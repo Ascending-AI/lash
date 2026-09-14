@@ -240,6 +240,10 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             surface: DurableSurface::SessionExecutionState,
             primary: true,
         },
+        DurableFormat::WorkflowGraphSchema => SurfaceRelation::Unwalkable(
+            "no bounded surface: the graph is projected for a host to store, so the bytes this \
+             version gates live outside lash's own store",
+        ),
         DurableFormat::VmAbi => SurfaceRelation::NotPersisted,
     }
 }

@@ -67,8 +67,10 @@ impl Lowerer {
             // awaited call's arguments inherited that call's depth: its leaves
             // lowered as plain calls whose `{ok:false,error}` envelopes the
             // aggregate then reported as fulfilled values, so `try/catch`
-            // never fired. Process handles in the array are values here; the
-            // runtime awaits them after the tool batch settles (ADR 0087).
+            // never fired. A process handle written into the array is not a
+            // leaf: the aggregate is one resource-operation batch (ADR 0095)
+            // and the runtime refuses the handle, naming `processes.await`,
+            // the tool that parks on the durable wait.
             let array = self.at_top_level_await_depth(|lowerer| lowerer.lower_expr(value))?;
             let aggregate = LashExpr::BuiltinCall {
                 name: "__typescript_await_array".into(),

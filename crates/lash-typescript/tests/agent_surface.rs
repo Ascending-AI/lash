@@ -2283,31 +2283,32 @@ fn runtime_array_rejections_use_recorded_settlement_order() {
     }
 }
 
+/// Every kind of aggregate leaf crosses a durable park.
+///
+/// The aggregate mixes a pending tool handle with a plain value, and the park
+/// lands between minting them and settling them. Under ADR 0087 a third kind
+/// rode along — a process handle settled in a second phase — and the
+/// continuation had to carry that encoding too. There is one handle kind and
+/// one settlement phase now, so what has to survive the park is the pending
+/// request map and the values beside it.
 #[test]
 fn pending_tool_handles_survive_durable_process_park() {
-    // The aggregate mixes a pending tool handle, a plain value and a child
-    // process handle; the park lands between minting them and settling them,
-    // so every kind of leaf crosses the continuation (ADR 0087).
     for mode in ["all", "allSettled"] {
         let source = format!(
-            r#"const child = defineProcess({{
-            name: "child", run: async () => "child"
-        }});
-        const worker = defineProcess({{
+            r#"const worker = defineProcess({{
             name: "worker", run: async () => {{
-                const pending = [web.fetch({{value: "kept"}}), 42, start(child, {{}})];
+                const pending = [web.fetch({{value: "kept"}}), 42];
                 await sleep(5);
                 return await Promise.{mode}(pending);
             }}
         }});"#
         );
         let expected = if mode == "all" {
-            serde_json::json!(["kept", 42, "child awaited"])
+            serde_json::json!(["kept", 42])
         } else {
             serde_json::json!([
                 {"status":"fulfilled","value":"kept"},
-                {"status":"fulfilled","value":42},
-                {"status":"fulfilled","value":"child awaited"}
+                {"status":"fulfilled","value":42}
             ])
         };
         assert_eq!(
@@ -2318,9 +2319,12 @@ fn pending_tool_handles_survive_durable_process_park() {
     }
 }
 
-/// Tools settle as one batch, then process handles settle in array order:
-/// a tool rejection wins over a process failure wherever it is written, and a
-/// process failure surfaces only once every tool leaf succeeded.
+/// The host an aggregate over tool leaves and process handles runs against.
+///
+/// Under ADR 0087 it answered two settlement phases. There is one recorded
+/// batch order now (ADR 0095), so its `Await` arm is reached only by the typed
+/// direct `await handle`, never by an aggregate: a handle written at an element
+/// position is refused before the host is asked anything.
 struct MixedAggregateHost;
 
 impl MixedAggregateHost {
@@ -2396,59 +2400,50 @@ fn run_mixed_aggregate(body: &str) -> Result<ExecutionOutcome, lashlang::Runtime
     ))
 }
 
+/// A process handle written at an element position of an aggregate is refused,
+/// in both aggregate forms and both written positions.
+///
+/// This replaces three ADR 0087 laws at once — a tool rejection beat a process
+/// failure wherever written, a process failure surfaced only once every tool
+/// leaf succeeded, and `allSettled` reported a process outcome in array order.
+/// All three described the ordering between two settlement phases. There is one
+/// phase now: an aggregate is one resource-operation batch whose recorded order
+/// is authoritative, and a durable wait joins it as `processes.await(handle)`,
+/// the leaf tool that parks on it. Which rejection that one order reports is
+/// pinned in `lash-core`'s `session::settlement_latency_tests`.
 #[test]
-fn mixed_aggregate_tool_rejection_wins_over_process_failure_in_either_order() {
-    for body in [
-        "const h = start(worker, { input: 'fail-p' }); finish(await Promise.all([web.fetch({ fail: true }), h]));",
-        "const h = start(worker, { input: 'fail-p' }); finish(await Promise.all([h, web.fetch({ fail: true })]));",
-    ] {
-        let error = run_mixed_aggregate(body).expect_err(body);
-        let rendered = error.to_string();
-        assert!(rendered.contains("tool failed"), "{body}: {rendered}");
-        assert!(
-            !rendered.contains("process fail-p failed"),
-            "{body}: {rendered}"
-        );
+fn a_process_handle_is_not_an_aggregate_leaf() {
+    for method in ["all", "allSettled"] {
+        for body in [
+            format!(
+                "const h = start(worker, {{ input: 'fail-p' }}); \
+                 finish(await Promise.{method}([web.fetch({{ fail: true }}), h]));"
+            ),
+            format!(
+                "const h = start(worker, {{ input: 'fail-p' }}); \
+                 finish(await Promise.{method}([h, web.fetch({{ fail: true }})]));"
+            ),
+        ] {
+            let error = run_mixed_aggregate(&body).expect_err(&body);
+            let rendered = error.to_string();
+            assert!(
+                rendered.contains("processes.await(handle)"),
+                "{body}: the refusal must name the tool that parks on the wait: {rendered}"
+            );
+            assert!(
+                !rendered.contains("process fail-p failed"),
+                "{body}: the process seam is never reached: {rendered}"
+            );
+        }
     }
 }
 
+/// `allSettled` still reports every outcome in array order; only the process
+/// leaves left, and with them the array-order process phase.
 #[test]
-fn mixed_aggregate_surfaces_the_first_failing_process_when_tools_succeed() {
-    let body = "const a = start(worker, { input: 'fail-a' }); const b = start(worker, { input: 'fail-b' }); \
-                finish(await Promise.all([b, web.fetch({ value: 1 }), a]));";
-    let error = run_mixed_aggregate(body).expect_err("a failing process rejects Promise.all");
-    let rendered = error.to_string();
-    assert!(rendered.contains("process fail-b failed"), "{rendered}");
-    assert!(!rendered.contains("fail-a"), "{rendered}");
-
-    let body = "const ok = start(worker, { input: 'p' }); finish(await Promise.all([web.fetch({ value: 1 }), ok, 3]));";
-    assert_eq!(
-        run_mixed_aggregate(body).expect("a fulfilled mixed aggregate finishes"),
-        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
-            1,
-            "process p done",
-            3
-        ])))
-    );
-}
-
-#[test]
-fn promise_all_keeps_nested_process_handles_shallow() {
-    let body = "const h = start(worker, { input: 'p' }); \
-                finish(await Promise.all([[h], web.fetch({ value: 1 })]));";
-    assert_eq!(
-        run_mixed_aggregate(body).expect("nested process handle remains an ordinary value"),
-        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
-            [{"__handle__": "lash", "id": "p.1.p", "process_id": "p"}],
-            1
-        ])))
-    );
-}
-
-#[test]
-fn mixed_all_settled_reports_every_outcome_in_array_order() {
-    let body = "const ok = start(worker, { input: 'p' }); const bad = start(worker, { input: 'fail-q' }); \
-                finish(await Promise.allSettled([web.fetch({ fail: true }), ok, bad, web.fetch({ value: 2 })]));";
+fn all_settled_reports_every_tool_outcome_in_array_order() {
+    let body =
+        "finish(await Promise.allSettled([web.fetch({ fail: true }), web.fetch({ value: 2 })]));";
     let outcome = run_mixed_aggregate(body).expect("allSettled never rejects");
     let ExecutionOutcome::Finished(Value::List(results)) = outcome else {
         panic!("expected a settled array, got {outcome:?}");
@@ -2463,24 +2458,25 @@ fn mixed_all_settled_reports_every_outcome_in_array_order() {
                 .unwrap_or_default()
         })
         .collect::<Vec<_>>();
-    assert_eq!(statuses, ["rejected", "fulfilled", "rejected", "fulfilled"]);
-    let reason = results[2]
-        .as_record()
-        .and_then(|record| record.get("reason"))
-        .map(Value::to_string)
-        .unwrap_or_default();
-    assert!(reason.contains("process fail-q failed"), "{reason}");
+    assert_eq!(statuses, ["rejected", "fulfilled"]);
     assert_eq!(
         results[1]
             .as_record()
             .and_then(|record| record.get("value")),
-        Some(&Value::String("process p done".into()))
-    );
-    assert_eq!(
-        results[3]
-            .as_record()
-            .and_then(|record| record.get("value")),
         Some(&Value::Number(2.0))
+    );
+}
+
+#[test]
+fn promise_all_keeps_nested_process_handles_shallow() {
+    let body = "const h = start(worker, { input: 'p' }); \
+                finish(await Promise.all([[h], web.fetch({ value: 1 })]));";
+    assert_eq!(
+        run_mixed_aggregate(body).expect("nested process handle remains an ordinary value"),
+        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
+            [{"__handle__": "lash", "id": "p.1.p", "process_id": "p"}],
+            1
+        ])))
     );
 }
 

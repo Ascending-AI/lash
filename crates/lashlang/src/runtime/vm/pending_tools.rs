@@ -6,66 +6,80 @@ use super::Vm;
 use lash_sansio::handle::{HANDLE_FIELD, HANDLE_KIND, HandleId, HandleTarget};
 use std::sync::Arc;
 
-/// How the settled outcome of a process handle inside an aggregate is shaped.
+/// What a value handed to `await` turned out to be.
 ///
-/// `Promise.all` unwraps: a failed process rejects the aggregate. Every other
-/// aggregate (`Promise.allSettled`, a Lashlang `await [...]`) reports each
-/// outcome as the `{ok, value | error}` record the direct `await` of the same
-/// handle would produce.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum ProcessLeafSettlement {
-    Unwrap,
-    Result,
-}
-
-/// What a value handed to `await` turned out to be, in the terms the repair
-/// text has to use.
+/// There is one handle kind (ADR 0095), so there is one question to ask of an
+/// awaited value: is it a handle record at all. Whether the id it carries names
+/// a live request of this execution is asked separately, by
+/// [`Vm::unsettleable_handle`], because that is where the three repair texts
+/// differ and collapsing them into the classification would spread the same
+/// decision over two places again.
 pub(super) enum AwaitedValue {
-    /// A pending-tool handle this execution minted: the request it names.
-    LocalToolHandle(HandleId),
-    /// A pending-tool handle record minted by another execution, or written
-    /// by hand.
-    ForeignToolHandle,
-    /// A process handle the host awaits.
-    ProcessHandle,
+    /// A handle record: the id it names.
+    Leaf(HandleId),
     /// Anything else: an ordinary value that needs no await.
     Plain,
 }
 
+/// Whether a handle id names a process rather than a tool request of this
+/// execution. A process handle settles through the durable process-await seam,
+/// never through the pending-tool batch.
+pub(super) fn is_runtime_process_handle_id(id: &HandleId) -> bool {
+    matches!(id.target(), Some(HandleTarget::Process { .. }))
+}
+
 impl<H: ExecutionHost> Vm<'_, H> {
-    /// Classify `value` for `await`: only a handle whose id carries this
-    /// execution's nonce reaches a request slot. The nonce is folded into the
-    /// id rather than stamped beside it, so there is one thing to check and
-    /// nothing to keep in step. It is what stops a handle kept in a session
-    /// global from aliasing the next execution's first request, and a literal
-    /// `{__handle__: "lash", id: "t.0000000000000000.0"}` from stealing a live
-    /// one.
+    /// Classify `value` for `await`: a handle record yields the id it carries,
+    /// everything else is a plain value.
     pub(super) fn classify_awaited(&self, value: &Value) -> AwaitedValue {
         let Value::Record(record) = value else {
             return AwaitedValue::Plain;
         };
-        let Some(handle) = parse_handle_record(record) else {
-            return AwaitedValue::Plain;
-        };
-        match handle.target() {
+        match parse_handle_record(record) {
+            Some(handle) => AwaitedValue::Leaf(handle),
+            None => AwaitedValue::Plain,
+        }
+    }
+
+    /// The live pending request `id` names, if it names one.
+    ///
+    /// Only a handle whose id carries this execution's nonce reaches a request
+    /// slot. The nonce is folded into the id rather than stamped beside it, so
+    /// there is one thing to check and nothing to keep in step. It is what stops
+    /// a handle kept in a session global from aliasing the next execution's
+    /// first request, and a literal `{__handle__: "lash", id: "t.0000000000000000.0"}`
+    /// from stealing a live one.
+    pub(super) fn live_pending_request(&self, id: &HandleId) -> bool {
+        matches!(
+            id.target(),
             Some(HandleTarget::Tool {
                 execution_nonce,
                 request: _,
-            }) => {
-                if execution_nonce == self.execution_nonce
-                    && self.pending_tools.contains_key(&handle)
-                {
-                    AwaitedValue::LocalToolHandle(handle)
-                } else {
-                    AwaitedValue::ForeignToolHandle
-                }
+            }) if execution_nonce == self.execution_nonce
+        ) && matches!(self.pending_tools.get(id), Some(Some(_)))
+    }
+
+    /// The error for a handle that names no live request of this execution.
+    ///
+    /// Three different mistakes reach here and each has its own repair: a
+    /// process handle that was written where a tool call belongs, a handle this
+    /// execution minted and already awaited, and a handle from somewhere else
+    /// entirely.
+    pub(super) fn unsettleable_handle(&self, id: &HandleId) -> RuntimeError {
+        let problem = match id.target() {
+            Some(HandleTarget::Process { .. }) => PROCESS_HANDLE_LEAF,
+            Some(HandleTarget::Tool {
+                execution_nonce,
+                request: _,
+            }) if execution_nonce == self.execution_nonce
+                && self.pending_tools.contains_key(id) =>
+            {
+                SETTLED_HANDLE
             }
-            Some(HandleTarget::Process { .. }) => AwaitedValue::ProcessHandle,
-            // A record shaped like a handle whose id names nothing: a
-            // hand-written or tampered id. It is refused as a tool handle
-            // rather than silently read as a plain value, so the repair text
-            // names what went wrong.
-            None => AwaitedValue::ForeignToolHandle,
+            _ => FOREIGN_HANDLE,
+        };
+        RuntimeError::PendingTool {
+            problem: problem.into(),
         }
     }
 
@@ -119,12 +133,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
-    /// Settle an array of handles and values in two phases: every pending tool
-    /// handle as one host batch (recorded settlement order decides which
-    /// rejection `Promise.all` reports), then every process handle in array
-    /// order through the host's process-await seam. A tool rejection therefore
-    /// always wins over a process failure; among processes the first written
-    /// wins (ADR 0087).
+    /// Settle an awaited array as **one** resource-operation batch.
+    ///
+    /// Every leaf that has to settle is a pending tool call, so the host
+    /// records one settlement order over all of them and that order is
+    /// authoritative: it decides which rejection an unwrapping aggregate
+    /// reports. A durable process wait is a leaf like any other, because
+    /// `processes.await` is a tool that parks on it (ADR 0095) — which is what
+    /// retired ADR 0087's second phase, where process leaves settled after the
+    /// batch and a tool rejection therefore always won.
     pub(super) async fn await_pending_array(&mut self, settle: bool) -> Result<(), RuntimeError> {
         use super::super::{CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf};
         let Value::List(items) = self.pop_stack()? else {
@@ -138,10 +155,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut seen = std::collections::BTreeMap::new();
         for item in items.iter() {
             match self.classify_awaited(item) {
-                AwaitedValue::LocalToolHandle(id) => {
+                AwaitedValue::Leaf(id) => {
                     if let Some(index) = seen.get(&id) {
                         shape.push(CompiledAggregateAwaitShape::BatchLeaf(*index));
                         continue;
+                    }
+                    if !self.live_pending_request(&id) {
+                        return Err(self.unsettleable_handle(&id));
                     }
                     let Some(Some(Value::List(call))) = self.pending_tools.get_mut(&id) else {
                         return Err(RuntimeError::PendingTool {
@@ -173,17 +193,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     values.extend(call[2..].iter().cloned());
                     shape.push(CompiledAggregateAwaitShape::BatchLeaf(index));
                 }
-                AwaitedValue::ForeignToolHandle => {
-                    return Err(RuntimeError::PendingTool {
-                        problem: FOREIGN_HANDLE.into(),
-                    });
-                }
-                // Phase two settles this one after the batch; the raw handle
-                // holds its place in the stack values until then.
-                AwaitedValue::ProcessHandle => {
-                    shape.push(CompiledAggregateAwaitShape::Value(values.len()));
-                    values.push(item.clone());
-                }
                 AwaitedValue::Plain => {
                     shape.push(CompiledAggregateAwaitShape::Value(values.len()));
                     values.push(if settle {
@@ -201,11 +210,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 *entry = None;
             }
         }
-        let process_leaves = if settle {
-            ProcessLeafSettlement::Result
-        } else {
-            ProcessLeafSettlement::Unwrap
-        };
         let batch = CompiledResourceOperationBatch {
             leaves: leaves.into_boxed_slice(),
             shape: CompiledAggregateAwaitShape::List(shape.into_boxed_slice()),
@@ -213,8 +217,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             aggregate_unwrap: false,
             first_settled_rejection: !settle,
         };
-        self.resolve_batch_spec(&batch, values, process_leaves)
-            .await
+        self.resolve_batch_spec(&batch, values).await
     }
 }
 
@@ -233,6 +236,7 @@ pub(super) fn ensure_no_tool_handle_arguments(args: &[Value]) -> Result<(), Runt
 pub(super) const SETTLED_HANDLE: &str =
     "this tool handle was already awaited; await each tool call once and reuse its value";
 pub(super) const FOREIGN_HANDLE: &str = "this tool handle was not minted by this execution (it is stale or hand-written); call the tool in this cell and await that call";
+pub(super) const PROCESS_HANDLE_LEAF: &str = "a process handle cannot be awaited directly; call `processes.await(handle)` and await that call, so the durable wait settles with the rest of the batch";
 pub(super) const HANDLE_AS_ARGUMENT: &str = "a pending tool handle was passed as a tool argument; await it first and pass the awaited value";
 
 pub(super) fn plain_value_awaited(value: &Value) -> String {

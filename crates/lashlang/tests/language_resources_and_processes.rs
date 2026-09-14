@@ -87,14 +87,20 @@ async fn explicit_start_and_await_merges_distinct_results() {
     assert_eq!(record["right"], Value::String("b".to_string().into()));
 }
 
+/// A started process is not a leaf of an awaited aggregate.
+///
+/// ADR 0087 settled process handles in a second phase after the tool batch, so
+/// writing them into `Promise.all` worked. There is one recorded batch order
+/// now (ADR 0095) and a durable wait joins it as `processes.await(handle)`,
+/// the leaf tool that parks on it. Awaiting each handle on its own — the form
+/// `explicit_start_and_await_merges_distinct_results` pins — is unaffected.
 #[tokio::test(flavor = "current_thread")]
-async fn awaiting_started_processes_returns_results_in_written_order() {
+async fn a_started_process_is_not_an_aggregate_leaf() {
     let host = TestHost::default();
     let mut state = State::new();
 
-    let value = finished(
-        execute(
-            r#"
+    let error = execute(
+        r#"
         const sleep_echo = defineProcess({
           name: "sleep_echo",
           run: async (value: string) => { return value; }
@@ -103,23 +109,16 @@ async fn awaiting_started_processes_returns_results_in_written_order() {
           start(sleep_echo, { value: "a" }),
           start(sleep_echo, { value: "b" })
         ]);
-        finish({ first: results[0], second: results[1], all: results });
+        finish({ first: results[0], second: results[1] });
         "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let Value::Record(record) = value else {
-        panic!("expected record");
-    };
-    assert_eq!(record["first"], Value::String("a".to_string().into()));
-    assert_eq!(record["second"], Value::String("b".to_string().into()));
-    assert_eq!(
-        record["all"],
-        Value::List(vec![Value::String("a".into()), Value::String("b".into())].into())
+        &mut state,
+        &host,
+    )
+    .await
+    .expect_err("a process handle is not a leaf of the batch");
+    assert!(
+        error.to_string().contains("processes.await(handle)"),
+        "the refusal must name the tool that parks on the wait: {error}"
     );
 }
 
@@ -1094,13 +1093,9 @@ async fn object_literals_accept_quoted_keys_around_awaited_results() {
     let value = finished(
         execute(
             r#"
-        const sleep_echo = defineProcess({
-          name: "sleep_echo",
-          run: async (value: string) => { return value; }
-        });
         const settled = await Promise.all([
-          start(sleep_echo, { value: "ok" }),
-          start(sleep_echo, { value: "quoted" })
+          tools.sleep_echo({ value: "ok" }),
+          tools.sleep_echo({ value: "quoted" })
         ]);
         const result = {
           fanout: settled[0],

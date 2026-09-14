@@ -336,10 +336,17 @@ fn every_durable_format_has_one_explicit_surface_relation() {
                 primary: true,
             },
         ),
+        (
+            DurableFormat::WorkflowGraphSchema,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: the graph is projected for a host to store, so the bytes this \
+                 version gates live outside lash's own store",
+            ),
+        ),
         (DurableFormat::VmAbi, SurfaceRelation::NotPersisted),
     ];
 
-    assert_eq!(relations.len(), 13);
+    assert_eq!(relations.len(), 14);
     for (format, expected) in relations {
         assert_eq!(
             format_surface(format),
@@ -358,6 +365,11 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             (
                 DurableFormat::SessionNodeBody,
                 "no bounded surface: one row per graph node, and the boundary is forward-only",
+            ),
+            (
+                DurableFormat::WorkflowGraphSchema,
+                "no bounded surface: the graph is projected for a host to store, so the bytes this \
+                 version gates live outside lash's own store",
             ),
         ]
     );
