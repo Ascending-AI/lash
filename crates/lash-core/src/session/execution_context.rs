@@ -751,12 +751,30 @@ impl<'run> RuntimeExecutionContext<'run> {
         {
             return Ok(env_ref);
         }
-        crate::publish_process_execution_env(
+        match crate::publish_process_execution_env(
             self.process_env_store.as_ref(),
             owner,
             &self.execution_env_spec,
         )
         .await
+        {
+            Ok(env_ref) => Ok(env_ref),
+            // A replayed handler re-derives the same staging owner, but the first
+            // execution already transferred the environment to the process owner and
+            // retired that staging owner permanently. Retirement is a store side
+            // effect outside the engine journal, so refusing here would make the
+            // replay skip the process-start command the first run emitted and
+            // diverge the journal. The reference is content-addressed, so the
+            // already-published bytes carry the same ref the publish would return.
+            Err(err) if crate::artifact_owner_is_permanently_retired(&err) => {
+                self.execution_env_spec.stable_ref().map_err(|err| {
+                    crate::PluginError::Session(format!(
+                        "failed to encode process execution env: {err}"
+                    ))
+                })
+            }
+            Err(err) => Err(err),
+        }
     }
 
     pub(crate) fn child_process_query(&self) -> Option<Arc<dyn crate::ProcessQuery>> {
@@ -1544,6 +1562,136 @@ mod tests {
         assert_eq!(
             signal_err.message,
             "process execution is unavailable outside a durable process execution"
+        );
+    }
+}
+
+#[cfg(test)]
+mod retired_staging_owner_tests {
+    use super::*;
+    use crate::tool_dispatch::ToolDispatchContext;
+    use crate::{ToolCall, ToolOutcome, ToolProvider};
+
+    struct NoTools;
+
+    #[async_trait::async_trait]
+    impl ToolProvider for NoTools {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            Vec::new()
+        }
+
+        fn resolve_contract(&self, _name: &str) -> Option<Arc<crate::ToolContract>> {
+            None
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::err_fmt("not used")
+        }
+    }
+
+    fn context_with_env_store(
+        env_store: Arc<crate::InMemoryProcessExecutionEnvStore>,
+    ) -> RuntimeExecutionContext<'static> {
+        let plugins = crate::plugin::PluginHost::empty()
+            .build_session("session")
+            .expect("plugin session");
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
+        let dispatch = Arc::new(ToolDispatchContext {
+            plugins,
+            tools: Arc::new(NoTools),
+            tool_registry: None,
+            tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
+            sessions: Arc::new(crate::testing::MockSessionManager::default()),
+            session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
+            session_graph: Arc::new(crate::testing::MockSessionManager::default()),
+            processes: Arc::new(crate::UnavailableProcessService),
+            trigger_router: None,
+            effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
+                crate::NativeRuntimeEffectController::default(),
+            )),
+            direct_completions: crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+            parent_invocation: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ),
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            event_tx,
+            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
+            attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
+            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+            turn_context: crate::TurnContext::default(),
+            clock: std::sync::Arc::new(crate::SystemClock),
+        });
+        RuntimeExecutionContext::new(
+            SessionId::from("session"),
+            dispatch,
+            env_store,
+            Arc::new(crate::SessionAttachmentStore::in_memory()),
+            Arc::new(crate::ChronologicalProjection::default()),
+            None,
+            crate::TurnContext::default(),
+        )
+    }
+
+    fn registration() -> crate::ProcessRegistration {
+        crate::ProcessRegistration::new(
+            "process:replayed-child",
+            crate::ProcessInput::Engine {
+                kind: "lashlang".to_string(),
+                payload: serde_json::json!({ "program": "noop" }),
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        )
+    }
+
+    /// FIG-3037: retiring the staging owner is a store side effect outside the
+    /// engine journal. A replayed handler re-derives the same staging owner, so
+    /// refusing the re-publish made the replay skip the process-start command the
+    /// first run emitted and diverged the journal.
+    #[tokio::test]
+    async fn attaching_execution_env_survives_a_retired_staging_owner_on_replay() {
+        let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+        let ctx = context_with_env_store(env_store.clone());
+
+        let first = ctx
+            .attach_captured_process_execution_env(registration())
+            .await
+            .expect("first execution attaches an execution env");
+        let first_ref = first
+            .env_ref
+            .clone()
+            .expect("first run captured an env ref");
+
+        // What a completed first start does: hand the environment to the process
+        // owner and permanently retire the staging owner.
+        let staging_owner = crate::ArtifactOwner::process_start(&registration().id);
+        crate::ProcessExecutionEnvStore::retire_process_execution_env_owner(
+            env_store.as_ref(),
+            &staging_owner,
+        )
+        .await
+        .expect("retire the staging owner");
+
+        let replayed = ctx
+            .attach_captured_process_execution_env(registration())
+            .await
+            .expect("a replayed start must still attach the same execution env");
+        assert_eq!(
+            replayed.env_ref,
+            Some(first_ref),
+            "the execution env reference is content addressed, so replay must see the first run's ref"
         );
     }
 }

@@ -617,6 +617,22 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
     }
 }
 
+/// Reports whether an artifact-store refusal is the permanent retirement of the
+/// owner the caller staged under.
+///
+/// A retired staging owner is the normal shape of a re-run: the earlier run
+/// transferred its artifacts to the process owner and retired the staging edge.
+/// Callers that re-derive the same staging owner treat this as "already staged"
+/// and keep going with the content-addressed reference, rather than failing the
+/// start.
+pub fn artifact_owner_is_permanently_retired(error: &crate::PluginError) -> bool {
+    matches!(
+        error,
+        crate::PluginError::Session(message)
+            if message.contains("artifact owner has been permanently retired")
+    )
+}
+
 pub async fn publish_process_execution_env(
     env_store: &dyn ProcessExecutionEnvStore,
     owner: &ArtifactOwner,

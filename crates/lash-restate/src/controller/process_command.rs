@@ -163,7 +163,9 @@ where
                 .await
                 {
                     Ok(env_ref) => (env_ref, true),
-                    Err(publish_error) if artifact_owner_is_permanently_retired(&publish_error) => {
+                    Err(publish_error)
+                        if lash_core::artifact_owner_is_permanently_retired(&publish_error) =>
+                    {
                         (expected_ref, false)
                     }
                     Err(publish_error) => return Err(publish_error.into()),
@@ -189,7 +191,7 @@ where
                     .publish_process_execution_env(&staging_owner, env_ref, &bytes)
                     .await
                 {
-                    if artifact_owner_is_permanently_retired(&publish_error) {
+                    if lash_core::artifact_owner_is_permanently_retired(&publish_error) {
                         false
                     } else {
                         return Err(publish_error.into());
@@ -214,7 +216,7 @@ where
                         .protect_start_artifacts(&staging_owner, payload)
                         .await
                     {
-                        if artifact_owner_is_permanently_retired(&protect_error) {
+                        if lash_core::artifact_owner_is_permanently_retired(&protect_error) {
                             false
                         } else {
                             return Err(protect_error.into());
@@ -722,12 +724,4 @@ where
         observer(outcome);
     }
     outcome
-}
-
-fn artifact_owner_is_permanently_retired(error: &lash_core::PluginError) -> bool {
-    matches!(
-        error,
-        lash_core::PluginError::Session(message)
-            if message.contains("artifact owner has been permanently retired")
-    )
 }
