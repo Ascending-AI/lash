@@ -240,12 +240,12 @@ impl State {
         // drop them too, which keeps both views agreeing on what a global
         // means and leaves the closure as garbage the next collection reclaims.
         let closure_reach = heap.closure_reach();
-        let closure_rooted = runtime_globals
-            .entries
-            .iter()
-            .filter(|entry| closure_reach.covers(&entry.value))
-            .map(|entry| entry.symbol)
-            .collect::<Vec<_>>();
+        let mut closure_rooted = Vec::new();
+        for entry in runtime_globals.entries.iter() {
+            if closure_reach.covers(&entry.value) {
+                closure_rooted.push(entry.symbol);
+            }
+        }
         for symbol in closure_rooted {
             runtime_globals.remove_symbol(symbol);
         }
