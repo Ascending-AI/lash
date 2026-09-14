@@ -26,9 +26,9 @@
 //! surfaced to a user.
 
 use lashlang::{
-    AssignPathStep, AssignTarget, BinaryOp, CatchClause, Declaration, Expr, FunctionDecl,
-    FunctionExpr, JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl,
-    ProcessSignalDecl, Program, ResourceRefExpr, TryExpr, TypeExpr, UnaryOp,
+    AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessSignalDecl,
+    Program, ResourceRefExpr, TypeExpr, UnaryOp,
 };
 use thiserror::Error;
 
@@ -51,9 +51,6 @@ pub enum TypeScriptSourceError {
 }
 
 type Printed = Result<String, TypeScriptSourceError>;
-
-/// The suffix the process wrapper's generated catch binding carries.
-const PROCESS_ERROR_SUFFIX: &str = "process_error";
 
 /// Print a lowered program as a canonical TypeScript module.
 pub fn typescript_program_source(program: &Program) -> Printed {
@@ -864,73 +861,7 @@ impl Printer {
 /// The wrapper is `Try { body: Finish(Call(Function)), catch: <generated> }`;
 /// only its function body was authored, so that is what prints back.
 pub(super) fn process_run_body(process: &ProcessDecl) -> Option<&Expr> {
-    process_run_body_path(process).map(|(_, body)| strip_completion_value(body))
-}
-
-/// The authored `run` body of a lowered `defineProcess`, with its AST path.
-///
-/// `defineProcess({ run })` lowers to `Try(Finish(Call(Function)))` with a
-/// generated `__typescript_*_process_error` catch. The authored statements are
-/// the inner function's body, and everything above it is the wrapper. The
-/// returned path is the prefix that addresses that body inside the process
-/// declaration: it is read off the AST — each step is the position of the
-/// chosen child in [`Expr::children`], the same spelling `execution_sites` and
-/// the compiler use — so node identity and execution-site correlation stay
-/// keyed on the real path rather than on a transcribed constant.
-pub(super) fn process_run_body_path(process: &ProcessDecl) -> Option<(Vec<u32>, &Expr)> {
-    let mut path = Vec::new();
-    let step = |parent: &Expr, child: &Expr, path: &mut Vec<u32>| {
-        let index = parent.children().position(|candidate| {
-            std::ptr::eq(std::ptr::from_ref(candidate), std::ptr::from_ref(child))
-        })?;
-        path.push(u32::try_from(index).ok()?);
-        Some(())
-    };
-
-    let wrapper = &process.body;
-    let Expr::Try(try_expr) = wrapper else {
-        return None;
-    };
-    let TryExpr {
-        body,
-        catch: Some(CatchClause {
-            binding,
-            body: catch_body,
-        }),
-        finally: None,
-    } = try_expr.as_ref()
-    else {
-        return None;
-    };
-    if !binding.starts_with(GENERATED_BINDING_PREFIX) || !binding.ends_with(PROCESS_ERROR_SUFFIX) {
-        return None;
-    }
-    match catch_body.as_ref() {
-        Expr::Fail(value) => match value.as_ref() {
-            Expr::Variable(name) if name == binding => {}
-            _ => return None,
-        },
-        _ => return None,
-    }
-
-    let finish = body.as_ref();
-    step(wrapper, finish, &mut path)?;
-    let Expr::Finish(call) = finish else {
-        return None;
-    };
-    let call = call.as_ref();
-    step(finish, call, &mut path)?;
-    let Expr::Call { function, .. } = call else {
-        return None;
-    };
-    let function = function.as_ref();
-    step(call, function, &mut path)?;
-    let Expr::Function(run) = function else {
-        return None;
-    };
-    let run_body = &run.body;
-    step(function, run_body, &mut path)?;
-    Some((path, run_body))
+    crate::lower::process_run_body_path(process).map(|(_, body)| strip_completion_value(body))
 }
 
 /// The statements of a block, with the lowerer's block wrapper removed.

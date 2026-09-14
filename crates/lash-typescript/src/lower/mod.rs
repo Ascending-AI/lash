@@ -27,6 +27,7 @@ mod constructs;
 mod entry;
 mod graph;
 mod json_replacer;
+mod process_wrapper;
 mod regex;
 mod spans;
 mod triggers;
@@ -35,6 +36,7 @@ use constructs::*;
 pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_workflow_fragment};
 use graph::{shortest_cycle_through, strongly_connected_components};
 use json_replacer::reject_json_parse_reviver;
+pub(crate) use process_wrapper::process_run_body_path;
 use triggers::{
     is_trigger_registration_operation, names_the_retired_trigger_event,
     retired_trigger_event_diagnostic,
@@ -1274,7 +1276,6 @@ impl Lowerer {
             .iter()
             .map(|name| LashExpr::Variable(name.clone()))
             .collect();
-        let failure_name = format!("{GENERATED_BINDING_PREFIX}process_error");
         self.declaration_spans.push(
             self.current_span
                 .map(|source| lashlang::Span {
@@ -1289,19 +1290,7 @@ impl Lowerer {
             signals,
             return_ty: Some(TypeExpr::Any),
             label: None,
-            body: LashExpr::Try(Box::new(TryExpr {
-                body: Box::new(LashExpr::Finish(Box::new(LashExpr::Call {
-                    function: Box::new(closure),
-                    args: call_args,
-                }))),
-                catch: Some(CatchClause {
-                    binding: failure_name.as_str().into(),
-                    body: Box::new(LashExpr::Fail(Box::new(LashExpr::Variable(
-                        failure_name.as_str().into(),
-                    )))),
-                }),
-                finally: None,
-            })),
+            body: process_wrapper::process_run_wrapper(closure, call_args),
         }));
         self.set_role(
             binding_name,
