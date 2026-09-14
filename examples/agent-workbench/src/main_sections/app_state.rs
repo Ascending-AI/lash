@@ -87,7 +87,6 @@ impl AppState {
                 .entry(&session_id)
                 .map(|entry| entry.name)
                 .unwrap_or_else(|| session_id.to_string()),
-            rlm_dialect: RLM_LANGUAGE_ID,
             session_id,
         }
     }

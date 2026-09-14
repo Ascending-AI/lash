@@ -437,7 +437,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 "trace_path": trace_path_display,
                 "lashlang_execution_path": lashlang_execution_path.display().to_string(),
                 "model": serde_json::to_value(state.selected_model()).unwrap_or(Value::Null),
-                "rlm_dialect": RLM_LANGUAGE_ID,
                 "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
                 "store_backend": stores.backend,
                 "restate_endpoint_addr": restate_endpoint_addr.to_string(),

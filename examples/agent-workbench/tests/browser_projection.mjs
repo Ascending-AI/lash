@@ -310,7 +310,6 @@ test("resident replacement async refetch preserves an actual provisional tool ro
       models: ["resident-model"],
       model_variant: "",
       model_variants: [""],
-      rlm_dialect: "standard",
     },
     observation: { cursor: "cursor-after-resident" },
     product_events: { cursor: 0, events: [] },
@@ -1492,9 +1491,6 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       clearTranscript() {},
       validateModel() {},
       knownSessionLabel: null,
-      // The dialect badge the snapshot paints: it reads the session's recorded
-      // dialect out of the same snapshot this block applies.
-      sessionDialect: element(),
       renderUsage() {},
       renderQueuedWork() {},
       renderApprovals() {},
