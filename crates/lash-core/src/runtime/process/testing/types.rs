@@ -15,6 +15,7 @@ pub struct TestLocalProcessRegistry {
     pub(super) process_terminal_write_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_terminal_write_outcome: Arc<Mutex<Option<ProcessCompletionOutcome>>>,
     pub(super) external_ref_write_error: Arc<Mutex<Option<PluginError>>>,
+    pub(super) cancel_request_write_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_lease_release_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) next_change_seq: Arc<Mutex<u64>>,
     pub(super) tombstone_compaction_horizon: Arc<Mutex<u64>>,

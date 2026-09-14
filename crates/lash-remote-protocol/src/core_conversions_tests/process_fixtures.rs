@@ -49,6 +49,7 @@ pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord
         backend: "worker".to_string(),
         id: "external:1".to_string(),
         metadata: Some(serde_json::json!({ "queue": "default" })),
+        segment_ordinal: None,
     });
     record.wait = Some(lash_core::WaitState {
         kind: lash_core::WaitKind::Signal {

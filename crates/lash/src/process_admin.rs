@@ -361,9 +361,19 @@ impl Processes {
         let process_work = resolved
             .process_work()
             .ok_or(EmbedError::MissingProcessRegistry)?;
-        let _ = process_work
+        // Advisory, exactly as the runtime start path treats it: the durable
+        // row is the work queue, so a failed nudge delays the run rather than
+        // failing the start.
+        if let Err(error) = process_work
             .admit_pending_processes("admin_process_start")
-            .await?;
+            .await
+        {
+            tracing::warn!(
+                process_id = %record.id,
+                %error,
+                "process start registered; advisory worker poke failed, the recovery sweep owns the run"
+            );
+        }
         Ok(*record)
     }
 

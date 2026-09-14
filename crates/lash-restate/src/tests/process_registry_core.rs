@@ -1202,101 +1202,417 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
     );
 }
 
+/// FIG-2964: a workflow-submission failure after registration cancels the row
+/// it created, inside the scheduling boundary, before the error reaches the
+/// caller.
+///
+/// Registration has already committed when the submit fails, so returning the
+/// error bare would leave a Running row that Restate never received and that
+/// nothing in the caller's cancel path can reach. A `StartFailed` request
+/// against a row with no execution and no external reference is terminal on the
+/// spot, so the child is cancelled and never runs.
 #[tokio::test]
-pub(super) async fn restate_start_failures_preserve_inputs_for_exact_recovery() {
-    for failure in ["workflow", "external_ref"] {
-        let context = Arc::new(RecordingContext::default());
-        if failure == "workflow" {
-            context.fail_next_process_workflow_start();
-        }
-        let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-        let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-        if failure == "external_ref" {
-            registry
-                .fail_next_external_ref_write_for_testing(PluginError::Session(
-                    "injected external-ref write failure".to_string(),
-                ))
-                .await;
-        }
-        let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
-        let process_id = ProcessId::from(format!("restate-start-recovery-{failure}"));
-        let spec = lash_core::ProcessExecutionEnvSpec::new(
-            lash_core::PluginOptions::empty(),
-            recovery_session_policy(),
-        );
-        let expected_ref = spec.stable_ref().expect("stable environment ref");
-        let command = || {
-            let registration = ProcessRegistration::new(
-                process_id.clone(),
-                ProcessInput::ToolCall {
-                    call: lash_core::PreparedToolCall::from_parts(
-                        format!("{process_id}-call"),
-                        "tool:recovery",
-                        "recovery",
-                        serde_json::Value::Null,
-                        None,
-                        serde_json::Value::Null,
-                    ),
-                },
-                lash_core::RecoveryContract::Rerunnable,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-            );
-            RuntimeEffectEnvelope::new(
-                runtime_invocation(
-                    RuntimeEffectKind::Process,
-                    &format!("restate-start-recovery-{failure}"),
-                ),
-                RuntimeEffectCommand::process(ProcessCommand::Start {
-                    registration,
-                    observers: vec![SessionId::from("session")],
-                    env_spec: Some(spec.clone()),
-                    execution_context: Box::new(ProcessExecutionContext::default()),
-                }),
-            )
-        };
-        let executor = || {
+pub(super) async fn restate_workflow_submission_failure_cancels_the_row_it_registered() {
+    let context = Arc::new(RecordingContext::default());
+    context.fail_next_process_workflow_start();
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let process_id = ProcessId::from("restate-start-failed-cancels");
+    let spec = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::empty(),
+        recovery_session_policy(),
+    );
+    let expected_ref = spec.stable_ref().expect("stable environment ref");
+
+    let injected_error = host
+        .execute_effect(
+            start_recovery_effect(&process_id, &spec),
             registry_local_executor(registry.clone())
-                .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>)
-        };
+                .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>),
+        )
+        .await
+        .expect_err("the submission failure must reach the caller as an error");
 
-        let injected_error = host
-            .execute_effect(command(), executor())
+    let record = registry
+        .get_process(&process_id)
+        .await
+        .expect("read committed process")
+        .expect("registration committed before the injected failure");
+    assert!(
+        record.is_terminal(),
+        "the compensated row must be terminal, got {:?}; error: {injected_error}",
+        record.status
+    );
+    assert_eq!(
+        record.status,
+        lash_core::ProcessStatus::Cancelled,
+        "a StartFailed request against a never-started row is Cancelled"
+    );
+    assert_eq!(
+        record
+            .cancel_request
+            .as_deref()
+            .map(|request| request.origin),
+        Some(lash_core::CancelOrigin::StartFailed),
+        "the cancellation must name its origin so it is distinguishable from an operator cancel"
+    );
+    assert!(
+        record.external_ref.is_none(),
+        "a row Restate never accepted must carry no backend owner"
+    );
+    assert!(
+        record.first_started.is_none(),
+        "the compensated child must never have run"
+    );
+    // The inputs stay readable: the cancellation is a terminal fact about this
+    // start, not a reclamation of the caller's committed input.
+    assert!(
+        env_store
+            .get_process_execution_env(&expected_ref)
             .await
-            .expect_err("injected post-registration start failure");
-        assert!(
-            registry
-                .get_process(&process_id)
-                .await
-                .expect("read committed process")
-                .is_some(),
-            "registration committed before the injected {failure} failure; error: {injected_error}"
-        );
-        assert!(
-            env_store
-                .get_process_execution_env(&expected_ref)
-                .await
-                .expect("read preserved start input")
-                .is_some(),
-            "a retriable {failure} failure must not reclaim the committed process input"
-        );
+            .expect("read preserved start input")
+            .is_some(),
+    );
+}
 
-        let outcome = host
-            .execute_effect(command(), executor())
+/// FIG-2964 acceptance: if the StartFailed compensation write itself fails, the
+/// start returns the record rather than the error.
+///
+/// The row is then exactly the shape the recovery sweep resubmits — nonterminal,
+/// no external reference, no cancel request — so recovery owns the run and the
+/// honest answer to the caller is the record it registered.
+#[tokio::test]
+pub(super) async fn restate_failed_start_compensation_returns_the_registered_record() {
+    let context = Arc::new(RecordingContext::default());
+    context.fail_next_process_workflow_start();
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    registry
+        .fail_next_cancel_request_for_testing(PluginError::Session(
+            "injected cancel-request write failure".to_string(),
+        ))
+        .await;
+    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let process_id = ProcessId::from("restate-start-failed-compensation-fails");
+    let spec = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::empty(),
+        recovery_session_policy(),
+    );
+
+    let outcome = host
+        .execute_effect(
+            start_recovery_effect(&process_id, &spec),
+            registry_local_executor(registry.clone())
+                .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>),
+        )
+        .await
+        .expect("a failed compensation write must return the record, not the error");
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Start { record },
+    } = outcome
+    else {
+        panic!("wrong start outcome")
+    };
+    assert_eq!(record.id, process_id);
+
+    let stored = registry
+        .get_process(&process_id)
+        .await
+        .expect("read committed process")
+        .expect("the row stands");
+    assert!(
+        !stored.is_terminal(),
+        "the uncompensated row must stay nonterminal so the sweep can resubmit it"
+    );
+    assert!(
+        stored.external_ref.is_none() && stored.cancel_request.is_none(),
+        "the row must match the shape the recovery sweep resubmits, got {stored:?}"
+    );
+}
+
+/// A failure *after* the workflow was accepted is a different case: Restate
+/// already owns the run, so the row is left for exact recovery rather than
+/// cancelled. Only the external-reference write is missing, and repeating the
+/// start completes the ownership transfer.
+#[tokio::test]
+pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exact_recovery() {
+    let context = Arc::new(RecordingContext::default());
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    registry
+        .fail_next_external_ref_write_for_testing(PluginError::Session(
+            "injected external-ref write failure".to_string(),
+        ))
+        .await;
+    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let process_id = ProcessId::from("restate-start-recovery-external-ref");
+    let spec = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::empty(),
+        recovery_session_policy(),
+    );
+    let expected_ref = spec.stable_ref().expect("stable environment ref");
+    let executor = || {
+        registry_local_executor(registry.clone())
+            .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>)
+    };
+
+    let injected_error = host
+        .execute_effect(start_recovery_effect(&process_id, &spec), executor())
+        .await
+        .expect_err("injected post-registration start failure");
+    let record = registry
+        .get_process(&process_id)
+        .await
+        .expect("read committed process")
+        .expect("registration committed before the injected failure");
+    assert!(
+        !record.is_terminal(),
+        "a row Restate already accepted must not be cancelled; error: {injected_error}"
+    );
+    assert!(
+        env_store
+            .get_process_execution_env(&expected_ref)
             .await
-            .expect("exact start retry completes ownership transfer");
-        let RuntimeEffectOutcome::Process {
-            result: ProcessEffectOutcome::Start { record },
-        } = outcome
-        else {
-            panic!("wrong recovery outcome")
-        };
-        assert_eq!(record.env_ref.as_ref(), Some(&expected_ref));
-        assert!(record.external_ref.is_some());
-    }
+            .expect("read preserved start input")
+            .is_some(),
+        "a retriable external-ref failure must not reclaim the committed process input"
+    );
+
+    let outcome = host
+        .execute_effect(start_recovery_effect(&process_id, &spec), executor())
+        .await
+        .expect("exact start retry completes ownership transfer");
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Start { record },
+    } = outcome
+    else {
+        panic!("wrong recovery outcome")
+    };
+    assert_eq!(record.env_ref.as_ref(), Some(&expected_ref));
+    assert!(record.external_ref.is_some());
+}
+
+/// FIG-2964: an ambiguous submission failure does not compensate.
+///
+/// A failure carrying no proof of non-acceptance — a dropped connection, a
+/// reply that never arrived — may have left an invocation running. Writing the
+/// StartFailed terminal there would terminalise a row whose workflow is doing
+/// the child's work, and the workflow's own terminal write would then fail
+/// against the row it was supposed to settle. The row is left alive and
+/// sweep-owned, and the start returns the record.
+#[tokio::test]
+pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_recovery() {
+    let context = Arc::new(RecordingContext::default());
+    context.fail_next_process_workflow_start_ambiguously();
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let process_id = ProcessId::from("restate-start-ambiguous");
+    let spec = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::empty(),
+        recovery_session_policy(),
+    );
+
+    let outcome = host
+        .execute_effect(
+            start_recovery_effect(&process_id, &spec),
+            registry_local_executor(registry.clone())
+                .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>),
+        )
+        .await
+        .expect("an ambiguous failure must return the record, not the error");
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Start { record },
+    } = outcome
+    else {
+        panic!("wrong start outcome")
+    };
+    assert_eq!(record.id, process_id);
+
+    let stored = registry
+        .get_process(&process_id)
+        .await
+        .expect("read committed process")
+        .expect("the row stands");
+    assert!(
+        !stored.is_terminal(),
+        "a submission that may be running must not be terminalised, got {:?}",
+        stored.status
+    );
+    assert!(
+        stored.cancel_request.is_none(),
+        "no cancellation may be recorded for a submission whose fate is unknown"
+    );
+    assert!(stored.external_ref.is_none());
+}
+
+/// FIG-2964: an exact retry whose submission fails must not cancel the row the
+/// first attempt registered.
+///
+/// Registration is idempotent by fingerprint on every backend, so the second
+/// call's registration succeeds by returning the first call's row. Treating
+/// that as "I created this" would let a retry write a terminal onto a row whose
+/// first attempt may already be running.
+#[tokio::test]
+pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_attempts_row() {
+    let context = Arc::new(RecordingContext::default());
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let process_id = ProcessId::from("restate-exact-retry-start-failure");
+    let spec = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::empty(),
+        recovery_session_policy(),
+    );
+    let executor = || {
+        registry_local_executor(registry.clone())
+            .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>)
+    };
+
+    // The first attempt reaches Restate and registers the row, but its
+    // external-reference write fails, so the row it leaves is nonterminal with
+    // no reference — exactly the shape the second attempt's compensation would
+    // find terminalisable.
+    registry
+        .fail_next_external_ref_write_for_testing(PluginError::Session(
+            "injected external-ref write failure".to_string(),
+        ))
+        .await;
+    let _ = host
+        .execute_effect(start_recovery_effect(&process_id, &spec), executor())
+        .await
+        .expect_err("the first attempt's reference write fails");
+    let first = registry
+        .get_process(&process_id)
+        .await
+        .expect("read process")
+        .expect("the first attempt's row stands");
+    assert!(first.external_ref.is_none() && !first.is_terminal());
+
+    // The second attempt is an exact repeat: registration returns the existing
+    // row, and this submission is definitively refused.
+    context.fail_next_process_workflow_start();
+    let outcome = host
+        .execute_effect(start_recovery_effect(&process_id, &spec), executor())
+        .await
+        .expect("a retry that did not create the row returns it rather than cancelling it");
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Start { record },
+    } = outcome
+    else {
+        panic!("wrong start outcome")
+    };
+    assert_eq!(record.id, process_id);
+
+    let stored = registry
+        .get_process(&process_id)
+        .await
+        .expect("read process")
+        .expect("the row stands");
+    assert!(
+        !stored.is_terminal(),
+        "a retry must never terminalise the row an earlier attempt created, got {:?}",
+        stored.status
+    );
+    assert!(
+        stored.cancel_request.is_none(),
+        "a retry must record no cancellation against the first attempt's row"
+    );
+    assert_eq!(stored.incarnation, first.incarnation);
+}
+
+/// FIG-2964: a registration conflict is a refusal, and never cancels the row
+/// it collided with.
+///
+/// Compensation is reachable only after *this* call created the row. A conflict
+/// means someone else owns the id, so cancelling on the way out would let any
+/// caller kill a live process by starting one that collides with it.
+#[tokio::test]
+pub(super) async fn restate_registration_conflict_refuses_without_cancelling_the_existing_row() {
+    use lash_core::ProcessRegistrar as _;
+
+    let context = Arc::new(RecordingContext::default());
+    // The workflow start would fail if it were reached; the refusal must land
+    // before that, so no compensation path can run.
+    context.fail_next_process_workflow_start();
+    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let process_id = ProcessId::from("restate-registration-conflict");
+    let existing = registry
+        .register_process(rerunnable_registration(process_id.as_str()))
+        .await
+        .expect("the incumbent row registers first");
+    let spec = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::empty(),
+        recovery_session_policy(),
+    );
+
+    let error = host
+        .execute_effect(
+            start_recovery_effect(&process_id, &spec),
+            registry_local_executor(registry.clone())
+                .with_process_env_store(Arc::new(
+                    lash_core::InMemoryProcessExecutionEnvStore::default(),
+                ) as Arc<dyn ProcessExecutionEnvStore>),
+        )
+        .await
+        .expect_err("a colliding registration is refused");
+    assert!(
+        error.to_string().contains("registration fingerprint"),
+        "the refusal must name the conflict, got: {error}"
+    );
+
+    let stored = registry
+        .get_process(&process_id)
+        .await
+        .expect("read process")
+        .expect("the incumbent row stands");
+    assert_eq!(stored.incarnation, existing.incarnation);
+    assert!(
+        !stored.is_terminal(),
+        "a refused start must never terminalise someone else's row, got {:?}",
+        stored.status
+    );
+    assert!(
+        stored.cancel_request.is_none(),
+        "a refused start must never request cancel on someone else's row"
+    );
+}
+
+/// Builds the start envelope the three start-failure regressions share.
+fn start_recovery_effect(
+    process_id: &ProcessId,
+    spec: &lash_core::ProcessExecutionEnvSpec,
+) -> RuntimeEffectEnvelope {
+    let registration = ProcessRegistration::new(
+        process_id.clone(),
+        ProcessInput::ToolCall {
+            call: lash_core::PreparedToolCall::from_parts(
+                format!("{process_id}-call"),
+                "tool:recovery",
+                "recovery",
+                serde_json::Value::Null,
+                None,
+                serde_json::Value::Null,
+            ),
+        },
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+    );
+    RuntimeEffectEnvelope::new(
+        runtime_invocation(RuntimeEffectKind::Process, process_id.as_str()),
+        RuntimeEffectCommand::process(ProcessCommand::Start {
+            registration,
+            observers: vec![SessionId::from("session")],
+            env_spec: Some(spec.clone()),
+            execution_context: Box::new(ProcessExecutionContext::default()),
+        }),
+    )
 }
 
 #[tokio::test]
@@ -1391,6 +1707,7 @@ pub(super) async fn restate_controller_start_emits_send_when_external_ref_alread
                 metadata: Some(serde_json::json!({
                     "invocation_id": format!("invocation-{process_id}")
                 })),
+                segment_ordinal: None,
             },
         )
         .await

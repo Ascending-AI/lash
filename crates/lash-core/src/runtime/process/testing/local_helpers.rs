@@ -36,7 +36,7 @@ impl TestLocalProcessRegistry {
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<crate::ProcessRegistrationOutcome, PluginError> {
         let registration = prepare_process_registration(registration)?;
         let registration_fingerprint =
             crate::runtime::process_registration_fingerprint(&registration, observers);
@@ -46,7 +46,9 @@ impl TestLocalProcessRegistry {
         let mut managed = self.managed.lock().await;
         if let Some(existing) = managed.get(&registration.id) {
             if existing.record.registration_fingerprint == registration_fingerprint {
-                return Ok(existing.record.clone());
+                return Ok(crate::ProcessRegistrationOutcome::existing(
+                    existing.record.clone(),
+                ));
             }
             return Err(PluginError::Session(format!(
                 "process `{}` registration fingerprint conflict: existing {}, new {}",
@@ -100,6 +102,6 @@ impl TestLocalProcessRegistry {
                 .or_default()
                 .insert(ProcessId::from(id.clone().to_string()));
         }
-        Ok(record)
+        Ok(crate::ProcessRegistrationOutcome::created(record))
     }
 }

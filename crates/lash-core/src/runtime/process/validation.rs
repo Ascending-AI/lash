@@ -185,14 +185,30 @@ pub fn prepare_process_transition(
 ) -> Result<ProcessTransitionPlan, PluginError> {
     let append = match transition {
         ProcessTransition::SetExternalRef(external_ref) => {
-            if record.external_ref.as_ref() == Some(&external_ref) {
-                return Ok(ProcessTransitionPlan::Unchanged);
+            // Mirrors the fold's compare-and-set: a write that cannot displace
+            // the recorded owner is an idempotent no-op, not an append, so a
+            // resubmitting sweep never rewrites a row it coalesced onto. Only
+            // a competing backend still reaches the fold's refusal.
+            match record.external_ref.as_ref() {
+                // Nothing recorded yet: this writer names the owner.
+                None => ProcessEventAppendRequest::external_ref_set(&record.id, &external_ref),
+                // A competing backend is a refusal at every ordinal, and the
+                // fold is the single place that refusal is phrased.
+                Some(existing) if existing.backend != external_ref.backend => {
+                    let mut append =
+                        ProcessEventAppendRequest::external_ref_set(&record.id, &external_ref);
+                    route_transition_refusal_to_fold(&mut append)?;
+                    append
+                }
+                // Only a strictly later segment displaces the recorded owner.
+                Some(existing) if external_ref.supersedes(existing) => {
+                    ProcessEventAppendRequest::external_ref_set(&record.id, &external_ref)
+                }
+                // Same or earlier segment on the same backend: an idempotent
+                // no-op, so a resubmitting sweep never rewrites a row it
+                // coalesced onto.
+                Some(_) => return Ok(ProcessTransitionPlan::Unchanged),
             }
-            let mut append = ProcessEventAppendRequest::external_ref_set(&record.id, &external_ref);
-            if record.external_ref.is_some() {
-                route_transition_refusal_to_fold(&mut append)?;
-            }
-            append
         }
         ProcessTransition::RequestCancel(request) => {
             if !record.is_terminal()
@@ -396,16 +412,31 @@ pub fn apply_process_event_projection(
         }
         ProcessEventKind::ExternalRefSet => {
             let external_ref = lifecycle_payload(event, "external_ref")?;
+            // Compare-and-set on the segment ordinal, never last-write-wins.
+            // A live host and the recovery sweep may both submit the same
+            // segment and mint different backend identities for it; the first
+            // recorded one stays, because both run the same coalesced work.
+            // Only a strictly later segment names a new owner, and a reference
+            // for an earlier segment is a stale writer that must not displace
+            // it.
             match record.external_ref.as_ref() {
                 None => record.external_ref = Some(external_ref),
                 Some(existing) if existing == &external_ref => {}
-                Some(existing) => {
+                // Two backends claiming one row is a model error at every
+                // ordinal: a row has exactly one durable owner substrate, so
+                // this is checked before the ordinal comparison — a later
+                // segment never licenses a change of substrate.
+                Some(existing) if existing.backend != external_ref.backend => {
                     return Err(process_external_ref_conflict(
                         &record.id,
                         existing,
                         &external_ref,
                     ));
                 }
+                Some(existing) if external_ref.supersedes(existing) => {
+                    record.external_ref = Some(external_ref);
+                }
+                Some(_) => {}
             }
         }
         ProcessEventKind::CancelRequested => {

@@ -52,6 +52,7 @@ fn non_default_native_substrate() -> NativeSubstrateConfig {
             intake_page: NonZeroUsize::new(3).expect("non-zero intake page"),
             fetch_attempts: NonZeroUsize::new(2).expect("non-zero fetch attempts"),
             fetch_retry_base: Duration::from_millis(3),
+            rescan_interval: Duration::from_millis(7),
         },
         work_cadence: non_default_work_cadence(),
     }

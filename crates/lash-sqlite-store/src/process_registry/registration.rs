@@ -2,11 +2,11 @@ use super::*;
 
 #[async_trait::async_trait]
 impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
-    async fn register_process_with_observers(
+    async fn register_process_reporting_disposition(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<ProcessRecord, lash_core::PluginError> {
+    ) -> Result<lash_core::ProcessRegistrationOutcome, lash_core::PluginError> {
         let registration = prepare_process_registration(registration)?;
         let mut observers = observers.to_vec();
         observers.sort();
@@ -16,13 +16,13 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
         let wake_session_id = registration.wake_session_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
-        let record = self
+        let outcome = self
             .conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     if let Some(existing) = Self::load_process_conn(tx, &registration.id)? {
                         if existing.registration_fingerprint == registration_fingerprint {
-                            return Ok(existing);
+                            return Ok(lash_core::ProcessRegistrationOutcome::existing(existing));
                         }
                         return Err(lash_core::PluginError::Session(format!(
                             "process `{}` registration fingerprint conflict: existing {}, new {}",
@@ -117,7 +117,7 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                             wake_delivery_config,
                         )?;
                     }
-                    Ok(record)
+                    Ok(lash_core::ProcessRegistrationOutcome::created(record))
                 })()))
             })
             .await
@@ -127,9 +127,9 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
         // are lifted now that the row is durable; the call is idempotent for
         // a host that keeps its process-scope fences here.
         self.scope_fence_hosts
-            .reinstate_process_scope(&record.id)
+            .reinstate_process_scope(&outcome.record.id)
             .await?;
-        Ok(record)
+        Ok(outcome)
     }
 
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {

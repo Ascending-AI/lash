@@ -570,3 +570,74 @@ fn an_absorbed_nested_report_is_never_re_reported_as_busy() {
         "another owner's contention survives; this call's own admission does not become it"
     );
 }
+
+/// FIG-2964: the native tier's failed start poke is only advisory because the
+/// idle dispatcher rescans the worklist on the worker-sweep cadence.
+///
+/// The second row below is registered straight into the store with no poke at
+/// all — the state a failed `drive_pending_processes` nudge leaves behind. It
+/// must still *run*, not merely stay non-terminal: without the rescan the row
+/// sits pending until some unrelated poke happens by, which on an idle host is
+/// never. The first row is what gets the dispatcher running in the first place,
+/// so the pickup under test is the rescan and nothing else.
+#[tokio::test]
+async fn an_idle_dispatcher_rescans_and_runs_a_row_no_poke_announced() {
+    let native_substrate = crate::NativeSubstrateConfig {
+        worker_sweep: crate::WorkerSweepPolicy {
+            rescan_interval: Duration::from_millis(5),
+            ..crate::WorkerSweepPolicy::default()
+        },
+        ..crate::NativeSubstrateConfig::default()
+    };
+    let started = Arc::new(AtomicUsize::new(0));
+    let run_handle = Arc::new(LateBoundProcessWork::default());
+    let (worker, registry, _run_handle, env_ref, test_registry) =
+        worker_with_engine_registry_timings_supplier_and_sink(
+            2,
+            Arc::new(GatedSuccessEngine {
+                started: Arc::clone(&started),
+                started_changed: Arc::new(tokio::sync::Notify::new()),
+                release: Arc::new(tokio::sync::Semaphore::new(16)),
+            }),
+            run_handle,
+            None,
+            None,
+            None,
+            native_substrate,
+        )
+        .await;
+
+    test_registry
+        .register_process(engine_registration(
+            "poked-row",
+            "gated-success",
+            env_ref.clone(),
+            serde_json::json!({}),
+        ))
+        .await
+        .expect("register the row that starts the dispatcher");
+    let report = worker
+        .drive_pending_processes()
+        .await
+        .expect("the poked row is admitted");
+    assert_eq!(report.admitted, vec!["poked-row".to_string()]);
+    wait_for_terminal_count(&registry, 1, "the poked row to run").await;
+
+    // Nothing announces this row: no poke, no drive call, no notification.
+    test_registry
+        .register_process(engine_registration(
+            "unannounced-row",
+            "gated-success",
+            env_ref,
+            serde_json::json!({}),
+        ))
+        .await
+        .expect("register the row whose poke failed");
+
+    wait_for_terminal_count(&registry, 2, "the rescan to find the unannounced row").await;
+    assert_eq!(
+        started.load(Ordering::SeqCst),
+        2,
+        "the rescan must actually run the row, not merely leave it non-terminal"
+    );
+}

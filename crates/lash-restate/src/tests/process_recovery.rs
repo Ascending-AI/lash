@@ -1907,11 +1907,14 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
     );
 }
 
+/// FIG-2964: submission is keyed by segment and coalesces.
+///
+/// The first scan submits the segment-0 workflow key and records the external
+/// reference that says Restate owns the row. A second scan re-reads the row,
+/// sees that reference, and skips: resubmitting would be a second POST for a
+/// run already in flight, and the workflow key is the only coalescing point.
 #[tokio::test]
-pub(super) async fn ingress_runner_submits_non_terminal_process_by_workflow_key() {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
-
+pub(super) async fn ingress_runner_submits_by_segment_key_once_and_coalesces_the_repeat_scan() {
     // A non-terminal, Lash-executed (Rerunnable) process is the durable
     // worklist row the ingress runner must submit. ExternallyOwned rows are
     // never submitted (ADR 0019), so the submittable case uses a Rerunnable row.
@@ -1921,41 +1924,21 @@ pub(super) async fn ingress_runner_submits_non_terminal_process_by_workflow_key(
         .await
         .expect("register");
 
-    // Minimal mock ingress: capture two submissions, then reply 202 Accepted
-    // so the reqwest submit succeeds. The second submit exercises the
-    // registry's exact-repeat external_ref path for a still-running process.
-    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-    let addr = listener.local_addr().expect("addr");
-    let captured_server = captured.clone();
-    let server = tokio::spawn(async move {
-        for _ in 0..2 {
-            let (mut socket, _) = listener.accept().await.expect("accept");
-            let mut buf = vec![0u8; 8192];
-            let n = socket.read(&mut buf).await.expect("read request");
-            captured_server
-                .lock_recover()
-                .push(String::from_utf8_lossy(&buf[..n]).into_owned());
-            socket
-                .write_all(
-                    b"HTTP/1.1 202 Accepted\r\ncontent-type: application/json\r\ncontent-length: 49\r\n\r\n{\"invocationId\":\"inv_task_1\",\"status\":\"Accepted\"}",
-                )
-                .await
-                .expect("write response");
-            socket.flush().await.expect("flush");
-        }
-    });
+    // The capture server accepts exactly one connection, so a second submit
+    // would have nothing to talk to: the single-response server is itself part
+    // of the proof that the repeat scan does not POST.
+    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
+        status: "202 Accepted",
+        body: r#"{"invocationId":"inv_task_1","status":"Accepted"}"#,
+    }])
+    .await;
 
-    let runner = RestateProcessIngressRunner::new(
-        format!("http://{addr}"),
-        registry.clone(),
-        continuation_store(),
-    );
-    let _ = runner
+    let runner = RestateProcessIngressRunner::new(base_url, registry.clone(), continuation_store());
+    let first = runner
         .admit_pending_processes("test")
         .await
         .expect("drive pending");
-    let _ = runner
+    let second = runner
         .admit_pending_processes("test")
         .await
         .expect("drive pending again");
@@ -1964,42 +1947,279 @@ pub(super) async fn ingress_runner_submits_non_terminal_process_by_workflow_key(
     let requests = captured.lock_recover().clone();
     assert_eq!(
         requests.len(),
-        2,
-        "the non-terminal process must be submitted on both scans"
+        1,
+        "the row is submitted once; the second scan coalesces onto the recorded reference: {requests:?}"
     );
     let request = &requests[0];
     assert!(
         request.starts_with("POST /LashProcessWorkflow/task-1/run/send "),
-        "submits the keyed workflow run: {request}"
+        "submits the segment-0 workflow key: {request}"
     );
     assert!(
         !request.contains("idempotency-key:"),
         "workflow sends must not carry an idempotency header; Restate coalesces by workflow key: {request}"
     );
+    assert_eq!(first.admitted, vec!["task-1".to_string()]);
     assert!(
-        requests[1].starts_with("POST /LashProcessWorkflow/task-1/run/send "),
-        "repeat scan submits the same keyed workflow run: {}",
-        requests[1]
+        second.admitted.is_empty(),
+        "a row Restate already owns is not admitted again: {second:?}"
+    );
+    assert_eq!(
+        second
+            .deferred
+            .iter()
+            .map(|entry| (entry.process_id.to_string(), entry.disposition.clone()))
+            .collect::<Vec<_>>(),
+        vec![("task-1".to_string(), ProcessRecoveryAttemptOutcome::Busy)],
+        "the skip is a typed deferral, not a silent drop"
     );
 
     // The durable backend reference is recorded so the process is observably
-    // owned by Restate.
+    // owned by Restate, and it names the segment it was minted for.
     let record = registry
         .get_process(&ProcessId::from("task-1"))
         .await
         .expect("read process")
         .expect("get process");
+    let external = record.external_ref.as_ref().expect("external ref recorded");
+    assert_eq!(external.backend.as_str(), "restate");
+    assert_eq!(external.id, "LashProcessWorkflow/task-1");
     assert_eq!(
-        record.external_ref.as_ref().map(|e| e.backend.as_str()),
-        Some("restate"),
-        "the durable external_ref must be recorded after a successful submit"
+        external.segment_ordinal,
+        Some(0),
+        "a live start always schedules the first segment"
     );
     assert_eq!(
-        record
-            .external_ref
+        external
+            .metadata
             .as_ref()
-            .and_then(|external| external.metadata.as_ref())
             .and_then(|metadata| metadata.get("invocation_id")),
         Some(&serde_json::json!("inv_task_1"))
     );
+}
+
+/// FIG-2964 acceptance: recovery of a row that has handed over once keys the
+/// submission by segment 1, not by the bare process id.
+///
+/// Segment 1 is the boundary case the keying scheme has to get right: it is the
+/// first ordinal that is not the process id itself, so a scheme that only
+/// special-cased "has a handover" would resubmit segment 0 and run the process
+/// twice from the start.
+///
+/// The row reaches its state through a live boundary — a real start that
+/// recorded its segment-0 reference, then a real handover whose successor send
+/// never landed — because that is the state the sweep actually meets. A
+/// hand-built handover with no reference at all is unreachable from any live
+/// start, and testing against it would let a skip keyed on
+/// `external_ref.is_some()` pass while stranding every real row.
+#[tokio::test]
+pub(super) async fn ingress_sweep_keys_segment_one_recovery_by_its_segment_workflow_key() {
+    let (registry, continuations, _boundary) =
+        super::restate_redrive::drive_to_live_segment_boundary("handed-over-once").await;
+
+    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
+        status: "202 Accepted",
+        body: r#"{"invocationId":"inv_handed_over_1","status":"Accepted"}"#,
+    }])
+    .await;
+    let runner =
+        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuations.clone());
+    let _ = runner
+        .admit_pending_processes("test")
+        .await
+        .expect("drive pending");
+    server.await.expect("mock ingress server task");
+
+    let requests = captured.lock_recover().clone();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0].starts_with("POST /LashProcessWorkflow/handed-over-once%231/run/send "),
+        "segment-1 recovery addresses the segment-1 workflow key: {}",
+        requests[0]
+    );
+    assert!(
+        !requests[0].starts_with("POST /LashProcessWorkflow/handed-over-once/run/send "),
+        "keying by the bare id would rerun the process from segment 0: {}",
+        requests[0]
+    );
+    assert!(
+        requests[0].contains("\"segment_ordinal\":1"),
+        "the submitted input must carry the ordinal it was keyed for: {}",
+        requests[0]
+    );
+
+    // The reference written for segment 1 names its ordinal, so a later
+    // compare-and-set can tell it apart from a stale segment-0 reference.
+    let record = registry
+        .get_process(&ProcessId::from("handed-over-once"))
+        .await
+        .expect("read process")
+        .expect("get process");
+    let external = record.external_ref.as_ref().expect("external ref recorded");
+    assert_eq!(external.id, "LashProcessWorkflow/handed-over-once#1");
+    assert_eq!(external.segment_ordinal, Some(1));
+}
+
+/// FIG-2964 regression: the sweep's skip is keyed on the recorded reference's
+/// *ordinal*, not on a reference merely existing.
+///
+/// Both rows below come from the same live boundary. The first has handed over
+/// to segment 1 while its reference still names segment 0 — a crashed successor
+/// Restate owns nothing for, so the sweep must submit it. The second has
+/// completed its handover, so the reference names segment 1 and Restate does own
+/// it: the sweep defers. Skipping on `external_ref.is_some()` would pass the
+/// second and strand the first forever, and after this PR *every* handed-over
+/// row carries a reference, so that skip would strand all of them.
+#[tokio::test]
+pub(super) async fn ingress_sweep_resubmits_a_stale_reference_and_defers_the_current_one() {
+    let (registry, continuations, boundary) =
+        super::restate_redrive::drive_to_live_segment_boundary("ordinal-aware-skip").await;
+
+    // Stale reference (segment 0) against a segment-1 handover: submit it.
+    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
+        status: "202 Accepted",
+        body: r#"{"invocationId":"inv_ordinal_aware_1","status":"Accepted"}"#,
+    }])
+    .await;
+    let runner =
+        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuations.clone());
+    let stale = runner
+        .admit_pending_processes("test")
+        .await
+        .expect("drive pending");
+    server.await.expect("mock ingress server task");
+    let requests = captured.lock_recover().clone();
+    assert_eq!(
+        requests.len(),
+        1,
+        "a reference one segment behind the handover must be resubmitted: {requests:?}"
+    );
+    assert!(
+        requests[0].starts_with("POST /LashProcessWorkflow/ordinal-aware-skip%231/run/send "),
+        "the resubmission addresses the latest segment, not the recorded one: {}",
+        requests[0]
+    );
+    assert_eq!(
+        stale.admitted,
+        vec!["ordinal-aware-skip".to_string()],
+        "the stale-reference row is admitted, not deferred"
+    );
+
+    // Now let the live handover complete, so the reference names segment 1.
+    boundary.complete_handover("ordinal-aware-skip").await;
+    let (base_url, captured, server) = spawn_restate_http_capture(vec![]).await;
+    let runner =
+        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuations.clone());
+    let current = runner
+        .admit_pending_processes("test")
+        .await
+        .expect("drive pending");
+    server.await.expect("mock ingress server task");
+    assert!(
+        captured.lock_recover().is_empty(),
+        "a row whose reference already names the latest segment is not resubmitted"
+    );
+    assert!(current.admitted.is_empty());
+    assert_eq!(
+        current
+            .deferred
+            .iter()
+            .map(|entry| (entry.process_id.to_string(), entry.disposition.clone()))
+            .collect::<Vec<_>>(),
+        vec![(
+            "ordinal-aware-skip".to_string(),
+            ProcessRecoveryAttemptOutcome::Busy
+        )],
+        "the skip is a typed deferral, not a silent drop"
+    );
+}
+
+/// FIG-2964: a host crash between registration and submission leaves exactly
+/// the row the sweep is meant to own, and the sweep starts it exactly once.
+///
+/// Two neighbours prove the rule is a resubmission rule and not a "start every
+/// nonterminal row" rule: a row carrying a standing cancel request is leaving,
+/// not starting, and the sweep neither submits it nor writes its terminal — the
+/// workflow's own journaled step is the only writer of a terminal.
+#[tokio::test]
+pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_leaves_the_cancelling_row_alone()
+{
+    let registry = process_registry();
+    registry
+        .register_process(rerunnable_registration("crashed-before-submit"))
+        .await
+        .expect("register the row whose host died before it submitted");
+    let cancelling = registry
+        .register_process(rerunnable_registration("cancel-requested"))
+        .await
+        .expect("register the row that is on its way out");
+    registry
+        .request_process_cancel(
+            &lash_core::ProcessRef::from_record(&cancelling),
+            lash_core::CancelOrigin::OperatorRequested,
+            "operator".to_string(),
+            None,
+        )
+        .await
+        .expect("record the standing cancel request");
+
+    // One response, one accepted connection: a second submit would have nothing
+    // to talk to, so the server shape is part of the "exactly once" proof.
+    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
+        status: "202 Accepted",
+        body: r#"{"invocationId":"inv_crashed","status":"Accepted"}"#,
+    }])
+    .await;
+    let runner =
+        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
+    let report = runner
+        .admit_pending_processes("test")
+        .await
+        .expect("sweep starts the crashed row");
+    server.await.expect("mock ingress server task");
+
+    let requests = captured.lock_recover().clone();
+    assert_eq!(
+        requests.len(),
+        1,
+        "exactly one child is started for the crashed row: {requests:?}"
+    );
+    assert!(
+        requests[0].starts_with("POST /LashProcessWorkflow/crashed-before-submit/run/send "),
+        "the crashed row is the one submitted: {}",
+        requests[0]
+    );
+    assert_eq!(
+        report.admitted,
+        vec![ProcessId::from("crashed-before-submit")]
+    );
+    assert_eq!(
+        report
+            .deferred
+            .iter()
+            .map(|entry| (entry.process_id.to_string(), entry.disposition.clone()))
+            .collect::<Vec<_>>(),
+        vec![(
+            "cancel-requested".to_string(),
+            ProcessRecoveryAttemptOutcome::Busy
+        )],
+    );
+
+    // The cancelling row is untouched: no run was submitted for it, and the
+    // sweep wrote no terminal of its own.
+    let untouched = registry
+        .get_process(&ProcessId::from("cancel-requested"))
+        .await
+        .expect("read process")
+        .expect("the cancelling row stands");
+    assert!(
+        !untouched.is_terminal(),
+        "the sweep must never terminalise a row it did not run, got {:?}",
+        untouched.status
+    );
+    assert!(
+        untouched.external_ref.is_none(),
+        "a row the sweep skipped must gain no backend owner"
+    );
+    assert!(untouched.cancel_request.is_some());
 }

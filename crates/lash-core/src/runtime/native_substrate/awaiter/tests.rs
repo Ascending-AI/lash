@@ -586,6 +586,7 @@ async fn sink_receives_runtime_lifecycle_events_in_order() {
                 backend: "test".to_string(),
                 id: "external".to_string(),
                 metadata: None,
+                segment_ordinal: None,
             },
         )
         .await

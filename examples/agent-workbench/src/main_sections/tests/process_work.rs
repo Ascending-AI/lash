@@ -628,6 +628,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         backend: "restate".to_string(),
         id: "invocation-778".to_string(),
         metadata: Some(json!({ "region": "eu-central-1" })),
+        segment_ordinal: None,
     };
     let record = registry
         .set_external_ref(&ProcessId::from(process_id), external_ref)

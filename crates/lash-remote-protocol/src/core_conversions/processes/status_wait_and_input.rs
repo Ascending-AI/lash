@@ -34,11 +34,13 @@ impl From<lash_core::ProcessExternalRef> for RemoteProcessExternalRef {
             backend,
             id,
             metadata,
+            segment_ordinal,
         } = value;
         Self {
             backend,
             id,
             metadata,
+            segment_ordinal,
         }
     }
 }
@@ -49,11 +51,13 @@ impl From<RemoteProcessExternalRef> for lash_core::ProcessExternalRef {
             backend,
             id,
             metadata,
+            segment_ordinal,
         } = value;
         Self {
             backend,
             id,
             metadata,
+            segment_ordinal,
         }
     }
 }

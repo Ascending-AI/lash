@@ -862,22 +862,33 @@ impl DurableProcessWorker {
                 continue;
             }
 
-            {
-                let mut state = self.execution_scheduler.state.lock_recover();
-                if state.pending.is_empty()
+            let idle = {
+                let state = self.execution_scheduler.state.lock_recover();
+                state.pending.is_empty()
                     && state.active == 0
                     && matches!(state.worklist_scan, ProcessWorklistScan::Idle)
-                {
-                    state.dispatcher_running = false;
-                    dispatcher_guard.disarm();
-                    return;
-                }
-            }
+            };
 
-            tokio::select! {
+            // An idle dispatcher waits instead of ending. Ending was what made
+            // the poke the only thing that ever looked at the store again: a
+            // failed poke on an otherwise quiet host left its registered row
+            // sitting there until some unrelated call happened to poke. The
+            // wait races the shutdown token, so the loop still ends with the
+            // worker that owns it.
+            let rescan = self.config.native_substrate.worker_sweep.rescan_interval;
+            let rescan_due = tokio::select! {
                 biased;
                 () = self.execution_scheduler.shutdown.cancelled() => return,
-                _ = self.execution_scheduler.changed.notified() => {}
+                _ = self.execution_scheduler.changed.notified() => false,
+                () = tokio::time::sleep(rescan), if idle => true,
+            };
+            if rescan_due {
+                let mut state = self.execution_scheduler.state.lock_recover();
+                if matches!(state.worklist_scan, ProcessWorklistScan::Idle) {
+                    // A fresh scan from the start of the worklist: a row this
+                    // dispatcher never saw is exactly the case being recovered.
+                    state.worklist_scan = ProcessWorklistScan::Ready(None);
+                }
             }
         }
     }

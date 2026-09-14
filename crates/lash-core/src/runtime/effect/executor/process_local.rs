@@ -171,9 +171,21 @@ impl ProcessLocalExecution {
                             .await?;
                     }
                 }
-                let _ = process_work
-                    .admit_pending_processes("process_start")
-                    .await?;
+                // The poke is advisory. Registration already committed the
+                // durable row, and the row is the work queue: the native
+                // worker's idle dispatcher rescans pending rows on the
+                // worker-sweep cadence (`WorkerSweepPolicy::rescan_interval`),
+                // so the row runs whether or not this nudge lands. Turning a
+                // failed nudge into a start error would tell the caller the
+                // child does not exist while it is queued to run, and the
+                // retry that follows does the work twice.
+                if let Err(error) = process_work.admit_pending_processes("process_start").await {
+                    tracing::warn!(
+                        process_id = %record.id,
+                        %error,
+                        "process start registered; advisory worker poke failed, the recovery sweep owns the run"
+                    );
+                }
                 Ok(ProcessEffectOutcome::Start {
                     record: Box::new(record),
                 })
@@ -416,6 +428,7 @@ mod tests {
     use crate::ProcessId;
     use crate::TestProcessRegistryWriteExt as _;
     use crate::{ProcessEventLog as _, ProcessQuery as _, ProcessRegistrar as _};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn tool_registration(process_id: &str, marker: &str) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
@@ -519,6 +532,95 @@ mod tests {
                 .expect("read reclaimed environment"),
             None,
             "the process owner must be the only surviving edge after transfer"
+        );
+    }
+
+    /// A `ProcessWorkSubstrate` whose advisory poke always fails.
+    struct PokeAlwaysFails {
+        pokes: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ProcessWorkSubstrate for PokeAlwaysFails {
+        async fn admit_pending_processes(
+            &self,
+            _reason: &str,
+        ) -> Result<crate::ProcessAdmissionReport, crate::PluginError> {
+            self.pokes.fetch_add(1, Ordering::SeqCst);
+            Err(crate::PluginError::Session(
+                "injected worker poke failure".to_string(),
+            ))
+        }
+
+        async fn await_process_terminal(
+            &self,
+            _process_ref: &crate::ProcessRef,
+        ) -> Result<crate::ProcessTerminalWait, crate::PluginError> {
+            unreachable!("poke witness does not await terminals")
+        }
+    }
+
+    /// FIG-2964, native tier: the worker poke after registration is advisory.
+    ///
+    /// Registration already committed the durable row, and the row is the work
+    /// queue — the recovery sweep runs it whether or not the nudge lands. A
+    /// failed nudge surfaced as a start error would tell the caller the child
+    /// does not exist while it is queued to run, and the caller's retry would
+    /// then do the work twice.
+    #[tokio::test]
+    async fn a_failed_worker_poke_still_returns_the_started_record() {
+        let process_id = ProcessId::from("advisory-poke-start");
+        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        let env_spec = crate::ProcessExecutionEnvSpec::new(
+            crate::PluginOptions::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        );
+        let process_work = Arc::new(PokeAlwaysFails {
+            pokes: AtomicUsize::new(0),
+        });
+        let executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
+            Arc::clone(&process_work) as Arc<dyn crate::ProcessWorkSubstrate>,
+        )
+        .with_process_env_store(Arc::new(crate::InMemoryProcessExecutionEnvStore::new())
+            as Arc<dyn crate::ProcessExecutionEnvStore>);
+
+        let outcome = NativeRuntimeEffectController::default()
+            .execute_effect(
+                start_envelope(
+                    "advisory-poke-start",
+                    tool_registration(process_id.as_str(), "advisory"),
+                    env_spec,
+                ),
+                executor,
+            )
+            .await
+            .expect("an advisory poke failure must not fail the start");
+        let crate::RuntimeEffectOutcome::Process {
+            result: ProcessEffectOutcome::Start { record },
+        } = outcome
+        else {
+            panic!("wrong start outcome")
+        };
+        assert_eq!(record.id, process_id);
+        assert_eq!(
+            process_work.pokes.load(Ordering::SeqCst),
+            1,
+            "the start must still attempt the nudge"
+        );
+
+        let stored = registry
+            .get_process(&process_id)
+            .await
+            .expect("read registered process")
+            .expect("the registered row stands");
+        assert!(
+            !stored.is_terminal(),
+            "a failed nudge must not terminalise the row the rescan will run"
+        );
+        assert!(
+            stored.cancel_request.is_none(),
+            "a failed nudge is not a start failure and must not request cancel"
         );
     }
 

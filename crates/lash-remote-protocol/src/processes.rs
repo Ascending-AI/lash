@@ -369,6 +369,11 @@ pub struct RemoteProcessExternalRef {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+    /// Execution segment the reference was minted for; absent reads as zero.
+    /// Carried so a peer's compare-and-set sees the same ordinal the owning
+    /// tier wrote, rather than silently flattening every segment to the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment_ordinal: Option<u64>,
 }
 
 impl RemoteProcessExternalRef {

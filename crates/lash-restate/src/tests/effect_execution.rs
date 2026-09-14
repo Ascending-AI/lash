@@ -162,8 +162,8 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
 }
 
 pub(super) struct MockHttpResponse {
-    status: &'static str,
-    body: &'static str,
+    pub(super) status: &'static str,
+    pub(super) body: &'static str,
 }
 
 pub(super) async fn read_http_request(socket: &mut tokio::net::TcpStream) -> String {

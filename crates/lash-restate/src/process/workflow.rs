@@ -680,7 +680,30 @@ where
                         segment_ordinal: next_segment_ordinal,
                         execution_id: Some(execution_id),
                     }));
-                let _ = request.send().await?;
+                let handle = request.send().await?;
+                // The successor is now the row's durable owner. Writing its
+                // reference here is what makes the recovery sweep's skip
+                // meaningful: without it the row keeps the segment-0 reference
+                // this chain started from, and a sweep comparing the recorded
+                // ordinal against the latest handover would resubmit a segment
+                // Restate is already running. The write is compare-and-set on
+                // the ordinal, so a sweep that raced this handover and wrote the
+                // same successor first is an idempotent no-op rather than a
+                // conflict.
+                self.registry
+                    .set_external_ref(
+                        &process_id,
+                        lash_core::ProcessExternalRef {
+                            backend: "restate".to_string(),
+                            id: format!("LashProcessWorkflow/{successor_key}"),
+                            metadata: Some(
+                                serde_json::json!({ "invocation_id": handle.invocation_id() }),
+                            ),
+                            segment_ordinal: Some(next_segment_ordinal),
+                        },
+                    )
+                    .await
+                    .map_err(handler_error_from_plugin)?;
                 let record = self
                     .registry
                     .get_process(&process_id)

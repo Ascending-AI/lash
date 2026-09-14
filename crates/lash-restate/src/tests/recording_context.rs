@@ -1,4 +1,5 @@
 use super::*;
+use crate::controller::context::ProcessWorkflowStartFailure;
 
 mod helpers;
 use helpers::{TestTurnCancelWakeStep, test_turn_cancel_wake_step};
@@ -527,6 +528,7 @@ pub(super) struct RecordingContext {
     pub(super) runs: Mutex<Vec<String>>,
     pub(super) started: Mutex<Vec<ProcessRegistration>>,
     fail_process_workflow_starts: AtomicUsize,
+    fail_process_workflow_starts_ambiguously: AtomicUsize,
     started_execution_contexts: Mutex<Vec<ProcessExecutionContext>>,
     pub(super) process_command_log: Mutex<Vec<String>>,
     pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
@@ -556,8 +558,16 @@ impl lash_trace::TraceSink for RecordingTraceSink {
 }
 
 impl RecordingContext {
+    /// The next submission is refused: the reply proves no run was accepted.
     pub(super) fn fail_next_process_workflow_start(&self) {
         self.fail_process_workflow_starts
+            .fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// The next submission fails with no proof of non-acceptance -- the
+    /// connection dropped, or the reply never arrived. A run may be executing.
+    pub(super) fn fail_next_process_workflow_start_ambiguously(&self) {
+        self.fail_process_workflow_starts_ambiguously
             .fetch_add(1, Ordering::SeqCst);
     }
 
@@ -770,7 +780,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         &'run self,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
+    ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,
     {
@@ -791,9 +801,20 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                 })
                 .is_ok()
             {
-                return Err(TerminalError::new(
+                return Err(ProcessWorkflowStartFailure::Rejected(TerminalError::new(
                     "injected process workflow start failure",
-                ));
+                )));
+            }
+            if self
+                .fail_process_workflow_starts_ambiguously
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(ProcessWorkflowStartFailure::Ambiguous(TerminalError::new(
+                    "injected ambiguous process workflow start failure",
+                )));
             }
             if let Some(endpoint) = endpoint {
                 let complete_runs =
@@ -810,7 +831,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                     },
                     complete_runs,
                 )
-                .await?;
+                .await
+                .map_err(ProcessWorkflowStartFailure::Rejected)?;
             }
             Ok(format!("invocation-{process_id}"))
         })
@@ -2038,11 +2060,15 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         &'run self,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
+    ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        Box::pin(async { Err(TerminalError::new("process workflow start is unsupported")) })
+        Box::pin(async {
+            Err(ProcessWorkflowStartFailure::Rejected(TerminalError::new(
+                "process workflow start is unsupported",
+            )))
+        })
     }
 
     fn request_process_workflow_cancel<'run>(
@@ -2252,7 +2278,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         &'run self,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
+    ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,
     {
@@ -2273,7 +2299,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                 .live_process_workflow_starts
                 .fetch_add(1, Ordering::SeqCst);
             let Some(worker) = worker else {
-                return Err(TerminalError::new("process workflow start is unsupported"));
+                return Err(ProcessWorkflowStartFailure::Rejected(TerminalError::new(
+                    "process workflow start is unsupported",
+                )));
             };
             let process_id = registration.id.clone();
             let process_task_context = Arc::clone(&context);
@@ -2314,11 +2342,11 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             }));
             let output = match process_task.await {
                 Ok(Ok(output)) => output,
-                Ok(Err(error)) => return Err(error),
+                Ok(Err(error)) => return Err(ProcessWorkflowStartFailure::Rejected(error)),
                 Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
                 Err(error) => {
-                    return Err(TerminalError::new(format!(
-                        "test process workflow task failed: {error}"
+                    return Err(ProcessWorkflowStartFailure::Rejected(TerminalError::new(
+                        format!("test process workflow task failed: {error}"),
                     )));
                 }
             };

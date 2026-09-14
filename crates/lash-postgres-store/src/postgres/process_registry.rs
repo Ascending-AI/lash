@@ -290,11 +290,11 @@ impl lash_core::ProcessQuery for PostgresProcessRegistry {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
-    async fn register_process_with_observers(
+    async fn register_process_reporting_disposition(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<lash_core::ProcessRegistrationOutcome, PluginError> {
         let registration = lash_core::runtime::prepare_process_registration(registration)?;
         let mut observers = observers.to_vec();
         observers.sort();
@@ -306,7 +306,7 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         if let Some(existing) = load_process_tx(&mut tx, &registration.id).await? {
             if existing.registration_fingerprint == registration_fingerprint {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(existing);
+                return Ok(lash_core::ProcessRegistrationOutcome::existing(existing));
             }
             return Err(PluginError::Session(format!(
                 "process `{}` registration fingerprint conflict: existing {}, new {}",
@@ -425,7 +425,7 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         self.scope_fence_hosts
             .reinstate_process_scope(&record.id)
             .await?;
-        Ok(record)
+        Ok(lash_core::ProcessRegistrationOutcome::created(record))
     }
 
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {

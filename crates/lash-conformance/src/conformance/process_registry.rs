@@ -4,6 +4,8 @@ use lash_sansio::ProcessId;
 mod caller_departure;
 mod cancellation;
 mod event_replay;
+mod external_ref;
+pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 mod lifecycle;
 mod parent_end;
 #[doc(hidden)]
@@ -722,6 +724,7 @@ pub async fn lifecycle_transition_refusals_are_backend_invariant(
                 backend: "first-backend".to_string(),
                 id: "first-id".to_string(),
                 metadata: None,
+                segment_ordinal: None,
             },
         )
         .await
@@ -734,6 +737,7 @@ pub async fn lifecycle_transition_refusals_are_backend_invariant(
                     backend: "second-backend".to_string(),
                     id: "second-id".to_string(),
                     metadata: None,
+                    segment_ordinal: None,
                 },
             )
             .await,
@@ -1061,6 +1065,7 @@ async fn refolded_process_record_matches_stored_projection(
                 backend: "refold-conformance".to_string(),
                 id: format!("external:{process_id}"),
                 metadata: Some(serde_json::json!({"cold": !Arc::ptr_eq(&writer, &reader)})),
+                segment_ordinal: None,
             },
         )
         .await

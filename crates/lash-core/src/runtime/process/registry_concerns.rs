@@ -23,7 +23,8 @@ use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessId, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
     ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRef, ProcessRegistration,
-    ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionId, WaitState,
+    ProcessRegistrationOutcome, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
+    SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceView;
 use super::registry::{
@@ -205,7 +206,27 @@ pub trait ProcessRegistrar: Send + Sync {
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<ProcessRecord, PluginError> {
+        Ok(self
+            .register_process_reporting_disposition(registration, observers)
+            .await?
+            .record)
+    }
+
+    /// Register as [`Self::register_process_with_observers`] does, and say
+    /// whether this call created the row or found one already recorded.
+    ///
+    /// Registration is idempotent by fingerprint: an exact repeat returns the
+    /// existing record rather than failing, so a caller cannot infer "I created
+    /// this row" from a successful registration. A caller that compensates a
+    /// later failure by writing a terminal onto the row it registered must know
+    /// the difference, or a retry will terminalise the first attempt's row —
+    /// and its running work — on the second attempt's behalf.
+    async fn register_process_reporting_disposition(
+        &self,
+        registration: ProcessRegistration,
+        observers: &[SessionId],
+    ) -> Result<ProcessRegistrationOutcome, PluginError>;
 
     /// Bind the effect host whose scope-retirement fence this registry lifts
     /// when a process id is registered again (ADR 0049).
