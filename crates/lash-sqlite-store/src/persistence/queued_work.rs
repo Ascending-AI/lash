@@ -477,16 +477,21 @@ impl QueuedWorkStore for Store {
                                     QUEUED_WORK_COLUMNS = QUEUED_WORK_COLUMNS.join(", ")
                                 ))
                                 .map_err(sqlite_error)?;
+                            #[expect(
+                                clippy::expect_used,
+                                reason = "`requested_rows[0]` on the line above already requires a non-empty slice"
+                            )]
+                            let last_enqueue_seq = requested_rows
+                                .last()
+                                .expect("requested rows exist")
+                                .enqueue_seq as i64;
                             stmt.query_map(
                                 params![
                                     session_id.as_str(),
                                     now as i64,
                                     sql_session_lease_generation(generation)?,
                                     requested_rows[0].enqueue_seq as i64,
-                                    requested_rows
-                                        .last()
-                                        .expect("requested rows exist")
-                                        .enqueue_seq as i64,
+                                    last_enqueue_seq,
                                 ],
                                 queued_batch_row_from_sql,
                             )
@@ -508,6 +513,10 @@ impl QueuedWorkStore for Store {
                             .take_while(|row| requested_ids.contains(row.batch_id.as_str()))
                             .cloned()
                             .collect::<Vec<_>>();
+                        #[expect(
+                            clippy::expect_used,
+                            reason = "`rows` was filtered to ids in `requested_ids`, which are exactly the keys of `requested_batches`"
+                        )]
                         let batches = rows
                             .iter()
                             .map(|row| {

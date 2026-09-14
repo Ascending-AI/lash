@@ -99,11 +99,7 @@ pub struct PostgresFaultInjector {
 impl PostgresFaultInjector {
     /// Arm one seed-selected fault point at its next reached occurrence.
     pub fn arm(&self, seed: u64, point: PostgresFaultPoint) {
-        self.arm_many([PostgresFaultArm::new(
-            seed,
-            point,
-            NonZeroU64::new(1).expect("one is non-zero"),
-        )]);
+        self.arm_many([PostgresFaultArm::new(seed, point, NonZeroU64::MIN)]);
     }
 
     /// Replace the current plan with multiple deterministic one-shot arms.

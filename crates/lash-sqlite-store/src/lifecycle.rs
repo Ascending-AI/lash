@@ -68,6 +68,10 @@ impl Store {
             fault_injector,
         )
         .await?;
+        #[expect(
+            clippy::expect_used,
+            reason = "the `OnceLock` belongs to the store value constructed on the line above, so nothing else can have set it"
+        )]
         store
             .session_id
             .set(session_id.clone())
@@ -236,6 +240,10 @@ impl Store {
         session_id: &SessionId,
     ) -> tokio_rusqlite::Result<Self> {
         let store = Self::open_readonly(path).await?;
+        #[expect(
+            clippy::expect_used,
+            reason = "the `OnceLock` belongs to the store value constructed on the line above, so nothing else can have set it"
+        )]
         store
             .session_id
             .set(session_id.clone())

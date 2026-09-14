@@ -384,31 +384,32 @@ impl QueuedWorkStore for PostgresSessionStore {
                         .collect(),
                 }
             })?;
-        let (selected, mut selected_batches) =
-            if let Some(interrupted_positions) = interrupted_positions {
-                let selected = interrupted_positions
-                    .into_iter()
-                    .map(|position| validation_rows[position].clone())
-                    .collect::<Vec<_>>();
-                let mut selected_batches = Vec::with_capacity(selected.len());
-                for row in &selected {
-                    selected_batches.push(queued_work_batch_from_row(&mut tx, row.clone()).await?);
+        let (selected, mut selected_batches) = if let Some(interrupted_positions) =
+            interrupted_positions
+        {
+            let selected = interrupted_positions
+                .into_iter()
+                .map(|position| validation_rows[position].clone())
+                .collect::<Vec<_>>();
+            let mut selected_batches = Vec::with_capacity(selected.len());
+            for row in &selected {
+                selected_batches.push(queued_work_batch_from_row(&mut tx, row.clone()).await?);
+            }
+            (selected, selected_batches)
+        } else {
+            let mut requested_batches = std::collections::BTreeMap::new();
+            for row in &requested_rows {
+                let batch = queued_work_batch_from_row(&mut tx, row.clone()).await?;
+                if batch.work_class() != lash_core::store::QueuedWorkClass::TurnWork {
+                    tx.rollback().await.map_err(store_sqlx_error)?;
+                    return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                        None,
+                        already_satisfied_batch_ids,
+                    ));
                 }
-                (selected, selected_batches)
-            } else {
-                let mut requested_batches = std::collections::BTreeMap::new();
-                for row in &requested_rows {
-                    let batch = queued_work_batch_from_row(&mut tx, row.clone()).await?;
-                    if batch.work_class() != lash_core::store::QueuedWorkClass::TurnWork {
-                        tx.rollback().await.map_err(store_sqlx_error)?;
-                        return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
-                            None,
-                            already_satisfied_batch_ids,
-                        ));
-                    }
-                    requested_batches.insert(row.batch_id.clone(), batch);
-                }
-                let span_rows = sqlx::query(&format!(
+                requested_batches.insert(row.batch_id.clone(), batch);
+            }
+            let span_rows = sqlx::query(&format!(
                     "SELECT {QUEUED_WORK_COLUMNS}
                      FROM lash_queued_work_batches
                      WHERE session_id = $1 AND available_at_ms <= $2
@@ -421,44 +422,53 @@ impl QueuedWorkStore for PostgresSessionStore {
                 .bind(now as i64)
                 .bind(sql_session_lease_generation(generation)?)
                 .bind(requested_rows[0].enqueue_seq as i64)
-                .bind(
-                    requested_rows
+                .bind({
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "`requested_rows[0]` on the line above already requires a non-empty slice"
+                    )]
+                    let last = requested_rows
                         .last()
                         .expect("requested rows exist")
-                        .enqueue_seq as i64,
-                )
+                        .enqueue_seq as i64;
+                    last
+                })
                 .fetch_all(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?
                 .into_iter()
                 .map(queued_batch_row)
                 .collect::<Result<Vec<_>, _>>()?;
-                let Some(first_position) = span_rows
-                    .iter()
-                    .position(|row| requested_ids.contains(row.batch_id.as_str()))
-                else {
-                    tx.rollback().await.map_err(store_sqlx_error)?;
-                    return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
-                        None,
-                        already_satisfied_batch_ids,
-                    ));
-                };
-                let selected = span_rows[first_position..]
-                    .iter()
-                    .take_while(|row| requested_ids.contains(row.batch_id.as_str()))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let selected_batches = selected
-                    .iter()
-                    .map(|row| {
-                        requested_batches
-                            .get(&row.batch_id)
-                            .expect("contiguous exact row was validated")
-                            .clone()
-                    })
-                    .collect::<Vec<_>>();
-                (selected, selected_batches)
+            let Some(first_position) = span_rows
+                .iter()
+                .position(|row| requested_ids.contains(row.batch_id.as_str()))
+            else {
+                tx.rollback().await.map_err(store_sqlx_error)?;
+                return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
             };
+            let selected = span_rows[first_position..]
+                .iter()
+                .take_while(|row| requested_ids.contains(row.batch_id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>();
+            #[expect(
+                clippy::expect_used,
+                reason = "`selected` was filtered to ids in `requested_ids`, which are exactly the keys of `requested_batches`"
+            )]
+            let selected_batches = selected
+                .iter()
+                .map(|row| {
+                    requested_batches
+                        .get(&row.batch_id)
+                        .expect("contiguous exact row was validated")
+                        .clone()
+                })
+                .collect::<Vec<_>>();
+            (selected, selected_batches)
+        };
         let candidates = selected
             .iter()
             .zip(selected_batches.iter())

@@ -678,6 +678,10 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 session_id.as_str().to_string(),
                 None,
             ),
+            #[expect(
+                clippy::expect_used,
+                reason = "`retired_scope` is `Some` for exactly the two variants this arm matches, and neither carries a session id whose validation could refuse the journal identity"
+            )]
             lash_core::EffectJournalRetirement::Process { .. }
             | lash_core::EffectJournalRetirement::RuntimeOperation { .. } => {
                 let scope = retirement

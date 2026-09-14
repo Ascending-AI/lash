@@ -252,7 +252,12 @@ pub(crate) fn load_session_meta(
             tx.commit().map_err(sqlite_error)?;
             return Ok(None);
         }
-        session_ids.into_iter().next().expect("one session id")
+        #[expect(
+            clippy::expect_used,
+            reason = "the `len() != 1` guard above returned, so exactly one id remains"
+        )]
+        let session_id = session_ids.into_iter().next().expect("one session id");
+        session_id
     };
     let mut stored = tx
         .query_row(

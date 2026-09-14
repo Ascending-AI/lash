@@ -106,6 +106,10 @@ pub struct SqliteTransactionPause {
 
 impl SqliteTransactionPause {
     /// Wait until the background SQLite thread reaches the armed boundary.
+    #[expect(
+        clippy::expect_used,
+        reason = "test-harness helper: the loop only exits once `reached_ordinal` is `Some`, and a panicked waiter task must abort the test"
+    )]
     pub async fn wait_until_reached(&self) -> u64 {
         let state = Arc::clone(&self.state);
         tokio::task::spawn_blocking(move || {
@@ -152,11 +156,7 @@ impl SqliteFaultInjector {
     /// This preserves the original replacement behavior: any unconsumed
     /// single or multi-arm plan is discarded.
     pub fn arm(&self, seed: u64, point: SqliteFaultPoint) {
-        self.arm_many([SqliteFaultArm::new(
-            seed,
-            point,
-            NonZeroU64::new(1).expect("one is non-zero"),
-        )]);
+        self.arm_many([SqliteFaultArm::new(seed, point, NonZeroU64::MIN)]);
     }
 
     /// Replace the current plan with multiple deterministic one-shot arms.
