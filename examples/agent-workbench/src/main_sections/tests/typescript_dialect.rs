@@ -173,16 +173,12 @@ fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
     for (path, resource_type, operations) in modules {
         for operation in operations {
             resources
-                .add_module_operation_binding(
+                .add_module_operation_contract(
                     path.iter().copied(),
                     resource_type,
                     *operation,
                     format!("tool:{}/{operation}", path.join("/")),
-                    lashlang::ResourceOperationBinding {
-                        input_ty: lashlang::TypeExpr::Any,
-                        output_ty: lashlang::TypeExpr::Any,
-                        output_from_input: None,
-                    },
+                    &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
                 )
                 .expect("workbench tutorial tool binding");
         }

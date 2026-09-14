@@ -15,7 +15,7 @@ use crate::ast::{
 use crate::lexer::Span;
 
 mod catalog;
-pub use catalog::LashlangHostCatalog;
+pub use catalog::{LashlangHostCatalog, OperationContract};
 mod host;
 use host::module_path_key;
 pub use host::{

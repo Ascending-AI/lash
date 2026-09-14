@@ -1256,16 +1256,12 @@ mod tests {
 
         let mut catalog = lashlang::LashlangHostCatalog::new();
         catalog
-            .add_module_operation_binding(
+            .add_module_operation_contract(
                 modules.to_vec(),
                 "ToolModule",
                 operation,
                 format!("tool:test/{}", modules.join("_")),
-                lashlang::ResourceOperationBinding {
-                    input_ty: lashlang::TypeExpr::Any,
-                    output_ty: lashlang::TypeExpr::Any,
-                    output_from_input: None,
-                },
+                &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
             )
             .expect("operation binding");
         let environment =

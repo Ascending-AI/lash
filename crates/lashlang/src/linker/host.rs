@@ -26,6 +26,27 @@ impl NamedDataType {
         Self::new(name, TypeExpr::Object(fields))
     }
 
+    /// Declares a host data type from the same JSON Schema a tool contract
+    /// would carry.
+    ///
+    /// The schema travels the ordinary importer, so a schema that says
+    /// `x-lash` still lands on the shape validation below and is refused: a
+    /// named data type is a *value* shape, and a process or a trigger handle
+    /// is not a value the host can hand back inside one.
+    pub fn from_schema(
+        name: impl Into<String>,
+        schema: &serde_json::Value,
+    ) -> Result<Self, NamedDataTypeError> {
+        let name = name.into();
+        let ty = crate::json_schema_to_type_expr(schema).map_err(|source| {
+            NamedDataTypeError::UnreadableSchema {
+                name: name.clone(),
+                reason: source.to_string(),
+            }
+        })?;
+        Self::new(name, ty)
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -54,6 +75,8 @@ pub enum NamedDataTypeError {
     NestedRef { name: String },
     #[error("host data type shape cannot contain {ty}")]
     UnsupportedType { ty: &'static str },
+    #[error("host data type `{name}` declares a schema lash cannot read: {reason}")]
+    UnreadableSchema { name: String, reason: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
@@ -102,6 +125,12 @@ pub enum LashlangHostCatalogError {
         source_type: String,
         existing: String,
         incoming: String,
+    },
+    #[error("host operation `{operation}` declares a schema lash cannot read: {source}")]
+    UnreadableOperationSchema {
+        operation: String,
+        #[source]
+        source: crate::json_schema::JsonSchemaError,
     },
 }
 

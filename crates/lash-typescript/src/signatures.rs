@@ -285,8 +285,12 @@ pub fn stdlib_name_count() -> usize {
 }
 
 /// Spells a JSON schema as a TypeScript type using the shared type engine.
+///
+/// A schema the importer refuses is rendered as the widest type rather than
+/// failing: this is prompt-facing documentation, and the same schema is
+/// refused with a typed diagnostic where it actually enters the catalog.
 pub fn render_schema_type(schema: &Value) -> String {
-    render_type(&json_schema_to_type_expr(schema))
+    render_type(&json_schema_to_type_expr(schema).unwrap_or(lashlang::TypeExpr::Any))
 }
 
 /// Confirms a TypeScript cell can address `call_path` verbatim as a tool call.

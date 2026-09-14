@@ -65,37 +65,31 @@ fn static_tool_run(field: &str) -> Program {
 }
 
 fn typed_output_host_environment() -> LashlangHostEnvironment {
-    let input_ty = TypeExpr::Object(vec![
-        TypeField {
-            name: "task".into(),
-            ty: TypeExpr::Str,
-            optional: false,
+    let input_schema = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "task": { "type": "string" },
+            "output": {}
         },
-        TypeField {
-            name: "output".into(),
-            ty: TypeExpr::Any,
-            optional: true,
-        },
-    ]);
+        "required": ["task"]
+    });
     let mut resources = LashlangHostCatalog::new();
     for (module, authority, default_schema) in [
         ("agents", "Agents", None),
-        ("llm", "Llm", Some(TypeExpr::Str)),
+        ("llm", "Llm", Some(serde_json::json!({ "type": "string" }))),
     ] {
         resources
-            .add_module_operation_binding(
+            .add_module_operation_contract(
                 [module],
                 authority,
                 if module == "agents" { "spawn" } else { "query" },
                 format!("{module}_typed_output"),
-                ResourceOperationBinding {
-                    input_ty: input_ty.clone(),
-                    output_ty: TypeExpr::Any,
-                    output_from_input: Some(OutputFromInputBinding {
-                        input_field: "output".to_string(),
-                        default_schema,
-                    }),
-                },
+                &crate::OperationContract::from_input_field(
+                    input_schema.clone(),
+                    "output",
+                    default_schema,
+                ),
             )
             .expect("host catalog operation must not conflict");
     }

@@ -14,6 +14,78 @@ pub struct LashlangHostCatalog {
     pub(super) trigger_sources: BTreeMap<String, TriggerSourceBinding>,
 }
 
+/// A host operation's types as JSON Schema, mirroring a tool contract.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OperationContract {
+    input_schema: serde_json::Value,
+    output: OperationOutputContract,
+}
+
+/// How a host operation's output type is determined.
+#[derive(Clone, Debug, PartialEq)]
+enum OperationOutputContract {
+    /// The output shape is fixed by the contract.
+    Static(serde_json::Value),
+    /// The output shape is the schema the caller passes in `input_field`,
+    /// falling back to `default_schema` when the call site says nothing.
+    FromInputField {
+        input_field: String,
+        default_schema: Option<serde_json::Value>,
+    },
+}
+
+impl OperationContract {
+    /// Declares an operation whose input and output shapes are both fixed.
+    pub fn new(input_schema: serde_json::Value, output_schema: serde_json::Value) -> Self {
+        Self {
+            input_schema,
+            output: OperationOutputContract::Static(output_schema),
+        }
+    }
+
+    /// Declares an operation whose output shape is named by one of its inputs.
+    pub fn from_input_field(
+        input_schema: serde_json::Value,
+        input_field: impl Into<String>,
+        default_schema: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            input_schema,
+            output: OperationOutputContract::FromInputField {
+                input_field: input_field.into(),
+                default_schema,
+            },
+        }
+    }
+
+    fn to_binding(&self) -> Result<ResourceOperationBinding, crate::json_schema::JsonSchemaError> {
+        let input_ty = crate::json_schema_to_type_expr(&self.input_schema)?;
+        let (output_ty, output_from_input) = match &self.output {
+            OperationOutputContract::Static(schema) => {
+                (crate::json_schema_to_type_expr(schema)?, None)
+            }
+            OperationOutputContract::FromInputField {
+                input_field,
+                default_schema,
+            } => (
+                TypeExpr::Any,
+                Some(OutputFromInputBinding {
+                    input_field: input_field.clone(),
+                    default_schema: default_schema
+                        .as_ref()
+                        .map(crate::json_schema_to_type_expr)
+                        .transpose()?,
+                }),
+            ),
+        };
+        Ok(ResourceOperationBinding {
+            input_ty,
+            output_ty,
+            output_from_input,
+        })
+    }
+}
+
 impl LashlangHostCatalog {
     pub fn new() -> Self {
         Self::default()
@@ -121,7 +193,7 @@ impl LashlangHostCatalog {
         input_ty: TypeExpr,
         output_ty: TypeExpr,
     ) -> Result<(), LashlangHostCatalogError> {
-        self.add_module_operation_binding(
+        self.insert_module_operation_binding(
             module_path,
             resource_type,
             operation,
@@ -134,7 +206,38 @@ impl LashlangHostCatalog {
         )
     }
 
-    pub fn add_module_operation_binding(
+    /// Declares a module operation the way a tool contract declares one: in
+    /// JSON Schema.
+    ///
+    /// This is the only way a host installs an operation whose output is
+    /// derived from an input field, and it is the same path a catalog tool
+    /// travels, so a host-owned operation and a tool cannot drift apart in
+    /// what a contract is allowed to say.
+    pub fn add_module_operation_contract(
+        &mut self,
+        module_path: impl IntoIterator<Item = impl Into<String>>,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        host_operation: impl Into<String>,
+        contract: &OperationContract,
+    ) -> Result<(), LashlangHostCatalogError> {
+        let host_operation = host_operation.into();
+        let binding = contract.to_binding().map_err(|source| {
+            LashlangHostCatalogError::UnreadableOperationSchema {
+                operation: host_operation.clone(),
+                source,
+            }
+        })?;
+        self.insert_module_operation_binding(
+            module_path,
+            resource_type,
+            operation,
+            host_operation,
+            binding,
+        )
+    }
+
+    fn insert_module_operation_binding(
         &mut self,
         module_path: impl IntoIterator<Item = impl Into<String>>,
         resource_type: impl Into<String>,
@@ -436,7 +539,7 @@ impl LashlangHostCatalog {
                         operation,
                     });
                 };
-                merged.add_module_operation_binding(
+                merged.insert_module_operation_binding(
                     incoming.path.iter().map(String::as_str),
                     resource_type.clone(),
                     operation.clone(),

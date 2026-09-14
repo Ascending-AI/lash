@@ -447,6 +447,67 @@ fn tool_catalog_imports_declared_static_schema_types() {
     );
 }
 
+/// A tool contract can say `process` and `handle`, and must say them right.
+///
+/// Before `x-lash` a tool could not describe a process at all: both sides of
+/// the boundary erased it. Now that it can, a contract that says it wrong is
+/// refused outright rather than widened to `Any`, because the keyword is only
+/// ever written on purpose.
+#[test]
+fn tool_contracts_carry_lash_types_and_refuse_malformed_ones() {
+    let tool = lash_core::ToolDefinition::raw(
+        "tool:test/spawn",
+        "spawn",
+        "spawn a process",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "target": { "x-lash": { "kind": "process_unknown" } } },
+            "required": ["target"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "x-lash": { "kind": "handle", "payload": { "type": "string" } } }),
+    )
+    .with_tool_binding(ToolBinding::new(["spawner"], "spawn").with_authority_type("Spawner"));
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
+    let resources = lashlang_resources_from_tool_catalog(&catalog).expect("tool schemas import");
+    let operation = resources
+        .resolve_operation("Spawner", "spawn")
+        .expect("operation is registered");
+    assert_eq!(
+        operation.input_ty,
+        lashlang::TypeExpr::Object(vec![lashlang::TypeField {
+            name: "target".into(),
+            ty: lashlang::TypeExpr::Process(lashlang::ProcessType::unknown()),
+            optional: false,
+        }])
+    );
+    assert_eq!(
+        operation.output_ty,
+        lashlang::TypeExpr::TriggerHandle(Box::new(lashlang::TypeExpr::Str))
+    );
+
+    let malformed = lash_core::ToolDefinition::raw(
+        "tool:test/broken",
+        "broken",
+        "a contract that says a lash type wrong",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "target": { "x-lash": { "kind": "process" } } },
+            "required": ["target"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({}),
+    )
+    .with_tool_binding(ToolBinding::new(["broken"], "run").with_authority_type("Broken"));
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![malformed]);
+    let error = lashlang_resources_from_tool_catalog(&catalog)
+        .expect_err("a malformed lash type refuses the whole contract");
+    assert!(
+        error.to_string().contains("x-lash"),
+        "the diagnostic must name the keyword that is wrong: {error}"
+    );
+}
+
 #[test]
 fn from_input_schema_tool_imports_contract_marker_and_default() {
     let tool = lash_core::ToolDefinition::raw(
@@ -504,7 +565,10 @@ fn representable_type_schema_subset_round_trips() {
 
     for expected in types {
         let schema = lashlang_type_expr_schema(&expected);
-        assert_eq!(lashlang::json_schema_to_type_expr(&schema), expected);
+        assert_eq!(
+            lashlang::json_schema_to_type_expr(&schema).expect("an exported schema imports"),
+            expected
+        );
     }
 }
 

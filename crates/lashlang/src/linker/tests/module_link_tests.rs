@@ -8,8 +8,10 @@ fn linked_module_accepts_restate_board_process_with_imported_schemas() {
         "type": "object",
         "properties": {},
         "additionalProperties": false
-    }));
-    let read_output = crate::json_schema_to_type_expr(&serde_json::json!({ "type": "object" }));
+    }))
+    .expect("schema imports");
+    let read_output = crate::json_schema_to_type_expr(&serde_json::json!({ "type": "object" }))
+        .expect("schema imports");
     let play_input = crate::json_schema_to_type_expr(&serde_json::json!({
         "type": "object",
         "properties": {
@@ -21,8 +23,10 @@ fn linked_module_accepts_restate_board_process_with_imported_schemas() {
         },
         "required": ["cell"],
         "additionalProperties": false
-    }));
-    let play_output = crate::json_schema_to_type_expr(&serde_json::json!({ "type": "object" }));
+    }))
+    .expect("schema imports");
+    let play_output = crate::json_schema_to_type_expr(&serde_json::json!({ "type": "object" }))
+        .expect("schema imports");
 
     assert_eq!(read_output, TypeExpr::Dict);
     assert_eq!(

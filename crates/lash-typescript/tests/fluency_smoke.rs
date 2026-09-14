@@ -116,16 +116,15 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
         ("random", "typescript.runtime.random"),
     ] {
         catalog
-            .add_module_operation_binding(
+            .add_module_operation_contract(
                 ["__typescript_runtime"],
                 "typescript.Runtime",
                 operation,
                 host_operation,
-                lashlang::ResourceOperationBinding {
-                    input_ty: lashlang::TypeExpr::Any,
-                    output_ty: lashlang::TypeExpr::Float,
-                    output_from_input: None,
-                },
+                &lashlang::OperationContract::new(
+                    serde_json::json!({}),
+                    serde_json::json!({ "type": "number" }),
+                ),
             )
             .expect("fluency typescript runtime binding");
     }
@@ -151,16 +150,12 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
         )
         .expect("fluency timer trigger source");
     catalog
-        .add_module_operation_binding(
+        .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            lashlang::ResourceOperationBinding {
-                input_ty: lashlang::TypeExpr::Any,
-                output_ty: lashlang::TypeExpr::Any,
-                output_from_input: None,
-            },
+            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("fluency web binding");
     lashlang::LashlangHostEnvironment::new(
