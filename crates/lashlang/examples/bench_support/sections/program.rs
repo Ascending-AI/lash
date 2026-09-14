@@ -166,8 +166,7 @@ finish({
   beta_index: beta_index,
   line_matches: line_matches,
   first_two: state.tags.slice(0, 2),
-  kept: state.kept,
-  stringified: JSON.stringify(state.counts)
+  kept: state.kept
 });
 "#
         }
@@ -334,14 +333,12 @@ finish(records.map((record: unknown) => record.value).join("|"));
 "#
         }
         Scenario::ProjectedOperations => {
+            // `len` and `empty` read the projected list directly; TypeScript
+            // spells that as `.length`, which lowers to a plain field read a
+            // projection does not serve (FIG-3058), so both stay AST-built in
+            // `ast_only_operations` and the projected path keeps being measured.
             r#"
-// A projected value answers its own operations, but `.length` is a plain
-// field read, which a projection does not serve. `slice()` materializes the
-// list through the projected surface first.
-const materialized_items = proj.items.slice(0);
 finish({
-  len: materialized_items.length,
-  empty: materialized_items.length === 0,
   keys: Object.keys(proj.record),
   values: Object.values(proj.record),
   contains: proj.items.includes("beta"),
@@ -771,4 +768,148 @@ finish({ doubled: doubled.length, tagged: tagged.length, last: doubled[doubled.l
         }
     };
     format!("{BENCH_PRELUDE}\n{main}")
+}
+
+/// Restores the measured operations the TypeScript dialect has no syntax for.
+///
+/// ADR 0096 keeps `cancel`, `validate`/`Type {}` and the projected `len`/`empty`
+/// reads in the IR while the authored surface can no longer spell them, so the
+/// corpus lowers what TypeScript expresses and builds the rest from the public
+/// AST constructors. Without this the guard would silently stop measuring
+/// `AbilityOp::Cancel`, the validator, and the projected-read path, and the
+/// max-only budgets would pass on a smaller program.
+///
+/// Statements are spliced in ahead of the trailing `finish` and result fields
+/// are appended to the record it returns, so the scenario keeps its shape. The
+/// span vectors are positional and the appended nodes have no source text, so
+/// they are dropped rather than left misaligned.
+pub fn with_ast_only_operations(scenario: Scenario, mut program: Program) -> Program {
+    let (statements, fields) = ast_only_operations(scenario);
+    if statements.is_empty() && fields.is_empty() {
+        return program;
+    }
+
+    let Expr::Block(mut block) = program.main else {
+        panic!("benchmark program body should be a block");
+    };
+    let Some(Expr::Finish(value)) = block.pop() else {
+        panic!("benchmark program should end in finish");
+    };
+    block.extend(statements);
+    let value = if fields.is_empty() {
+        *value
+    } else {
+        let Expr::Record(mut entries) = *value else {
+            panic!("benchmark scenario should finish a record");
+        };
+        entries.extend(fields);
+        Expr::Record(entries)
+    };
+    block.push(Expr::Finish(Box::new(value)));
+    program.main = Expr::Block(block);
+    program.expression_spans.clear();
+    program.expression_source_spans.clear();
+    program
+}
+
+type AstOnlyOperations = (Vec<Expr>, Vec<(compact_str::CompactString, Expr)>);
+
+fn ast_only_operations(scenario: Scenario) -> AstOnlyOperations {
+    match scenario {
+        Scenario::LanguageHostEnvironment => (
+            vec![
+                ast_assign(
+                    "cancelled",
+                    Expr::StartProcess(ProcessStartExpr {
+                        process: "echo".into(),
+                        args: vec![("value".into(), Expr::String("cancelled".into()))],
+                    }),
+                ),
+                Expr::Cancel(Box::new(ast_variable("cancelled"))),
+                ast_assign(
+                    "validated",
+                    ast_builtin(
+                        "validate",
+                        vec![
+                            Expr::Record(vec![
+                                ("user".into(), ast_variable("direct")),
+                                ("choice".into(), ast_variable("choice")),
+                                ("tags".into(), ast_field(ast_variable("state"), "tags")),
+                                ("counts".into(), ast_field(ast_variable("state"), "counts")),
+                                ("kept".into(), ast_field(ast_variable("state"), "kept")),
+                                ("maybe".into(), Expr::Null),
+                            ]),
+                            Expr::TypeLiteral(Box::new(payload_type())),
+                        ],
+                    ),
+                ),
+            ],
+            vec![
+                ("validated".into(), ast_variable("validated")),
+                (
+                    "stringified".into(),
+                    ast_builtin("to_string", vec![ast_variable("validated")]),
+                ),
+            ],
+        ),
+        Scenario::ToolControlHostEnvironment => (
+            vec![Expr::Cancel(Box::new(ast_variable("second")))],
+            Vec::new(),
+        ),
+        Scenario::ProjectedOperations => (
+            Vec::new(),
+            vec![
+                (
+                    "len".into(),
+                    ast_builtin("len", vec![ast_field(ast_variable("proj"), "items")]),
+                ),
+                (
+                    "empty".into(),
+                    ast_builtin("empty", vec![ast_field(ast_variable("proj"), "items")]),
+                ),
+            ],
+        ),
+        _ => (Vec::new(), Vec::new()),
+    }
+}
+
+/// The validator shape `language_host_environment` measures.
+fn payload_type() -> TypeExpr {
+    TypeExpr::Object(vec![
+        TypeField {
+            name: "user".into(),
+            ty: TypeExpr::Str,
+            optional: false,
+        },
+        TypeField {
+            name: "choice".into(),
+            ty: TypeExpr::Enum(vec!["yes".into(), "no".into()]),
+            optional: false,
+        },
+        TypeField {
+            name: "tags".into(),
+            ty: TypeExpr::List(Box::new(TypeExpr::Str)),
+            optional: false,
+        },
+        TypeField {
+            name: "counts".into(),
+            ty: TypeExpr::Dict,
+            optional: false,
+        },
+        TypeField {
+            name: "kept".into(),
+            ty: TypeExpr::List(Box::new(TypeExpr::Str)),
+            optional: false,
+        },
+        TypeField {
+            name: "maybe".into(),
+            ty: TypeExpr::Union(vec![TypeExpr::Str, TypeExpr::Null]),
+            optional: false,
+        },
+        TypeField {
+            name: "optional_note".into(),
+            ty: TypeExpr::Str,
+            optional: true,
+        },
+    ])
 }

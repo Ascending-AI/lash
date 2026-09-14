@@ -54,7 +54,7 @@ fn main() {
     for scenario in &scenarios {
         let source = benchmark_program(*scenario);
         program_bytes += source.len();
-        let linked = linked_benchmark_program(source.as_str());
+        let linked = linked_benchmark_program(*scenario, source.as_str());
         let compiled = compile_linked(&linked);
 
         for _ in 0..iterations {

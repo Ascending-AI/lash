@@ -121,11 +121,17 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
 ///
 /// ADR 0096 makes TypeScript the sole authored RLM dialect; lashlang names the
 /// IR and the VM the benchmarks measure.
-pub fn linked_benchmark_program(source: &str) -> LinkedModule {
+pub fn parse_benchmark_program(scenario: Scenario, source: &str) -> Program {
     let environment = benchmark_host_environment();
     let program = lash_typescript::parse_with_globals(source, &environment.globals)
         .unwrap_or_else(|diagnostic| panic!("benchmark program should parse: {diagnostic}"));
-    LinkedModule::link(program, environment).expect("benchmark program should link")
+    with_ast_only_operations(scenario, program)
+}
+
+pub fn linked_benchmark_program(scenario: Scenario, source: &str) -> LinkedModule {
+    let program = parse_benchmark_program(scenario, source);
+    LinkedModule::link(program, benchmark_host_environment())
+        .expect("benchmark program should link")
 }
 
 pub fn projected_bindings(scenario: Scenario) -> ProjectedBindings {

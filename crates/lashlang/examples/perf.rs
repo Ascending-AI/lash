@@ -2,7 +2,7 @@ mod bench_support;
 
 use bench_support::{
     BenchHost, Scenario, benchmark_host_environment, benchmark_program, linked_benchmark_program,
-    projected_bindings, seeded_state_for,
+    parse_benchmark_program, projected_bindings, seeded_state_for,
 };
 use lashlang::{
     CompiledProcessCache, CompiledProgramCache, ExecutionEnvironment, ExecutionOutcome,
@@ -156,7 +156,8 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
                 let mut scratch = ExecutionScratch::new();
-                let linked = linked_benchmark_program(std::hint::black_box(source.as_str()));
+                let linked =
+                    linked_benchmark_program(scenario, std::hint::black_box(source.as_str()));
                 let compiled = compile_linked(&linked);
                 let outcome =
                     execute_benchmark(rt, &compiled, &mut state, &host, &mut scratch, &projected);
@@ -170,7 +171,8 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
                 let mut scratch = ExecutionScratch::new();
-                let linked = linked_benchmark_program(std::hint::black_box(source.as_str()));
+                let linked =
+                    linked_benchmark_program(scenario, std::hint::black_box(source.as_str()));
                 let compiled = compile_linked(&linked);
                 let outcome =
                     execute_benchmark(rt, &compiled, &mut state, &host, &mut scratch, &projected);
@@ -179,12 +181,13 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
         }
         Mode::LinkArtifact => {
             for _ in 0..iterations {
-                let linked = linked_benchmark_program(std::hint::black_box(source.as_str()));
+                let linked =
+                    linked_benchmark_program(scenario, std::hint::black_box(source.as_str()));
                 std::hint::black_box((&linked.module_ref, &linked.host_requirements_ref));
             }
         }
         Mode::CompiledExecute => {
-            let linked = linked_benchmark_program(source.as_str());
+            let linked = linked_benchmark_program(scenario, source.as_str());
             let compiled = compile_linked(&linked);
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
@@ -194,7 +197,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             }
         }
         Mode::Snapshot => {
-            let linked = linked_benchmark_program(source.as_str());
+            let linked = linked_benchmark_program(scenario, source.as_str());
             let compiled = compile_linked(&linked);
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
@@ -208,7 +211,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             }
         }
         Mode::ArtifactRoundtrip => {
-            let linked = linked_benchmark_program(source.as_str());
+            let linked = linked_benchmark_program(scenario, source.as_str());
             artifact_bytes = Some(
                 linked
                     .artifact
@@ -229,7 +232,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             }
         }
         Mode::CompiledProcessCache => {
-            let linked = linked_benchmark_program(source.as_str());
+            let linked = linked_benchmark_program(scenario, source.as_str());
             let process_ref = linked
                 .artifact
                 .process_ref("echo")
@@ -249,11 +252,17 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             process_cache_stats = Some(cache.stats());
         }
         Mode::CompiledProgramCache => {
+            // The dialect front-end lives above this crate (ADR 0096), so the
+            // benchmark parses the way a host does and hands the cache the AST.
+            // A hit must still cost only the keyed lookup, which is what the
+            // `cached_compiled_program` probe measures.
             let mut cache = CompiledProgramCache::new();
             for _ in 0..iterations {
-                let compiled = cache
-                    .get_or_compile(std::hint::black_box(source.as_str()))
-                    .expect("program cache compile should succeed");
+                let key = std::hint::black_box(source.as_str());
+                let compiled = match cache.cached_compiled_program(key) {
+                    Some(compiled) => compiled,
+                    None => cache.get_or_compile_ast(key, parse_benchmark_program(scenario, key)),
+                };
                 std::hint::black_box(compiled.compile_stats());
             }
             program_cache_stats = Some(cache.stats());
@@ -262,9 +271,13 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             let mut cache = LinkedProgramCache::new();
             let surface = benchmark_host_environment();
             for _ in 0..iterations {
-                let compiled = cache
-                    .get_or_compile(std::hint::black_box(source.as_str()), surface)
-                    .expect("linked program cache compile should succeed");
+                let key = std::hint::black_box(source.as_str());
+                let compiled = match cache.cached_linked_program(key, surface) {
+                    Some(compiled) => compiled,
+                    None => cache
+                        .get_or_compile_ast(key, parse_benchmark_program(scenario, key), surface)
+                        .expect("linked program cache compile should succeed"),
+                };
                 std::hint::black_box(compiled.compiled_program().compile_stats());
             }
             linked_cache_stats = Some(cache.stats());
@@ -389,7 +402,7 @@ fn run_phase_breakdown(
     source: &str,
     iterations: usize,
 ) -> Vec<PhaseBreakdownMetric> {
-    let parsed = lashlang::parse(source).expect("benchmark program should parse");
+    let parsed = parse_benchmark_program(scenario, source);
     let linked = LinkedModule::link(parsed.clone(), benchmark_host_environment())
         .expect("benchmark program should link");
     let compiled = compile_linked(&linked);
@@ -398,8 +411,7 @@ fn run_phase_breakdown(
     let mut scratch = ExecutionScratch::new();
 
     let parse = measure_phase("parse", iterations, || {
-        let parsed =
-            lashlang::parse(std::hint::black_box(source)).expect("benchmark program should parse");
+        let parsed = parse_benchmark_program(scenario, std::hint::black_box(source));
         std::hint::black_box(parsed);
     });
     let link = measure_phase("link", iterations, || {

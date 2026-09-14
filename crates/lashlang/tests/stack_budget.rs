@@ -75,6 +75,11 @@ finish({
 #[test]
 fn stack_budget_max_nesting_depth_lower_link_compile_execute() {
     run_on_stack_budget("stack-budget-max-nesting", || {
+        // Measured: the TypeScript front-end accepts exactly 25 levels of this
+        // shape, where the lashlang parser accepted 29. `TS_SOURCE_NESTING_LIMIT`
+        // counts the statement and expression levels the retired grammar did
+        // not, so the same object literal runs out of budget sooner. The walk
+        // below tracks the real cap; this floor only catches it moving.
         let deepest = deepest_accepted_nesting();
         assert!(
             deepest >= 25,

@@ -206,8 +206,29 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
       "beta",
       3
     ],
-    "stringified": "{\"alpha\":1,\"beta\":1,\"gamma\":1,\"delta\":1}",
+    "stringified": "{\"choice\":\"yes\",\"counts\":{\"alpha\":1,\"beta\":1,\"delta\":1,\"gamma\":1},\"kept\":[\"alpha\",\"gamma\"],\"maybe\":null,\"tags\":[\"alpha\",\"beta\",\"gamma\",\"delta\"],\"user\":\"sam\"}",
     "summary": "sam:3",
+    "validated": {
+      "choice": "yes",
+      "counts": {
+        "alpha": 1,
+        "beta": 1,
+        "delta": 1,
+        "gamma": 1
+      },
+      "kept": [
+        "alpha",
+        "gamma"
+      ],
+      "maybe": null,
+      "tags": [
+        "alpha",
+        "beta",
+        "gamma",
+        "delta"
+      ],
+      "user": "sam"
+    },
     "values": [
       1,
       1,

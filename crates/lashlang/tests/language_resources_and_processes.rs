@@ -1272,6 +1272,11 @@ async fn source_errors_are_reported_by_the_dialect_front_end() {
     let ExecuteError::Parse(diagnostic) = error else {
         panic!("expected a front-end diagnostic, got {error:?}");
     };
+    assert_eq!(
+        diagnostic.code,
+        lash_typescript::DiagnosticCode::SyntaxError
+    );
+    assert_eq!(diagnostic.message, "Expected '}', got '<eof>'");
     assert!(
         diagnostic.span.is_some(),
         "the refusal must carry a span: {diagnostic:?}"

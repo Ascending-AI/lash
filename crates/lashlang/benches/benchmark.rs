@@ -38,14 +38,14 @@ fn benchmark_one_shot_modes(
     scenario: Scenario,
 ) {
     let source = benchmark_program(scenario);
-    let linked = linked_benchmark_program(source.as_str());
+    let linked = linked_benchmark_program(scenario, source.as_str());
     let compiled = compile_linked(&linked);
     let projected = projected_bindings(scenario);
 
     group.bench_function(BenchmarkId::new("one_shot", scenario), |b| {
         b.iter(|| {
             let mut state = seeded_state_for(scenario);
-            let linked = linked_benchmark_program(black_box(source.as_str()));
+            let linked = linked_benchmark_program(scenario, black_box(source.as_str()));
             let compiled = compile_linked(&linked);
             let env = ExecutionEnvironment::new(host).with_projected_bindings(projected.clone());
             let outcome = rt
@@ -59,7 +59,7 @@ fn benchmark_one_shot_modes(
         prewarm();
         b.iter(|| {
             let mut state = seeded_state_for(scenario);
-            let linked = linked_benchmark_program(black_box(source.as_str()));
+            let linked = linked_benchmark_program(scenario, black_box(source.as_str()));
             let compiled = compile_linked(&linked);
             let env = ExecutionEnvironment::new(host).with_projected_bindings(projected.clone());
             let outcome = rt
@@ -115,7 +115,7 @@ fn lashlang_m9_benchmarks(c: &mut Criterion) {
         ("production_rlm", production_source),
         ("production_rlm_live_state", live_state_source),
     ] {
-        let linked = linked_benchmark_program(source.as_str());
+        let linked = linked_benchmark_program(scenario, source.as_str());
         let compiled = compile_linked(&linked);
         group.bench_function(BenchmarkId::new("vm_attribution", mode), |b| {
             b.iter(|| {
@@ -135,23 +135,28 @@ fn lashlang_m9_benchmarks(c: &mut Criterion) {
 
 fn m9_live_state_program() -> String {
     const LIVE_STATE: &str = r#"
-live_scalar_0 = 0
-live_scalar_1 = 1
-live_scalar_2 = 2
-live_scalar_3 = 3
-live_scalar_4 = 4
-live_scalar_5 = 5
-live_scalar_6 = 6
-live_scalar_7 = 7
-live_compound_0 = { value: live_scalar_0, next: { value: live_scalar_1 } }
-live_compound_1 = { value: live_scalar_2, next: { value: live_scalar_3 } }
-live_compound_2 = { value: live_scalar_4, next: { value: live_scalar_5 } }
-live_compound_3 = { value: live_scalar_6, next: { value: live_scalar_7 } }
-live_stack = [live_compound_0, live_compound_1, live_compound_2, live_compound_3]
+const live_scalar_0 = 0;
+const live_scalar_1 = 1;
+const live_scalar_2 = 2;
+const live_scalar_3 = 3;
+const live_scalar_4 = 4;
+const live_scalar_5 = 5;
+const live_scalar_6 = 6;
+const live_scalar_7 = 7;
+const live_compound_0 = { value: live_scalar_0, next: { value: live_scalar_1 } };
+const live_compound_1 = { value: live_scalar_2, next: { value: live_scalar_3 } };
+const live_compound_2 = { value: live_scalar_4, next: { value: live_scalar_5 } };
+const live_compound_3 = { value: live_scalar_6, next: { value: live_scalar_7 } };
+const live_stack = [live_compound_0, live_compound_1, live_compound_2, live_compound_3];
 "#;
 
     let production = benchmark_program(Scenario::ToolControlHostEnvironment);
-    production.replacen("first = start", &format!("{LIVE_STATE}\nfirst = start"), 1)
+    let anchor = "const first = start";
+    assert!(
+        production.contains(anchor),
+        "M9 live-state benchmark must splice ahead of the first process start"
+    );
+    production.replacen(anchor, &format!("{LIVE_STATE}\n{anchor}"), 1)
 }
 
 fn expect_finished(outcome: ExecutionOutcome) -> Value {
