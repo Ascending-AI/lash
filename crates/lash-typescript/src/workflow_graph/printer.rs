@@ -190,10 +190,9 @@ impl Printer {
             out.push('\n');
         }
         out.push_str(&format!(
-            "const {} = defineProcess({{\n  name: {},\n  signals: {},\n  run: async ({}) => ",
+            "const {} = defineProcess({{\n  name: {},\n  run: async ({}) => ",
             self.identifier("process binding", binding)?,
             string_literal(process.name.as_str()),
-            self.signals(&process.signals)?,
             params.join(", "),
         ));
         let mut run_bound = process

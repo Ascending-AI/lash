@@ -72,6 +72,7 @@ impl LinkError {
             Self::InvalidTriggerRegistration { .. } => "invalid_trigger_registration",
             Self::InvalidTriggerSubscriptionKey { .. } => "invalid_trigger_subscription_key",
             Self::ProcessLiteralOutsideProcessSlot { .. } => "process_literal_outside_process_slot",
+            Self::ConflictingSignalPayload { .. } => "conflicting_signal_payload",
             Self::InvalidTriggerInputs { .. } => "invalid_trigger_inputs",
             Self::DuplicateTriggerInput { .. } => "duplicate_trigger_input",
             Self::MissingTriggerInput { .. } => "missing_trigger_input",

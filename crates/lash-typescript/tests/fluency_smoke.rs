@@ -213,8 +213,7 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         "#,
         r#"
         const worker = defineProcess({
-          name: "worker", signals: { ready: null },
-          run: async (request: unknown) => {
+          name: "worker",           run: async (request: unknown) => {
             const signal = await waitSignal("ready");
             await sleep(10);
             wake(signal);
@@ -260,8 +259,7 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
         // trigger source constructor.
         r#"
         const remember = defineProcess({
-          name: "remember", signals: {},
-          run: async (tick: unknown) => { return tick; }
+          name: "remember",           run: async (tick: unknown) => { return tick; }
         });
         const source = timer.Schedule({ expr: "0 8 * * *" });
         const registration = await registerTrigger({

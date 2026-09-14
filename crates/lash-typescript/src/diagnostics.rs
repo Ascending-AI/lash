@@ -61,6 +61,7 @@ pub enum DiagnosticCode {
     ProcessConfigFieldUnsupported,
     ProcessNameLiteralRequired,
     ProcessSignalsLiteralRequired,
+    ProcessSignalsRemoved,
     ProcessRunLiteralRequired,
     ProcessCaptureUnsupported,
     ProcessTargetStaticRequired,
@@ -144,6 +145,7 @@ impl DiagnosticCode {
         Self::ProcessConfigFieldUnsupported,
         Self::ProcessNameLiteralRequired,
         Self::ProcessSignalsLiteralRequired,
+        Self::ProcessSignalsRemoved,
         Self::ProcessRunLiteralRequired,
         Self::ProcessCaptureUnsupported,
         Self::ProcessTargetStaticRequired,
@@ -289,6 +291,9 @@ impl DiagnosticCode {
             Self::ProcessSignalsLiteralRequired => {
                 "give `signals` a literal object with static properties"
             }
+            Self::ProcessSignalsRemoved => {
+                "drop `signals` and let the body's `waitSignal` sites declare the set"
+            }
             Self::ProcessRunLiteralRequired => "give `run` a function literal",
             Self::ProcessTargetStaticRequired => {
                 "name a top-level `defineProcess` binding directly"
@@ -331,6 +336,7 @@ impl DiagnosticCode {
             Self::ClassUnsupported
             | Self::GeneratorUnsupported
             | Self::AsyncUnsupported
+            | Self::ProcessSignalsRemoved
             | Self::WithUnsupported
             | Self::EvalUnsupported
             | Self::FunctionConstructorUnsupported
@@ -470,6 +476,7 @@ impl DiagnosticCode {
             Self::ProcessConfigFieldUnsupported => "TS_PROCESS_CONFIG_FIELD_UNSUPPORTED",
             Self::ProcessNameLiteralRequired => "TS_PROCESS_NAME_LITERAL_REQUIRED",
             Self::ProcessSignalsLiteralRequired => "TS_PROCESS_SIGNALS_LITERAL_REQUIRED",
+            Self::ProcessSignalsRemoved => "TS_PROCESS_SIGNALS_REMOVED",
             Self::ProcessRunLiteralRequired => "TS_PROCESS_RUN_LITERAL_REQUIRED",
             Self::ProcessCaptureUnsupported => "TS_PROCESS_CAPTURE_UNSUPPORTED",
             Self::ProcessTargetStaticRequired => "TS_PROCESS_TARGET_STATIC_REQUIRED",

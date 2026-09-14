@@ -56,6 +56,10 @@ pub(super) struct Linker<'module> {
     pub(super) workflow_diagnostic_owner: Cell<Option<usize>>,
     /// Process declarations lifted from `Expr::ProcessLiteral` during the
     /// lowering walk, in lift order, with the span to record for each.
+    /// While one literal lifts, `collect_signals` is on and every wait site
+    /// records its await-site expected payload here.
+    pub(super) collect_signals: Cell<bool>,
+    pub(super) inferred_signals: RefCell<BTreeMap<String, TypeExpr>>,
     pub(super) lifted_declarations: RefCell<Vec<(Declaration, Option<Span>)>>,
     /// The AST path of every expression in the program, keyed by node pointer:
     /// `main`-rooted paths are the `children()` index chain, and a declaration
@@ -82,6 +86,8 @@ impl<'module> Linker<'module> {
             workflow_analysis: None,
             recover_workflow_errors: Cell::new(false),
             workflow_diagnostic_owner: Cell::new(None),
+            collect_signals: Cell::new(false),
+            inferred_signals: RefCell::new(BTreeMap::new()),
             lifted_declarations: RefCell::new(Vec::new()),
             expression_paths: expression_paths_by_pointer(program),
         }

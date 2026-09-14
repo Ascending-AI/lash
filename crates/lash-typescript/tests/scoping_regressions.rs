@@ -362,7 +362,7 @@ fn dead_process_handle_names_do_not_change_await_lowering() {
     // unrelated later binding, turning `await` on a settled value into a
     // process await.
     let source = r#"
-        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const worker = defineProcess({ name: "worker", run: async () => 1 });
         { const handle = start(worker); }
         { const handle = 5; finish(await handle); }
     "#;
@@ -373,7 +373,7 @@ fn dead_process_handle_names_do_not_change_await_lowering() {
 fn process_handle_program(binding_kind: &str, terminal: &str) -> lashlang::Program {
     let source = format!(
         r#"
-        const worker = defineProcess({{ name: "worker", signals: {{}}, run: async () => 1 }});
+        const worker = defineProcess({{ name: "worker", run: async () => 1 }});
         {binding_kind} handle = start(worker);
         {terminal}
         "#
@@ -436,7 +436,7 @@ fn let_process_handle_all_settled_matches_const_lowering() {
 #[test]
 fn reassigned_let_process_handle_returns_to_runtime_await_classification() {
     let source = r#"
-        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const worker = defineProcess({ name: "worker", run: async () => 1 });
         let handle = start(worker);
         handle = 5;
         finish(await handle);
@@ -448,7 +448,7 @@ fn reassigned_let_process_handle_returns_to_runtime_await_classification() {
 #[test]
 fn reassigned_let_process_handle_inside_loop_never_gets_the_typed_role() {
     let source = r#"
-        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const worker = defineProcess({ name: "worker", run: async () => 1 });
         const ts = [1, 2];
         let handle = start(worker);
         for (const t of ts) {
@@ -467,7 +467,7 @@ fn compound_and_update_back_edges_also_block_the_typed_role() {
     for mutation in ["handle += t;", "handle++;"] {
         let source = format!(
             r#"
-            const worker = defineProcess({{ name: "worker", signals: {{}}, run: async () => 1 }});
+            const worker = defineProcess({{ name: "worker", run: async () => 1 }});
             const ts = [1, 2];
             let handle = start(worker);
             for (const t of ts) {{
@@ -498,7 +498,7 @@ fn start_resolves_its_target_through_the_scope_stack() {
     // `start` resolves its argument like every other read: a parameter that
     // shadows the process binding is not the process.
     let shadowed = r#"
-        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const worker = defineProcess({ name: "worker", run: async () => 1 });
         const f = (worker: number) => start(worker);
         finish(f(1));
     "#;
@@ -510,7 +510,7 @@ fn start_resolves_its_target_through_the_scope_stack() {
     );
     // The unshadowed target still resolves.
     let visible = r#"
-        const worker = defineProcess({ name: "worker", signals: {}, run: async () => 1 });
+        const worker = defineProcess({ name: "worker", run: async () => 1 });
         const handle = start(worker);
         finish(1);
     "#;

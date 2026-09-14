@@ -72,7 +72,6 @@ fn parse_program(source: &str) -> Program {
 fn process_resource_operation_site_correlates_to_workflow_node() {
     let source = r#"const searchTest = defineProcess({
   name: "search_test",
-  signals: {},
   run: async () => {
     const result = await tools.echo({ value: { ok: true } });
     wake(result);
@@ -324,8 +323,7 @@ finish(identity(1));
 fn execution_site_compiler_and_graph_emit_the_complete_descriptor_vocabulary() {
     let source = r#"const worker = defineProcess({
   name: "worker",
-  signals: { ready: null },
-  run: async () => {
+    run: async () => {
     const payload = await waitSignal("ready");
     wake(payload);
     return payload;

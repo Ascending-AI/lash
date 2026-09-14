@@ -129,6 +129,7 @@ pub fn process(name: &str, params: Vec<ProcessParam>, body: Expr) -> Declaration
 pub fn process_literal(params: Vec<ProcessParam>, body: Expr) -> Expr {
     Expr::ProcessLiteral(Box::new(crate::ProcessLiteralExpr {
         params,
+        hidden_args: Vec::new(),
         body: Box::new(body),
     }))
 }

@@ -118,6 +118,15 @@ pub enum LinkError {
         expected: String,
         span: Option<Span>,
     },
+    #[error(
+        "wait sites for signal `{name}` disagree on the payload: one awaits {first}, another {second}; make them agree or use distinct signal names"
+    )]
+    ConflictingSignalPayload {
+        name: String,
+        first: String,
+        second: String,
+        span: Option<Span>,
+    },
     #[error("trigger registration `inputs` must be a literal record")]
     InvalidTriggerInputs { span: Option<Span> },
     #[error("trigger registration input `{input}` is duplicated")]
@@ -271,6 +280,7 @@ impl LinkError {
             | Self::InvalidTriggerRegistration { span }
             | Self::InvalidTriggerSubscriptionKey { span }
             | Self::ProcessLiteralOutsideProcessSlot { span, .. }
+            | Self::ConflictingSignalPayload { span, .. }
             | Self::InvalidTriggerInputs { span }
             | Self::DuplicateTriggerInput { span, .. }
             | Self::MissingTriggerInput { span, .. }

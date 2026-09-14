@@ -672,3 +672,19 @@ fn is_callback_method(method: &str) -> bool {
             | "toSorted"
     )
 }
+
+impl super::Lowerer {
+    /// The binding whose generated slot is `internal`, across the scope stack.
+    ///
+    /// Process-literal capture diagnostics need the *source* of each capture:
+    /// its visible spelling, kind (mutable or not), and hold-class. Generated
+    /// slot names are unique across the stack precisely where a binding is
+    /// locally shadowed, so the reverse lookup answers one binding at most.
+    pub(super) fn binding_by_internal(&self, internal: &str) -> std::option::Option<&Binding> {
+        self.scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.bindings.values())
+            .find(|binding| binding.internal.as_str() == internal)
+    }
+}
