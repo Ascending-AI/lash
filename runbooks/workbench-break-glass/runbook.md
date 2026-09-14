@@ -26,8 +26,11 @@ scripted evidence. This runbook covers only the operator and browser story.
    owner destruction, not cancellation evidence, and must never produce a rendered or
    durable `Cancelled` result.
 4. Press the Workbench Stop control only after Restate reports the invocation non-active.
-   The Workbench labels that control **stop after step** (title "stop the running turn")
-   on the `#abort` element; it does not render the string `stop turn`. The expected
+   The Workbench renders two cancel affordances and neither is labelled `stop turn`:
+   `#stop` is **stop after step** (finish the step, commit its tool calls, then end) and
+   `#abort` is **abort** (cancel now and drop uncommitted work). This phase uses **abort**
+   (`#abort`), because the owner is already destroyed and there is no step left to finish.
+   The expected
    receipt is HTTP 202 with `accepted: true` and a single cancellation whose `status` is
    `cancellation_recorded_terminal_pending` and which carries **no** `terminal` and no
    `terminal_error`: the cancellation is recorded, the terminal never arrives because the
@@ -48,8 +51,8 @@ scripted evidence. This runbook covers only the operator and browser story.
   `agent_workbench.startup` trace record (`restate_ingress_url`,
   `restate_endpoint_addr`) rather than trusting any arithmetic, and record
   `ADMIN=http://127.0.0.1:<derived-admin-port>`.
-- UI: session id, composer, running/idle pill, the Stop control (**stop after step**,
-  `#abort`), transcript/code execution.
+- UI: session id, composer, running/idle pill, the two cancel controls (**stop after step**
+  `#stop`, **abort** `#abort`), transcript/code execution.
   Backend: `GET /api/state`, `POST /api/turn`, `POST /api/turn/cancel`. Disk:
   `<fresh-data-dir>/active-turns.json` and `trace.jsonl`.
 - Restate Admin SQL is `POST $ADMIN/query` with JSON `{ "query": "..." }`. Send
@@ -113,7 +116,7 @@ Screenshot `02-killed-route-still-visible.png`.
 
 ## Phase 3 — Use Stop to prune the dangling route honestly
 
-Press **stop after step** (`#abort`) and capture `POST /api/turn/cancel`. Keep the browser
+Press **abort** (`#abort`) and capture `POST /api/turn/cancel`. Keep the browser
 open for at least 15 seconds after the click so the page's own re-render is captured.
 Require exactly one cancellation receipt for the Phase 1 address with:
 

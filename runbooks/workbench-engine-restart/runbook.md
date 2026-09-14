@@ -34,12 +34,12 @@ cancellation receipts, committed state, and UI/API agreement—not model prose.
    address must stay unchanged. Removing/recreating the container or restarting the web
    process invalidates this geometry.
 2. **Prove execution, not prompt echo.** Before stopping Restate, require the running
-   pill, visible **stop after step**, exactly one `/api/state.active_turns` address, an
+   pill, visible **stop after step** and **abort**, exactly one `/api/state.active_turns` address, an
    `exec_code_started` trace record for that turn, and its `/api/work` entry with
    `lifecycle: "running"`. LLM request trace records echo the prompt and are never gate
    evidence. A turn that already settled is a retry of this phase.
 3. **Reconverge before Stop.** After Restate is ready again, reload/poll until the UI and
-   `/api/state` show the exact pre-bounce address as running and **stop after step** is visible. Do not
+   `/api/state` show the exact pre-bounce address as running and both cancel controls are visible. Do not
    press a stale button during the engine outage.
 4. **Committed cancellation is authoritative.** `POST /api/turn/cancel` must settle as
    `TurnStop::Cancelled` and carry non-empty evidence with `origin: "user"`. The rendered
@@ -68,9 +68,11 @@ cancellation receipts, committed state, and UI/API agreement—not model prose.
   container state after each command and poll the port-isolated Restate admin/ingress
   endpoints until ready after start.
 - UI: session id, idle/running pill, transcript, composer, and the Stop control.
-  The Workbench does not label that control "stop turn": the rendered affordance
-  is **stop after step** (with "stop the running turn" as its title) on the
-  `#abort` element. Gate on that control, not on the string `stop turn`.
+  The Workbench does not label any control "stop turn". It renders two: `#stop`,
+  labelled **stop after step** (finish the current step and commit its tool calls, then
+  end the turn), and `#abort`, labelled **abort** (cancel now, dropping uncommitted work).
+  Both appear only while a turn is running. Gate visibility on those two controls, and
+  press **abort** where this runbook says so, not on the string `stop turn`.
 - HTTP truth: `GET /healthz`, `GET /api/state`, `POST /api/turn`,
   `POST /api/turn/cancel`, `GET /api/work`.
 - Disk/trace truth: `<data-dir>/session-id`, `<data-dir>/active-turns.json`, and
@@ -93,7 +95,7 @@ shape; ordinary tool work or a top-level turn-scoped sleep does not qualify.
 
 Poll until all of these agree:
 
-- the running pill and **stop after step** are visible;
+- the running pill and both cancel controls are visible;
 - `/api/state.active_turns` contains exactly one address for the rendered session;
 - `active-turns.json` contains that exact session/turn pair;
 - `trace.jsonl` contains an `exec_code_started` record for that exact turn after the
@@ -130,7 +132,7 @@ not permission to continue without the post-start gates.
 
 **Reload once during the outage and gate the outage render.** The parked turn is durable
 truth; the shell must not contradict it. Require that the reloaded page still shows the
-running pill and **stop after step**, that `/api/state.active_turns` still carries the exact
+running pill and the cancel controls, that `/api/state.active_turns` still carries the exact
 Phase 1 address, and that the page renders **neither** an `idle` pill **nor** "no turns
 yet". A render that is indistinguishable from an empty, idle session is a failure of this
 phase even though the engine is down. Screenshot `02-outage-reload.png`.
@@ -144,7 +146,7 @@ Run `docker start <restate-container>`. Poll—not sleep—until its admin and i
 are ready. Require the container id, Workbench PID, session id, and endpoint-worker
 address are unchanged from Phase 0/1.
 
-Reload and poll until the page reconverges on the running pill and **stop after step**, and
+Reload and poll until the page reconverges on the running pill and the cancel controls, and
 `/api/state.active_turns` contains the exact Phase 1 address. `active-turns.json` must
 still agree. For the baseline shape, `/api/work` must show the exact Phase 1 process id
 still at `lifecycle: "running"`. Screenshot `03-reconverged-running.png`; save the state
@@ -152,7 +154,7 @@ and work snapshot as `03-reconverged-state.json` and `03-reconverged-work.json`.
 
 ## Phase 3 — Stop the replayed turn
 
-Press **stop after step** (`#abort`) while capturing `POST /api/turn/cancel`. Gate:
+Press **abort** (`#abort`) while capturing `POST /api/turn/cancel`. Gate:
 
 1. the response is accepted for the exact Phase 1 address;
 2. the gate outcome is `requested` or `already_requested`;
