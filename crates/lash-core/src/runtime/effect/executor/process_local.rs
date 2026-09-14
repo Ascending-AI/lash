@@ -121,26 +121,27 @@ impl ProcessLocalExecution {
                     }
                     _ => None,
                 };
-                let record = match NativeRuntimeEffectController::start_process(
-                    Arc::clone(&registry),
-                    registration,
-                    observers,
-                )
-                .await
-                {
-                    Ok(record) => record,
-                    Err(error) => {
-                        if let Some(env_store) = process_env_store.as_ref() {
-                            env_store
-                                .retire_process_execution_env_owner(&staging_owner)
-                                .await?;
+                let (record, realization) =
+                    match NativeRuntimeEffectController::start_process_reporting_realization(
+                        Arc::clone(&registry),
+                        registration,
+                        observers,
+                    )
+                    .await
+                    {
+                        Ok(outcome) => outcome,
+                        Err(error) => {
+                            if let Some(env_store) = process_env_store.as_ref() {
+                                env_store
+                                    .retire_process_execution_env_owner(&staging_owner)
+                                    .await?;
+                            }
+                            if let Some((engine, _, _)) = engine_artifacts.as_ref() {
+                                engine.retire_artifact_owner(&staging_owner).await?;
+                            }
+                            return Err(error.into());
                         }
-                        if let Some((engine, _, _)) = engine_artifacts.as_ref() {
-                            engine.retire_artifact_owner(&staging_owner).await?;
-                        }
-                        return Err(error.into());
-                    }
-                };
+                    };
                 let process_owner =
                     crate::ArtifactOwner::process(crate::ProcessRef::from_record(&record));
                 if let (Some(env_store), Some((env_ref, bytes, staged))) =
@@ -186,9 +187,12 @@ impl ProcessLocalExecution {
                         "process start registered; advisory worker poke failed, the recovery sweep owns the run"
                     );
                 }
-                Ok(ProcessEffectOutcome::Start {
-                    record: Box::new(record),
-                })
+                Ok((
+                    ProcessEffectOutcome::Start {
+                        record: Box::new(record),
+                    },
+                    realization,
+                ))
             }
             ProcessCommand::List {
                 session_scope,
@@ -212,7 +216,10 @@ impl ProcessLocalExecution {
                             .await?
                     }
                 };
-                Ok(ProcessEffectOutcome::List { entries })
+                Ok((
+                    ProcessEffectOutcome::List { entries },
+                    crate::StoreRealization::Realized,
+                ))
             }
             ProcessCommand::Transfer {
                 from_scope,
@@ -227,11 +234,17 @@ impl ProcessLocalExecution {
                         crate::ProcessObserverBy::host("runtime-effect-transfer"),
                     )
                     .await?;
-                Ok(ProcessEffectOutcome::Transfer)
+                Ok((
+                    ProcessEffectOutcome::Transfer,
+                    crate::StoreRealization::Realized,
+                ))
             }
             ProcessCommand::DeleteSession { session_id } => {
                 let report = registry.delete_session_process_state(&session_id).await?;
-                Ok(ProcessEffectOutcome::DeleteSession { report })
+                Ok((
+                    ProcessEffectOutcome::DeleteSession { report },
+                    crate::StoreRealization::Realized,
+                ))
             }
             ProcessCommand::Await { process_ref } => {
                 let await_terminal = || await_process_terminal(process_work.as_ref(), &process_ref);
@@ -255,9 +268,12 @@ impl ProcessLocalExecution {
                 } else {
                     await_terminal().await?
                 };
-                Ok(ProcessEffectOutcome::Await {
-                    output: Box::new(output),
-                })
+                Ok((
+                    ProcessEffectOutcome::Await {
+                        output: Box::new(output),
+                    },
+                    crate::StoreRealization::Realized,
+                ))
             }
             ProcessCommand::Cancel {
                 process_ref,
@@ -265,21 +281,26 @@ impl ProcessLocalExecution {
                 requester,
                 attribution,
             } => {
-                let record = NativeRuntimeEffectController::request_process_cancel_ref(
-                    registry,
-                    &process_ref,
-                    origin,
-                    requester,
-                    attribution,
-                )
-                .await?;
-                Ok(ProcessEffectOutcome::Cancel {
-                    record: Box::new(record),
-                })
+                let (record, realization) =
+                    NativeRuntimeEffectController::request_process_cancel_ref_reporting_realization(
+                        registry,
+                        &process_ref,
+                        origin,
+                        requester,
+                        attribution,
+                    )
+                    .await?;
+                Ok((
+                    ProcessEffectOutcome::Cancel {
+                        record: Box::new(record),
+                    },
+                    realization,
+                ))
             }
-            ProcessCommand::CancelRefused { refusal, .. } => {
-                Ok(ProcessEffectOutcome::CancelRefused { refusal })
-            }
+            ProcessCommand::CancelRefused { refusal, .. } => Ok((
+                ProcessEffectOutcome::CancelRefused { refusal },
+                crate::StoreRealization::Realized,
+            )),
             ProcessCommand::Signal {
                 process_ref,
                 signal_name,
@@ -293,6 +314,7 @@ impl ProcessLocalExecution {
                     )
                 })?;
                 let result = registry.append_event_ref(&process_ref, request).await?;
+                let realization = result.realization;
                 let waiting_ordinal =
                     registry
                         .get_process_ref(&process_ref)
@@ -342,25 +364,31 @@ impl ProcessLocalExecution {
                         )
                         .await?;
                 }
-                Ok(ProcessEffectOutcome::Signal {
-                    event: Box::new(result.event),
-                })
+                Ok((
+                    ProcessEffectOutcome::Signal {
+                        event: Box::new(result.event),
+                    },
+                    realization,
+                ))
             }
             ProcessCommand::EmitEvent {
                 process_id,
                 request,
             } => {
                 let result = registry.append_event(&process_id, request).await?;
-                Ok(ProcessEffectOutcome::EmitEvent {
-                    event: Box::new(result.event),
-                    wake_delivery: result.wake_delivery.map(Box::new),
-                })
+                Ok((
+                    ProcessEffectOutcome::EmitEvent {
+                        event: Box::new(result.event),
+                        wake_delivery: result.wake_delivery.map(Box::new),
+                    },
+                    result.realization,
+                ))
             }
         };
-        if let (Ok(outcome), Some(observer)) = (&outcome, outcome_observer) {
-            observer(outcome);
+        if let (Ok((outcome, realization)), Some(observer)) = (&outcome, outcome_observer) {
+            observer(outcome, *realization);
         }
-        outcome
+        outcome.map(|(outcome, _)| outcome)
     }
 }
 

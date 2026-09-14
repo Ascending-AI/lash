@@ -638,6 +638,32 @@ pub trait ProcessLifecycle: Send + Sync {
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, PluginError>;
 
+    /// Request cancellation and report whether this call recorded it.
+    ///
+    /// The no-op arm of [`Self::request_process_cancel`] is invisible in its
+    /// return value: the same record comes back whether this call wrote the
+    /// request or found it already recorded. Callers that report replay to a
+    /// host need that distinction (FIG-3070), so a store that coalesces repeat
+    /// cancellations overrides this and answers with
+    /// [`crate::StoreRealization::Coalesced`] on its no-op arm.
+    ///
+    /// The default runs the plain cancel and reports `Realized`. It exists so
+    /// an in-memory double that never coalesces does not owe an
+    /// implementation; every store that folds a repeat request onto the
+    /// recorded one must override it.
+    async fn request_process_cancel_reporting_realization(
+        &self,
+        process_ref: &crate::ProcessRef,
+        origin: crate::CancelOrigin,
+        requester: String,
+        attribution: Option<crate::RuntimeReplayAttribution>,
+    ) -> Result<(ProcessRecord, crate::StoreRealization), PluginError> {
+        let record = self
+            .request_process_cancel(process_ref, origin, requester, attribution)
+            .await?;
+        Ok((record, crate::StoreRealization::Realized))
+    }
+
     /// Set the durable, non-terminal Abandon Request marker (ADR 0019).
     ///
     /// First-writer-wins: a repeat with the same requester and reason is an

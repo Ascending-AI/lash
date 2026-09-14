@@ -1084,6 +1084,23 @@ impl lash_core::ProcessLifecycle for SqliteProcessRegistry {
         requester: String,
         attribution: Option<lash_core::RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, lash_core::PluginError> {
+        self.request_process_cancel_reporting_realization(
+            process_ref,
+            origin,
+            requester,
+            attribution,
+        )
+        .await
+        .map(|(record, _)| record)
+    }
+
+    async fn request_process_cancel_reporting_realization(
+        &self,
+        process_ref: &ProcessRef,
+        origin: lash_core::CancelOrigin,
+        requester: String,
+        attribution: Option<lash_core::RuntimeReplayAttribution>,
+    ) -> Result<(ProcessRecord, lash_core::StoreRealization), lash_core::PluginError> {
         let process_ref = process_ref.clone();
         let now = self.clock.timestamp_ms();
         let request = lash_core::CancelRequest::new(origin, requester, now);
@@ -1096,7 +1113,9 @@ impl lash_core::ProcessLifecycle for SqliteProcessRegistry {
                         &record,
                         ProcessTransition::RequestCancel(request),
                     )? {
-                        ProcessTransitionPlan::Unchanged => return Ok(record),
+                        ProcessTransitionPlan::Unchanged => {
+                            return Ok((record, lash_core::StoreRealization::Coalesced));
+                        }
                         ProcessTransitionPlan::Append(mut append) => {
                             if let Some(replay) = append.replay.as_mut() {
                                 replay.attribution = attribution;
@@ -1110,7 +1129,7 @@ impl lash_core::ProcessLifecycle for SqliteProcessRegistry {
                             )?;
                         }
                     }
-                    Ok(record)
+                    Ok((record, lash_core::StoreRealization::Realized))
                 })()))
             })
             .await

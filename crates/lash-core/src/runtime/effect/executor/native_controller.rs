@@ -336,14 +336,18 @@ impl NativeRuntimeEffectController {
     /// [`ProcessWorkSubstrate`](crate::ProcessWorkSubstrate) is the sole executor.
     /// Registering the row is all this path does; the control seam drives the
     /// host driver after a successful start.
-    pub(crate) async fn start_process(
+    /// Start, reporting whether the registry inserted the row or returned one
+    /// it already held under the same registration fingerprint (FIG-3070).
+    pub(crate) async fn start_process_reporting_realization(
         registry: Arc<dyn crate::ProcessRegistry>,
         registration: crate::ProcessRegistration,
         observers: Vec<SessionId>,
-    ) -> Result<ProcessRecord, PluginError> {
-        registry
-            .register_process_with_observers(registration, &observers)
-            .await
+    ) -> Result<(ProcessRecord, crate::StoreRealization), PluginError> {
+        let outcome = registry
+            .register_process_reporting_disposition(registration, &observers)
+            .await?;
+        let realization = crate::StoreRealization::from_wrote(outcome.is_created());
+        Ok((outcome.record, realization))
     }
 
     pub async fn request_process_cancel(
@@ -367,6 +371,25 @@ impl NativeRuntimeEffectController {
     ) -> Result<ProcessRecord, PluginError> {
         registry
             .request_process_cancel(process_ref, origin, requester, attribution)
+            .await
+    }
+
+    /// Cancel, reporting whether this call recorded the request or found the
+    /// same cancellation already recorded (FIG-3070).
+    pub(crate) async fn request_process_cancel_ref_reporting_realization(
+        registry: Arc<dyn crate::ProcessRegistry>,
+        process_ref: &crate::ProcessRef,
+        origin: crate::CancelOrigin,
+        requester: String,
+        attribution: Option<crate::RuntimeReplayAttribution>,
+    ) -> Result<(ProcessRecord, crate::StoreRealization), PluginError> {
+        registry
+            .request_process_cancel_reporting_realization(
+                process_ref,
+                origin,
+                requester,
+                attribution,
+            )
             .await
     }
 }

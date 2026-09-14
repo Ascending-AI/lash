@@ -558,6 +558,7 @@ impl SqliteProcessRegistry {
                 Ok((
                     ProcessEventAppendReceipt {
                         last_event_sequence: record.last_event_sequence,
+                        realization: lash_core::StoreRealization::Coalesced,
                         event,
                         wake_delivery,
                     },
@@ -626,6 +627,7 @@ impl SqliteProcessRegistry {
                 Ok((
                     ProcessEventAppendReceipt {
                         last_event_sequence: event.sequence,
+                        realization: lash_core::StoreRealization::Realized,
                         event,
                         wake_delivery,
                     },

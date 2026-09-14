@@ -561,6 +561,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     Ok(lash_core::TriggerIngressReceipt {
                         occurrence: record,
                         reservations,
+                        realization: lash_core::StoreRealization::from_wrote(is_new),
                     })
                 })()))
             })

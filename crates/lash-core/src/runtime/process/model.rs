@@ -1164,6 +1164,54 @@ lifecycle_vocabulary!(ProcessStatus, label, by_ref {
     CallerDeparted => "caller_departed",
 });
 
+/// Whether a durable write landed on this call, or coalesced onto a fact the
+/// store already held under the same durable key.
+///
+/// Every identity-bearing store write in this runtime is idempotent under its
+/// own durable key: a re-presented start, event append, signal, cancellation
+/// request or trigger occurrence returns the recorded fact instead of writing a
+/// second one. The store is the only layer that knows which of the two
+/// happened, and callers that report replay to a host -- the tool-intent
+/// ingress above all -- cannot infer it from a successful `Ok` (FIG-3070).
+///
+/// This is a store verdict, never a journal verdict: an effect journal that
+/// replays a recorded outcome never reaches the store at all, so a caller
+/// reporting "was this a replay?" folds both together.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoreRealization {
+    /// This call wrote the durable fact.
+    #[default]
+    Realized,
+    /// The store already held this fact under the same durable key; this call
+    /// wrote nothing and returned what was already there.
+    Coalesced,
+}
+
+impl StoreRealization {
+    /// Whether the store coalesced this call onto an already-recorded fact.
+    pub fn is_coalesced(self) -> bool {
+        matches!(self, Self::Coalesced)
+    }
+
+    /// Whether this call wrote the durable fact.
+    ///
+    /// Named for serde's `skip_serializing_if`, which keeps the common arm off
+    /// the wire so adding this field leaves existing encodings byte-identical.
+    pub fn is_realized(&self) -> bool {
+        matches!(self, Self::Realized)
+    }
+
+    /// The verdict for a call that wrote when `wrote` and coalesced otherwise.
+    pub fn from_wrote(wrote: bool) -> Self {
+        if wrote {
+            Self::Realized
+        } else {
+            Self::Coalesced
+        }
+    }
+}
+
 /// What a registration call did to the registry.
 ///
 /// Registration is idempotent by fingerprint on every backend: an exact repeat

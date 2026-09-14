@@ -553,7 +553,30 @@ impl TriggerRouter {
         request: TriggerOccurrenceRequest,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<TriggerEmitReport, PluginError> {
-        let report = self.emit(request, effect_controller).await?;
+        self.emit_recorded_reporting_realization(request, effect_controller)
+            .await
+            .map(|(report, _)| report)
+    }
+
+    /// [`Self::emit_recorded`], also reporting whether the trigger store
+    /// recorded this occurrence or coalesced it onto one it already held under
+    /// the same idempotency key (FIG-3070).
+    ///
+    /// The occurrence idempotency key, not an effect-journal key, is the dedupe
+    /// point for a re-submitted emission, so a caller that reports replay to a
+    /// host -- the tool-intent ingress -- can only learn it from the store. The
+    /// verdict rides beside the report rather than inside it: it describes this
+    /// call, not the occurrence, and `TriggerEmitReport` crosses the remote
+    /// peer wire where a per-call field would be a protocol change for a fact
+    /// the wire never had to carry.
+    pub async fn emit_recorded_reporting_realization(
+        &self,
+        request: TriggerOccurrenceRequest,
+        effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<(TriggerEmitReport, crate::StoreRealization), PluginError> {
+        let (report, realization) = self
+            .emit_reporting_realization(request, effect_controller)
+            .await?;
         let mut deliveries = Vec::with_capacity(report.deliveries.len());
         for mut delivery in report.deliveries {
             delivery.outcome = match delivery.outcome {
@@ -565,7 +588,10 @@ impl TriggerRouter {
             };
             deliveries.push(delivery);
         }
-        Ok(TriggerEmitReport::new(report.occurrence_id, deliveries))
+        Ok((
+            TriggerEmitReport::new(report.occurrence_id, deliveries),
+            realization,
+        ))
     }
 
     pub async fn emit(
@@ -573,9 +599,22 @@ impl TriggerRouter {
         request: TriggerOccurrenceRequest,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<TriggerEmitReport, PluginError> {
+        self.emit_reporting_realization(request, effect_controller)
+            .await
+            .map(|(report, _)| report)
+    }
+
+    /// [`Self::emit`], also reporting the trigger store's occurrence-key
+    /// verdict for this call (FIG-3070).
+    pub async fn emit_reporting_realization(
+        &self,
+        request: TriggerOccurrenceRequest,
+        effect_controller: &crate::ScopedEffectController<'_>,
+    ) -> Result<(TriggerEmitReport, crate::StoreRealization), PluginError> {
         let TriggerIngressReceipt {
             occurrence,
             reservations,
+            realization,
         } = self.store.ingest_occurrence(request).await?;
         let process_work = &self.process_work;
         let mut deliveries = Vec::new();
@@ -614,7 +653,10 @@ impl TriggerRouter {
                 .admit_pending_processes("trigger_delivery")
                 .await?;
         }
-        Ok(TriggerEmitReport::new(occurrence.occurrence_id, deliveries))
+        Ok((
+            TriggerEmitReport::new(occurrence.occurrence_id, deliveries),
+            realization,
+        ))
     }
 
     pub(crate) async fn start_delivery(

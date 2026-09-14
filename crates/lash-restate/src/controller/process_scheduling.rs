@@ -12,7 +12,7 @@ pub(super) async fn schedule_restate_process<'ctx, C>(
     observers: Vec<SessionId>,
     execution_context: lash_core::ProcessExecutionContext,
     context: &C,
-) -> Result<ProcessRecord, PluginError>
+) -> Result<(ProcessRecord, lash_core::StoreRealization), PluginError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
@@ -26,6 +26,9 @@ where
         .register_process_reporting_disposition(registration.clone(), &observers)
         .await?;
     let created_here = registered.is_created();
+    // The registry's own verdict, carried out to the caller so a coalesced
+    // redelivery is reported as a replay rather than a fresh start (FIG-3070).
+    let realization = lash_core::StoreRealization::from_wrote(created_here);
     let record = registered.record;
     let invocation_id = match context
         .start_process_workflow(registration, execution_context)
@@ -59,7 +62,7 @@ where
                     created_here,
                     "Restate process submission failed without licensing a start-failed compensation; recovery owns the row"
                 );
-                return Ok(record);
+                return Ok((record, realization));
             }
             return match compensate_failed_process_submission(
                 registry.as_ref(),
@@ -80,7 +83,7 @@ where
                         error = %compensation_error,
                         "Restate process submission failed and its start-failed compensation could not be written; recovery owns the row"
                     );
-                    Ok(record)
+                    Ok((record, realization))
                 }
             };
         }
@@ -102,6 +105,7 @@ where
             },
         )
         .await
+        .map(|record| (record, realization))
 }
 
 /// Record the StartFailed cancellation for a row whose workflow submission

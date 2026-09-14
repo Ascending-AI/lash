@@ -1120,7 +1120,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         .expect("register process for redrive witness");
     let process_executed = Arc::new(AtomicBool::new(false));
     let ran_proc = Arc::clone(&process_executed);
-    let process_observer: lash_core::ProcessOutcomeObserver = Arc::new(move |_| {
+    let process_observer: lash_core::ProcessOutcomeObserver = Arc::new(move |_, _| {
         ran_proc.store(true, Ordering::SeqCst);
     });
 

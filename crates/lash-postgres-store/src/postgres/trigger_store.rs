@@ -366,6 +366,7 @@ impl TriggerStore for PostgresTriggerStore {
         Ok(lash_core::TriggerIngressReceipt {
             occurrence,
             reservations,
+            realization: lash_core::StoreRealization::from_wrote(is_new),
         })
     }
 
