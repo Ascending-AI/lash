@@ -103,7 +103,7 @@ lash_rust_integration_test(
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
-        "//crates/lash-core:package_files",
+        "//crates/lash-core-store:package_files",
     ],
     library = ":lash-sim",
     library_crate_name = "lash_sim",
