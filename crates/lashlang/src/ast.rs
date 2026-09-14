@@ -584,6 +584,11 @@ pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessLiteralExpr {
     pub params: Vec<ProcessParam>,
+    /// Immutable, durably representable cell locals the body reads; each
+    /// becomes a hidden start argument carrying the value the variable had
+    /// when the process started (FIG-2998).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_args: Vec<ProcessParam>,
     pub body: Box<Expr>,
 }
 
@@ -917,6 +922,7 @@ where
         })),
         Expr::ProcessLiteral(literal) => Expr::ProcessLiteral(Box::new(ProcessLiteralExpr {
             params: literal.params,
+            hidden_args: literal.hidden_args,
             body: Box::new(folder.fold_expr(*literal.body)),
         })),
         Expr::Call { function, args } => Expr::Call {

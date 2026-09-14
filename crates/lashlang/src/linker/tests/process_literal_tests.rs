@@ -231,3 +231,128 @@ fn a_literal_through_a_path_step_or_shape_mismatch_stays_refused() {
         LinkError::ProcessLiteralOutsideProcessSlot { .. }
     ));
 }
+
+#[test]
+fn the_signal_set_is_inferred_from_wait_sites_including_unreached_branches() {
+    // handle = await crew.run({
+    //   program: async (tick) => {
+    //     const signal = await waitSignal("go");
+    //     ... finish(signal);
+    //   },
+    //   inputs: {}
+    // })?
+    // Structural enumeration, so an unreached branch's "hold" counts too.
+    let program = builders::module(
+        vec![],
+        vec![
+            builders::assign(
+                "handle",
+                crew_run(builders::process_literal(
+                    vec![],
+                    builders::if_else(
+                        builders::bool_lit(true),
+                        builders::assign("signal", builders::wait_signal("go")),
+                        builders::assign("unused", builders::wait_signal("hold")),
+                    ),
+                )),
+            ),
+            builders::finish(builders::var("handle")),
+        ],
+    );
+
+    let linked = LinkedModule::link(program, full_host_environment())
+        .expect("inferred wait sites are legal");
+    let Declaration::Process(process) = process_names_first(&linked).expect("lift happened") else {
+        unreachable!("the module lifted exactly one process");
+    };
+    let names: Vec<&str> = process
+        .signals
+        .iter()
+        .map(|signal| signal.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["go", "hold"],
+        "the inferred set is a structural walk: {names:?}"
+    );
+}
+
+#[test]
+fn disjoint_signal_payloads_for_one_name_are_refused() {
+    // Two wait sites for one literal name, each awaiting a different shape:
+    // `tools.accept_str(<literal>)` types the payload str, the second arm
+    // types it integer. Mutually unassignable sites are an error.
+    let program = builders::module(
+        vec![],
+        vec![
+            builders::assign(
+                "handle",
+                crew_run(builders::process_literal(
+                    vec![],
+                    builders::if_else(
+                        builders::bool_lit(true),
+                        builders::unwrap(builders::await_expr(builders::module_call(
+                            &["tools"],
+                            "accept_str",
+                            vec![builders::wait_signal("daily")],
+                        ))),
+                        builders::unwrap(builders::await_expr(builders::module_call(
+                            &["tools"],
+                            "accept_int",
+                            vec![builders::wait_signal("daily")],
+                        ))),
+                    ),
+                )),
+            ),
+            builders::finish(builders::var("handle")),
+        ],
+    );
+
+    let error = LinkedModule::link(program, full_host_environment())
+        .expect_err("mutually unassignable payload sites conflict");
+    assert!(
+        matches!(
+            error,
+            LinkError::ConflictingSignalPayload { ref name, .. } if name == "daily"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_immutable_capture_becomes_a_hidden_start_argument() {
+    //    budget = ...
+    //    handler = async (tick) => { ... finish(tick.budget_below(budget)) }
+    // The lifted signature carries the read's hidden arg, and the prompt
+    // teaches that the process sees the value a variable had when it started.
+    let program = builders::module(
+        vec![],
+        vec![
+            builders::assign("budget", builders::num(3.0)),
+            builders::assign("handler", {
+                let mut literal =
+                    builders::process_literal(vec![], builders::finish(builders::var("budget")));
+                if let Expr::ProcessLiteral(inner) = &mut literal {
+                    inner
+                        .hidden_args
+                        .push(builders::param("budget", TypeExpr::Any));
+                }
+                literal
+            }),
+            builders::assign("handle", crew_run(builders::var("handler"))),
+            builders::finish(builders::var("handle")),
+        ],
+    );
+
+    let linked = LinkedModule::link(program, full_host_environment())
+        .expect("a captured immutable local is a hidden start argument");
+    let Declaration::Process(process) = process_names_first(&linked).expect("lift happened") else {
+        unreachable!("the module lifted exactly one process");
+    };
+    assert_eq!(
+        process.params.last().map(|param| param.name.as_str()),
+        Some("budget"),
+        "the hidden start argument rides the signature: {:?}",
+        process.params
+    );
+}

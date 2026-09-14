@@ -134,7 +134,7 @@ impl<'module> Linker<'module> {
             Expr::Await(inner) => self.lower_await(inner, scope, expected),
             Expr::SleepFor(inner) => self.lower_sleep_for(inner, scope),
             Expr::SleepUntil(inner) => self.lower_sleep_until(inner, scope),
-            Expr::WaitSignal { name } => self.lower_wait_signal(name, scope),
+            Expr::WaitSignal { name } => self.lower_wait_signal(name, scope, expected),
             Expr::SignalRun { run, name, payload } => {
                 self.lower_signal_run(run, name, payload, scope)
             }
@@ -959,6 +959,7 @@ impl<'module> Linker<'module> {
         &self,
         name: &AstString,
         scope: &mut Scope,
+        expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
         self.ensure_feature(
             self.surface.abilities.process_signals,
@@ -971,10 +972,52 @@ impl<'module> Linker<'module> {
                 span: scope.span,
             });
         }
+        if self.collect_signals.get() {
+            self.record_signal_payload(name.as_str(), expected, scope.span)?;
+        }
         Ok((
             Expr::WaitSignal { name: name.clone() },
             Binding::Value(TypeExpr::Any),
         ))
+    }
+
+    /// Records one wait site's payload type while its process literal lifts.
+    ///
+    /// A second site for the same name must agree: sites whose resolved
+    /// types are mutually unassignable conflict and the link is refused; the
+    /// set is structural, so an unreached branch's wait sites count.
+    pub(super) fn record_signal_payload(
+        &self,
+        name: &str,
+        expected: Option<&TypeExpr>,
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        let payload = expected
+            .map(|expected| self.resolve_type_aliases(expected))
+            .unwrap_or(TypeExpr::Any);
+        let mut signals = self.inferred_signals.borrow_mut();
+        match signals.get(name).cloned() {
+            None => {
+                signals.insert(name.to_owned(), payload);
+                Ok(())
+            }
+            Some(existing) => {
+                if existing == payload {
+                    Ok(())
+                } else if self.is_type_assignable(&existing, &payload)
+                    && self.is_type_assignable(&payload, &existing)
+                {
+                    Ok(())
+                } else {
+                    Err(LinkError::ConflictingSignalPayload {
+                        name: name.to_owned(),
+                        first: format_type_expr(&existing),
+                        second: format_type_expr(&payload),
+                        span,
+                    })
+                }
+            }
+        }
     }
 
     pub(super) fn lower_signal_run(

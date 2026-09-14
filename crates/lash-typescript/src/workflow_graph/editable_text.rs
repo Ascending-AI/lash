@@ -96,7 +96,7 @@ pub(super) fn parse_typescript_fragment(
                 .collect::<String>();
             (
                 format!(
-                    "const {OPAQUE_WRAPPER} = defineProcess({{ name: \"{OPAQUE_WRAPPER}\", signals: {{}}, run: async () => {{\n{prelude}{text}\n}} }});\n"
+                    "const {OPAQUE_WRAPPER} = defineProcess({{ name: \"{OPAQUE_WRAPPER}\", run: async () => {{\n{prelude}{text}\n}} }});\n"
                 ),
                 BTreeSet::new(),
                 names.len(),
@@ -191,7 +191,7 @@ pub fn parse_typescript_process_statement(
         .map(|name| format!("  let {name};\n"))
         .collect::<String>();
     let source = format!(
-        "const {OPAQUE_WRAPPER} = defineProcess({{ name: \"{OPAQUE_WRAPPER}\", signals: {{}}, run: async () => {{\n{prelude}{text}\n}} }});\n"
+        "const {OPAQUE_WRAPPER} = defineProcess({{ name: \"{OPAQUE_WRAPPER}\", run: async () => {{\n{prelude}{text}\n}} }});\n"
     );
     let program = crate::parse_workflow_fragment(&source, &BTreeSet::new(), processes)
         .map_err(|error| TypeScriptFragmentError(error.to_string()))?;

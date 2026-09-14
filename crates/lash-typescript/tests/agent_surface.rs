@@ -32,7 +32,6 @@ fn define_process_is_a_static_declaration_and_return_stays_a_function_return() {
         r#"
         const worker = defineProcess({
           name: "worker",
-          signals: { ready: null },
           run: async (input: unknown) => {
             try { return input; } finally { wake("completed"); }
           }
@@ -48,7 +47,10 @@ fn define_process_is_a_static_declaration_and_return_stays_a_function_return() {
     };
     assert_eq!(process.name.as_str(), "worker");
     assert_eq!(process.params[0].name.as_str(), "input");
-    assert_eq!(process.signals[0].name.as_str(), "ready");
+    assert!(
+        process.signals.is_empty(),
+        "the set is inferred, not declared"
+    );
     let Expr::Try(wrapper) = &process.body else {
         panic!("process wrapper should translate uncaught errors into failure")
     };
@@ -75,7 +77,6 @@ fn durable_process_agent_primitives_link_through_existing_effects() {
     let source = r#"
         const worker = defineProcess({
           name: "worker",
-          signals: { ready: null },
           run: async (input: unknown) => {
             const signal = await waitSignal("ready");
             await sleep(5);
@@ -104,8 +105,7 @@ fn durable_process_agent_primitives_link_through_existing_effects() {
 fn production_link_cache_preserves_typescript_artifact_identity() {
     let source = r#"
         const worker = defineProcess({
-          name: "worker", signals: {},
-          run: async (input: unknown) => { const alias = input; return alias; }
+          name: "worker",           run: async (input: unknown) => { const alias = input; return alias; }
         });
         finish(start(worker, { input: [1] }));
     "#;
@@ -132,8 +132,7 @@ fn wake_signals_runs_and_process_finish_is_rejected() {
     let program = lash_typescript::parse(
         r#"
         const worker = defineProcess({
-          name: "worker", signals: { ready: null },
-          run: async () => await waitSignal("ready")
+          name: "worker",           run: async () => await waitSignal("ready")
         });
         const handle = start(worker);
         wake(handle, "ready", { ok: true });
@@ -146,8 +145,7 @@ fn wake_signals_runs_and_process_finish_is_rejected() {
     let error = lash_typescript::parse(
         r#"
         const worker = defineProcess({
-          name: "worker", signals: {},
-          run: async () => { try { finish(1); } finally { wake("cleanup"); } }
+          name: "worker",           run: async () => { try { finish(1); } finally { wake("cleanup"); } }
         });
         "#,
     )
@@ -164,8 +162,7 @@ fn process_membership_reaches_functions_nested_inside_run() {
     let error = lash_typescript::parse(
         r#"
         const worker = defineProcess({
-          name: "worker", signals: {},
-          run: async () => {
+          name: "worker",           run: async () => {
             function stop() { finish(1); }
             return stop();
           }
@@ -205,8 +202,7 @@ impl ExecutionHost for SignalHost {
 fn foreground_wake_delivers_a_named_process_signal() {
     let source = r#"
         const worker = defineProcess({
-          name: "worker", signals: { ready: null },
-          run: async () => await waitSignal("ready")
+          name: "worker",           run: async () => await waitSignal("ready")
         });
         const handle = start(worker);
         wake(handle, "ready", { ok: true });
@@ -271,8 +267,7 @@ impl ExecutionHost for StartHost {
 fn start_and_await_process_execute_through_shared_process_effects() {
     let source = r#"
         const worker = defineProcess({
-          name: "worker", signals: {},
-          run: async (input: unknown) => { return input * 2; }
+          name: "worker",           run: async (input: unknown) => { return input * 2; }
         });
         finish(await start(worker, { input: 3 }));
     "#;
@@ -324,8 +319,7 @@ fn caught_process_await(host: &ProcessAwaitFailureHost, probe: &str) -> Value {
     let source = format!(
         r#"
         const worker = defineProcess({{
-          name: "worker", signals: {{}},
-          run: async () => {{ return null; }}
+          name: "worker",           run: async () => {{ return null; }}
         }});
         const handle = start(worker);
         try {{
@@ -448,8 +442,7 @@ impl ExecutionHost for ProcessHandleIdInspectionHost {
 fn process_handle_exposes_id_member_for_subsequent_operations() {
     let source = r#"
         const worker = defineProcess({
-          name: "worker", signals: {},
-          run: async (input: unknown) => { return input; }
+          name: "worker",           run: async (input: unknown) => { return input; }
         });
         const handle = start(worker, { input: 42 });
         const processId = handle.process_id;
@@ -1394,8 +1387,7 @@ fn durable_processes_resume_across_await_signal_sleep_and_pending_finally() {
         (
             r#"
             const worker = defineProcess({
-              name: "worker", signals: { ready: null },
-              run: async () => await waitSignal("ready")
+              name: "worker",               run: async () => await waitSignal("ready")
             });
             "#,
             serde_json::json!({}),
@@ -1404,8 +1396,7 @@ fn durable_processes_resume_across_await_signal_sleep_and_pending_finally() {
         (
             r#"
             const worker = defineProcess({
-              name: "worker", signals: {},
-              run: async (input: unknown) => { await sleep(5); return input; }
+              name: "worker",               run: async (input: unknown) => { await sleep(5); return input; }
             });
             "#,
             serde_json::json!({ "input": 7 }),
@@ -1414,8 +1405,7 @@ fn durable_processes_resume_across_await_signal_sleep_and_pending_finally() {
         (
             r#"
             const worker = defineProcess({
-              name: "worker", signals: {},
-              run: async (input: unknown) => {
+              name: "worker",               run: async (input: unknown) => {
                 try { return input; } finally { await sleep(5); }
               }
             });
@@ -1426,8 +1416,7 @@ fn durable_processes_resume_across_await_signal_sleep_and_pending_finally() {
         (
             r#"
             const worker = defineProcess({
-              name: "worker", signals: {},
-              run: async (input: unknown) => { wake(input); return input; }
+              name: "worker",               run: async (input: unknown) => { wake(input); return input; }
             });
             "#,
             serde_json::json!({ "input": 11 }),
@@ -1447,8 +1436,7 @@ fn uncaught_throw_fails_a_durable_process() {
     futures::executor::block_on(async {
         let source = r#"
             const worker = defineProcess({
-              name: "worker", signals: {},
-              run: async () => { throw "broken"; }
+              name: "worker",               run: async () => { throw "broken"; }
             });
         "#;
         let program = lash_typescript::parse(source).expect("process should lower");
@@ -1478,8 +1466,7 @@ fn uncaught_throw_fails_a_durable_process() {
 fn durable_process_resumes_after_shared_promise_batch() {
     let source = r#"
         const worker = defineProcess({
-          name: "worker", signals: {},
-          run: async () => await Promise.all([
+          name: "worker",           run: async () => await Promise.all([
             web.fetch({ value: 1 }), web.fetch({ value: 2 })
           ])
         });
@@ -2304,10 +2291,10 @@ fn pending_tool_handles_survive_durable_process_park() {
     for mode in ["all", "allSettled"] {
         let source = format!(
             r#"const child = defineProcess({{
-            name: "child", signals: {{}}, run: async () => "child"
+            name: "child", run: async () => "child"
         }});
         const worker = defineProcess({{
-            name: "worker", signals: {{}}, run: async () => {{
+            name: "worker", run: async () => {{
                 const pending = [web.fetch({{value: "kept"}}), 42, start(child, {{}})];
                 await sleep(5);
                 return await Promise.{mode}(pending);
@@ -2395,7 +2382,7 @@ impl ExecutionHost for MixedAggregateHost {
 fn run_mixed_aggregate(body: &str) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
     let source = format!(
         r#"const worker = defineProcess({{
-            name: "worker", signals: {{}}, run: async (input: unknown) => input
+            name: "worker", run: async (input: unknown) => input
         }});
         {body}"#
     );

@@ -53,7 +53,7 @@ fn program(params: &str, inputs: &str) -> String {
     format!(
         r#"
         const remember = defineProcess({{
-          name: "remember", signals: {{}},
+          name: "remember",
           run: async ({params}) => {{ return true; }}
         }});
         const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
@@ -94,7 +94,7 @@ fn register_update_and_revive_share_the_arrow() {
         let source = format!(
             r#"
             const remember = defineProcess({{
-              name: "remember", signals: {{}},
+              name: "remember",
               run: async (tick: unknown) => {{ return true; }}
             }});
             const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
@@ -271,7 +271,7 @@ fn a_fixed_value_is_an_ordinary_expression_in_the_enclosing_scope() {
         r#"
         const event = "outer";
         const remember = defineProcess({
-          name: "remember", signals: {},
+          name: "remember",
           run: async (tick: unknown, label: unknown) => { return true; }
         });
         const schedule = timer.Schedule({ expr: "0 8 * * *" });
@@ -302,7 +302,7 @@ fn a_trigger_target_is_a_literal_process_binding() {
         let error = reject(&format!(
             r#"
             const remember = defineProcess({{
-              name: "remember", signals: {{}},
+              name: "remember",
               run: async (tick: unknown) => {{ return true; }}
             }});
             const alias = remember;
@@ -337,11 +337,11 @@ fn a_process_can_register_a_trigger_aimed_at_another_process() {
     accept(
         r#"
         const remember = defineProcess({
-          name: "remember", signals: {},
+          name: "remember",
           run: async (tick: unknown) => { return true; }
         });
         const owner = defineProcess({
-          name: "owner", signals: {},
+          name: "owner",
           run: async () => {
             const schedule = timer.Schedule({ expr: "0 8 * * *" });
             await registerTrigger({
@@ -365,13 +365,13 @@ fn registrations_in_a_process_body_keep_their_source_order() {
     accept(
         r#"
         const first = defineProcess({
-          name: "first", signals: {}, run: async (tick: unknown) => { return true; }
+          name: "first", run: async (tick: unknown) => { return true; }
         });
         const second = defineProcess({
-          name: "second", signals: {}, run: async (tick: unknown) => { return true; }
+          name: "second", run: async (tick: unknown) => { return true; }
         });
         const owner = defineProcess({
-          name: "owner", signals: {},
+          name: "owner",
           run: async () => {
             const schedule = timer.Schedule({ expr: "0 8 * * *" });
             await registerTrigger({
@@ -400,7 +400,7 @@ fn an_aliased_trigger_target_is_still_refused() {
         reject(
             r#"
         const remember = defineProcess({
-          name: "remember", signals: {}, run: async (tick: unknown) => { return true; }
+          name: "remember", run: async (tick: unknown) => { return true; }
         });
         const alias = remember;
         const schedule = timer.Schedule({ expr: "0 8 * * *" });

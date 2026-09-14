@@ -1103,32 +1103,18 @@ impl Lowerer {
                 None,
             ));
         };
-        let signals = match field("signals") {
-            None => Vec::new(),
-            Some(Expr::Object(signals)) => signals
-                .iter()
-                .map(|property| match property {
-                    ObjectProperty::KeyValue(PropertyKey::Static(name), _) => {
-                        Ok(ProcessSignalDecl {
-                            name: name.as_str().into(),
-                            ty: TypeExpr::Any,
-                        })
-                    }
-                    _ => Err(Diagnostic::new(
-                        DiagnosticCode::ProcessSignalsLiteralRequired,
-                        "defineProcess.signals requires static properties",
-                        None,
-                    )),
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-            Some(_) => {
-                return Err(Diagnostic::new(
-                    DiagnosticCode::ProcessSignalsLiteralRequired,
-                    "defineProcess.signals must be an object literal",
-                    None,
-                ));
-            }
-        };
+        // FIG-2998: the `signals` declaration is gone from the dialect. The
+        // registered set is inferred from the body's literal `waitSignal`
+        // names — including unreached branches — so a declaration is now a
+        // second source of truth to disagree with.
+        if field("signals").is_some() {
+            return Err(Diagnostic::with_repair(
+                DiagnosticCode::ProcessSignalsRemoved,
+                "defineProcess.signals is removed: the signal set is inferred from the body's `waitSignal(<literal>)` sites, including unreached branches",
+                "drop the `signals: { .. }` key and write `await waitSignal(<literal>)` where the body waits",
+                None,
+            ));
+        }
         let Some(Expr::Function(run)) = field("run") else {
             return Err(Diagnostic::new(
                 DiagnosticCode::ProcessRunLiteralRequired,
@@ -1211,7 +1197,7 @@ impl Lowerer {
         self.declarations.push(Declaration::Process(ProcessDecl {
             name: process_name.as_str().into(),
             params,
-            signals,
+            signals: Vec::new(),
             return_ty: Some(TypeExpr::Any),
             label: None,
             body: process_wrapper::process_run_wrapper(closure, call_args),
@@ -1246,12 +1232,48 @@ impl Lowerer {
             }
             _ => unreachable!("run lowering returns a function"),
         };
-        if !run.captures.is_empty() {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ProcessCaptureUnsupported,
-                "a process body must receive durable inputs as parameters",
-                None,
-            ));
+        // FIG-2998: a lifted body may read immutable, durably representable
+        // cell locals; each such read becomes a hidden start argument carrying
+        // the value the variable had when the process started. Anything less
+        // durable refuses naming the variable and the rewrite.
+        let mut hidden_args = Vec::with_capacity(run.captures.len());
+        for capture in &run.captures {
+            let binding = self
+                .binding_by_internal(capture)
+                .ok_or_else(|| {
+                    Diagnostic::defect(
+                        DiagnosticCode::ProcessCaptureUnsupported,
+                        format!("a process body references unknown binding `{capture}`"),
+                        None,
+                    )
+                })?
+                .clone();
+            if let BindingRole::ProcessHandle = binding.role {
+                return Err(Diagnostic::with_repair(
+                    DiagnosticCode::ProcessCaptureUnsupported,
+                    format!(
+                        "a process body cannot capture the process-handle binding `{}`: a process sees the value a variable had when it started, and a handle is not a durable value it may copy",
+                        binding.internal
+                    ),
+                    "pass the handle into the process body through its `run` arguments",
+                    None,
+                ));
+            }
+            if !matches!(binding.kind, BindingKind::Const) {
+                return Err(Diagnostic::with_repair(
+                    DiagnosticCode::ProcessCaptureUnsupported,
+                    format!(
+                        "a process body reads the mutable binding `{}`, and ADR 0011 forbids capturing a mutable name: bind the copy before the cell, or pass the value in as a start argument",
+                        binding.internal
+                    ),
+                    "pass the value to the process through its `run` arguments",
+                    None,
+                ));
+            }
+            hidden_args.push(ProcessParam {
+                name: binding.internal.as_str().into(),
+                ty: TypeExpr::Any,
+            });
         }
         let params = run
             .params
@@ -1278,6 +1300,7 @@ impl Lowerer {
         Ok(LashExpr::ProcessLiteral(Box::new(
             lashlang::ProcessLiteralExpr {
                 params,
+                hidden_args,
                 body: Box::new(process_wrapper::process_run_wrapper(closure, call_args)),
             },
         )))

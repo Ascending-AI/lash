@@ -63,6 +63,7 @@ impl<'module> Linker<'module> {
         let name = self.lifted_process_name(literal, original);
         let mut process_scope = Scope::new(true, span);
         let mut seen = BTreeSet::new();
+        let mut start_params = literal.params.clone();
         for param in &literal.params {
             if !seen.insert(param.name.to_string()) {
                 return Err(LinkError::DuplicateProcessParam {
@@ -71,11 +72,35 @@ impl<'module> Linker<'module> {
                 });
             }
             self.validate_type_refs(&param.ty, span)?;
+        }
+        for hidden in &literal.hidden_args {
+            if !seen.insert(hidden.name.to_string()) {
+                return Err(LinkError::DuplicateProcessParam {
+                    name: hidden.name.to_string(),
+                    span,
+                });
+            }
+            self.validate_type_refs(&hidden.ty, span)?;
+            start_params.push(hidden.clone());
+        }
+        for param in start_params.clone() {
             process_scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
         }
         let previous_completion = self.collect_completion.replace(true);
+        let previous_signals = self.collect_signals.replace(true);
+        let previous_inferred = std::mem::take(&mut *self.inferred_signals.borrow_mut());
         let lowered = self.lower_expr(&literal.body, &mut process_scope);
         self.collect_completion.set(previous_completion);
+        self.collect_signals.set(previous_signals);
+        let signals = self
+            .inferred_signals
+            .borrow()
+            .iter()
+            .map(|(name, ty)| ProcessSignalDecl {
+                name: name.as_str().into(),
+                ty: ty.clone(),
+            })
+            .collect::<Vec<_>>();
         let body = lowered?.0;
         let completion = self
             .completion_facts
@@ -88,16 +113,22 @@ impl<'module> Linker<'module> {
             outputs.push(TypeExpr::Null);
         }
         let output = union_type(outputs);
-        let signature = crate::ProcessSignature::try_new(literal.params.clone(), output.clone())
-            .map_err(|source| LinkError::InvalidAst {
-                source: crate::InvalidAst::InvalidProcessSignature { source },
+        let signature =
+            crate::ProcessSignature::try_new(start_params, output.clone()).map_err(|source| {
+                LinkError::InvalidAst {
+                    source: crate::InvalidAst::InvalidProcessSignature { source },
+                }
             })?;
         let process_ty = TypeExpr::Process(crate::ProcessType::known(signature));
         self.lifted_declarations.borrow_mut().push((
             Declaration::Process(ProcessDecl {
                 name: name.clone().into(),
-                params: literal.params.clone(),
-                signals: Vec::new(),
+                params: {
+                    let mut linked = literal.params.clone();
+                    linked.extend(literal.hidden_args.clone());
+                    linked
+                },
+                signals,
                 return_ty: Some(output),
                 label: None,
                 body,

@@ -10,7 +10,8 @@ use crate::artifact::{
 };
 use crate::ast::{
     AssignPathStep, AstString, Declaration, Expr, ListComprehensionClause, ProcessDecl,
-    ProcessParam, Program, ResourceRefExpr, TypeExpr, TypeField, format_type_expr,
+    ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TypeExpr, TypeField,
+    format_type_expr,
 };
 use crate::span::Span;
 

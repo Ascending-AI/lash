@@ -45,7 +45,6 @@ fn assert_lens_laws(source: &str) {
 
 const REPRESENTATIVE: &str = r#"const child = defineProcess({
   name: "child",
-  signals: { refresh: null },
   run: async (input: unknown) => {
     let total = 0;
     for (const value of input.values) {
@@ -338,14 +337,12 @@ finish(state);
 fn edited_expression_text_is_rendered_and_reprojected() {
     let source = r#"const child = defineProcess({
   name: "child",
-  signals: {},
   run: async () => {
     return 1;
   }
 });
 const workflow = defineProcess({
   name: "workflow",
-  signals: {},
   run: async () => {
     const state = { count: 0, other: 0 };
     while (state.count < 3) {
@@ -431,7 +428,7 @@ finish(1);
 #[test]
 fn invalid_edited_expression_returns_field_typed_error() {
     let mut graph = workflow_graph_from_source(
-        "const workflow = defineProcess({ name: \"workflow\", signals: {}, run: async () => { while (true) { await sleep(1); } return null; } });\nfinish(1);\n",
+        "const workflow = defineProcess({ name: \"workflow\", run: async () => { while (true) { await sleep(1); } return null; } });\nfinish(1);\n",
     )
     .expect("fixture projects");
     let process = graph
@@ -458,7 +455,7 @@ fn invalid_edited_expression_returns_field_typed_error() {
     ));
 
     let mut graph = workflow_graph_from_source(
-        "const workflow = defineProcess({ name: \"workflow\", signals: {}, run: async () => { const state = { count: 0 }; state.count = 1; return state; } });\nfinish(1);\n",
+        "const workflow = defineProcess({ name: \"workflow\", run: async () => { const state = { count: 0 }; state.count = 1; return state; } });\nfinish(1);\n",
     )
     .expect("fixture projects");
     let state_update_id = graph
@@ -499,7 +496,6 @@ fn invalid_edited_expression_returns_field_typed_error() {
 fn all_container_expression_slots_accept_host_edits() {
     let source = r#"const workflow = defineProcess({
   name: "workflow",
-  signals: {},
   run: async () => {
     const values = [1, 2];
     if (true) {
@@ -767,7 +763,6 @@ fn nodes_expose_stable_identifiers_available_before_their_execution() {
     let graph = workflow_graph_from_source(
         r#"const scoped = defineProcess({
   name: "scoped",
-  signals: {},
   run: async (record: unknown) => {
     const state = { count: 0 };
     const first = 1;
@@ -833,7 +828,6 @@ fn facet_environment() -> LashlangHostEnvironment {
 fn catalog_projection_exposes_typed_facets_non_fatally() {
     let source = r#"const workflow = defineProcess({
   name: "workflow",
-  signals: {},
   run: async (name: string) => {
     const query = name;
     const result = await tools.lookup({ query: query });
@@ -938,7 +932,6 @@ fn standalone_pure_expressions_remain_computations() {
 fn effectful_composites_are_typed_and_never_opaque() {
     let source = r#"const child = defineProcess({
   name: "child",
-  signals: {},
   run: async () => {
     return 1;
   }
@@ -1015,7 +1008,6 @@ fn projection_covers_calls_containers_and_terminals() {
     // rather than parsing (FIG-3033).
     let source = r#"const triage = defineProcess({
   name: "triage",
-  signals: {},
   run: async (input: unknown) => {
     if (input.source === "gmail") {
       const message = await gmail.getMessage(input.messageId);
@@ -1058,7 +1050,6 @@ const value = await tools.app_lookup({});
 /** @label Traffic lights */
 const lights = defineProcess({
   name: "lights",
-  signals: {},
   run: async () => {
     /** @label Go — Turn the green light on */
     await display.set_light({ name: "green", state: "on" });
@@ -1220,7 +1211,6 @@ fn a_label_with_no_spelling_is_refused_by_the_renderer() {
         ))
     ));
 }
-
 /// An inline process body is a process container of the module (FIG-2997):
 /// it projects its own declaration, named exactly what the linker lifts the
 /// literal to, and the lens laws hold over a call that carries one in

@@ -32,11 +32,12 @@ mod fluency_smoke;
 mod grammar_coverage;
 #[path = "no_abort_guarantee.rs"]
 mod no_abort_guarantee;
+#[path = "projected_paths.rs"]
+mod process_literal_captures;
 #[path = "projected_coercion.rs"]
 mod projected_coercion;
 #[path = "projected_durable_restore.rs"]
 mod projected_durable_restore;
-#[path = "projected_paths.rs"]
 mod projected_paths;
 #[path = "regex_runtime.rs"]
 mod regex_runtime;
