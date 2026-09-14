@@ -282,7 +282,34 @@ async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_e
         let redriven = ingress
             .submit(key, trigger_intent(&SessionId::from(SESSION)))
             .await;
-        assert_eq!(redriven, first, "redrive returns the byte-stable outcome");
+        // The typed outcome is byte-stable across the redrive. The `replayed`
+        // bit beside it is not, and must not be: the first submission recorded
+        // the occurrence and the redrive coalesced onto it, which is the whole
+        // point of the occurrence idempotency key (FIG-3070).
+        let (
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: first_outcome,
+                replayed: first_replayed,
+            },
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: redriven_outcome,
+                replayed: redriven_replayed,
+            },
+        ) = (&first, &redriven)
+        else {
+            panic!(
+                "both the first emission and its redrive are admitted, got {first:?} then {redriven:?}"
+            )
+        };
+        assert_eq!(
+            redriven_outcome, first_outcome,
+            "redrive returns the byte-stable outcome"
+        );
+        assert!(!first_replayed, "the first emission records the occurrence");
+        assert!(
+            redriven_replayed,
+            "the redrive coalesces onto the recorded occurrence"
+        );
     }
     assert_eq!(
         store
@@ -2147,6 +2174,21 @@ fn assert_admitted(outcome: &crate::tools::ToolIntentIngressOutcome, context: &s
     );
 }
 
+/// Assert an admitted outcome reports the expected `replayed` verdict.
+fn assert_replayed(
+    outcome: &crate::tools::ToolIntentIngressOutcome,
+    expected: bool,
+    context: &str,
+) {
+    match outcome {
+        crate::tools::ToolIntentIngressOutcome::Admitted { replayed, .. } => assert_eq!(
+            *replayed, expected,
+            "{context} must report replayed: {expected}, got {outcome:?}"
+        ),
+        other => panic!("{context} must be admitted, got {other:?}"),
+    }
+}
+
 fn assert_duplicate_identity(
     outcome: &crate::tools::ToolIntentIngressOutcome,
     expected: lash_core::ToolIntentKind,
@@ -2183,6 +2225,11 @@ async fn redelivered_start_realizes_one_process_and_refuses_a_changed_declaratio
         .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
         .await;
     assert_admitted(&replayed, "the redelivered start");
+    assert_replayed(
+        &replayed,
+        true,
+        "a start the registry coalesced onto the recorded row",
+    );
     assert_eq!(
         registry
             .get_process(&started)
@@ -2216,6 +2263,58 @@ async fn redelivered_start_realizes_one_process_and_refuses_a_changed_declaratio
     Ok(())
 }
 
+/// The three dispositions of one controller-owned start, told apart by the
+/// `replayed` bit the host reads (FIG-3070).
+///
+/// A fresh submission realizes. A submission the *effect journal* already holds
+/// replays without reaching the store. A submission on a fresh journal whose
+/// registration the *store* already holds coalesces: local execution runs, the
+/// registry returns the recorded row, and nothing is written. The third used to
+/// report `replayed: false`, because the ingress read "did local execution run"
+/// rather than the store's verdict.
+#[tokio::test]
+async fn a_coalesced_start_reports_replayed_and_a_fresh_start_does_not() -> Result<()> {
+    let (core, registry) = ingress_core().await?;
+    let key = ingress_of(&core)?.key("coalesced-start", 0);
+
+    let realized = ingress_of(&core)?
+        .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
+        .await;
+    assert_replayed(&realized, false, "the start that created the row");
+    let started = ProcessId::from(key.identity().replay_key.clone());
+    let created_at = registry
+        .get_process(&started)
+        .await?
+        .expect("the start realizes a process")
+        .created_at_ms;
+
+    // Same invocation, so the controller's effect journal answers before the
+    // store is consulted at all.
+    let journal_replay = ingress_of(&core)?
+        .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
+        .await;
+    assert_replayed(&journal_replay, true, "a start the journal replayed");
+
+    // A fresh invocation carries a fresh journal, so this one reaches the
+    // registry, which coalesces it onto the row the first start created. The
+    // durable key, not the journal, is what makes it a replay.
+    let redelivery = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let coalesced = ingress_of(&redelivery)?
+        .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
+        .await;
+    assert_replayed(&coalesced, true, "a start the registry coalesced");
+    assert_eq!(
+        registry
+            .get_process(&started)
+            .await?
+            .expect("the coalesced start returns the original process")
+            .created_at_ms,
+        created_at,
+        "all three submissions name the one process the first start created"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Result<()> {
     let (core, registry) = ingress_core().await?;
@@ -2231,6 +2330,11 @@ async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Resul
         .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
         .await;
     assert_admitted(&replayed, "the redelivered emission");
+    assert_replayed(
+        &replayed,
+        true,
+        "an append the store coalesced onto the recorded event",
+    );
     assert_eq!(
         emitted_event_count(&registry, EVENT).await?,
         1,
@@ -2269,6 +2373,11 @@ async fn redelivered_signal_appends_once_and_refuses_a_changed_payload() -> Resu
         .submit(key.clone(), signal_intent(&SessionId::from(SESSION)))
         .await;
     assert_admitted(&replayed, "the redelivered signal");
+    assert_replayed(
+        &replayed,
+        true,
+        "a signal the store coalesced onto the recorded event",
+    );
     assert_eq!(
         emitted_event_count(&registry, &signal_event).await?,
         1,
@@ -2311,6 +2420,11 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
         .submit(key, cancel_intent(&SessionId::from(SESSION)))
         .await;
     assert_admitted(&replayed, "the redelivered cancel");
+    assert_replayed(
+        &replayed,
+        true,
+        "a cancel the store coalesced onto the recorded request",
+    );
     assert_eq!(
         cancel_request_snapshot(&registry, PROCESS).await?,
         requested,
@@ -2352,6 +2466,11 @@ async fn redelivered_trigger_ingests_once_and_refuses_a_changed_payload() -> Res
         .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))
         .await;
     assert_admitted(&replayed, "the redelivered emission");
+    assert_replayed(
+        &replayed,
+        true,
+        "an occurrence the trigger store coalesced onto the recorded one",
+    );
     assert_eq!(
         store
             .list_occurrences(lash_core::TriggerOccurrenceFilter::default())

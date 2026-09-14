@@ -1337,6 +1337,10 @@ fn trigger_operation_receipt_preimage(
 pub struct TriggerIngressReceipt {
     pub occurrence: TriggerOccurrenceRecord,
     pub reservations: Vec<TriggerDeliveryReservation>,
+    /// Whether this call recorded the occurrence, or the store already held one
+    /// under the same idempotency key and returned it (FIG-3070).
+    #[serde(default, skip_serializing_if = "crate::StoreRealization::is_realized")]
+    pub realization: crate::StoreRealization,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

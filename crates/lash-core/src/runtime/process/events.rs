@@ -561,6 +561,15 @@ pub struct ProcessEventAppendReceipt {
     /// Sequence durably folded into the process record when this append
     /// settled. On replay this can be newer than `event.sequence`.
     pub last_event_sequence: u64,
+    /// Whether this call wrote the event row, or the store found the same
+    /// replay key already appended and returned the recorded event (FIG-3070).
+    ///
+    /// This is the [`ProcessEventAppendPlan`](super::validation::ProcessEventAppendPlan)
+    /// arm the store took, carried out to the caller instead of being discarded
+    /// at the store boundary. Defaulted and omitted when `Realized` so the
+    /// receipt's encoding is unchanged for anything that round-trips it.
+    #[serde(default, skip_serializing_if = "crate::StoreRealization::is_realized")]
+    pub realization: crate::StoreRealization,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake_delivery: Option<ProcessWakeDelivery>,
 }

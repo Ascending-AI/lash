@@ -382,6 +382,7 @@ pub(crate) async fn apply_process_event_append_tx(
             Ok((
                 ProcessEventAppendReceipt {
                     last_event_sequence: record.last_event_sequence,
+                    realization: lash_core::StoreRealization::Coalesced,
                     event,
                     wake_delivery,
                 },
@@ -442,6 +443,7 @@ pub(crate) async fn apply_process_event_append_tx(
             Ok((
                 ProcessEventAppendReceipt {
                     last_event_sequence: event.sequence,
+                    realization: lash_core::StoreRealization::Realized,
                     event,
                     wake_delivery,
                 },

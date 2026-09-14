@@ -240,6 +240,23 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         requester: String,
         attribution: Option<lash_core::RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, PluginError> {
+        self.request_process_cancel_reporting_realization(
+            process_ref,
+            origin,
+            requester,
+            attribution,
+        )
+        .await
+        .map(|(record, _)| record)
+    }
+
+    async fn request_process_cancel_reporting_realization(
+        &self,
+        process_ref: &ProcessRef,
+        origin: lash_core::CancelOrigin,
+        requester: String,
+        attribution: Option<lash_core::RuntimeReplayAttribution>,
+    ) -> Result<(ProcessRecord, lash_core::StoreRealization), PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_ref_tx(&mut tx, process_ref).await?;
         let now = self.clock.timestamp_ms();
@@ -250,7 +267,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         )? {
             ProcessTransitionPlan::Unchanged => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(record);
+                return Ok((record, lash_core::StoreRealization::Coalesced));
             }
             ProcessTransitionPlan::Append(mut append) => {
                 if let Some(replay) = append.replay.as_mut() {
@@ -267,7 +284,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             }
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(record)
+        Ok((record, lash_core::StoreRealization::Realized))
     }
 
     async fn request_process_abandon(

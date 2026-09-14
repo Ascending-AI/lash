@@ -326,6 +326,7 @@ impl TriggerStore for InMemoryTriggerStore {
             return Ok(TriggerIngressReceipt {
                 occurrence,
                 reservations,
+                realization: crate::StoreRealization::Coalesced,
             });
         }
         let occurrence_id = deterministic_occurrence_id(&request);
@@ -357,6 +358,7 @@ impl TriggerStore for InMemoryTriggerStore {
         Ok(TriggerIngressReceipt {
             occurrence: record,
             reservations,
+            realization: crate::StoreRealization::Realized,
         })
     }
 

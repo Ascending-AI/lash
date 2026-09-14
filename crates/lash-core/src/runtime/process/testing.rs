@@ -104,6 +104,7 @@ impl TestLocalProcessRegistry {
                 }
                 Ok(ProcessEventAppendReceipt {
                     last_event_sequence: record.record.last_event_sequence,
+                    realization: crate::StoreRealization::Coalesced,
                     event,
                     wake_delivery,
                 })
@@ -130,6 +131,7 @@ impl TestLocalProcessRegistry {
                 }
                 Ok(ProcessEventAppendReceipt {
                     last_event_sequence: event.sequence,
+                    realization: crate::StoreRealization::Realized,
                     event,
                     wake_delivery,
                 })

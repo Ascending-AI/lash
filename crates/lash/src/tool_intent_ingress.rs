@@ -140,7 +140,9 @@ pub enum ToolIntentIngressRefusal {
 ///
 /// On controller-owned, key-addressed tiers, repeating the same key returns the
 /// first typed `outcome` with `replayed: true` and cannot realize a conflicting
-/// payload twice.
+/// payload twice -- whether the repeat is caught by the controller's effect
+/// journal or, on a fresh invocation with an empty journal, by the durable key
+/// the store already holds.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolIntentIngressOutcome {
@@ -148,8 +150,12 @@ pub enum ToolIntentIngressOutcome {
     Admitted {
         /// Execution outcome produced for the admitted intent.
         outcome: lash_core::ToolIntentExecutionOutcome,
-        /// `false` when this submission realized the command and `true` when a
-        /// controller-owned key-addressed journal returned an earlier outcome.
+        /// `false` only when this submission wrote the durable fact.
+        ///
+        /// `true` covers both ways a submission can realize nothing: a
+        /// controller-owned key-addressed journal returned an earlier outcome
+        /// without reaching the store, or the store coalesced the write onto
+        /// the fact it already held under the same durable key (FIG-3070).
         replayed: bool,
     },
     /// Carries the reason a tool intent was refused.
@@ -901,12 +907,14 @@ impl ToolIntentIngress {
             lash_core::ToolIntent::EmitTrigger(intent) => {
                 let mut request = intent.request;
                 request.idempotency_key = identity.replay_key.clone();
-                let report = self.emit_recorded_trigger(request).await?;
+                let (report, realization) = self.emit_recorded_trigger(request).await?;
                 // The replay-derived occurrence idempotency key, not an
                 // effect-journal key, is the dedupe point for a re-submitted
-                // trigger emission, so this route never reports a journal
-                // replay.
-                return Ok((RealizedIntent::Trigger(report), false));
+                // trigger emission, so this route has no journal verdict to
+                // read. It reports the trigger store's own: a re-submitted
+                // occurrence coalesces onto the recorded one (FIG-3070).
+                let replayed = realization.is_coalesced();
+                return Ok((RealizedIntent::Trigger(report), replayed));
             }
         };
         let (result, replayed) = self.run_command(identity, command).await?;
@@ -918,7 +926,10 @@ impl ToolIntentIngress {
     async fn emit_recorded_trigger(
         &self,
         request: lash_core::TriggerOccurrenceRequest,
-    ) -> crate::Result<lash_core::facade_support::TriggerEmitReport> {
+    ) -> crate::Result<(
+        lash_core::facade_support::TriggerEmitReport,
+        lash_core::StoreRealization,
+    )> {
         let store = self
             .core
             .env
@@ -947,7 +958,7 @@ impl ToolIntentIngress {
             .effect_host
             .scoped(self.scope.clone())?;
         router
-            .emit_recorded(request, &scoped)
+            .emit_recorded_reporting_realization(request, &scoped)
             .await
             .map_err(Into::into)
     }
@@ -1027,11 +1038,26 @@ impl ToolIntentIngress {
         .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
             identity.clone(),
         ));
-        let realized_now = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Two independent ways this submission can fail to realize anything,
+        // folded into the one `replayed` bit the host reads (FIG-3070):
+        //
+        //  * the effect journal replayed a recorded outcome, so local
+        //    execution never ran and the observer never fires; and
+        //  * local execution ran against a fresh journal and the *store*
+        //    coalesced the write onto the durable key it already held.
+        //
+        // Only the store knows the second, so it reports its verdict through
+        // the observer instead of the ingress inferring one from "did we
+        // execute locally".
+        let store_realization =
+            std::sync::Arc::new(std::sync::Mutex::new(None::<lash_core::StoreRealization>));
         let outcome_observer: lash_core::ProcessOutcomeObserver = {
-            let realized_now = std::sync::Arc::clone(&realized_now);
-            std::sync::Arc::new(move |_| {
-                realized_now.store(true, std::sync::atomic::Ordering::SeqCst);
+            let store_realization = std::sync::Arc::clone(&store_realization);
+            std::sync::Arc::new(move |_, realization| {
+                *store_realization
+                    .lock()
+                    .expect("tool intent ingress realization verdict is never poisoned") =
+                    Some(realization);
             })
         };
         let outcome = scoped
@@ -1068,9 +1094,14 @@ impl ToolIntentIngress {
                 "tool-intent ingress effect returned a non-process outcome".to_string(),
             )));
         };
-        Ok((
-            result,
-            !realized_now.load(std::sync::atomic::Ordering::SeqCst),
-        ))
+        let replayed = match *store_realization
+            .lock()
+            .expect("tool intent ingress realization verdict is never poisoned")
+        {
+            // Local execution never ran: the journal replayed this effect.
+            None => true,
+            Some(realization) => realization.is_coalesced(),
+        };
+        Ok((result, replayed))
     }
 }

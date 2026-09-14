@@ -318,6 +318,23 @@ impl crate::runtime::process::registry::ProcessLifecycle for TestLocalProcessReg
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, PluginError> {
+        self.request_process_cancel_reporting_realization(
+            process_ref,
+            origin,
+            requester,
+            attribution,
+        )
+        .await
+        .map(|(record, _)| record)
+    }
+
+    async fn request_process_cancel_reporting_realization(
+        &self,
+        process_ref: &crate::ProcessRef,
+        origin: crate::CancelOrigin,
+        requester: String,
+        attribution: Option<crate::RuntimeReplayAttribution>,
+    ) -> Result<(ProcessRecord, crate::StoreRealization), PluginError> {
         if let Some(error) = self.cancel_request_write_error.lock().await.take() {
             return Err(error);
         }
@@ -337,7 +354,9 @@ impl crate::runtime::process::registry::ProcessLifecycle for TestLocalProcessReg
         let request = crate::CancelRequest::new(origin, requester, self.clock.timestamp_ms());
         match prepare_process_transition(&record.record, ProcessTransition::RequestCancel(request))?
         {
-            ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
+            ProcessTransitionPlan::Unchanged => {
+                return Ok((record.record.clone(), crate::StoreRealization::Coalesced));
+            }
             ProcessTransitionPlan::Append(mut append) => {
                 if let Some(replay) = append.replay.as_mut() {
                     replay.attribution = attribution;
@@ -345,7 +364,7 @@ impl crate::runtime::process::registry::ProcessLifecycle for TestLocalProcessReg
                 self.append_managed_event(record, *append).await?;
             }
         }
-        Ok(record.record.clone())
+        Ok((record.record.clone(), crate::StoreRealization::Realized))
     }
 
     async fn request_process_abandon(

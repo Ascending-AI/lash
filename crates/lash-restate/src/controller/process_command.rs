@@ -18,6 +18,18 @@ struct JournaledCancelAdmission {
     version: u32,
     identity: JournaledCancelCommandIdentity,
     result: Result<Box<ProcessRecord>, PluginError>,
+    /// Whether the admission recorded the cancellation or found the store
+    /// already holding the same one (FIG-3070).
+    ///
+    /// Defaulted rather than version-bumped: a journal entry written before
+    /// this field existed replays as `Realized`, which is exactly what the
+    /// caller reported for it at the time, so no in-flight invocation is
+    /// refused for want of a bit that did not exist when it was journaled.
+    #[serde(
+        default,
+        skip_serializing_if = "lash_core::StoreRealization::is_realized"
+    )]
+    realization: lash_core::StoreRealization,
 }
 
 fn process_command_journal_name(invocation: &RuntimeEffectInvocation, operation: &str) -> String {
@@ -207,7 +219,7 @@ where
                 }
                 _ => None,
             };
-            let record = match schedule_restate_process(
+            let (record, realization) = match schedule_restate_process(
                 Arc::clone(&registry),
                 registration,
                 observers,
@@ -216,7 +228,7 @@ where
             )
             .await
             {
-                Ok(record) => record,
+                Ok(scheduled) => scheduled,
                 // Registration, workflow submission, and external-ref persistence are
                 // separate durable authorities. An error after any one of them is an
                 // unknown/retriable start, not proof that the process was abandoned.
@@ -254,9 +266,12 @@ where
                         .await?;
                 }
             }
-            Ok(ProcessEffectOutcome::Start {
-                record: Box::new(record),
-            })
+            Ok((
+                ProcessEffectOutcome::Start {
+                    record: Box::new(record),
+                },
+                realization,
+            ))
         }
         ProcessCommand::List {
             session_scope,
@@ -280,7 +295,10 @@ where
                         .await?
                 }
             };
-            Ok(ProcessEffectOutcome::List { entries })
+            Ok((
+                ProcessEffectOutcome::List { entries },
+                lash_core::StoreRealization::Realized,
+            ))
         }
         ProcessCommand::Transfer {
             from_scope,
@@ -295,11 +313,17 @@ where
                     lash_core::ProcessObserverBy::host("restate-transfer"),
                 )
                 .await?;
-            Ok(ProcessEffectOutcome::Transfer)
+            Ok((
+                ProcessEffectOutcome::Transfer,
+                lash_core::StoreRealization::Realized,
+            ))
         }
         ProcessCommand::DeleteSession { session_id } => {
             let report = registry.delete_session_process_state(&session_id).await?;
-            Ok(ProcessEffectOutcome::DeleteSession { report })
+            Ok((
+                ProcessEffectOutcome::DeleteSession { report },
+                lash_core::StoreRealization::Realized,
+            ))
         }
         ProcessCommand::Await { process_ref } => {
             registry.get_process_ref(&process_ref).await?;
@@ -427,9 +451,12 @@ where
                     return Err(lash_core::StoreError::SessionDeleted { session_id }.into());
                 }
             };
-            Ok(ProcessEffectOutcome::Await {
-                output: Box::new(output),
-            })
+            Ok((
+                ProcessEffectOutcome::Await {
+                    output: Box::new(output),
+                },
+                lash_core::StoreRealization::Realized,
+            ))
         }
         ProcessCommand::Cancel {
             process_ref,
@@ -453,21 +480,26 @@ where
                     process_command_journal_name(invocation, "process-cancel-admission"),
                     None,
                     async move {
-                        let result = admission_registry
-                            .request_process_cancel(
+                        let admitted = admission_registry
+                            .request_process_cancel_reporting_realization(
                                 &admission_process_ref,
                                 origin,
                                 admission_requester,
                                 admission_attribution,
                             )
-                            .await
-                            .map(Box::new);
+                            .await;
+                        let realization = admitted
+                            .as_ref()
+                            .map(|(_, realization)| *realization)
+                            .unwrap_or_default();
+                        let result = admitted.map(|(record, _)| Box::new(record));
                         encode_process_command_journal_payload(
                             "cancel admission",
                             JournaledCancelAdmission {
                                 version: PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
                                 identity: admitted_identity,
                                 result,
+                                realization,
                             },
                         )
                     },
@@ -486,6 +518,7 @@ where
                 &admission.identity,
                 &command_identity,
             )?;
+            let realization = admission.realization;
             let record = *admission.result?;
             context
                 .request_process_workflow_cancel(RestateProcessCancelRequest::from_record(&record)?)
@@ -496,13 +529,17 @@ where
                         format!("Restate process cancellation failed: {err}"),
                     )
                 })?;
-            Ok(ProcessEffectOutcome::Cancel {
-                record: Box::new(record),
-            })
+            Ok((
+                ProcessEffectOutcome::Cancel {
+                    record: Box::new(record),
+                },
+                realization,
+            ))
         }
-        ProcessCommand::CancelRefused { refusal, .. } => {
-            Ok(ProcessEffectOutcome::CancelRefused { refusal })
-        }
+        ProcessCommand::CancelRefused { refusal, .. } => Ok((
+            ProcessEffectOutcome::CancelRefused { refusal },
+            lash_core::StoreRealization::Realized,
+        )),
         ProcessCommand::Signal {
             process_ref,
             signal_name,
@@ -510,6 +547,7 @@ where
             ..
         } => {
             let result = registry.append_event_ref(&process_ref, request).await?;
+            let realization = result.realization;
             let ordinal = signal_ordinal_for_event(
                 registry.as_ref(),
                 &process_ref,
@@ -539,23 +577,29 @@ where
                         format!("Restate process signal resolution failed: {err}"),
                     ))
                 })?;
-            Ok(ProcessEffectOutcome::Signal {
-                event: Box::new(result.event),
-            })
+            Ok((
+                ProcessEffectOutcome::Signal {
+                    event: Box::new(result.event),
+                },
+                realization,
+            ))
         }
         ProcessCommand::EmitEvent {
             process_id,
             request,
         } => {
             let result = registry.append_event(&process_id, request).await?;
-            Ok(ProcessEffectOutcome::EmitEvent {
-                event: Box::new(result.event),
-                wake_delivery: result.wake_delivery.map(Box::new),
-            })
+            Ok((
+                ProcessEffectOutcome::EmitEvent {
+                    event: Box::new(result.event),
+                    wake_delivery: result.wake_delivery.map(Box::new),
+                },
+                result.realization,
+            ))
         }
     };
-    if let (Ok(outcome), Some(observer)) = (&outcome, outcome_observer) {
-        observer(outcome);
+    if let (Ok((outcome, realization)), Some(observer)) = (&outcome, outcome_observer) {
+        observer(outcome, *realization);
     }
-    outcome
+    outcome.map(|(outcome, _)| outcome)
 }
