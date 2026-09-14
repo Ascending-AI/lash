@@ -357,6 +357,7 @@ impl super::Lowerer {
     /// performs, against the same scope stack, so the fact lands on the
     /// binding the reads will find and dies when its scope pops.
     pub(super) fn set_role(&mut self, name: &str, role: BindingRole) -> Result<(), Diagnostic> {
+        let span = self.current_span;
         let binding = self
             .scopes
             .iter_mut()
@@ -366,7 +367,7 @@ impl super::Lowerer {
                 Diagnostic::new(
                     DiagnosticCode::UnknownBinding,
                     format!("unknown binding `{name}`"),
-                    None,
+                    span,
                 )
             })?;
         binding.role = role;
@@ -374,6 +375,7 @@ impl super::Lowerer {
     }
 
     pub(super) fn clear_process_handle_role(&mut self, name: &str) -> Result<(), Diagnostic> {
+        let span = self.current_span;
         let binding = self
             .scopes
             .iter_mut()
@@ -383,7 +385,7 @@ impl super::Lowerer {
                 Diagnostic::new(
                     DiagnosticCode::UnknownBinding,
                     format!("unknown binding `{name}`"),
-                    None,
+                    span,
                 )
             })?;
         if binding.role == BindingRole::ProcessHandle {
@@ -393,6 +395,7 @@ impl super::Lowerer {
     }
 
     pub(super) fn binding(&self, name: &str) -> Result<&Binding, Diagnostic> {
+        let span = self.current_span;
         self.scopes
             .iter()
             .rev()
@@ -401,12 +404,13 @@ impl super::Lowerer {
                 Diagnostic::new(
                     DiagnosticCode::UnknownBinding,
                     format!("unknown binding `{name}`"),
-                    None,
+                    span,
                 )
             })
     }
 
     pub(super) fn resolve(&mut self, name: &str) -> Result<String, Diagnostic> {
+        let span = self.current_span;
         let Some(binding) = self
             .scopes
             .iter()
@@ -417,7 +421,7 @@ impl super::Lowerer {
             return Err(Diagnostic::new(
                 DiagnosticCode::UnknownBinding,
                 format!("unknown binding `{name}`"),
-                None,
+                span,
             ));
         };
         let current_function = self.current_function();
@@ -425,7 +429,7 @@ impl super::Lowerer {
             return Err(Diagnostic::new(
                 DiagnosticCode::TemporalDeadZone,
                 format!("`{name}` is read before initialization"),
-                None,
+                span,
             ));
         }
         if current_function != binding.owner_function {
@@ -435,7 +439,7 @@ impl super::Lowerer {
                     format!(
                         "captured binding `{name}` is not initialized when the closure is created"
                     ),
-                    None,
+                    span,
                 ));
             }
             let first_capturing_function = self

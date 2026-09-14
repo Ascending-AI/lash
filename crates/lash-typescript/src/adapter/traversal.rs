@@ -146,7 +146,7 @@ impl Expr {
             | Expr::Number(_)
             | Expr::String(_)
             | Expr::RegExp { .. }
-            | Expr::Ident(_)
+            | Expr::Ident(_, _)
             | Expr::This
             | Expr::LoneSurrogateString => {}
         }

@@ -39,7 +39,7 @@ fn trigger_event_marker() -> LashExpr {
 }
 
 fn mentions_identifier(expr: &Expr, name: &str) -> bool {
-    if matches!(expr, Expr::Ident(found) if found == name) {
+    if matches!(expr, Expr::Ident(found, _) if found == name) {
         return true;
     }
     expr.children()
@@ -53,7 +53,7 @@ fn mentions_identifier(expr: &Expr, name: &str) -> bool {
 /// GitHub #1350 reports.
 fn names_same_descriptor(expr: &Expr, source: &Expr) -> bool {
     match (expr, source) {
-        (Expr::Ident(left), Expr::Ident(right)) => left == right,
+        (Expr::Ident(left, _), Expr::Ident(right, _)) => left == right,
         _ => match (module_path(expr), module_path(source)) {
             (Some(left), Some(right)) => left == right,
             _ => false,
@@ -116,7 +116,7 @@ impl Lowerer {
     /// The prompt has said "Literal target" the whole time; this is the rule
     /// that makes it true, on all four registration spellings.
     fn require_literal_process_target(&self, target: &Expr) -> Result<(), Diagnostic> {
-        if let Expr::Ident(name) = target
+        if let Expr::Ident(name, _) = target
             && matches!(
                 self.binding(name).map(|binding| &binding.role),
                 Ok(BindingRole::ProcessDefinition(_))
@@ -154,7 +154,7 @@ impl Lowerer {
                     None,
                 ));
             }
-            if matches!(object.as_ref(), Expr::Ident(root) if root == "trigger")
+            if matches!(object.as_ref(), Expr::Ident(root, _) if root == "trigger")
                 && !self.has_binding("trigger")
             {
                 return Err(retired_trigger_event_diagnostic());
@@ -214,7 +214,7 @@ impl Lowerer {
                     "`inputs` maps `{key}` twice"
                 )));
             }
-            if matches!(value, Expr::Ident(found) if found == parameter) {
+            if matches!(value, Expr::Ident(found, _) if found == parameter) {
                 lowered.push((key.as_str().into(), trigger_event_marker()));
                 continue;
             }
@@ -235,7 +235,7 @@ impl Lowerer {
 /// its own value, here as everywhere else. The caller checks the binding.
 pub(super) fn names_the_retired_trigger_event(object: &Expr, property: &MemberProperty) -> bool {
     matches!(property, MemberProperty::Field(field) if field == "event")
-        && matches!(object, Expr::Ident(root) if root == "trigger")
+        && matches!(object, Expr::Ident(root, _) if root == "trigger")
 }
 
 pub(super) fn retired_trigger_event_diagnostic() -> Diagnostic {

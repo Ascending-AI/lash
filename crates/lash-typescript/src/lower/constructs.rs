@@ -1010,7 +1010,7 @@ impl Lowerer {
             return self.lower_instanceof(left, right);
         }
         if op == BinaryOp::In {
-            if matches!(right, Expr::Ident(name) if name == "globalThis" && !self.has_binding(name))
+            if matches!(right, Expr::Ident(name, _) if name == "globalThis" && !self.has_binding(name))
             {
                 let Expr::String(name) = left else {
                     return Err(Diagnostic::refusal(
@@ -1223,7 +1223,7 @@ impl Lowerer {
     }
 
     fn lower_instanceof(&mut self, left: &Expr, right: &Expr) -> Result<LashExpr, Diagnostic> {
-        let Expr::Ident(constructor) = right else {
+        let Expr::Ident(constructor, _) = right else {
             return Err(Diagnostic::new(
                 DiagnosticCode::InstanceOfUnsupported,
                 "Unsupported: instanceof with a dynamic RHS. Use err.name checks or Array.isArray(value).",
@@ -1404,7 +1404,7 @@ pub(super) fn global_this_member_name<'a>(
     property: &'a MemberProperty,
 ) -> Option<&'a str> {
     match (object, property) {
-        (Expr::Ident(root), MemberProperty::Field(field)) if root == "globalThis" => {
+        (Expr::Ident(root, _), MemberProperty::Field(field)) if root == "globalThis" => {
             Some(field.as_str())
         }
         _ => None,

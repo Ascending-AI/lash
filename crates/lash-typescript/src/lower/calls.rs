@@ -239,13 +239,13 @@ impl Lowerer {
 
     fn classify_callee<'a>(&self, callee: &'a Expr) -> CalleeFamily<'a> {
         match callee {
-            Expr::Ident(name) if !self.has_binding(name) => CalleeFamily::UnboundGlobal(name),
+            Expr::Ident(name, _) if !self.has_binding(name) => CalleeFamily::UnboundGlobal(name),
             Expr::Member {
                 object,
                 property: MemberProperty::Field(method),
                 ..
             } => CalleeFamily::Member { object, method },
-            Expr::Ident(name)
+            Expr::Ident(name, _)
                 if self
                     .binding(name)
                     .is_ok_and(|binding| binding.role == BindingRole::AsyncHelper) =>
@@ -430,8 +430,8 @@ impl Lowerer {
                     name: name.as_str().into(),
                 })
             }
-            (AgentPrimitive::Start, [Expr::Ident(target)]) => self.lower_start(target, &[]),
-            (AgentPrimitive::Start, [Expr::Ident(target), Expr::Object(entries)]) => {
+            (AgentPrimitive::Start, [Expr::Ident(target, _)]) => self.lower_start(target, &[]),
+            (AgentPrimitive::Start, [Expr::Ident(target, _), Expr::Object(entries)]) => {
                 self.lower_start(target, entries)
             }
             (AgentPrimitive::RegisterTrigger, [config]) if self.position.await_depth > 0 => {
@@ -485,7 +485,7 @@ impl Lowerer {
         method: &str,
         args: &[Expr],
     ) -> Result<LashExpr, Diagnostic> {
-        if matches!(object, Expr::Ident(name) if name == "crypto")
+        if matches!(object, Expr::Ident(name, _) if name == "crypto")
             && method == "randomUUID"
             && !self.has_binding("crypto")
         {
@@ -502,7 +502,8 @@ impl Lowerer {
                 None,
             ));
         }
-        if matches!(object, Expr::Ident(name) if name == "Promise") && !self.has_binding("Promise")
+        if matches!(object, Expr::Ident(name, _) if name == "Promise")
+            && !self.has_binding("Promise")
         {
             match method {
                 "race" | "any" => {
@@ -533,7 +534,7 @@ impl Lowerer {
                 _ => {}
             }
         }
-        if matches!(object, Expr::Ident(name) if name == "JSON") && !self.has_binding("JSON") {
+        if matches!(object, Expr::Ident(name, _) if name == "JSON") && !self.has_binding("JSON") {
             if method == "parse" && args.len() > 1 {
                 return Err(reject_json_parse_reviver());
             }
@@ -639,7 +640,7 @@ impl Lowerer {
                 None,
             ));
         }
-        if matches!(object, Expr::Ident(name) if name == "console")
+        if matches!(object, Expr::Ident(name, _) if name == "console")
             && matches!(method, "log" | "warn" | "error" | "info" | "debug")
         {
             if !self.has_binding("console") {
@@ -666,7 +667,7 @@ impl Lowerer {
                 });
             }
         }
-        if matches!(object, Expr::Ident(name) if name == "Date")
+        if matches!(object, Expr::Ident(name, _) if name == "Date")
             && method == "now"
             && args.is_empty()
             && !self.has_binding("Date")
@@ -675,7 +676,7 @@ impl Lowerer {
                 "now",
             ))));
         }
-        if matches!(object, Expr::Ident(name) if name == "Math")
+        if matches!(object, Expr::Ident(name, _) if name == "Math")
             && method == "random"
             && args.is_empty()
             && !self.has_binding("Math")
@@ -711,7 +712,7 @@ impl Lowerer {
                     property: MemberProperty::Field(field),
                     ..
                 } if field == "searchParams" => true,
-                Expr::Ident(name) => self
+                Expr::Ident(name, _) => self
                     .binding(name)
                     .is_ok_and(|binding| matches!(binding.role, BindingRole::ExoticIterable(_))),
                 _ => false,
@@ -793,7 +794,7 @@ impl Lowerer {
         {
             return Err(Diagnostic::refusal(DiagnosticCode::MethodUnsupported, "Unsupported: iterator methods may only be consumed directly by for-of / spread / Array.from / new Map|Set / Object.fromEntries", None).with_hint("wrap it at the point of use: `[...expr]`"));
         }
-        if matches!(object, Expr::Ident(name) if name == "Array")
+        if matches!(object, Expr::Ident(name, _) if name == "Array")
             && method == "from"
             && !self.has_binding("Array")
         {
@@ -825,7 +826,7 @@ impl Lowerer {
                 self.lower_array_from_mapping(array, mapping_args)
             };
         }
-        if matches!(object, Expr::Ident(name) if name == "Object")
+        if matches!(object, Expr::Ident(name, _) if name == "Object")
             && method == "fromEntries"
             && !self.has_binding("Object")
         {
@@ -868,10 +869,10 @@ impl Lowerer {
         {
             return self.lower_string_replace_callback(object, needle, callback);
         }
-        if matches!(object, Expr::Ident(owner) if matches!(owner.as_str(), "Object" | "Map"))
+        if matches!(object, Expr::Ident(owner, _) if matches!(owner.as_str(), "Object" | "Map"))
             && method == "groupBy"
             && !self.has_binding(match object {
-                Expr::Ident(owner) => owner,
+                Expr::Ident(owner, _) => owner,
                 _ => unreachable!(),
             })
         {
@@ -882,7 +883,7 @@ impl Lowerer {
                     None,
                 ));
             };
-            let Expr::Ident(owner) = object else {
+            let Expr::Ident(owner, _) = object else {
                 unreachable!()
             };
             return self.lower_group_by(owner, source, callback);
@@ -932,7 +933,7 @@ impl Lowerer {
                 Expr::New { constructor, .. } => {
                     IterableKind::from_constructor(constructor).is_some()
                 }
-                Expr::Ident(name) => self
+                Expr::Ident(name, _) => self
                     .binding(name)
                     .is_ok_and(|binding| matches!(binding.role, BindingRole::ExoticIterable(_))),
                 _ => false,
@@ -1001,7 +1002,9 @@ impl Lowerer {
         // Falling through reported it as a tool call needing `await`, and
         // under `await` it lowered and failed at the host untyped.
         let ecma_owner = match object {
-            Expr::Ident(owner) if is_ecma_global_namespace(owner) && !self.has_binding(owner) => {
+            Expr::Ident(owner, _)
+                if is_ecma_global_namespace(owner) && !self.has_binding(owner) =>
+            {
                 Some(owner.as_str())
             }
             _ => None,
@@ -1044,7 +1047,7 @@ impl Lowerer {
         // `inputs` template is erased on all four paths. Retiring the event
         // binding for one of them would strand the other three.
         let lowered_args = if receiver_is_module_authority
-            && matches!(object, Expr::Ident(root) if root == "triggers")
+            && matches!(object, Expr::Ident(root, _) if root == "triggers")
             && is_trigger_registration_operation(method)
             && let [config] = args
         {

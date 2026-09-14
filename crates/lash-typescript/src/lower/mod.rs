@@ -367,7 +367,7 @@ impl Lowerer {
                             ..
                         } = callee.as_ref()
                     {
-                        let kind = if matches!(object.as_ref(), Expr::Ident(owner) if owner == "Map")
+                        let kind = if matches!(object.as_ref(), Expr::Ident(owner, _) if owner == "Map")
                             && method == "groupBy"
                         {
                             Some(IterableKind::Map)
@@ -863,29 +863,29 @@ impl Lowerer {
                     LashExpr::String(flags.as_str().into()),
                 ],
             },
-            Expr::Ident(name) if name == "undefined" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "undefined" && !self.has_binding(name) => {
                 LashExpr::Undefined
             }
-            Expr::Ident(name) if name == "NaN" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "NaN" && !self.has_binding(name) => {
                 LashExpr::Number(f64::NAN)
             }
-            Expr::Ident(name) if name == "Infinity" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "Infinity" && !self.has_binding(name) => {
                 LashExpr::Number(f64::INFINITY)
             }
-            Expr::Ident(name)
+            Expr::Ident(name, _)
                 if matches!(name.as_str(), "String" | "Number" | "Boolean")
                     && !self.has_binding(name) =>
             {
                 self.lower_conversion_function(name)
             }
-            Expr::Ident(name) if name == "globalThis" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "globalThis" && !self.has_binding(name) => {
                 return Err(Diagnostic::refusal(
                     DiagnosticCode::UnsupportedExpression,
                     "Unsupported: bare globalThis. Use globalThis.identifier for durable session state.",
                     None,
                 ));
             }
-            Expr::Ident(name) if name == "arguments" && !self.has_binding(name) => {
+            Expr::Ident(name, _) if name == "arguments" && !self.has_binding(name) => {
                 return Err(Diagnostic::new(
                     DiagnosticCode::ThisUnsupported,
                     "Unsupported: arguments. Declare an explicit ...rest parameter instead.",
@@ -900,7 +900,7 @@ impl Lowerer {
                     None,
                 ));
             }
-            Expr::Ident(name) => LashExpr::Variable(self.resolve(name)?.into()),
+            Expr::Ident(name, _) => LashExpr::Variable(self.resolve(name)?.into()),
             Expr::Array(items) => self.lower_array_literal(items)?,
             Expr::Object(entries) => self.lower_object_literal(entries)?,
             Expr::Assign { target, op, value } => self.lower_assignment(target, *op, value)?,
@@ -915,7 +915,7 @@ impl Lowerer {
                 UnaryOp::Minus => js_unary(JavaScriptUnaryOp::Negate, self.lower_expr(value)?),
                 UnaryOp::Not => js_unary(JavaScriptUnaryOp::Not, self.lower_expr(value)?),
                 UnaryOp::BitNot => self.lower_bit_not(value)?,
-                UnaryOp::TypeOf if matches!(value.as_ref(), Expr::Ident(name) if !self.has_binding(name)) => {
+                UnaryOp::TypeOf if matches!(value.as_ref(), Expr::Ident(name, _) if !self.has_binding(name)) => {
                     LashExpr::String("undefined".into())
                 }
                 UnaryOp::TypeOf => js_unary(JavaScriptUnaryOp::TypeOf, self.lower_expr(value)?),
@@ -1212,7 +1212,7 @@ impl Lowerer {
 
     fn member_path(&mut self, expr: &Expr) -> Result<(String, Vec<AssignPathStep>), Diagnostic> {
         match expr {
-            Expr::Ident(name) => Ok((self.resolve(name)?, Vec::new())),
+            Expr::Ident(name, _) => Ok((self.resolve(name)?, Vec::new())),
             Expr::Member {
                 object, property, ..
             } => {
@@ -1243,7 +1243,8 @@ impl Lowerer {
                 None,
             ));
         }
-        if matches!(object, Expr::Ident(name) if name == "globalThis" && !self.has_binding(name)) {
+        if matches!(object, Expr::Ident(name, _) if name == "globalThis" && !self.has_binding(name))
+        {
             return match property {
                 MemberProperty::Field(field)
                     if !matches!(field.as_str(), "undefined" | "NaN" | "Infinity") =>
@@ -1266,7 +1267,7 @@ impl Lowerer {
                 )),
             };
         }
-        if let Expr::Ident(owner) = object
+        if let Expr::Ident(owner, _) = object
             && is_known_runtime_global(owner)
             && !self.has_binding(owner)
         {
@@ -1321,7 +1322,7 @@ fn is_define_process_call(expr: &Expr) -> bool {
     matches!(
         expr,
         Expr::Call { callee, .. }
-            if matches!(callee.as_ref(), Expr::Ident(name) if name == "defineProcess")
+            if matches!(callee.as_ref(), Expr::Ident(name, _) if name == "defineProcess")
     )
 }
 
@@ -1425,6 +1426,7 @@ fn source_span(expr: &Expr) -> Option<SourceSpan> {
         Expr::Call { span, .. } | Expr::Member { span, .. } | Expr::Await { span, .. } => {
             Some(*span)
         }
+        Expr::Ident(_, span) => *span,
         _ => None,
     }
 }

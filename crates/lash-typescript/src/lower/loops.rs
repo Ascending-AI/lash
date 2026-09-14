@@ -52,7 +52,7 @@ impl Lowerer {
                 None,
             ));
         };
-        let Expr::Ident(condition_name) = left.as_ref() else {
+        let Expr::Ident(condition_name, _) = left.as_ref() else {
             return Err(Diagnostic::new(
                 DiagnosticCode::ForUnsupported,
                 "classic for condition must read its loop binding",
@@ -201,7 +201,7 @@ pub(super) fn continue_under_finally(
 /// result or a literal roots at nothing, and nothing in the body can name it.
 fn expression_root_binding(expr: &Expr) -> Option<&str> {
     match expr {
-        Expr::Ident(name) => Some(name.as_str()),
+        Expr::Ident(name, _) => Some(name.as_str()),
         Expr::Member { object, .. } => expression_root_binding(object),
         _ => None,
     }
@@ -209,7 +209,7 @@ fn expression_root_binding(expr: &Expr) -> Option<&str> {
 
 /// Whether an expression mentions `binding` anywhere.
 fn mentions_binding(expr: &Expr, binding: &str) -> bool {
-    matches!(expr, Expr::Ident(name) if name == binding)
+    matches!(expr, Expr::Ident(name, _) if name == binding)
         || matches!(expr, Expr::Assign { target, .. } | Expr::Update { target, .. }
             if assign_target_names_binding(target, binding))
         || expr

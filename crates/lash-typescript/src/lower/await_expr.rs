@@ -4,7 +4,7 @@ impl Lowerer {
     pub(super) fn lower_await(&mut self, inner: &Expr) -> Result<LashExpr, Diagnostic> {
         let async_helper = match inner {
             Expr::Call { callee, .. } => match callee.as_ref() {
-                Expr::Ident(name) => self
+                Expr::Ident(name, _) => self
                     .binding(name)
                     .is_ok_and(|binding| binding.role == BindingRole::AsyncHelper),
                 Expr::Function(function) => function.is_async,
@@ -16,7 +16,7 @@ impl Lowerer {
         // is a process handle only if the binding it reads is one.
         let process_handle = matches!(
             inner,
-            Expr::Ident(name)
+            Expr::Ident(name, _)
                 if self
                     .binding(name)
                     .is_ok_and(|binding| binding.role == BindingRole::ProcessHandle)
@@ -29,7 +29,7 @@ impl Lowerer {
                         object,
                         property: MemberProperty::Field(method),
                         ..
-                    } if matches!(object.as_ref(), Expr::Ident(name) if name == "Promise" && !self.has_binding(name))
+                    } if matches!(object.as_ref(), Expr::Ident(name, _) if name == "Promise" && !self.has_binding(name))
                         && matches!(method.as_str(), "all" | "allSettled")
                 ) =>
             {
