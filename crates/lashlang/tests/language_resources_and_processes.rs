@@ -1,4 +1,28 @@
+// Host calls, processes, collections and the heap, authored in TypeScript.
+//
+// ADR 0096 makes TypeScript the sole authored RLM dialect. The facts this file
+// pins are the VM's, not the retired surface's: aggregates dispatch
+// concurrently, a started process settles through the host, indexing and path
+// assignment share heap objects across aliases and across a snapshot, and the
+// shaping builtins keep their declared order and errors. Where a construct had
+// no TypeScript spelling — the shaping builtins, `range`/`push`, the
+// assignment-target guards — the program is built from the AST, which is the
+// only path those IR nodes still have.
+
 use super::*;
+use crate::ast_support::{call, finish, finish_program, list, number, program, string};
+
+fn var(name: &str) -> lashlang::Expr {
+    lashlang::Expr::Variable(name.into())
+}
+
+async fn run(program: lashlang::Program) -> Result<Value, RuntimeError> {
+    let host = TestHost::default();
+    let mut state = State::new();
+    lashlang::execute(&program, &mut state, &host)
+        .await
+        .map(finished)
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn aggregate_await_resource_calls_run_concurrently_and_preserve_record_shape() {
@@ -8,11 +32,11 @@ async fn aggregate_await_resource_calls_run_concurrently_and_preserve_record_sha
     let value = finished(
         execute(
             r#"
-        results = await {
-          left: tools.sleep_echo({ value: "a" })?,
-          right: tools.sleep_echo({ value: "b" })?
-        }
-        finish results
+        const settled = await Promise.all([
+          tools.sleep_echo({ value: "a" }),
+          tools.sleep_echo({ value: "b" })
+        ]);
+        finish({ left: settled[0], right: settled[1] });
         "#,
             &mut state,
             &host,
@@ -41,11 +65,13 @@ async fn explicit_start_and_await_merges_distinct_results() {
     let value = finished(
         execute(
             r#"
-        process sleep_echo(value: str) { finish value }
-        left = start sleep_echo(value: "a")
-        right = start sleep_echo(value: "b")
-        results = await [left, right]
-        finish { left: results[0]?, right: results[1]? }
+        const sleep_echo = defineProcess({
+          name: "sleep_echo",
+          run: async (value: string) => { return value; }
+        });
+        const left = start(sleep_echo, { value: "a" });
+        const right = start(sleep_echo, { value: "b" });
+        finish({ left: await left, right: await right });
         "#,
             &mut state,
             &host,
@@ -62,58 +88,22 @@ async fn explicit_start_and_await_merges_distinct_results() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn await_list_returns_branch_results_in_order() {
+async fn awaiting_started_processes_returns_results_in_written_order() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        process sleep_echo(value: str) { finish value }
-        results = await [
-          start sleep_echo(value: "a"),
-          start sleep_echo(value: "b")
-        ]
-        finish results
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let Value::List(results) = value else {
-        panic!("expected result list");
-    };
-    assert_eq!(results.len(), 2);
-    assert_eq!(
-        results[0].as_record().unwrap()["value"],
-        Value::String("a".to_string().into())
-    );
-    assert_eq!(
-        results[1].as_record().unwrap()["value"],
-        Value::String("b".to_string().into())
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn await_list_returns_results_in_written_order() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        process sleep_echo(value: str) { finish value }
-        results = await [
-          start sleep_echo(value: "a"),
-          start sleep_echo(value: "b")
-        ]
-        finish {
-          first: results[0]?,
-          second: results[1]?
-        }
+        const sleep_echo = defineProcess({
+          name: "sleep_echo",
+          run: async (value: string) => { return value; }
+        });
+        const results = await Promise.all([
+          start(sleep_echo, { value: "a" }),
+          start(sleep_echo, { value: "b" })
+        ]);
+        finish({ first: results[0], second: results[1], all: results });
         "#,
             &mut state,
             &host,
@@ -127,36 +117,27 @@ async fn await_list_returns_results_in_written_order() {
     };
     assert_eq!(record["first"], Value::String("a".to_string().into()));
     assert_eq!(record["second"], Value::String("b".to_string().into()));
+    assert_eq!(
+        record["all"],
+        Value::List(vec![Value::String("a".into()), Value::String("b".into())].into())
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn removed_parallel_keyword_is_parse_error() {
-    let err = lashlang::compile(
-        r#"
-        parallel {
-          start sleep_echo(value: "a")
-        }
-        "#,
-    )
-    .expect_err("parallel keyword should be removed");
-    assert!(format!("{err}").contains("unexpected `parallel`"));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn slice_null_bounds_default_to_start_or_end() {
+async fn slice_bounds_default_to_start_or_end() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        values = [10, 20, 30, 40, 50]
-        finish {
-          list_tail: slice(values, 3, null),
-          list_head: slice(values, null, 2),
-          string_tail: slice("abcdef", 4, null),
-          string_head: slice("abcdef", null, 2)
-        }
+        const values = [10, 20, 30, 40, 50];
+        finish({
+          list_tail: values.slice(3),
+          list_head: values.slice(0, 2),
+          string_tail: "abcdef".slice(4),
+          string_head: "abcdef".slice(0, 2)
+        });
         "#,
             &mut state,
             &host,
@@ -187,23 +168,92 @@ async fn slice_null_bounds_default_to_start_or_end() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn out_of_range_index_reads_are_undefined_and_record_contains_is_supported() {
+async fn slice_supports_negative_bounds() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        values = [10, 20, 30]
-        text = "abc"
-        finish {
+        const values = [10, 20, 30, 40, 50];
+        finish({
+          list_tail: values.slice(-2),
+          list_without_last: values.slice(0, -1),
+          list_middle: values.slice(-4, -1),
+          string_tail: "abcdef".slice(-2),
+          string_without_last: "abcdef".slice(0, -1),
+          string_middle: "abcdef".slice(-5, -2)
+        });
+        "#,
+            &mut state,
+            &host,
+        )
+        .await
+        .expect("execution should succeed"),
+    );
+
+    let Value::Record(record) = value else {
+        panic!("expected record");
+    };
+    assert_eq!(
+        record["list_tail"],
+        Value::List(vec![Value::Number(40.0), Value::Number(50.0)].into())
+    );
+    assert_eq!(
+        record["list_without_last"],
+        Value::List(
+            vec![
+                Value::Number(10.0),
+                Value::Number(20.0),
+                Value::Number(30.0),
+                Value::Number(40.0),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        record["list_middle"],
+        Value::List(
+            vec![
+                Value::Number(20.0),
+                Value::Number(30.0),
+                Value::Number(40.0),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        record["string_tail"],
+        Value::String("ef".to_string().into())
+    );
+    assert_eq!(
+        record["string_without_last"],
+        Value::String("abcde".to_string().into())
+    );
+    assert_eq!(
+        record["string_middle"],
+        Value::String("bcd".to_string().into())
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn out_of_range_index_reads_are_undefined_and_key_membership_is_supported() {
+    let host = TestHost::default();
+    let mut state = State::new();
+
+    let value = finished(
+        execute(
+            r#"
+        const values = [10, 20, 30];
+        const text = "abc";
+        finish({
           tail: values[-1],
           before_tail: values[-2],
           oob: values[-4],
           last_char: text[-1],
-          record_has_key: contains({ foo: 1, bar: 2 }, "foo"),
-          record_missing_key: contains({ foo: 1, bar: 2 }, "baz")
-        }
+          record_has_key: "foo" in { foo: 1, bar: 2 },
+          record_missing_key: "baz" in { foo: 1, bar: 2 }
+        });
         "#,
             &mut state,
             &host,
@@ -225,27 +275,30 @@ async fn out_of_range_index_reads_are_undefined_and_record_contains_is_supported
     assert_eq!(record["record_missing_key"], Value::Bool(false));
 }
 
+/// The dialect's `in` operator covered lists, object keys and substrings with
+/// one spelling. ECMA splits them: `in` is key membership, `includes` is
+/// element and substring membership (ADR 0096).
 #[tokio::test(flavor = "current_thread")]
-async fn membership_operator_supports_lists_record_keys_and_string_substrings() {
+async fn membership_covers_lists_object_keys_and_string_substrings() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        needle = 2
-        haystack = [1, 2, 3]
-        substring = "bc"
-        text = "abcd"
-        finish {
-          list_present: needle in haystack,
-          list_missing: 4 in [1, 2, 3],
+        const needle = 2;
+        const haystack = [1, 2, 3];
+        const substring = "bc";
+        const text = "abcd";
+        finish({
+          list_present: haystack.includes(needle),
+          list_missing: [1, 2, 3].includes(4),
           record_present: "foo" in { foo: 1, bar: 2 },
           record_missing: "baz" in { foo: 1, bar: 2 },
-          string_present: substring in text,
-          string_missing: "xz" in text,
-          string_negated: !("xz" in text)
-        }
+          string_present: text.includes(substring),
+          string_missing: text.includes("xz"),
+          string_negated: !text.includes("xz")
+        });
         "#,
             &mut state,
             &host,
@@ -266,38 +319,75 @@ async fn membership_operator_supports_lists_record_keys_and_string_substrings() 
     assert_eq!(record["string_negated"], Value::Bool(true));
 }
 
+/// The shaping builtins (`sort_by`, `sum`, `unique`, `min`/`max` and friends)
+/// are IR intrinsics with no TypeScript spelling, so their determinism and
+/// stable ordering are pinned against the AST.
 #[tokio::test(flavor = "current_thread")]
 async fn shaping_builtins_are_deterministic_and_preserve_stable_order() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        rows = [
-          { id: "first", profile: { score: 2 } },
-          { id: "second", profile: { score: 1 } },
-          { id: "third", profile: { score: 2 } }
-        ]
-        finish {
-          sorted: sort([3, 1, 2]),
-          sorted_by: sort_by(rows, "profile.score"),
-          sum: sum([1, 2, 3]),
-          min: min([3, 1, 2]),
-          max: max([3, 1, 2]),
-          replaced: replace("a-b-a", "a", "x"),
-          lower: lower("Straße"),
-          upper: upper("Straße"),
-          unique: unique([1, 2, 1, 3, 2]),
-          reversed: reverse([1, 2, 3])
-        }
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
+    let row = |id: &str, score: f64| {
+        lashlang::Expr::Record(vec![
+            ("id".into(), string(id)),
+            (
+                "profile".into(),
+                lashlang::Expr::Record(vec![("score".into(), number(score))]),
+            ),
+        ])
+    };
+    let numbers = || list(vec![number(3.0), number(1.0), number(2.0)]);
+    let value = run(finish_program(lashlang::Expr::Record(vec![
+        ("sorted".into(), call("sort", vec![numbers()])),
+        (
+            "sorted_by".into(),
+            call(
+                "sort_by",
+                vec![
+                    list(vec![
+                        row("first", 2.0),
+                        row("second", 1.0),
+                        row("third", 2.0),
+                    ]),
+                    string("profile.score"),
+                ],
+            ),
+        ),
+        (
+            "sum".into(),
+            call(
+                "sum",
+                vec![list(vec![number(1.0), number(2.0), number(3.0)])],
+            ),
+        ),
+        ("min".into(), call("min", vec![numbers()])),
+        ("max".into(), call("max", vec![numbers()])),
+        (
+            "replaced".into(),
+            call("replace", vec![string("a-b-a"), string("a"), string("x")]),
+        ),
+        ("lower".into(), call("lower", vec![string("Straße")])),
+        ("upper".into(), call("upper", vec![string("Straße")])),
+        (
+            "unique".into(),
+            call(
+                "unique",
+                vec![list(vec![
+                    number(1.0),
+                    number(2.0),
+                    number(1.0),
+                    number(3.0),
+                    number(2.0),
+                ])],
+            ),
+        ),
+        (
+            "reversed".into(),
+            call(
+                "reverse",
+                vec![list(vec![number(1.0), number(2.0), number(3.0)])],
+            ),
+        ),
+    ])))
+    .await
+    .expect("shaping builtins should run");
 
     let Value::Record(record) = value else {
         panic!("expected record");
@@ -339,16 +429,76 @@ async fn shaping_builtins_are_deterministic_and_preserve_stable_order() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn empty_extrema_are_typed_runtime_errors() {
-    let host = TestHost::default();
     for builtin in ["min", "max"] {
-        let mut state = State::new();
-        let error = execute(&format!("finish {builtin}([])"), &mut state, &host)
+        let error = run(finish_program(call(builtin, vec![list(Vec::new())])))
             .await
             .expect_err("empty extrema must fail");
         assert!(
-            matches!(error, ExecuteError::Runtime(RuntimeError::ShapingEmptyList { builtin: actual }) if actual == builtin)
+            matches!(&error, RuntimeError::ShapingEmptyList { builtin: actual } if actual == builtin),
+            "{error:?}"
         );
     }
+}
+
+/// `range` and `push` are IR intrinsics with no TypeScript spelling: an author
+/// writes a counting loop and `Array.prototype.push`. The VM still implements
+/// them, so their bounds and growth rules are pinned against the AST.
+#[tokio::test(flavor = "current_thread")]
+async fn range_and_push_cover_common_collection_building() {
+    let value = run(program(vec![
+        lashlang::Expr::Assign {
+            target: lashlang::AssignTarget::variable("indexes".into()),
+            expr: Box::new(call("range", vec![number(0.0), number(3.0)])),
+        },
+        lashlang::Expr::Assign {
+            target: lashlang::AssignTarget::variable("extended".into()),
+            expr: Box::new(call("push", vec![var("indexes"), number(3.0)])),
+        },
+        finish(lashlang::Expr::Record(vec![
+            ("indexes".into(), var("indexes")),
+            ("extended".into(), var("extended")),
+            ("from_zero".into(), call("range", vec![number(3.0)])),
+            (
+                "negative".into(),
+                call("range", vec![number(-2.0), number(1.0)]),
+            ),
+            (
+                "empty".into(),
+                call("range", vec![number(5.0), number(2.0)]),
+            ),
+        ])),
+    ]))
+    .await
+    .expect("range and push should run");
+
+    let Value::Record(record) = value else {
+        panic!("expected record");
+    };
+    assert_eq!(
+        record["indexes"],
+        Value::List(vec![Value::Number(0.0), Value::Number(1.0), Value::Number(2.0)].into())
+    );
+    assert_eq!(
+        record["extended"],
+        Value::List(
+            vec![
+                Value::Number(0.0),
+                Value::Number(1.0),
+                Value::Number(2.0),
+                Value::Number(3.0),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        record["from_zero"],
+        Value::List(vec![Value::Number(0.0), Value::Number(1.0), Value::Number(2.0)].into())
+    );
+    assert_eq!(
+        record["negative"],
+        Value::List(vec![Value::Number(-2.0), Value::Number(-1.0), Value::Number(0.0)].into())
+    );
+    assert_eq!(record["empty"], Value::List(Vec::new().into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -359,9 +509,9 @@ async fn dynamic_record_indexing_reads_fields() {
     let value = finished(
         execute(
             r#"
-        key = "foo"
-        record = { foo: 42 }
-        finish { found: record[key], missing: record["missing"] }
+        const key = "foo";
+        const source = { foo: 42 };
+        finish({ found: source[key], missing: source["missing"] });
         "#,
             &mut state,
             &host,
@@ -386,15 +536,15 @@ async fn indexed_and_field_assignment_update_collections() {
     let value = finished(
         execute(
             r#"
-        record = {}
-        key = "count"
-        record[key] = 1
-        record.count = record.count + 1
-        record.extra = "ok"
-        items = [1, 2, 3]
-        items[1] = 20
-        items[2] = 30
-        finish { record: record, items: items }
+        const record = {};
+        const key = "count";
+        record[key] = 1;
+        record.count = record.count + 1;
+        record.extra = "ok";
+        const items = [1, 2, 3];
+        items[1] = 20;
+        items[2] = 30;
+        finish({ record: record, items: items });
         "#,
             &mut state,
             &host,
@@ -425,15 +575,14 @@ async fn nested_path_assignment_and_histogram_loops_work() {
     let value = finished(
         execute(
             r#"
-        state = { groups: { a: { counts: [1, 2] }, b: { counts: [3] } } }
-        g = "a"
-        state.groups[g].counts[1] = 5
-        counts = {}
-        labels = ["a", "b", "a", "c", "b", "a"]
-        for label in labels {
-          counts[label] = counts[label] + 1
+        const shape = { groups: { a: { counts: [1, 2] }, b: { counts: [3] } } };
+        const g = "a";
+        shape.groups[g].counts[1] = 5;
+        const counts = {};
+        for (const label of ["a", "b", "a", "c", "b", "a"]) {
+          counts[label] = (counts[label] === undefined ? 0 : counts[label]) + 1;
         }
-        finish { state: state, counts: counts }
+        finish({ shape: shape, counts: counts });
         "#,
             &mut state,
             &host,
@@ -445,8 +594,8 @@ async fn nested_path_assignment_and_histogram_loops_work() {
     let Value::Record(record) = value else {
         panic!("expected record");
     };
-    let state = record["state"].as_record().expect("expected state record");
-    let groups = state["groups"].as_record().expect("expected groups record");
+    let shape = record["shape"].as_record().expect("expected shape record");
+    let groups = shape["groups"].as_record().expect("expected groups record");
     let group_a = groups["a"].as_record().expect("expected group record");
     assert_eq!(
         group_a["counts"],
@@ -468,12 +617,12 @@ async fn path_assignment_is_visible_through_every_alias() {
     let value = finished(
         execute(
             r#"
-        record = { x: 1, nested: { y: 1 }, items: [1, 2] }
-        alias = record
-        record.x = 2
-        record.nested.y = 3
-        record.items[0] = 9
-        finish { record: record, alias: alias }
+        const record = { x: 1, nested: { y: 1 }, items: [1, 2] };
+        const alias = record;
+        record.x = 2;
+        record.nested.y = 3;
+        record.items[0] = 9;
+        finish({ record: record, alias: alias });
         "#,
             &mut state,
             &host,
@@ -517,10 +666,10 @@ async fn path_assignment_rhs_shares_the_assigned_object_across_a_snapshot() {
     let mut state = State::new();
     execute(
         r#"
-            a = {}
-            b = []
-            a.x = b
-            b = push(b, 1)
+            const a = {};
+            const b = [];
+            a.x = b;
+            b.push(1);
         "#,
         &mut state,
         &host,
@@ -535,7 +684,7 @@ async fn path_assignment_rhs_shares_the_assigned_object_across_a_snapshot() {
         lashlang::Snapshot::from_canonical_bytes(&bytes).expect("snapshot should decode");
     let mut restored = State::from_snapshot(snapshot);
     let value = finished(
-        execute("finish a.x", &mut restored, &host)
+        execute("finish(a.x);", &mut restored, &host)
             .await
             .expect("restored execution should succeed"),
     );
@@ -549,9 +698,9 @@ async fn iterator_binding_aliases_the_iterated_element() {
     let mut state = State::new();
     execute(
         r#"
-            a = [[1]]
-            for x in a {
-              x = push(x, 2)
+            const a = [[1]];
+            for (const x of a) {
+              x.push(2);
             }
         "#,
         &mut state,
@@ -567,7 +716,7 @@ async fn iterator_binding_aliases_the_iterated_element() {
         lashlang::Snapshot::from_canonical_bytes(&bytes).expect("snapshot should decode");
     let mut restored = State::from_snapshot(snapshot);
     let value = finished(
-        execute("finish a", &mut restored, &host)
+        execute("finish(a);", &mut restored, &host)
             .await
             .expect("restored execution should succeed"),
     );
@@ -584,17 +733,17 @@ async fn iterator_binding_aliases_the_iterated_element() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn push_insertion_shares_the_inserted_object() {
+async fn insertion_shares_the_inserted_object() {
     let value = finished(
         execute(
             r#"
-            acc = []
-            for n in range(0, 3) {
-              row = [n]
-              acc = push(acc, row)
-              row = push(row, 99)
+            const acc = [];
+            for (const n of [0, 1, 2]) {
+              const row = [n];
+              acc.push(row);
+              row.push(99);
             }
-            finish acc
+            finish(acc);
             "#,
             &mut State::new(),
             &TestHost::default(),
@@ -621,13 +770,13 @@ async fn iterator_value_pushed_into_a_container_stays_shared() {
     let value = finished(
         execute(
             r#"
-            xs = [[1]]
-            acc = []
-            for x in xs {
-              acc = push(acc, x)
-              x = push(x, 9)
+            const xs = [[1]];
+            const acc = [];
+            for (const x of xs) {
+              acc.push(x);
+              x.push(9);
             }
-            finish acc
+            finish(acc);
             "#,
             &mut State::new(),
             &TestHost::default(),
@@ -648,18 +797,23 @@ async fn iterator_value_pushed_into_a_container_stays_shared() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn nested_field_index_and_comprehension_inserts_stay_shared() {
+async fn nested_field_index_and_flattening_inserts_stay_shared() {
     let value = finished(
         execute(
             r#"
-            source = { rows: [[[1]], [[2]]] }
-            flattened = [inner for outer in source.rows for inner in outer]
-            picked = source.rows[0][0]
-            holder = { items: [] }
-            holder.items = push(holder.items, picked)
-            picked = push(picked, 9)
-            for inner in source.rows[1] { inner = push(inner, 8) }
-            finish { flattened: flattened, held: holder.items, source: source }
+            const source = { rows: [[[1]], [[2]]] };
+            let flattened = [];
+            for (const outer of source.rows) {
+              for (const inner of outer) {
+                flattened.push(inner);
+              }
+            }
+            const picked = source.rows[0][0];
+            const holder = { items: [] };
+            holder.items.push(picked);
+            picked.push(9);
+            for (const inner of source.rows[1]) { inner.push(8); }
+            finish({ flattened: flattened, held: holder.items, source: source });
             "#,
             &mut State::new(),
             &TestHost::default(),
@@ -715,23 +869,20 @@ async fn nested_field_index_and_comprehension_inserts_stay_shared() {
 #[tokio::test(flavor = "current_thread")]
 async fn effect_result_to_path_isolated_from_later_field_reads() {
     let host = TestHost::default().with_file("a.txt", "original");
-    let source = r#"
-            holder = { value: null }
-            holder.value = await files.read({ path: "a.txt" })?
-            local = holder.value
-            finish { local: local, stored: holder.value }
-            "#;
-    let linked = lashlang::LinkedModule::link(
-        parse(source).expect("effect path program should parse"),
-        test_host_environment(),
-    )
-    .expect("effect path program should link");
-    let compiled = lashlang::compile_linked(&linked);
     let mut state = State::new();
     let value = finished(
-        lashlang::execute(&compiled, &mut state, &host)
-            .await
-            .expect("effect path insertion should succeed"),
+        execute(
+            r#"
+            const holder = { value: null };
+            holder.value = await files.read({ path: "a.txt" });
+            const local = holder.value;
+            finish({ local: local, stored: holder.value });
+            "#,
+            &mut state,
+            &host,
+        )
+        .await
+        .expect("effect path insertion should succeed"),
     );
     assert_eq!(
         value,
@@ -746,7 +897,7 @@ async fn effect_result_to_path_isolated_from_later_field_reads() {
 async fn heap_aware_global_patches_survive_next_cell_and_cold_restore() {
     let host = TestHost::default();
     let mut state = State::new();
-    execute("seed = [1]", &mut state, &host)
+    execute("const seed = [1];", &mut state, &host)
         .await
         .expect("heap setup should succeed");
     assert!(
@@ -759,7 +910,7 @@ async fn heap_aware_global_patches_survive_next_cell_and_cold_restore() {
     );
 
     let value = finished(
-        execute("finish diary", &mut state, &host)
+        execute("finish(diary);", &mut state, &host)
             .await
             .expect("patched global should reach the next cell"),
     );
@@ -776,7 +927,7 @@ async fn heap_aware_global_patches_survive_next_cell_and_cold_restore() {
         lashlang::Snapshot::from_canonical_bytes(&bytes).expect("snapshot should decode");
     let mut restored = State::from_snapshot(snapshot);
     let value = finished(
-        execute("finish diary", &mut restored, &host)
+        execute("finish(diary);", &mut restored, &host)
             .await
             .expect("patched global should survive cold restore"),
     );
@@ -786,32 +937,79 @@ async fn heap_aware_global_patches_survive_next_cell_and_cold_restore() {
     );
 
     assert!(restored.remove_global("diary").is_some());
+    // With the global gone the name is nobody's, which the TypeScript
+    // front-end reports at parse rather than letting it reach the VM.
     assert!(matches!(
-        execute("finish diary", &mut restored, &host).await,
-        Err(ExecuteError::Runtime(
-            RuntimeError::UndefinedVariable { .. }
-        ))
+        execute("finish(diary);", &mut restored, &host).await,
+        Err(ExecuteError::Parse(_))
     ));
 }
 
+/// The assignment-target guards are VM facts about paths that have no slot to
+/// write. TypeScript never reaches two of them — a string index write is a
+/// silent no-op in ECMA — so they are pinned against the AST that does.
 #[tokio::test(flavor = "current_thread")]
 async fn path_assignment_reports_invalid_targets() {
-    // Array index assignment is ECMA's (ADR 0096): an index past the end
-    // grows the array, a numeric string is the same index as the number, and a
-    // non-index key is a property write. None of those is an error any more,
-    // so what remains here are the targets that still have no slot to write.
-    assert!(matches!(
-        runtime_error("text = \"abc\"\ntext[0] = \"x\"").await,
-        RuntimeError::CannotAssignIndex { actual } if actual == "string"
-    ));
-    assert!(matches!(
-        runtime_error("record = {}\nrecord.missing.value = 1").await,
-        RuntimeError::MissingAssignmentField { field } if field == "missing"
-    ));
-    assert!(matches!(
-        runtime_error("record = { item: 1 }\nrecord.item.value = 2").await,
-        RuntimeError::CannotAssignField { actual, .. } if actual == "number"
-    ));
+    let assign_path = |root: &str, root_value: lashlang::Expr, steps, value| {
+        program(vec![
+            lashlang::Expr::Assign {
+                target: lashlang::AssignTarget::variable(root.into()),
+                expr: Box::new(root_value),
+            },
+            lashlang::Expr::Assign {
+                target: lashlang::AssignTarget {
+                    root: root.into(),
+                    steps,
+                },
+                expr: Box::new(value),
+            },
+        ])
+    };
+
+    let error = run(assign_path(
+        "text",
+        string("abc"),
+        vec![lashlang::AssignPathStep::Index(number(0.0))],
+        string("x"),
+    ))
+    .await
+    .expect_err("a string has no index slot");
+    assert!(
+        matches!(&error, RuntimeError::CannotAssignIndex { actual } if actual == "string"),
+        "{error:?}"
+    );
+
+    let error = run(assign_path(
+        "record",
+        lashlang::Expr::Record(Vec::new()),
+        vec![
+            lashlang::AssignPathStep::Field("missing".into()),
+            lashlang::AssignPathStep::Field("value".into()),
+        ],
+        number(1.0),
+    ))
+    .await
+    .expect_err("an absent intermediate field has no slot");
+    assert!(
+        matches!(&error, RuntimeError::MissingAssignmentField { field } if field == "missing"),
+        "{error:?}"
+    );
+
+    let error = run(assign_path(
+        "record",
+        lashlang::Expr::Record(vec![("item".into(), number(1.0))]),
+        vec![
+            lashlang::AssignPathStep::Field("item".into()),
+            lashlang::AssignPathStep::Field("value".into()),
+        ],
+        number(2.0),
+    ))
+    .await
+    .expect_err("a scalar has no field slot");
+    assert!(
+        matches!(&error, RuntimeError::CannotAssignField { actual, .. } if actual == "number"),
+        "{error:?}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -822,15 +1020,14 @@ async fn else_if_chains_execute_without_extra_braces() {
     let value = finished(
         execute(
             r#"
-        score = 7
-        if score > 10 {
-          label = "large"
-        } else if score > 5 {
-          label = "medium"
-        } else {
-          label = "small"
+        const score = 7;
+        let label = "small";
+        if (score > 10) {
+          label = "large";
+        } else if (score > 5) {
+          label = "medium";
         }
-        finish label
+        finish(label);
         "#,
             &mut state,
             &host,
@@ -843,136 +1040,6 @@ async fn else_if_chains_execute_without_extra_braces() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn slice_supports_negative_bounds() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        values = [10, 20, 30, 40, 50]
-        finish {
-          list_tail: slice(values, -2, null),
-          list_without_last: slice(values, null, -1),
-          list_middle: slice(values, -4, -1),
-          string_tail: slice("abcdef", -2, null),
-          string_without_last: slice("abcdef", null, -1),
-          string_middle: slice("abcdef", -5, -2)
-        }
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let Value::Record(record) = value else {
-        panic!("expected record");
-    };
-    assert_eq!(
-        record["list_tail"],
-        Value::List(vec![Value::Number(40.0), Value::Number(50.0)].into())
-    );
-    assert_eq!(
-        record["list_without_last"],
-        Value::List(
-            vec![
-                Value::Number(10.0),
-                Value::Number(20.0),
-                Value::Number(30.0),
-                Value::Number(40.0),
-            ]
-            .into()
-        )
-    );
-    assert_eq!(
-        record["list_middle"],
-        Value::List(
-            vec![
-                Value::Number(20.0),
-                Value::Number(30.0),
-                Value::Number(40.0),
-            ]
-            .into()
-        )
-    );
-    assert_eq!(
-        record["string_tail"],
-        Value::String("ef".to_string().into())
-    );
-    assert_eq!(
-        record["string_without_last"],
-        Value::String("abcde".to_string().into())
-    );
-    assert_eq!(
-        record["string_middle"],
-        Value::String("bcd".to_string().into())
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn range_and_push_cover_common_collection_building() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        indexes = range(0, 3)
-        extended = push(indexes, 3)
-        loop_total = 0
-        for n in range(0, 4) {
-          loop_total = loop_total + n
-        }
-        finish {
-          indexes: indexes,
-          extended: extended,
-          from_zero: range(3),
-          negative: range(-2, 1),
-          empty: range(5, 2),
-          loop_total: loop_total
-        }
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let Value::Record(record) = value else {
-        panic!("expected record");
-    };
-    assert_eq!(
-        record["indexes"],
-        Value::List(vec![Value::Number(0.0), Value::Number(1.0), Value::Number(2.0)].into())
-    );
-    assert_eq!(
-        record["extended"],
-        Value::List(
-            vec![
-                Value::Number(0.0),
-                Value::Number(1.0),
-                Value::Number(2.0),
-                Value::Number(3.0),
-            ]
-            .into()
-        )
-    );
-    assert_eq!(
-        record["from_zero"],
-        Value::List(vec![Value::Number(0.0), Value::Number(1.0), Value::Number(2.0)].into())
-    );
-    assert_eq!(
-        record["negative"],
-        Value::List(vec![Value::Number(-2.0), Value::Number(-1.0), Value::Number(0.0)].into())
-    );
-    assert_eq!(record["empty"], Value::List(Vec::new().into()));
-    assert_eq!(record["loop_total"], Value::Number(6.0));
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn for_loop_assignments_carry_across_iterations() {
     let host = TestHost::default();
     let mut state = State::new();
@@ -980,16 +1047,16 @@ async fn for_loop_assignments_carry_across_iterations() {
     let value = finished(
         execute(
             r#"
-        raw = split(" x , y , z ", ",")
-        parts = []
-        count = 0
-        snapshots = []
-        for part in raw {
-          parts = push(parts, trim(part))
-          count = count + 1
-          snapshots = push(snapshots, { part: trim(part), parts: parts, count: count })
+        const raw = " x , y , z ".split(",");
+        const parts = [];
+        let count = 0;
+        const snapshots = [];
+        for (const part of raw) {
+          parts.push(part.trim());
+          count = count + 1;
+          snapshots.push({ part: part.trim(), parts: parts, count: count });
         }
-        finish { parts: parts, count: count, snapshots: snapshots }
+        finish({ parts: parts, count: count, snapshots: snapshots });
         "#,
             &mut state,
             &host,
@@ -1020,26 +1087,29 @@ async fn for_loop_assignments_carry_across_iterations() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn record_literals_accept_commas_and_quoted_keys_around_awaited_results() {
+async fn object_literals_accept_quoted_keys_around_awaited_results() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        process sleep_echo(value: str) { finish value }
-        settled = await [
-          start sleep_echo(value: "ok"),
-          start sleep_echo(value: "quoted"),
-        ]
-        result = {
-          fanout: settled[0]?,
-          "with space": settled[1]?,
-        }
-        finish {
+        const sleep_echo = defineProcess({
+          name: "sleep_echo",
+          run: async (value: string) => { return value; }
+        });
+        const settled = await Promise.all([
+          start(sleep_echo, { value: "ok" }),
+          start(sleep_echo, { value: "quoted" })
+        ]);
+        const result = {
+          fanout: settled[0],
+          "with space": settled[1]
+        };
+        finish({
           branch: result.fanout,
           quoted_value: result["with space"]
-        }
+        });
         "#,
             &mut state,
             &host,
@@ -1063,12 +1133,12 @@ async fn string_comparisons_are_lexicographic() {
     let value = finished(
         execute(
             r#"
-        finish {
+        finish({
           lt: "abc" < "def",
           gt: "xyz" > "abc",
           le: "abc" <= "abc",
           ge: "xyz" >= "abc"
-        }
+        });
         "#,
             &mut state,
             &host,
@@ -1094,10 +1164,10 @@ async fn stringification_preserves_integer_format_inside_containers() {
     let value = finished(
         execute(
             r#"
-        finish {
-          list_text: to_string([1, 2]),
-          record_text: to_string({ a: 1, b: 2.5 })
-        }
+        finish({
+          list_text: JSON.stringify([1, 2]),
+          record_text: JSON.stringify({ a: 1, b: 2.5 })
+        });
         "#,
             &mut state,
             &host,
@@ -1127,8 +1197,8 @@ async fn snapshot_round_trip_preserves_repl_like_state() {
     finished(
         execute(
             r#"
-        counter = 1
-        finish counter
+        const counter = 1;
+        finish(counter);
         "#,
             &mut state,
             &host,
@@ -1148,8 +1218,8 @@ async fn snapshot_round_trip_preserves_repl_like_state() {
     let value = finished(
         execute(
             r#"
-        counter = counter + 1
-        finish counter
+        const next = counter + 1;
+        finish(next);
         "#,
             &mut restored,
             &host,
@@ -1169,8 +1239,8 @@ async fn json_and_record_helpers_work() {
     let value = finished(
         execute(
             r#"
-        obj = json_parse("{\"path\":\"src/lib.rs\",\"line\":7}")
-        finish format("{}:{}", obj.path, obj.line)
+        const obj = JSON.parse("{\"path\":\"src/lib.rs\",\"line\":7}");
+        finish(obj.path + ":" + obj.line);
         "#,
             &mut state,
             &host,
@@ -1182,18 +1252,33 @@ async fn json_and_record_helpers_work() {
     assert_eq!(value, Value::String("src/lib.rs:7".to_string().into()));
 }
 
+/// A malformed program is refused by the dialect front-end before anything
+/// reaches the IR, and the refusal carries its own span (ADR 0096).
 #[tokio::test(flavor = "current_thread")]
-async fn parse_errors_are_parse_level_and_precise() {
-    let error = parse(
+async fn source_errors_are_reported_by_the_dialect_front_end() {
+    let host = TestHost::default();
+    let mut state = State::new();
+    let error = execute(
         r#"
-        if true {
-          answer = 1
+        if (true) {
+          const answer = 1;
         "#,
+        &mut state,
+        &host,
     )
-    .expect_err("parse should fail");
+    .await
+    .expect_err("an unterminated block must be refused");
 
-    match error {
-        lashlang::ParseError::Expected { expected, .. } => assert_eq!(expected, "`}`"),
-        other => panic!("unexpected parse error: {other:?}"),
-    }
+    let ExecuteError::Parse(diagnostic) = error else {
+        panic!("expected a front-end diagnostic, got {error:?}");
+    };
+    assert_eq!(
+        diagnostic.code,
+        lash_typescript::DiagnosticCode::SyntaxError
+    );
+    assert_eq!(diagnostic.message, "Expected '}', got '<eof>'");
+    assert!(
+        diagnostic.span.is_some(),
+        "the refusal must carry a span: {diagnostic:?}"
+    );
 }

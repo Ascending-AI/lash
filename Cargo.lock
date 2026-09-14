@@ -2130,6 +2130,7 @@ dependencies = [
  "insta",
  "lash-internal-core",
  "lash-internal-sansio",
+ "lash-internal-typescript",
  "lash-regress",
  "num-bigint",
  "num-traits",

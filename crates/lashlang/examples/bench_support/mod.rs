@@ -1,10 +1,11 @@
 use compact_str::ToCompactString;
 use lashlang::{
-    AbilityOp, AbilityResult, AssignTarget, BinaryOp, ExecutionHost, ExecutionHostError, Expr,
-    FunctionExpr, HostDescriptor, ImageValue, LASH_PROCESS_NAME_KEY, LashlangAbilities,
-    LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, ListValue, Program,
-    ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, Record, State, TypeExpr, TypeField, Value, from_json,
+    AbilityOp, AbilityResult, AssignTarget, BinaryOp, Declaration, ExecutionHost,
+    ExecutionHostError, Expr, FunctionExpr, HostDescriptor, ImageValue, LASH_PROCESS_NAME_KEY,
+    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, ListValue,
+    Program, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
+    ProjectedReadResponse, ProjectedValue, Record, State, TypeExpr, TypeField, UnaryOp, Value,
+    from_json,
 };
 use std::fmt;
 use std::sync::{Arc, OnceLock};
@@ -107,6 +108,22 @@ fn ast_assign(name: &str, expr: Expr) -> Expr {
     Expr::Assign {
         target: AssignTarget::variable(name.into()),
         expr: Box::new(expr),
+    }
+}
+
+#[allow(dead_code)]
+fn ast_builtin(name: &str, args: Vec<Expr>) -> Expr {
+    Expr::BuiltinCall {
+        name: name.into(),
+        args,
+    }
+}
+
+#[allow(dead_code)]
+fn ast_field(target: Expr, field: &str) -> Expr {
+    Expr::Field {
+        target: Box::new(target),
+        field: field.into(),
     }
 }
 
@@ -294,6 +311,10 @@ pub fn seeded_state_for(scenario: Scenario) -> State {
     }
     State::from_snapshot(lashlang::Snapshot::new(globals))
 }
+
+pub mod builders;
+
+use self::builders as b;
 
 include!("sections/program.rs");
 include!("sections/environment.rs");

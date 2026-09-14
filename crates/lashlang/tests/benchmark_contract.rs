@@ -4,8 +4,7 @@ mod bench_support;
 use std::collections::BTreeMap;
 
 use bench_support::{
-    BenchHost, Scenario, benchmark_program, linked_benchmark_program, projected_bindings,
-    seeded_state_for,
+    BenchHost, Scenario, linked_benchmark_program, projected_bindings, seeded_state_for,
 };
 use lashlang::{ExecutionEnvironment, ExecutionOutcome, Value, compile_linked, execute};
 
@@ -15,8 +14,7 @@ async fn benchmark_scenarios_have_golden_outputs() {
     let mut outputs = BTreeMap::new();
 
     for scenario in Scenario::ALL {
-        let source = benchmark_program(*scenario);
-        let linked = linked_benchmark_program(source.as_str());
+        let linked = linked_benchmark_program(*scenario);
         let compiled = compile_linked(&linked);
         let mut state = seeded_state_for(*scenario);
         let projected = projected_bindings(*scenario);

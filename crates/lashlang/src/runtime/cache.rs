@@ -393,45 +393,70 @@ impl CompiledProgramCache {
         &mut self,
         source: &str,
     ) -> Result<Arc<CompiledProgram>, crate::parser::ParseError> {
+        if let Some(compiled) = self.cached_compiled_program(source) {
+            return Ok(compiled);
+        }
+
+        let program = crate::parse(source)?;
+        Ok(self.compile_and_cache(source, program))
+    }
+
+    /// Compiles and caches an already-parsed shared-AST program.
+    ///
+    /// A host that produced the AST itself should ask
+    /// [`Self::cached_compiled_program`] first, so that a hit does not pay for
+    /// the parse this method's `program` argument required.
+    pub fn get_or_compile_ast(&mut self, source: &str, program: Program) -> Arc<CompiledProgram> {
+        if let Some(compiled) = self.cached_compiled_program(source) {
+            return compiled;
+        }
+        self.compile_and_cache(source, program)
+    }
+
+    /// The compiled program already cached for this source, without parsing or
+    /// compiling anything.
+    ///
+    /// A hit is recorded and promoted exactly as it is on the compiling paths,
+    /// so this is the lookup those paths use rather than a peek beside them.
+    pub fn cached_compiled_program(&mut self, source: &str) -> Option<Arc<CompiledProgram>> {
         let source_hash = program_source_hash(source);
         if let Some(entry) = self.entries.back()
             && program_source_matches(entry, source_hash, source)
         {
             self.hits += 1;
-            return Ok(entry.compiled.clone());
+            return Some(entry.compiled.clone());
         }
 
-        if let Some(index) = self
+        let index = self
             .entries
             .iter()
-            .position(|entry| program_source_matches(entry, source_hash, source))
-        {
-            self.hits += 1;
-            let entry = self
-                .entries
-                .remove(index)
-                .expect("cache index came from existing entry");
-            let compiled = entry.compiled.clone();
-            self.entries.push_back(entry);
-            return Ok(compiled);
-        }
+            .position(|entry| program_source_matches(entry, source_hash, source))?;
+        self.hits += 1;
+        let entry = self
+            .entries
+            .remove(index)
+            .expect("cache index came from existing entry");
+        let compiled = entry.compiled.clone();
+        self.entries.push_back(entry);
+        Some(compiled)
+    }
 
+    fn compile_and_cache(&mut self, source: &str, program: Program) -> Arc<CompiledProgram> {
         self.misses += 1;
-        let program = crate::parse(source)?;
         let compiled = Arc::new(compile_program_internal(&program));
         if self.capacity == 0 {
-            return Ok(compiled);
+            return compiled;
         }
         if self.entries.len() == self.capacity {
             self.entries.pop_front();
             self.evictions += 1;
         }
         self.entries.push_back(CachedCompiledProgram {
-            source_hash,
+            source_hash: program_source_hash(source),
             source: Arc::<str>::from(source),
             compiled: compiled.clone(),
         });
-        Ok(compiled)
+        compiled
     }
 
     pub fn clear(&mut self) {

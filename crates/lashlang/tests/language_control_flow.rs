@@ -1,4 +1,14 @@
+// Control flow, operators and the host-call surface, authored in TypeScript.
+//
+// ADR 0096 makes TypeScript the sole authored RLM dialect, so every program
+// here is TypeScript lowered through `lash_typescript`. What the file pins is
+// unchanged: the VM's loops, loop control, conditional evaluation, truthiness,
+// coercion and tool-call results. Where a construct had no TypeScript spelling
+// the fact it pinned is either re-pinned to its ECMA equivalent or, when it was
+// a property of the IR rather than of any dialect, built straight from the AST.
+
 use super::*;
+use crate::ast_support::{call, finish_program, number, string};
 
 #[tokio::test(flavor = "current_thread")]
 async fn executes_if_for_and_list_concat() {
@@ -8,19 +18,18 @@ async fn executes_if_for_and_list_concat() {
     let value = finished(
         execute(
             r#"
-        nums = [1, 2, 3, 4]
-        sum = 0
-        labels = []
-        for n in nums {
-          sum = sum + n
-          labels = labels + [format("n={}", n)]
+        const nums = [1, 2, 3, 4];
+        let sum = 0;
+        let labels = [];
+        for (const n of nums) {
+          sum = sum + n;
+          labels = labels.concat(["n=" + n]);
         }
-        if sum == 10 {
-          result = join(labels, ",")
-        } else {
-          result = "bad"
+        let result = "bad";
+        if (sum === 10) {
+          result = labels.join(",");
         }
-        finish result
+        finish(result);
         "#,
             &mut state,
             &host,
@@ -32,17 +41,21 @@ async fn executes_if_for_and_list_concat() {
     assert_eq!(value, Value::String("n=1,n=2,n=3,n=4".to_string().into()));
 }
 
+/// The list comprehension's replacement: `filter` then `map`. The fact the
+/// comprehension test pinned — that the element binding never leaks into the
+/// enclosing scope — is an ECMA fact about callback parameters, so it is
+/// re-pinned rather than dropped.
 #[tokio::test(flavor = "current_thread")]
-async fn list_comprehension_builds_filtered_lists_without_clobbering_outer_bindings() {
+async fn filter_and_map_build_lists_without_clobbering_outer_bindings() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        n = "outer"
-        doubled = [n * 2 for n in [1, 2, 3, 4] if n % 2 == 0]
-        finish { doubled: doubled, n: n }
+        const n = "outer";
+        const doubled = [1, 2, 3, 4].filter((n) => n % 2 === 0).map((n) => n * 2);
+        finish({ doubled: doubled, n: n });
         "#,
             &mut state,
             &host,
@@ -59,16 +72,26 @@ async fn list_comprehension_builds_filtered_lists_without_clobbering_outer_bindi
     assert_eq!(record["n"], Value::String("outer".to_string().into()));
 }
 
+/// The nested comprehension's replacement: nested iteration. The ordering it
+/// pinned — outer clause slowest, filter applied per inner element — is the
+/// ordering nested `for...of` produces.
 #[tokio::test(flavor = "current_thread")]
-async fn list_comprehension_nested_clauses_preserve_python_ordering() {
+async fn nested_iteration_preserves_written_ordering() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        pairs = [format("{}:{}", a, b) for a in ["x", "y"] for b in range(0, 3) if b != 1]
-        finish pairs
+        let pairs = [];
+        for (const a of ["x", "y"]) {
+          for (const b of [0, 1, 2]) {
+            if (b !== 1) {
+              pairs = pairs.concat([a + ":" + b]);
+            }
+          }
+        }
+        finish(pairs);
         "#,
             &mut state,
             &host,
@@ -91,8 +114,10 @@ async fn list_comprehension_nested_clauses_preserve_python_ordering() {
     );
 }
 
+/// Host calls in both the filter and the element position of a loop that
+/// builds a list, which is what the effectful comprehension pinned.
 #[tokio::test(flavor = "current_thread")]
-async fn list_comprehension_allows_effectful_iterables_filters_and_elements() {
+async fn a_loop_may_await_host_calls_in_its_filter_and_its_element() {
     let host = TestHost::default()
         .with_file("Cargo.toml", "abc")
         .with_file("README.md", "");
@@ -101,13 +126,14 @@ async fn list_comprehension_allows_effectful_iterables_filters_and_elements() {
     let value = finished(
         execute(
             r#"
-        paths = ["Cargo.toml", "README.md"]
-        sizes = [
-          len(await files.read({ path: path })?)
-          for path in paths
-          if len(await files.read({ path: path })?) > 0
-        ]
-        finish sizes
+        const paths = ["Cargo.toml", "README.md"];
+        let sizes = [];
+        for (const path of paths) {
+          if ((await files.read({ path: path })).length > 0) {
+            sizes = sizes.concat([(await files.read({ path: path })).length]);
+          }
+        }
+        finish(sizes);
         "#,
             &mut state,
             &host,
@@ -120,22 +146,22 @@ async fn list_comprehension_allows_effectful_iterables_filters_and_elements() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn break_exits_loop_and_restores_loop_binding() {
+async fn break_exits_loop_and_leaves_the_outer_binding_alone() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        item = "outer"
-        seen = []
-        for item in [1, 2, 3] {
-          if item == 2 {
-            break
+        const item = "outer";
+        let seen = [];
+        for (const entry of [1, 2, 3]) {
+          if (entry === 2) {
+            break;
           }
-          seen = seen + [item]
+          seen = seen.concat([entry]);
         }
-        finish { seen: seen, item: item }
+        finish({ seen: seen, item: item });
         "#,
             &mut state,
             &host,
@@ -157,14 +183,14 @@ async fn continue_skips_to_next_iteration() {
     let value = finished(
         execute(
             r#"
-        seen = []
-        for n in [1, 2, 3, 4] {
-          if n == 2 {
-            continue
+        let seen = [];
+        for (const n of [1, 2, 3, 4]) {
+          if (n === 2) {
+            continue;
           }
-          seen = seen + [n]
+          seen = seen.concat([n]);
         }
-        finish seen
+        finish(seen);
         "#,
             &mut state,
             &host,
@@ -187,13 +213,13 @@ async fn while_loop_runs_until_condition_is_false() {
     let value = finished(
         execute(
             r#"
-        n = 0
-        seen = []
-        while n < 4 {
-          seen = seen + [n]
-          n = n + 1
+        let n = 0;
+        let seen = [];
+        while (n < 4) {
+          seen = seen.concat([n]);
+          n = n + 1;
         }
-        finish { n: n, seen: seen }
+        finish({ n: n, seen: seen });
         "#,
             &mut state,
             &host,
@@ -226,14 +252,14 @@ async fn break_exits_while_loop() {
     let value = finished(
         execute(
             r#"
-        n = 0
-        while true {
-          n = n + 1
-          if n == 3 {
-            break
+        let n = 0;
+        while (true) {
+          n = n + 1;
+          if (n === 3) {
+            break;
           }
         }
-        finish n
+        finish(n);
         "#,
             &mut state,
             &host,
@@ -253,19 +279,19 @@ async fn continue_skips_to_next_while_condition() {
     let value = finished(
         execute(
             r#"
-        n = 0
-        seen = []
-        while n < 5 {
-          n = n + 1
-          if n == 2 {
-            continue
+        let n = 0;
+        let seen = [];
+        while (n < 5) {
+          n = n + 1;
+          if (n === 2) {
+            continue;
           }
-          if n == 4 {
-            continue
+          if (n === 4) {
+            continue;
           }
-          seen = seen + [n]
+          seen = seen.concat([n]);
         }
-        finish seen
+        finish(seen);
         "#,
             &mut state,
             &host,
@@ -288,20 +314,20 @@ async fn nested_loop_control_targets_nearest_loop() {
     let value = finished(
         execute(
             r#"
-        seen = []
-        for outer in [1, 2] {
-          for inner in [1, 2, 3] {
-            if inner == 2 {
-              continue
+        let seen = [];
+        for (const outer of [1, 2]) {
+          for (const inner of [1, 2, 3]) {
+            if (inner === 2) {
+              continue;
             }
-            if inner == 3 {
-              break
+            if (inner === 3) {
+              break;
             }
-            seen = seen + [format("{}:{}", outer, inner)]
+            seen = seen.concat([outer + ":" + inner]);
           }
-          seen = seen + [format("outer={}", outer)]
+          seen = seen.concat(["outer=" + outer]);
         }
-        finish seen
+        finish(seen);
         "#,
             &mut state,
             &host,
@@ -332,22 +358,22 @@ async fn nested_for_and_while_loop_control_targets_nearest_loop() {
     let value = finished(
         execute(
             r#"
-        seen = []
-        for outer in [1, 2] {
-          inner = 0
-          while inner < 3 {
-            inner = inner + 1
-            if inner == 2 {
-              continue
+        let seen = [];
+        for (const outer of [1, 2]) {
+          let inner = 0;
+          while (inner < 3) {
+            inner = inner + 1;
+            if (inner === 2) {
+              continue;
             }
-            if inner == 3 {
-              break
+            if (inner === 3) {
+              break;
             }
-            seen = seen + [format("{}:{}", outer, inner)]
+            seen = seen.concat([outer + ":" + inner]);
           }
-          seen = seen + [format("outer={}", outer)]
+          seen = seen.concat(["outer=" + outer]);
         }
-        finish seen
+        finish(seen);
         "#,
             &mut state,
             &host,
@@ -378,10 +404,10 @@ async fn finish_inside_loop_still_terminates_program() {
     let value = finished(
         execute(
             r#"
-        for n in [1, 2, 3] {
-          finish n
+        for (const n of [1, 2, 3]) {
+          finish(n);
         }
-        finish 99
+        finish(99);
         "#,
             &mut state,
             &host,
@@ -401,9 +427,9 @@ async fn ternary_selects_the_correct_branch() {
     let value = finished(
         execute(
             r#"
-        truthy = true ? "left" : "right"
-        falsy = false ? "left" : "right"
-        finish format("{}:{}", truthy, falsy)
+        const truthy = true ? "left" : "right";
+        const falsy = false ? "left" : "right";
+        finish(truthy + ":" + falsy);
         "#,
             &mut state,
             &host,
@@ -423,8 +449,8 @@ async fn ternary_is_right_associative() {
     let value = finished(
         execute(
             r#"
-        result = false ? 1 : true ? 2 : 3
-        finish result
+        const result = false ? 1 : true ? 2 : 3;
+        finish(result);
         "#,
             &mut state,
             &host,
@@ -444,8 +470,8 @@ async fn ternary_has_lower_precedence_than_boolean_ops() {
     let value = finished(
         execute(
             r#"
-        result = false or true ? "yes" : "no"
-        finish result
+        const result = false || true ? "yes" : "no";
+        finish(result);
         "#,
             &mut state,
             &host,
@@ -457,6 +483,8 @@ async fn ternary_has_lower_precedence_than_boolean_ops() {
     assert_eq!(value, Value::String("yes".to_string().into()));
 }
 
+/// The unselected branch is never evaluated, so a call the VM would refuse
+/// sits harmlessly in the arm that is not taken.
 #[tokio::test(flavor = "current_thread")]
 async fn ternary_short_circuits_unselected_branch() {
     let host = TestHost::default();
@@ -465,9 +493,9 @@ async fn ternary_short_circuits_unselected_branch() {
     let value = finished(
         execute(
             r#"
-        yes = true ? "ok" : missing_name
-        no = false ? missing_name : "ok"
-        finish format("{}:{}", yes, no)
+        const yes = true ? "ok" : JSON.parse("{");
+        const no = false ? JSON.parse("{") : "ok";
+        finish(yes + ":" + no);
         "#,
             &mut state,
             &host,
@@ -480,16 +508,18 @@ async fn ternary_short_circuits_unselected_branch() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn unary_bang_aliases_not() {
+async fn boolean_operators_evaluate_as_ecma_does() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        a = !false
-        b = !true
-        finish [a, b]
+        const a = true && false;
+        const b = false || true;
+        const c = !false && (false || true);
+        const d = !true;
+        finish([a, b, c, d]);
         "#,
             &mut state,
             &host,
@@ -500,49 +530,35 @@ async fn unary_bang_aliases_not() {
 
     assert_eq!(
         value,
-        Value::List(vec![Value::Bool(true), Value::Bool(false)].into())
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn symbolic_boolean_aliases_match_word_operators() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        a = true && false
-        b = false || true
-        c = !false && (false || true)
-        finish [a, b, c]
-        "#,
-            &mut state,
-            &host,
+        Value::List(
+            vec![
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(false)
+            ]
+            .into()
         )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(
-        value,
-        Value::List(vec![Value::Bool(false), Value::Bool(true), Value::Bool(true)].into())
     );
 }
 
+/// Truthiness in conditions and in `!`. The dialect's old "bounded truthiness"
+/// agreed with ECMA on every one of these rows, so the row set is unchanged and
+/// the claim is simply re-pinned to ECMA: `0` and `""` are falsy, and an empty
+/// array is truthy.
 #[tokio::test(flavor = "current_thread")]
-async fn conditions_and_ternary_use_bounded_truthiness() {
+async fn conditions_and_ternary_use_ecma_truthiness() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        a = 1 ? "yes" : "no"
-        b = "" ? "yes" : "no"
-        c = !0
-        d = ![]
-        finish [a, b, c, d]
+        const a = 1 ? "yes" : "no";
+        const b = "" ? "yes" : "no";
+        const c = !0;
+        const d = ![];
+        finish([a, b, c, d]);
         "#,
             &mut state,
             &host,
@@ -573,8 +589,8 @@ async fn string_concatenation_stringifies_non_string_side() {
     let value = finished(
         execute(
             r#"
-        found = await files.read({ path: "src/lib.rs" })
-        finish "status=" + found.ok + " value=" + found.value
+        const found = await files.read({ path: "src/lib.rs" });
+        finish("status=" + true + " value=" + found);
         "#,
             &mut state,
             &host,
@@ -589,26 +605,29 @@ async fn string_concatenation_stringifies_non_string_side() {
     );
 }
 
+/// Scalar coercion in arithmetic and in the string standard library. The
+/// dialect's `join`/`split`/`starts_with` builtins have no TypeScript spelling;
+/// their ECMA counterparts are instance methods, and they coerce the same way.
 #[tokio::test(flavor = "current_thread")]
-async fn arithmetic_and_string_builtins_coerce_scalars() {
+async fn arithmetic_and_string_methods_coerce_scalars() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        total = true + 2
-        scaled = "3" * 2
-        joined = join(["a", 2, true], "-")
-        split_num = split(101, 0)
-        prefix = starts_with(123, 12)
-        finish {
+        const total = true + 2;
+        const scaled = "3" * 2;
+        const joined = ["a", 2, true].join("-");
+        const split_num = "101".split("0");
+        const prefix = "123".startsWith("12");
+        finish({
           total: total,
           scaled: scaled,
           joined: joined,
           split_num: split_num,
           prefix: prefix
-        }
+        });
         "#,
             &mut state,
             &host,
@@ -637,15 +656,18 @@ async fn arithmetic_and_string_builtins_coerce_scalars() {
     assert_eq!(record["prefix"], Value::Bool(true));
 }
 
+/// The dialect's `to_string` sorted a record's keys; `JSON.stringify` keeps
+/// insertion order (ADR 0096), so the claim is re-pinned to the ECMA order
+/// rather than to the retired builtin's.
 #[tokio::test(flavor = "current_thread")]
-async fn to_string_stringifies_records() {
+async fn json_stringify_serialises_objects_in_insertion_order() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        finish to_string({ ok: true, count: 2 })
+        finish(JSON.stringify({ ok: true, count: 2 }));
         "#,
             &mut state,
             &host,
@@ -656,22 +678,22 @@ async fn to_string_stringifies_records() {
 
     assert_eq!(
         value,
-        Value::String("{\"count\":2,\"ok\":true}".to_string().into())
+        Value::String("{\"ok\":true,\"count\":2}".to_string().into())
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn observe_captures_intermediate_values_without_ending_execution() {
+async fn print_captures_intermediate_values_without_ending_execution() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        item = { ok: true, count: 2 }
-        print item
-        print "step done"
-        finish "final"
+        const item = { ok: true, count: 2 };
+        print(item);
+        print("step done");
+        finish("final");
         "#,
             &mut state,
             &host,
@@ -702,8 +724,8 @@ async fn execution_can_continue_without_finish() {
 
     let outcome = execute(
         r#"
-        counter = 1
-        print counter
+        const counter = 1;
+        print(counter);
         "#,
         &mut state,
         &host,
@@ -717,22 +739,33 @@ async fn execution_can_continue_without_finish() {
     assert_eq!(observed.as_slice(), &[Value::Number(1.0)]);
 }
 
+/// A failed host call is a thrown error rather than an `{ ok, error }` record
+/// (ADR 0096), so the "summarise both outcomes" pattern is written with
+/// `try`/`catch`. What it pins is unchanged: both branches of the summary are
+/// reachable in one program, and the failure carries the host's own text.
 #[tokio::test(flavor = "current_thread")]
-async fn ternary_fixes_tool_result_formatting_pattern() {
+async fn a_summary_can_report_both_a_successful_and_a_failed_host_call() {
     let host = TestHost::default().with_file("src/lib.rs", "pub fn main() {}");
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        found = await files.read({ path: "src/lib.rs" })
-        missing = await files.read({ path: "src/missing.rs" })
-        summary = format(
-          "found={} missing={}",
-          found.ok ? "ok" : format("failed: {}", found.error),
-          missing.ok ? "ok" : format("failed: {}", missing.error)
-        )
-        finish summary
+        let found = "";
+        try {
+          await files.read({ path: "src/lib.rs" });
+          found = "ok";
+        } catch (error) {
+          found = "failed: " + error.message;
+        }
+        let missing = "";
+        try {
+          await files.read({ path: "src/missing.rs" });
+          missing = "ok";
+        } catch (error) {
+          missing = "failed: " + error.message;
+        }
+        finish("found=" + found + " missing=" + missing);
         "#,
             &mut state,
             &host,
@@ -744,202 +777,81 @@ async fn ternary_fixes_tool_result_formatting_pattern() {
     let Value::String(text) = value else {
         panic!("expected string");
     };
-    assert!(text.contains("found=ok"));
-    assert!(text.contains("missing=failed:"));
+    assert!(text.contains("found=ok"), "{text}");
+    assert!(text.contains("missing=failed:"), "{text}");
+}
+
+/// The `format` builtin is part of the retired dialect's standard library and
+/// has no TypeScript spelling (ADR 0096) — TypeScript concatenates. Its
+/// placeholder rules are still IR facts the VM enforces, so the rows that pin
+/// them build the call straight from the AST.
+#[tokio::test(flavor = "current_thread")]
+async fn format_resolves_positional_and_escaped_placeholders() {
+    for (args, expected) in [
+        (
+            vec![string("b={1} a={0}"), string("x"), string("y")],
+            "b=y a=x",
+        ),
+        (vec![string("plain")], "plain"),
+        (vec![string("{{{}}}"), number(1.0)], "{1}"),
+    ] {
+        let host = TestHost::default();
+        let mut state = State::new();
+        let program = finish_program(call("format", args));
+        let value = finished(
+            lashlang::execute(&program, &mut state, &host)
+                .await
+                .expect("format should run"),
+        );
+        assert_eq!(value, Value::String(expected.to_string().into()));
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn format_supports_indexed_reordering() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        finish format("b={1} a={0}", "x", "y")
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(value, Value::String("b=y a=x".to_string().into()));
+async fn format_rejects_malformed_templates_and_unused_arguments() {
+    for (args, expected) in [
+        (
+            vec![string("{} {1}"), string("x"), string("y")],
+            lashlang::FormatError::MixedPlaceholderKinds,
+        ),
+        (
+            vec![string("plain"), number(1.0)],
+            lashlang::FormatError::UnusedArgument { index: 0 },
+        ),
+        (vec![string("{")], lashlang::FormatError::UnmatchedOpenBrace),
+        (
+            vec![string("}")],
+            lashlang::FormatError::UnmatchedCloseBrace,
+        ),
+    ] {
+        let host = TestHost::default();
+        let mut state = State::new();
+        let program = finish_program(call("format", args));
+        let error = lashlang::execute(&program, &mut state, &host)
+            .await
+            .expect_err("format should reject");
+        assert_eq!(error, RuntimeError::Format(expected));
+    }
 }
 
+/// A tool call yields the host's value directly and throws on failure, which is
+/// the replacement for the dialect's `{ ok, value }` result record (ADR 0096).
 #[tokio::test(flavor = "current_thread")]
-async fn format_without_placeholders_returns_literal_string() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        finish format("plain")
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(value, Value::String("plain".to_string().into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn format_supports_escaped_braces() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        finish format("{{{}}}", 1)
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(value, Value::String("{1}".to_string().into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn format_accepts_multiline_markdown_string_templates() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r####"
-        finish format("""## Installed {0}
-
-`{1}` is installed and available.
-
-Tail:
-{2}""", "cargo-machete", "cargo machete", "ok")
-        "####,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(
-        value,
-        Value::String(
-            "## Installed cargo-machete\n\n`cargo machete` is installed and available.\n\nTail:\nok"
-                .to_string()
-                .into()
-        )
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn format_accepts_raw_markdown_templates_with_literal_braces() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r####"
-        finish format(r"""## {0}
-
-```json
-{{"status":"{1}","ok":true}}
-```
-
-Output:
-{2}""", "cargo-machete", "installed", "ready")
-        "####,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    assert_eq!(
-        value,
-        Value::String(
-            "## cargo-machete\n\n```json\n{\"status\":\"installed\",\"ok\":true}\n```\n\nOutput:\nready"
-                .to_string()
-                .into()
-        )
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn format_rejects_mixed_placeholder_styles_end_to_end() {
-    let error = runtime_error(
-        r#"
-        finish format("{} {1}", "x", "y")
-        "#,
-    )
-    .await;
-
-    assert_eq!(
-        error,
-        RuntimeError::Format(lashlang::FormatError::MixedPlaceholderKinds)
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn format_rejects_unused_args_end_to_end() {
-    let error = runtime_error(
-        r#"
-        finish format("plain", 1)
-        "#,
-    )
-    .await;
-
-    assert_eq!(
-        error,
-        RuntimeError::Format(lashlang::FormatError::UnusedArgument { index: 0 })
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn format_rejects_unmatched_braces_end_to_end() {
-    let open_error = runtime_error(
-        r#"
-        finish format("{")
-        "#,
-    )
-    .await;
-    assert_eq!(
-        open_error,
-        RuntimeError::Format(lashlang::FormatError::UnmatchedOpenBrace)
-    );
-
-    let close_error = runtime_error(
-        r#"
-        finish format("}")
-        "#,
-    )
-    .await;
-    assert_eq!(
-        close_error,
-        RuntimeError::Format(lashlang::FormatError::UnmatchedCloseBrace)
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn tool_calls_return_result_records() {
+async fn tool_calls_return_values_and_throw_on_failure() {
     let host = TestHost::default().with_file("src/lib.rs", "pub fn main() {}");
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        found = await files.read({ path: "src/lib.rs" })
-        missing = await files.read({ path: "src/missing.rs" })
-        finish { found: found, missing: missing }
+        const found = await files.read({ path: "src/lib.rs" });
+        let missing = null;
+        try {
+          missing = await files.read({ path: "src/missing.rs" });
+        } catch (error) {
+          missing = error instanceof Error;
+        }
+        finish({ found: found, missing: missing });
         "#,
             &mut state,
             &host,
@@ -951,12 +863,6 @@ async fn tool_calls_return_result_records() {
     let Value::Record(record) = value else {
         panic!("expected record");
     };
-    assert_eq!(
-        record["found"].as_record().unwrap()["ok"],
-        Value::Bool(true)
-    );
-    assert_eq!(
-        record["missing"].as_record().unwrap()["ok"],
-        Value::Bool(false)
-    );
+    assert_eq!(record["found"], Value::String("pub fn main() {}".into()));
+    assert_eq!(record["missing"], Value::Bool(true));
 }

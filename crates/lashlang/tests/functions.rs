@@ -90,27 +90,30 @@ async fn a_closure_from_an_earlier_program_does_not_fail_the_next_one() {
 }
 
 /// The same law for a *declared* function, written in the surface syntax a cell
-/// actually contains.
+/// actually contains: TypeScript, the only authoring dialect (ADR 0096).
 ///
 /// The test above builds its closure through the public AST, with explicit
 /// captures. This one does not build a closure at all, on the face of it: `fn`
 /// is a declaration, and Lashlang has no first-class function value. The closure
 /// appears anyway, because a declared call is materialized at its call site as a
-/// capture-free closure over the chunk function — so an ordinary `fn` cell
-/// leaves one on the heap and the next program is validated against it.
+/// capture-free closure over the chunk function — so an ordinary function
+/// declaration leaves one on the heap and the next program is validated against
+/// it.
 ///
 /// Red before the FIG-1562 fix with `UnknownFunction { index: 0 }`. It is worth
 /// having next to the RLM cell suite (`lash-protocol-rlm`'s
 /// `testing::cell_conformance`) rather than only inside it: through an RLM
-/// Lashlang cell the defect is latent rather than certain, because whether a
+/// cell the defect is latent rather than certain, because whether a
 /// stale index resolves depends on what the *next* cell's chunk happens to
 /// contain. Here the next program has no functions at all, so there is nothing
 /// for a stale index to land on and the law is asserted rather than sampled.
 #[tokio::test(flavor = "current_thread")]
 async fn a_declared_function_from_an_earlier_program_does_not_fail_the_next_one() {
-    let first = lashlang::compile("fn scale(n: float) -> float { n * 2 }\nscaled = scale(3)")
-        .expect("the declaring program compiles");
-    let second = lashlang::compile("finish 42").expect("the next program compiles");
+    let first = lash_typescript::compile(
+        "function scale(n: number): number { return n * 2; }\nconst scaled = scale(3);",
+    )
+    .expect("the declaring program compiles");
+    let second = lash_typescript::compile("finish(42);").expect("the next program compiles");
 
     let mut state = State::new();
     execute(&first, &mut state, &Host)

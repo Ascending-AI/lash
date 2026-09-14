@@ -1,21 +1,30 @@
-// Aggregate await over list comprehensions (FIG-2764).
+// Aggregate await, authored in TypeScript (FIG-2764, ADR 0096).
 //
-// `await [op(x)? for x in xs]` is an aggregate-await shape: every call starts
-// before any of them is awaited, and `?` on the leaf unwraps each element
-// exactly as it does in a literal list. `[await op(x)? for x in xs]` stays
-// the sequential form.
+// The dialect spelled the fan-out shape `await [op(x)? for x in xs]`; the
+// TypeScript spelling is `await Promise.all(xs.map((x) => op(x)))`. What the
+// file pins is unchanged: every call in the aggregate starts before any of
+// them is awaited, calls start in written order, the sequential shape stays
+// sequential, and a failing leaf fails the aggregate.
+//
+// The wrapped form has no direct TypeScript spelling — a tool call yields the
+// host's value and throws on failure instead of an `{ ok, value }` record — so
+// the per-item-errors row is re-pinned to `Promise.allSettled`, whose
+// `{ status, value | reason }` settlement is the ECMA shape that replaced it.
+
+use super::*;
+use crate::ast_support::{finish_program, number};
 
 #[tokio::test(flavor = "current_thread")]
-async fn await_list_comprehension_of_unwrapped_calls_fans_out_and_returns_values() {
+async fn promise_all_over_tool_calls_fans_out_and_returns_values() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        ids = ["a", "b", "c"]
-        results = await [tools.sleep_echo({ value: id })? for id in ids]
-        finish results
+        const ids = ["a", "b", "c"];
+        const results = await Promise.all(ids.map((id) => tools.sleep_echo({ value: id })));
+        finish(results);
         "#,
             &mut state,
             &host,
@@ -34,60 +43,33 @@ async fn await_list_comprehension_of_unwrapped_calls_fans_out_and_returns_values
             ]
             .into()
         ),
-        "`?` on the comprehension leaf must yield unwrapped values, not result records"
+        "an aggregate of tool calls must yield unwrapped values"
     );
     assert_eq!(
         host.max_active.load(Ordering::SeqCst),
         3,
-        "every comprehension call must start before any of them is awaited"
+        "every call in the aggregate must start before any of them is awaited"
     );
     assert_eq!(
         host.calls.lock_recover().as_slice(),
         ["a", "b", "c"],
-        "calls start in comprehension order"
+        "calls start in written order"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn await_list_comprehension_of_wrapped_calls_returns_wrappers_in_order() {
+async fn awaiting_each_call_in_turn_stays_sequential() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        results = await [tools.sleep_echo({ value: id }) for id in ["a", "b"]]
-        finish results
-        "#,
-            &mut state,
-            &host,
-        )
-        .await
-        .expect("execution should succeed"),
-    );
-
-    let Value::List(results) = value else {
-        panic!("expected list");
-    };
-    assert_eq!(results.len(), 2);
-    for (result, expected) in results.iter().zip(["a", "b"]) {
-        let record = result.as_record().expect("wrapped result record");
-        assert_eq!(record["ok"], Value::Bool(true));
-        assert_eq!(record["value"], Value::String(expected.into()));
-    }
-    assert_eq!(host.max_active.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn list_comprehension_of_awaited_calls_stays_sequential() {
-    let host = TestHost::default();
-    let mut state = State::new();
-
-    let value = finished(
-        execute(
-            r#"
-        results = [await tools.sleep_echo({ value: id })? for id in ["a", "b", "c"]]
-        finish results
+        let results = [];
+        for (const id of ["a", "b", "c"]) {
+          results = results.concat([await tools.sleep_echo({ value: id })]);
+        }
+        finish(results);
         "#,
             &mut state,
             &host,
@@ -110,28 +92,30 @@ async fn list_comprehension_of_awaited_calls_stays_sequential() {
     assert_eq!(
         host.max_active.load(Ordering::SeqCst),
         1,
-        "`[await op(x)? for x in xs]` awaits each call before starting the next"
+        "awaiting inside the loop awaits each call before starting the next"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn await_list_comprehension_honours_filters_and_nested_clauses() {
+async fn an_aggregate_honours_filters_and_nested_iteration() {
     let host = TestHost::default();
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        filtered = await [tools.sleep_echo({ value: id })? for id in ["a", "b", "c"] if id != "b"]
-        nested = await [
-          tools.sleep_echo({ value: format("{}{}", x, y) })?
-          for x in ["a", "b"]
-          if x != "c"
-          for y in ["1", "2"]
-          if y != "3"
-        ]
-        empty = await [tools.sleep_echo({ value: id })? for id in []]
-        finish { filtered: filtered, nested: nested, empty: empty }
+        const filtered = await Promise.all(
+          ["a", "b", "c"].filter((id) => id !== "b").map((id) => tools.sleep_echo({ value: id }))
+        );
+        let pairs = [];
+        for (const x of ["a", "b"]) {
+          for (const y of ["1", "2"]) {
+            pairs = pairs.concat([x + y]);
+          }
+        }
+        const nested = await Promise.all(pairs.map((pair) => tools.sleep_echo({ value: pair })));
+        const empty = await Promise.all([].map((id) => tools.sleep_echo({ value: id })));
+        finish({ filtered: filtered, nested: nested, empty: empty });
         "#,
             &mut state,
             &host,
@@ -158,51 +142,65 @@ async fn await_list_comprehension_honours_filters_and_nested_clauses() {
             ]
             .into()
         ),
-        "nested clauses fan out in Python clause order"
+        "nested iteration fans out in written order"
     );
     assert_eq!(record["empty"], Value::List(Vec::new().into()));
     assert_eq!(
         host.max_active.load(Ordering::SeqCst),
         4,
-        "the nested comprehension starts all four calls before awaiting"
+        "the nested aggregate starts all four calls before awaiting"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn await_list_comprehension_with_unwrap_fails_on_the_first_failed_leaf() {
-    let host = TestHost::default().with_file("Cargo.toml", "abc");
-    let mut state = State::new();
-
-    let error = match execute(
-        r#"
-        contents = await [files.read({ path: path })? for path in ["Cargo.toml", "missing.rs"]]
-        finish contents
-        "#,
-        &mut state,
-        &host,
-    )
-    .await
-    {
-        Err(ExecuteError::Runtime(error)) => error,
-        other => panic!("expected the `?` leaf to fail the cell, got {other:?}"),
-    };
-
-    let RuntimeError::UnwrappedModuleOperationFailed { source } = &error else {
-        panic!("expected the `?` diagnostic, got {error:?}");
-    };
-    assert_eq!(source.to_string(), "missing file: missing.rs");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn await_list_comprehension_without_unwrap_keeps_per_item_errors_in_place() {
+async fn promise_all_fails_on_the_first_failed_leaf() {
     let host = TestHost::default().with_file("Cargo.toml", "abc");
     let mut state = State::new();
 
     let value = finished(
         execute(
             r#"
-        results = await [files.read({ path: path }) for path in ["Cargo.toml", "missing.rs"]]
-        finish results
+        let reported = "";
+        try {
+          await Promise.all(
+            ["Cargo.toml", "missing.rs"].map((path) => files.read({ path: path }))
+          );
+        } catch (error) {
+          reported = error.message;
+        }
+        finish(reported);
+        "#,
+            &mut state,
+            &host,
+        )
+        .await
+        .expect("execution should succeed"),
+    );
+
+    let Value::String(reported) = value else {
+        panic!("expected string");
+    };
+    assert!(
+        reported.contains("missing file: missing.rs"),
+        "the rejection carries the failing leaf's own text: {reported}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn promise_all_settled_keeps_per_item_errors_in_place() {
+    let host = TestHost::default().with_file("Cargo.toml", "abc");
+    let mut state = State::new();
+
+    let value = finished(
+        execute(
+            r#"
+        const results = await Promise.allSettled(
+          ["Cargo.toml", "missing.rs"].map((path) => files.read({ path: path }))
+        );
+        finish(results.map((result) => ({
+          status: result.status,
+          detail: result.status === "fulfilled" ? result.value : result.reason.message
+        })));
         "#,
             &mut state,
             &host,
@@ -215,26 +213,28 @@ async fn await_list_comprehension_without_unwrap_keeps_per_item_errors_in_place(
         panic!("expected list");
     };
     assert_eq!(results.len(), 2);
-    let ok = results[0].as_record().expect("first result record");
-    assert_eq!(ok["ok"], Value::Bool(true));
-    assert_eq!(ok["value"], Value::String("abc".into()));
-    let err = results[1].as_record().expect("second result record");
-    assert_eq!(err["ok"], Value::Bool(false));
+    let ok = results[0].as_record().expect("first settlement");
+    assert_eq!(ok["status"], Value::String("fulfilled".into()));
+    assert_eq!(ok["detail"], Value::String("abc".into()));
+    let err = results[1].as_record().expect("second settlement");
+    assert_eq!(err["status"], Value::String("rejected".into()));
     assert_eq!(
-        err["error"],
+        err["detail"],
         Value::String("missing file: missing.rs".into())
     );
 }
 
+/// Awaiting a value that is not a pending handle is a VM guard rather than a
+/// dialect rule: TypeScript's `await` of an ordinary value is legal ECMA and
+/// never reaches it, so the guard is pinned against the AST it protects.
 #[tokio::test(flavor = "current_thread")]
 async fn awaiting_an_already_resolved_value_is_a_loud_runtime_error() {
-    let error = runtime_error(
-        r#"
-        values = [await tools.sleep_echo({ value: id })? for id in ["a"]]
-        finish await values
-        "#,
-    )
-    .await;
+    let host = TestHost::default();
+    let mut state = State::new();
+    let program = finish_program(lashlang::Expr::Await(Box::new(number(1.0))));
+    let error = lashlang::execute(&program, &mut state, &host)
+        .await
+        .expect_err("awaiting a resolved value must fail");
 
     assert!(
         matches!(&error, RuntimeError::AwaitExpectsHandle { .. }),
@@ -245,4 +245,3 @@ async fn awaiting_an_already_resolved_value_is_a_loud_runtime_error() {
         "the diagnostic names the repair: {error}"
     );
 }
-use super::*;

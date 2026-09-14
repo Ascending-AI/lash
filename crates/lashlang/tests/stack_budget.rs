@@ -1,34 +1,37 @@
 use lashlang::{
     AbilityOp, AbilityResult, CatchClause, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Expr, LashlangAbilities, LashlangHostEnvironment, Program, Record, State, TryExpr, Value,
-    compile_linked, execute, parse,
+    compile_linked, execute,
 };
 use std::sync::Arc;
 
 const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
 #[test]
-fn stack_budget_lashlang_parse_link_compile_execute_process_fanout() {
-    run_on_stack_budget("stack-budget-lashlang-process-fanout", || {
+fn stack_budget_lower_link_compile_execute_process_fanout() {
+    run_on_stack_budget("stack-budget-process-fanout", || {
         let test = Box::pin(async {
-            let program = parse(
+            let program = lash_typescript::parse(
                 r#"
-process child(value: str) {
-  finish { value: value, lookup: "lookup:" + value }
-}
+const child = defineProcess({
+  name: "child",
+  run: async (value: string) => {
+    return { value: value, lookup: "lookup:" + value };
+  }
+});
 
-left = start child(value: "left")
-right = start child(value: "right")
-joined = await { left: left, right: right }
-sleep for "0ms"
-finish {
-  left: joined.left.value.lookup,
-  right: joined.right.value.lookup,
+const left = start(child, { value: "left" });
+const right = start(child, { value: "right" });
+const joined = { left: await left, right: await right };
+await sleep(0);
+finish({
+  left: joined.left.lookup,
+  right: joined.right.lookup,
   final: "stack-budget"
-}
+});
 "#,
             )
-            .expect("program parses");
+            .expect("program lowers");
             let surface = LashlangHostEnvironment::new(
                 lashlang::LashlangHostCatalog::new(),
                 LashlangAbilities::all(),
@@ -62,24 +65,30 @@ finish {
     });
 }
 
-/// The parser caps syntactic nesting (`MAX_NESTING_DEPTH`) precisely so that a
-/// legal program can never drive a downstream AST walker off the stack: the cap
-/// is only meaningful if link, compile and execute each cost no more per level
-/// than the parser that admitted the program. This runs the deepest program the
-/// parser will ever accept through the whole pipeline on the same 2 MiB budget a
-/// host thread gets, so a walker that regrows its per-level frame fails here
-/// instead of aborting a host process.
+/// The dialect front-end caps syntactic nesting precisely so that a legal
+/// program can never drive a downstream AST walker off the stack: the cap is
+/// only meaningful if link, compile and execute each cost no more per level
+/// than the front-end that admitted the program. This runs the deepest program
+/// the front-end will ever accept through the whole pipeline on the same 2 MiB
+/// budget a host thread gets, so a walker that regrows its per-level frame
+/// fails here instead of aborting a host process.
 #[test]
-fn stack_budget_lashlang_max_nesting_depth_parse_link_compile_execute() {
-    run_on_stack_budget("stack-budget-lashlang-max-nesting", || {
+fn stack_budget_max_nesting_depth_lower_link_compile_execute() {
+    run_on_stack_budget("stack-budget-max-nesting", || {
+        // Measured: the TypeScript front-end accepts exactly 25 levels of this
+        // shape, where the lashlang parser accepted 29. `TS_SOURCE_NESTING_LIMIT`
+        // counts the statement and expression levels the retired grammar did
+        // not, so the same object literal runs out of budget sooner. The walk
+        // below tracks the real cap; this floor only catches it moving.
         let deepest = deepest_accepted_nesting();
         assert!(
-            deepest >= 29,
-            "expected the parser to accept at least 29 nested levels, got {deepest}; \
-             if MAX_NESTING_DEPTH moved on purpose, move this floor with it"
+            deepest >= 25,
+            "expected the front-end to accept at least 25 nested levels, got {deepest}; \
+             if the nesting cap moved on purpose, move this floor with it"
         );
 
-        let program = parse(&nested_program(deepest)).expect("deepest program parses");
+        let program =
+            lash_typescript::parse(&nested_program(deepest)).expect("deepest program lowers");
         let surface = LashlangHostEnvironment::new(
             lashlang::LashlangHostCatalog::new(),
             LashlangAbilities::all(),
@@ -104,9 +113,9 @@ fn stack_budget_lashlang_max_nesting_depth_parse_link_compile_execute() {
     });
 }
 
-/// `depth` levels of AST-only `try/catch/finally` around a constant. The parser
-/// has no production for these nodes, so nothing about the source grammar
-/// bounds how deep a dialect can build them.
+/// `depth` levels of AST-only `try/catch/finally` around a constant. These
+/// nodes are built by dialects rather than authored, so nothing about a source
+/// grammar bounds how deep one can build them.
 fn nested_try_program(depth: usize) -> Program {
     let mut expr = Expr::Number(7.0);
     for level in 0..depth {
@@ -164,10 +173,10 @@ fn stack_budget_most_expensive_ast_variant_at_the_nesting_cap() {
     });
 }
 
-/// The AST-only exception nodes must meet the same 2 MiB budget as parsed
-/// shapes at the depth the parser admits.
+/// The AST-only exception nodes must meet the same 2 MiB budget as authored
+/// shapes at the depth the front-end admits.
 #[test]
-fn stack_budget_ast_try_finally_at_parser_max_depth() {
+fn stack_budget_ast_try_finally_at_front_end_max_depth() {
     run_on_stack_budget("stack-budget-ast-try-finally", || {
         let program = nested_try_program(deepest_accepted_nesting());
         let linked =
@@ -224,12 +233,12 @@ fn ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort() {
     }
 }
 
-/// Walks up until the parser refuses, so the guard tracks the real cap rather
-/// than a copy of it.
+/// Walks up until the front-end refuses, so the guard tracks the real cap
+/// rather than a copy of it.
 fn deepest_accepted_nesting() -> usize {
     let mut deepest = 0;
     for depth in 1..=128 {
-        if parse(&nested_program(depth)).is_err() {
+        if lash_typescript::parse(&nested_program(depth)).is_err() {
             break;
         }
         deepest = depth;
@@ -237,16 +246,16 @@ fn deepest_accepted_nesting() -> usize {
     deepest
 }
 
-/// A record literal nested `depth` levels deep, read back through a field chain
-/// of the same depth: the deepest shape the parser admits, in both the value it
-/// builds and the path it walks.
+/// An object literal nested `depth` levels deep, read back through a field
+/// chain of the same depth: the deepest shape the front-end admits, in both the
+/// value it builds and the path it walks.
 fn nested_program(depth: usize) -> String {
     let mut literal = String::from("0");
     for _ in 0..depth {
         literal = format!("{{ next: {literal} }}");
     }
     let chain = ".next".repeat(depth);
-    format!("tree = {literal}\nfinish {{ leaf: tree{chain} }}\n")
+    format!("const tree = {literal};\nfinish({{ leaf: tree{chain} }});\n")
 }
 
 fn run_on_stack_budget(name: &str, test: impl FnOnce() + Send + 'static) {

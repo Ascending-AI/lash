@@ -1,7 +1,7 @@
 use lash_sansio::sync::MutexExt;
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Record,
-    RuntimeError, State, TypeExpr, Value, parse,
+    RuntimeError, State, TypeExpr, Value,
 };
 use std::collections::HashMap;
 use std::sync::{
@@ -222,26 +222,6 @@ fn test_host_environment() -> lashlang::LashlangHostEnvironment {
         )
         .expect("host catalog operation must not conflict");
     lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all())
-}
-
-fn program_len(program: &lashlang::Program) -> usize {
-    match &program.main {
-        lashlang::Expr::Block(expressions) => expressions.len(),
-        _ => 1,
-    }
-}
-
-async fn runtime_error(source: &str) -> RuntimeError {
-    let host = TestHost::default();
-    let mut state = State::new();
-    match execute(source, &mut state, &host)
-        .await
-        .expect_err("execution should fail")
-    {
-        ExecuteError::Runtime(error) => error,
-        ExecuteError::Parse(error) => panic!("expected runtime error, got parse error: {error:?}"),
-        ExecuteError::Link(error) => panic!("expected runtime error, got link error: {error:?}"),
-    }
 }
 
 mod language_aggregate_await_comprehensions;

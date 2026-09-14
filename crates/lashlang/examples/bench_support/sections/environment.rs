@@ -117,12 +117,14 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
         .with_globals(["history", "ctx", "snap", "img", "docs", "proj"])
 }
 
-pub fn linked_benchmark_program(source: &str) -> LinkedModule {
-    LinkedModule::link(
-        lashlang::parse(source).expect("benchmark program should parse"),
-        benchmark_host_environment(),
-    )
-    .expect("benchmark program should link")
+/// Lowers a benchmark program through the TypeScript front-end and links it.
+///
+/// ADR 0096 makes TypeScript the sole authored RLM dialect; lashlang names the
+/// IR and the VM the benchmarks measure.
+/// Links a benchmark scenario's program against the benchmark host surface.
+pub fn linked_benchmark_program(scenario: Scenario) -> LinkedModule {
+    LinkedModule::link(benchmark_program(scenario), benchmark_host_environment())
+        .expect("benchmark program should link")
 }
 
 pub fn projected_bindings(scenario: Scenario) -> ProjectedBindings {
