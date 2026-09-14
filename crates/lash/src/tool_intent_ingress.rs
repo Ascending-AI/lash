@@ -380,11 +380,12 @@ impl ToolIntentIngress {
     /// [`ToolIntentIngressRefusal::DuplicateIdentity`]. Controller-owned tiers
     /// report the same refusal: every shape lands on a durable key at the point
     /// it mutates, so a re-submitted identity realizes once and a changed
-    /// payload under a bound identity is refused at the store. The one shape
-    /// whose identity is not bound to its subject across invocations is
-    /// `CancelProcess`, whose fence lives on the target record: it requests one
-    /// cancellation per target, but a re-used identity naming a *different*
-    /// target cancels that other process rather than being refused.
+    /// payload under a bound identity is refused at the store. `CancelProcess`
+    /// carries no content past its target, and its store fence lives on the
+    /// target record, so its identity is bound to the target it first named in
+    /// the durable submission ledger instead: a re-used identity naming a
+    /// *different* target is refused there, before the second target is
+    /// touched.
     ///
     /// `StartProcess` and `EmitTrigger` submissions do not retain their
     /// host-chosen realization identifiers. Lash replaces a start's
@@ -609,7 +610,11 @@ impl ToolIntentIngress {
                 )
             })?;
         let intent = match &preparation {
-            lash_core::ToolIntentPreparation::ControllerOwned => intent,
+            lash_core::ToolIntentPreparation::ControllerOwned => {
+                self.bind_controller_owned_cancel_target(identity, &intent)
+                    .await?;
+                intent
+            }
             lash_core::ToolIntentPreparation::RuntimeOwned {
                 admission,
                 _guard: _,
@@ -792,6 +797,87 @@ impl ToolIntentIngress {
                 )
             })?;
         Ok(((kind, value), replayed))
+    }
+
+    /// Bind a controller-owned `CancelProcess` identity to the target it first
+    /// named.
+    ///
+    /// The other four shapes carry their content into the durable key they
+    /// land on — a registration fingerprint, an event replay key, an
+    /// occurrence idempotency key — so a re-used identity carrying different
+    /// content is refused by the store itself. A cancel carries nothing but
+    /// its target, and its fence lives on the *target* record: a bound
+    /// identity re-submitted against a second process finds that record
+    /// unfenced and cancels it. Nothing on the first target can see that
+    /// (FIG-3072).
+    ///
+    /// The binding is therefore taken where the runtime-owned tier takes it:
+    /// the durable tool-intent submission ledger, which this ingress already
+    /// writes on the controller-owned tier through
+    /// [`retain_in_journal`](lash_core::ToolIntentOutcomeSink::retain_in_journal)
+    /// once an outcome exists. Claiming the row *before* realization instead
+    /// is what makes the target durable across invocations: the redelivery
+    /// arrives with an empty effect journal, reads the row the first
+    /// invocation left, and compares payload hashes.
+    ///
+    /// A matching payload is not refused, unlike on the runtime-owned tier: a
+    /// redelivered invocation legitimately re-presents its own submission, and
+    /// the target record coalesces it onto the recorded request. Only a
+    /// changed payload — for a cancel, only a changed target — is refused, as
+    /// [`ToolIntentIngressRefusal::DuplicateIdentity`], the same vocabulary
+    /// both other shapes and the runtime-owned tier use.
+    async fn bind_controller_owned_cancel_target(
+        &self,
+        identity: &lash_core::ToolIntentIdentity,
+        intent: &lash_core::ToolIntent,
+    ) -> std::result::Result<(), RealizationFailure> {
+        let kind = intent.kind();
+        if kind != lash_core::ToolIntentKind::CancelProcess {
+            return Ok(());
+        }
+        let submitted =
+            lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone()).map_err(
+                |error| {
+                    RealizationFailure::Command(
+                        kind,
+                        crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
+                            "failed to hash tool-intent submission: {error}"
+                        ))),
+                    )
+                },
+            )?;
+        use lash_core::ToolIntentOutcomeSink as _;
+        let _guard = self.lock_submission_gate(&identity.replay_key).await;
+        let admission = self.admit(submitted.clone()).await.map_err(|error| {
+            RealizationFailure::Command(
+                kind,
+                crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
+            )
+        })?;
+        let lash_core::ToolIntentSubmissionAdmission::Existing(existing) = admission else {
+            return Ok(());
+        };
+        if existing.protocol_version != lash_core::TOOL_INTENT_PROTOCOL_V2 {
+            return Err(RealizationFailure::Refused(
+                ToolIntentIngressRefusal::UnsupportedProtocolVersion {
+                    recorded: existing.protocol_version,
+                },
+            ));
+        }
+        if existing.kind != kind {
+            return Err(RealizationFailure::Refused(
+                ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+                    recorded_kind: existing.kind,
+                    submitted_kind: kind,
+                },
+            ));
+        }
+        if existing.payload_hash != submitted.payload_hash {
+            return Err(RealizationFailure::Refused(
+                ToolIntentIngressRefusal::DuplicateIdentity { kind },
+            ));
+        }
+        Ok(())
     }
 
     /// Classify one realization error.
