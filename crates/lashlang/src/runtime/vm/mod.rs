@@ -244,6 +244,12 @@ pub struct Vm<'a, H> {
     iter_stack: Vec<IterState>,
     active_function: Option<usize>,
     frames: Vec<CallFrame>,
+    /// The most recently released frame's slot vectors, kept for the next
+    /// call. A callback-driven loop (`Array.map`, `Map`/`Set.forEach`, async
+    /// map) otherwise allocates a fresh values/projected pair per visited
+    /// element. One slot is all such a loop needs: every element returns
+    /// before the next one is called.
+    slot_scratch: Option<SlotState>,
     handlers: Vec<ExceptionHandler>,
     finally_stack: Vec<FinallyState>,
     lashlang_execution_occurrences: FxHashMap<String, u64>,
@@ -445,7 +451,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let mut values = self.stack.drain(start..).collect::<Vec<_>>();
                 let function = values.remove(0);
                 let active = self.begin_lashlang_execution(self.current_instruction_ip());
-                match self.begin_function_call(function, values, ReturnTarget::Direct) {
+                match self.begin_function_call(
+                    function,
+                    CallArguments::Owned(values),
+                    ReturnTarget::Direct,
+                ) {
                     Ok(()) => {
                         if let Some(active) = &active {
                             self.complete_lashlang_execution(active);
