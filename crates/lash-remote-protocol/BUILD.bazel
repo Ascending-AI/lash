@@ -22,6 +22,7 @@ lash_rust_library(
         "core-conversions",
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-remote-protocol",
     package_name = "lash-internal-remote-protocol",

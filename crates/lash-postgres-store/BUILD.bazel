@@ -107,6 +107,7 @@ lash_rust_integration_test(
         "perf-witness",
         "testing",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
     extra_compile_data = [],
     library = ":lash-postgres-store",
     library_crate_name = "lash_postgres_store",
@@ -136,6 +137,7 @@ lash_rust_integration_test(
         "perf-witness",
         "testing",
     ],
+    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
     extra_compile_data = [
         "//crates/lash-core:queued_claim_atomicity",
     ],

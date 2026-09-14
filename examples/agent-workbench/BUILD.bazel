@@ -21,6 +21,7 @@ lash_rust_binary(
         "default",
         "provider-wire-fixtures",
     ],
+    exec_properties = {"cpu_count": "1", "memory_kb": "3145728"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -48,6 +49,7 @@ lash_rust_unit_test(
         "default",
         "provider-wire-fixtures",
     ],
+    exec_properties = {"cpu_count": "1", "memory_kb": "3670016"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],

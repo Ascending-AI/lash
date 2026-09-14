@@ -130,6 +130,7 @@ lash_rust_integration_test(
     crate_name = "workflow_graph",
     crate_root = "tests/workflow_graph.rs",
     declared_features = [],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     library = ":workflow-graph-roundtrip",
     library_crate_name = "workflow_graph_roundtrip",

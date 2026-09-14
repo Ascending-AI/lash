@@ -6,6 +6,14 @@ load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 
+# Every remote action carries a `memory_kb` and a `cpu_count` request. The
+# repository default in `.bazelrc` is the small action; a target that needs more
+# says so here, through `exec_properties` that
+# `tools/bazel/generate_build_files.py` writes into the generated BUILD file
+# from the measured table in `tools/bazel/action-sizes.json`. Per-target
+# properties merge with the remote defaults, and both keys are always emitted
+# together so a request is legible without reading the defaults.
+
 _IGNORED_FILES = [
     "BUILD",
     "BUILD.bazel",
@@ -92,7 +100,12 @@ def lash_rust_build_script(
         manifest_dir,
         package_name,
         version,
-        data = []):
+        data = [],
+        exec_properties = {}):
+    # `cargo_build_script` forwards its kwargs to the rule that RUNS the script,
+    # not to the `rust_binary` that compiles it, so a `build_script` row sizes
+    # the script's execution action. Compiling a `build.rs` has never been the
+    # expensive half, and the measured table carries no build-script row today.
     cargo_build_script(
         name = name,
         aliases = _aliases_for(all_crate_deps(build = True)),
@@ -102,6 +115,7 @@ def lash_rust_build_script(
         data = data,
         deps = all_crate_deps(build = True),
         edition = "2024",
+        exec_properties = exec_properties,
         pkg_name = package_name,
         rustc_env = _cargo_env(package_name, manifest_dir, version),
         rustc_flags = _cargo_check_cfg(declared_features),
@@ -119,6 +133,7 @@ def lash_rust_library(
         package_name,
         version,
         build_script = None,
+        exec_properties = {},
         extra_compile_data = []):
     deps = all_crate_deps(normal = True)
     if build_script:
@@ -133,6 +148,7 @@ def lash_rust_library(
         data = _all_package_files() + extra_compile_data,
         deps = deps,
         edition = "2024",
+        exec_properties = exec_properties,
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version),
         rustc_flags = _cargo_check_cfg(declared_features),
@@ -153,6 +169,7 @@ def lash_rust_binary(
         manifest_dir,
         package_name,
         version,
+        exec_properties = {},
         include_dev_deps = False,
         library = None,
         library_crate_name = None,
@@ -172,6 +189,7 @@ def lash_rust_binary(
         data = _all_package_files() + extra_compile_data,
         deps = deps,
         edition = "2024",
+        exec_properties = exec_properties,
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version, rustc_env),
         rustc_flags = _cargo_check_cfg(declared_features),
@@ -200,6 +218,7 @@ def lash_rust_unit_test(
         version,
         args = [],
         build_script = None,
+        exec_properties = {},
         extra_compile_data = [],
         extra_data = [],
         library = None,
@@ -225,6 +244,7 @@ def lash_rust_unit_test(
         deps = deps,
         edition = "2024",
         env = _test_env(test_env),
+        exec_properties = exec_properties,
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version),
         rustc_flags = _cargo_check_cfg(declared_features),
@@ -248,6 +268,7 @@ def lash_rust_integration_test(
         package_name,
         version,
         args = [],
+        exec_properties = {},
         library = None,
         library_crate_name = None,
         extra_compile_data = [],
@@ -271,6 +292,7 @@ def lash_rust_integration_test(
         deps = deps,
         edition = "2024",
         env = _test_env(test_env),
+        exec_properties = exec_properties,
         lint_config = lint_config(),
         rustc_env = _cargo_env(package_name, manifest_dir, version, rustc_env),
         rustc_flags = _cargo_check_cfg(declared_features),

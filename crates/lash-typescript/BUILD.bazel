@@ -54,6 +54,7 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
     extra_compile_data = [
         "//examples:codemode_parity_cells",
     ],

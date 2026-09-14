@@ -41,6 +41,7 @@ lash_rust_unit_test(
         "default",
         "lashlang",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-llm-tools",
     package_name = "lash-internal-llm-tools",
