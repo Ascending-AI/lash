@@ -380,6 +380,21 @@ impl ProcessCapability {
         }
     }
 
+    /// Reads the attempt bound already recorded for a process id, if a row exists.
+    pub(in crate::runtime::session_manager) async fn recorded_max_attempts(
+        &self,
+        current: &CurrentSessionCapability,
+        process_id: &ProcessId,
+    ) -> Result<Option<u32>, crate::PluginError> {
+        let Some(registry) = current.host.process_registry() else {
+            return Ok(None);
+        };
+        Ok(registry
+            .get_process(process_id)
+            .await?
+            .and_then(|record| record.max_attempts))
+    }
+
     pub(in crate::runtime::session_manager) async fn start_process(
         &self,
         current: &CurrentSessionCapability,

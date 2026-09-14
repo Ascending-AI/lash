@@ -67,6 +67,24 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessHandleView, PluginError>;
 
+    /// Reads the attempt bound already recorded for `process_id`, if a row exists.
+    ///
+    /// The registry row is the durable truth for a child's resolved
+    /// `max_attempts`: a redrive that re-registers the same deterministic child
+    /// id must reuse the recorded bound rather than the caller's current host
+    /// default, or the registration fingerprint conflicts forever. Returns
+    /// `None` when no row exists yet, which is the only case in which the
+    /// caller's own resolution decides. Services without a registry read keep
+    /// the default and behave as they did before the bound existed.
+    async fn recorded_max_attempts(
+        &self,
+        session_id: &SessionId,
+        process_id: &ProcessId,
+    ) -> Result<Option<u32>, PluginError> {
+        let _ = (session_id, process_id);
+        Ok(None)
+    }
+
     async fn start(
         &self,
         session_id: &SessionId,

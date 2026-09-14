@@ -481,9 +481,12 @@ pub struct RlmExecutionState {
     /// Trigger-definition outcomes remain separate from tool grants so a
     /// mixed link cannot execute one provider family through the other.
     pub(super) deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
-    /// Attempt bound stamped onto children this execution's code starts, read
-    /// once from the host config and then replayed from the durable snapshot so
-    /// a redrive across a config change re-registers the recorded value.
+    /// Attempt bound stamped onto children this execution's code starts. Pinned
+    /// from the host config by the first cell that actually starts a child and
+    /// then replayed from the durable snapshot, so a later cell keeps the
+    /// recorded value. It is an optimisation, not the source of truth: an
+    /// already-registered child re-registers with the bound on its registry
+    /// row, which is what keeps a redrive's fingerprint stable.
     child_max_attempts: Option<std::num::NonZeroU32>,
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_leaf_keys: BTreeSet<String>,
@@ -527,24 +530,26 @@ impl RlmExecutionState {
         }
     }
 
-    /// Resolve the attempt bound this execution stamps onto children its code
-    /// starts, pinning the host default the first time a cell asks for it.
+    /// The attempt bound an earlier cell of this execution pinned, if any.
+    pub(super) fn child_max_attempts(&self) -> Option<std::num::NonZeroU32> {
+        self.child_max_attempts
+    }
+
+    /// Records the bound a cell pinned while it ran.
     ///
-    /// Once pinned the value rides the durable snapshot, so a later cell, a
-    /// resumed execution, or a redrive after the host default changed all
-    /// register children with the bound the first start recorded and the
-    /// registration fingerprint therefore stays stable.
-    pub(super) fn pin_child_max_attempts(
-        &mut self,
-        host_default: std::num::NonZeroU32,
-    ) -> std::num::NonZeroU32 {
-        match self.child_max_attempts {
-            Some(pinned) => pinned,
-            None => {
-                self.child_max_attempts = Some(host_default);
-                self.root_dirty = true;
-                host_default
-            }
+    /// A cell that started no child pins nothing and leaves the snapshot root
+    /// clean; the first cell that does start one dirties the root exactly once
+    /// so the value rides the durable snapshot for later cells. The pin is
+    /// write-once: an already-pinned execution keeps its value even if a cell
+    /// reports a different one, so a host default that moved mid-execution
+    /// cannot rewrite the bound a sibling child already registered with.
+    pub(super) fn adopt_child_max_attempts(&mut self, pinned: Option<std::num::NonZeroU32>) {
+        if self.child_max_attempts.is_some() {
+            return;
+        }
+        if let Some(pinned) = pinned {
+            self.child_max_attempts = Some(pinned);
+            self.root_dirty = true;
         }
     }
 

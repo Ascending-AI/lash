@@ -38,9 +38,12 @@ pub(super) struct HostBridge<'run> {
     host_environment: lashlang::LashlangHostEnvironment,
     deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
-    /// Attempt bound stamped onto children this execution starts, pinned in the
-    /// durable execution state before the cell ran.
-    child_max_attempts: std::num::NonZeroU32,
+    /// Attempt bound stamped onto children this execution starts. `None` until
+    /// this execution actually starts a child: an execution that never starts
+    /// one pins nothing and leaves the durable snapshot root alone.
+    child_max_attempts: Mutex<Option<std::num::NonZeroU32>>,
+    /// Host default consulted only when nothing is pinned yet.
+    child_max_attempts_default: std::num::NonZeroU32,
 }
 
 pub(super) struct HostBridgeConfig<'run> {
@@ -50,7 +53,10 @@ pub(super) struct HostBridgeConfig<'run> {
     pub host_environment: lashlang::LashlangHostEnvironment,
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     pub artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
-    pub child_max_attempts: std::num::NonZeroU32,
+    /// Bound already pinned by an earlier cell of this execution, if any.
+    pub child_max_attempts: Option<std::num::NonZeroU32>,
+    /// Host default this cell would pin if it is the first to start a child.
+    pub child_max_attempts_default: std::num::NonZeroU32,
 }
 
 type HostAbilityFuture<'a> =
@@ -70,8 +76,21 @@ impl<'run> HostBridge<'run> {
             host_environment: config.host_environment,
             deferred_execution_grants: config.deferred_execution_grants,
             artifact_store: config.artifact_store,
-            child_max_attempts: config.child_max_attempts,
+            child_max_attempts: Mutex::new(config.child_max_attempts),
+            child_max_attempts_default: config.child_max_attempts_default,
         }
+    }
+
+    /// Resolves the attempt bound for a child this cell is about to start,
+    /// pinning the host default on the first such start.
+    fn pin_child_max_attempts(&self) -> std::num::NonZeroU32 {
+        let mut guard = self.child_max_attempts.lock_recover();
+        *guard.get_or_insert(self.child_max_attempts_default)
+    }
+
+    /// The bound this execution has pinned, if it started a child at all.
+    pub(super) fn pinned_child_max_attempts(&self) -> Option<std::num::NonZeroU32> {
+        *self.child_max_attempts.lock_recover()
     }
 
     fn next_index(&self) -> usize {
@@ -584,7 +603,7 @@ impl HostBridge<'_> {
                     lash_core::OnParentEnd::Abandon,
                 ),
                 lash_core::RecoveryContract::Rerunnable,
-                self.child_max_attempts,
+                self.pin_child_max_attempts(),
             )
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?

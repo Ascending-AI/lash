@@ -1273,19 +1273,24 @@ fn lashlang_dialect_pins_snapshot_engine_id() {
 }
 
 #[test]
-fn the_first_cell_pins_the_child_attempt_bound_and_later_host_changes_do_not_move_it() {
+fn the_first_child_start_pins_the_attempt_bound_and_later_host_changes_do_not_move_it() {
     let mut state = RlmExecutionState::for_engine("lashlang");
-    assert_eq!(state.child_max_attempts, None);
+    assert_eq!(state.child_max_attempts(), None);
+
+    // A cell that starts no child pins nothing, so the snapshot root stays as
+    // clean as it was before the cell ran.
+    state.adopt_child_max_attempts(None);
+    assert_eq!(state.child_max_attempts(), None);
 
     let first = std::num::NonZeroU32::new(5).expect("non-zero host default");
-    assert_eq!(state.pin_child_max_attempts(first), first);
-    assert_eq!(state.child_max_attempts, Some(first));
+    state.adopt_child_max_attempts(Some(first));
+    assert_eq!(state.child_max_attempts(), Some(first));
 
-    // A later turn on a reconfigured host re-registers the same children, so
-    // it must carry the bound already hashed into their fingerprints.
+    // A later cell on a reconfigured host reports the bound it resolved from
+    // the already-pinned value, and a stale higher default never displaces it.
     let changed = std::num::NonZeroU32::new(11).expect("non-zero changed default");
-    assert_eq!(state.pin_child_max_attempts(changed), first);
-    assert_eq!(state.child_max_attempts, Some(first));
+    state.adopt_child_max_attempts(Some(changed));
+    assert_eq!(state.child_max_attempts(), Some(first));
 
     // The pin survives a snapshot round trip, which is what carries it across
     // the process boundary a redrive crosses.
@@ -1298,6 +1303,5 @@ fn the_first_cell_pins_the_child_attempt_bound_and_later_host_changes_do_not_mov
     restored
         .restore_execution_state(&snapshot)
         .expect("restore the pinned snapshot");
-    assert_eq!(restored.child_max_attempts, Some(first));
-    assert_eq!(restored.pin_child_max_attempts(changed), first);
+    assert_eq!(restored.child_max_attempts(), Some(first));
 }

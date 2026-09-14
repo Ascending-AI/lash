@@ -1373,6 +1373,18 @@ impl crate::ProcessService for EffectBackedProcessService {
         self.start_from_request(session_id, request, scope).await
     }
 
+    async fn recorded_max_attempts(
+        &self,
+        _session_id: &SessionId,
+        process_id: &ProcessId,
+    ) -> Result<Option<u32>, crate::PluginError> {
+        Ok(self
+            .registry
+            .get_process(process_id)
+            .await?
+            .and_then(|record| record.max_attempts))
+    }
+
     async fn start(
         &self,
         _session_id: &SessionId,

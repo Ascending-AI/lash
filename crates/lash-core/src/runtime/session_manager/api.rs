@@ -264,6 +264,18 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         Ok(crate::ProcessHandleView::from_record(record))
     }
 
+    async fn recorded_max_attempts(
+        &self,
+        session_id: &SessionId,
+        process_id: &crate::ProcessId,
+    ) -> Result<Option<u32>, crate::PluginError> {
+        let _ = session_id;
+        self.services
+            .processes
+            .recorded_max_attempts(&self.services.current, process_id)
+            .await
+    }
+
     async fn start(
         &self,
         session_id: &SessionId,

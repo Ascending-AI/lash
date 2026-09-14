@@ -415,6 +415,7 @@ macro_rules! process_registry_tests {
                 (session_delete_preserves_process_bytes, "session-delete-bytes"),
                 (refolded_process_record_matches_hot_projection, "hot-refold"),
                 (process_attempt_budget_is_typed, "attempt-budget"),
+                (redriven_child_reregisters_with_the_recorded_attempt_bound, "redriven-attempt-bound"),
                 (tombstones_make_pruned_processes_distinguishable, "tombstones"),
                 (reused_process_ids_refuse_superseded_incarnations, "incarnation-reuse"),
                 (watched_process_registry_reused_process_ids_refuse_superseded_incarnations, "watched-incarnation-reuse"),
