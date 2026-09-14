@@ -63,6 +63,10 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  # The metrics observation hooks are gated on
+  # `all(any(test, feature = "testing"), feature = "otel-trace")`, so the
+  # normal-context TRUE witness needs both features on one library artifact.
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--lib", "--no-default-features", "--features", "otel-trace,testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-ids", "--tests", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-ids", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-ids", "--tests", "--no-default-features", "--features", "testing", "--locked"],
