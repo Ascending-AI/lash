@@ -109,6 +109,7 @@ agent-service-restate-e2e:
   endpoint_url="${AGENT_SERVICE_E2E_ENDPOINT_URL:-http://127.0.0.1:$((LASH_E2E_PORT_BASE + 23))}"
   admin_url="${RESTATE_ADMIN_URL:-http://127.0.0.1:$admin_port}"
   ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$ingress_port}"
+  run_token="$(date +%s)-$$"
 
   cleanup() {
     docker rm -f "$container" >/dev/null 2>&1 || true
@@ -142,8 +143,16 @@ agent-service-restate-e2e:
     sleep 1
   done
 
+  # The Restate durability path refuses to run without a trust-domain id, and
+  # the effect-group workflow reads it per request: without it the handler
+  # answers 500 `RESTATE_AUTHORITY_ID is required`. The id is fresh per run
+  # because the Restate container above is created and removed per run, so
+  # there is no durable state from a previous run for a stable id to keep
+  # continuity with; it stays one value for the whole run, which is what the
+  # host and the durable controller have to agree on.
   RESTATE_INGRESS_URL="$ingress_url" \
   RESTATE_ADMIN_URL="$admin_url" \
+  RESTATE_AUTHORITY_ID="${RESTATE_AUTHORITY_ID:-agent-service-e2e:${LASH_GATE_WORKTREE_SLUG}:${run_token}}" \
   AGENT_SERVICE_E2E_ENDPOINT_BIND="$endpoint_bind" \
   AGENT_SERVICE_E2E_ENDPOINT_URL="$endpoint_url" \
   cargo test -p agent-service --features restate \
