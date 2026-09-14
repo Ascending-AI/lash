@@ -51,6 +51,23 @@ def _cargo_check_cfg(declared_features):
         "--check-cfg=cfg(feature,values({}))".format(feature_values),
     ]
 
+def _sharding(shard_count):
+    """Splits one libtest binary across `shard_count` parallel test actions.
+
+    `rust_test`'s sharding wrapper enumerates the binary with `--list`, sorts
+    the names and assigns each to a shard by a stable name hash, so the shards
+    execute disjoint subsets whose union is every case the unsharded binary
+    runs. It is opt-in because each shard pays its own `--list` execution and
+    runfiles tree; only a binary whose wall time dominates a partition earns
+    one.
+    """
+    if shard_count <= 0:
+        return {}
+    return {
+        "experimental_enable_sharding": True,
+        "shard_count": shard_count,
+    }
+
 def _test_env(extra):
     # Insta otherwise shells out to Cargo to discover the workspace and then
     # resolves snapshots from the package path twice inside Bazel runfiles.
@@ -187,6 +204,7 @@ def lash_rust_unit_test(
         extra_data = [],
         library = None,
         library_crate_name = None,
+        shard_count = 0,
         test_env = {},
         tags = [],
         timeout = None):
@@ -217,6 +235,7 @@ def lash_rust_unit_test(
         tags = tags,
         timeout = timeout,
         version = version,
+        **_sharding(shard_count)
     )
 
 def lash_rust_integration_test(
@@ -233,6 +252,7 @@ def lash_rust_integration_test(
         extra_compile_data = [],
         extra_data = [],
         rustc_env = {},
+        shard_count = 0,
         test_env = {},
         tags = []):
     deps = all_crate_deps(normal = True, normal_dev = True)
@@ -258,4 +278,5 @@ def lash_rust_integration_test(
         ),
         tags = tags,
         version = version,
+        **_sharding(shard_count)
     )

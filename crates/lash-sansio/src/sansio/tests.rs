@@ -1218,7 +1218,7 @@ fn zero_output_limit_with_a_full_prompt_refines_to_context_overflow() {
     assert!(effects.iter().any(|effect| matches!(
         effect,
         Effect::Emit(SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Stopped(TurnStop::ProviderError)
+            outcome: TurnOutcome::Stopped(TurnStop::ContextOverflow)
         })
     )));
 }
@@ -1278,8 +1278,11 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
     );
 }
 
+/// FIG-1272: a mid-turn context overflow stops as its own outcome, so a host
+/// can tell it apart from an auth failure or a 500 and compact instead of
+/// restarting. On the pre-FIG-1272 mapping this asserted `ProviderError`.
 #[test]
-fn context_overflow_response_stops_as_provider_error() {
+fn context_overflow_response_stops_as_its_own_outcome() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
     let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
@@ -1299,12 +1302,18 @@ fn context_overflow_response_stops_as_provider_error() {
 
     let effects = drain_effects(&mut machine);
     assert!(find_done(&effects).is_some());
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Emit(SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Stopped(TurnStop::ProviderError)
+    let outcomes = effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+            _ => None,
         })
-    )));
+        .collect::<Vec<_>>();
+    assert_eq!(
+        outcomes,
+        vec![&TurnOutcome::Stopped(TurnStop::ContextOverflow)],
+        "overflow must not collapse into ProviderError"
+    );
     assert!(effects.iter().any(|effect| matches!(
         effect,
         Effect::Emit(SessionStreamEvent::Error {
@@ -1312,6 +1321,136 @@ fn context_overflow_response_stops_as_provider_error() {
             ..
         }) if envelope.terminal_reason == Some(LlmTerminalReason::ContextOverflow)
     )));
+}
+
+/// The classifier's own path. `is_context_overflow_text` and the OpenAI
+/// `context_length_exceeded` code both classify a *failed* call, which reaches
+/// the machine as `Err(LlmCallError)` and never touches the Ok-response
+/// refinement. Before FIG-1272 that path finished `ProviderError`
+/// unconditionally, so a real provider's overflow stayed indistinguishable no
+/// matter how well it had been classified.
+#[test]
+fn context_overflow_llm_error_stops_as_its_own_outcome() {
+    let config = test_config(Arc::new(ProseDriver));
+    let msgs = vec![user_message("hello")];
+    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Err(LlmCallError {
+            message: "This model's maximum context length is 128000 tokens".to_string(),
+            retryable: false,
+            kind: crate::llm::types::ProviderFailureKind::Validation,
+            raw: None,
+            code: Some("context_length_exceeded".to_string()),
+            terminal_reason: LlmTerminalReason::ContextOverflow,
+            request_body: None,
+            partial_response: None,
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(find_done(&effects).is_some());
+    let outcomes = effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        outcomes,
+        vec![&TurnOutcome::Stopped(TurnStop::ContextOverflow)],
+        "a classified overflow failure must not collapse into ProviderError"
+    );
+}
+
+/// The neighbouring failure reasons on the same error path did not move: only
+/// `ContextOverflow` is singled out, everything else still stops as
+/// `ProviderError`.
+#[test]
+fn non_overflow_llm_errors_still_stop_as_provider_error() {
+    for reason in [
+        LlmTerminalReason::ProviderError,
+        LlmTerminalReason::ContentFilter,
+        LlmTerminalReason::Unknown,
+        LlmTerminalReason::OutputLimit,
+    ] {
+        let config = test_config(Arc::new(ProseDriver));
+        let msgs = vec![user_message("hello")];
+        let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+
+        let effects = drain_effects(&mut machine);
+        let llm_id = *find_llm_call(&effects).expect("llm call").0;
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Err(LlmCallError {
+                message: "provider said no".to_string(),
+                retryable: false,
+                kind: crate::llm::types::ProviderFailureKind::Unknown,
+                raw: None,
+                code: None,
+                terminal_reason: reason,
+                request_body: None,
+                partial_response: None,
+            }),
+        });
+
+        let effects = drain_effects(&mut machine);
+        let outcomes = effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            outcomes,
+            vec![&TurnOutcome::Stopped(TurnStop::ProviderError)],
+            "{reason:?} must still stop as ProviderError"
+        );
+    }
+}
+
+/// The neighbouring terminal reasons keep their existing mapping: only
+/// overflow moved (FIG-1272).
+#[test]
+fn content_filter_and_provider_error_still_stop_as_provider_error() {
+    for reason in [
+        LlmTerminalReason::ContentFilter,
+        LlmTerminalReason::ProviderError,
+    ] {
+        let config = test_config(Arc::new(ProseDriver));
+        let msgs = vec![user_message("hello")];
+        let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+
+        let effects = drain_effects(&mut machine);
+        let llm_id = *find_llm_call(&effects).expect("llm call").0;
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(LlmResponse {
+                terminal_reason: reason,
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        });
+
+        let effects = drain_effects(&mut machine);
+        assert!(
+            effects.iter().any(|effect| matches!(
+                effect,
+                Effect::Emit(SessionStreamEvent::TurnOutcome {
+                    outcome: TurnOutcome::Stopped(TurnStop::ProviderError)
+                })
+            )),
+            "{reason:?} must still stop as ProviderError"
+        );
+    }
 }
 
 #[test]

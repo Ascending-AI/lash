@@ -978,6 +978,7 @@ fn render_outcome_for_output(outcome: &TurnOutcome) -> Option<String> {
             | TurnStop::MaxTurns
             | TurnStop::ToolFailure
             | TurnStop::ProviderError
+            | TurnStop::ContextOverflow
             | TurnStop::PluginAbort
             | TurnStop::RuntimeError,
         ) => None,
