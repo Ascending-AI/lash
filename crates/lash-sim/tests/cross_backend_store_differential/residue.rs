@@ -391,11 +391,17 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
     ("process_events", PROCESS_LIFECYCLE),
     ("process_leases", PROCESS_LIFECYCLE),
     ("process_observers", PROCESS_LIFECYCLE),
-    ("process_parent_end_plans", PROCESS_LIFECYCLE),
     ("process_segment_handovers", PROCESS_LIFECYCLE),
     ("process_tombstones", PROCESS_LIFECYCLE),
     ("process_wake_deliveries", PROCESS_LIFECYCLE),
     ("process_artifact_cleanup", PROCESS_LIFECYCLE),
+    (
+        "parent_end_plans",
+        "process-lifecycle surface: every write goes through the process registry's parent-end \
+         path, which this fixture does not wire, and the row is keyed by the ended parent scope \
+         rather than by a session, so a session-scoped digest query could not read it either; \
+         owned by the process conformance suites",
+    ),
     (
         "wake_allocation_floors",
         "process-wake surface, and on SQLite it lives in the factory-wide `durable-core.db` \
