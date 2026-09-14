@@ -1,8 +1,8 @@
 mod bench_support;
 
 use bench_support::{
-    BenchHost, Scenario, benchmark_host_environment, benchmark_program, linked_benchmark_program,
-    parse_benchmark_program, projected_bindings, seeded_state_for,
+    BenchHost, Scenario, benchmark_host_environment, benchmark_main, benchmark_program,
+    linked_benchmark_program, projected_bindings, seeded_state_for,
 };
 use lashlang::{
     CompiledProcessCache, CompiledProgramCache, ExecutionEnvironment, ExecutionOutcome,
@@ -139,7 +139,7 @@ fn main() {
 }
 
 fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterations: usize) {
-    let source = benchmark_program(scenario);
+    let cache_key = scenario.to_string();
     let projected = projected_bindings(scenario);
     let host = BenchHost;
     let mut scratch = ExecutionScratch::new();
@@ -156,8 +156,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
                 let mut scratch = ExecutionScratch::new();
-                let linked =
-                    linked_benchmark_program(scenario, std::hint::black_box(source.as_str()));
+                let linked = linked_benchmark_program(std::hint::black_box(scenario));
                 let compiled = compile_linked(&linked);
                 let outcome =
                     execute_benchmark(rt, &compiled, &mut state, &host, &mut scratch, &projected);
@@ -171,8 +170,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
                 let mut scratch = ExecutionScratch::new();
-                let linked =
-                    linked_benchmark_program(scenario, std::hint::black_box(source.as_str()));
+                let linked = linked_benchmark_program(std::hint::black_box(scenario));
                 let compiled = compile_linked(&linked);
                 let outcome =
                     execute_benchmark(rt, &compiled, &mut state, &host, &mut scratch, &projected);
@@ -181,13 +179,12 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
         }
         Mode::LinkArtifact => {
             for _ in 0..iterations {
-                let linked =
-                    linked_benchmark_program(scenario, std::hint::black_box(source.as_str()));
+                let linked = linked_benchmark_program(std::hint::black_box(scenario));
                 std::hint::black_box((&linked.module_ref, &linked.host_requirements_ref));
             }
         }
         Mode::CompiledExecute => {
-            let linked = linked_benchmark_program(scenario, source.as_str());
+            let linked = linked_benchmark_program(scenario);
             let compiled = compile_linked(&linked);
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
@@ -197,7 +194,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             }
         }
         Mode::Snapshot => {
-            let linked = linked_benchmark_program(scenario, source.as_str());
+            let linked = linked_benchmark_program(scenario);
             let compiled = compile_linked(&linked);
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
@@ -211,7 +208,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             }
         }
         Mode::ArtifactRoundtrip => {
-            let linked = linked_benchmark_program(scenario, source.as_str());
+            let linked = linked_benchmark_program(scenario);
             artifact_bytes = Some(
                 linked
                     .artifact
@@ -232,7 +229,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             }
         }
         Mode::CompiledProcessCache => {
-            let linked = linked_benchmark_program(scenario, source.as_str());
+            let linked = linked_benchmark_program(scenario);
             let process_ref = linked
                 .artifact
                 .process_ref("echo")
@@ -258,10 +255,10 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             // `cached_compiled_program` probe measures.
             let mut cache = CompiledProgramCache::new();
             for _ in 0..iterations {
-                let key = std::hint::black_box(source.as_str());
+                let key = std::hint::black_box(cache_key.as_str());
                 let compiled = match cache.cached_compiled_program(key) {
                     Some(compiled) => compiled,
-                    None => cache.get_or_compile_ast(key, parse_benchmark_program(scenario, key)),
+                    None => cache.get_or_compile_ast(key, benchmark_program(scenario)),
                 };
                 std::hint::black_box(compiled.compile_stats());
             }
@@ -271,11 +268,11 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             let mut cache = LinkedProgramCache::new();
             let surface = benchmark_host_environment();
             for _ in 0..iterations {
-                let key = std::hint::black_box(source.as_str());
+                let key = std::hint::black_box(cache_key.as_str());
                 let compiled = match cache.cached_linked_program(key, surface) {
                     Some(compiled) => compiled,
                     None => cache
-                        .get_or_compile_ast(key, parse_benchmark_program(scenario, key), surface)
+                        .get_or_compile_ast(key, benchmark_program(scenario), surface)
                         .expect("linked program cache compile should succeed"),
                 };
                 std::hint::black_box(compiled.compiled_program().compile_stats());
@@ -283,12 +280,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             linked_cache_stats = Some(cache.stats());
         }
         Mode::PhaseBreakdown => {
-            phase_breakdown = Some(run_phase_breakdown(
-                rt,
-                scenario,
-                source.as_str(),
-                iterations,
-            ));
+            phase_breakdown = Some(run_phase_breakdown(rt, scenario, iterations));
         }
     }
     let elapsed = started.elapsed();
@@ -319,7 +311,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
     println!("mode: {mode:?}");
     println!("scenario: {scenario}");
     println!("iterations: {iterations}");
-    println!("program_bytes: {}", source.len());
+    println!("program_expressions: {}", benchmark_main(scenario).len());
     if let Some(bytes) = artifact_bytes {
         println!("artifact_bytes: {bytes}");
     }
@@ -399,10 +391,9 @@ impl PhaseBreakdownMetric {
 fn run_phase_breakdown(
     rt: &tokio::runtime::Runtime,
     scenario: Scenario,
-    source: &str,
     iterations: usize,
 ) -> Vec<PhaseBreakdownMetric> {
-    let parsed = parse_benchmark_program(scenario, source);
+    let parsed = benchmark_program(scenario);
     let linked = LinkedModule::link(parsed.clone(), benchmark_host_environment())
         .expect("benchmark program should link");
     let compiled = compile_linked(&linked);
@@ -410,9 +401,9 @@ fn run_phase_breakdown(
     let host = BenchHost;
     let mut scratch = ExecutionScratch::new();
 
-    let parse = measure_phase("parse", iterations, || {
-        let parsed = parse_benchmark_program(scenario, std::hint::black_box(source));
-        std::hint::black_box(parsed);
+    let build = measure_phase("build", iterations, || {
+        let built = benchmark_program(std::hint::black_box(scenario));
+        std::hint::black_box(built);
     });
     let link = measure_phase("link", iterations, || {
         let linked = LinkedModule::link(
@@ -432,7 +423,7 @@ fn run_phase_breakdown(
         expect_finished(outcome);
     });
 
-    vec![parse, link, compile, execute]
+    vec![build, link, compile, execute]
 }
 
 fn measure_phase(

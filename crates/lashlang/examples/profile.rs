@@ -1,7 +1,7 @@
 mod bench_support;
 
 use bench_support::{
-    BenchHost, Scenario, benchmark_program, linked_benchmark_program, projected_bindings,
+    BenchHost, Scenario, benchmark_main, linked_benchmark_program, projected_bindings,
     seeded_state_for,
 };
 use lashlang::{
@@ -49,12 +49,11 @@ fn main() {
         .expect("tokio runtime");
     let mut profile = ProfileReport::default();
     let mut scratch = ExecutionScratch::new();
-    let mut program_bytes = 0usize;
+    let mut program_expressions = 0usize;
 
     for scenario in &scenarios {
-        let source = benchmark_program(*scenario);
-        program_bytes += source.len();
-        let linked = linked_benchmark_program(*scenario, source.as_str());
+        program_expressions += benchmark_main(*scenario).len();
+        let linked = linked_benchmark_program(*scenario);
         let compiled = compile_linked(&linked);
 
         for _ in 0..iterations {
@@ -89,7 +88,7 @@ fn main() {
         );
     }
     println!("iterations: {iterations}");
-    println!("program_bytes: {program_bytes}");
+    println!("program_expressions: {program_expressions}");
     let compile_stats = profile.compile_stats();
     println!(
         "compile_type_literals_total: {}",

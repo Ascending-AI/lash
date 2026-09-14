@@ -1,10 +1,11 @@
 use compact_str::ToCompactString;
 use lashlang::{
-    AbilityOp, AbilityResult, AssignTarget, BinaryOp, ExecutionHost, ExecutionHostError, Expr,
-    FunctionExpr, HostDescriptor, ImageValue, LASH_PROCESS_NAME_KEY, LashlangAbilities,
-    LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, ListValue, ProcessStartExpr,
+    AbilityOp, AbilityResult, AssignTarget, BinaryOp, Declaration, ExecutionHost,
+    ExecutionHostError, Expr, FunctionExpr, HostDescriptor, ImageValue, LASH_PROCESS_NAME_KEY,
+    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, ListValue,
     Program, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, Record, State, TypeExpr, TypeField, Value, from_json,
+    ProjectedReadResponse, ProjectedValue, Record, State, TypeExpr, TypeField, UnaryOp, Value,
+    from_json,
 };
 use std::fmt;
 use std::sync::{Arc, OnceLock};
@@ -310,6 +311,10 @@ pub fn seeded_state_for(scenario: Scenario) -> State {
     }
     State::from_snapshot(lashlang::Snapshot::new(globals))
 }
+
+pub mod builders;
+
+use self::builders as b;
 
 include!("sections/program.rs");
 include!("sections/environment.rs");

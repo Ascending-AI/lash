@@ -185,25 +185,41 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
   "language_host_environment": {
     "awaited": "awaited",
     "beta_index": 6,
-    "choice": "yes",
     "direct": "sam",
     "first_two": [
       "alpha",
       "beta"
     ],
-    "kept": [
-      "alpha",
-      "gamma"
-    ],
     "line_matches": [
-      "alpha",
-      "beta",
-      "gamma"
+      {
+        "end": 1,
+        "line": 1,
+        "match": "a",
+        "start": 0,
+        "text": "alpha"
+      },
+      {
+        "end": 4,
+        "line": 2,
+        "match": "a",
+        "start": 3,
+        "text": "beta"
+      },
+      {
+        "end": 2,
+        "line": 3,
+        "match": "a",
+        "start": 1,
+        "text": "gamma"
+      }
     ],
     "lookup": "alpha,beta,gamma",
     "positional": [
       "left:alpha",
-      "beta",
+      {
+        "ok": true,
+        "value": "beta"
+      },
       3
     ],
     "stringified": "{\"choice\":\"yes\",\"counts\":{\"alpha\":1,\"beta\":1,\"delta\":1,\"gamma\":1},\"kept\":[\"alpha\",\"gamma\"],\"maybe\":null,\"tags\":[\"alpha\",\"beta\",\"gamma\",\"delta\"],\"user\":\"sam\"}",
@@ -308,7 +324,13 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
     "body_head": "l",
     "body_match_index": 5,
     "body_matches": [
-      "lazy markdown body"
+      {
+        "end": 13,
+        "line": 1,
+        "match": "markdown",
+        "start": 5,
+        "text": "lazy markdown body"
+      }
     ],
     "body_text": "lazy markdown body",
     "body_truthy": true,
@@ -319,14 +341,20 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
     "history_len": 3,
     "second_content": "beta response",
     "second_matches": [
-      "beta response"
+      {
+        "end": 13,
+        "line": 1,
+        "match": "response",
+        "start": 5,
+        "text": "beta response"
+      }
     ]
   },
   "snapshot_projected_state": {
     "count": 8,
     "head": "projected body s",
     "id": "snapshot-mixed",
-    "materialized_len": 49,
+    "materialized_len": 24,
     "nested_head": "Nested Projection",
     "normal_title": "Snapshot Rules",
     "tags": "snapshot,projected,mixed"
@@ -334,7 +362,7 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
   "syntax_text_host_environment": {
     "patch_head": "*** Begin Patch",
     "pieces": [
-      110,
+      109,
       true,
       true,
       true,
@@ -367,7 +395,9 @@ expression: "serde_json::to_string_pretty(&outputs).expect(\"benchmark outputs s
   },
   "wrapped_error_paths": {
     "boom_error": true,
+    "boom_ok": false,
     "missing_error": true,
+    "missing_ok": false,
     "ok_value": "still-running",
     "probe_done": true,
     "probe_exit": 1
