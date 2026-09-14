@@ -1,3 +1,8 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
+
 //! The durable-wait arming a parked `processes.await` rides on.
 //!
 //! One responsibility: hold the wait for a process terminal *outside* the

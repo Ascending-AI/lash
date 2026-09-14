@@ -244,3 +244,90 @@ fn declaring_tools_type_their_process_arguments_as_processes() {
         );
     }
 }
+
+/// The definition a caller starts is the definition `processes.list` filters
+/// by. The tool puts the definition value verbatim in the engine payload, the
+/// engine's own admission decodes that payload back into the definition
+/// reference it stores on the row, and the same value passed as
+/// `processes.list({ definition })` selects that row. Nothing in this path is
+/// the plugin's own encoding: the value is minted and read by the engine, and
+/// the plugin only carries it.
+#[tokio::test]
+async fn a_started_definition_is_the_definition_processes_list_filters_by() {
+    let component = lashlang::ContentHash::new(
+        "0000000000000000000000000000000000000000000000000000000000000001",
+    );
+    let definition = lashlang::ProcessDefinitionIdentity::new(
+        lashlang::ModuleRef::new(&component),
+        lashlang::HostRequirementsRef::new(&component),
+        lashlang::ProcessRef::new(component.clone(), 0),
+        "review",
+    )
+    .to_process_value();
+
+    let (_, declared) = intents(attempt!(
+        "start_process",
+        serde_json::json!({ "definition": definition, "args": { "topic": "handles" } })
+    ));
+    let [ToolIntent::StartProcess(start)] = declared.as_slice() else {
+        panic!("expected one start declaration, got {declared:?}");
+    };
+    let lash_core::ProcessInput::Engine { kind, payload } = &start.declaration.input else {
+        panic!("a definition start is an engine start");
+    };
+
+    // The owning engine admits its own payload and names the definition itself.
+    let identity = lash_lashlang_runtime::admit_lashlang_process(
+        lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
+        payload,
+        None,
+    )
+    .expect("the lashlang engine admits the payload the tool declared");
+    assert_eq!(kind, lash_lashlang_runtime::LASHLANG_ENGINE_KIND);
+
+    let mut registration = lash_core::ProcessRegistration::new(
+        "process-review",
+        start.declaration.input.clone(),
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+    )
+    .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+        "process-env:fig-3000-declaration-test",
+    )));
+    registration.identity = identity;
+    let record = lash_core::ProcessRecord::from_registration(
+        registration,
+        lash_core::ProcessIncarnation::from_registration_sequence(1),
+    );
+
+    let filter = lash_core::ProcessListFilter::decode(&serde_json::json!({
+        "definition": definition,
+        "status": "any",
+    }))
+    .expect("the definition value is a valid list filter");
+    assert!(
+        filter.matches_record(&record),
+        "the process started from a definition must be the one listing by it returns"
+    );
+
+    let other = lashlang::ProcessDefinitionIdentity::new(
+        lashlang::ModuleRef::new(&component),
+        lashlang::HostRequirementsRef::new(&component),
+        lashlang::ProcessRef::new(component, 1),
+        "summarize",
+    )
+    .to_process_value();
+    let other_filter = lash_core::ProcessListFilter::decode(&serde_json::json!({
+        "definition": other,
+        "status": "any",
+    }))
+    .expect("the definition value is a valid list filter");
+    assert!(
+        !other_filter.matches_record(&record),
+        "a different definition must not select this process"
+    );
+}

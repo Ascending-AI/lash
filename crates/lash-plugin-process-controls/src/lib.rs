@@ -166,7 +166,7 @@ pub(crate) fn done_without_intents(result: ToolOutcome) -> lash_core::ToolAttemp
         ToolOutcome::Done(output) => lash_core::ToolAttemptOutcome::done_without_intents(
             lash_core::ToolOutcomeDone::from_output(*output),
         ),
-        ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(pending),
+        ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(*pending),
     }
 }
 

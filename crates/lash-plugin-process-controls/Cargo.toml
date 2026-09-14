@@ -32,4 +32,6 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
+lash-lashlang-runtime = { workspace = true }
+lashlang = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }

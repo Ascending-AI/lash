@@ -1,4 +1,5 @@
 use super::*;
+use tracing::Instrument as _;
 
 async fn await_process_terminal(
     process_work: &dyn crate::ProcessWorkSubstrate,
@@ -308,29 +309,37 @@ impl ProcessLocalExecution {
                     )
                 })?;
                 let process_work = Arc::clone(&process_work);
-                tokio::spawn(async move {
-                    let resolution =
-                        match await_process_terminal(process_work.as_ref(), &process_ref).await {
-                            Ok(output) => process_terminal_resolution(output),
-                            Err(error) => {
-                                Resolution::Err(crate::runtime::ExternalCompletionError {
-                                    code: "process_terminal_unobservable".to_string(),
-                                    message: error.to_string(),
-                                    raw: None,
-                                })
-                            }
-                        };
-                    if let Err(error) = effect_controller
-                        .resolve_await_event(&key, resolution)
-                        .await
-                    {
-                        tracing::warn!(
-                            process_id = %process_ref.process_id,
-                            key_id = %key.key_id,
-                            "armed process terminal could not resolve its durable wait: {error}"
-                        );
+                #[allow(
+                    clippy::disallowed_methods,
+                    reason = "the lint protects the caller's tracing context, which this task carries explicitly through the `instrument` below"
+                )]
+                tokio::spawn(
+                    async move {
+                        let resolution =
+                            match await_process_terminal(process_work.as_ref(), &process_ref).await
+                            {
+                                Ok(output) => process_terminal_resolution(output),
+                                Err(error) => {
+                                    Resolution::Err(crate::runtime::ExternalCompletionError {
+                                        code: "process_terminal_unobservable".to_string(),
+                                        message: error.to_string(),
+                                        raw: None,
+                                    })
+                                }
+                            };
+                        if let Err(error) = effect_controller
+                            .resolve_await_event(&key, resolution)
+                            .await
+                        {
+                            tracing::warn!(
+                                process_id = %process_ref.process_id,
+                                key_id = %key.key_id,
+                                "armed process terminal could not resolve its durable wait: {error}"
+                            );
+                        }
                     }
-                });
+                    .instrument(tracing::Span::current()),
+                );
                 Ok((
                     ProcessEffectOutcome::AttachTerminal,
                     crate::StoreRealization::Realized,
@@ -513,7 +522,6 @@ mod terminal_wait_tests {
 #[cfg(test)]
 mod attach_terminal_tests {
     use super::*;
-    use crate::ProcessId;
     use crate::{
         ProcessLeases as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
     };
@@ -626,7 +634,7 @@ mod attach_terminal_tests {
         async fn complete(&self, value: serde_json::Value) -> crate::ProcessAwaitOutput {
             let terminal =
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value));
-            let process_id = ProcessId::from(self.process_ref.process_id.clone());
+            let process_id = self.process_ref.process_id.clone();
             let owner = crate::LeaseOwnerIdentity::opaque(
                 "attach-terminal-test-writer",
                 "attach-terminal-test-writer:001",
@@ -725,7 +733,7 @@ mod attach_terminal_tests {
             .await;
         let record = fixture
             .registry
-            .get_process(&ProcessId::from(fixture.process_ref.process_id.clone()))
+            .get_process(&fixture.process_ref.process_id)
             .await
             .expect("read the awaited process")
             .expect("the cancelled wait must not have removed the process");
