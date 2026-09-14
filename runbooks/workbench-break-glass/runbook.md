@@ -25,10 +25,16 @@ scripted evidence. This runbook covers only the operator and browser story.
 3. Use Restate Admin `PATCH /invocations/<id>/kill`, not cooperative cancel. KILL is
    owner destruction, not cancellation evidence, and must never produce a rendered or
    durable `Cancelled` result.
-4. Press Workbench **stop turn** only after Restate reports the invocation non-active.
-   The expected bounded receipt has no terminal and has
-   `terminal_error.code = turn_terminal_await_timeout`; this is a passing break-glass
-   result, not a successful cancellation.
+4. Press the Workbench Stop control only after Restate reports the invocation non-active.
+   The Workbench labels that control **stop after step** (title "stop the running turn")
+   on the `#abort` element; it does not render the string `stop turn`. The expected
+   receipt is HTTP 202 with `accepted: true` and a single cancellation whose `status` is
+   `cancellation_recorded_terminal_pending` and which carries **no** `terminal` and no
+   `terminal_error`: the cancellation is recorded, the terminal never arrives because the
+   owner was destroyed. That pending status is exactly what makes the page render
+   "turn route cleared · terminal outcome unknown"
+   (`examples/agent-workbench/assets/index.html`). This is a passing break-glass result,
+   not a successful cancellation.
 5. Recovery must reuse the original session. Allow up to 90 seconds for lease fencing
    and successor acquisition, but poll throughout—never sleep to decide readiness.
 
@@ -36,20 +42,29 @@ scripted evidence. This runbook covers only the operator and browser story.
 
 - Choose `<port>` and `<fresh-data-dir>`, then boot:
   `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=exec-blocked AGENT_WORKBENCH_DATA_DIR=<fresh-data-dir> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
-- The helper derives `offset=<port>-3030`, Restate ingress port `8080+offset`, and Restate
-  admin port `19070+offset`. Record `ADMIN=http://127.0.0.1:<derived-admin-port>` rather
-  than assuming the default port.
-- UI: session id, composer, running/idle pill, Stop, transcript/code execution.
+- The helper derives `offset=(<port>-3030)*10` — note the factor of ten — then Restate
+  ingress port `8080+offset` and Restate admin port `19070+offset`. For port 3507 that is
+  ingress 12850 and admin 23840, not 8557/19547. Read the ports back from the host's own
+  `agent_workbench.startup` trace record (`restate_ingress_url`,
+  `restate_endpoint_addr`) rather than trusting any arithmetic, and record
+  `ADMIN=http://127.0.0.1:<derived-admin-port>`.
+- UI: session id, composer, running/idle pill, the Stop control (**stop after step**,
+  `#abort`), transcript/code execution.
   Backend: `GET /api/state`, `POST /api/turn`, `POST /api/turn/cancel`. Disk:
   `<fresh-data-dir>/active-turns.json` and `trace.jsonl`.
-- Restate Admin SQL is `POST $ADMIN/query` with JSON `{ "query": "..." }`; KILL is
+- Restate Admin SQL is `POST $ADMIN/query` with JSON `{ "query": "..." }`. Send
+  `accept: application/json`; without it the endpoint answers in Arrow IPC and a JSON
+  decode fails on the first byte. KILL is
   `PATCH $ADMIN/invocations/<invocation-id>/kill` with an empty body.
 - Teardown: `just agent-workbench-down <port>`.
 
 ## Phase 0 — Boot and identify the session
 
-Poll `/healthz`, open the page, and require the startup warning names `exec-blocked` and
-the rendered model id is `dev/failure-paths`. Record the rendered, API, and disk session
+Poll `/healthz`, open the page, and require the host's own evidence that the scenario is
+armed: the process log's `development provider scenario enabled: exec-blocked` line and the
+`agent_workbench.startup` trace record, whose `dev_provider_scenario` is `exec-blocked` and
+whose `model.model` is `dev/failure-paths`. The page itself renders the model selector as
+"provider default" and never prints the model id, so do not gate on the rendered id. Record the rendered, API, and disk session
 ids and require equality. Screenshot `00-break-glass-ready.png`.
 
 ## Phase 1 — Wedge one exact turn
@@ -98,13 +113,14 @@ Screenshot `02-killed-route-still-visible.png`.
 
 ## Phase 3 — Use Stop to prune the dangling route honestly
 
-Press **stop turn** and capture `POST /api/turn/cancel`. The request includes the bounded
-terminal attach, so poll the request itself with a browser timeout of at least 15 seconds.
+Press **stop after step** (`#abort`) and capture `POST /api/turn/cancel`. Keep the browser
+open for at least 15 seconds after the click so the page's own re-render is captured.
 Require exactly one cancellation receipt for the Phase 1 address with:
 
-- `accepted: true` and a gate outcome of `requested` or `already_requested`;
-- `terminal: null`;
-- `terminal_error.code: "turn_terminal_await_timeout"`;
+- HTTP 202 and `accepted: true`, with a gate outcome of `requested` or `already_requested`;
+- `status: "cancellation_recorded_terminal_pending"`;
+- **no** `terminal` and no `terminal_error` key at all — the request is recorded and the
+  terminal never arrives, which is the honest shape after owner destruction;
 - no cancellation evidence anywhere in a terminal, because no terminal exists.
 
 Require the page to render `turn route cleared · terminal outcome unknown`, return idle,
@@ -135,7 +151,7 @@ Restate container are gone.
 | Exact invocation | Restate row key equals active turn id | | `01-restate-invocation.json` |
 | Admin KILL | exact invocation becomes non-active | | `02-killed-invocation.json` |
 | No fabricated cancellation | UI/API/trace never report Cancelled or evidence | | `02-*`, `03-*` |
-| Honest route pruning | null terminal + timeout code; unknown-terminal note; route clears | | `03-pruned-*` |
+| Honest route pruning | `cancellation_recorded_terminal_pending` with no terminal and no terminal_error; unknown-terminal note; route clears | | `03-pruned-*` |
 | Session recovery | same session commits exact second-call response | | `04-same-session-recovered-*` |
 | Store-side negative | companion harness reports `break-glass-negative` passed | | harness log |
 | Teardown | Workbench and derived Restate container gone | | command log |
