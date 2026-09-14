@@ -149,12 +149,7 @@ fn is_pre_cutover_trigger_list_envelope(value: &Value) -> bool {
             .is_some_and(|filter| filter.contains_key("session_id"))
 }
 
-/// Compact, content-free mismatch evidence retained on the controller error.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuntimeEffectReplayMismatchReport {
-    pub divergent_path_count: usize,
-    pub first_divergent_paths: Vec<String>,
-}
+
 
 /// Trace capability dedicated to replay-divergence diagnostics.
 ///

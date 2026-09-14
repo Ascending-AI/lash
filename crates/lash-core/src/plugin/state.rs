@@ -9,19 +9,9 @@ use std::sync::{Arc, Mutex};
 const VALUE_LIMIT: usize = 32 * 1024;
 const STORE_LIMIT: usize = 128 * 1024;
 
-/// Complete plugin-state checkpoint body, including non-resident namespaces.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct PluginState {
-    pub plugins: BTreeMap<String, PluginNamespaceState>,
-}
 
-/// One namespace's mediated generation and JSON values. Plugin versions are diagnostics only.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PluginNamespaceState {
-    pub generation: u64,
-    pub values: BTreeMap<String, Value>,
-}
+
+
 
 /// A deterministic rejection of a plugin-state key.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

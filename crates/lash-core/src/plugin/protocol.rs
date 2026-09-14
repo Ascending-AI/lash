@@ -177,60 +177,13 @@ pub struct ProtocolBeforeLlmCallContext {
 /// changes, where inlining them all commits the whole 1.09 MB every turn.
 pub const EXECUTION_STATE_LEAF_MIN_BODY_BYTES: usize = 512;
 
-/// Complete protocol-owned execution-state component update for one checkpoint.
-///
-/// `root` is the well-known execution-state root body. `components` is the
-/// complete leaf-key listing reachable from that root: a changed body submits
-/// new logical bytes, while an unchanged key reuses its resident durable ref.
-/// An absent key is deleted. An absent root requires an empty leaf set.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ExecutionStateSnapshot {
-    pub root: Option<Vec<u8>>,
-    pub components: BTreeMap<String, ExecutionStateComponentSnapshot>,
-}
 
-impl ExecutionStateSnapshot {
-    pub fn from_root(root: Option<Vec<u8>>) -> Self {
-        Self {
-            root,
-            components: BTreeMap::new(),
-        }
-    }
 
-    pub fn changed_component(&mut self, key: impl Into<String>, body: Vec<u8>) {
-        self.components
-            .insert(key.into(), ExecutionStateComponentSnapshot::Changed(body));
-    }
 
-    pub fn unchanged_component(&mut self, key: impl Into<String>) {
-        self.components
-            .insert(key.into(), ExecutionStateComponentSnapshot::Unchanged);
-    }
 
-    pub fn from_hydrated(state: HydratedExecutionState) -> Self {
-        Self {
-            root: Some(state.root),
-            components: state
-                .components
-                .into_iter()
-                .map(|(key, body)| (key, ExecutionStateComponentSnapshot::Changed(body)))
-                .collect(),
-        }
-    }
-}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ExecutionStateComponentSnapshot {
-    Changed(Vec<u8>),
-    Unchanged,
-}
 
-/// Fully hydrated protocol-owned execution state supplied during restore.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HydratedExecutionState {
-    pub root: Vec<u8>,
-    pub components: BTreeMap<String, Vec<u8>>,
-}
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProtocolLlmCallAction {
@@ -408,54 +361,6 @@ pub trait ProtocolDriverPlugin: Send + Sync {
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble;
 }
 
-/// Plugin-owned options carried on a `SessionCreateRequest`.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct PluginOptions {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub plugins: BTreeMap<String, serde_json::Value>,
-}
 
-impl PluginOptions {
-    /// Constructs an empty `PluginOptions` for protocol and process-engine implementors while
-    /// preparing or executing plugin and tool work.
-    pub fn empty() -> Self {
-        Self::default()
-    }
 
-    /// Serializes one plugin's typed options for protocol implementors assembling session input.
-    pub fn typed<T>(plugin_id: impl Into<String>, extras: T) -> Result<Self, serde_json::Error>
-    where
-        T: Serialize,
-    {
-        let mut options = Self::default();
-        options.insert_typed(plugin_id, extras)?;
-        Ok(options)
-    }
 
-    /// Inserts one plugin's typed options for protocol implementors composing a shared option map.
-    pub fn insert_typed<T>(
-        &mut self,
-        plugin_id: impl Into<String>,
-        extras: T,
-    ) -> Result<(), serde_json::Error>
-    where
-        T: Serialize,
-    {
-        self.plugins
-            .insert(plugin_id.into(), serde_json::to_value(extras)?);
-        Ok(())
-    }
-
-    /// Decodes one plugin's typed options for protocol and process-engine implementors, returning
-    /// `None` when that plugin supplied no entry.
-    pub fn decode<T>(&self, plugin_id: &str) -> Result<Option<T>, serde_json::Error>
-    where
-        T: DeserializeOwned,
-    {
-        self.plugins
-            .get(plugin_id)
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()
-    }
-}
