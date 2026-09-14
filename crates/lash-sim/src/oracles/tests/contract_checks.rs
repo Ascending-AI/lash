@@ -101,15 +101,30 @@ fn unmapped_scenario_semantics_fail_loudly_for_every_suite() {
         ),
         (
             "standard",
-            standard_contract_semantics("standard.brand_new_contract", &[], &summary),
+            standard_contract_semantics(
+                "standard.brand_new_contract",
+                &[],
+                &summary,
+                &ScenarioFactMemo::default(),
+            ),
         ),
         (
             "rlm",
-            rlm_contract_semantics("rlm.brand_new_contract", &[], &summary),
+            rlm_contract_semantics(
+                "rlm.brand_new_contract",
+                &[],
+                &summary,
+                &ScenarioFactMemo::default(),
+            ),
         ),
         (
             "agent",
-            agent_contract_semantics("agent.brand_new_contract", &[], &summary),
+            agent_contract_semantics(
+                "agent.brand_new_contract",
+                &[],
+                &summary,
+                &ScenarioFactMemo::default(),
+            ),
         ),
     ] {
         assert!(
@@ -1053,4 +1068,121 @@ fn process_wake_at_most_once_fails_on_duplicate_runtime_turns() {
             .message
             .contains("no runtime-turn materialization id")
     );
+}
+
+#[test]
+fn every_battery_slot_declares_the_one_oracle_id_its_verdict_uses() {
+    let summary = semantic_summary();
+    let events = semantic_events();
+    let expectations = WorkloadExpectations::default();
+
+    // The minimizer skips a slot on its declared id alone, so that id has to be
+    // the id the slot's verdict actually reports under, and no two slots may
+    // claim the same one — otherwise skipping the "wrong" slot could skip past
+    // a verdict that matches the target.
+    let mut declared_ids = Vec::new();
+    walk_generated_trace_oracles(
+        &events,
+        &summary,
+        &[],
+        &expectations,
+        &ScenarioFactMemo::default(),
+        |slot| {
+            declared_ids.push(slot.declared_oracle_id());
+            false
+        },
+        |_| true,
+    );
+
+    let mut evaluated_ids = Vec::new();
+    walk_generated_trace_oracles(
+        &events,
+        &summary,
+        &[],
+        &expectations,
+        &ScenarioFactMemo::default(),
+        |_| false,
+        |verdict| {
+            evaluated_ids.push(verdict.oracle_id);
+            true
+        },
+    );
+
+    assert_eq!(
+        declared_ids, evaluated_ids,
+        "each slot must declare exactly the oracle id its verdict reports under"
+    );
+
+    let unique = declared_ids.iter().collect::<BTreeSet<_>>();
+    assert_eq!(
+        unique.len(),
+        declared_ids.len(),
+        "two battery slots declaring one oracle id would make a skip decision ambiguous"
+    );
+}
+
+#[test]
+fn a_slot_claims_its_own_declared_oracle_id_and_no_other() {
+    for contract in all_scenario_contracts() {
+        let slot = OracleSlot::ScenarioContract(contract);
+        let declared = slot.declared_oracle_id();
+        assert!(slot.declares_oracle_id(&declared));
+        assert!(!slot.declares_oracle_id(contract.oracle_id));
+        assert!(!slot.declares_oracle_id(&format!("{declared}-suffix")));
+    }
+
+    let slot = OracleSlot::Battery(CANCELLATION_ORACLE);
+    assert!(slot.declares_oracle_id(CANCELLATION_ORACLE));
+    assert!(!slot.declares_oracle_id(EXEC_CODE_ORACLE));
+}
+
+#[test]
+fn one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would() {
+    let summary = semantic_summary();
+    let events = semantic_events();
+    let expectations = WorkloadExpectations::default();
+
+    // The minimizer reuses one memo across every candidate of a run. Walking a
+    // series of candidates through a shared memo must produce exactly the
+    // verdicts each candidate would get on its own.
+    // Every fourth candidate rather than all of them: the walk is the whole
+    // oracle battery twice per candidate, and the property is per candidate.
+    let shared = ScenarioFactMemo::default();
+    for dropped in (0..events.len()).step_by(4) {
+        let mut candidate = events.clone();
+        candidate.remove(dropped);
+
+        let mut memoized = Vec::new();
+        walk_generated_trace_oracles(
+            &candidate,
+            &summary,
+            &[],
+            &expectations,
+            &shared,
+            |_| false,
+            |verdict| {
+                memoized.push((verdict.oracle_id, verdict.status, verdict.message));
+                true
+            },
+        );
+
+        let mut fresh = Vec::new();
+        walk_generated_trace_oracles(
+            &candidate,
+            &summary,
+            &[],
+            &expectations,
+            &ScenarioFactMemo::default(),
+            |_| false,
+            |verdict| {
+                fresh.push((verdict.oracle_id, verdict.status, verdict.message));
+                true
+            },
+        );
+
+        assert_eq!(
+            memoized, fresh,
+            "candidate without event {dropped} disagreed with its own unmemoized walk"
+        );
+    }
 }
