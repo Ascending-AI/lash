@@ -11,10 +11,10 @@
 //! test until the method is either driven or excluded on the record.
 
 /// Trait sources that define the gated surface.
-const SESSION_STORE_SOURCE: &str = include_str!("../../../lash-core/src/store/mod.rs");
-const ATTACHMENT_STORE_SOURCE: &str = include_str!("../../../lash-core/src/attachments.rs");
+const SESSION_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/mod.rs");
+const ATTACHMENT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/attachments.rs");
 const ATTACHMENT_MANIFEST_SOURCE: &str =
-    include_str!("../../../lash-core/src/store/attachment_manifest.rs");
+    include_str!("../../../lash-core-store/src/store/attachment_manifest.rs");
 
 /// Every source file that makes up this test binary. A method counts as
 /// covered when the harness calls it from one of these.

@@ -155,9 +155,11 @@ constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
 constant_path = "crates/lash-core/src/runtime/process/events.rs"
 description = "serialized ProcessWakeDelivery outbox payload"
 
+# The payload struct moved to `lash-core-store`; the stamped constant still
+# lives with the outbox writer in `lash-core`.
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/process/events.rs"]
+paths = ["crates/lash-core-store/src/process_identity.rs"]
 symbols = ["ProcessWakeDelivery"]
 
 [[surface]]
@@ -172,12 +174,12 @@ symbols = ["derive"]
 
 [[surface]]
 constant = "APPEND_REQUEST_IDENTITY_ENCODING_VERSION"
-constant_path = "crates/lash-core/src/store/commit_identity.rs"
+constant_path = "crates/lash-core-store/src/store/commit_identity.rs"
 description = "stable append-request identity byte projection"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/store/commit_identity.rs"]
+paths = ["crates/lash-core-store/src/store/commit_identity.rs"]
 symbols = [
   "push_len_prefixed",
   "push_string",
@@ -199,12 +201,12 @@ symbols = [
 
 [[surface]]
 constant = "RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION"
-constant_path = "crates/lash-core/src/store/semantic_boundary.rs"
+constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
 description = "canonical record-config semantic-boundary request encoding (FIG-2480)"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/store/semantic_boundary.rs"]
+paths = ["crates/lash-core-store/src/store/semantic_boundary.rs"]
 symbols = [
   "SemanticBoundaryRequestIntent",
   "semantic_boundary_request_intent_encoding",
@@ -213,12 +215,12 @@ symbols = [
 
 [[surface]]
 constant = "CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION"
-constant_path = "crates/lash-core/src/store/semantic_boundary.rs"
+constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
 description = "canonical create-session semantic-boundary request encoding (FIG-2480)"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/store/semantic_boundary.rs"]
+paths = ["crates/lash-core-store/src/store/semantic_boundary.rs"]
 symbols = [
   "SemanticBoundaryRequestIntent",
   "semantic_boundary_request_intent_encoding",
@@ -227,12 +229,12 @@ symbols = [
 
 [[surface]]
 constant = "USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION"
-constant_path = "crates/lash-core/src/store/semantic_boundary.rs"
+constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
 description = "canonical usage-ledger semantic-boundary request encoding (FIG-2480)"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/store/semantic_boundary.rs"]
+paths = ["crates/lash-core-store/src/store/semantic_boundary.rs"]
 symbols = [
   "SemanticBoundaryRequestIntent",
   "semantic_boundary_request_intent_encoding",
@@ -371,12 +373,12 @@ symbols = [
 
 [[surface]]
 constant = "PROCESS_TRANSFER_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/runtime/effect/envelope.rs"
+constant_path = "crates/lash-core-store/src/effect_identity.rs"
 description = "stable process-transfer set identity"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/effect/identity_types.rs"]
+paths = ["crates/lash-core-store/src/effect_identity.rs"]
 symbols = ["process_transfer_set_preimage"]
 
 [[surface]]
@@ -421,12 +423,12 @@ symbols = ["tool_invocation_batch_preimage"]
 
 [[surface]]
 constant = "USAGE_PAYLOAD_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/store/runtime_commit.rs"
+constant_path = "crates/lash-core-store/src/store/runtime_commit.rs"
 description = "stable runtime-usage payload identity and persisted encoding tag"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/store/runtime_commit.rs"]
+paths = ["crates/lash-core-store/src/store/runtime_commit.rs"]
 symbols = ["usage_payload_identity_bytes"]
 
 [[surface]]
@@ -469,12 +471,12 @@ symbols = [
 
 [[surface]]
 constant = "SESSION_CHECKPOINT_SCHEMA_VERSION"
-constant_path = "crates/lash-core/src/store/checkpoint.rs"
+constant_path = "crates/lash-core-store/src/store/checkpoint.rs"
 description = "persisted session checkpoint manifest"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/store/checkpoint.rs"]
+paths = ["crates/lash-core-store/src/store/checkpoint.rs"]
 symbols = ["SessionCheckpoint"]
 
 [[surface]]
@@ -492,7 +494,7 @@ must_cover = ["TurnCheckpoint", "MachineState", "Effect"]
 
 [[surface]]
 constant = "CHECKPOINT_COMPONENT_ENCODING_VERSION"
-constant_path = "crates/lash-core/src/store/checkpoint.rs"
+constant_path = "crates/lash-core-store/src/store/checkpoint.rs"
 description = "logical bytes stored behind checkpoint component descriptors"
 
 # Component bodies are owned by multiple runtime/plugin crates. The descriptor
@@ -500,17 +502,17 @@ description = "logical bytes stored behind checkpoint component descriptors"
 # narrower versioned surface here when introduced.
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/store/checkpoint.rs"]
+paths = ["crates/lash-core-store/src/store/checkpoint.rs"]
 symbols = ["CheckpointComponentDescriptor", "HydratedCheckpointComponent"]
 
 [[surface]]
 constant = "SESSION_HEAD_META_SCHEMA_VERSION"
-constant_path = "crates/lash-core/src/store/mod.rs"
+constant_path = "crates/lash-core-store/src/store/mod.rs"
 description = "persisted JSON session-head payload"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/store/mod.rs"]
+paths = ["crates/lash-core-store/src/store/mod.rs"]
 symbols = ["SessionHeadPayload"]
 
 # The head payload's config column shape lives in session_graph.rs; guarding
@@ -518,7 +520,7 @@ symbols = ["SessionHeadPayload"]
 # of only the node-body whole-file sweep that happens to share the file.
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/session_graph.rs"]
+paths = ["crates/lash-core-store/src/session_graph.rs"]
 symbols = ["PersistedSessionConfig"]
 
 # Host instruction capability bytes also persist through the head's ModelSpec.
@@ -529,7 +531,7 @@ symbols = ["ModelCapability", "InstructionRole"]
 
 [[surface]]
 constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
-constant_path = "crates/lash-core/src/session_graph.rs"
+constant_path = "crates/lash-core-store/src/session_graph.rs"
 description = "persisted JSON graph-node body in lash_graph_nodes.node_json"
 
 # The node body is the session graph's durable history shape, so its guard
@@ -571,7 +573,7 @@ description = "persisted JSON graph-node body in lash_graph_nodes.node_json"
 # the separate surface declared below.
 [[surface.guard]]
 kind = "rust_serde_shapes"
-paths = ["crates/lash-core/src/session_graph.rs"]
+paths = ["crates/lash-core-store/src/session_graph.rs"]
 must_cover = ["StoredSessionNodeBody", "SessionNodePayload", "SessionNodeRecord"]
 
 [[surface.guard]]
@@ -600,14 +602,14 @@ symbols = [
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/plugin/session_types.rs"]
+paths = ["crates/lash-core-store/src/session_identity.rs"]
 symbols = ["AgentFrameReason", "AgentFrameAssignment"]
 
 # The frame assignment carries the session policy and the plugin options, so
 # both travel in the body.
 [[surface.guard]]
 kind = "file"
-paths = ["crates/lash-core/src/session_model/session_policy_serde.rs"]
+paths = ["crates/lash-core-store/src/session_policy_serde.rs"]
 must_cover = [
   "impl serde::Serialize for SessionPolicy",
   "impl<'de> serde::Deserialize<'de> for SessionPolicy",
@@ -615,7 +617,7 @@ must_cover = [
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/plugin/protocol.rs"]
+paths = ["crates/lash-core-store/src/execution_state.rs"]
 symbols = ["PluginOptions"]
 
 # The policy's own members: the model spec and its limits, the reasoning and
@@ -677,12 +679,12 @@ symbols = ["MediaType", "AttachmentRef"]
 
 [[surface]]
 constant = "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION"
-constant_path = "crates/lash-core/src/lib.rs"
+constant_path = "crates/lash-core-store/src/protocol_turn_options.rs"
 description = "persisted protocol-specific turn options envelope"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/lib.rs"]
+paths = ["crates/lash-core-store/src/protocol_turn_options.rs"]
 # The envelope's wire shape lives in hand-written codecs, not in the in-memory
 # struct: `serialize_protocol_turn_options` is the sole definition of the
 # emitted field names, their order, and the stamped version's type, and
@@ -983,12 +985,12 @@ must_cover = ["Envelope", "Transport"]
 
 [[surface]]
 constant = "CURRENT_SESSION_STATE_VERSION"
-constant_path = "crates/lash-core/src/store/state_version.rs"
+constant_path = "crates/lash-core-store/src/store/state_version.rs"
 description = "complete session continuation generation including mediated plugin state"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/plugin/state.rs"]
+paths = ["crates/lash-core-store/src/plugin_state.rs"]
 symbols = ["PluginState", "PluginNamespaceState"]
 
 [[surface]]

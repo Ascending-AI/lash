@@ -8,7 +8,6 @@
 
 use super::*;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
-use lash_core::testing::conformance_support::SessionGraphConformanceAccess;
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 use lash_core::testing::store_fixtures::claim_session_execution_lease_for_test;
 pub(super) use lash_core::testing::store_fixtures::commit_runtime_state_for_test;

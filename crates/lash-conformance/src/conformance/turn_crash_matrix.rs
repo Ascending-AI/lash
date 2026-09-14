@@ -678,8 +678,11 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
         self.inner.as_ref()
     }
 
-    fn turn_cancellation_authority(&self) -> Option<crate::TurnCancellationAuthority> {
-        self.inner.turn_cancellation_authority().map(|authority| {
+    fn turn_cancellation_authority(
+        &self,
+    ) -> Option<Arc<dyn crate::store::StoreTurnCancellationAuthority>> {
+        self.inner.turn_cancellation_authority().map(|handle| {
+            let authority = crate::concrete_turn_cancellation_authority(&handle);
             crate::TurnCancellationAuthority::new(
                 authority.binding_id(),
                 Arc::new(SeamTurnControlResolver {
@@ -687,6 +690,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
                     control: self.control.clone(),
                 }),
             )
+            .into_store_authority()
         })
     }
 

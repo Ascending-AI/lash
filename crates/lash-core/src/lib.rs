@@ -16,8 +16,11 @@
 #[doc(hidden)]
 pub use async_trait::async_trait;
 
-pub mod attachments;
-pub mod chronological;
+pub use crate::runtime::concrete_turn_cancellation_authority;
+pub use lash_core_store::attachments;
+pub use lash_core_store::chronological;
+pub use lash_core_store::impl_noop_attachment_manifest;
+pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub mod direct;
 pub(crate) use lash_core_ids::identity_json;
 pub use lash_core_llm::llm;
@@ -50,8 +53,7 @@ pub mod provider {
 }
 pub mod runtime;
 pub mod session;
-pub mod session_graph;
-pub(crate) mod session_graph_integrity;
+pub use lash_core_store::session_graph;
 pub mod session_model;
 /// Stable hashing primitives, re-exported from `lash-core-ids`. The helpers
 /// stay crate-internal; the module itself is public under `testing` exactly as
@@ -59,8 +61,6 @@ pub mod session_model;
 #[cfg(feature = "testing")]
 pub mod stable_hash {
     pub use lash_core_ids::stable_hash::sha256_hex;
-    #[cfg(test)]
-    pub(crate) use lash_core_ids::stable_hash::stable_json_sha256_hex;
     pub(crate) use lash_core_ids::stable_hash::{blake3_hex, stable_json_string};
 }
 #[cfg(not(feature = "testing"))]
@@ -68,6 +68,7 @@ pub(crate) use lash_core_ids::stable_hash;
 pub(crate) use lash_core_ids::stable_identity;
 pub mod store;
 pub use lash_core_ids::task;
+pub use lash_core_store::store_backend_support;
 /// Standard-lock poison recovery traits used across Lash hosts and runtimes.
 pub mod sync {
     pub use lash_sansio::sync::*;
@@ -91,220 +92,6 @@ pub mod trace;
 #[cfg(not(feature = "testing"))]
 mod trace;
 pub mod triggers;
-
-pub mod store_backend_support {
-    use lash_sansio::SessionId;
-
-    mod append_identity;
-    mod process_lifecycle_sql;
-    pub mod required_constraints;
-    mod session_meta;
-
-    pub use append_identity::decode_append_request_identity;
-    pub use process_lifecycle_sql::{
-        live_process_status_predicate_sql, nonterminal_process_status_predicate_sql,
-        retired_process_status_predicate_sql, undelivered_wake_delivery_state_predicate_sql,
-        wake_delivery_state_sql_literal,
-    };
-    pub use session_meta::{
-        CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredObserverIntent, StoredRelation,
-        guard_rebind_lineage,
-    };
-
-    /// Reserved runtime-receipt identity used as the durable completion marker
-    /// for one settled session-command batch. Backends write one marker for
-    /// every batch in a coalesced command claim in the same transaction as the
-    /// head commit and queue deletion.
-    pub fn session_command_batch_completion_key(
-        session_id: &SessionId,
-        batch_id: &str,
-    ) -> Result<String, crate::StoreError> {
-        crate::OperationId::new(
-            crate::ExecutionScope::queue_drain(session_id, batch_id),
-            "session-command-settlement",
-        )
-        .storage_key()
-    }
-
-    /// Durable receipt identity of one turn's final commit.
-    ///
-    /// A turn's runtime commits are receipted under the turn's own execution
-    /// scope, and the last of them carries the reserved `final` operation key,
-    /// so this string is present in the receipt table exactly when the turn
-    /// committed. Backends implementing
-    /// [`SessionCommitStore::committed_turn_exists`](crate::store::SessionCommitStore::committed_turn_exists)
-    /// must test membership with this key rather than deriving one of their
-    /// own, so the committed-turn fact cannot drift between tiers.
-    pub fn turn_commit_receipt_storage_key(
-        session_id: &SessionId,
-        turn_id: &lash_sansio::TurnId,
-    ) -> Result<String, crate::StoreError> {
-        crate::OperationId::new(
-            crate::ExecutionScope::turn(session_id.clone(), turn_id.clone()),
-            "final",
-        )
-        .storage_key()
-    }
-
-    /// Construct queued-work claim data with the predecessor identity that an
-    /// abandoning store must restore. Store implementors pass `None` for fresh
-    /// work and the interrupted `claim_id` for a redrive.
-    pub fn queued_work_claim_data(
-        batches: Vec<crate::runtime::QueuedWorkBatch>,
-        abandon_restore_claim_id: Option<String>,
-        abandon_restore_claim_token: Option<String>,
-    ) -> Result<crate::runtime::QueuedWorkClaimData, crate::StoreError> {
-        if abandon_restore_claim_id.is_some() != abandon_restore_claim_token.is_some() {
-            return Err(crate::StoreError::QueuedWorkPredecessorClaimCorrupt {
-                claim_id_present: abandon_restore_claim_id.is_some(),
-                claim_token_present: abandon_restore_claim_token.is_some(),
-            });
-        }
-        Ok(crate::runtime::QueuedWorkClaimData {
-            batches,
-            abandon_restore_claim_id,
-            abandon_restore_claim_token: abandon_restore_claim_token.map(String::into_boxed_str),
-        })
-    }
-
-    /// Return the interrupted predecessor identity an abandoning queued-work
-    /// store must restore, or `None` when the claim originated as fresh work.
-    pub fn queued_work_abandon_restore_claim_id(
-        claim: &crate::runtime::QueuedWorkClaim,
-    ) -> Option<&str> {
-        claim.abandon_restore_claim_id.as_deref()
-    }
-
-    /// Return the interrupted predecessor token paired with its claim identity.
-    pub fn queued_work_abandon_restore_claim_token(
-        claim: &crate::runtime::QueuedWorkClaim,
-    ) -> Option<&str> {
-        claim.abandon_restore_claim_token.as_deref()
-    }
-
-    /// The one rule deciding whether an active-turn-scoped pending-input row is
-    /// an orphan this scope may repair.
-    ///
-    /// Every backend answers with this function or with SQL that mirrors it
-    /// literally, so "which rows can a dead turn's repair touch" has exactly one
-    /// definition (FIG-1573). The row must be active-turn scoped and in a state
-    /// only its own turn could advance; the scope then supplies the proof that
-    /// the turn is gone. `live_generation` is the fencing token of the lease the
-    /// backend has just re-validated in this transaction, so a row claimed by
-    /// the live lane is never an orphan.
-    pub fn orphaned_active_turn_input_is_repairable(
-        scope: crate::OrphanedTurnInputScope<'_>,
-        live_generation: u64,
-        state: crate::TurnInputState,
-        ingress: &crate::TurnInputIngress,
-        claim_token_present: bool,
-        claim_session_lease_generation: u64,
-    ) -> bool {
-        if !matches!(
-            state,
-            crate::TurnInputState::PendingActive | crate::TurnInputState::Accepted
-        ) {
-            return false;
-        }
-        let Some(pinned_turn_id) = ingress.active_turn_id() else {
-            return false;
-        };
-        match scope {
-            crate::OrphanedTurnInputScope::Turn(turn_id) => pinned_turn_id == turn_id,
-            crate::OrphanedTurnInputScope::LaneGeneration { resumable_turn_id } => {
-                // A turn the caller can still resume owns its pinned rows, even
-                // though its claim generation is dead: durable recovery replays
-                // it under the same turn id, and a swept row changes the
-                // request that replay reconstructs (FIG-1573).
-                if let Some(resumable) = resumable_turn_id
-                    && pinned_turn_id
-                        .as_str()
-                        .strip_prefix(resumable.as_str())
-                        .is_some_and(|rest| rest.is_empty() || rest.starts_with(":agent-frame:"))
-                {
-                    return false;
-                }
-                !claim_token_present || claim_session_lease_generation != live_generation
-            }
-        }
-    }
-
-    /// Build the SQL predicate admitting exactly the active-turn ingress whose
-    /// minimum boundary has been reached at `checkpoint`.
-    ///
-    /// `min_boundary_expr` is the backend expression reading
-    /// `ingress_json.min_boundary` (JSON extraction differs per dialect). SQL
-    /// stores splice this in so `min_boundary` is filtered at EVERY checkpoint
-    /// from the one core rule
-    /// ([`crate::TurnInputCheckpointBoundary::admits`]) instead of a
-    /// hand-written per-checkpoint special case (FIG-1524).
-    ///
-    /// An absent field reads as the serde default (`after_work`), so a
-    /// hand-written or externally produced row cannot bypass the filter by
-    /// omitting the key. A value this build does not recognize matches no
-    /// literal and is therefore never claimed here: a node that cannot
-    /// interpret a boundary leaves the row for a peer that can, where before
-    /// FIG-1524 the final checkpoint selected such a row and the
-    /// deserialization failure failed the whole claim call.
-    pub fn admitted_min_boundary_sql(
-        min_boundary_expr: &str,
-        checkpoint: crate::CheckpointKind,
-    ) -> String {
-        let admitted = crate::TurnInputCheckpointBoundary::ALL
-            .iter()
-            .filter(|boundary| boundary.admits(checkpoint))
-            .map(|boundary| format!("'{}'", boundary.as_wire_str()))
-            .collect::<Vec<_>>();
-        if admitted.is_empty() {
-            // No boundary reaches this checkpoint: admit nothing. An empty `IN
-            // ()` list is a syntax error in both dialects.
-            return "FALSE".to_string();
-        }
-        format!(
-            "COALESCE({min_boundary_expr}, '{}') IN ({})",
-            crate::TurnInputCheckpointBoundary::default().as_wire_str(),
-            admitted.join(", ")
-        )
-    }
-
-    /// Quote one turn-input state for interpolation into backend SQL.
-    pub fn state_sql_literal(state: crate::TurnInputState) -> String {
-        format!("'{}'", state.as_str())
-    }
-
-    /// Quote a turn-input state list for interpolation into backend SQL.
-    pub fn state_sql_literal_list(states: &[crate::TurnInputState]) -> String {
-        states
-            .iter()
-            .copied()
-            .map(state_sql_literal)
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    /// Spell the complete terminal turn-input state set for interpolation into backend SQL.
-    pub fn terminal_turn_input_states_sql() -> String {
-        let terminal_states = crate::TurnInputState::ALL
-            .iter()
-            .copied()
-            .filter(|state| state.is_terminal())
-            .collect::<Vec<_>>();
-        if terminal_states.is_empty() {
-            // Admit no state rather than interpolating the invalid SQL `IN ()`.
-            return "FALSE".to_string();
-        }
-        state_sql_literal_list(&terminal_states)
-    }
-
-    pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
-    pub use crate::store::session_execution_lease::{
-        SessionExecutionLeaseClaimIdentity, SessionExecutionLeaseFenceFacts,
-        SessionExecutionLeaseRefusalFacts, SessionExecutionLeaseRefusalOperation,
-        SessionExecutionLeaseRow, lease_owner_from_columns,
-        require_current_session_execution_lease, row_to_session_execution_lease,
-        trace_session_execution_lease_refusal,
-    };
-}
 
 pub mod facade_support {
     pub use crate::runtime::effect::bind_store_turn_control_authority;
@@ -391,7 +178,6 @@ pub mod facade_support {
     pub use crate::direct::DirectPart;
     pub use crate::direct::DirectRequest;
     pub use crate::direct::DirectRole;
-    pub use crate::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::llm::transport::LlmTransportError;
     pub use crate::plugin::AbortTurnDirective;
     pub use crate::plugin::AfterToolCallPluginDirective;
@@ -449,7 +235,6 @@ pub mod facade_support {
     pub use crate::plugin::TurnPluginDirective;
     pub use crate::plugin::TurnResultHookContext;
     pub use crate::plugin::TurnTransformContext;
-    pub use crate::plugin::session_types::facade_ops::AgentFrameReasonFacadeOps;
     pub use crate::plugin::{KeyRejection, PluginStateEdit, PluginStateError, PluginStateStore};
     pub use crate::plugin_stack::PluginStack;
     pub use crate::provider::CacheRetention;
@@ -593,7 +378,6 @@ pub mod facade_support {
     pub use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
     pub use crate::runtime::effect_replay_driver;
     pub use crate::runtime::ensure_durable_effect_input;
-    pub use crate::runtime::facade_ops::TurnContextFacadeOps;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
     pub use crate::runtime::process_wake_delivery;
@@ -607,13 +391,15 @@ pub mod facade_support {
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
     pub use crate::runtime::{process_signal_await_key, process_signal_wait_key};
+    pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
+    pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
+    pub use lash_core_store::turn_input_vocabulary::facade_ops::TurnContextFacadeOps;
     /// Whether this build records the runtime-tuning OpenTelemetry metrics.
     pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
     /// Record one first-party PostgreSQL runtime-connection acquisition wait.
     pub fn record_postgres_pool_acquire_wait(wait: std::time::Duration, outcome: &'static str) {
         crate::operational_metrics::record_postgres_pool_acquire_wait(wait, outcome);
     }
-    pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use crate::runtime::terminal_append_request;
     pub use crate::runtime::validate_generic_process_event_append;
     pub use crate::runtime::validate_replayed_effect_envelope;
@@ -623,7 +409,6 @@ pub mod facade_support {
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
-    pub use crate::session_graph::facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
     pub use crate::session_graph::frame_node_id;
     pub use crate::session_model::ConversationRecord;
     pub use crate::session_model::GenerationOverlay;
@@ -641,7 +426,7 @@ pub mod facade_support {
     pub use crate::tool_registry::ToolRestoreReport;
     pub use crate::tool_registry::ToolSourceHandle;
     pub use crate::tool_registry::ToolStateEntry;
-    pub use crate::tool_registry::facade_ops::{ToolRegistryFacadeOps, ToolStateFacadeOps};
+    pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
     pub use crate::triggers::InMemoryTriggerStore;
     pub use crate::triggers::TriggerDeliveryEmitOutcome;
     pub use crate::triggers::TriggerDeliveryEmitReceipt;
@@ -668,6 +453,11 @@ pub mod facade_support {
     pub use crate::triggers::trigger_occurrence_request_matches_record;
     pub use crate::triggers::trigger_operation_receipt_id;
     pub use crate::triggers::validate_trigger_occurrence_request;
+    pub use lash_core_store::session_graph::facade_ops::{
+        SessionGraphFacadeOps, SessionNodeProjection,
+    };
+    pub use lash_core_store::session_state::facade_ops::RuntimeSessionStateFacadeOps;
+    pub use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
     pub use lash_sansio::AcceptedInjectedTurnInput;
     pub use lash_sansio::AttachmentMaterializationNotice;
     pub use lash_sansio::AttachmentMaterializationReason;
@@ -889,194 +679,8 @@ pub use triggers::{
     TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft,
     TriggerSubscriptionFilter, TriggerSubscriptionRecord, admit_trigger_registration_target,
 };
-pub(crate) const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProtocolTurnOptions {
-    pub payload: serde_json::Value,
-}
-
-/// Emits the persisted wire shape for [`ProtocolTurnOptions`]: the schema version is stamped from
-/// the constant rather than carried in memory, so this body is the sole definition of the emitted
-/// field names, their order, and the stamped version's type. It is a named free function so the
-/// version-bump guard can cover it by symbol.
-fn serialize_protocol_turn_options<S>(
-    options: &ProtocolTurnOptions,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    use serde::ser::SerializeStruct;
-    let mut state = serializer.serialize_struct("ProtocolTurnOptions", 2)?;
-    state.serialize_field("schema_version", &PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION)?;
-    state.serialize_field("payload", &options.payload)?;
-    state.end()
-}
-
-impl serde::Serialize for ProtocolTurnOptions {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serialize_protocol_turn_options(self, serializer)
-    }
-}
-
-fn empty_protocol_turn_payload() -> serde_json::Value {
-    serde_json::Value::Object(serde_json::Map::new())
-}
-
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum ProtocolTurnOptionsError {
-    #[error(
-        "protocol turn options are missing schema_version and were written by unsupported pre-versioned state (expected {expected})"
-    )]
-    MissingSchemaVersion { expected: u32 },
-    #[error(
-        "protocol turn options schema_version {actual} is not supported by this binary (expected {expected})"
-    )]
-    UnsupportedSchemaVersion { actual: u32, expected: u32 },
-    #[error(
-        "protocol turn options schema_version {actual} is invalid (expected integer {expected})"
-    )]
-    InvalidSchemaVersion { actual: String, expected: u32 },
-    #[error("failed to decode protocol turn options payload: {0}")]
-    Decode(#[source] serde_json::Error),
-}
-
-fn parse_protocol_turn_options_schema_version(
-    value: Option<serde_json::Value>,
-) -> Result<u32, ProtocolTurnOptionsError> {
-    let expected = PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION;
-    let Some(value) = value else {
-        return Err(ProtocolTurnOptionsError::MissingSchemaVersion { expected });
-    };
-    let Some(actual) = value
-        .as_u64()
-        .and_then(|version| u32::try_from(version).ok())
-    else {
-        return Err(ProtocolTurnOptionsError::InvalidSchemaVersion {
-            actual: value.to_string(),
-            expected,
-        });
-    };
-    ensure_protocol_turn_options_schema_version(actual)?;
-    Ok(actual)
-}
-
-fn ensure_protocol_turn_options_schema_version(
-    actual: u32,
-) -> Result<(), ProtocolTurnOptionsError> {
-    let expected = PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION;
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(ProtocolTurnOptionsError::UnsupportedSchemaVersion { actual, expected })
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for ProtocolTurnOptions {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        struct ProtocolTurnOptionsWire {
-            schema_version: Option<serde_json::Value>,
-            #[serde(default = "empty_protocol_turn_payload")]
-            payload: serde_json::Value,
-        }
-
-        let wire = ProtocolTurnOptionsWire::deserialize(deserializer)?;
-        parse_protocol_turn_options_schema_version(wire.schema_version)
-            .map_err(serde::de::Error::custom)?;
-        Ok(Self {
-            payload: wire.payload,
-        })
-    }
-}
-
-impl Default for ProtocolTurnOptions {
-    fn default() -> Self {
-        Self::empty()
-    }
-}
-
-impl ProtocolTurnOptions {
-    /// Constructs schema-current empty object options for protocol implementors materializing a
-    /// turn with no protocol-specific overrides.
-    pub fn empty() -> Self {
-        Self {
-            payload: serde_json::Value::Object(serde_json::Map::new()),
-        }
-    }
-
-    /// Wraps an arbitrary JSON payload at the current schema version for protocol implementors
-    /// materializing turn-specific state.
-    pub fn from_payload(payload: serde_json::Value) -> Self {
-        Self { payload }
-    }
-
-    /// Reports empty only for an empty JSON object so protocol implementors do not confuse scalar,
-    /// list, or null payloads with absent options.
-    pub fn is_empty(&self) -> bool {
-        match &self.payload {
-            serde_json::Value::Object(map) => map.is_empty(),
-            _ => false,
-        }
-    }
-
-    /// Serializes typed protocol options at the current schema version for protocol implementors
-    /// materializing a turn.
-    pub fn typed<T>(value: T) -> Result<Self, serde_json::Error>
-    where
-        T: serde::Serialize,
-    {
-        Ok(Self {
-            payload: serde_json::to_value(value)?,
-        })
-    }
-}
-
-impl ProtocolTurnOptions {
-    /// Deserializes typed protocol options payload for protocol implementors.
-    pub fn decode<T>(&self) -> Result<T, ProtocolTurnOptionsError>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        serde_json::from_value(self.payload.clone()).map_err(ProtocolTurnOptionsError::Decode)
-    }
-}
-
-pub(crate) mod facade_ops {
-    use super::ProtocolTurnOptions;
-
-    /// Facade-internal operations for [`ProtocolTurnOptions`].
-    ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait ProtocolTurnOptionsFacadeOps {
-        fn merged_with_override(&self, override_options: &Self) -> Self;
-    }
-
-    impl ProtocolTurnOptionsFacadeOps for ProtocolTurnOptions {
-        fn merged_with_override(&self, override_options: &Self) -> Self {
-            match (&self.payload, &override_options.payload) {
-                (serde_json::Value::Object(base), serde_json::Value::Object(overrides)) => {
-                    let mut payload = base.clone();
-                    payload.extend(overrides.clone());
-                    Self {
-                        payload: serde_json::Value::Object(payload),
-                    }
-                }
-                _ => override_options.clone(),
-            }
-        }
-    }
-}
-
+pub(crate) mod facade_ops {}
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 /// Durable protocol-driver state owned by protocol-engine implementors.
 ///
@@ -1323,7 +927,6 @@ pub(crate) use session::RuntimeExecutionProcessEventContext;
 pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{ExecRequest, RuntimeExecutionContext, SessionError};
-pub(crate) use session_graph::SessionMessageTreeNode;
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
     SessionGraphScopeError, SessionNodePayload, SessionNodeRecord,
@@ -1376,6 +979,8 @@ pub use tool_provider::{
     ToolChildProcessStarted, ToolContext, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext,
     ToolProvider,
 };
+#[cfg(test)]
+mod attachments_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1394,73 +999,6 @@ mod tests {
         .expect_err("invalid seed cannot construct a tool control");
 
         assert!(err.to_string().contains("kind"), "unexpected error: {err}");
-    }
-
-    #[test]
-    fn protocol_turn_options_missing_payload_deserializes_to_empty_object() {
-        let options: ProtocolTurnOptions = serde_json::from_value(serde_json::json!({
-            "schema_version": PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION
-        }))
-        .expect("deserialize options");
-
-        assert!(options.is_empty());
-        assert_eq!(options.payload, serde_json::json!({}));
-    }
-
-    #[test]
-    fn protocol_turn_options_explicit_null_is_not_empty() {
-        let options: ProtocolTurnOptions = serde_json::from_value(serde_json::json!({
-            "schema_version": PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
-            "payload": null
-        }))
-        .expect("deserialize options");
-
-        assert!(!options.is_empty());
-        assert_eq!(options.payload, serde_json::Value::Null);
-    }
-
-    #[test]
-    fn protocol_turn_options_missing_schema_version_rejects_preversioned_state() {
-        let err =
-            serde_json::from_value::<ProtocolTurnOptions>(serde_json::json!({ "payload": {} }))
-                .expect_err("pre-versioned options should fail");
-
-        assert!(
-            err.to_string().contains(
-                "missing schema_version and were written by unsupported pre-versioned state"
-            ),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn protocol_turn_options_unsupported_schema_version_rejects_state() {
-        let err = serde_json::from_value::<ProtocolTurnOptions>(serde_json::json!({
-            "schema_version": PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION + 1,
-            "payload": {}
-        }))
-        .expect_err("unsupported options version should fail");
-
-        assert!(
-            err.to_string().contains("is not supported by this binary"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn protocol_turn_options_serialization_preserves_wire_shape() {
-        let options = ProtocolTurnOptions::from_payload(serde_json::json!({
-            "mode": "test"
-        }));
-        // Byte-level: `serde_json::Value` compares as a `BTreeMap` here, so only the emitted
-        // string pins field order — the property the persisted envelope actually depends on.
-        let encoded = serde_json::to_string(&options).expect("serialize options");
-        assert_eq!(encoded, r#"{"schema_version":1,"payload":{"mode":"test"}}"#);
-        assert_eq!(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, 1);
-
-        let round_tripped: ProtocolTurnOptions =
-            serde_json::from_str(&encoded).expect("deserialize roundtrip");
-        assert_eq!(round_tripped.payload, serde_json::json!({ "mode": "test" }));
     }
 
     #[test]

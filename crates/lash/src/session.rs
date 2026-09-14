@@ -472,7 +472,8 @@ fn reconcile_loaded_state_policy(
         &state.session_id,
         state.policy.recorded_provider_id(),
         policy.recorded_provider_id(),
-    )?;
+    )
+    .map_err(lash_core::SessionError::from)?;
     state.policy = policy.clone();
     state.policy.provider_id = settled_provider_id;
     if !host_prompt_is_present && let Some(persisted_prompt) = persisted_prompt {

@@ -194,7 +194,11 @@ fn build_runtime_state(
     base.current_frame_node_id = None;
     base.persisted_node_ids.clear();
     base.reset_initial_agent_frame_with_clock(
-        crate::AgentFrameAssignment::from_session_request(request, policy.clone()),
+        crate::AgentFrameAssignment::from_session_request_facts(
+            request.plugin_options.clone(),
+            request.usage_source.clone(),
+            policy.clone(),
+        ),
         base.protocol_turn_options.clone(),
         clock,
     );

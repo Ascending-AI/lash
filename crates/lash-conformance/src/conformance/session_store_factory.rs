@@ -852,9 +852,11 @@ pub async fn process_prune_deletes_owned_session_stores(
         .expect("claim process-owned closure lane")
         .acquired()
         .expect("process-owned closure lane is free");
-    let authority = pinned_store
-        .turn_cancellation_authority()
-        .expect("persistent process-owned store exposes cancellation authority");
+    let authority = crate::concrete_turn_cancellation_authority(
+        &pinned_store
+            .turn_cancellation_authority()
+            .expect("persistent process-owned store exposes cancellation authority"),
+    );
     let physical_scope = crate::ExecutionScope::process(PROCESS_ID);
     let binding_id =
         crate::turn_control_binding_id_for_scope(authority.binding_id(), &physical_scope)

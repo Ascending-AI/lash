@@ -116,6 +116,74 @@ REGISTRATION_BASELINES = {
     # changed, so the serialized lease bytes are identical and
     # PROCESS_LEASE_SCHEMA_VERSION stays 2 under its relocated key.
     'crates/lash-core/src/runtime/process/model/lease.rs:PROCESS_LEASE_SCHEMA_VERSION': 'sha256:627d95b22c67fe20640132b6a8fff0b188aa1b107891feaf350487de0194e8f6',
+    # FIG-3042 step 4: the durable domain layer was carved verbatim out of
+    # lash-core into the new lash-internal-core-store crate. Every surface
+    # below kept its file name and its contents; only the crate directory in
+    # front of the path changed (crates/lash-core/src/... ->
+    # crates/lash-core-store/src/...), and versioned-surfaces.toml follows each
+    # file. A surface key is path-qualified, so a relocation reads to the check
+    # as a brand-new key with no merge-base value even though the merge-base
+    # value is right there under the old path; that is what these entries pin.
+    #
+    # The reading, written out once for all of them: the move is a `cp` of the
+    # file plus a crate boundary. No struct, field, variant, enum arm, derive
+    # input, serde attribute, preimage byte expression, tag or constant value
+    # changed on any of these surfaces. The visibility widenings the carve
+    # required (pub(crate) -> pub on items lash-core still calls) are Rust
+    # visibility alone and are invisible to serde, to IdentityEncoder and to
+    # every emitted byte. So each constant keeps the value it had at the
+    # merge-base: no durable format moved and a bump would publish a false
+    # incompatibility to stored data and peers.
+    #
+    # The corresponding old-path entries above and in
+    # IDENTIFIER_RENAME_BASELINES stay as dead-but-honest history. As with
+    # every entry here, these pin a STATE and not a transition: any further
+    # guarded-shape drift on these surfaces re-fails the gate.
+    "crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:d7cc86c3a9018bc4f56119dd666c6f6280ca4b4cc9d881e798d16b1a2ac85042"
+    ),
+    "crates/lash-core-store/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:59fa45d404be44b05157eab4a48ed266b16c3be6a16cf5b7c45dd3410abaa032"
+    ),
+    "crates/lash-core-store/src/store/semantic_boundary.rs:CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:59fa45d404be44b05157eab4a48ed266b16c3be6a16cf5b7c45dd3410abaa032"
+    ),
+    "crates/lash-core-store/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:59fa45d404be44b05157eab4a48ed266b16c3be6a16cf5b7c45dd3410abaa032"
+    ),
+    # The preimage helper was already extracted to an effect-identity module by
+    # FIG-2828; step 4 moves that module into the store crate and, with the
+    # envelope's other half staying behind, the constant travels with the
+    # preimage it stamps. constant_path follows it to effect_identity.rs.
+    "crates/lash-core-store/src/effect_identity.rs:PROCESS_TRANSFER_FAMILY_VERSION": (
+        "sha256:fd1c8180f7527a8a3351c9928c75f65d158f028628c963d741cf07ecf59698d8"
+    ),
+    "crates/lash-core-store/src/store/runtime_commit.rs:USAGE_PAYLOAD_FAMILY_VERSION": (
+        "sha256:e011166157bb61ec231962ddc2f6e0a4643c8a5d0b4169937c0cde690adf39e8"
+    ),
+    "crates/lash-core-store/src/store/checkpoint.rs:SESSION_CHECKPOINT_SCHEMA_VERSION": (
+        "sha256:0df187b51bed2dc8e75316cfc03f011e5bd7aebec9d37816b41033d4eb5101f2"
+    ),
+    "crates/lash-core-store/src/store/checkpoint.rs:CHECKPOINT_COMPONENT_ENCODING_VERSION": (
+        "sha256:7c12433057d269a90e6faaee3529d39e59335b398cc1f655b083a6c9ad632931"
+    ),
+    "crates/lash-core-store/src/store/mod.rs:SESSION_HEAD_META_SCHEMA_VERSION": (
+        "sha256:fec9a971eedc5816bbe7fa4e550838a1ef104fcee6a339d0cf9cf1c2a801cc8a"
+    ),
+    "crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
+        "sha256:942d93486d04e890ae21c77550653cbb6a699a3fb036462db826059299f841ec"
+    ),
+    # PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION was declared in lash-core's lib.rs
+    # beside the hand-written codecs that stamp it; the whole envelope -- the
+    # struct, both codecs, the wire carrier and the constant -- moved together
+    # into its own file in the store crate, so the guard and constant_path both
+    # follow to protocol_turn_options.rs.
+    "crates/lash-core-store/src/protocol_turn_options.rs:PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION": (
+        "sha256:cb04566004239a990b38cecec781c27577b1d2afec0e8e6a6a024aa961e33a85"
+    ),
+    "crates/lash-core-store/src/store/state_version.rs:CURRENT_SESSION_STATE_VERSION": (
+        "sha256:5fb0524a0d534905c775abf9c0051cc48a4e5d844f61fa1be003e3fd3901549c"
+    ),
 }
 
 # Burned one-time proofs that a change moved Rust identifiers across a guarded
@@ -315,8 +383,17 @@ IDENTIFIER_RENAME_BASELINES = {
     # authoritative-looking baseline behind. As with every entry here, these pin
     # a STATE and not a transition: restoring exactly these bytes later would
     # re-match and be excused again.
+    # FIG-3042 step 4 (live): the guarded ProcessWakeDelivery payload struct
+    # moved verbatim from crates/lash-core/src/runtime/process/events.rs into
+    # crates/lash-core-store/src/process_identity.rs, taking its derives and
+    # serde attributes with it; the outbox writer and the constant itself stay
+    # in events.rs, so this key keeps its merge-base identity while the guard
+    # path follows the struct. The move changed no field, no serde attribute
+    # and no derive input, so the serialized outbox payload is byte-identical
+    # and PROCESS_WAKE_DELIVERY_FORMAT_VERSION stays 3. (Superseded state:
+    # sha256:d918335cb663799309bcc9e97f4997719ec782481526c417bf09c012c1bc2316.)
     "crates/lash-core/src/runtime/process/events.rs:PROCESS_WAKE_DELIVERY_FORMAT_VERSION": (
-        "sha256:d918335cb663799309bcc9e97f4997719ec782481526c417bf09c012c1bc2316"
+        "sha256:1b3ccb158e7da7ad6bfe7a5c76d0029e7e589c991faece2ed89b4153dbd75a7e"
     ),
     "crates/lash-core/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
         "sha256:d3a77b92196da92208db28436247f96f29491dcc6e4012511649cfbb38e8c993"

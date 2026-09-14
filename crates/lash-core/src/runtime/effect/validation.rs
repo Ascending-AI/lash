@@ -1,3 +1,4 @@
+pub use lash_core_store::runtime_error::*;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -8,7 +9,7 @@ use lash_trace::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope};
+use super::RuntimeEffectEnvelope;
 
 /// Matches the whole-body bound used by extended provider-request tracing.
 /// Values over this bound are omitted whole rather than prefix-truncated.
@@ -147,13 +148,6 @@ fn is_pre_cutover_trigger_list_envelope(value: &Value) -> bool {
             .pointer("/command/command/filter")
             .and_then(Value::as_object)
             .is_some_and(|filter| filter.contains_key("session_id"))
-}
-
-/// Compact, content-free mismatch evidence retained on the controller error.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuntimeEffectReplayMismatchReport {
-    pub divergent_path_count: usize,
-    pub first_divergent_paths: Vec<String>,
 }
 
 /// Trace capability dedicated to replay-divergence diagnostics.

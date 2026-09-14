@@ -1,4 +1,5 @@
 use crate::TurnId;
+pub use lash_core_store::turn_input_vocabulary::*;
 use lash_sansio::sync::MutexExt;
 #[cfg(feature = "testing")]
 pub mod assembly;
@@ -34,9 +35,9 @@ pub mod in_memory_store;
 #[cfg(not(feature = "testing"))]
 mod in_memory_store;
 #[cfg(feature = "testing")]
-pub mod io;
+pub use lash_core_store::input_normalization as io;
 #[cfg(not(feature = "testing"))]
-mod io;
+pub(crate) use lash_core_store::input_normalization as io;
 mod lifecycle;
 use claim_settlement::TurnClaimSettlement;
 #[cfg(feature = "testing")]
@@ -47,10 +48,10 @@ pub(crate) mod native_substrate;
 mod observation;
 mod process;
 mod process_worker;
+use lash_core_store::queued_drain_policy;
+pub use native_substrate::bounded_multiplicative_jitter;
 pub(crate) use process_worker::ensure_process_execution_permit;
 pub use process_worker::release_process_execution_permit_while;
-mod queued_drain_policy;
-pub use native_substrate::bounded_multiplicative_jitter;
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
@@ -94,7 +95,7 @@ pub mod turn_control;
 #[cfg(not(feature = "testing"))]
 pub(crate) mod turn_control;
 mod turn_driver;
-mod turn_failure_evidence;
+use lash_core_store::turn_failure_evidence;
 mod turn_graph_editor;
 pub use turn_failure_evidence::{
     ChargeSafetyRefusalEvidence, TurnFailureEvidence, TurnFailurePartialOutput,
@@ -110,9 +111,9 @@ pub mod turn_queue;
 #[cfg(not(feature = "testing"))]
 mod turn_queue;
 #[cfg(feature = "testing")]
-pub mod usage;
+pub use lash_core_store::usage;
 #[cfg(not(feature = "testing"))]
-mod usage;
+pub(crate) use lash_core_store::usage;
 mod worker_capacity;
 
 use std::any::Any;
@@ -211,8 +212,8 @@ pub use effect::{
     ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
     TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
     TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
-    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    concrete_turn_cancellation_authority, refuse_unhonored_group_membership,
+    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 #[cfg(feature = "testing")]
 pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
@@ -326,11 +327,11 @@ pub use process_worker::{
     trigger_delivery_reconcile_scope,
 };
 pub use queued_drain_policy::default_queued_drain_policy;
+pub(crate) use queued_drain_policy::shared_drain_mode_policy;
 pub use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
     QueuedDrainSelection,
 };
-pub(crate) use queued_drain_policy::{exact_selection_drain_policy, shared_drain_mode_policy};
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
@@ -345,7 +346,7 @@ pub use turn_control::{
 #[cfg(feature = "testing")]
 pub use turn_input_ingress::ingress_message_id;
 #[cfg(not(feature = "testing"))]
-pub(crate) use turn_input_ingress::ingress_message_id;
+pub use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
@@ -422,353 +423,6 @@ impl RuntimeTurnPhaseProbeSlot {
     }
 }
 
-/// Host-provided per-turn input.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum InputItem {
-    Text { text: String },
-    Attachment { source: crate::AttachmentSource },
-}
-
-impl InputItem {
-    /// Constructs a text turn item for protocol implementors while preserving its position among
-    /// mixed text and attachment input.
-    pub fn text(text: impl Into<String>) -> Self {
-        Self::Text { text: text.into() }
-    }
-
-    /// Constructs an attachment item for protocol implementors while preserving the source variant
-    /// until runtime attachment resolution.
-    pub fn attachment(source: crate::AttachmentSource) -> Self {
-        Self::Attachment { source }
-    }
-}
-
-/// Host-provided per-turn input.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TurnInput {
-    pub items: Vec<InputItem>,
-    /// Per-turn override for protocol-owned turn options.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
-    /// Internal protocol transport carrier for the facade builder's turn ID.
-    ///
-    /// All non-advanced facade paths overwrite this field. Set
-    /// `TurnBuilder::turn_id` to control turn identity. Only low-level protocol
-    /// transport should read this field directly.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace_turn_id: Option<TurnId>,
-    #[serde(skip)]
-    pub protocol_extension: Option<ProtocolTurnExtensionHandle>,
-    #[serde(skip)]
-    pub turn_context: TurnContext,
-}
-
-impl TurnInput {
-    /// Constructs an input with no items for protocol and process-engine implementors that will add
-    /// content or extensions before execution.
-    pub fn empty() -> Self {
-        Self::items(std::iter::empty())
-    }
-
-    /// Constructs a one-item text input for protocol and process-engine implementors without adding
-    /// protocol extensions or metadata.
-    pub fn text(text: impl Into<String>) -> Self {
-        Self::items([InputItem::text(text)])
-    }
-
-    /// Collects mixed input items in caller order for protocol implementors materializing a turn.
-    pub fn items(items: impl IntoIterator<Item = InputItem>) -> Self {
-        Self {
-            items: items.into_iter().collect(),
-            protocol_turn_options: None,
-            trace_turn_id: None,
-            protocol_extension: None,
-            turn_context: TurnContext::default(),
-        }
-    }
-
-    /// Appends an attachment after existing turn items for protocol implementors, preserving
-    /// mixed-input source order.
-    pub fn with_attachment(mut self, source: crate::AttachmentSource) -> Self {
-        self.items.push(InputItem::attachment(source));
-        self
-    }
-
-    /// Sets the protocol turn options carried by a `TurnInput` for protocol and process-engine
-    /// implementors while materializing protocol-specific session and turn state.
-    pub fn with_protocol_turn_options(mut self, options: crate::ProtocolTurnOptions) -> Self {
-        self.protocol_turn_options = Some(options);
-        self
-    }
-}
-
-/// Per-turn, in-process side channel of typed plugin inputs.
-///
-/// This is an `Any`-keyed map of live Rust values handed to plugins for a
-/// single turn. It is deliberately **not** serializable: the values never
-/// survive a process boundary, so durable effect-host runs explicitly reject a
-/// turn that carries any live inputs with
-/// [`RuntimeErrorCode::DurableEffectLivePluginInput`]. Durable callers must
-/// instead encode replayable data in `protocol_turn_options` or persisted
-/// plugin state.
-#[derive(Clone, Default)]
-pub struct LiveTurnInputs {
-    inputs: HashMap<&'static str, Arc<dyn Any + Send + Sync>>,
-}
-
-impl LiveTurnInputs {
-    fn insert<T>(&mut self, plugin_id: &'static str, input: T)
-    where
-        T: Send + Sync + 'static,
-    {
-        self.inputs.insert(plugin_id, Arc::new(input));
-    }
-
-    fn get<T>(&self, plugin_id: &'static str) -> Option<&T>
-    where
-        T: 'static,
-    {
-        self.inputs
-            .get(plugin_id)
-            .and_then(|input| input.downcast_ref::<T>())
-    }
-
-    fn contains(&self, plugin_id: &'static str) -> bool {
-        self.inputs.contains_key(plugin_id)
-    }
-
-    pub fn plugin_ids(&self) -> Vec<&'static str> {
-        self.inputs.keys().copied().collect()
-    }
-
-    /// Returns an error when live per-turn inputs would make a durable effect
-    /// host replay depend on process-local values.
-    pub fn durable_effect_rejection(&self) -> Result<(), RuntimeError> {
-        if self.inputs.is_empty() {
-            return Ok(());
-        }
-        Err(RuntimeError::new(
-            RuntimeErrorCode::DurableEffectLivePluginInput,
-            "durable effect hosts do not support live TurnContext plugin inputs; encode replayable data in protocol_turn_options or persisted plugin state",
-        ))
-    }
-}
-
-#[derive(Clone)]
-pub struct TurnContext {
-    plugin_inputs: LiveTurnInputs,
-    provider: Option<crate::ProviderHandle>,
-    prompt: crate::PromptLayer,
-    local_cancel_origin: TurnCancelOriginHint,
-    claim_checkpoint_queued_work: bool,
-    enforce_selected_queued_work_cost_bound: bool,
-}
-
-impl Default for TurnContext {
-    fn default() -> Self {
-        Self {
-            plugin_inputs: LiveTurnInputs::default(),
-            provider: None,
-            prompt: crate::PromptLayer::default(),
-            local_cancel_origin: TurnCancelOriginHint::default(),
-            claim_checkpoint_queued_work: true,
-            enforce_selected_queued_work_cost_bound: false,
-        }
-    }
-}
-
-impl TurnContext {
-    /// Constructs a `TurnContext` for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Updates plugin input state for protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
-    pub fn insert_plugin_input<T>(&mut self, plugin_id: &'static str, input: T)
-    where
-        T: Send + Sync + 'static,
-    {
-        self.plugin_inputs.insert(plugin_id, input);
-    }
-
-    /// Updates provider state for protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
-    pub fn set_provider(&mut self, provider: crate::ProviderHandle) {
-        self.provider = Some(provider);
-    }
-
-    /// Exposes provider to protocol and process-engine implementors while preparing or executing
-    /// plugin and tool work. Returns `None` when no provider is present.
-    pub fn provider(&self) -> Option<&crate::ProviderHandle> {
-        self.provider.as_ref()
-    }
-
-    pub fn set_local_cancel_origin_hint(&mut self, hint: TurnCancelOriginHint) {
-        self.local_cancel_origin = hint;
-    }
-
-    pub(crate) fn local_cancel_origin_hint(&self) -> TurnCancelOriginHint {
-        self.local_cancel_origin.clone()
-    }
-
-    pub(crate) fn mark_selected_queued_work_drain(&mut self) {
-        self.claim_checkpoint_queued_work = false;
-        self.enforce_selected_queued_work_cost_bound = true;
-    }
-
-    pub(crate) fn enforces_selected_queued_work_cost_bound(&self) -> bool {
-        self.enforce_selected_queued_work_cost_bound
-    }
-
-    pub(crate) fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {
-        if self.claim_checkpoint_queued_work {
-            default_limit
-        } else {
-            0
-        }
-    }
-
-    /// Exposes plugin input to protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work. Returns `None` when no plugin input is present.
-    pub fn plugin_input<T>(&self, plugin_id: &'static str) -> Option<&T>
-    where
-        T: 'static,
-    {
-        self.plugin_inputs.get(plugin_id)
-    }
-
-    /// Lets protocol implementors detect type-erased live plugin inputs that cannot cross a durable
-    /// serialization boundary.
-    pub fn has_live_plugin_inputs(&self) -> bool {
-        !self.plugin_inputs.inputs.is_empty()
-    }
-
-    /// Lists only type-erased live plugin inputs for protocol implementors that must reject
-    /// non-persistable turn extensions before a durable boundary.
-    pub fn live_plugin_input_ids(&self) -> Vec<&'static str> {
-        self.plugin_inputs.plugin_ids()
-    }
-
-    /// Live plugin inputs for this turn. The durable boundary inspects this to
-    /// reject turns carrying non-serializable live state.
-    pub fn live_plugin_inputs(&self) -> &LiveTurnInputs {
-        &self.plugin_inputs
-    }
-
-    /// Updates prompt layer state for protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
-    pub fn set_prompt_layer(&mut self, prompt: crate::PromptLayer) {
-        self.prompt = prompt;
-    }
-
-    /// Exposes prompt layer to protocol and process-engine implementors while preparing or
-    /// executing plugin and tool work.
-    pub fn prompt_layer(&self) -> &crate::PromptLayer {
-        &self.prompt
-    }
-}
-
-pub(crate) mod facade_ops {
-    use super::*;
-
-    /// Facade-internal operations for [`TurnContext`].
-    ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait TurnContextFacadeOps {
-        fn has_plugin_input(&self, plugin_id: &'static str) -> bool;
-
-        fn set_prompt_template(&mut self, template: crate::PromptTemplate);
-
-        fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution);
-
-        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
-        fn replace_prompt_slot(
-            &mut self,
-            slot: crate::PromptSlot,
-            contributions: impl IntoIterator<Item = crate::PromptContribution>,
-        );
-
-        fn clear_prompt_slot(&mut self, slot: crate::PromptSlot);
-    }
-
-    impl TurnContextFacadeOps for TurnContext {
-        fn has_plugin_input(&self, plugin_id: &'static str) -> bool {
-            self.plugin_inputs.contains(plugin_id)
-        }
-
-        fn set_prompt_template(&mut self, template: crate::PromptTemplate) {
-            self.prompt.template = Some(template);
-        }
-
-        fn add_prompt_contribution(&mut self, contribution: crate::PromptContribution) {
-            self.prompt.add_contribution(contribution);
-        }
-
-        fn replace_prompt_slot(
-            &mut self,
-            slot: crate::PromptSlot,
-            contributions: impl IntoIterator<Item = crate::PromptContribution>,
-        ) {
-            self.prompt.replace_slot(slot, contributions);
-        }
-
-        fn clear_prompt_slot(&mut self, slot: crate::PromptSlot) {
-            self.prompt.clear_slot(slot);
-        }
-    }
-}
-
-impl fmt::Debug for TurnContext {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TurnContext")
-            .field("plugin_inputs", &self.plugin_inputs.plugin_ids())
-            .field("has_provider", &self.provider.is_some())
-            .field("has_prompt_layer", &(!self.prompt.is_empty()))
-            .finish()
-    }
-}
-
-#[derive(Clone)]
-pub struct ProtocolTurnExtensionHandle(Arc<dyn ProtocolTurnExtension>);
-
-impl ProtocolTurnExtensionHandle {
-    /// Type-erases and shares a turn extension for protocol implementors while retaining its
-    /// downcast and prompt-contribution behavior.
-    pub fn new(extension: impl ProtocolTurnExtension + 'static) -> Self {
-        Self(Arc::new(extension))
-    }
-
-    /// Exposes the erased extension for protocol implementors that must downcast back to their
-    /// concrete turn-extension type.
-    pub fn as_any(&self) -> &dyn Any {
-        self.0.as_any()
-    }
-
-    /// Exposes prompt contributions to protocol and process-engine implementors while materializing
-    /// or restoring protocol session state.
-    pub fn prompt_contributions(&self) -> Vec<crate::PromptContribution> {
-        self.0.prompt_contributions()
-    }
-}
-
-impl fmt::Debug for ProtocolTurnExtensionHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("ProtocolTurnExtensionHandle(..)")
-    }
-}
-
-pub trait ProtocolTurnExtension: Send + Sync {
-    fn as_any(&self) -> &dyn Any;
-
-    fn prompt_contributions(&self) -> Vec<crate::PromptContribution> {
-        Vec::new()
-    }
-}
-
 #[derive(Clone)]
 pub struct ProtocolSessionExtensionHandle(Arc<dyn ProtocolSessionExtension>);
 
@@ -797,11 +451,7 @@ pub trait ProtocolSessionExtension: Send + Sync {
 }
 
 mod normalized_item {
-    #[derive(Clone, Debug)]
-    pub enum NormalizedItem {
-        Text(String),
-        Attachment(crate::AttachmentSource),
-    }
+    pub use lash_core_store::input_normalization::NormalizedItem;
 }
 
 // The relocated `runtime::tests` binaries name this type; the `testing` feature
@@ -931,19 +581,6 @@ impl EventSink for NoopEventSink {
     }
 
     async fn emit(&self, _event: SessionStreamEvent) {}
-}
-
-/// Stable identifier for a semantic turn activity.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub struct TurnActivityId(pub Arc<str>);
-
-impl TurnActivityId {
-    /// Constructs a `TurnActivityId` for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
-    pub fn new(id: impl Into<Arc<str>>) -> Self {
-        Self(id.into())
-    }
 }
 
 /// App-facing semantic activity emitted during a turn.

@@ -1,0 +1,1690 @@
+use crate::{NodeId, SessionId};
+use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
+use std::sync::{Arc, OnceLock};
+
+use crate::session_graph_integrity::{
+    ancestry_indices, graph_node_indices, validate_graph_parent_topology,
+};
+use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
+use crate::{BaseRenderCache, ClockWallTime, Message, PromptUsage, TokenUsage};
+use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
+use lash_sansio::core_support::MessageCoreSupport;
+
+#[path = "session_graph_legacy_response.rs"]
+mod legacy_response;
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RealizedNodeTimestamp {
+    pub node_id: NodeId,
+    pub timestamp: String,
+}
+
+pub mod facade_ops {
+    use super::*;
+
+    /// Presentation-projection helpers for hosts rendering a [`SessionNodeRecord`].
+    ///
+    /// Hosts use these operations to render session trees without matching on
+    /// the persisted node payload shape themselves.
+    pub trait SessionNodeProjection {
+        fn event(&self) -> Option<&SessionHistoryRecord>;
+
+        fn message(&self) -> Option<Message>;
+
+        fn plugin(&self) -> Option<(&str, &serde_json::Value)>;
+    }
+
+    impl SessionNodeProjection for SessionNodeRecord {
+        fn event(&self) -> Option<&SessionHistoryRecord> {
+            match &self.payload {
+                SessionNodePayload::Event { event } => Some(event),
+                SessionNodePayload::Plugin { .. } | SessionNodePayload::FrameOpen { .. } => None,
+            }
+        }
+
+        fn message(&self) -> Option<Message> {
+            match self.event()? {
+                SessionHistoryRecord::Conversation(record) => Some(record.to_message()),
+                _ => None,
+            }
+        }
+
+        fn plugin(&self) -> Option<(&str, &serde_json::Value)> {
+            match &self.payload {
+                SessionNodePayload::Event { .. } | SessionNodePayload::FrameOpen { .. } => None,
+                SessionNodePayload::Plugin { plugin_type, body } => {
+                    Some((plugin_type.as_str(), body.as_ref()))
+                }
+            }
+        }
+    }
+
+    /// Facade-internal operations for [`SessionGraph`].
+    ///
+    /// This is not integrator surface, carries no stability promise, and exists
+    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
+    pub trait SessionGraphFacadeOps {
+        fn active_path_nodes(&self) -> Vec<&SessionNodeRecord>;
+
+        fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&NodeId>;
+
+        fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord>;
+    }
+
+    impl SessionGraphFacadeOps for SessionGraph {
+        fn active_path_nodes(&self) -> Vec<&SessionNodeRecord> {
+            self.cache()
+                .active_path_indices
+                .iter()
+                .map(|idx| &self.nodes[*idx])
+                .collect()
+        }
+
+        fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&NodeId> {
+            let idx = self
+                .nearest_ancestor_index(leaf_node_id, |node| {
+                    matches!(node.payload, SessionNodePayload::FrameOpen { .. })
+                })
+                .ok()??;
+            Some(&self.nodes[idx].node_id)
+        }
+
+        fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord> {
+            self.try_agent_frame_records(session_id)
+                .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
+        }
+    }
+}
+
+pub fn draft_node_id(namespace: &str, ordinal: u64) -> NodeId {
+    let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
+    NodeId::new(format!(
+        "draft-node/v3/{}",
+        crate::stable_hash::blake3_hex("lash-draft-node/v3", preimage.as_bytes())
+    ))
+}
+
+/// Derive a durable frame identity before the surrounding operation commits.
+///
+/// Process provenance can capture the current frame scope immediately, so a
+/// FrameOpen ID must be final before runtime effects begin. The host-provided
+/// session id fixes the identity before store admission; binding must leave it
+/// unchanged.
+#[expect(
+    clippy::expect_used,
+    reason = "`FrameNodeId::new` rejects only the empty string, and the derived id always carries its `frame-node/v3/` prefix"
+)]
+pub fn frame_node_id(session_id: &SessionId, frame_key: &str) -> crate::FrameNodeId {
+    let preimage = format!(
+        "{}:{session_id}:{}:{frame_key}",
+        session_id.len(),
+        frame_key.len()
+    );
+    crate::FrameNodeId::new(format!(
+        "frame-node/v3/{}",
+        crate::stable_hash::blake3_hex("lash-frame-node/v3", preimage.as_bytes())
+    ))
+    .expect("derived frame node ids are non-empty")
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct SessionGraphData {
+    #[serde(default)]
+    pub nodes: Vec<SessionNodeRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaf_node_id: Option<NodeId>,
+}
+
+#[derive(Debug)]
+pub struct SessionGraph {
+    inner: Arc<SessionGraphData>,
+    cache: Arc<OnceLock<SessionGraphCache>>,
+}
+
+impl Default for SessionGraph {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(SessionGraphData::default()),
+            cache: Arc::new(OnceLock::new()),
+        }
+    }
+}
+
+impl Clone for SessionGraph {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            cache: Arc::clone(&self.cache),
+        }
+    }
+}
+
+impl serde::Serialize for SessionGraph {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.inner.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SessionGraph {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let inner = SessionGraphData::deserialize(deserializer)?;
+        Self::from_nodes(inner.nodes, inner.leaf_node_id).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Deref for SessionGraph {
+    type Target = SessionGraphData;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref()
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SessionNodeRecord {
+    pub node_id: NodeId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_node_id: Option<NodeId>,
+    pub timestamp: String,
+    #[serde(flatten)]
+    pub payload: SessionNodePayload,
+}
+
+/// Durable generation of the `node_json` graph-node body.
+///
+/// The body is the session graph's persisted history shape: the stored
+/// timestamp plus the whole [`SessionNodePayload`] family it flattens, down
+/// through the conversation record and its message parts. Every change to that
+/// shape advances this constant, and `scripts/versioned-surfaces.toml` makes CI
+/// demand the advance — the guard is what a shape change collides with, so no
+/// node-body field arrives by review attention alone.
+///
+/// Graph nodes are immutable history, so the generation is a forward-only
+/// fence rather than an equality check: a body stamped at this generation or
+/// older loads, and a body from a strictly newer generation is refused with the
+/// generation it carries. Bodies written before the stamp existed carry no
+/// field and are generation 1 by definition.
+///
+/// Version 4 persists `RetryDecision.charge_safety` when present; older bodies
+/// omit it and continue to decode through the field's `default`.
+///
+/// Version 5 persists typed `MessageOrigin::TurnOutput` provenance on durable
+/// assistant messages.
+///
+/// Version 6 stores checked `FrameKey` values in durable frame-open payloads.
+///
+/// Version 7 persists tool-access and subagent authority in the durable
+/// session configuration.
+///
+/// Version 3 removes the duplicated `LlmResponse.full_text` member. The
+/// pre-v3 decode path below projects that legacy value into response parts
+/// before typed decoding when the parts carry no visible assistant prose.
+///
+/// Version 11 carries host instruction roles and native feedback capabilities.
+///
+/// Version 12 stamps each LLM attempt with its usage disposition (FIG-2765):
+/// provider-reported, or unreported by the provider, after an abort, or after
+/// a failure. Reported attempts elide the field, so a v11 body reads as v12
+/// bytes; the fence exists because a v11 reader would drop a hole silently.
+///
+/// Version 13 carries the full admitted effect address in causal references.
+/// Older readers would collapse equal replay keys from distinct execution
+/// scopes, so the node-body fence rejects them rather than losing authority.
+///
+/// Version 14 records genuine-user-segment boundaries on projected LLM
+/// messages so client-side retention can make deterministic whole-segment cuts.
+///
+/// Re-exported by the facade's `formats` manifest so a host can read it before
+/// wiring a store. The manifest reports it as a forward-only fence rather than a
+/// counter, because that is what the check above is.
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 14;
+
+/// Generation of a body written before the stamp existed.
+///
+/// The pre-stamp shape is exactly generation 1, so an absent field is that
+/// generation stated rather than an unknown one tolerated.
+fn unstamped_node_body_schema_version() -> u32 {
+    1
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredSessionNodeBody {
+    #[serde(default = "unstamped_node_body_schema_version")]
+    schema_version: u32,
+    timestamp: String,
+    #[serde(flatten)]
+    payload: SessionNodePayload,
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionNodeDraft {
+    payload: SessionNodeDraftPayload,
+}
+
+#[derive(Clone, Debug)]
+enum SessionNodeDraftPayload {
+    Message(Message),
+    Plugin {
+        plugin_type: String,
+        body: serde_json::Value,
+    },
+    ProtocolEvent(ProtocolEvent),
+}
+
+impl SessionNodeDraft {
+    pub(crate) fn message(message: Message) -> Self {
+        Self {
+            payload: SessionNodeDraftPayload::Message(message),
+        }
+    }
+
+    pub fn plugin(plugin_type: impl Into<String>, body: serde_json::Value) -> Self {
+        Self {
+            payload: SessionNodeDraftPayload::Plugin {
+                plugin_type: plugin_type.into(),
+                body,
+            },
+        }
+    }
+
+    pub(crate) fn protocol_event(event: ProtocolEvent) -> Self {
+        Self {
+            payload: SessionNodeDraftPayload::ProtocolEvent(event),
+        }
+    }
+
+    pub fn event(event: SessionHistoryRecord) -> Self {
+        match event {
+            SessionHistoryRecord::Conversation(record) => Self::message(record.to_message()),
+            SessionHistoryRecord::Protocol(event) => Self::protocol_event(event),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SharedJsonValue(pub Arc<serde_json::Value>);
+
+impl SharedJsonValue {
+    pub fn new(value: serde_json::Value) -> Self {
+        Self(Arc::new(value))
+    }
+
+    pub fn to_owned(&self) -> serde_json::Value {
+        self.0.as_ref().clone()
+    }
+}
+
+impl AsRef<serde_json::Value> for SharedJsonValue {
+    fn as_ref(&self) -> &serde_json::Value {
+        self.0.as_ref()
+    }
+}
+
+impl serde::Serialize for SharedJsonValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SharedJsonValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(Self::new(value))
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+// justification: persisted graph nodes retain their public inline payload shape across storage and replay.
+#[allow(clippy::large_enum_variant)]
+pub enum SessionNodePayload {
+    Event {
+        event: SessionHistoryRecord,
+    },
+    Plugin {
+        plugin_type: String,
+        body: SharedJsonValue,
+    },
+    FrameOpen {
+        frame_key: crate::FrameKey,
+        reason: crate::AgentFrameReason,
+        assignment: crate::AgentFrameAssignment,
+        protocol_turn_options: crate::ProtocolTurnOptions,
+    },
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct PersistedSessionConfig {
+    pub provider_id: String,
+    pub model: crate::ModelSpec,
+    pub turn_budget: crate::TurnBudget,
+    /// Session prompt configuration required to continue a cold-loaded
+    /// session with the composition it last committed.
+    ///
+    /// `None` is reserved for heads written before prompt persistence existed.
+    /// `Some(PromptLayer::new())` is an explicit committed empty layer and is
+    /// serialized so reopen authority can distinguish it from legacy absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<crate::PromptLayer>,
+    /// Generation controls required to continue a cold-loaded session with
+    /// the options it last committed.
+    #[serde(default)]
+    pub generation: crate::GenerationOptions,
+    /// Authority inputs needed to reconstruct the same tool policy on a
+    /// stateless worker. Catalog membership remains separate host curation.
+    pub tool_access: crate::SessionToolAccess,
+    /// Subagent authority is part of durable session construction rather than
+    /// ambient worker state.
+    #[serde(default)]
+    pub subagent: Option<crate::SubagentSessionContext>,
+    /// Commanded durable protocol turn options (SESSION_HEAD_META v6).
+    ///
+    /// `None` is reserved for heads written before this field existed and for
+    /// creation rows written before the first state commit; restore then falls
+    /// back to the checkpoint copy. `Some` is authoritative on cold load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
+}
+
+impl PersistedSessionConfig {
+    /// Builds an empty persisted config carrying the required per-turn budget.
+    ///
+    /// Store implementors reading durable session heads populate the provider
+    /// and model fields from the row; the budget has no default by doctrine,
+    /// so every construction names `TurnBudget::Bounded(n)` or `Unbounded`
+    /// explicitly.
+    pub fn new(turn_budget: crate::TurnBudget) -> Self {
+        Self {
+            provider_id: String::new(),
+            model: crate::ModelSpec::default(),
+            turn_budget,
+            prompt: None,
+            generation: crate::GenerationOptions::default(),
+            tool_access: crate::SessionToolAccess::default(),
+            subagent: None,
+            protocol_turn_options: None,
+        }
+    }
+}
+
+impl From<&crate::SessionPolicy> for PersistedSessionConfig {
+    fn from(policy: &crate::SessionPolicy) -> Self {
+        Self {
+            provider_id: policy.recorded_provider_id().to_string(),
+            model: policy.model.clone(),
+            turn_budget: policy.turn_budget,
+            prompt: Some(policy.prompt.clone()),
+            generation: policy.generation.clone(),
+            tool_access: crate::SessionToolAccess::default(),
+            subagent: None,
+            protocol_turn_options: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct PersistedTurnState {
+    pub turn_index: usize,
+    #[serde(default)]
+    pub token_usage: TokenUsage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_prompt_usage: Option<PromptUsage>,
+    #[serde(default)]
+    pub protocol_turn_options: crate::ProtocolTurnOptions,
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionMessageTreeNode {
+    pub node_id: NodeId,
+    pub parent_message_node_id: Option<NodeId>,
+    pub message: Message,
+    pub timestamp: String,
+    pub children: Vec<SessionMessageTreeNode>,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ActiveReadReplacement {
+    pub(crate) leaf_node_id: Option<NodeId>,
+    pub(crate) new_tail_nodes: Vec<SessionNodeRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ActiveReadProjection {
+    pub active_events: Vec<SessionHistoryRecord>,
+    pub active_messages: Vec<Message>,
+}
+
+pub(crate) struct ActiveReadPrefix<'a> {
+    retained_nodes: Vec<&'a SessionNodeRecord>,
+    retained_message_count: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionReadModel {
+    pub active_events: Arc<Vec<SessionHistoryRecord>>,
+    pub messages: Arc<Vec<Message>>,
+    pub prompt_render_cache: Arc<BaseRenderCache>,
+}
+
+/// Failure to resolve an explicitly requested frame on the active session path.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SessionGraphScopeError {
+    /// The requested identity does not name a frame on the active path.
+    #[error("frame `{frame_node_id}` was not found on the active session path")]
+    FrameNotFound {
+        /// Requested durable frame identity.
+        frame_node_id: crate::FrameNodeId,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionGraphAppendBuilder {
+    existing_ids: HashSet<NodeId>,
+    leaf_node_id: Option<NodeId>,
+    draft_namespace: String,
+    next_draft_ordinal: u64,
+}
+
+impl SessionGraphAppendBuilder {
+    pub fn leaf_node_id(&self) -> Option<&NodeId> {
+        self.leaf_node_id.as_ref()
+    }
+
+    pub fn set_leaf_node_id(&mut self, leaf_node_id: Option<NodeId>) {
+        self.leaf_node_id = leaf_node_id;
+    }
+
+    pub fn remap_node_ids(&mut self, mapping: &[(NodeId, NodeId)]) {
+        if mapping.is_empty() {
+            return;
+        }
+        let mapping = mapping.iter().cloned().collect::<HashMap<_, _>>();
+        self.existing_ids = self
+            .existing_ids
+            .drain()
+            .map(|id| mapping.get(&id).cloned().unwrap_or(id))
+            .collect();
+        if let Some(leaf) = self.leaf_node_id.as_mut()
+            && let Some(derived) = mapping.get(leaf)
+        {
+            *leaf = derived.clone();
+        }
+    }
+
+    pub fn append_messages_at<I>(
+        &mut self,
+        messages: I,
+        timestamp: String,
+    ) -> Vec<SessionNodeRecord>
+    where
+        I: IntoIterator<Item = Message>,
+    {
+        self.append_drafts_at(
+            messages.into_iter().map(SessionNodeDraft::message),
+            timestamp,
+        )
+    }
+
+    pub fn append_events_at<I>(&mut self, events: I, timestamp: String) -> Vec<SessionNodeRecord>
+    where
+        I: IntoIterator<Item = SessionHistoryRecord>,
+    {
+        self.append_drafts_at(events.into_iter().map(SessionNodeDraft::event), timestamp)
+    }
+
+    pub fn append_drafts_at<I>(&mut self, drafts: I, timestamp: String) -> Vec<SessionNodeRecord>
+    where
+        I: IntoIterator<Item = SessionNodeDraft>,
+    {
+        let mut nodes = Vec::new();
+        for draft in drafts {
+            let parent_node_id = self.leaf_node_id.clone();
+            let (node_id, payload) = match draft.payload {
+                SessionNodeDraftPayload::Message(message) => {
+                    let node_id = self.next_draft_node_id();
+                    (
+                        node_id,
+                        SessionNodePayload::Event {
+                            event: SessionHistoryRecord::Conversation(
+                                ConversationRecord::from_message(message),
+                            ),
+                        },
+                    )
+                }
+                SessionNodeDraftPayload::Plugin { plugin_type, body } => {
+                    let node_id = self.next_draft_node_id();
+                    (
+                        node_id,
+                        SessionNodePayload::Plugin {
+                            plugin_type,
+                            body: SharedJsonValue::new(body),
+                        },
+                    )
+                }
+                SessionNodeDraftPayload::ProtocolEvent(event) => {
+                    let node_id = self.next_draft_node_id();
+                    (
+                        node_id,
+                        SessionNodePayload::Event {
+                            event: SessionHistoryRecord::Protocol(event),
+                        },
+                    )
+                }
+            };
+            self.existing_ids.insert(node_id.clone());
+            self.leaf_node_id = Some(node_id.clone());
+            nodes.push(SessionNodeRecord {
+                node_id,
+                parent_node_id,
+                timestamp: timestamp.clone(),
+                payload,
+            });
+        }
+        nodes
+    }
+
+    fn next_draft_node_id(&mut self) -> NodeId {
+        loop {
+            let candidate = draft_node_id(&self.draft_namespace, self.next_draft_ordinal);
+            self.next_draft_ordinal += 1;
+            if !self.existing_ids.contains(&candidate) {
+                return candidate;
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SessionGraphCache {
+    by_id: HashMap<NodeId, usize>,
+    active_path_indices: Vec<usize>,
+    active_events: Arc<Vec<SessionHistoryRecord>>,
+    active_messages: Arc<Vec<Message>>,
+    /// Memoized render of `active_messages`. Shared with every
+    /// `MessageSequence` built off this read model so the chat projector's
+    /// per-iteration `render_prompt` walk only happens once per turn.
+    /// Replaced (not invalidated in-place) whenever `active_messages`
+    /// changes — the `Arc` identity tracks the cache's validity.
+    prompt_render_cache: Arc<BaseRenderCache>,
+    /// Memoized scoped read-model answer, keyed by the frame it was
+    /// projected for.
+    ///
+    /// Identity is the point, not the saved work: the turn projection decides
+    /// prefix agreement by comparing the `Arc` a read model handed out
+    /// (`TurnGraphEditor::message_delta_if_current_preserved`), so a frame
+    /// projection rebuilt per call would hand the turn's two readers two
+    /// equal-but-distinct `Arc`s and force the whole-window reconciliation on
+    /// every boundary. Cleared whenever the active path moves.
+    frame_read_model: OnceLock<(String, SessionReadModel)>,
+}
+
+impl SessionGraphCache {
+    fn build(graph: &SessionGraph) -> Result<Self, crate::StoreError> {
+        let by_id = graph_node_indices(graph)?;
+        let mut active_path_indices =
+            ancestry_indices(graph, &by_id, graph.leaf_node_id.as_deref())?;
+        active_path_indices.reverse();
+
+        let mut cache = Self {
+            by_id,
+            active_path_indices,
+            active_events: Arc::new(Vec::new()),
+            active_messages: Arc::new(Vec::new()),
+            prompt_render_cache: Arc::new(BaseRenderCache::new()),
+            frame_read_model: OnceLock::new(),
+        };
+        cache.rebuild_read_model(graph);
+        Ok(cache)
+    }
+
+    fn rebuild_read_model(&mut self, graph: &SessionGraph) {
+        let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
+        let mut active_events = Vec::with_capacity(self.active_path_indices.len());
+        for idx in &self.active_path_indices {
+            let node = &graph.nodes[*idx];
+            if let Some(event) = node.event() {
+                active_events.push(event.clone());
+            }
+            if let Some(message) = node.message() {
+                if !message.is_transient() {
+                    active_messages.push(message);
+                }
+                continue;
+            }
+        }
+        self.active_messages = Arc::new(active_messages);
+        self.active_events = Arc::new(active_events);
+        self.prompt_render_cache = Arc::new(BaseRenderCache::new());
+        self.frame_read_model = OnceLock::new();
+    }
+
+    fn scoped_read_model(
+        &self,
+        graph: &SessionGraph,
+        frame_node_id: &crate::FrameNodeId,
+    ) -> SessionReadModel {
+        if let Some((memoized_frame_node_id, read_model)) = self.frame_read_model.get()
+            && memoized_frame_node_id == frame_node_id.as_str()
+        {
+            return read_model.clone();
+        }
+        let read_model = self.project_scoped_read_model(graph, frame_node_id);
+        let _ = self
+            .frame_read_model
+            .set((frame_node_id.to_string(), read_model.clone()));
+        read_model
+    }
+
+    fn project_scoped_read_model(
+        &self,
+        graph: &SessionGraph,
+        frame_node_id: &crate::FrameNodeId,
+    ) -> SessionReadModel {
+        let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
+        let mut active_events = Vec::with_capacity(self.active_path_indices.len());
+        let mut in_frame = false;
+        for idx in &self.active_path_indices {
+            let node = &graph.nodes[*idx];
+            if node.node_id == frame_node_id.as_str() {
+                in_frame = true;
+            } else if in_frame && matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
+                break;
+            }
+            if !in_frame {
+                continue;
+            }
+            if let Some(event) = node.event() {
+                active_events.push(event.clone());
+            }
+            if let Some(message) = node.message() {
+                if !message.is_transient() {
+                    active_messages.push(message);
+                }
+                continue;
+            }
+        }
+        SessionReadModel {
+            active_events: Arc::new(active_events),
+            messages: Arc::new(active_messages),
+            prompt_render_cache: Arc::new(BaseRenderCache::new()),
+        }
+    }
+
+    fn append_node(
+        &mut self,
+        node_index: usize,
+        node: &SessionNodeRecord,
+        previous_leaf_node_id: Option<&str>,
+    ) {
+        self.by_id.insert(node.node_id.clone(), node_index);
+        let parent_matches_leaf = node.parent_node_id.as_deref() == previous_leaf_node_id;
+        if !parent_matches_leaf {
+            return;
+        }
+        self.frame_read_model = OnceLock::new();
+        self.active_path_indices.push(node_index);
+        if let Some(event) = node.event() {
+            Arc::make_mut(&mut self.active_events).push(event.clone());
+        }
+        if let Some(message) = node.message()
+            && !message.is_transient()
+        {
+            let messages = Arc::make_mut(&mut self.active_messages);
+            messages.push(message);
+            self.prompt_render_cache = Arc::new(BaseRenderCache::new());
+        }
+    }
+
+    fn reserve_append_capacity(&mut self, additional_nodes: usize, additional_messages: usize) {
+        self.by_id.reserve(additional_nodes);
+        self.active_path_indices.reserve(additional_nodes);
+        if additional_messages > 0 {
+            Arc::make_mut(&mut self.active_messages).reserve(additional_messages);
+        }
+    }
+}
+
+impl SessionNodeRecord {
+    /// Borrow the message identity carried by a conversation node.
+    ///
+    /// Protocol-event, plugin-state, and frame-boundary nodes return `None`.
+    pub fn message_id(&self) -> Option<&str> {
+        match &self.payload {
+            SessionNodePayload::Event {
+                event: SessionHistoryRecord::Conversation(message),
+            } => Some(message.id.as_str()),
+            SessionNodePayload::Event { .. }
+            | SessionNodePayload::Plugin { .. }
+            | SessionNodePayload::FrameOpen { .. } => None,
+        }
+    }
+
+    /// Encode only immutable node content for `node_json`.
+    ///
+    /// Identity and graph structure are columns so SQL can index, join, and
+    /// re-derive reachability without parsing an opaque JSON blob. The body
+    /// states its own node-body generation so a reader never has to infer the
+    /// shape it is holding.
+    pub fn encode_storage_body(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&StoredSessionNodeBody {
+            schema_version: SESSION_NODE_BODY_SCHEMA_VERSION,
+            timestamp: self.timestamp.clone(),
+            payload: self.payload.clone(),
+        })
+    }
+
+    /// Reassembles a node for store implementors from dedicated identity/parent columns and the
+    /// immutable JSON body; malformed body JSON is returned as an error.
+    ///
+    /// A body from a strictly newer node-body generation is refused rather than
+    /// decoded on a shape this build does not know; older and unstamped bodies
+    /// load unchanged.
+    pub fn decode_storage_body(
+        node_id: String,
+        parent_node_id: Option<String>,
+        node_json: &str,
+    ) -> Result<Self, serde_json::Error> {
+        let mut value = serde_json::from_str::<serde_json::Value>(node_json)?;
+        let body_schema_version = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_else(|| u64::from(unstamped_node_body_schema_version()));
+        if body_schema_version <= 2 {
+            legacy_response::upgrade_session_node_llm_responses(&mut value);
+        }
+        let body = serde_json::from_value::<StoredSessionNodeBody>(value)?;
+        if body.schema_version > SESSION_NODE_BODY_SCHEMA_VERSION {
+            return Err(serde::de::Error::custom(format!(
+                "graph node body is schema version {}, but this build reads at most {}; \
+                 remedy: run a Lash build at or past that node-body generation",
+                body.schema_version, SESSION_NODE_BODY_SCHEMA_VERSION
+            )));
+        }
+        Ok(Self {
+            node_id: NodeId::from(node_id),
+            parent_node_id: parent_node_id.map(NodeId::from),
+            timestamp: body.timestamp,
+            payload: body.payload,
+        })
+    }
+
+    /// Borrows frame-boundary state for store and protocol implementors, returning `None` for event
+    /// and plugin nodes.
+    pub fn frame_open(
+        &self,
+    ) -> Option<(
+        &crate::AgentFrameReason,
+        &crate::AgentFrameAssignment,
+        &crate::ProtocolTurnOptions,
+    )> {
+        match &self.payload {
+            SessionNodePayload::FrameOpen {
+                reason,
+                assignment,
+                protocol_turn_options,
+                ..
+            } => Some((reason, assignment, protocol_turn_options)),
+            SessionNodePayload::Event { .. } | SessionNodePayload::Plugin { .. } => None,
+        }
+    }
+
+    /// Provider and model captured by this frame boundary.
+    pub fn frame_config(&self) -> Option<PersistedSessionConfig> {
+        let (_, assignment, protocol_turn_options) = self.frame_open()?;
+        let mut config = PersistedSessionConfig::from(&assignment.policy);
+        config.protocol_turn_options = Some(protocol_turn_options.clone());
+        Some(config)
+    }
+
+    /// Decodes a plugin node body for store and protocol implementors, returning `None` when the
+    /// node is not a plugin node or its body does not match the requested type.
+    pub fn plugin_body<T>(&self) -> Option<T>
+    where
+        T: for<'de> serde::Deserialize<'de>,
+    {
+        let (_, body) = self.plugin()?;
+        T::deserialize(body).ok()
+    }
+}
+
+impl SessionGraph {
+    /// Appends non-transient messages after the active leaf in source order for protocol
+    /// implementors applying a read-model delta.
+    pub fn append_active_read_delta(&mut self, messages: &[Message]) {
+        let appendable_messages = messages
+            .iter()
+            .filter(|message| !message.is_transient())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        self.reserve_append_capacity(appendable_messages.len(), appendable_messages.len());
+        self.append_message_batch(appendable_messages);
+    }
+
+    pub(crate) fn append_active_conversation_messages_at(
+        &mut self,
+        messages: &[Message],
+        timestamp: String,
+    ) {
+        let appendable_messages = messages
+            .iter()
+            .filter(|message| !message.is_transient())
+            .cloned()
+            .collect::<Vec<_>>();
+        self.reserve_append_capacity(appendable_messages.len(), appendable_messages.len());
+        self.append_message_batch_at(appendable_messages, timestamp);
+    }
+
+    /// Builds and structurally validates a graph from node data.
+    ///
+    /// Graph integrity follows the same pair-assertion rule as durable state: validate before
+    /// writing and validate again after reading. Store implementations must map an error returned
+    /// here while decoding durable rows to their typed stored-data-corruption variant. A supplied
+    /// leaf must resolve, but leaf presence is a resident-graph invariant enforced by
+    /// `validate_resident_integrity` at the resident seam.
+    pub fn from_nodes(
+        nodes: Vec<SessionNodeRecord>,
+        leaf_node_id: Option<NodeId>,
+    ) -> Result<Self, crate::StoreError> {
+        let graph = Self::from_validated_nodes(nodes, leaf_node_id);
+        graph.validate_structural_integrity()?;
+        Ok(graph)
+    }
+
+    /// Builds a graph from nodes whose integrity is already guaranteed by the caller.
+    ///
+    /// This is deliberately crate-private and named for auditability. It is only appropriate when
+    /// the nodes are derived from an already-validated resident graph by an operation that
+    /// preserves identity, parent topology, and leaf membership.
+    pub fn from_validated_nodes(
+        nodes: Vec<SessionNodeRecord>,
+        leaf_node_id: Option<NodeId>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(SessionGraphData {
+                nodes,
+                leaf_node_id,
+            }),
+            cache: Arc::new(OnceLock::new()),
+        }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn from_unchecked_nodes_for_testing(
+        nodes: Vec<SessionNodeRecord>,
+        leaf_node_id: Option<NodeId>,
+    ) -> Self {
+        Self::from_validated_nodes(nodes, leaf_node_id)
+    }
+
+    pub fn validate_resident_integrity(&self) -> Result<(), crate::StoreError> {
+        if !self.nodes.is_empty() && self.leaf_node_id.is_none() {
+            return Err(crate::StoreError::InvalidGraphLeaf { leaf_node_id: None });
+        }
+        self.validate_structural_integrity()
+    }
+
+    fn validate_structural_integrity(&self) -> Result<(), crate::StoreError> {
+        let by_id = graph_node_indices(self)?;
+        ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
+        validate_graph_parent_topology(self, &by_id)
+    }
+
+    pub(crate) fn append_builder(&self) -> SessionGraphAppendBuilder {
+        let namespace = self.leaf_node_id.as_deref().map_or_else(
+            || "unscoped-root".to_string(),
+            |leaf| format!("unscoped:{leaf}"),
+        );
+        self.append_builder_in_namespace(namespace)
+    }
+
+    pub fn append_builder_in_namespace(
+        &self,
+        draft_namespace: impl Into<String>,
+    ) -> SessionGraphAppendBuilder {
+        SessionGraphAppendBuilder {
+            existing_ids: self.nodes.iter().map(|node| node.node_id.clone()).collect(),
+            leaf_node_id: self.leaf_node_id.clone(),
+            draft_namespace: draft_namespace.into(),
+            next_draft_ordinal: 0,
+        }
+    }
+
+    fn invalidate_cache(&mut self) {
+        self.cache = Arc::new(OnceLock::new());
+    }
+
+    pub fn data_mut(&mut self) -> &mut SessionGraphData {
+        self.invalidate_cache();
+        Arc::make_mut(&mut self.inner)
+    }
+
+    pub fn remap_node_ids(&mut self, _session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
+        if mapping.is_empty() {
+            return;
+        }
+        let mapping = mapping.iter().cloned().collect::<HashMap<_, _>>();
+        let data = self.data_mut();
+        for node in &mut data.nodes {
+            if let Some(derived) = mapping.get(&node.node_id) {
+                node.node_id = derived.clone();
+            }
+            if let Some(parent) = node.parent_node_id.as_mut()
+                && let Some(derived) = mapping.get(parent)
+            {
+                *parent = derived.clone();
+            }
+        }
+        if let Some(leaf) = data.leaf_node_id.as_mut()
+            && let Some(derived) = mapping.get(leaf)
+        {
+            *leaf = derived.clone();
+        }
+    }
+
+    pub(crate) fn apply_realized_node_timestamps(&mut self, realized: &[RealizedNodeTimestamp]) {
+        if realized.is_empty() {
+            return;
+        }
+        let timestamps = realized
+            .iter()
+            .map(|node| (node.node_id.as_str(), node.timestamp.as_str()))
+            .collect::<HashMap<_, _>>();
+        for node in &mut self.data_mut().nodes {
+            if let Some(timestamp) = timestamps.get(node.node_id.as_str()) {
+                node.timestamp = (*timestamp).to_string();
+            }
+        }
+    }
+
+    fn reserve_append_capacity(&mut self, additional_nodes: usize, additional_messages: usize) {
+        if additional_nodes == 0 {
+            return;
+        }
+        self.detach_initialized_cache_for_append();
+        Arc::make_mut(&mut self.inner)
+            .nodes
+            .reserve(additional_nodes);
+        if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
+            && let Some(cache) = cache_lock.get_mut()
+        {
+            cache.reserve_append_capacity(additional_nodes, additional_messages);
+        }
+    }
+
+    fn detach_initialized_cache_for_append(&mut self) {
+        if Arc::get_mut(&mut self.cache).is_some() {
+            return;
+        }
+        let Some(cache) = self.cache.get().cloned() else {
+            self.invalidate_cache();
+            return;
+        };
+        let lock = OnceLock::new();
+        let _ = lock.set(cache);
+        self.cache = Arc::new(lock);
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the `OnceLock` was just set above, and nothing clears it behind a shared borrow"
+    )]
+    fn try_cache(&self) -> Result<&SessionGraphCache, crate::StoreError> {
+        if let Some(cache) = self.cache.get() {
+            return Ok(cache);
+        }
+        let cache = SessionGraphCache::build(self)?;
+        let _ = self.cache.set(cache);
+        Ok(self
+            .cache
+            .get()
+            .expect("session graph cache was initialized"))
+    }
+
+    /// Returns the cache for a graph that passed construction-time validation.
+    ///
+    /// The panic is a last-resort invariant for defects introduced by later in-memory mutation;
+    /// durable rows are rejected by [`Self::from_nodes`] before they can reach this reader.
+    fn cache(&self) -> &SessionGraphCache {
+        self.try_cache()
+            .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
+    }
+
+    fn append_message_batch(&mut self, messages: Vec<Message>) {
+        self.append_message_batch_at(messages, crate::SystemClock.timestamp_rfc3339());
+    }
+
+    fn append_message_batch_at(&mut self, messages: Vec<Message>, timestamp: String) {
+        if messages.is_empty() {
+            return;
+        }
+        self.append_node_drafts_at_inner(
+            None,
+            messages.into_iter().map(SessionNodeDraft::message),
+            timestamp,
+        );
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the node was pushed onto `data.nodes` on the line above, so the vector is non-empty"
+    )]
+    fn append_prebuilt_nodes(&mut self, nodes: Vec<SessionNodeRecord>) {
+        if nodes.is_empty() {
+            return;
+        }
+
+        self.detach_initialized_cache_for_append();
+        if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
+            && let Some(cache) = cache_lock.get_mut()
+        {
+            let data = Arc::make_mut(&mut self.inner);
+            for node in nodes {
+                let previous_leaf = data.leaf_node_id.clone();
+                let node_id = node.node_id.clone();
+                data.nodes.push(node);
+                cache.append_node(
+                    data.nodes.len() - 1,
+                    data.nodes.last().expect("just appended graph node"),
+                    previous_leaf.as_deref(),
+                );
+                data.leaf_node_id = Some(node_id);
+            }
+            return;
+        }
+
+        let data = self.data_mut();
+        for node in nodes {
+            data.leaf_node_id = Some(node.node_id.clone());
+            data.nodes.push(node);
+        }
+    }
+
+    /// Appends one message after the active leaf for protocol implementors and returns its
+    /// content-derived node ID.
+    pub fn append_message(&mut self, message: Message) -> NodeId {
+        self.append_node_draft(SessionNodeDraft::message(message))
+    }
+
+    /// Appends a plugin payload after the active leaf for protocol implementors extending session
+    /// history, returning the content-derived node ID.
+    pub fn append_plugin(
+        &mut self,
+        plugin_type: impl Into<String>,
+        body: serde_json::Value,
+    ) -> NodeId {
+        self.append_node_draft(SessionNodeDraft::plugin(plugin_type, body))
+    }
+
+    fn try_active_path_nodes(&self) -> Result<Vec<&SessionNodeRecord>, crate::StoreError> {
+        Ok(self
+            .try_cache()?
+            .active_path_indices
+            .iter()
+            .map(|idx| &self.nodes[*idx])
+            .collect())
+    }
+
+    /// Reads either the whole active history or one explicitly requested frame.
+    ///
+    /// `None` is the only unscoped representation. A requested frame must name
+    /// a `FrameOpen` node on the active path.
+    pub fn read_model(
+        &self,
+        frame_node_id: Option<&crate::FrameNodeId>,
+    ) -> Result<SessionReadModel, SessionGraphScopeError> {
+        let cache = self.cache();
+        let Some(frame_node_id) = frame_node_id else {
+            return Ok(SessionReadModel {
+                active_events: Arc::clone(&cache.active_events),
+                messages: Arc::clone(&cache.active_messages),
+                prompt_render_cache: Arc::clone(&cache.prompt_render_cache),
+            });
+        };
+        let frame_exists_on_active_path = cache.active_path_indices.iter().any(|index| {
+            let node = &self.nodes[*index];
+            node.node_id == frame_node_id.as_str()
+                && matches!(node.payload, SessionNodePayload::FrameOpen { .. })
+        });
+        if !frame_exists_on_active_path {
+            return Err(SessionGraphScopeError::FrameNotFound {
+                frame_node_id: frame_node_id.clone(),
+            });
+        }
+        Ok(cache.scoped_read_model(self, frame_node_id))
+    }
+
+    /// Resolve the canonical current frame for `leaf_node_id`.
+    ///
+    /// The head caches this answer for bounded reads, but ancestry remains the
+    /// truth and is used to validate every stored pointer.
+    pub fn append_protocol_event(&mut self, event: ProtocolEvent) -> NodeId {
+        self.append_node_draft(SessionNodeDraft::protocol_event(event))
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "`append_node_drafts` returns one node id per draft, and exactly one draft was passed"
+    )]
+    pub(crate) fn append_node_draft(&mut self, draft: SessionNodeDraft) -> NodeId {
+        self.append_node_drafts([draft])
+            .into_iter()
+            .next()
+            .expect("single draft append must create one node")
+    }
+
+    pub(crate) fn append_node_drafts<I>(&mut self, drafts: I) -> Vec<NodeId>
+    where
+        I: IntoIterator<Item = SessionNodeDraft>,
+    {
+        self.append_node_drafts_at_inner(None, drafts, crate::SystemClock.timestamp_rfc3339())
+    }
+
+    pub fn append_frame_open_with_id_at(
+        &mut self,
+        frame_node_id: crate::FrameNodeId,
+        frame_key: crate::FrameKey,
+        reason: crate::AgentFrameReason,
+        assignment: crate::AgentFrameAssignment,
+        protocol_turn_options: crate::ProtocolTurnOptions,
+        timestamp: String,
+    ) -> bool {
+        if self.find_node(frame_node_id.as_str()).is_some() {
+            return false;
+        }
+        self.append_prebuilt_nodes(vec![SessionNodeRecord {
+            node_id: NodeId::new(frame_node_id.into_inner()),
+            parent_node_id: self.leaf_node_id.clone(),
+            timestamp,
+            payload: SessionNodePayload::FrameOpen {
+                frame_key,
+                reason,
+                assignment,
+                protocol_turn_options,
+            },
+        }]);
+        true
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "`FrameNodeId::new` rejects only the empty string, and a node id read back out of the graph is never empty"
+    )]
+    pub(crate) fn try_agent_frame_records(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::AgentFrameRecord>, crate::StoreError> {
+        let mut previous_frame_node_id = None;
+        let mut frames = Vec::new();
+        for node in self.try_active_path_nodes()? {
+            let Some((reason, assignment, protocol_turn_options)) = node.frame_open() else {
+                continue;
+            };
+            let frame_node_id = crate::FrameNodeId::new(node.node_id.clone())
+                .expect("validated graph node identities are non-empty");
+            frames.push(crate::AgentFrameRecord::new_at(
+                frame_node_id.clone(),
+                session_id.to_string(),
+                previous_frame_node_id.clone(),
+                reason.clone(),
+                assignment.clone(),
+                protocol_turn_options.clone(),
+                node.timestamp.clone(),
+            ));
+            previous_frame_node_id = Some(frame_node_id);
+        }
+        Ok(frames)
+    }
+
+    pub fn append_node_drafts_at<I>(
+        &mut self,
+        draft_namespace: &str,
+        drafts: I,
+        timestamp: String,
+    ) -> Vec<NodeId>
+    where
+        I: IntoIterator<Item = SessionNodeDraft>,
+    {
+        self.append_node_drafts_at_inner(Some(draft_namespace), drafts, timestamp)
+    }
+
+    fn append_node_drafts_at_inner<I>(
+        &mut self,
+        draft_namespace: Option<&str>,
+        drafts: I,
+        timestamp: String,
+    ) -> Vec<NodeId>
+    where
+        I: IntoIterator<Item = SessionNodeDraft>,
+    {
+        let mut builder = draft_namespace.map_or_else(
+            || self.append_builder(),
+            |namespace| self.append_builder_in_namespace(namespace),
+        );
+        let nodes = builder.append_drafts_at(drafts, timestamp);
+        let node_ids = nodes
+            .iter()
+            .map(|node| node.node_id.clone())
+            .collect::<Vec<_>>();
+        self.append_prebuilt_nodes(nodes);
+        node_ids
+    }
+
+    /// Atomically applies an append's nodes and selected leaf after validating the whole proposal.
+    ///
+    /// Incoming IDs must be unoccupied, including within the incoming batch. The append must be a
+    /// continuous chain, its first parent must already be resident (unless it starts a new root),
+    /// and its selected leaf must resolve. Validation completes before nodes, leaf, or cached read
+    /// state changes, so every refusal leaves this graph unchanged.
+    pub fn apply_append(
+        &mut self,
+        append: &crate::store::GraphAppend,
+    ) -> Result<(), crate::StoreError> {
+        for node in self.nodes.iter().chain(&append.nodes) {
+            crate::session_graph_integrity::validate_node_id(&node.node_id)?;
+        }
+
+        let mut occupied_ids = HashSet::with_capacity(self.nodes.len() + append.nodes.len());
+        for node in &self.nodes {
+            if !occupied_ids.insert(node.node_id.as_str()) {
+                return Err(crate::StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
+            }
+        }
+        let resident_ids = occupied_ids.clone();
+        for node in &append.nodes {
+            if !occupied_ids.insert(node.node_id.as_str()) {
+                return Err(crate::StoreError::NodeIdCollision {
+                    node_id: node.node_id.clone(),
+                });
+            }
+        }
+        append.validate_append_topology()?;
+
+        if let Some(first) = append.nodes.first()
+            && let Some(parent_node_id) = first.parent_node_id.as_deref()
+            && !resident_ids.contains(parent_node_id)
+        {
+            return Err(crate::StoreError::InvalidGraphParent {
+                node_id: first.node_id.clone(),
+                expected: None,
+                actual: first.parent_node_id.clone(),
+            });
+        }
+        if append.nodes.is_empty()
+            && let Some(leaf_node_id) = append.leaf_node_id.as_deref()
+            && !resident_ids.contains(leaf_node_id)
+        {
+            return Err(crate::StoreError::InvalidGraphLeaf {
+                leaf_node_id: append.leaf_node_id.clone(),
+            });
+        }
+
+        if append.nodes.is_empty() {
+            if self.leaf_node_id != append.leaf_node_id {
+                self.data_mut().leaf_node_id = append.leaf_node_id.clone();
+            }
+            return Ok(());
+        }
+
+        let extends_active_leaf = append.nodes[0].parent_node_id == self.leaf_node_id;
+        if extends_active_leaf {
+            self.append_prebuilt_nodes(append.nodes.clone());
+        } else {
+            let data = self.data_mut();
+            data.nodes.extend(append.nodes.iter().cloned());
+            data.leaf_node_id = append.leaf_node_id.clone();
+        }
+        Ok(())
+    }
+
+    /// Tests branch liveness for store and protocol implementors against the current leaf ancestry.
+    ///
+    /// The panic is a last-resort invariant for post-construction mutation defects. Durable data
+    /// is validated by [`Self::from_nodes`] before a resident graph is returned.
+    pub fn active_path_contains(&self, node_id: &str) -> bool {
+        self.try_active_path_contains(node_id)
+            .unwrap_or_else(|err| panic!("invalid resident session graph: {err}"))
+    }
+
+    pub(crate) fn try_active_path_contains(
+        &self,
+        node_id: &str,
+    ) -> Result<bool, crate::StoreError> {
+        let cache = self.try_cache()?;
+        let Some(node_index) = cache.by_id.get(node_id) else {
+            return Ok(false);
+        };
+        Ok(cache.active_path_indices.contains(node_index))
+    }
+
+    /// Return a resident graph containing only the current ancestry path.
+    ///
+    /// This is a memory-residency trim. It does not create a durable fork or
+    /// move a persisted session head. The caller must have validated the source graph.
+    pub fn trim_to_active_path(&self) -> SessionGraph {
+        let path = self.active_path_nodes();
+        // Selecting the ancestry of a validated graph preserves unique ids, complete parents, and
+        // the existing leaf, so repeating the full validation on this hot read projection is
+        // unnecessary.
+        SessionGraph::from_validated_nodes(
+            path.into_iter().cloned().collect(),
+            self.leaf_node_id.clone(),
+        )
+    }
+
+    pub fn try_trim_to_active_path(&self) -> Result<SessionGraph, crate::StoreError> {
+        let by_id = graph_node_indices(self)?;
+        let mut path = ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
+        path.reverse();
+        SessionGraph::from_nodes(
+            path.into_iter()
+                .map(|index| self.nodes[index].clone())
+                .collect(),
+            self.leaf_node_id.clone(),
+        )
+    }
+
+    /// Looks up any resident node by ID for store and protocol implementors, including nodes
+    /// outside the active path; an unknown ID returns `None`.
+    pub fn find_node(&self, node_id: &str) -> Option<&SessionNodeRecord> {
+        self.cache()
+            .by_id
+            .get(node_id)
+            .and_then(|idx| self.nodes.get(*idx))
+    }
+
+    /// Rewrites the active readable tail and moves the resident leaf while retaining historical
+    /// branches and excluding transient replacement messages.
+    ///
+    /// The resulting graph is a read projection. It must never be committed against an existing
+    /// session head because the rewritten tail is not parented from that durable head.
+    /// Rewrites either the whole active readable tail or one requested frame.
+    ///
+    /// Resolution happens before mutation, so a missing requested frame leaves
+    /// the graph unchanged.
+    pub fn rewrite_active_read_tail(
+        &mut self,
+        frame_node_id: Option<&crate::FrameNodeId>,
+        messages: &[Message],
+    ) -> Result<(), SessionGraphScopeError> {
+        let active_path = self.active_path_nodes();
+        let current_nodes = match frame_node_id {
+            None => active_path.as_slice(),
+            Some(frame_node_id) => {
+                let index = active_path
+                    .iter()
+                    .position(|node| {
+                        node.node_id == frame_node_id.as_str()
+                            && matches!(node.payload, SessionNodePayload::FrameOpen { .. })
+                    })
+                    .ok_or_else(|| SessionGraphScopeError::FrameNotFound {
+                        frame_node_id: frame_node_id.clone(),
+                    })?;
+                &active_path[index..]
+            }
+        };
+        let replacement = build_active_read_replacement(
+            current_nodes.iter().copied(),
+            self.append_builder_in_namespace(format!(
+                "unscoped-replacement:{}",
+                self.leaf_node_id.as_deref().unwrap_or("root")
+            )),
+            messages,
+            crate::SystemClock.timestamp_rfc3339(),
+        );
+        let data = self.data_mut();
+        data.leaf_node_id = replacement.leaf_node_id;
+        data.nodes.extend(replacement.new_tail_nodes);
+        Ok(())
+    }
+
+    /// Builds a `SessionGraph` from active read state data for store, effect-host, and protocol
+    /// implementors while materializing, executing, or persisting a session turn.
+    #[expect(
+        clippy::expect_used,
+        reason = "frame resolution can only fail for a scoped rewrite, and this one passes `None` as the frame"
+    )]
+    pub fn from_active_read_state(messages: &[Message]) -> Self {
+        let mut graph = Self::default();
+        graph
+            .rewrite_active_read_tail(None, messages)
+            .expect("unscoped replacement cannot fail frame resolution");
+        graph
+    }
+
+    /// Exposes message tree to store, effect-host, and protocol implementors while materializing,
+    /// executing, or persisting a session turn.
+    pub fn message_tree(&self) -> Vec<SessionMessageTreeNode> {
+        let active_node_ids = self
+            .active_path_nodes()
+            .into_iter()
+            .filter(|node| node.message().is_some())
+            .map(|node| node.node_id.clone())
+            .collect::<HashSet<_>>();
+
+        let message_nodes = self
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                let message = node.message()?.clone();
+                let parent_message_node_id =
+                    self.nearest_message_ancestor(node.parent_node_id.as_deref());
+                Some(SessionMessageTreeNode {
+                    node_id: node.node_id.clone(),
+                    parent_message_node_id,
+                    message,
+                    timestamp: node.timestamp.clone(),
+                    children: Vec::new(),
+                    active: active_node_ids.contains(&node.node_id),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        build_tree(message_nodes)
+    }
+
+    fn nearest_message_ancestor(&self, node_id: Option<&str>) -> Option<NodeId> {
+        let idx = self
+            .nearest_ancestor_index(node_id, |node| node.message().is_some())
+            .ok()??;
+        Some(self.nodes[idx].node_id.clone())
+    }
+
+    fn nearest_ancestor_index(
+        &self,
+        node_id: Option<&str>,
+        predicate: impl FnMut(&SessionNodeRecord) -> bool,
+    ) -> Result<Option<usize>, crate::StoreError> {
+        if let Some(cache) = self.cache.get() {
+            return nearest_ancestor_index(self, &cache.by_id, node_id, predicate);
+        }
+        let by_id = graph_node_indices(self)?;
+        nearest_ancestor_index(self, &by_id, node_id, predicate)
+    }
+}
+
+fn nearest_ancestor_index(
+    graph: &SessionGraph,
+    by_id: &HashMap<NodeId, usize>,
+    node_id: Option<&str>,
+    mut predicate: impl FnMut(&SessionNodeRecord) -> bool,
+) -> Result<Option<usize>, crate::StoreError> {
+    let mut current = node_id.and_then(|node_id| by_id.get(node_id).copied());
+    let mut remaining = graph.nodes.len();
+    while let Some(idx) = current {
+        let node = &graph.nodes[idx];
+        if predicate(node) {
+            return Ok(Some(idx));
+        }
+        if remaining == 0 {
+            return Err(crate::StoreError::InvalidGraphParent {
+                node_id: node.node_id.clone(),
+                expected: None,
+                actual: node.parent_node_id.clone(),
+            });
+        }
+        remaining -= 1;
+        current = node
+            .parent_node_id
+            .as_ref()
+            .and_then(|parent| by_id.get(parent).copied());
+    }
+    Ok(None)
+}
+
+fn build_tree(mut nodes: Vec<SessionMessageTreeNode>) -> Vec<SessionMessageTreeNode> {
+    let mut children_by_parent = HashMap::<Option<NodeId>, Vec<SessionMessageTreeNode>>::new();
+    for node in nodes.drain(..) {
+        children_by_parent
+            .entry(node.parent_message_node_id.clone())
+            .or_default()
+            .push(node);
+    }
+    let mut roots = build_tree_children(None, &mut children_by_parent);
+    sort_tree(&mut roots);
+    roots
+}
+
+fn sort_tree(nodes: &mut [SessionMessageTreeNode]) {
+    nodes.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    for node in nodes {
+        sort_tree(&mut node.children);
+    }
+}
+
+fn build_tree_children(
+    parent_id: Option<NodeId>,
+    children_by_parent: &mut HashMap<Option<NodeId>, Vec<SessionMessageTreeNode>>,
+) -> Vec<SessionMessageTreeNode> {
+    let mut children = children_by_parent.remove(&parent_id).unwrap_or_default();
+    for child in &mut children {
+        child.children = build_tree_children(Some(child.node_id.clone()), children_by_parent);
+    }
+    children
+}
+
+pub fn build_active_read_replacement<'a>(
+    current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
+    mut append_builder: SessionGraphAppendBuilder,
+    messages: &[Message],
+    timestamp: String,
+) -> ActiveReadReplacement {
+    let target = messages
+        .iter()
+        .filter(|message| !message.is_transient())
+        .collect::<Vec<_>>();
+
+    let prefix = active_read_prefix(current_nodes, &target);
+    append_builder.set_leaf_node_id(
+        prefix
+            .retained_nodes
+            .last()
+            .map(|node| node.node_id.clone()),
+    );
+    let new_tail_nodes = append_builder.append_messages_at(
+        target
+            .into_iter()
+            .skip(prefix.retained_message_count)
+            .cloned(),
+        timestamp,
+    );
+
+    ActiveReadReplacement {
+        leaf_node_id: append_builder.leaf_node_id().cloned(),
+        new_tail_nodes,
+    }
+}
+
+pub fn build_active_read_projection<'a>(
+    current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
+    messages: &[Message],
+) -> ActiveReadProjection {
+    let target = messages
+        .iter()
+        .filter(|message| !message.is_transient())
+        .collect::<Vec<_>>();
+
+    let prefix = active_read_prefix(current_nodes, &target);
+    let mut active_events = Vec::new();
+    let mut active_messages = Vec::new();
+    for node in prefix.retained_nodes {
+        push_active_read_node(node, &mut active_events, &mut active_messages);
+    }
+
+    for message in target.into_iter().skip(prefix.retained_message_count) {
+        active_events.push(SessionHistoryRecord::Conversation(
+            ConversationRecord::from_message(message.clone()),
+        ));
+        active_messages.push(message.clone());
+    }
+
+    ActiveReadProjection {
+        active_events,
+        active_messages,
+    }
+}
+
+pub(crate) fn active_read_prefix<'a>(
+    current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
+    target: &[&Message],
+) -> ActiveReadPrefix<'a> {
+    let mut retained_nodes = Vec::new();
+    let mut retained_message_count = 0usize;
+    for node in current_nodes {
+        match node.message() {
+            Some(current_message) if current_message.is_transient() => continue,
+            Some(current_message) => {
+                let Some(target_message) = target.get(retained_message_count) else {
+                    break;
+                };
+                if !current_message.content_equals(target_message) {
+                    break;
+                }
+                retained_message_count += 1;
+            }
+            None => {}
+        }
+        retained_nodes.push(node);
+    }
+
+    ActiveReadPrefix {
+        retained_nodes,
+        retained_message_count,
+    }
+}
+
+fn push_active_read_node(
+    node: &SessionNodeRecord,
+    active_events: &mut Vec<SessionHistoryRecord>,
+    active_messages: &mut Vec<Message>,
+) {
+    if let Some(event) = node.event() {
+        active_events.push(event.clone());
+    }
+    if let Some(message) = node.message()
+        && !message.is_transient()
+    {
+        active_messages.push(message);
+    }
+}
+
+#[cfg(test)]
+#[path = "session_graph_tests.rs"]
+mod tests;

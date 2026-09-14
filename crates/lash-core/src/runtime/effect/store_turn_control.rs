@@ -11,12 +11,13 @@ pub fn bind_store_turn_control_authority(
     if owner.turn_control_authority_owner() != crate::TurnControlAuthorityOwner::SessionStore {
         return Ok(owner);
     }
-    let authority = store.turn_cancellation_authority().ok_or_else(|| {
+    let handle = store.turn_cancellation_authority().ok_or_else(|| {
         crate::RuntimeError::new(
             crate::RuntimeErrorCode::InvalidTurnCancelRequest,
             "the configured effect host delegates turn cancellation to a session store that exposes no recoverable authority",
         )
     })?;
+    let authority = crate::runtime::effect::executor::concrete_turn_cancellation_authority(&handle);
     let peek_controller = Arc::new(StoreDelegatedTurnControlPeekController {
         resolver: authority.resolver(),
     });

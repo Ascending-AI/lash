@@ -1,6 +1,7 @@
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
+pub use lash_core_store::await_event_identity::*;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -164,100 +165,6 @@ impl EffectJournalRetirement {
             | ExecutionScope::QueueDrain { .. }
             | ExecutionScope::SessionDelete { .. } => None,
         }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AwaitEventWaitIdentity {
-    ToolCompletion {
-        tool_call_id: String,
-    },
-    ProcessSignal {
-        process_id: ProcessId,
-        signal_name: String,
-        ordinal: u64,
-    },
-    /// Reserved first-writer-wins cancellation-versus-completion gate for a
-    /// foreground turn.
-    TurnCancelGate,
-    /// Reserved terminal publication promise for a foreground turn.
-    TurnTerminal,
-    Custom {
-        key: String,
-    },
-    /// Reserved first-writer-wins escalation promise for a foreground turn:
-    /// written only by an immediate request that found the cancellation gate
-    /// already holding an after-step request.
-    TurnCancelEscalation,
-}
-
-impl AwaitEventWaitIdentity {
-    /// Constructs the stable wait identity effect-host implementors use to resolve a deferred tool
-    /// call by its call ID.
-    pub fn tool_completion(tool_call_id: impl Into<String>) -> Self {
-        Self::ToolCompletion {
-            tool_call_id: tool_call_id.into(),
-        }
-    }
-
-    /// Constructs the stable wait identity effect-host implementors use to resolve one named
-    /// process signal without colliding with other signals or attempts.
-    pub fn process_signal(
-        process_id: impl Into<ProcessId>,
-        signal_name: impl Into<String>,
-        ordinal: u64,
-    ) -> Self {
-        Self::ProcessSignal {
-            process_id: process_id.into(),
-            signal_name: signal_name.into(),
-            ordinal,
-        }
-    }
-
-    pub(in crate::runtime::effect) fn validate(&self) -> Result<(), RuntimeError> {
-        let invalid = match self {
-            Self::ToolCompletion { tool_call_id } => tool_call_id.trim().is_empty(),
-            Self::ProcessSignal {
-                process_id,
-                signal_name,
-                ordinal,
-            } => process_id.trim().is_empty() || signal_name.trim().is_empty() || *ordinal == 0,
-            Self::TurnCancelGate | Self::TurnTerminal | Self::TurnCancelEscalation => false,
-            Self::Custom { key } => key.trim().is_empty(),
-        };
-        if invalid {
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::InvalidAwaitEventWaitIdentity,
-                "await-event wait identity requires non-empty stable ids",
-            ));
-        }
-        Ok(())
-    }
-
-    /// Lets effect-host implementors distinguish the reserved turn-control wait from ordinary tool
-    /// and application waits.
-    pub fn is_turn_control(&self) -> bool {
-        matches!(
-            self,
-            Self::TurnCancelGate | Self::TurnTerminal | Self::TurnCancelEscalation
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct AwaitEventKey {
-    pub scope: ExecutionScope,
-    pub wait: AwaitEventWaitIdentity,
-    pub key_id: String,
-    pub signature: String,
-}
-
-impl AwaitEventKey {
-    /// Derives the deterministic promise key effect-host implementors use to rendezvous durable
-    /// wait resolution with its execution scope and wait identity.
-    pub fn promise_key(&self) -> String {
-        format!("lash-await-event:{}", self.key_id)
     }
 }
 
@@ -1446,7 +1353,7 @@ pub trait EffectHost: AwaitEventResolver {
         &'a self,
         scoped: &'a ScopedEffectController<'_>,
     ) -> Result<TurnControlBinding<'a>, RuntimeError> {
-        let binding_id = super::turn_control_authority::turn_control_binding_id_for_scope(
+        let binding_id = super::turn_control_binding_id_for_scope(
             &self.turn_control_binding_id(),
             scoped.execution_scope(),
         )?;
@@ -1469,11 +1376,10 @@ pub trait EffectHost: AwaitEventResolver {
                         "durable turn-control controller does not identify its await-event authority",
                     ));
                 };
-                let controller_binding_id =
-                    super::turn_control_authority::turn_control_binding_id_for_scope(
-                        &controller_authority_id,
-                        scoped.execution_scope(),
-                    )?;
+                let controller_binding_id = super::turn_control_binding_id_for_scope(
+                    &controller_authority_id,
+                    scoped.execution_scope(),
+                )?;
                 if controller_binding_id != binding_id {
                     return Err(RuntimeError::new(
                         crate::RuntimeErrorCode::InvalidTurnCancelRequest,
@@ -1661,10 +1567,8 @@ impl TurnCancelClosureOwnerBinding {
         scope: &ExecutionScope,
         admitted_binding_id: &str,
     ) -> Result<(), RuntimeError> {
-        let owner_binding_id = super::turn_control_authority::turn_control_binding_id_for_scope(
-            &self.owner.turn_control_binding_id(),
-            scope,
-        )?;
+        let owner_binding_id =
+            super::turn_control_binding_id_for_scope(&self.owner.turn_control_binding_id(), scope)?;
         if owner_binding_id != admitted_binding_id {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::InvalidTurnCancelRequest,

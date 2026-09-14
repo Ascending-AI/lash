@@ -3,10 +3,11 @@
 `rules_rust` ships `rust_clippy` and `rust_clippy_aspect`, but its aspect binds
 one `clippy.toml` for the whole build. Clippy resolves its configuration by
 walking up from each crate's manifest directory and stopping at the first
-`clippy.toml` it finds, and this repository has two: the workspace file and
-`crates/lash-core/clippy.toml`, which carries the `disallowed-methods` list the
-workspace lint table denies. A single global config would leave that list empty
-for `lash-core` and silently pass `clippy::disallowed_methods` there, so the
+`clippy.toml` it finds, and this repository has three: the workspace file,
+`crates/lash-core/clippy.toml` and `crates/lash-core-store/clippy.toml`, which
+carry the `disallowed-methods` list the workspace lint table denies. A single
+global config would leave that list empty for the two core crates and silently
+pass `clippy::disallowed_methods` there, so the
 aspect below selects the nearest declared config per target exactly as Cargo
 does. Everything else is the upstream action.
 
@@ -87,6 +88,7 @@ lash_clippy_aspect = aspect(
             default = [
                 Label("//:clippy.toml"),
                 Label("//crates/lash-core:clippy.toml"),
+                Label("//crates/lash-core-store:clippy.toml"),
             ],
         ),
         # The remaining attributes mirror `rust_clippy_aspect` so that

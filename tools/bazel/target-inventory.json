@@ -1,8 +1,8 @@
 {
   "cargo_only_target_count": 1,
-  "cargo_package_count": 41,
-  "cargo_target_count": 131,
-  "generated_label_count": 188,
+  "cargo_package_count": 42,
+  "cargo_target_count": 132,
+  "generated_label_count": 190,
   "packages": [
     {
       "declared_features": [],
@@ -132,6 +132,56 @@
         "testing"
       ],
       "dependencies": [
+        "async-trait",
+        "chrono",
+        "futures-util",
+        "lash-internal-core-ids",
+        "lash-internal-core-llm",
+        "lash-internal-sansio",
+        "lash-internal-trace",
+        "proptest",
+        "rmp-serde",
+        "schemars",
+        "serde",
+        "serde-content",
+        "serde_bytes",
+        "serde_json",
+        "sha2",
+        "tempfile",
+        "thiserror",
+        "tokio",
+        "tracing",
+        "uuid"
+      ],
+      "manifest": "crates/lash-core-store/Cargo.toml",
+      "package": "lash-internal-core-store",
+      "resolved_features": [
+        "default",
+        "perf-witness",
+        "testing"
+      ],
+      "targets": [
+        {
+          "cargo": "lash_core_store",
+          "kind": "lib",
+          "label": "//crates/lash-core-store:lash-core-store"
+        },
+        {
+          "cargo": "lash_core_store",
+          "kind": "unit-test",
+          "label": "//crates/lash-core-store:lash-core-store__unit_test",
+          "tags": []
+        }
+      ]
+    },
+    {
+      "declared_features": [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing"
+      ],
+      "dependencies": [
         "arc-swap",
         "async-trait",
         "chrono",
@@ -141,6 +191,7 @@
         "lash-internal-core",
         "lash-internal-core-ids",
         "lash-internal-core-llm",
+        "lash-internal-core-store",
         "lash-internal-sansio",
         "lash-internal-trace",
         "proptest",

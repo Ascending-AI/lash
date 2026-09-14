@@ -280,9 +280,11 @@ async fn recover_turn_cancel_closure(
     })
     .await
     .expect("cancellation recovery lane becomes reclaimable");
-    let authority = store
-        .turn_cancellation_authority()
-        .expect("persistent backend exposes reopenable cancellation authority");
+    let authority = crate::concrete_turn_cancellation_authority(
+        &store
+            .turn_cancellation_authority()
+            .expect("persistent backend exposes reopenable cancellation authority"),
+    );
     let admitted_scope = crate::ExecutionScope::turn(&identity.session_id, &identity.turn_id);
     store
         .validate_turn_cancellation_binding(

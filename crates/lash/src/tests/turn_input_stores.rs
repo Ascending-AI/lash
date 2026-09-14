@@ -14,7 +14,9 @@ impl lash_core::TurnInputStore for SnapshotStore {
         Ok(lash_core::TurnCancelIntentSnapshot::Absent)
     }
 
-    fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
+    fn turn_cancellation_authority(
+        &self,
+    ) -> Option<Arc<dyn lash_core::store::StoreTurnCancellationAuthority>> {
         Some(
             self.turn_cancellation_authority
                 .get_or_init(|| {
@@ -25,7 +27,8 @@ impl lash_core::TurnInputStore for SnapshotStore {
                         ),
                     )
                 })
-                .clone(),
+                .clone()
+                .into_store_authority(),
         )
     }
 
@@ -253,7 +256,9 @@ impl lash_core::TurnInputStore for SnapshotStore {
 
 #[async_trait]
 impl lash_core::TurnInputStore for BoundSessionStore {
-    fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
+    fn turn_cancellation_authority(
+        &self,
+    ) -> Option<Arc<dyn lash_core::store::StoreTurnCancellationAuthority>> {
         Some(
             self.turn_cancellation_authority
                 .get_or_init(|| {
@@ -264,7 +269,8 @@ impl lash_core::TurnInputStore for BoundSessionStore {
                         ),
                     )
                 })
-                .clone(),
+                .clone()
+                .into_store_authority(),
         )
     }
 

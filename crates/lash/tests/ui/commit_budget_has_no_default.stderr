@@ -7,7 +7,7 @@ error[E0599]: no associated function or constant named `default` found for struc
 note: if you're trying to build a new `CommitBudget` consider using one of the following associated functions:
       CommitBudget::new
       CommitBudget::bounded
- --> $WORKSPACE/crates/lash-core/src/store/commit_budget.rs
+ --> $WORKSPACE/crates/lash-core-store/src/store/commit_budget.rs
   |
   |     pub const fn new(bytes: CommitBudgetLimit, nodes: CommitBudgetLimit) -> Self {
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,97 +1,13 @@
+//! Effect-controller error widening that needs `lash-core`'s plugin errors.
+//!
+//! The error type itself is store vocabulary (`lash_core_store::runtime_error`)
+//! and is re-exported at this path.
+
+pub use lash_core_store::runtime_error::RuntimeEffectControllerError;
+
 use crate::PluginError;
+#[allow(unused_imports)]
 use crate::runtime::{RuntimeError, RuntimeErrorCode};
-
-use serde::{Deserialize, Serialize};
-
-use crate::RuntimeEffectKind;
-
-#[derive(Clone, Debug, thiserror::Error, Serialize, Deserialize)]
-#[error("{code}: {message}")]
-pub struct RuntimeEffectControllerError {
-    pub code: RuntimeErrorCode,
-    pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<crate::runtime::effect::RuntimeEffectReplayMismatchReport>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cause: Option<crate::RuntimeErrorCause>,
-}
-
-impl RuntimeEffectControllerError {
-    /// Constructs a first-party `RuntimeEffectControllerError` from a classified code.
-    pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-            summary: None,
-            cause: None,
-        }
-    }
-
-    /// Constructs an error minted by a foreign effect-host extension.
-    ///
-    /// Hosts must namespace these codes and must not mint a built-in
-    /// [`RuntimeErrorCode`] spelling. First-party producers use [`Self::new`],
-    /// whose typed argument makes an unclassified string a compile error.
-    pub fn foreign(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::ForeignCode(code.into()), message)
-    }
-
-    /// Sets the summary carried by a `RuntimeEffectControllerError` for effect-host implementors
-    /// while executing or replaying a runtime effect.
-    pub fn with_summary(
-        mut self,
-        summary: crate::runtime::effect::RuntimeEffectReplayMismatchReport,
-    ) -> Self {
-        self.summary = Some(summary);
-        self
-    }
-
-    pub(in crate::runtime::effect) fn wrong_outcome(
-        expected: RuntimeEffectKind,
-        actual: RuntimeEffectKind,
-    ) -> Self {
-        Self::new(
-            RuntimeErrorCode::RuntimeEffectWrongOutcome,
-            format!(
-                "expected {} outcome, got {}",
-                expected.as_str(),
-                actual.as_str()
-            ),
-        )
-    }
-
-    pub(crate) fn into_runtime_error(self) -> RuntimeError {
-        let Self {
-            code,
-            message,
-            summary,
-            cause,
-        } = self;
-        let mut runtime = RuntimeError::new(code, message);
-        runtime.summary = summary;
-        match cause {
-            Some(cause) => runtime.with_cause(cause),
-            None => runtime,
-        }
-    }
-}
-
-impl From<RuntimeError> for RuntimeEffectControllerError {
-    fn from(err: RuntimeError) -> Self {
-        Self {
-            code: err.code,
-            message: err.message,
-            summary: err.summary,
-            cause: err.cause,
-        }
-    }
-}
-
-impl From<lash_sansio::EffectIdentityError> for RuntimeEffectControllerError {
-    fn from(error: lash_sansio::EffectIdentityError) -> Self {
-        RuntimeError::from(error).into()
-    }
-}
 
 impl From<PluginError> for RuntimeEffectControllerError {
     fn from(err: PluginError) -> Self {
@@ -118,48 +34,6 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 err.to_string(),
             ),
             err => Self::new(RuntimeErrorCode::Plugin, err.to_string()),
-        }
-    }
-}
-
-impl From<crate::StoreError> for RuntimeEffectControllerError {
-    fn from(err: crate::StoreError) -> Self {
-        let cause = match &err {
-            crate::StoreError::SessionDeleted { session_id } => {
-                Some(crate::RuntimeErrorCause::SessionDeleted {
-                    session_id: session_id.clone(),
-                })
-            }
-            _ => None,
-        };
-        let code = match &err {
-            crate::StoreError::StoredDataCorrupt { .. }
-            | crate::StoreError::MonotonicCounterOverflow { .. } => {
-                crate::RuntimeErrorCode::RuntimeStoreCorrupt
-            }
-            crate::StoreError::SessionDeleted { .. } => crate::RuntimeErrorCode::SessionDeleted,
-            crate::StoreError::HeadRevisionConflict { .. } => {
-                crate::RuntimeErrorCode::StoreCommitSuperseded
-            }
-            crate::StoreError::CommitNodeBudgetExceeded { .. } => {
-                crate::RuntimeErrorCode::StoreCommitNodeBudgetExceeded
-            }
-            crate::StoreError::CommitByteBudgetExceeded { .. } => {
-                crate::RuntimeErrorCode::StoreCommitByteBudgetExceeded
-            }
-            crate::StoreError::CheckpointComponentEncodingVersionMismatch { .. } => {
-                crate::RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
-            }
-            crate::StoreError::RecordEncodingFailed { .. } => {
-                crate::RuntimeErrorCode::RecordEncodingFailed
-            }
-            _ => crate::RuntimeErrorCode::RuntimeStore,
-        };
-        Self {
-            code,
-            message: err.to_string(),
-            summary: None,
-            cause,
         }
     }
 }
@@ -295,10 +169,7 @@ mod tests {
         )
         .into_runtime_error();
 
-        assert_eq!(
-            runtime_error.code,
-            crate::RuntimeErrorCode::ForeignCode("plugin_defined_abort".to_string())
-        );
+        assert_eq!(runtime_error.code.as_str(), "plugin_defined_abort");
         assert!(!runtime_error.is_retryable());
         assert!(!runtime_error.is_terminal());
     }

@@ -6,7 +6,7 @@ pub(crate) mod executor;
 mod group;
 pub mod group_drain;
 mod group_journal;
-mod identity_types;
+use lash_core_store::effect_identity as identity_types;
 mod native_host;
 mod store_turn_control;
 pub use store_turn_control::bind_store_turn_control_authority;
@@ -34,7 +34,7 @@ pub use executor::{
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
     TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
-    turn_control_binding_id_for_scope,
+    concrete_turn_cancellation_authority, turn_control_binding_id_for_scope,
 };
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,

@@ -20,6 +20,7 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-core": "lash-internal-core",
     "lash-core-ids": "lash-internal-core-ids",
     "lash-core-llm": "lash-internal-core-llm",
+    "lash-core-store": "lash-internal-core-store",
     "lash-http-transport": "lash-internal-http-transport",
     "lash-lashlang-runtime": "lash-internal-lashlang-runtime",
     "lash-llm-tools": "lash-internal-llm-tools",

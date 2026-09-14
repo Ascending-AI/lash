@@ -39,13 +39,4 @@ impl SessionGraphConformanceAccess for crate::SessionGraph {
     }
 }
 
-/// Generation injection for backend checkpoint round-trip fixtures.
-pub trait ToolStateConformanceAccess {
-    fn with_generation_for_conformance(self, generation: u64) -> Self;
-}
-
-impl ToolStateConformanceAccess for crate::ToolState {
-    fn with_generation_for_conformance(self, generation: u64) -> Self {
-        crate::ToolState::with_generation(self, generation)
-    }
-}
+pub use lash_core_store::tool_state::ToolStateConformanceAccess;

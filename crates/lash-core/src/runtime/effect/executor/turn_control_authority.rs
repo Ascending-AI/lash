@@ -3,56 +3,111 @@ use std::sync::Arc;
 use super::control::{AwaitEventResolver, ScopedEffectController};
 use crate::RuntimeError;
 
-const PHYSICAL_SCOPE_BINDING_SEPARATOR: &str = "#lash-physical-scope:";
-
-/// Bind a durable cancellation authority to the non-session physical scope
-/// that owns its journal. Turn/session scopes are already tied to their
-/// address and keep the deployment identity unchanged.
-pub fn turn_control_binding_id_for_scope(
-    base: &str,
-    scope: &crate::ExecutionScope,
-) -> Result<String, RuntimeError> {
-    match scope.journal_identity() {
-        Ok(identity) if scope.session_id().is_none() => Ok(format!(
-            "{base}{PHYSICAL_SCOPE_BINDING_SEPARATOR}{}",
-            identity.key()
-        )),
-        Ok(_) => Ok(base.to_string()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-pub(crate) fn binding_id_admits_scope(binding_id: &str, scope: &crate::ExecutionScope) -> bool {
-    match scope.journal_identity() {
-        Ok(identity) if scope.session_id().is_none() => binding_id.ends_with(&format!(
-            "{PHYSICAL_SCOPE_BINDING_SEPARATOR}{}",
-            identity.key()
-        )),
-        Ok(_) => !binding_id.contains(PHYSICAL_SCOPE_BINDING_SEPARATOR),
-        Err(_) => false,
-    }
-}
-
-/// Select the scope persisted with a turn-closure authorization.
+/// A reopenable authority for the reserved turn-cancellation promises.
 ///
-/// Session-bound controllers may be driving a queue drain or another turn when
-/// they discover an orphan. The durable input row's turn address is the
-/// canonical admission identity in that case. Process and runtime-operation
-/// controllers with a journal-bound cancellation authority instead carry the physical identity selected before
-/// session work began, so recovery must preserve it exactly. Store-owned Native
-/// promises use the turn address even when ordinary effects run in an operation scope.
-pub(crate) fn admitted_turn_cancel_scope(
-    address: &crate::TurnAddress,
-    controller_scope: &crate::ExecutionScope,
-    binding_id: &str,
-) -> crate::ExecutionScope {
-    if controller_scope.session_id().is_some()
-        || !binding_id.contains(PHYSICAL_SCOPE_BINDING_SEPARATOR)
-    {
-        address.execution_scope()
-    } else {
-        controller_scope.clone()
+/// The resolver is intentionally owned: reopening a session must recover the
+/// same database-backed authority without borrowing an effect-host invocation.
+#[derive(Clone)]
+pub struct TurnCancellationAuthority {
+    binding_id: String,
+    resolver: Arc<dyn AwaitEventResolver>,
+}
+impl TurnCancellationAuthority {
+    pub fn new(binding_id: impl Into<String>, resolver: Arc<dyn AwaitEventResolver>) -> Self {
+        Self {
+            binding_id: binding_id.into(),
+            resolver,
+        }
     }
+
+    pub fn binding_id(&self) -> &str {
+        &self.binding_id
+    }
+
+    /// Erase this authority for the store seam.
+    ///
+    /// [`crate::store::TurnInputStore::turn_cancellation_authority`] hands back
+    /// the object-safe [`lash_core_store::turn_control_binding::StoreTurnCancellationAuthority`]
+    /// because the concrete authority owns an `AwaitEventResolver`, which is
+    /// runtime machinery the store layer cannot depend on.
+    pub fn into_store_authority(
+        self,
+    ) -> Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority> {
+        Arc::new(self)
+    }
+
+    pub fn resolver(&self) -> Arc<dyn AwaitEventResolver> {
+        Arc::clone(&self.resolver)
+    }
+
+    /// Finish one exact closure operation previously authorized by the store.
+    ///
+    /// This grants no store mutation authority: the promise pair may be
+    /// settled after owner takeover, while applying input effects and consuming
+    /// the authorization still requires the successor's current store fence.
+    pub async fn settle_authorized_closure(
+        &self,
+        authorization: &crate::TurnCancelClosureAuthorization,
+    ) -> Result<crate::TurnCancelClosureSettlement, RuntimeError> {
+        authorization.validate()?;
+        let expected_binding = crate::turn_control_binding_id_for_scope(
+            &self.binding_id,
+            authorization.admitted_scope(),
+        )?;
+        if authorization.binding_id() != expected_binding {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                format!(
+                    "turn cancellation closure binding `{}` does not match authority `{}`",
+                    authorization.binding_id(),
+                    expected_binding
+                ),
+            ));
+        }
+        let control = match crate::runtime::turn_control::ActiveTurnControl::new(
+            self.resolver.as_ref(),
+            authorization.address(),
+        )
+        .await
+        {
+            Ok(control) => control,
+            Err(error) if error.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
+                return Err(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+                    format!(
+                        "turn `{}` in session `{}` was revoked before authorized closure settlement",
+                        authorization.turn_id(),
+                        authorization.session_id()
+                    ),
+                ));
+            }
+            Err(error) => return Err(error),
+        };
+        control
+            .settle_authorized(self.resolver.as_ref(), authorization)
+            .await
+    }
+}
+
+impl lash_core_store::turn_control_binding::StoreTurnCancellationAuthority
+    for TurnCancellationAuthority
+{
+    fn binding_id(&self) -> &str {
+        self.binding_id()
+    }
+}
+
+/// Recover the concrete authority a store handed back through the seam.
+///
+/// `TurnCancellationAuthority` is the sole implementor, and only this crate
+/// constructs one, so a handle that is anything else is a programming error.
+pub fn concrete_turn_cancellation_authority(
+    handle: &Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority>,
+) -> TurnCancellationAuthority {
+    let any: &dyn std::any::Any = handle.as_ref();
+    any.downcast_ref::<TurnCancellationAuthority>()
+        .expect("a store turn-cancellation authority is always a TurnCancellationAuthority")
+        .clone()
 }
 
 /// Whether turn-control reads participate in a durable controller journal.
@@ -168,82 +223,11 @@ impl TurnControlBinding<'_> {
     }
 }
 
-/// A reopenable authority for the reserved turn-cancellation promises.
-///
-/// The resolver is intentionally owned: reopening a session must recover the
-/// same database-backed authority without borrowing an effect-host invocation.
-#[derive(Clone)]
-pub struct TurnCancellationAuthority {
-    binding_id: String,
-    resolver: Arc<dyn AwaitEventResolver>,
-}
-
-impl TurnCancellationAuthority {
-    pub fn new(binding_id: impl Into<String>, resolver: Arc<dyn AwaitEventResolver>) -> Self {
-        Self {
-            binding_id: binding_id.into(),
-            resolver,
-        }
-    }
-
-    pub fn binding_id(&self) -> &str {
-        &self.binding_id
-    }
-
-    pub fn resolver(&self) -> Arc<dyn AwaitEventResolver> {
-        Arc::clone(&self.resolver)
-    }
-
-    /// Finish one exact closure operation previously authorized by the store.
-    ///
-    /// This grants no store mutation authority: the promise pair may be
-    /// settled after owner takeover, while applying input effects and consuming
-    /// the authorization still requires the successor's current store fence.
-    pub async fn settle_authorized_closure(
-        &self,
-        authorization: &crate::TurnCancelClosureAuthorization,
-    ) -> Result<crate::TurnCancelClosureSettlement, RuntimeError> {
-        authorization.validate()?;
-        let expected_binding =
-            turn_control_binding_id_for_scope(&self.binding_id, authorization.admitted_scope())?;
-        if authorization.binding_id() != expected_binding {
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
-                format!(
-                    "turn cancellation closure binding `{}` does not match authority `{}`",
-                    authorization.binding_id(),
-                    expected_binding
-                ),
-            ));
-        }
-        let control = match crate::runtime::turn_control::ActiveTurnControl::new(
-            self.resolver.as_ref(),
-            authorization.address(),
-        )
-        .await
-        {
-            Ok(control) => control,
-            Err(error) if error.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
-                return Err(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::TurnControlUnknownOrRevoked,
-                    format!(
-                        "turn `{}` in session `{}` was revoked before authorized closure settlement",
-                        authorization.turn_id(),
-                        authorization.session_id()
-                    ),
-                ));
-            }
-            Err(error) => return Err(error),
-        };
-        control
-            .settle_authorized(self.resolver.as_ref(), authorization)
-            .await
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{admitted_turn_cancel_scope, turn_control_binding_id_for_scope};
+    use lash_core_store::turn_control_binding::{
+        admitted_turn_cancel_scope, turn_control_binding_id_for_scope,
+    };
 
     #[test]
     fn orphan_recovery_uses_persisted_turn_address_for_session_scopes() {

@@ -1,12 +1,10 @@
-use crate::SessionId;
+pub use lash_core_store::process_identity::*;
 use lash_sansio::{CancelOrigin, CancelRequest};
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{
-    ProcessId, ProcessIncarnation, ProcessObserverBy, ProcessRef, ProcessStatus, RecoveryContract,
-};
+use super::model::{ProcessId, ProcessObserverBy, RecoveryContract};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessEventType {
@@ -254,12 +252,6 @@ pub fn terminal_append_request(
     }
     ProcessEventAppendRequest::new(event_type, payload)
         .with_replay_key(format!("process:{process_id}:terminal:{event_type}"))
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessTerminalSemantics {
-    pub status: ProcessStatus,
-    pub outcome: ProcessAwaitOutput,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -788,30 +780,6 @@ fn cancellation_replay_key(process_ref: &ProcessRef, request: &CancelRequest) ->
 /// in the invocation delivered with a process wake.
 pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 3;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessWakeDelivery {
-    pub version: u32,
-    pub wake_id: String,
-    pub target_session_id: SessionId,
-    pub process_id: ProcessId,
-    pub process_incarnation: ProcessIncarnation,
-    pub sequence: u64,
-    pub event_type: String,
-    pub event_invocation: crate::RuntimeInvocation,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_caused_by: Option<crate::CausalRef>,
-    /// Authority captured from the durable process originator at event append.
-    /// The delivery driver must forward this unchanged into queued work.
-    #[serde(default, skip_serializing_if = "process_wake_authority_is_empty")]
-    pub authority: crate::QueuedWorkAuthority,
-    pub input: String,
-    pub created_at_ms: u64,
-}
-
-fn process_wake_authority_is_empty(authority: &crate::QueuedWorkAuthority) -> bool {
-    authority.principal.is_none() && authority.elevation.is_none()
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProcessEventKind {
     FirstStarted,
@@ -1036,5 +1004,19 @@ mod cancellation_identity_tests {
                 "a malformed reserved tool-value tag must be rejected"
             );
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessTerminalSemantics {
+    pub status: ProcessStatus,
+    pub outcome: ProcessAwaitOutput,
+}
+
+impl ProcessTerminalSemantics {
+    /// Maps a terminal process outcome to its durable status for process-store implementors;
+    /// non-terminal variants remain running.
+    pub fn into_status(self) -> ProcessStatus {
+        self.status
     }
 }

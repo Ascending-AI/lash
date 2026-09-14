@@ -1957,7 +1957,9 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::TurnInputStore for CommitRetryStore {
-    fn turn_cancellation_authority(&self) -> Option<lash_core::TurnCancellationAuthority> {
+    fn turn_cancellation_authority(
+        &self,
+    ) -> Option<std::sync::Arc<dyn lash_core::store::StoreTurnCancellationAuthority>> {
         self.inner.turn_cancellation_authority()
     }
 

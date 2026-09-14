@@ -1,0 +1,1170 @@
+use super::*;
+use crate::SessionId;
+
+/// Delegating base for [`RuntimePersistence`] decorators.
+///
+/// Implementors supply one inner persistence handle and override only the
+/// operations they intercept. Every other operation, including convenience
+/// methods with defaults on the component traits, is forwarded to the inner
+/// handle by the blanket component-trait implementations below.
+///
+/// A decorator must not implement the component traits directly; doing so
+/// would overlap these blanket implementations.
+#[async_trait::async_trait]
+pub trait RuntimePersistenceDecorator: Send + Sync {
+    fn inner(&self) -> &(dyn RuntimePersistence + '_);
+
+    fn turn_cancellation_authority(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::StoreTurnCancellationAuthority>> {
+        self.inner().turn_cancellation_authority()
+    }
+
+    async fn read_session_state_version(&self) -> Result<u32, StoreError> {
+        self.inner().read_session_state_version().await
+    }
+
+    async fn admit_session_state(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+    ) -> Result<SessionStateAdmission, StoreError> {
+        self.inner().admit_session_state(lease).await
+    }
+
+    async fn begin_attachment_write(
+        &self,
+        intent: AttachmentIntent,
+    ) -> Result<AttachmentWriteFence, StoreError> {
+        self.inner().begin_attachment_write(intent).await
+    }
+
+    async fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        self.inner().complete_attachment_write(intent, permit).await
+    }
+
+    async fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        self.inner().abort_attachment_write(intent, permit).await
+    }
+
+    async fn commit_refs(
+        &self,
+        session_id: &SessionId,
+        attachment_ids: &[crate::AttachmentId],
+    ) -> Result<(), StoreError> {
+        self.inner().commit_refs(session_id, attachment_ids).await
+    }
+
+    async fn list_uncommitted(
+        &self,
+        older_than_epoch_ms: u64,
+    ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
+        self.inner().list_uncommitted(older_than_epoch_ms).await
+    }
+
+    async fn forget_aged_uncommitted_intents(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<(), StoreError> {
+        self.inner()
+            .forget_aged_uncommitted_intents(intent_grace_cutoff_epoch_ms)
+            .await
+    }
+
+    async fn has_live_ref_for_id(
+        &self,
+        attachment_id: &crate::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, StoreError> {
+        self.inner()
+            .has_live_ref_for_id(attachment_id, intent_grace_cutoff_epoch_ms)
+            .await
+    }
+
+    async fn forget(
+        &self,
+        session_id: &SessionId,
+        attachment_id: &crate::AttachmentId,
+    ) -> Result<(), StoreError> {
+        self.inner().forget(session_id, attachment_id).await
+    }
+
+    async fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError> {
+        self.inner().list_all_refs().await
+    }
+
+    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
+        self.inner().load_session().await
+    }
+
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        self.inner().load_session_head_meta().await
+    }
+
+    async fn committed_turn_exists(&self, turn_id: &crate::TurnId) -> Result<bool, StoreError> {
+        self.inner().committed_turn_exists(turn_id).await
+    }
+
+    async fn load_node(
+        &self,
+        node_id: &str,
+    ) -> Result<Option<crate::SessionNodeRecord>, StoreError> {
+        self.inner().load_node(node_id).await
+    }
+
+    async fn commit_runtime_state(
+        &self,
+        commit: RuntimeCommit,
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
+        self.inner().commit_runtime_state(commit).await
+    }
+
+    async fn admit_and_bind_session(
+        &self,
+        binding: &SessionBinding,
+    ) -> Result<SessionAdmission, StoreError> {
+        self.inner().admit_and_bind_session(binding).await
+    }
+
+    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+        self.inner().save_session_meta(meta).await
+    }
+
+    async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
+        self.inner().load_session_meta().await
+    }
+
+    async fn enqueue_pending_turn_input(
+        &self,
+        input: crate::PendingTurnInputDraft,
+    ) -> Result<crate::PendingTurnInput, StoreError> {
+        self.inner().enqueue_pending_turn_input(input).await
+    }
+
+    async fn turn_is_committed(&self, address: &crate::TurnAddress) -> Result<bool, StoreError> {
+        self.inner().turn_is_committed(address).await
+    }
+
+    async fn record_turn_cancel_request(
+        &self,
+        request: crate::TurnCancelRequest,
+    ) -> Result<crate::TurnCancelRequestRecord, StoreError> {
+        self.inner().record_turn_cancel_request(request).await
+    }
+
+    async fn turn_cancel_request(
+        &self,
+        address: &crate::TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError> {
+        self.inner().turn_cancel_request(address).await
+    }
+
+    async fn turn_cancel_request_intent(
+        &self,
+        address: &crate::TurnAddress,
+    ) -> Result<crate::TurnCancelIntentSnapshot, StoreError> {
+        self.inner().turn_cancel_request_intent(address).await
+    }
+
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
+    ) -> Result<(), StoreError> {
+        self.inner()
+            .validate_turn_cancellation_binding(
+                session_id,
+                session_execution_lease,
+                binding_id,
+                admitted_scope,
+            )
+            .await
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        authorization: &crate::TurnCancelClosureAuthorization,
+    ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError> {
+        self.inner()
+            .authorize_turn_cancel_closure(session_execution_lease, authorization)
+            .await
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
+        self.inner()
+            .pending_turn_cancel_closures(
+                session_id,
+                session_execution_lease,
+                binding_id,
+                admitted_scope,
+            )
+            .await
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
+        self.inner().pending_turn_cancel_closure_pins().await
+    }
+
+    async fn reconcile_turn_cancel_winner(
+        &self,
+        address: &crate::TurnAddress,
+        observed: &crate::TurnCancelIntentSnapshot,
+        evidence: &crate::TurnCancellationEvidence,
+    ) -> Result<bool, StoreError> {
+        self.inner()
+            .reconcile_turn_cancel_winner(address, observed, evidence)
+            .await
+    }
+
+    async fn list_pending_turn_inputs(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::PendingTurnInput>, StoreError> {
+        self.inner().list_pending_turn_inputs(session_id).await
+    }
+
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::TurnInputApplication>, StoreError> {
+        self.inner().list_turn_input_applications(session_id).await
+    }
+
+    async fn cancel_pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input_id: &str,
+    ) -> Result<crate::PendingTurnInputCancelOutcome, StoreError> {
+        self.inner()
+            .cancel_pending_turn_input(session_id, input_id)
+            .await
+    }
+
+    async fn cancel_pending_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        targets: &[crate::PendingTurnInputCancelTarget],
+    ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError> {
+        self.inner()
+            .cancel_pending_turn_inputs(session_id, targets)
+            .await
+    }
+
+    async fn cancel_pending_turn_input_suffix(
+        &self,
+        session_id: &SessionId,
+        anchor: &crate::PendingTurnInputCancelTarget,
+    ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError> {
+        self.inner()
+            .cancel_pending_turn_input_suffix(session_id, anchor)
+            .await
+    }
+
+    async fn claim_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        turn_id: &crate::TurnId,
+        checkpoint: crate::CheckpointKind,
+        max_inputs: usize,
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError> {
+        self.inner()
+            .claim_active_turn_inputs(
+                session_id,
+                session_execution_lease,
+                owner,
+                turn_id,
+                checkpoint,
+                max_inputs,
+            )
+            .await
+    }
+
+    async fn claim_next_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        max_inputs: usize,
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError> {
+        self.inner()
+            .claim_next_turn_inputs(session_id, session_execution_lease, owner, max_inputs)
+            .await
+    }
+
+    async fn abandon_turn_input_claim(
+        &self,
+        claim: &crate::WorkClaim<crate::runtime::TurnInputClaimData>,
+    ) -> Result<(), StoreError> {
+        self.inner().abandon_turn_input_claim(claim).await
+    }
+
+    async fn abandon_turn_input_claims(
+        &self,
+        claims: &[crate::WorkClaim<crate::runtime::TurnInputClaimData>],
+    ) -> Result<(), StoreError> {
+        self.inner().abandon_turn_input_claims(claims).await
+    }
+
+    async fn orphaned_active_turn_ids(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        scope: OrphanedTurnInputScope<'_>,
+    ) -> Result<Vec<crate::TurnId>, StoreError> {
+        self.inner()
+            .orphaned_active_turn_ids(session_id, session_execution_lease, scope)
+            .await
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        turn_id: &crate::TurnId,
+        observed: &crate::TurnCancelIntentSnapshot,
+        settlement: Option<&crate::TurnCancelClosureSettlement>,
+    ) -> Result<crate::store::TurnCancelRepairResult, StoreError> {
+        self.inner()
+            .repair_orphaned_active_turn_inputs(
+                session_id,
+                session_execution_lease,
+                turn_id,
+                observed,
+                settlement,
+            )
+            .await
+    }
+
+    async fn try_claim_session_execution_lease(
+        &self,
+        session_id: &SessionId,
+        owner: &LeaseOwnerIdentity,
+        executor_id: &str,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
+        self.inner()
+            .try_claim_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms)
+            .await
+    }
+
+    async fn try_claim_session_execution_lease_with_token(
+        &self,
+        session_id: &SessionId,
+        owner: &LeaseOwnerIdentity,
+        executor_id: &str,
+        claim_nonce: &LeaseClaimNonce,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
+        self.inner()
+            .try_claim_session_execution_lease_with_token(
+                session_id,
+                owner,
+                executor_id,
+                claim_nonce,
+                lease_ttl_ms,
+            )
+            .await
+    }
+
+    async fn renew_session_execution_lease(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLease, StoreError> {
+        self.inner()
+            .renew_session_execution_lease(fence, lease_ttl_ms)
+            .await
+    }
+
+    async fn release_session_execution_lease(
+        &self,
+        completion: &SessionExecutionLeaseAuthority,
+    ) -> Result<(), StoreError> {
+        self.inner()
+            .release_session_execution_lease(completion)
+            .await
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::SessionExecutionLeaseObservation, StoreError> {
+        self.inner().get_session_execution_lease(session_id).await
+    }
+
+    async fn enqueue_queued_work(
+        &self,
+        batch: crate::QueuedWorkBatchDraft,
+    ) -> Result<crate::QueuedWorkBatch, StoreError> {
+        self.inner().enqueue_queued_work(batch).await
+    }
+
+    async fn enqueue_queued_work_with_outcome(
+        &self,
+        batch: crate::QueuedWorkBatchDraft,
+    ) -> Result<crate::QueuedWorkEnqueueOutcome, StoreError> {
+        self.inner().enqueue_queued_work_with_outcome(batch).await
+    }
+
+    async fn claim_leading_ready_session_command(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError> {
+        self.inner()
+            .claim_leading_ready_session_command(session_id, session_execution_lease, owner)
+            .await
+    }
+
+    async fn claim_ready_queued_work(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        boundary: crate::QueuedWorkClaimBoundary,
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<crate::QueuedWorkClaimOutcome, StoreError> {
+        self.inner()
+            .claim_ready_queued_work(session_id, session_execution_lease, owner, boundary, policy)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn claim_checkpoint_work(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        turn_id: &crate::TurnId,
+        checkpoint: crate::CheckpointKind,
+        max_inputs: usize,
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<
+        (
+            Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>,
+            Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>,
+        ),
+        StoreError,
+    > {
+        self.inner()
+            .claim_checkpoint_work(
+                session_id,
+                session_execution_lease,
+                owner,
+                turn_id,
+                checkpoint,
+                max_inputs,
+                policy,
+            )
+            .await
+    }
+
+    async fn claim_ready_queued_work_by_batch_ids(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        boundary: crate::QueuedWorkClaimBoundary,
+        batch_ids: &[crate::BatchId],
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
+        self.inner()
+            .claim_ready_queued_work_by_batch_ids(
+                session_id,
+                session_execution_lease,
+                owner,
+                boundary,
+                batch_ids,
+                policy,
+            )
+            .await
+    }
+
+    async fn abandon_queued_work_claim(
+        &self,
+        claim: &crate::WorkClaim<crate::runtime::QueuedWorkClaimData>,
+    ) -> Result<(), StoreError> {
+        self.inner().abandon_queued_work_claim(claim).await
+    }
+
+    async fn abandon_queued_work_claims(
+        &self,
+        claims: &[crate::WorkClaim<crate::runtime::QueuedWorkClaimData>],
+    ) -> Result<(), StoreError> {
+        self.inner().abandon_queued_work_claims(claims).await
+    }
+
+    async fn cancel_queued_work_batch(
+        &self,
+        session_id: &SessionId,
+        batch_id: &str,
+    ) -> Result<Option<crate::QueuedWorkBatch>, StoreError> {
+        self.inner()
+            .cancel_queued_work_batch(session_id, batch_id)
+            .await
+    }
+
+    async fn queued_work_batch_completed(
+        &self,
+        session_id: &SessionId,
+        batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        self.inner()
+            .queued_work_batch_completed(session_id, batch_id)
+            .await
+    }
+
+    async fn pending_session_work_ordering(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<PendingSessionWorkOrdering, StoreError> {
+        self.inner().pending_session_work_ordering(session_id).await
+    }
+
+    async fn list_queued_work(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
+        self.inner().list_queued_work(session_id).await
+    }
+
+    async fn list_pending_queued_work(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
+        self.inner().list_pending_queued_work(session_id).await
+    }
+
+    async fn vacuum(&self) -> MaintenanceResult<VacuumReport> {
+        self.inner().vacuum().await
+    }
+
+    async fn gc_unreachable(&self) -> MaintenanceResult<GcReport> {
+        self.inner().gc_unreachable().await
+    }
+}
+
+#[async_trait::async_trait]
+impl<T> AttachmentManifest for T
+where
+    T: RuntimePersistenceDecorator + ?Sized,
+{
+    async fn begin_attachment_write(
+        &self,
+        intent: AttachmentIntent,
+    ) -> Result<AttachmentWriteFence, StoreError> {
+        RuntimePersistenceDecorator::begin_attachment_write(self, intent).await
+    }
+
+    async fn complete_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::complete_attachment_write(self, intent, permit).await
+    }
+
+    async fn abort_attachment_write(
+        &self,
+        intent: &AttachmentIntent,
+        permit: AttachmentWritePermit,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::abort_attachment_write(self, intent, permit).await
+    }
+
+    async fn commit_refs(
+        &self,
+        session_id: &SessionId,
+        attachment_ids: &[crate::AttachmentId],
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::commit_refs(self, session_id, attachment_ids).await
+    }
+
+    async fn list_uncommitted(
+        &self,
+        older_than_epoch_ms: u64,
+    ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
+        RuntimePersistenceDecorator::list_uncommitted(self, older_than_epoch_ms).await
+    }
+
+    async fn forget_aged_uncommitted_intents(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::forget_aged_uncommitted_intents(
+            self,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+
+    async fn has_live_ref_for_id(
+        &self,
+        attachment_id: &crate::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, StoreError> {
+        RuntimePersistenceDecorator::has_live_ref_for_id(
+            self,
+            attachment_id,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+
+    async fn forget(
+        &self,
+        session_id: &SessionId,
+        attachment_id: &crate::AttachmentId,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::forget(self, session_id, attachment_id).await
+    }
+
+    async fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, StoreError> {
+        RuntimePersistenceDecorator::list_all_refs(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<T> SessionCommitStore for T
+where
+    T: RuntimePersistenceDecorator + ?Sized,
+{
+    async fn read_session_state_version(&self) -> Result<u32, StoreError> {
+        RuntimePersistenceDecorator::read_session_state_version(self).await
+    }
+
+    async fn admit_session_state(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+    ) -> Result<SessionStateAdmission, StoreError> {
+        RuntimePersistenceDecorator::admit_session_state(self, lease).await
+    }
+
+    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
+        RuntimePersistenceDecorator::load_session(self).await
+    }
+
+    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        RuntimePersistenceDecorator::load_session_head_meta(self).await
+    }
+
+    async fn committed_turn_exists(&self, turn_id: &crate::TurnId) -> Result<bool, StoreError> {
+        RuntimePersistenceDecorator::committed_turn_exists(self, turn_id).await
+    }
+
+    async fn load_node(
+        &self,
+        node_id: &str,
+    ) -> Result<Option<crate::SessionNodeRecord>, StoreError> {
+        RuntimePersistenceDecorator::load_node(self, node_id).await
+    }
+
+    async fn commit_runtime_state(
+        &self,
+        commit: RuntimeCommit,
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
+        RuntimePersistenceDecorator::commit_runtime_state(self, commit).await
+    }
+
+    async fn admit_and_bind_session(
+        &self,
+        binding: &SessionBinding,
+    ) -> Result<SessionAdmission, StoreError> {
+        RuntimePersistenceDecorator::admit_and_bind_session(self, binding).await
+    }
+
+    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::save_session_meta(self, meta).await
+    }
+
+    async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
+        RuntimePersistenceDecorator::load_session_meta(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<T> TurnInputStore for T
+where
+    T: RuntimePersistenceDecorator + ?Sized,
+{
+    fn turn_cancellation_authority(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::StoreTurnCancellationAuthority>> {
+        RuntimePersistenceDecorator::turn_cancellation_authority(self)
+    }
+
+    async fn turn_is_committed(&self, address: &crate::TurnAddress) -> Result<bool, StoreError> {
+        RuntimePersistenceDecorator::turn_is_committed(self, address).await
+    }
+
+    async fn reconcile_turn_cancel_winner(
+        &self,
+        address: &crate::TurnAddress,
+        observed: &crate::TurnCancelIntentSnapshot,
+        evidence: &crate::TurnCancellationEvidence,
+    ) -> Result<bool, StoreError> {
+        RuntimePersistenceDecorator::reconcile_turn_cancel_winner(self, address, observed, evidence)
+            .await
+    }
+
+    async fn record_turn_cancel_request(
+        &self,
+        request: crate::TurnCancelRequest,
+    ) -> Result<crate::TurnCancelRequestRecord, StoreError> {
+        RuntimePersistenceDecorator::record_turn_cancel_request(self, request).await
+    }
+
+    async fn turn_cancel_request(
+        &self,
+        address: &crate::TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError> {
+        RuntimePersistenceDecorator::turn_cancel_request(self, address).await
+    }
+
+    async fn turn_cancel_request_intent(
+        &self,
+        address: &crate::TurnAddress,
+    ) -> Result<crate::TurnCancelIntentSnapshot, StoreError> {
+        RuntimePersistenceDecorator::turn_cancel_request_intent(self, address).await
+    }
+
+    async fn validate_turn_cancellation_binding(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::validate_turn_cancellation_binding(
+            self,
+            session_id,
+            session_execution_lease,
+            binding_id,
+            admitted_scope,
+        )
+        .await
+    }
+
+    async fn authorize_turn_cancel_closure(
+        &self,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        authorization: &crate::TurnCancelClosureAuthorization,
+    ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError> {
+        RuntimePersistenceDecorator::authorize_turn_cancel_closure(
+            self,
+            session_execution_lease,
+            authorization,
+        )
+        .await
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        admitted_scope: &crate::ExecutionScope,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
+        RuntimePersistenceDecorator::pending_turn_cancel_closures(
+            self,
+            session_id,
+            session_execution_lease,
+            binding_id,
+            admitted_scope,
+        )
+        .await
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
+        RuntimePersistenceDecorator::pending_turn_cancel_closure_pins(self).await
+    }
+
+    async fn enqueue_pending_turn_input(
+        &self,
+        input: crate::PendingTurnInputDraft,
+    ) -> Result<crate::PendingTurnInput, StoreError> {
+        RuntimePersistenceDecorator::enqueue_pending_turn_input(self, input).await
+    }
+
+    async fn list_pending_turn_inputs(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::PendingTurnInput>, StoreError> {
+        RuntimePersistenceDecorator::list_pending_turn_inputs(self, session_id).await
+    }
+
+    async fn list_turn_input_applications(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::TurnInputApplication>, StoreError> {
+        RuntimePersistenceDecorator::list_turn_input_applications(self, session_id).await
+    }
+
+    async fn cancel_pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input_id: &str,
+    ) -> Result<crate::PendingTurnInputCancelOutcome, StoreError> {
+        RuntimePersistenceDecorator::cancel_pending_turn_input(self, session_id, input_id).await
+    }
+
+    async fn cancel_pending_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        targets: &[crate::PendingTurnInputCancelTarget],
+    ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError> {
+        RuntimePersistenceDecorator::cancel_pending_turn_inputs(self, session_id, targets).await
+    }
+
+    async fn cancel_pending_turn_input_suffix(
+        &self,
+        session_id: &SessionId,
+        anchor: &crate::PendingTurnInputCancelTarget,
+    ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError> {
+        RuntimePersistenceDecorator::cancel_pending_turn_input_suffix(self, session_id, anchor)
+            .await
+    }
+
+    async fn claim_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        turn_id: &crate::TurnId,
+        checkpoint: crate::CheckpointKind,
+        max_inputs: usize,
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError> {
+        RuntimePersistenceDecorator::claim_active_turn_inputs(
+            self,
+            session_id,
+            session_execution_lease,
+            owner,
+            turn_id,
+            checkpoint,
+            max_inputs,
+        )
+        .await
+    }
+
+    async fn claim_next_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        max_inputs: usize,
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError> {
+        RuntimePersistenceDecorator::claim_next_turn_inputs(
+            self,
+            session_id,
+            session_execution_lease,
+            owner,
+            max_inputs,
+        )
+        .await
+    }
+
+    async fn abandon_turn_input_claim(
+        &self,
+        claim: &crate::WorkClaim<crate::runtime::TurnInputClaimData>,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::abandon_turn_input_claim(self, claim).await
+    }
+
+    async fn abandon_turn_input_claims(
+        &self,
+        claims: &[crate::WorkClaim<crate::runtime::TurnInputClaimData>],
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::abandon_turn_input_claims(self, claims).await
+    }
+
+    async fn orphaned_active_turn_ids(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        scope: OrphanedTurnInputScope<'_>,
+    ) -> Result<Vec<crate::TurnId>, StoreError> {
+        RuntimePersistenceDecorator::orphaned_active_turn_ids(
+            self,
+            session_id,
+            session_execution_lease,
+            scope,
+        )
+        .await
+    }
+
+    async fn repair_orphaned_active_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        turn_id: &crate::TurnId,
+        observed: &crate::TurnCancelIntentSnapshot,
+        settlement: Option<&crate::TurnCancelClosureSettlement>,
+    ) -> Result<crate::store::TurnCancelRepairResult, StoreError> {
+        RuntimePersistenceDecorator::repair_orphaned_active_turn_inputs(
+            self,
+            session_id,
+            session_execution_lease,
+            turn_id,
+            observed,
+            settlement,
+        )
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl<T> SessionExecutionLeaseStore for T
+where
+    T: RuntimePersistenceDecorator + ?Sized,
+{
+    async fn try_claim_session_execution_lease(
+        &self,
+        session_id: &SessionId,
+        owner: &LeaseOwnerIdentity,
+        executor_id: &str,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
+        RuntimePersistenceDecorator::try_claim_session_execution_lease(
+            self,
+            session_id,
+            owner,
+            executor_id,
+            lease_ttl_ms,
+        )
+        .await
+    }
+
+    async fn try_claim_session_execution_lease_with_token(
+        &self,
+        session_id: &SessionId,
+        owner: &LeaseOwnerIdentity,
+        executor_id: &str,
+        claim_nonce: &LeaseClaimNonce,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
+        RuntimePersistenceDecorator::try_claim_session_execution_lease_with_token(
+            self,
+            session_id,
+            owner,
+            executor_id,
+            claim_nonce,
+            lease_ttl_ms,
+        )
+        .await
+    }
+
+    async fn renew_session_execution_lease(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLease, StoreError> {
+        RuntimePersistenceDecorator::renew_session_execution_lease(self, fence, lease_ttl_ms).await
+    }
+
+    async fn release_session_execution_lease(
+        &self,
+        completion: &SessionExecutionLeaseAuthority,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::release_session_execution_lease(self, completion).await
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::SessionExecutionLeaseObservation, StoreError> {
+        RuntimePersistenceDecorator::get_session_execution_lease(self, session_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<T> QueuedWorkStore for T
+where
+    T: RuntimePersistenceDecorator + ?Sized,
+{
+    async fn enqueue_queued_work(
+        &self,
+        batch: crate::QueuedWorkBatchDraft,
+    ) -> Result<crate::QueuedWorkBatch, StoreError> {
+        RuntimePersistenceDecorator::enqueue_queued_work(self, batch).await
+    }
+
+    async fn enqueue_queued_work_with_outcome(
+        &self,
+        batch: crate::QueuedWorkBatchDraft,
+    ) -> Result<crate::QueuedWorkEnqueueOutcome, StoreError> {
+        RuntimePersistenceDecorator::enqueue_queued_work_with_outcome(self, batch).await
+    }
+
+    async fn claim_leading_ready_session_command(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+    ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError> {
+        RuntimePersistenceDecorator::claim_leading_ready_session_command(
+            self,
+            session_id,
+            session_execution_lease,
+            owner,
+        )
+        .await
+    }
+
+    async fn claim_ready_queued_work(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        boundary: crate::QueuedWorkClaimBoundary,
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<crate::QueuedWorkClaimOutcome, StoreError> {
+        RuntimePersistenceDecorator::claim_ready_queued_work(
+            self,
+            session_id,
+            session_execution_lease,
+            owner,
+            boundary,
+            policy,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn claim_checkpoint_work(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        turn_id: &crate::TurnId,
+        checkpoint: crate::CheckpointKind,
+        max_inputs: usize,
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<
+        (
+            Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>,
+            Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>,
+        ),
+        StoreError,
+    > {
+        RuntimePersistenceDecorator::claim_checkpoint_work(
+            self,
+            session_id,
+            session_execution_lease,
+            owner,
+            turn_id,
+            checkpoint,
+            max_inputs,
+            policy,
+        )
+        .await
+    }
+
+    async fn claim_ready_queued_work_by_batch_ids(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        boundary: crate::QueuedWorkClaimBoundary,
+        batch_ids: &[crate::BatchId],
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
+        RuntimePersistenceDecorator::claim_ready_queued_work_by_batch_ids(
+            self,
+            session_id,
+            session_execution_lease,
+            owner,
+            boundary,
+            batch_ids,
+            policy,
+        )
+        .await
+    }
+
+    async fn abandon_queued_work_claim(
+        &self,
+        claim: &crate::WorkClaim<crate::runtime::QueuedWorkClaimData>,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::abandon_queued_work_claim(self, claim).await
+    }
+
+    async fn abandon_queued_work_claims(
+        &self,
+        claims: &[crate::WorkClaim<crate::runtime::QueuedWorkClaimData>],
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::abandon_queued_work_claims(self, claims).await
+    }
+
+    async fn cancel_queued_work_batch(
+        &self,
+        session_id: &SessionId,
+        batch_id: &str,
+    ) -> Result<Option<crate::QueuedWorkBatch>, StoreError> {
+        RuntimePersistenceDecorator::cancel_queued_work_batch(self, session_id, batch_id).await
+    }
+
+    async fn queued_work_batch_completed(
+        &self,
+        session_id: &SessionId,
+        batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        RuntimePersistenceDecorator::queued_work_batch_completed(self, session_id, batch_id).await
+    }
+
+    async fn pending_session_work_ordering(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<PendingSessionWorkOrdering, StoreError> {
+        RuntimePersistenceDecorator::pending_session_work_ordering(self, session_id).await
+    }
+
+    async fn list_queued_work(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
+        RuntimePersistenceDecorator::list_queued_work(self, session_id).await
+    }
+
+    async fn list_pending_queued_work(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
+        RuntimePersistenceDecorator::list_pending_queued_work(self, session_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl<T> StoreMaintenance for T
+where
+    T: RuntimePersistenceDecorator + ?Sized,
+{
+    async fn vacuum(&self) -> MaintenanceResult<VacuumReport> {
+        RuntimePersistenceDecorator::vacuum(self).await
+    }
+
+    async fn gc_unreachable(&self) -> MaintenanceResult<GcReport> {
+        RuntimePersistenceDecorator::gc_unreachable(self).await
+    }
+}

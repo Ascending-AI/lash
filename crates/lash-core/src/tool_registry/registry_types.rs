@@ -1,4 +1,5 @@
 use super::*;
+pub use lash_core_store::tool_state::{ReconfigureError, ToolRegistrationKind};
 
 #[derive(Clone, PartialEq)]
 pub(super) struct ToolRegistryEntry {
@@ -131,14 +132,6 @@ impl ToolSurface {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ToolRegistrationKind {
-    #[default]
-    Leaf,
-    Orchestrating,
-}
-
 /// Typed registry-source identity. Leaf source labels and orchestrating tool
 /// identities occupy disjoint namespaces even when their rendered text is
 /// identical.
@@ -187,24 +180,6 @@ pub(super) struct ToolRegistryInner {
 pub struct ToolRestoreReport {
     pub generation: u64,
     pub orphaned: Vec<ToolId>,
-}
-
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum ReconfigureError {
-    #[error("validation error: {0}")]
-    Validation(String),
-    #[error(
-        "tool id `{tool_id}` is registered in both the leaf and orchestrating lanes (leaf source `{leaf_source_id}`)"
-    )]
-    CrossLaneToolIdCollision {
-        tool_id: ToolId,
-        leaf_source_id: String,
-    },
-    #[error("unknown tool source: {0}")]
-    UnknownSource(String),
-    #[error("generation mismatch: expected {expected}, actual {actual}")]
-    GenerationMismatch { expected: u64, actual: u64 },
 }
 
 #[derive(Clone)]
