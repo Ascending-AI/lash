@@ -275,22 +275,20 @@ confidence-broad:
 confidence-full:
   bash "{{repo}}/scripts/confidence-gate.sh" full
 
-# Optional broader iteration run: the whole workspace suite except six tests
+# Optional broader iteration run: the whole workspace suite except four tests
 # that between them account for most of its wall clock. It can supplement a
 # focused regression when wider feedback is useful, but it is not a routine
 # review or stacking prerequisite. State its exact scope; CI supplies the broad
 # merge proof.
 #
-# Measured on a 32-core box: 3848 of the 3854 tests in 38s, against 204s for
-# the full run. The list is those six by measurement, not a category sweep —
-# the cheap tests beside them keep running. Each exclusion, and why deferring
-# it during iteration is safe:
-#   lash-sim `minimizer_preserves_named_contract_execution_fixture_reasons`
-#     (180s), `generated_sim_profile_writes_trace_replay_and_provider_artifacts`
-#     (169s), `minimizer_preserves_provider_worker_backend_fixture_reasons`
-#     (138s), and `minimizer_writes_replayable_regression_package` (95s) —
+# The list is those by measurement, not a category sweep — the cheap tests
+# beside them keep running. Each exclusion, and why deferring it during
+# iteration is safe:
+#   lash-sim `generated_sim_profile_writes_trace_replay_and_provider_artifacts`
+#     (213s), `minimizer_writes_replayable_regression_package` (112s) and
+#     `replay_failure_publishes_no_minimized_package_artifacts` (109s) —
 #     counterexample minimization and the generated simulation harness,
-#     replayed across the committed fixture corpora. These four are the
+#     replayed across the committed fixture corpora. These three are the
 #     critical path of the full run; the other minimizer tests are cheap and
 #     stay in.
 #   lash-runtime `ui` binary — the trybuild compile-fail gates on the public
@@ -300,7 +298,7 @@ confidence-full:
 #     only an API-surface change can move the result.
 # Drop the leading `not` from the expression to run only the excluded set.
 battery-fast:
-  cargo nextest run --workspace --locked -E 'not ((package(lash-runtime) & binary(ui)) + (package(lash-sim) & test(/^(minimize::tests::minimizer_preserves_named_contract_execution_fixture_reasons|minimize::tests::minimizer_preserves_provider_worker_backend_fixture_reasons|minimize::tests::minimizer_writes_replayable_regression_package|runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)$/)))'
+  cargo nextest run --workspace --locked -E 'not ((package(lash-runtime) & binary(ui)) + (package(lash-sim) & test(/^(minimize::tests::minimizer_writes_replayable_regression_package|minimize::tests::replay_failure_publishes_no_minimized_package_artifacts|runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)$/)))'
 
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
