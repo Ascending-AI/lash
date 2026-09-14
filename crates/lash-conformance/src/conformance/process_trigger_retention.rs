@@ -329,7 +329,9 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
                     lash_core::OnParentEnd::Abandon,
                 ),
             )
-            .with_identity(ProcessIdentity::new("test")),
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::new("test"),
+            )),
         )
         .await
         .expect("register delivery process");
@@ -463,9 +465,13 @@ fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscrip
             kind: "test".to_string(),
             payload: serde_json::json!({ "process": "worker" }),
         },
-        target_identity: ProcessIdentity::new("test")
-            .with_label(Some("worker".to_string()))
-            .with_definition(Some(serde_json::json!({ "process_name": "worker" }))),
+        target_identity: ProcessIdentity::for_definition(
+            lash_core::ProcessDefinitionRef::unclaimed(
+                "test",
+                serde_json::json!({ "process_name": "worker" }),
+            ),
+            Some("worker".to_string()),
+        ),
         event_types: Vec::new(),
         input_template,
         target_label: Some("worker".to_string()),
@@ -607,7 +613,9 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
                         lash_core::OnParentEnd::Abandon,
                     ),
                 )
-                .with_identity(ProcessIdentity::new("test")),
+                .with_admitted_identity(
+                    lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::new("test")),
+                ),
             )
             .await
             .expect("register delivery process");
@@ -686,7 +694,9 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
                     lash_core::OnParentEnd::Abandon,
                 ),
             )
-            .with_identity(ProcessIdentity::new("test")),
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::new("test"),
+            )),
         )
         .await
         .expect("register delivery process");
@@ -761,7 +771,9 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
                 lash_core::OnParentEnd::Abandon,
             ),
         )
-        .with_identity(ProcessIdentity::new("test"))
+        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+            ProcessIdentity::new("test"),
+        ))
     };
     handles
         .registry
@@ -826,7 +838,11 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
                                 lash_core::OnParentEnd::Abandon,
                             ),
                         )
-                        .with_identity(ProcessIdentity::new("test")),
+                        .with_admitted_identity(
+                            lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::new(
+                                "test",
+                            )),
+                        ),
                     )
                     .await
                     .expect("re-register after classification and before delete");

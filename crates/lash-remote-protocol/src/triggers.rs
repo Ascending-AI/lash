@@ -8,8 +8,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::processes::{
-    RemoteProcessDefinitionIdentity, RemoteProcessEventType, RemoteProcessExecutionEnvRef,
-    RemoteProcessIdentity, RemoteProcessInput, RemoteProcessOriginator, RemoteSessionScope,
+    RemoteProcessEventType, RemoteProcessExecutionEnvRef, RemoteProcessIdentity,
+    RemoteProcessInput, RemoteProcessOriginator, RemoteSessionScope,
 };
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 
@@ -174,7 +174,7 @@ pub struct RemoteTriggerSubscriptionFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<RemoteProcessDefinitionIdentity>,
+    pub target: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
 }

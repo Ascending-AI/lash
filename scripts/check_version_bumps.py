@@ -351,6 +351,25 @@ IDENTIFIER_RENAME_BASELINES = {
     "VM_CONTINUATION_FORMAT_VERSION": (
         "sha256:3be27b55f201a7b5e39f3c668f7d4508b33a6ea7527cc4e85b65d53dea1c45ae"
     ),
+    # FIG-2992: a process identity's `definition` became the typed
+    # `ProcessDefinitionRef` instead of a bare `serde_json::Value`. Both trigger
+    # projections were retyped to match and nothing else: the draft projection
+    # still writes the engine kind string and then the engine-owned definition
+    # value alone (`reference.definition.as_json()`), and the subscription
+    # filter still compares that same value. The engine kind is already fixed by
+    # the projected `kind` leaf and the signature is a claim the engine resolves,
+    # so neither joins the preimage. Regenerating the durable-read fixture on
+    # both backends reproduced trigger-definition, trigger-command,
+    # trigger-subscription and trigger-operation fingerprints byte-identical to
+    # the merge-base rows, which is the evidence that the shape reading is a
+    # retyping: TRIGGER_COMMAND_FAMILY_VERSION stays 5 and
+    # TRIGGER_DEFINITION_FAMILY_VERSION stays 4.
+    "crates/lash-core/src/triggers.rs:TRIGGER_COMMAND_FAMILY_VERSION": (
+        "sha256:f14bf2e2d8b714b8d89f617652ae1586bb56d5d6718d41b45a827c10bf5f014b"
+    ),
+    "crates/lash-core/src/triggers/router.rs:TRIGGER_DEFINITION_FAMILY_VERSION": (
+        "sha256:fb3d470b763cbd828e7df0bde4fd205be0d7cd077de30acd08d25c7b3ad2b73e"
+    ),
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

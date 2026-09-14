@@ -57,7 +57,10 @@ fn list_and_prune_statements_keep_their_previous_predicates() {
     assert!(LIST_PROCESSES_SQL.contains(
         "               AND ($10::BIGINT IS NULL OR status IN ('running', 'waiting')\n                    OR updated_at_ms >= $10)\n"
     ));
-    assert!(LIST_PROCESSES_SQL.contains("(record_json::JSONB #> '{identity,definition}') = $5"));
+    assert!(
+        LIST_PROCESSES_SQL
+            .contains("(record_json::JSONB #> '{identity,definition,definition}') = $5")
+    );
     assert!(LIST_OBSERVED_SQL.contains(
         "               AND ($3::BIGINT IS NULL OR p.status IN ('running', 'waiting')\n                    OR p.updated_at_ms >= $3)\n"
     ));

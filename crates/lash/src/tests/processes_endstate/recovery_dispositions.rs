@@ -370,7 +370,11 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
                         lash_core::OnParentEnd::Abandon,
                     ),
                 )
-                .with_identity(lash_core::ProcessIdentity::new("test")),
+                .with_admitted_identity(
+                    lash_core::AdmittedProcessIdentity::for_testing(
+                        lash_core::ProcessIdentity::new("test"),
+                    ),
+                ),
             )
             .await?;
     }

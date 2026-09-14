@@ -409,8 +409,10 @@ impl SurfaceRunner {
                             kind: "surface".to_string(),
                             payload: serde_json::json!({"key": key}),
                         },
-                        target_identity: ProcessIdentity::new("surface")
-                            .with_label(Some("surface-worker".to_string())),
+                        target_identity: ProcessIdentity::labelled(
+                            "surface",
+                            Some("surface-worker".to_string()),
+                        ),
                         event_types: Vec::new(),
                         input_template: inputs,
                         target_label: Some("surface-worker".to_string()),

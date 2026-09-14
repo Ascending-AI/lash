@@ -162,9 +162,16 @@ pub(super) fn project_trigger_draft(
         label,
         definition,
     } = target_identity;
-    identity.string(kind);
+    identity.string(kind.as_str());
     identity.optional(label.as_deref(), |identity, label| identity.string(label));
-    identity.optional(definition.as_ref(), project_trigger_payload_leaf);
+    // A target identity's definition reference projects as the engine-owned
+    // definition value alone: the engine kind is already fixed by `kind`, and the
+    // signature is a claim the engine resolves, never part of what the
+    // subscription names. The bytes therefore stay identical to the pre-FIG-2992
+    // untyped blob and no family rotation is needed.
+    identity.optional(definition.as_ref(), |identity, definition| {
+        project_trigger_payload_leaf(identity, definition.definition.as_json());
+    });
     let mut event_types = event_types.iter().collect::<Vec<_>>();
     event_types.sort_by(|left, right| left.name.cmp(&right.name));
     identity.sequence(event_types, |identity, event_type| {
@@ -714,7 +721,9 @@ impl TriggerRouter {
                 crate::OnParentEnd::Abandon,
             ),
         )
-        .with_identity(subscription.target_identity.clone())
+        .with_admitted_identity(crate::AdmittedProcessIdentity::pinned(
+            subscription.target_identity.clone(),
+        ))
         .with_extra_event_types(subscription.event_types.clone())
         .with_execution_env_ref(Some(subscription.env_ref.clone()))
         .with_wake_session_id(
@@ -1048,9 +1057,10 @@ mod tests {
             .with_input_template(bindings)
             .with_name("name")
             .with_target_label("label");
-        draft.target_identity = crate::ProcessIdentity::new("kind")
-            .with_label(Some("label"))
-            .with_definition(Some(serde_json::json!({"definition": 0})));
+        draft.target_identity = crate::ProcessIdentity::for_definition(
+            crate::ProcessDefinitionRef::unclaimed("kind", serde_json::json!({"definition": 0})),
+            Some("label"),
+        );
         draft
     }
 
@@ -1403,7 +1413,7 @@ mod tests {
                 kind: "testing-fixture".to_string(),
                 payload: serde_json::json!({ "process": process_name }),
             },
-            crate::ProcessIdentity::new("testing-fixture").with_label(Some(process_name)),
+            crate::ProcessIdentity::labelled("testing-fixture", Some(process_name)),
         )
         .with_payload_schema(crate::LashSchema::any())
     }
@@ -1502,7 +1512,7 @@ mod tests {
             crate::ProcessInput::External {
                 metadata: serde_json::json!({}),
             },
-            crate::ProcessIdentity::new("external").with_label(Some("expected")),
+            crate::ProcessIdentity::labelled("external", Some("expected")),
         )
         .with_target_label("other");
 

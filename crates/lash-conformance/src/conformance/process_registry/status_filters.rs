@@ -24,11 +24,15 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
                     lash_core::OnParentEnd::Abandon,
                 ),
             )
-            .with_identity(
-                ProcessIdentity::new("indexed-filter-kind")
-                    .with_label(Some("filter-label"))
-                    .with_definition(Some(serde_json::json!({"definition": "target"}))),
-            ),
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::for_definition(
+                    lash_core::ProcessDefinitionRef::unclaimed(
+                        "indexed-filter-kind",
+                        serde_json::json!({"definition": "target"}),
+                    ),
+                    Some("filter-label"),
+                ),
+            )),
         )
         .await
         .expect("register filter target");
@@ -54,7 +58,7 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
 
     let matches = registry
         .list_processes(&ProcessListFilter {
-            definition: Some(serde_json::json!({"definition": "target"})),
+            definition: Some(serde_json::json!({"definition": "target"}).into()),
             status: ProcessStatusFilter::any_of([ProcessStatus::Waiting]),
 
             originator: Some(ProcessOriginatorFilter::session("filter-origin")),

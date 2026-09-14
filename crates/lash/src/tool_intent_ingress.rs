@@ -842,8 +842,9 @@ impl ToolIntentIngress {
                 request.id = identity.recorded_process_id();
                 let env_spec = request.env_spec.clone();
                 let observers = request.observers.clone();
-                let registration =
-                    self.admit_engine_start(request.into_registration(None), env_spec.as_ref())?;
+                let registration = self
+                    .admit_engine_start(request.into_registration(None), env_spec.as_ref())
+                    .await?;
                 lash_core::ProcessCommand::Start {
                     registration,
                     observers,
@@ -967,7 +968,7 @@ impl ToolIntentIngress {
     /// the exact execution environment recorded on the request. The gate may
     /// use that immutable environment to derive identity, but cannot inspect a
     /// live catalog or artifact store, so replaying the same intent is safe.
-    fn admit_engine_start(
+    async fn admit_engine_start(
         &self,
         registration: lash_core::ProcessRegistration,
         env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
@@ -981,8 +982,8 @@ impl ToolIntentIngress {
         // open does, or a plugin-contributed kind would be refused here as
         // unregistered.
         let engines = self.resolved_process_engines()?;
-        let identity = engines.admit(kind, payload, env_spec)?;
-        Ok(registration.with_identity(identity))
+        let identity = engines.admit(kind, payload, env_spec).await?;
+        Ok(registration.with_admitted_identity(identity))
     }
 
     /// The engine registry a session opened on this core would see: this core's

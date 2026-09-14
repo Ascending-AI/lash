@@ -112,7 +112,7 @@ impl From<lash_core::ProcessHandleView> for RemoteProcessHandleView {
             id,
             process_id,
             incarnation: incarnation.registration_sequence(),
-            kind,
+            kind: kind.into(),
             label,
             definition: definition.map(Into::into),
             status: status.into(),
@@ -140,7 +140,7 @@ impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
             id,
             process_id,
             incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-            kind,
+            kind: kind.into(),
             label,
             definition: definition.map(Into::into),
             status: status.into(),
@@ -240,7 +240,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
                 lifecycle.try_into()?,
             )
             .with_max_attempts(max_attempts)
-            .with_identity(identity.into())
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::pinned(identity.into()))
             .with_event_types(event_types.into_iter().map(Into::into))
             .with_execution_env_ref(env_ref.map(|env_ref| {
                 lash_core::ProcessExecutionEnvRef::new(env_ref.as_str().to_string())

@@ -339,9 +339,13 @@ fn lashlang_process_definition_for_identity(
 fn lashlang_process_identity_for_definition(
     definition: &lashlang::ProcessDefinitionIdentity,
 ) -> lash_core::ProcessIdentity {
-    lash_core::ProcessIdentity::new(LASHLANG_ENGINE_KIND)
-        .with_label(Some(definition.process_name.clone()))
-        .with_definition(Some(lashlang_process_definition_for_identity(definition)))
+    lash_core::ProcessIdentity::for_definition(
+        lash_core::ProcessDefinitionRef::unclaimed(
+            LASHLANG_ENGINE_KIND,
+            lashlang_process_definition_for_identity(definition),
+        ),
+        Some(definition.process_name.clone()),
+    )
 }
 
 fn trigger_key_and_revision(payload: &Value) -> Result<(String, u64), ExecutionHostError> {

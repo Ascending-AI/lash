@@ -303,11 +303,15 @@ fn wake_registration(process_id: &ProcessId, wake_session_id: &SessionId) -> Pro
             lash_core::OnParentEnd::Abandon,
         ),
     )
-    .with_identity(
-        ProcessIdentity::new("version-bump")
-            .with_label(Some(process_id.to_string()))
-            .with_definition(Some(json!({"scenario": "version-bump-recreation"}))),
-    )
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        ProcessIdentity::for_definition(
+            lash::process::ProcessDefinitionRef::unclaimed(
+                "version-bump",
+                json!({"scenario": "version-bump-recreation"}),
+            ),
+            Some(process_id.to_string()),
+        ),
+    ))
     .with_extra_event_types([wake_event_type()])
     .with_wake_session_id(Some(SessionId::from(wake_session_id.to_string())))
 }
@@ -476,7 +480,7 @@ async fn fire_trigger(storage: &PostgresStorage, tag: &str) -> Result<FiredTrigg
         ProcessInput::External {
             metadata: json!({"runbook": "version-bump-recreation"}),
         },
-        ProcessIdentity::new("version-bump").with_label(Some(format!("trigger-target-{tag}"))),
+        ProcessIdentity::labelled("version-bump", Some(format!("trigger-target-{tag}"))),
     )
     .with_name(format!("version-bump-{tag}"))
     .with_source(source.clone())

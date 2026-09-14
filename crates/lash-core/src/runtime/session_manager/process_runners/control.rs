@@ -414,8 +414,9 @@ impl ProcessCapability {
             )
             .with_execution_env_ref(env_ref)
             .with_wake_session_id(wake_session_id);
-        let registration =
-            self.admit_and_stamp_engine_start(current, registration, validation_env_spec.as_ref())?;
+        let registration = self
+            .admit_and_stamp_engine_start(current, registration, validation_env_spec.as_ref())
+            .await?;
         let execution_context = options.execution_context(&scope);
         let runner = ProcessCommandRunner::new(
             current,
@@ -456,8 +457,9 @@ impl ProcessCapability {
         // runs against the recorded spec instead of a stored env ref. It must
         // run here: once the start command crosses the journal the entry is
         // committed and replays forever.
-        let registration =
-            self.admit_and_stamp_engine_start(current, registration, env_spec.as_ref())?;
+        let registration = self
+            .admit_and_stamp_engine_start(current, registration, env_spec.as_ref())
+            .await?;
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
         self.command_runner(current, &scope)?
@@ -471,7 +473,7 @@ impl ProcessCapability {
     }
 
     /// Admit immutable recorded inputs and stamp the sole engine identity.
-    fn admit_and_stamp_engine_start(
+    async fn admit_and_stamp_engine_start(
         &self,
         current: &CurrentSessionCapability,
         registration: crate::ProcessRegistration,
@@ -500,8 +502,9 @@ impl ProcessCapability {
             .host
             .core
             .process_engines
-            .admit(kind, payload, Some(env_spec))?;
-        Ok(registration.with_identity(identity))
+            .admit(kind, payload, Some(env_spec))
+            .await?;
+        Ok(registration.with_admitted_identity(identity))
     }
 
     pub(in crate::runtime::session_manager) async fn await_process(

@@ -89,8 +89,7 @@ async fn register_ingress_trigger_subscription(
             kind: "testing-fixture".to_string(),
             payload: serde_json::json!({"process": "intent-ingress-delivery"}),
         },
-        lash_core::ProcessIdentity::new("testing-fixture")
-            .with_label(Some("intent-ingress-delivery")),
+        lash_core::ProcessIdentity::labelled("testing-fixture", Some("intent-ingress-delivery")),
     )
     .with_payload_schema(lash_core::LashSchema::any());
     let outcome = store
@@ -1818,13 +1817,17 @@ fn admit_ingress_engine(
             "ingress admission requires the recorded execution environment".to_string(),
         )
     })?;
-    Ok(lash_core::ProcessIdentity::new(INGRESS_ENGINE_KIND)
-        .with_label(payload.get("program").and_then(serde_json::Value::as_str))
-        .with_definition(Some(serde_json::json!({
-            "payload": payload,
-            "model": env.policy.model.id,
-            "provider": env.policy.provider_id,
-        }))))
+    Ok(lash_core::ProcessIdentity::for_definition(
+        lash_core::ProcessDefinitionRef::unclaimed(
+            INGRESS_ENGINE_KIND,
+            serde_json::json!({
+                "payload": payload,
+                "model": env.policy.model.id,
+                "provider": env.policy.provider_id,
+            }),
+        ),
+        payload.get("program").and_then(serde_json::Value::as_str),
+    ))
 }
 
 struct IngressAdmissionEnginePlugin;
@@ -2070,7 +2073,10 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
 
     assert_eq!(ingress_identity, session_identity);
     assert_eq!(
-        ingress_identity.definition,
+        ingress_identity
+            .definition
+            .as_ref()
+            .map(|reference| reference.definition.as_json().clone()),
         Some(serde_json::json!({
             "payload": {"program": "environment-sensitive"},
             "model": mock_model_spec().id,

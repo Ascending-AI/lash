@@ -122,11 +122,12 @@ fn engine_entry(
                 crate::OnParentEnd::Abandon,
             ),
         )
-        .with_identity(
-            ProcessIdentity::new("test-engine")
-                .with_label(Some(process_name))
-                .with_definition(Some(definition)),
-        )
+        .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
+            ProcessIdentity::for_definition(
+                crate::ProcessDefinitionRef::unclaimed("test-engine", definition),
+                Some(process_name),
+            ),
+        ))
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
             "process-env:test:{process_id}"
         )))),

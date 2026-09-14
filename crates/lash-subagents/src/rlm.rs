@@ -78,9 +78,10 @@ impl RlmSubagentToolsProvider {
                 lash_core::OnParentEnd::Abandon,
             ),
         )
-        .with_identity(
-            lash_core::ProcessIdentity::new("subagent").with_label(Some("spawn".to_string())),
-        );
+        .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
+            "subagent",
+            Some("spawn".to_string()),
+        ));
         context
             .start_process(request)
             .await

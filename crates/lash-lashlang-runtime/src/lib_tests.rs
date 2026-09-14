@@ -1049,7 +1049,9 @@ async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission
                 lash_core::OnParentEnd::Abandon,
             ),
         )
-        .with_identity(input.process_identity());
+        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+            input.process_identity(),
+        ));
         let context = lash_core::testing::process_engine_run_context_for_validation(
             registration,
             catalog,

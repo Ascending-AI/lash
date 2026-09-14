@@ -1974,9 +1974,10 @@ fn admit_payload_gated_engine(
     _env_spec: Option<&lash_core::ProcessExecutionEnvSpec>,
 ) -> Result<lash_core::ProcessIdentity, lash_core::PluginError> {
     if payload.get("program").and_then(serde_json::Value::as_str) == Some("known") {
-        return Ok(lash_core::ProcessIdentity::new(PAYLOAD_GATED_ENGINE_KIND)
-            .with_label(payload.get("program").and_then(serde_json::Value::as_str))
-            .with_definition(Some(payload.clone())));
+        return Ok(lash_core::ProcessIdentity::for_definition(
+            lash_core::ProcessDefinitionRef::unclaimed(PAYLOAD_GATED_ENGINE_KIND, payload.clone()),
+            payload.get("program").and_then(serde_json::Value::as_str),
+        ));
     }
     Err(lash_core::PluginError::Session(format!(
         "unknown {PAYLOAD_GATED_ENGINE_KIND} program"

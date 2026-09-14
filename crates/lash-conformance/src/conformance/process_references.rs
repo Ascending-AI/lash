@@ -97,9 +97,12 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
                         lash_core::OnParentEnd::Abandon,
                     ),
                 )
-                .with_identity(
-                    ProcessIdentity::new("reference-test").with_definition(Some(definition)),
-                )
+                .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                    ProcessIdentity::for_definition(
+                        lash_core::ProcessDefinitionRef::unclaimed("reference-test", definition),
+                        None::<String>,
+                    ),
+                ))
                 .with_execution_env_ref(Some(env_ref)),
             )
             .await
@@ -174,7 +177,11 @@ fn reference_counts(summaries: Vec<ProcessLiveReferenceView>) -> BTreeMap<(Strin
         .map(|summary| {
             (
                 (
-                    summary.definition.as_ref().map(key).unwrap_or_default(),
+                    summary
+                        .definition
+                        .as_ref()
+                        .map(|reference| key(reference.definition.as_json()))
+                        .unwrap_or_default(),
                     summary
                         .env_ref
                         .as_ref()

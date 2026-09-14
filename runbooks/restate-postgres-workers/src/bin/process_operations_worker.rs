@@ -45,11 +45,15 @@ fn registration() -> ProcessRegistration {
             lash_core::OnParentEnd::Abandon,
         ),
     )
-    .with_identity(
-        ProcessIdentity::new("runbook")
-            .with_label(Some(PROCESS_ID))
-            .with_definition(Some(json!({"scenario": "worker-crash-recovery"}))),
-    )
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        ProcessIdentity::for_definition(
+            lash::process::ProcessDefinitionRef::unclaimed(
+                "runbook",
+                json!({"scenario": "worker-crash-recovery"}),
+            ),
+            Some(PROCESS_ID),
+        ),
+    ))
     .with_extra_event_types([ProcessEventType {
         name: EVENT_TYPE.to_string(),
         payload_schema: lash_core::LashSchema::any(),
@@ -127,7 +131,9 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                     lash_core::OnParentEnd::Abandon,
                 ),
             )
-            .with_identity(ProcessIdentity::new("runbook-retarget"))
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::new("runbook-retarget"),
+            ))
             .with_extra_event_types([ProcessEventType {
                 name: EVENT_TYPE.to_string(),
                 payload_schema: lash_core::LashSchema::any(),

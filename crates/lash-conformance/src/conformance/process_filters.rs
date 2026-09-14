@@ -45,7 +45,9 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
     let target = registry
         .register_process(
             registration("proc-filter-target")
-                .with_identity(ProcessIdentity::new("filter-kind").with_label(Some("target-label")))
+                .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                    ProcessIdentity::labelled("filter-kind", Some("target-label")),
+                ))
                 .with_process_provenance(ProcessProvenance::session(scope).with_caused_by(Some(
                     CausalRef::TriggerOccurrence {
                         occurrence_id: "occurrence-target".to_string(),
@@ -59,10 +61,12 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
         .expect("register target");
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     registry
-        .register_process(
-            registration("proc-filter-other")
-                .with_identity(ProcessIdentity::new("other-kind").with_label(Some("other-label"))),
-        )
+        .register_process(registration("proc-filter-other").with_admitted_identity(
+            lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::labelled(
+                "other-kind",
+                Some("other-label"),
+            )),
+        ))
         .await
         .expect("register other");
     for (suffix, definition) in [
@@ -82,10 +86,16 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
     ] {
         registry
             .register_process(
-                registration(&format!("proc-filter-definition-{suffix}")).with_identity(
-                    ProcessIdentity::new("definition-kind")
-                        .with_label(Some(&format!("definition-{suffix}")))
-                        .with_definition(Some(definition)),
+                registration(&format!("proc-filter-definition-{suffix}")).with_admitted_identity(
+                    lash_core::AdmittedProcessIdentity::for_testing(
+                        ProcessIdentity::for_definition(
+                            lash_core::ProcessDefinitionRef::unclaimed(
+                                "definition-kind",
+                                definition,
+                            ),
+                            Some(&format!("definition-{suffix}")),
+                        ),
+                    ),
                 ),
             )
             .await
@@ -183,7 +193,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             &registry,
             ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                definition: Some(definition),
+                definition: Some(definition.into()),
                 ..ProcessListFilter::default()
             },
         )
@@ -239,7 +249,9 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
     for process_id in ["recent-filter-running", "recent-filter-old"] {
         registry
             .register_process_with_observers(
-                registration(process_id).with_identity(ProcessIdentity::new(KIND)),
+                registration(process_id).with_admitted_identity(
+                    lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::new(KIND)),
+                ),
                 &[SessionId::from("recent-filter-observer".to_string())],
             )
             .await
@@ -258,7 +270,9 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     registry
         .register_process_with_observers(
-            registration("recent-filter-fresh").with_identity(ProcessIdentity::new(KIND)),
+            registration("recent-filter-fresh").with_admitted_identity(
+                lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::new(KIND)),
+            ),
             &[SessionId::from("recent-filter-observer".to_string())],
         )
         .await
