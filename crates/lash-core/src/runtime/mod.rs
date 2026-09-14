@@ -212,7 +212,8 @@ pub use effect::{
     ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
     TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
     TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
-    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
+    concrete_turn_cancellation_authority, refuse_unhonored_group_membership,
+    turn_control_binding_id_for_scope,
     validate_replayed_effect_envelope,
 };
 #[cfg(feature = "testing")]

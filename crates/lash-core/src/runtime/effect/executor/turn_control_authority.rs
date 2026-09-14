@@ -32,6 +32,18 @@ impl TurnCancellationAuthority {
         &self.binding_id
     }
 
+    /// Erase this authority for the store seam.
+    ///
+    /// [`crate::store::TurnInputStore::turn_cancellation_authority`] hands back
+    /// the object-safe [`lash_core_store::turn_control_binding::StoreTurnCancellationAuthority`]
+    /// because the concrete authority owns an `AwaitEventResolver`, which is
+    /// runtime machinery the store layer cannot depend on.
+    pub fn into_store_authority(
+        self,
+    ) -> Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority> {
+        Arc::new(self)
+    }
+
     pub fn resolver(&self) -> Arc<dyn AwaitEventResolver> {
         Arc::clone(&self.resolver)
     }
@@ -95,7 +107,7 @@ impl lash_core_store::turn_control_binding::StoreTurnCancellationAuthority
 ///
 /// `TurnCancellationAuthority` is the sole implementor, and only this crate
 /// constructs one, so a handle that is anything else is a programming error.
-pub(crate) fn concrete_turn_cancellation_authority(
+pub fn concrete_turn_cancellation_authority(
     handle: &Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority>,
 ) -> TurnCancellationAuthority {
     let any: &dyn std::any::Any = handle.as_ref();

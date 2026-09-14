@@ -34,7 +34,7 @@ pub use executor::{
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
     TurnControlAuthorityOwner, TurnControlBinding, TurnControlParticipation,
-    turn_control_binding_id_for_scope,
+    concrete_turn_cancellation_authority, turn_control_binding_id_for_scope,
 };
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,

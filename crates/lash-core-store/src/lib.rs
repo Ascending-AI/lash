@@ -7,6 +7,12 @@
 //! that drives a turn, so `lash-core` re-exports every module and item below
 //! at its original path.
 
+/// Re-exported so `impl_noop_attachment_manifest!` can paste an
+/// `#[async_trait]` impl into crates that do not depend on `async-trait`
+/// directly. Not part of the supported surface.
+#[doc(hidden)]
+pub use async_trait::async_trait;
+
 pub mod attachments;
 pub mod await_event_identity;
 pub mod chronological;
@@ -185,7 +191,8 @@ pub(crate) mod runtime {
 
 pub(crate) use attachments::AttachmentSourcePolicy;
 pub(crate) use input_normalization::NormalizedItem;
-pub(crate) use lash_sansio as sansio;
+#[doc(hidden)]
+pub use lash_sansio as sansio;
 pub(crate) use lash_sansio::llm::capability::ReasoningSelection;
 pub(crate) use lash_sansio::llm::types::LlmCallRecord;
 pub(crate) use lash_sansio::session_model::prompt::{PromptSlot, PromptTemplate};

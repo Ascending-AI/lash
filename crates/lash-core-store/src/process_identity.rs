@@ -330,6 +330,32 @@ pub trait ProcessRecordIdentity {
     fn process_incarnation(&self) -> ProcessIncarnation;
 }
 
+impl<T> ProcessRecordIdentity for &T
+where
+    T: ProcessRecordIdentity + ?Sized,
+{
+    fn process_id(&self) -> &ProcessId {
+        T::process_id(self)
+    }
+
+    fn process_incarnation(&self) -> ProcessIncarnation {
+        T::process_incarnation(self)
+    }
+}
+
+impl<T> ProcessRecordIdentity for Box<T>
+where
+    T: ProcessRecordIdentity + ?Sized,
+{
+    fn process_id(&self) -> &ProcessId {
+        T::process_id(self)
+    }
+
+    fn process_incarnation(&self) -> ProcessIncarnation {
+        T::process_incarnation(self)
+    }
+}
+
 /// Generates a durable lifecycle vocabulary and its complete variant list from
 /// one declaration.
 ///

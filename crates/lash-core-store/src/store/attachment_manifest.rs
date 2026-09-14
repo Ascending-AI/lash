@@ -656,59 +656,59 @@ pub trait AttachmentManifest: Send + Sync {
 macro_rules! impl_noop_attachment_manifest {
     ($ty:ty) => {
         #[$crate::async_trait]
-        impl $crate::AttachmentManifest for $ty {
+        impl $crate::store::attachment_manifest::AttachmentManifest for $ty {
             async fn begin_attachment_write(
                 &self,
-                _intent: $crate::AttachmentIntent,
-            ) -> ::std::result::Result<$crate::AttachmentWriteFence, $crate::StoreError> {
-                ::std::result::Result::Ok($crate::AttachmentWriteFence::Granted(
-                    $crate::AttachmentWritePermit::new($crate::AttachmentWriteToken::new()),
+                _intent: $crate::store::attachment_manifest::AttachmentIntent,
+            ) -> ::std::result::Result<$crate::store::attachment_manifest::AttachmentWriteFence, $crate::store::StoreError> {
+                ::std::result::Result::Ok($crate::store::attachment_manifest::AttachmentWriteFence::Granted(
+                    $crate::store::attachment_manifest::AttachmentWritePermit::new($crate::store::attachment_manifest::AttachmentWriteToken::new()),
                 ))
             }
 
             async fn complete_attachment_write(
                 &self,
-                _intent: &$crate::AttachmentIntent,
-                _permit: $crate::AttachmentWritePermit,
-            ) -> ::std::result::Result<(), $crate::StoreError> {
+                _intent: &$crate::store::attachment_manifest::AttachmentIntent,
+                _permit: $crate::store::attachment_manifest::AttachmentWritePermit,
+            ) -> ::std::result::Result<(), $crate::store::StoreError> {
                 Ok(())
             }
 
             async fn abort_attachment_write(
                 &self,
-                _intent: &$crate::AttachmentIntent,
-                _permit: $crate::AttachmentWritePermit,
-            ) -> ::std::result::Result<(), $crate::StoreError> {
+                _intent: &$crate::store::attachment_manifest::AttachmentIntent,
+                _permit: $crate::store::attachment_manifest::AttachmentWritePermit,
+            ) -> ::std::result::Result<(), $crate::store::StoreError> {
                 Ok(())
             }
 
             async fn commit_refs(
                 &self,
-                _session_id: &$crate::SessionId,
-                _attachment_ids: &[$crate::AttachmentId],
-            ) -> ::std::result::Result<(), $crate::StoreError> {
+                _session_id: &$crate::sansio::SessionId,
+                _attachment_ids: &[$crate::sansio::AttachmentId],
+            ) -> ::std::result::Result<(), $crate::store::StoreError> {
                 Ok(())
             }
 
             async fn list_uncommitted(
                 &self,
                 _older_than_epoch_ms: u64,
-            ) -> ::std::result::Result<Vec<$crate::AttachmentManifestEntry>, $crate::StoreError>
+            ) -> ::std::result::Result<Vec<$crate::store::attachment_manifest::AttachmentManifestEntry>, $crate::store::StoreError>
             {
                 Ok(Vec::new())
             }
 
             async fn forget(
                 &self,
-                _session_id: &$crate::SessionId,
-                _attachment_id: &$crate::AttachmentId,
-            ) -> ::std::result::Result<(), $crate::StoreError> {
+                _session_id: &$crate::sansio::SessionId,
+                _attachment_id: &$crate::sansio::AttachmentId,
+            ) -> ::std::result::Result<(), $crate::store::StoreError> {
                 Ok(())
             }
 
             async fn list_all_refs(
                 &self,
-            ) -> ::std::result::Result<Vec<$crate::AttachmentId>, $crate::StoreError> {
+            ) -> ::std::result::Result<Vec<$crate::sansio::AttachmentId>, $crate::store::StoreError> {
                 Ok(Vec::new())
             }
         }

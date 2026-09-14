@@ -41,12 +41,11 @@ pub use trigger::TriggerLocalExecution;
 pub use lash_core_store::turn_control_binding::turn_control_binding_id_for_scope;
 pub use turn_control_authority::{
     TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
-    TurnControlBinding, TurnControlParticipation,
+    TurnControlBinding, TurnControlParticipation, concrete_turn_cancellation_authority,
 };
 pub(crate) use lash_core_store::turn_control_binding::{
     admitted_turn_cancel_scope, binding_id_admits_scope,
 };
-pub(crate) use turn_control_authority::concrete_turn_cancellation_authority;
 
 use crate::LlmRequest as CoreLlmRequest;
 use crate::ProcessRegistry;

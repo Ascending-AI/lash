@@ -672,9 +672,11 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         .await?
         .acquired()
         .expect("fresh session lane is available");
-    let authority = store
-        .turn_cancellation_authority()
-        .expect("factory-created in-memory store exposes its cancellation authority");
+    let authority = lash_core::concrete_turn_cancellation_authority(
+        &store
+            .turn_cancellation_authority()
+            .expect("factory-created in-memory store exposes its cancellation authority"),
+    );
     let physical_scope = lash_core::ExecutionScope::process(process_id.clone());
     let binding_id = lash_core::facade_support::turn_control_binding_id_for_scope(
         authority.binding_id(),
@@ -781,9 +783,11 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         .await?
         .acquired()
         .expect("fresh late session lane is available");
-    let late_authority = late_store
-        .turn_cancellation_authority()
-        .expect("late store exposes cancellation authority");
+    let late_authority = lash_core::concrete_turn_cancellation_authority(
+        &late_store
+            .turn_cancellation_authority()
+            .expect("late store exposes cancellation authority"),
+    );
     let late_scope = lash_core::ExecutionScope::process(process_id.clone());
     let late_binding_id = lash_core::facade_support::turn_control_binding_id_for_scope(
         late_authority.binding_id(),

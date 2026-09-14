@@ -16,8 +16,10 @@
 #[doc(hidden)]
 pub use async_trait::async_trait;
 
+pub use crate::runtime::concrete_turn_cancellation_authority;
 pub use lash_core_store::attachments;
-pub use lash_core_store::protocol_turn_options::ProtocolTurnOptions;
+pub use lash_core_store::impl_noop_attachment_manifest;
+pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub use lash_core_store::chronological;
 pub mod direct;
 pub(crate) use lash_core_ids::identity_json;
