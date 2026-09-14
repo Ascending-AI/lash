@@ -452,9 +452,11 @@ mod tests {
         )
     }
 
+    /// The process-handle record a cell actually holds, as
+    /// `session::process_handles::process_handle_json` mints it.
     fn handle_json(id: &str, incarnation: u64) -> serde_json::Value {
         serde_json::json!({
-            "__handle__": lash_core::PROCESS_HANDLE_KIND,
+            "__handle__": "process",
             "id": id,
             "incarnation": incarnation,
         })
@@ -502,11 +504,11 @@ mod tests {
         for (label, args) in [
             ("missing handle", serde_json::json!({})),
             (
-                "wrong marker",
-                serde_json::json!({ "handle": { "__handle__": "tool", "id": "x", "incarnation": 1 } }),
+                "a record that is not a handle at all",
+                serde_json::json!({ "handle": { "id": "x", "incarnation": 1 } }),
             ),
             (
-                "missing incarnation",
+                "a handle with no incarnation",
                 serde_json::json!({ "handle": { "__handle__": "process", "id": "x" } }),
             ),
         ] {
