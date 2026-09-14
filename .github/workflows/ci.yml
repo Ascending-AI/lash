@@ -121,12 +121,7 @@ jobs:
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}
       schema: ${{ steps.classify.outputs.schema }}
-      rust_code: ${{ steps.classify.outputs.rust_code }}
-      deps_config: ${{ steps.classify.outputs.deps_config }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
-      workflows_only: ${{ steps.classify.outputs.workflows_only }}
-      e2e_relevant: ${{ steps.classify.outputs.e2e_relevant }}
-      scripts_gates: ${{ steps.classify.outputs.scripts_gates }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
       postgres_matrix: ${{ steps.postgres-matrix.outputs.postgres_matrix }}
