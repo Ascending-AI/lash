@@ -283,12 +283,73 @@ jobs:
           path: .benchmarks/perf-guard/*
           if-no-files-found: warn
 
+  package-crates:
+    name: Dry-run package publishable crates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: prepare-release
+
+    steps:
+      - name: Check out repository
+        # Equivalent to checkout ref: ${{ needs.prepare-release.outputs.release_sha }}.
+        env:
+          CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          auth_config="${RUNNER_TEMP}/lash-git-auth-${GITHUB_JOB}.config"
+          umask 077
+          {
+            printf '[http]\n'
+            printf '\textraHeader = %s\n' "AUTHORIZATION: basic ${auth_header}"
+          } > "${auth_config}"
+          git config --local include.path "${auth_config}"
+          git fetch --no-tags --prune --depth=1 origin "${CHECKOUT_REF}"
+          git checkout --force --detach FETCH_HEAD
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      # The packaging proof the publisher's --no-verify leans on. CI tests the
+      # code on main; only packaging catches a missing `include`, a manifest
+      # field that does not survive publishing, an internal dependency without
+      # a resolvable version, or a publish cycle. Packaging runs at the real
+      # release version (stamped here exactly as the publisher stamps it), so
+      # the manifests and lockfile are exercised as they will be uploaded.
+      #
+      # --no-verify here skips only the per-crate verify *builds* of the
+      # packaged tarballs -- the same code validate-release-ref and the
+      # target's full-profile CI run already compile. Measured locally:
+      # packaging every publishable crate takes ~16s, while verify-building the
+      # tarballs is a cold dependency build per crate and runs into the
+      # hour-plus range, which no release-job budget covers. Run
+      # `just package-workspace` (verify on by default) for the verified form.
+      - name: Package every publishable crate at the release version
+        env:
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+        run: |
+          python3 scripts/package_workspace.py \
+            --no-verify \
+            --version "${RELEASE_TAG#v}" \
+            --digests packaged-crate-digests.json
+
+      - name: Upload packaged crate digests
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-packaged-crate-digests-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
+          path: packaged-crate-digests.json
+          if-no-files-found: warn
+
   publish-crates:
     name: Publish crates to crates.io
     runs-on: ubuntu-latest
     # Per-layer crates.io index-visibility waits are externally paced.
     timeout-minutes: 20
-    needs: [prepare-release, validate-release-ref]
+    needs: [prepare-release, validate-release-ref, package-crates]
     # CARGO_REGISTRY_TOKEN lives in the `main` GitHub Environment; a job must
     # declare the environment to read its secrets.
     environment: main
@@ -371,8 +432,12 @@ jobs:
       # `.release-tools` copy).
       #
       # --no-verify: skip redundant per-crate verify-builds. The release is cut
-      # from a fully CI-tested `main`; the publisher packages and uploads that
-      # already-tested code directly.
+      # from a fully CI-tested `main`, and the required package-crates job above
+      # has already packaged and verify-built every publishable crate at this
+      # exact release version, so the publisher packages and uploads that
+      # already-proven code directly. After each upload the publisher downloads
+      # the crate back from crates.io and fails the release loudly unless its
+      # digest matches the .crate this job produced.
       #
       # Auth: a crates.io API token in the CARGO_REGISTRY_TOKEN secret. This is
       # required for the *first* publish of brand-new crates, because crates.io

@@ -47,7 +47,11 @@ thiserror = "2"
 url = { workspace = true }
 
 [dev-dependencies]
-lash-typescript = { workspace = true }
+# Version-less on purpose: lash-typescript depends on this crate, so a
+# versioned dev-dependency back onto it would be a publish cycle (a
+# versioned dev-dep survives into the published manifest and has to
+# resolve on the index). Path-only dev-deps are stripped when packaging.
+lash-typescript = { package = "lash-internal-typescript", path = "../lash-typescript" }
 criterion = { version = "0.5", features = ["async_tokio"] }
 futures = "0.3"
 insta = "1"

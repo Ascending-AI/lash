@@ -16,6 +16,13 @@ release version into the workspace manifests + lockfile (via
 `main` never carries a released version and published crates still pin the real
 one.
 
+Post-publish proof: every crate this run uploads is downloaded back from
+crates.io and its sha256 compared to the `.crate` `cargo publish` produced in
+`<target>/package` (and to the checksum crates.io records). A mismatch fails the
+release loudly. Packaging itself is proven before any upload by the required
+`scripts/package_workspace.py` job, which is what lets the upload run with
+`--no-verify`.
+
 `--plan` prints the computed version + publish layers and exits without touching
 crates.io — a safe dry run of the stamping target and layering.
 """
@@ -26,11 +33,13 @@ import argparse
 import concurrent.futures
 import datetime
 import email.utils
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -39,6 +48,8 @@ from pathlib import Path
 
 
 USER_AGENT = "lash-release-publisher/1.0"
+_TARGET_DIRECTORY: Path | None = None
+_TARGET_DIRECTORY_LOCK = threading.Lock()
 TRANSIENT_PUBLISH_ERRORS = (
     "no matching package named",
     "failed to select a version",
@@ -73,6 +84,7 @@ def main() -> int:
     # concurrency conservative. The transient "try again after" backoff still
     # covers any 429 that slips through.
     parser.add_argument("--layer-concurrency", type=int, default=4)
+    parser.add_argument("--upload-digest-attempts", type=int, default=5)
     parser.add_argument(
         "--version",
         dest="version",
@@ -309,11 +321,15 @@ def publish_package(package: dict, args: argparse.Namespace) -> None:
 
         if result.returncode == 0:
             wait_for_crate_version(name, version, args)
+            verify_uploaded_crate(name, version, args)
             return
 
         normalized = output.lower()
         if any(marker in normalized for marker in ALREADY_PUBLISHED_ERRORS):
             wait_for_crate_version(name, version, args)
+            # A version uploaded by an earlier run: this job has no local
+            # .crate to compare it against, so there is nothing to check.
+            print(f"skipping upload digest check (already uploaded): {name} {version}")
             return
 
         if not any(marker in normalized for marker in TRANSIENT_PUBLISH_ERRORS):
@@ -337,6 +353,103 @@ def wait_for_crate_version(name: str, version: str, args: argparse.Namespace) ->
         print(f"waiting for crates.io visibility: {name} {version}")
         time.sleep(args.visibility_delay_seconds)
     raise RuntimeError(f"timed out waiting for crates.io visibility: {name} {version}")
+
+
+def verify_uploaded_crate(name: str, version: str, args: argparse.Namespace) -> None:
+    """Fail loudly unless crates.io serves back the exact bytes we packaged.
+
+    `cargo publish` leaves the tarball it uploaded in `<target>/package`, so the
+    upload can be checked against the artifact this job produced rather than
+    against a re-packaged guess. A mismatch means the registry is serving
+    something other than the release we built, which must stop the release.
+    """
+    local_path = local_crate_path(name, version)
+    if not local_path.is_file():
+        raise RuntimeError(
+            f"cargo publish left no local package for {name} {version} at {local_path}; "
+            "cannot check the uploaded crate digest"
+        )
+    local_digest = sha256_file(local_path)
+
+    uploaded = download_uploaded_crate(name, version, args)
+    uploaded_digest = hashlib.sha256(uploaded).hexdigest()
+    if uploaded_digest != local_digest:
+        raise RuntimeError(
+            f"UPLOADED CRATE DIGEST MISMATCH for {name} {version}: crates.io serves "
+            f"sha256 {uploaded_digest}, the locally packaged {local_path.name} is "
+            f"sha256 {local_digest}"
+        )
+
+    registry_checksum = registry_crate_checksum(name, version)
+    if registry_checksum and registry_checksum != local_digest:
+        raise RuntimeError(
+            f"UPLOADED CRATE DIGEST MISMATCH for {name} {version}: crates.io records "
+            f"checksum {registry_checksum}, the locally packaged {local_path.name} is "
+            f"sha256 {local_digest}"
+        )
+
+    print(f"uploaded crate matches local package: {name} {version} sha256={local_digest}")
+
+
+def download_uploaded_crate(name: str, version: str, args: argparse.Namespace) -> bytes:
+    encoded_name = urllib.parse.quote(name, safe="")
+    encoded_version = urllib.parse.quote(version, safe="")
+    url = f"https://crates.io/api/v1/crates/{encoded_name}/{encoded_version}/download"
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    last_error: Exception | None = None
+    for attempt in range(1, args.upload_digest_attempts + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                return response.read()
+        except (urllib.error.HTTPError, OSError) as error:
+            last_error = error
+            print(
+                f"download of uploaded {name} {version} failed "
+                f"(attempt {attempt}/{args.upload_digest_attempts}): {error}",
+                file=sys.stderr,
+            )
+            if attempt < args.upload_digest_attempts:
+                time.sleep(args.retry_delay_seconds)
+    raise RuntimeError(f"could not download uploaded crate {name} {version}: {last_error}")
+
+
+def registry_crate_checksum(name: str, version: str) -> str | None:
+    """The sha256 crates.io records for a version, or None when unavailable."""
+    encoded_name = urllib.parse.quote(name, safe="")
+    encoded_version = urllib.parse.quote(version, safe="")
+    request = urllib.request.Request(
+        f"https://crates.io/api/v1/crates/{encoded_name}/{encoded_version}",
+        headers={"User-Agent": USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read())
+    except (urllib.error.HTTPError, OSError, json.JSONDecodeError) as error:
+        print(f"crates.io checksum lookup failed for {name} {version}: {error}", file=sys.stderr)
+        return None
+    checksum = payload.get("version", {}).get("checksum")
+    return checksum if isinstance(checksum, str) else None
+
+
+def local_crate_path(name: str, version: str) -> Path:
+    return target_directory() / "package" / f"{name}-{version}.crate"
+
+
+def target_directory() -> Path:
+    global _TARGET_DIRECTORY
+    with _TARGET_DIRECTORY_LOCK:
+        if _TARGET_DIRECTORY is None:
+            metadata = run_json(["cargo", "metadata", "--format-version", "1", "--no-deps"])
+            _TARGET_DIRECTORY = Path(metadata["target_directory"])
+        return _TARGET_DIRECTORY
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def retry_delay_seconds(output: str, default_delay_seconds: int) -> int:

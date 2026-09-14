@@ -66,6 +66,7 @@ run_release_script_tests() {
   python3 scripts/test_check_version_bump_fixtures.py
   python3 scripts/test_release_version.py
   python3 scripts/test_publish_workspace.py
+  python3 scripts/test_package_workspace.py
   bash scripts/test-ci-reclaim-disk.sh
 }
 

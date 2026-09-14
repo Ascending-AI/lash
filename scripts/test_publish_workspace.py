@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import io
 import pathlib
 import subprocess
+import tempfile
 import tomllib
 import unittest
 from unittest import mock
@@ -57,6 +59,41 @@ def load_publish_workspace_module():
     return module
 
 
+def build_internal_dependency_closure(
+    metadata: dict, workspace_members: set[str]
+) -> dict[str, set[str]]:
+    """Package id -> every workspace package it reaches through non-dev deps."""
+    id_by_dir = {
+        pathlib.Path(package["manifest_path"]).parent: package["id"]
+        for package in metadata["packages"]
+        if package["id"] in workspace_members
+    }
+    edges: dict[str, set[str]] = {}
+    for package in metadata["packages"]:
+        if package["id"] not in workspace_members:
+            continue
+        edges[package["id"]] = {
+            id_by_dir[pathlib.Path(dependency["path"])]
+            for dependency in package["dependencies"]
+            if dependency.get("kind") != "dev"
+            and dependency.get("path")
+            and pathlib.Path(dependency["path"]) in id_by_dir
+        }
+
+    closure: dict[str, set[str]] = {}
+    for package_id in edges:
+        reached: set[str] = set()
+        pending = list(edges[package_id])
+        while pending:
+            current = pending.pop()
+            if current in reached:
+                continue
+            reached.add(current)
+            pending.extend(edges.get(current, ()))
+        closure[package_id] = reached
+    return closure
+
+
 class PublishWorkspaceTest(unittest.TestCase):
     def test_publish_retries_cargo_registry_http2_failures(self) -> None:
         publish_workspace = load_publish_workspace_module()
@@ -90,6 +127,7 @@ class PublishWorkspaceTest(unittest.TestCase):
         with (
             mock.patch.object(publish_workspace, "crate_version_visible", return_value=False),
             mock.patch.object(publish_workspace, "wait_for_crate_version") as wait,
+            mock.patch.object(publish_workspace, "verify_uploaded_crate"),
             mock.patch.object(publish_workspace.time, "sleep"),
             mock.patch.object(publish_workspace.subprocess, "run", side_effect=[first, second]) as run,
         ):
@@ -374,6 +412,14 @@ class PublishWorkspaceTest(unittest.TestCase):
                 self.assertEqual(dependency["version"], "=0.0.0-dev")
                 self.assertIn("path", dependency)
 
+        # Internal deps pin the exact workspace version so a published crate
+        # never resolves a sibling from another release. The one exception is a
+        # dev-dependency pointing back at a crate that already depends on this
+        # one: a versioned dev-dep survives into the published manifest and has
+        # to resolve on the index, so pinning it would make the pair
+        # unpublishable (and unpackageable) in either order. Version-less path
+        # dev-deps are stripped when packaging, which is what breaks the cycle.
+        depends_on = build_internal_dependency_closure(metadata, workspace_members)
         for package in metadata["packages"]:
             if package["id"] not in workspace_members or package.get("publish") == []:
                 continue
@@ -388,9 +434,13 @@ class PublishWorkspaceTest(unittest.TestCase):
                 )
                 if target["id"] == package["id"]:
                     continue
+                cyclic_dev_dependency = (
+                    dependency["kind"] == "dev"
+                    and package["id"] in depends_on[target["id"]]
+                )
                 self.assertEqual(
                     dependency["req"],
-                    "=0.0.0-dev",
+                    "*" if cyclic_dev_dependency else "=0.0.0-dev",
                     f"{package['name']} -> {dependency['name']}",
                 )
 
@@ -425,6 +475,103 @@ class PublishWorkspaceTest(unittest.TestCase):
             )
             self.assertEqual(facade_dev_dependency["rename"], "lash")
             self.assertEqual(facade_dev_dependency["req"], "*")
+
+    def test_uploaded_crate_digest_mismatch_fails_the_release(self) -> None:
+        # The point of the post-publish check: if crates.io serves anything
+        # other than the bytes this job packaged, the release stops.
+        publish_workspace = load_publish_workspace_module()
+        args = argparse.Namespace(upload_digest_attempts=1, retry_delay_seconds=0)
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            (target / "package").mkdir()
+            (target / "package" / "lash-internal-sansio-1.2.3.crate").write_bytes(b"local")
+
+            with (
+                mock.patch.object(publish_workspace, "target_directory", return_value=target),
+                mock.patch.object(
+                    publish_workspace, "download_uploaded_crate", return_value=b"other"
+                ),
+                mock.patch.object(publish_workspace, "registry_crate_checksum", return_value=None),
+            ):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaises(RuntimeError) as raised:
+                        publish_workspace.verify_uploaded_crate(
+                            "lash-internal-sansio", "1.2.3", args
+                        )
+
+        self.assertIn("UPLOADED CRATE DIGEST MISMATCH", str(raised.exception))
+
+    def test_uploaded_crate_digest_match_passes(self) -> None:
+        publish_workspace = load_publish_workspace_module()
+        args = argparse.Namespace(upload_digest_attempts=1, retry_delay_seconds=0)
+        payload = b"identical bytes"
+        checksum = hashlib.sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            (target / "package").mkdir()
+            (target / "package" / "lash-internal-sansio-1.2.3.crate").write_bytes(payload)
+
+            with (
+                mock.patch.object(publish_workspace, "target_directory", return_value=target),
+                mock.patch.object(
+                    publish_workspace, "download_uploaded_crate", return_value=payload
+                ),
+                mock.patch.object(
+                    publish_workspace, "registry_crate_checksum", return_value=checksum
+                ),
+            ):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    publish_workspace.verify_uploaded_crate("lash-internal-sansio", "1.2.3", args)
+
+    def test_registry_recorded_checksum_mismatch_fails_the_release(self) -> None:
+        publish_workspace = load_publish_workspace_module()
+        args = argparse.Namespace(upload_digest_attempts=1, retry_delay_seconds=0)
+        payload = b"identical bytes"
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            (target / "package").mkdir()
+            (target / "package" / "lash-internal-sansio-1.2.3.crate").write_bytes(payload)
+
+            with (
+                mock.patch.object(publish_workspace, "target_directory", return_value=target),
+                mock.patch.object(
+                    publish_workspace, "download_uploaded_crate", return_value=payload
+                ),
+                mock.patch.object(
+                    publish_workspace, "registry_crate_checksum", return_value="0" * 64
+                ),
+            ):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaises(RuntimeError) as raised:
+                        publish_workspace.verify_uploaded_crate(
+                            "lash-internal-sansio", "1.2.3", args
+                        )
+
+        self.assertIn("UPLOADED CRATE DIGEST MISMATCH", str(raised.exception))
+
+    def test_successful_publish_checks_the_uploaded_crate(self) -> None:
+        publish_workspace = load_publish_workspace_module()
+        args = argparse.Namespace(
+            publish_timeout_seconds=600,
+            publish_attempts=1,
+            retry_delay_seconds=0,
+            visibility_timeout_seconds=1,
+            visibility_delay_seconds=0,
+            upload_digest_attempts=1,
+        )
+        package = {"name": "lash-internal-sansio", "version": "1.2.3"}
+        published = subprocess.CompletedProcess(["cargo", "publish"], 0, "", "")
+
+        with (
+            mock.patch.object(publish_workspace, "crate_version_visible", return_value=False),
+            mock.patch.object(publish_workspace, "wait_for_crate_version"),
+            mock.patch.object(publish_workspace, "verify_uploaded_crate") as verify,
+            mock.patch.object(publish_workspace.subprocess, "run", return_value=published),
+        ):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                publish_workspace.publish_package(package, args)
+
+        verify.assert_called_once_with(package["name"], package["version"], args)
 
 
 if __name__ == "__main__":
