@@ -42,6 +42,15 @@ impl RemoteProcessCancelReceipt {
         .validate("RemoteProcessCancelReceipt")?;
         if let Some(record) = &self.record {
             record.validate("RemoteProcessCancelReceipt")?;
+            if record.status != self.status {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteProcessCancelReceipt",
+                    message: format!(
+                        "cancel receipt status `{:?}` contradicts its record status `{:?}`",
+                        self.status, record.status
+                    ),
+                });
+            }
         }
         Ok(())
     }

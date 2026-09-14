@@ -137,3 +137,131 @@ fn remote_process_event_semantics_reject_contradictory_status_and_outcome() {
             .contains("contradicts its outcome")
     );
 }
+
+fn settled_failed() -> RemoteProcessAwaitOutput {
+    RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                class: RemoteToolFailureClass::Execution,
+                code: "failed".to_string(),
+                message: "failed".to_string(),
+                source: RemoteProcessToolFailureSource::Tool,
+                retry: RemoteProcessToolRetryStatus::Never,
+                raw: None,
+            }),
+            control: None,
+        },
+    }
+}
+
+fn abandoned_outcome() -> RemoteProcessAwaitOutput {
+    RemoteProcessAwaitOutput::Abandoned {
+        evidence: RemoteAbandonEvidence {
+            writer: RemoteAbandonWriter::OwnerDrain,
+            owner: None,
+            epoch_ms: 1,
+        },
+        control: None,
+    }
+}
+
+fn terminal_event(status: RemoteProcessStatus, outcome: RemoteProcessAwaitOutput) {
+    RemoteProcessEventSemantics {
+        terminal: Some(RemoteProcessTerminalSemantics { status, outcome }),
+        wake: None,
+    }
+    .validate("RemoteProcessEventSemantics")
+    .expect("matching terminal status and outcome must be accepted");
+}
+
+#[test]
+fn remote_process_event_semantics_accept_matching_failed_cancelled_and_abandoned() {
+    terminal_event(RemoteProcessStatus::Failed, settled_failed());
+    terminal_event(RemoteProcessStatus::Cancelled, settled_cancelled());
+    terminal_event(RemoteProcessStatus::Abandoned, abandoned_outcome());
+}
+
+#[test]
+fn remote_process_cancel_receipt_rejects_status_that_contradicts_its_record() {
+    let receipt = RemoteProcessCancelReceipt {
+        origin: lash_sansio::CancelOrigin::OperatorRequested,
+        process_id: ProcessId::from("process:1"),
+        incarnation: 1,
+        status: RemoteProcessStatus::Cancelled,
+        record: Some(remote_process_record()),
+    };
+    assert!(
+        receipt
+            .validate()
+            .expect_err("cancel receipt status must match the embedded record")
+            .to_string()
+            .contains("contradicts its record status")
+    );
+}
+
+fn observed_process(lifecycle: RemoteProcessStatus, terminal: bool) -> RemoteObservedProcess {
+    RemoteObservedProcess {
+        process_id: ProcessId::from("process:1"),
+        incarnation: 1,
+        last_event_sequence: 1,
+        graph_key: "process:process:1:incarnation:1".to_string(),
+        kind: "external".to_string(),
+        identity: RemoteProcessIdentity {
+            kind: "external".to_string(),
+            label: Some("Import".to_string()),
+            definition: None,
+        },
+        lifecycle,
+        status_label: match lifecycle {
+            RemoteProcessStatus::Running => "running",
+            RemoteProcessStatus::Waiting => "waiting",
+            RemoteProcessStatus::Completed => "completed",
+            RemoteProcessStatus::Failed => "failed",
+            RemoteProcessStatus::Cancelled => "cancelled",
+            RemoteProcessStatus::Abandoned => "abandoned",
+            RemoteProcessStatus::CallerDeparted => "caller_departed",
+        }
+        .to_string(),
+        terminal,
+        disposition: RemoteRecoveryContract::ExternallyOwned,
+        error: None,
+        created_at_ms: 1,
+        updated_at_ms: 2,
+        first_started: None,
+        lease_holder: None,
+        lease_expires_at_ms: None,
+        abandon_request: None,
+        cancel_request: None,
+        input: RemoteProcessInput::External {
+            metadata: serde_json::json!({ "label": "Import" }),
+        },
+        originator: RemoteProcessOriginator::Host { scope: None },
+        env_ref: None,
+        caused_by: None,
+        external_ref: None,
+        wait: None,
+        child_session_id: None,
+        label: "Import".to_string(),
+    }
+}
+
+#[test]
+fn remote_observed_process_rejects_terminal_flag_that_contradicts_lifecycle() {
+    assert!(
+        observed_process(RemoteProcessStatus::Running, true)
+            .validate("RemoteObservedProcess")
+            .expect_err("non-terminal lifecycle with terminal=true must be rejected")
+            .to_string()
+            .contains("contradicts lifecycle")
+    );
+    assert!(
+        observed_process(RemoteProcessStatus::Failed, false)
+            .validate("RemoteObservedProcess")
+            .expect_err("terminal lifecycle with terminal=false must be rejected")
+            .to_string()
+            .contains("contradicts lifecycle")
+    );
+    observed_process(RemoteProcessStatus::Failed, true)
+        .validate("RemoteObservedProcess")
+        .expect("matching terminal flag and lifecycle must be accepted");
+}
