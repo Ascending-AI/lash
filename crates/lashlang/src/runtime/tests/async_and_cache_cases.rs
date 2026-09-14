@@ -1,5 +1,71 @@
 use super::*;
 
+/// `process echo(value: str) { finish value }`
+fn echo_process() -> Declaration {
+    builders::process(
+        "echo",
+        vec![builders::param("value", TypeExpr::Str)],
+        builders::block(vec![builders::finish(builders::var("value"))]),
+    )
+}
+
+/// `process scan() { finish 1 }`
+fn scan_process() -> Declaration {
+    builders::process(
+        "scan",
+        Vec::new(),
+        builders::block(vec![builders::finish(builders::num(1.0))]),
+    )
+}
+
+/// `start echo(value: <value>)`
+fn start_echo(value: &str) -> Expr {
+    builders::start("echo", vec![("value", builders::string(value))])
+}
+
+/// `tools.echo({ value: <value> })`
+fn tools_echo(value: &str) -> Expr {
+    builders::receiver_call(
+        builders::resource(&["tools"]),
+        "echo",
+        vec![builders::record(vec![("value", builders::string(value))])],
+    )
+}
+
+/// `(results[<index>])?`
+fn unwrap_result(index: usize) -> Expr {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "test indexes are small literals"
+    )]
+    builders::unwrap(builders::index(
+        builders::var("results"),
+        builders::num(index as f64),
+    ))
+}
+
+/// ```text
+/// process echo(value: str) { finish value }
+/// handles = <handles>
+/// results = await handles
+/// finish results
+/// ```
+fn await_handles_program(handles: Expr) -> Program {
+    builders::module(
+        vec![echo_process()],
+        vec![
+            builders::assign("handles", handles),
+            builders::assign("results", builders::await_expr(builders::var("handles"))),
+            builders::finish(builders::var("results")),
+        ],
+    )
+}
+
+/// `finish 7`
+fn finish_seven() -> Program {
+    builders::program(vec![builders::finish(builders::num(7.0))])
+}
+
 struct AsyncHost;
 
 impl ExecutionHost for AsyncHost {
@@ -81,13 +147,22 @@ async fn linked_value_constructor_wraps_host_descriptor() {
         )
         .expect("value constructor is unique");
     let surface = crate::LashlangHostEnvironment::new(resources, crate::LashlangAbilities::all());
-    let program = crate::parse(
-        r#"
-        source = timer.Schedule({ expr: "0 8 * * *" })
-        finish source
-        "#,
-    )
-    .expect("program should parse");
+    // source = timer.Schedule({ expr: "0 8 * * *" })
+    // finish source
+    let program = builders::program(vec![
+        builders::assign(
+            "source",
+            builders::receiver_call(
+                builders::resource(&["timer"]),
+                "Schedule",
+                vec![builders::record(vec![(
+                    "expr",
+                    builders::string("0 8 * * *"),
+                )])],
+            ),
+        ),
+        builders::finish(builders::var("source")),
+    ]);
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
     let compiled = crate::compile_linked(&linked);
     let mut state = State::new();
@@ -109,16 +184,20 @@ async fn linked_value_constructor_wraps_host_descriptor() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn process_handles_can_be_started_awaited_and_cancelled() {
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        handle = start echo(value: "done")
-        result = await handle
-        cancel handle
-        finish result
-        "#,
-    )
-    .expect("program should parse");
+    // process echo(value: str) { finish value }
+    // handle = start echo(value: "done")
+    // result = await handle
+    // cancel handle
+    // finish result
+    let program = builders::module(
+        vec![echo_process()],
+        vec![
+            builders::assign("handle", start_echo("done")),
+            builders::assign("result", builders::await_expr(builders::var("handle"))),
+            builders::cancel(builders::var("handle")),
+            builders::finish(builders::var("result")),
+        ],
+    );
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &AsyncHost)
         .await
@@ -136,16 +215,24 @@ async fn process_handles_can_be_started_awaited_and_cancelled() {
 #[tokio::test(flavor = "current_thread")]
 async fn start_process_returns_raw_handle_and_passes_explicit_input() {
     let host = RecordingProcessHost::default();
-    let program = crate::parse(
-        r#"
-        process scan(root: str) -> str {
-          finish root
-        }
-        handle = start scan(root: ".")
-        finish handle
-        "#,
-    )
-    .expect("program should parse");
+    // process scan(root: str) -> str { finish root }
+    // handle = start scan(root: ".")
+    // finish handle
+    let program = builders::module(
+        vec![builders::process_returning(
+            "scan",
+            vec![builders::param("root", TypeExpr::Str)],
+            TypeExpr::Str,
+            builders::block(vec![builders::finish(builders::var("root"))]),
+        )],
+        vec![
+            builders::assign(
+                "handle",
+                builders::start("scan", vec![("root", builders::string("."))]),
+            ),
+            builders::finish(builders::var("handle")),
+        ],
+    );
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &host)
         .await
@@ -171,13 +258,12 @@ async fn start_process_returns_raw_handle_and_passes_explicit_input() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn unlinked_compiled_program_rejects_unsited_process_starts() {
-    let program = crate::parse(
-        r#"
-        process scan() { finish 1 }
-        finish start scan()
-        "#,
-    )
-    .expect("program should parse");
+    // process scan() { finish 1 }
+    // finish start scan()
+    let program = builders::module(
+        vec![scan_process()],
+        vec![builders::finish(builders::start("scan", Vec::new()))],
+    );
     let compiled = compile_program(&program);
     let mut state = State::new();
 
@@ -194,7 +280,8 @@ async fn unlinked_compiled_program_rejects_unsited_process_starts() {
 #[test]
 fn compiled_process_cache_reuses_process_ref_and_host_requirements_ref() {
     let linked = crate::LinkedModule::link(
-        crate::parse("process scan() { finish 1 }").expect("parse module"),
+        // process scan() { finish 1 }
+        builders::module(vec![scan_process()], Vec::new()),
         runtime_test_environment(),
     )
     .expect("link module");
@@ -286,18 +373,37 @@ async fn processes_emit_events_and_terminal_outcomes() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn while_runs_inside_process_body() {
-    let program = crate::parse(
-        r#"
-        process count_to(limit: int) {
-          n = 0
-          while n < limit {
-            n = n + 1
-          }
-          finish n
-        }
-        "#,
-    )
-    .expect("process with while should parse");
+    // process count_to(limit: int) {
+    //   n = 0
+    //   while n < limit { n = n + 1 }
+    //   finish n
+    // }
+    let program = builders::module(
+        vec![builders::process(
+            "count_to",
+            vec![builders::param("limit", TypeExpr::Int)],
+            builders::block(vec![
+                builders::assign("n", builders::num(0.0)),
+                builders::while_loop(
+                    builders::binary(
+                        builders::var("n"),
+                        crate::ast::BinaryOp::Less,
+                        builders::var("limit"),
+                    ),
+                    builders::block(vec![builders::assign(
+                        "n",
+                        builders::binary(
+                            builders::var("n"),
+                            crate::ast::BinaryOp::Add,
+                            builders::num(1.0),
+                        ),
+                    )]),
+                ),
+                builders::finish(builders::var("n")),
+            ]),
+        )],
+        Vec::new(),
+    );
     let compiled = crate::compile_process(&program, "count_to").expect("process should compile");
     let mut state = State::new();
     state
@@ -664,13 +770,12 @@ async fn profile_report_tracks_list_comprehension_append_and_iteration() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn await_unknown_handle_reports_runtime_error() {
-    let program = crate::parse(
-        r#"
-        result = await 1
-        finish result
-        "#,
-    )
-    .expect("program should parse");
+    // result = await 1
+    // finish result
+    let program = builders::program(vec![
+        builders::assign("result", builders::await_expr(builders::num(1.0))),
+        builders::finish(builders::var("result")),
+    ]);
     let mut state = State::new();
     let error = execute_program(&program, &mut state, &AsyncHost)
         .await
@@ -687,19 +792,19 @@ async fn await_unknown_handle_reports_runtime_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn await_list_of_handles_returns_results_in_order() {
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        handles = [
-          start echo(value: "first"),
-          start echo(value: "second"),
-          start echo(value: "third")
-        ]
-        results = await handles
-        finish results
-        "#,
-    )
-    .expect("program should parse");
+    // process echo(value: str) { finish value }
+    // handles = [
+    //   start echo(value: "first"),
+    //   start echo(value: "second"),
+    //   start echo(value: "third")
+    // ]
+    // results = await handles
+    // finish results
+    let program = await_handles_program(builders::list(vec![
+        start_echo("first"),
+        start_echo("second"),
+        start_echo("third"),
+    ]));
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &AsyncHost)
         .await
@@ -722,15 +827,12 @@ async fn await_list_of_handles_returns_results_in_order() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn await_list_preserves_per_item_errors() {
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        handles = [start echo(value: "done"), start echo(value: "fail")]
-        results = await handles
-        finish results
-        "#,
-    )
-    .expect("program should parse");
+    // process echo(value: str) { finish value }
+    // handles = [start echo(value: "done"), start echo(value: "fail")]
+    // results = await handles
+    // finish results
+    let program =
+        await_handles_program(builders::list(vec![start_echo("done"), start_echo("fail")]));
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &FailingAwaitHost)
         .await
@@ -760,18 +862,30 @@ async fn await_list_preserves_per_item_errors() {
 /// reach into a bound record belonged to the retired surface dialect.
 #[tokio::test(flavor = "current_thread")]
 async fn await_of_a_record_leaves_its_handle_fields_unsettled() {
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        handles = {
-          first: start echo(value: "one"),
-          second: start echo(value: "two"),
-        }
-        results = await handles
-        finish results.first?
-        "#,
-    )
-    .expect("program should parse");
+    // process echo(value: str) { finish value }
+    // handles = {
+    //   first: start echo(value: "one"),
+    //   second: start echo(value: "two"),
+    // }
+    // results = await handles
+    // finish results.first?
+    let program = builders::module(
+        vec![echo_process()],
+        vec![
+            builders::assign(
+                "handles",
+                builders::record(vec![
+                    ("first", start_echo("one")),
+                    ("second", start_echo("two")),
+                ]),
+            ),
+            builders::assign("results", builders::await_expr(builders::var("handles"))),
+            builders::finish(builders::unwrap(builders::field(
+                builders::var("results"),
+                "first",
+            ))),
+        ],
+    );
     let mut state = State::new();
     let error = execute_program(&program, &mut state, &AsyncHost)
         .await
@@ -786,15 +900,21 @@ async fn await_of_a_record_leaves_its_handle_fields_unsettled() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn result_unwrap_extracts_awaited_handles_and_joined_results() {
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        handle = start echo(value: "done")
-        result = (await handle)?
-        finish result
-        "#,
-    )
-    .expect("program should parse");
+    // process echo(value: str) { finish value }
+    // handle = start echo(value: "done")
+    // result = (await handle)?
+    // finish result
+    let program = builders::module(
+        vec![echo_process()],
+        vec![
+            builders::assign("handle", start_echo("done")),
+            builders::assign(
+                "result",
+                builders::unwrap(builders::await_expr(builders::var("handle"))),
+            ),
+            builders::finish(builders::var("result")),
+        ],
+    );
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &AsyncHost)
         .await
@@ -804,17 +924,22 @@ async fn result_unwrap_extracts_awaited_handles_and_joined_results() {
     };
     assert_eq!(value, Value::String("done".into()));
 
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        results = await [
-          start echo(value: "left"),
-          start echo(value: "right")
-        ]
-        finish [(results[0])?, (results[1])?]
-        "#,
-    )
-    .expect("program should parse");
+    // process echo(value: str) { finish value }
+    // results = await [start echo(value: "left"), start echo(value: "right")]
+    // finish [(results[0])?, (results[1])?]
+    let program = builders::module(
+        vec![echo_process()],
+        vec![
+            builders::assign(
+                "results",
+                builders::await_expr(builders::list(vec![
+                    start_echo("left"),
+                    start_echo("right"),
+                ])),
+            ),
+            builders::finish(builders::list(vec![unwrap_result(0), unwrap_result(1)])),
+        ],
+    );
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &AsyncHost)
         .await
@@ -834,15 +959,24 @@ async fn result_unwrap_extracts_awaited_handles_and_joined_results() {
 /// handle record.
 #[tokio::test(flavor = "current_thread")]
 async fn aggregate_await_settles_process_handles_after_module_operations() {
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        h = start echo(value: "left")
-        results = await [h, tools.echo({ value: "right" })]
-        finish [(results[0])?, (results[1])?]
-        "#,
-    )
-    .expect("program should parse");
+    // process echo(value: str) { finish value }
+    // h = start echo(value: "left")
+    // results = await [h, tools.echo({ value: "right" })]
+    // finish [(results[0])?, (results[1])?]
+    let program = builders::module(
+        vec![echo_process()],
+        vec![
+            builders::assign("h", start_echo("left")),
+            builders::assign(
+                "results",
+                builders::await_expr(builders::list(vec![
+                    builders::var("h"),
+                    tools_echo("right"),
+                ])),
+            ),
+            builders::finish(builders::list(vec![unwrap_result(0), unwrap_result(1)])),
+        ],
+    );
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &AsyncHost)
         .await
@@ -855,15 +989,21 @@ async fn aggregate_await_settles_process_handles_after_module_operations() {
     );
 
     // A failing process settles as a result record; the leaf's `?` reports it.
-    let program = crate::parse(
-        r#"
-        process echo(value: str) { finish value }
-        h = start echo(value: "fail")
-        results = await [tools.echo({ value: "ok" }), h]
-        finish (results[1])?
-        "#,
-    )
-    .expect("program should parse");
+    // process echo(value: str) { finish value }
+    // h = start echo(value: "fail")
+    // results = await [tools.echo({ value: "ok" }), h]
+    // finish (results[1])?
+    let program = builders::module(
+        vec![echo_process()],
+        vec![
+            builders::assign("h", start_echo("fail")),
+            builders::assign(
+                "results",
+                builders::await_expr(builders::list(vec![tools_echo("ok"), builders::var("h")])),
+            ),
+            builders::finish(unwrap_result(1)),
+        ],
+    );
     let mut state = State::new();
     let error = execute_program(&program, &mut state, &AsyncHost)
         .await
@@ -876,21 +1016,31 @@ async fn aggregate_await_settles_process_handles_after_module_operations() {
 /// before any process handle is touched.
 #[tokio::test(flavor = "current_thread")]
 async fn aggregate_await_reports_module_rejections_before_process_failures() {
-    for source in [
-        r#"
-        process echo(value: str) { finish value }
-        h = start echo(value: "fail")
-        results = await [tools.err({})?, h]
-        finish results
-        "#,
-        r#"
-        process echo(value: str) { finish value }
-        h = start echo(value: "fail")
-        results = await [h, tools.err({})?]
-        finish results
-        "#,
+    // process echo(value: str) { finish value }
+    // h = start echo(value: "fail")
+    // results = await [tools.err({})?, h]   /   await [h, tools.err({})?]
+    // finish results
+    let rejecting_leaf = || {
+        builders::unwrap(builders::receiver_call(
+            builders::resource(&["tools"]),
+            "err",
+            vec![builders::record(Vec::new())],
+        ))
+    };
+    let aggregate = |leaves: Vec<Expr>| {
+        builders::module(
+            vec![echo_process()],
+            vec![
+                builders::assign("h", start_echo("fail")),
+                builders::assign("results", builders::await_expr(builders::list(leaves))),
+                builders::finish(builders::var("results")),
+            ],
+        )
+    };
+    for program in [
+        aggregate(vec![rejecting_leaf(), builders::var("h")]),
+        aggregate(vec![builders::var("h"), rejecting_leaf()]),
     ] {
-        let program = crate::parse(source).expect("program should parse");
         let mut state = State::new();
         let error = execute_program(&program, &mut state, &AsyncHost)
             .await
@@ -1360,14 +1510,24 @@ async fn type_literal_inside_resource_operation_args_passes_through_as_record() 
     let host = CaptureHost {
         captured: std::sync::Mutex::new(None),
     };
-    let program = crate::parse(
-        r#"
-        Shape = Type { name: str, tags: list[str] }
-        await tools.spawn({ output: Shape })
-        finish null
-        "#,
-    )
-    .expect("should parse");
+    // Shape = Type { name: str, tags: list[str] }
+    // await tools.spawn({ output: Shape })
+    // finish null
+    let program = builders::program(vec![
+        builders::assign(
+            "Shape",
+            builders::type_literal(TypeExpr::Object(vec![
+                builders::type_field("name", TypeExpr::Str, false),
+                builders::type_field("tags", TypeExpr::List(Box::new(TypeExpr::Str)), false),
+            ])),
+        ),
+        builders::await_expr(builders::receiver_call(
+            builders::resource(&["tools"]),
+            "spawn",
+            vec![builders::record(vec![("output", builders::var("Shape"))])],
+        )),
+        builders::finish(builders::null()),
+    ]);
     let mut state = State::new();
     execute_program(&program, &mut state, &host)
         .await
@@ -1377,31 +1537,6 @@ async fn type_literal_inside_resource_operation_args_passes_through_as_record() 
     let inner = crate::runtime::unwrap_type_value(&captured).expect("has $lash_type");
     let schema = inner.as_record().expect("schema record");
     assert_eq!(schema["type"], Value::String("object".into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn duplicate_field_name_is_parse_error() {
-    let err = crate::parse("x = Type { a: str, a: int }").expect_err("duplicate field");
-    let message = format!("{err}");
-    assert!(message.contains("duplicate field"), "{message}");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn empty_enum_is_parse_error() {
-    let err = crate::parse("x = Type { status: enum[] }").expect_err("empty enum");
-    let message = format!("{err}");
-    assert!(message.contains("enum"), "{message}");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn unknown_type_constructor_becomes_ref_not_error_at_parse() {
-    // Unknown identifiers in type position are treated as refs; runtime
-    // resolution is what errors out.
-    let program = crate::parse("finish Type { x: Unknown }").expect("should parse as ref");
-    let Expr::Block(expressions) = program.main else {
-        panic!("program should be a block");
-    };
-    assert!(matches!(expressions.last(), Some(Expr::Finish(_))));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1447,9 +1582,16 @@ async fn field_access_on_projected_record_returns_projected() {
         "input",
         serde_json::json!({ "prompt": "hello", "depth": 3 }),
     );
-    let (value, _) = exec_with_projected("finish input.prompt", &projected)
-        .await
-        .expect("projected field read");
+    let (value, _) = exec_with_projected(
+        // finish input.prompt
+        builders::program(vec![builders::finish(builders::field(
+            builders::var("input"),
+            "prompt",
+        ))]),
+        &projected,
+    )
+    .await
+    .expect("projected field read");
     assert!(
         matches!(value, Value::Projected(_)),
         "expected `input.prompt` to stay projected, got {value:?}"
@@ -1460,9 +1602,16 @@ async fn field_access_on_projected_record_returns_projected() {
 async fn nested_field_access_keeps_projection() {
     let projected =
         projected_record_bindings("cfg", serde_json::json!({ "options": { "timeout": 30 } }));
-    let (value, _) = exec_with_projected("finish cfg.options.timeout", &projected)
-        .await
-        .expect("nested projected field read");
+    let (value, _) = exec_with_projected(
+        // finish cfg.options.timeout
+        builders::program(vec![builders::finish(builders::field(
+            builders::field(builders::var("cfg"), "options"),
+            "timeout",
+        ))]),
+        &projected,
+    )
+    .await
+    .expect("nested projected field read");
     assert!(
         matches!(value, Value::Projected(_)),
         "expected nested field to stay projected, got {value:?}"
@@ -1473,9 +1622,16 @@ async fn nested_field_access_keeps_projection() {
 async fn index_on_projected_list_returns_projected() {
     let projected =
         projected_record_bindings("items", serde_json::json!(["alpha", "beta", "gamma"]));
-    let (value, _) = exec_with_projected("finish items[1]", &projected)
-        .await
-        .expect("projected index read");
+    let (value, _) = exec_with_projected(
+        // finish items[1]
+        builders::program(vec![builders::finish(builders::index(
+            builders::var("items"),
+            builders::num(1.0),
+        ))]),
+        &projected,
+    )
+    .await
+    .expect("projected index read");
     assert!(
         matches!(value, Value::Projected(_)),
         "expected `items[1]` to stay projected, got {value:?}"
@@ -1485,9 +1641,17 @@ async fn index_on_projected_list_returns_projected() {
 #[tokio::test(flavor = "current_thread")]
 async fn computation_strips_projection() {
     let projected = projected_record_bindings("input", serde_json::json!({ "n": 7 }));
-    let (value, _) = exec_with_projected("finish input.n + 1", &projected)
-        .await
-        .expect("computed value");
+    let (value, _) = exec_with_projected(
+        // finish input.n + 1
+        builders::program(vec![builders::finish(builders::binary(
+            builders::field(builders::var("input"), "n"),
+            crate::ast::BinaryOp::Add,
+            builders::num(1.0),
+        ))]),
+        &projected,
+    )
+    .await
+    .expect("computed value");
     assert!(
         !matches!(value, Value::Projected(_)),
         "computation should strip projection, got {value:?}"
@@ -1498,7 +1662,16 @@ async fn computation_strips_projection() {
 async fn record_literal_preserves_per_entry_projection() {
     let projected = projected_record_bindings("input", serde_json::json!({ "prompt": "hello" }));
     let (value, _) = exec_with_projected(
-        "g = 42\nfinish { proj: input.prompt, glob: g, lit: 99 }",
+        // g = 42
+        // finish { proj: input.prompt, glob: g, lit: 99 }
+        builders::program(vec![
+            builders::assign("g", builders::num(42.0)),
+            builders::finish(builders::record(vec![
+                ("proj", builders::field(builders::var("input"), "prompt")),
+                ("glob", builders::var("g")),
+                ("lit", builders::num(99.0)),
+            ])),
+        ]),
         &projected,
     )
     .await
@@ -1579,11 +1752,10 @@ impl ExecutionHost for TerminatorHost {
 }
 
 async fn run_with_terminator_host(
-    source: &str,
+    program: Program,
     mode: TerminatorMode,
 ) -> (Result<ExecutionOutcome, RuntimeError>, Vec<AbilityOp>) {
     let host = TerminatorHost::new(mode);
-    let program = crate::parse(source).expect("program should parse");
     let mut state = State::new();
     let outcome = execute_program(&program, &mut state, &host).await;
     let observed = host.observed.lock_recover().clone();
@@ -1604,7 +1776,8 @@ async fn run_process_with_terminator_host(
 
 #[tokio::test(flavor = "current_thread")]
 async fn finish_routes_through_host() {
-    let (outcome, observed) = run_with_terminator_host("finish 7", TerminatorMode::Identity).await;
+    let (outcome, observed) =
+        run_with_terminator_host(finish_seven(), TerminatorMode::Identity).await;
     assert_eq!(
         outcome.expect("finish should succeed"),
         ExecutionOutcome::Finished(Value::Number(7.0))
@@ -1615,7 +1788,7 @@ async fn finish_routes_through_host() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn host_transforms_finish_value() {
-    let (outcome, _) = run_with_terminator_host("finish 7", TerminatorMode::Transform).await;
+    let (outcome, _) = run_with_terminator_host(finish_seven(), TerminatorMode::Transform).await;
     assert_eq!(
         outcome.expect("finish should succeed"),
         ExecutionOutcome::Finished(Value::Number(107.0)),
@@ -1625,7 +1798,7 @@ async fn host_transforms_finish_value() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn host_error_during_finish_propagates_as_runtime_error() {
-    let (outcome, _) = run_with_terminator_host("finish 7", TerminatorMode::Err).await;
+    let (outcome, _) = run_with_terminator_host(finish_seven(), TerminatorMode::Err).await;
     let err = outcome.expect_err("host error should surface");
     let message = err.to_string();
     assert!(message.contains("finish failed"), "{message}");
@@ -1634,7 +1807,7 @@ async fn host_error_during_finish_propagates_as_runtime_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn host_returning_unit_for_finish_errors_cleanly() {
-    let (outcome, _) = run_with_terminator_host("finish 7", TerminatorMode::Unit).await;
+    let (outcome, _) = run_with_terminator_host(finish_seven(), TerminatorMode::Unit).await;
     let err = outcome.expect_err("unit result should error");
     let message = err.to_string();
     assert!(message.contains("finish failed"), "{message}");
@@ -1686,7 +1859,8 @@ fn a_compiled_process_cache_hit_builds_no_key() {
     use std::sync::atomic::Ordering;
 
     let linked = crate::LinkedModule::link(
-        crate::parse("process scan() { finish 1 }").expect("parse module"),
+        // process scan() { finish 1 }
+        builders::module(vec![scan_process()], Vec::new()),
         runtime_test_environment(),
     )
     .expect("link module");
