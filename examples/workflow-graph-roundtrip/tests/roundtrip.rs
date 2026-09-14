@@ -7,6 +7,25 @@ use workflow_graph_roundtrip::{
     RunEvent, RunStatus, RunTiming, SaveWorkflowResponse, WorkflowCatalogEntry, WorkflowDocument,
 };
 
+/// The names a `counter-loop` fragment may reach. The lens parses editable
+/// text through the TypeScript front-end, which rejects an unknown binding.
+fn workflow_globals() -> std::collections::BTreeSet<String> {
+    std::collections::BTreeSet::from(["state".to_string()])
+}
+
+/// The canonical TypeScript the lens stores for an editable expression: what
+/// the front-end reads back out of `text`, printed by the lens's own printer.
+fn canonical_expression(text: &str) -> String {
+    let expression = lash_typescript::workflow_graph::parse_typescript_expression(
+        text,
+        &workflow_globals(),
+        &std::collections::BTreeSet::new(),
+    )
+    .unwrap_or_else(|error| panic!("`{text}` must parse as an editable expression: {error}"));
+    lash_typescript::workflow_graph::typescript_expression_source(&expression)
+        .unwrap_or_else(|error| panic!("`{text}` must print back as TypeScript: {error}"))
+}
+
 #[tokio::test]
 async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1200,14 +1219,8 @@ async fn expression_valued_call_fields_save_reproject_and_reject_malformed_edits
     let base = format!("http://{addr}");
 
     let mut document = select_workflow(&client, &base, "counter-loop").await;
-    let expected_progress = lashlang::canonical_expression_source(
-        &lashlang::parse_expression("state.count * 20 + 20").expect("progress expression"),
-    )
-    .expect("canonical progress expression");
-    let expected_item = lashlang::canonical_expression_source(
-        &lashlang::parse_expression("state.count").expect("item expression"),
-    )
-    .expect("canonical item expression");
+    let expected_progress = canonical_expression("state.count * 20 + 20");
+    let expected_item = canonical_expression("state.count");
     assert!(document.nodes.iter().any(|node| {
         node.data.operation.as_deref() == Some("add_item")
             && node.data.fields.get("item") == Some(&EditableValue::Expr(expected_item.clone()))
@@ -1234,10 +1247,7 @@ async fn expression_valued_call_fields_save_reproject_and_reject_malformed_edits
         .expect("save expression-valued field");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let mut saved: WorkflowDocument = response.json().await.expect("saved workflow");
-    let edited_progress = lashlang::canonical_expression_source(
-        &lashlang::parse_expression("state.count * 10 + 10").expect("edited expression"),
-    )
-    .expect("canonical edited expression");
+    let edited_progress = canonical_expression("state.count * 10 + 10");
     assert!(saved.nodes.iter().any(|node| {
         node.data.operation.as_deref() == Some("set_progress")
             && node.data.fields.get("pct") == Some(&EditableValue::Expr(edited_progress.clone()))
@@ -2155,7 +2165,12 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
         .expect("counter-loop document");
     let invalid_target = "state.count + 1";
     assert!(
-        lashlang::parse_expression(invalid_target).is_ok(),
+        lash_typescript::workflow_graph::parse_typescript_expression(
+            invalid_target,
+            &workflow_globals(),
+            &std::collections::BTreeSet::new(),
+        )
+        .is_ok(),
         "invalid assignment target should remain a valid expression"
     );
     let state_update = document

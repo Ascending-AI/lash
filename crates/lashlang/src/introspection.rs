@@ -11,7 +11,6 @@ pub struct ModuleIntrospection {
     pub module_ref: ModuleRef,
     pub host_requirements_ref: HostRequirementsRef,
     pub host_requirements: HostRequirements,
-    pub canonical_source: String,
     pub exported_processes: Vec<ProcessIntrospection>,
     pub required_module_instances: Vec<ModuleInstanceIntrospection>,
     pub required_resource_types: Vec<ResourceTypeIntrospection>,
@@ -22,9 +21,6 @@ pub struct ModuleIntrospection {
 
 impl ModuleIntrospection {
     pub fn from_artifact(artifact: &ModuleArtifact) -> Result<Self, ModuleIntrospectionError> {
-        let canonical_source = artifact
-            .canonical_source()
-            .map_err(ModuleIntrospectionError::CanonicalSource)?;
         let mut exported_processes = Vec::new();
         for process_name in artifact.exports.processes.keys() {
             let definition =
@@ -37,12 +33,6 @@ impl ModuleIntrospection {
                     process_name: process_name.clone(),
                 }
             })?;
-            let canonical_process_source = artifact
-                .canonical_process_source_by_name(process_name)
-                .map_err(ModuleIntrospectionError::CanonicalSource)?
-                .ok_or_else(|| ModuleIntrospectionError::MissingProcess {
-                    process_name: process_name.clone(),
-                })?;
             exported_processes.push(ProcessIntrospection {
                 definition,
                 label: process.label.clone(),
@@ -63,7 +53,6 @@ impl ModuleIntrospection {
                     })
                     .collect(),
                 return_type: process.return_ty.clone().map(TypeView::new),
-                canonical_source: canonical_process_source,
             });
         }
 
@@ -71,7 +60,6 @@ impl ModuleIntrospection {
             module_ref: artifact.module_ref.clone(),
             host_requirements_ref: artifact.host_requirements_ref.clone(),
             host_requirements: artifact.host_requirements.clone(),
-            canonical_source,
             exported_processes,
             required_module_instances: module_instances(artifact),
             required_resource_types: resource_types(artifact),
@@ -117,7 +105,6 @@ pub struct ProcessIntrospection {
     pub signals: Vec<ProcessSignalIntrospection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub return_type: Option<TypeView>,
-    pub canonical_source: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -203,8 +190,6 @@ impl TypeView {
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ModuleIntrospectionError {
-    #[error("failed to render canonical source: {0}")]
-    CanonicalSource(#[from] crate::CanonicalSourceError),
     #[error("module artifact export is missing process `{process_name}`")]
     MissingProcess { process_name: String },
 }

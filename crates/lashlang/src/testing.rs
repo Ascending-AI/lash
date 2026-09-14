@@ -9,9 +9,10 @@ pub mod conformance;
 /// this crate can run a program the way the crate's own unit tests do.
 pub mod harness;
 
-/// Pure AST constructors used by this crate's own unit tests.
+/// Pure AST constructors for building fixture programs.
 ///
-/// Unavailable to embedders on purpose: it is `cfg(test)` only, not part of the
-/// `testing` feature's published surface.
-#[cfg(test)]
-pub(crate) mod ast_builders;
+/// ADR 0096 leaves the crate without a source front-end, so a test that used
+/// to spell its fixture in Lashlang states the AST instead. The constructors
+/// are shared rather than re-derived per crate, and stay behind the `testing`
+/// feature so they never ship in a production build.
+pub mod ast_builders;

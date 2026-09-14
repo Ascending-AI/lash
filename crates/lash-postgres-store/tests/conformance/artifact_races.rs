@@ -1,9 +1,21 @@
 use super::*;
 use lashlang::LashlangArtifactStore as _;
 
-fn artifact(source: &str) -> lashlang::ModuleArtifact {
-    lashlang::ModuleArtifact::from_program(lashlang::parse(source).expect("parse module"))
-        .expect("build module artifact")
+/// `process <name>(root: str) -> str { finish root }` — the fixture only has to
+/// be a distinct publishable module; what it computes is never read.
+fn artifact(process_name: &str) -> lashlang::ModuleArtifact {
+    use lashlang::testing::ast_builders as b;
+
+    let program = b::module(
+        vec![b::process_returning(
+            process_name,
+            vec![b::param("root", lashlang::TypeExpr::Str)],
+            lashlang::TypeExpr::Str,
+            b::finish(b::var("root")),
+        )],
+        Vec::new(),
+    );
+    lashlang::ModuleArtifact::from_program(program).expect("build module artifact")
 }
 
 async fn lock_artifact_mutations<'a>(
@@ -53,7 +65,7 @@ async fn postgres_artifact_release_observes_owner_that_commits_ahead_of_it() {
     };
     reset(&storage).await;
     let store = storage.lashlang_artifact_store();
-    let module = artifact("process race(root: str) -> str { finish root }");
+    let module = artifact("race");
     let owner_a = lash_core::ArtifactOwner::host("artifact-race-a");
     let owner_b = lash_core::ArtifactOwner::host("artifact-race-b");
     store
@@ -112,7 +124,7 @@ async fn postgres_concurrent_final_artifact_releases_converge_to_absent_bytes() 
     };
     reset(&storage).await;
     let store = storage.lashlang_artifact_store();
-    let module = artifact("process releases(root: str) -> str { finish root }");
+    let module = artifact("releases");
     let owner_a = lash_core::ArtifactOwner::host("final-release-a");
     let owner_b = lash_core::ArtifactOwner::host("final-release-b");
     store

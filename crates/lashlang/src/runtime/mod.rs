@@ -9,7 +9,7 @@
 //! sibling submodules can write `use super::*` without caring which
 //! file an item lives in).
 
-use crate::lexer::Span;
+use crate::span::Span;
 use thiserror::Error;
 
 pub(crate) const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
@@ -47,7 +47,7 @@ pub use cache::{
 #[allow(unused_imports)]
 pub(crate) use compiler::*;
 pub use entry_points::{
-    ExecutableProgram, compile, compile_ast, compile_linked, compile_linked_process,
+    ExecutableProgram, compile_ast, compile_linked, compile_linked_process,
     compile_module_artifact_process, compile_process, execute, prewarm,
 };
 pub use heap::{

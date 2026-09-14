@@ -24,8 +24,9 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Snapshot, State,
-    Value, compile, execute,
+    AbilityOp, AbilityResult, AssignPathStep, AssignTarget, BinaryOp, ExecutionHost,
+    ExecutionHostError, ExecutionOutcome, Expr, Program, Snapshot, State, Value, compile_ast,
+    execute,
 };
 
 #[global_allocator]
@@ -73,12 +74,15 @@ impl ExecutionHost for Host {
     }
 }
 
-/// Runs `source` and returns `(finished value, bytes the run allocated)`.
+/// Runs `program` and returns `(finished value, bytes the run allocated)`.
 ///
-/// Only execution is measured: the program is compiled first, so the parser and
-/// the compiler's allocations stay out of the figure.
-fn run_measured(source: &str) -> (Value, u64) {
-    let compiled = compile(source).expect("cost probe should compile");
+/// Only execution is measured: the program is compiled first, so the compiler's
+/// allocations stay out of the figure. The probes are built from the IR rather
+/// than authored: what they pin is the cost of the two lowered append forms,
+/// and stating those forms is the only way to be sure the measurement is of
+/// them (ADR 0096).
+fn run_measured(program: &Program) -> (Value, u64) {
+    let compiled = compile_ast(program).expect("cost probe should compile");
     let mut state = State::new();
     let before = ALLOCATED_BYTES.load(Ordering::Relaxed);
     let outcome = futures::executor::block_on(execute(&compiled, &mut state, &Host))
@@ -90,27 +94,94 @@ fn run_measured(source: &str) -> (Value, u64) {
     (value, allocated)
 }
 
+fn var(name: &str) -> Expr {
+    Expr::Variable(name.into())
+}
+
+fn builtin(name: &str, args: Vec<Expr>) -> Expr {
+    Expr::BuiltinCall {
+        name: name.into(),
+        args,
+    }
+}
+
+fn assign(name: &str, expr: Expr) -> Expr {
+    Expr::Assign {
+        target: AssignTarget::variable(name.into()),
+        expr: Box::new(expr),
+    }
+}
+
+/// `appended = __typescript_stdlib("push", items, <member>)` — what `xs.push(m)`
+/// lowers to.
+fn push_append(member: Expr) -> Expr {
+    assign(
+        "appended",
+        builtin(
+            "__typescript_stdlib",
+            vec![Expr::String("push".into()), var("items"), member],
+        ),
+    )
+}
+
+/// `items[items.length] = <member>` — what a terminal index write lowers to.
+fn index_append(member: Expr) -> Expr {
+    Expr::Assign {
+        target: AssignTarget {
+            root: "items".into(),
+            steps: vec![AssignPathStep::Index(Expr::Field {
+                target: Box::new(var("items")),
+                field: "length".into(),
+            })],
+        },
+        expr: Box::new(member),
+    }
+}
+
 /// The loop every probe shares, with `body` as its one statement. `finish`
 /// reports a number rather than the list so the export at the end of the run
 /// does not itself walk what was built.
-fn probe_source(body: &str, iterations: usize) -> String {
-    format!(
-        "items = []
-total = 0
-for i in range(0, {iterations}) {{
-{body}
-}}
-finish total + len(items)
-"
-    )
+///
+/// ```text
+/// items = []
+/// total = 0
+/// for i in range(0, <iterations>) { <body> }
+/// finish total + len(items)
+/// ```
+fn probe_program(body: Expr, iterations: usize) -> Program {
+    Program::block(vec![
+        assign("items", Expr::List(Vec::new())),
+        assign("total", Expr::Number(0.0)),
+        Expr::For {
+            binding: "i".into(),
+            iterable: Box::new(builtin(
+                "range",
+                vec![Expr::Number(0.0), Expr::Number(iterations as f64)],
+            )),
+            body: Box::new(Expr::Block(vec![body])),
+        },
+        Expr::Finish(Box::new(Expr::Binary {
+            op: BinaryOp::Add,
+            left: Box::new(var("total")),
+            right: Box::new(builtin("len", vec![var("items")])),
+        })),
+    ])
 }
 
 /// Bytes one append costs, with the loop, the range and the scaffolding the
 /// append does not pay for subtracted out.
-fn bytes_per_append(body: &str, iterations: usize) -> f64 {
-    let (built, with_append) = run_measured(&probe_source(body, iterations));
-    let (baseline_value, without_append) =
-        run_measured(&probe_source("    total = total + i", iterations));
+fn bytes_per_append(body: fn() -> Expr, iterations: usize) -> f64 {
+    let (built, with_append) = run_measured(&probe_program(body(), iterations));
+    // total = total + i
+    let baseline = assign(
+        "total",
+        Expr::Binary {
+            op: BinaryOp::Add,
+            left: Box::new(var("total")),
+            right: Box::new(var("i")),
+        },
+    );
+    let (baseline_value, without_append) = run_measured(&probe_program(baseline, iterations));
     assert_eq!(
         built,
         Value::Number(iterations as f64),
@@ -131,7 +202,7 @@ fn bytes_per_append(body: &str, iterations: usize) -> f64 {
 /// bursts, and the two runs do not land on the same point of the growth curve —
 /// but it is far below what a rebuild produces. Before this fix, appending
 /// 3,200 items cost roughly four times as much per item as appending 800.
-fn assert_per_append_cost_is_flat(label: &str, body: &str) {
+fn assert_per_append_cost_is_flat(label: &str, body: fn() -> Expr) {
     let small = bytes_per_append(body, 800);
     let large = bytes_per_append(body, 3_200);
     assert!(
@@ -143,15 +214,12 @@ fn assert_per_append_cost_is_flat(label: &str, body: &str) {
 
 #[test]
 fn push_costs_the_same_at_every_list_length() {
-    assert_per_append_cost_is_flat(
-        "push",
-        "    appended = __typescript_stdlib(\"push\", items, i)",
-    );
+    assert_per_append_cost_is_flat("push", || push_append(var("i")));
 }
 
 #[test]
 fn terminal_index_assignment_costs_the_same_at_every_list_length() {
-    assert_per_append_cost_is_flat("index append", "    items[items.length] = i");
+    assert_per_append_cost_is_flat("index append", || index_append(var("i")));
 }
 
 /// What makes the in-place append cheap is that it charges the appended member
@@ -176,15 +244,43 @@ fn terminal_index_assignment_costs_the_same_at_every_list_length() {
 /// constant cannot cancel out against a differently shaped member.
 #[test]
 fn an_append_charges_what_the_object_measures() {
-    let source = "items = []
-for i in range(0, 64) {
-    items[items.length] = \"member-\" + to_string(i)
-    appended = __typescript_stdlib(\"push\", items, [i, \"nested\"])
-    also = __typescript_stdlib(\"push\", items, i)
-}
-finish items.length
-";
-    let compiled = compile(source).expect("byte-accounting probe should compile");
+    // items = []
+    // for i in range(0, 64) {
+    //     items[items.length] = "member-" + to_string(i)
+    //     appended = __typescript_stdlib("push", items, [i, "nested"])
+    //     also = __typescript_stdlib("push", items, i)
+    // }
+    // finish items.length
+    let program = Program::block(vec![
+        assign("items", Expr::List(Vec::new())),
+        Expr::For {
+            binding: "i".into(),
+            iterable: Box::new(builtin(
+                "range",
+                vec![Expr::Number(0.0), Expr::Number(64.0)],
+            )),
+            body: Box::new(Expr::Block(vec![
+                index_append(Expr::Binary {
+                    op: BinaryOp::Add,
+                    left: Box::new(Expr::String("member-".into())),
+                    right: Box::new(builtin("to_string", vec![var("i")])),
+                }),
+                push_append(Expr::List(vec![var("i"), Expr::String("nested".into())])),
+                assign(
+                    "also",
+                    builtin(
+                        "__typescript_stdlib",
+                        vec![Expr::String("push".into()), var("items"), var("i")],
+                    ),
+                ),
+            ])),
+        },
+        Expr::Finish(Box::new(Expr::Field {
+            target: Box::new(var("items")),
+            field: "length".into(),
+        })),
+    ]);
+    let compiled = compile_ast(&program).expect("byte-accounting probe should compile");
     let mut state = State::new();
     let outcome = futures::executor::block_on(execute(&compiled, &mut state, &Host))
         .expect("byte-accounting probe should execute");
@@ -206,7 +302,12 @@ finish items.length
 
     // And the array the charge was accumulated for is still the array that was
     // built, so the equality was not bought by losing members.
-    let compiled = compile("finish items.length").expect("restored probe should compile");
+    // finish items.length
+    let compiled = compile_ast(&Program::block(vec![Expr::Finish(Box::new(Expr::Field {
+        target: Box::new(var("items")),
+        field: "length".into(),
+    }))]))
+    .expect("restored probe should compile");
     let outcome = futures::executor::block_on(execute(&compiled, &mut restored, &Host))
         .expect("restored probe should execute");
     assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(192.0)));

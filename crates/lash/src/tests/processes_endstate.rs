@@ -1,9 +1,13 @@
 use super::*;
+
+use lashlang::testing::ast_builders as b;
+
 use lash_core::{
     ProcessEngine as _, ProcessQuery as _, ProcessRetention as _, TestProcessRegistryWriteExt,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::sync::MutexExt;
+use programs::{child_join_process, wait_signal_process};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
@@ -162,11 +166,11 @@ struct LinkedTestProcess {
 impl LinkedTestProcess {
     async fn new(
         artifact_store: &dyn lash_lashlang_runtime::LashlangArtifactStore,
-        source: &str,
+        program: lashlang::Program,
         process_name: &str,
     ) -> Self {
         let linked = lashlang::LinkedModule::link(
-            lashlang::parse(source).expect("parse lashlang process"),
+            program,
             lashlang::LashlangHostEnvironment::new(
                 lashlang::LashlangHostCatalog::new(),
                 lashlang::LashlangAbilities::default()
@@ -1068,12 +1072,11 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     )?;
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"
-        process main() signals { ready: any } {
-          value = wait_signal("ready")
-          finish value
-        }
-        "#,
+        // process main() signals { ready: any } {
+        //   value = wait_signal("ready")
+        //   finish value
+        // }
+        wait_signal_process(lashlang::TypeExpr::Any, b::var("value")),
         "main",
     )
     .await;
@@ -1210,12 +1213,11 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
     let session_id = "session-trigger-visibility";
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"
-        process main() signals { ready: any } {
-          value = wait_signal("ready")
-          finish value
-        }
-        "#,
+        // process main() signals { ready: any } {
+        //   value = wait_signal("ready")
+        //   finish value
+        // }
+        wait_signal_process(lashlang::TypeExpr::Any, b::var("value")),
         "main",
     )
     .await;
@@ -1330,12 +1332,11 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     )?;
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"
-        process main() signals { ready: string } {
-          value = wait_signal("ready")
-          finish value
-        }
-        "#,
+        // process main() signals { ready: string } {
+        //   value = wait_signal("ready")
+        //   finish value
+        // }
+        wait_signal_process(lashlang::TypeExpr::Str, b::var("value")),
         "main",
     )
     .await;
@@ -1443,13 +1444,27 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     )?;
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"
-        process main() signals { ready: any } {
-          first = wait_signal("ready")
-          second = wait_signal("ready")
-          finish { first: first, second: second }
-        }
-        "#,
+        // process main() signals { ready: any } {
+        //   first = wait_signal("ready")
+        //   second = wait_signal("ready")
+        //   finish { first: first, second: second }
+        // }
+        b::module(
+            vec![b::process_with_signals(
+                "main",
+                Vec::new(),
+                vec![b::signal("ready", lashlang::TypeExpr::Any)],
+                b::block(vec![
+                    b::assign("first", b::wait_signal("ready")),
+                    b::assign("second", b::wait_signal("ready")),
+                    b::finish(b::record(vec![
+                        ("first", b::var("first")),
+                        ("second", b::var("second")),
+                    ])),
+                ]),
+            )],
+            Vec::new(),
+        ),
         "main",
     )
     .await;
@@ -1561,17 +1576,13 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
     )?;
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"
-        process child() {
-          finish { from: "child" }
-        }
-
-        process main() {
-          handle = start child()
-          value = await handle
-          finish { joined: value }
-        }
-        "#,
+        // process child() { finish { from: "child" } }
+        // process main() {
+        //   handle = start child()
+        //   value = await handle
+        //   finish { joined: value }
+        // }
+        child_join_process(b::record(vec![("joined", b::var("value"))])),
         "main",
     )
     .await;
@@ -1663,17 +1674,13 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     let process_id = "chain-parent";
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"
-        process child() {
-          finish { from: "child" }
-        }
-
-        process main() {
-          handle = start child()
-          value = await handle
-          finish value
-        }
-        "#,
+        // process child() { finish { from: "child" } }
+        // process main() {
+        //   handle = start child()
+        //   value = await handle
+        //   finish value
+        // }
+        child_join_process(b::var("value")),
         "main",
     )
     .await;
@@ -1763,12 +1770,14 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     let process_id = "outliving-process";
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"
-        process main() signals { ready: any } {
-          value = wait_signal("ready")
-          finish { resumed: value }
-        }
-        "#,
+        // process main() signals { ready: any } {
+        //   value = wait_signal("ready")
+        //   finish { resumed: value }
+        // }
+        wait_signal_process(
+            lashlang::TypeExpr::Any,
+            b::record(vec![("resumed", b::var("value"))]),
+        ),
         "main",
     )
     .await;
@@ -2174,7 +2183,16 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     let artifact_store = Arc::new(SwitchableArtifactStore::new(durable_store));
     let process = LinkedTestProcess::new(
         artifact_store.as_ref(),
-        r#"process main() -> str { finish "redriven" }"#,
+        // process main() -> str { finish "redriven" }
+        b::module(
+            vec![b::process_returning(
+                "main",
+                Vec::new(),
+                lashlang::TypeExpr::Str,
+                b::finish(b::string("redriven")),
+            )],
+            Vec::new(),
+        ),
         "main",
     )
     .await;
@@ -2454,4 +2472,5 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
 mod artifact_cleanup_round4;
 mod native_process_await;
 mod owner_lifecycle;
+mod programs;
 mod recovery_dispositions;

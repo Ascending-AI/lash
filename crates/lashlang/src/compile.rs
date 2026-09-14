@@ -3,12 +3,16 @@ use thiserror::Error;
 
 use crate::{
     HostRequirementsRef, LashlangHostEnvironment, LinkError, LinkedModule, ModuleArtifact,
-    ModuleIntrospection, ModuleIntrospectionError, ModuleRef, ParseError, Span,
-    format_link_diagnostic, format_parse_diagnostic, parse,
+    ModuleIntrospection, ModuleIntrospectionError, ModuleRef, Program, Span,
+    format_link_diagnostic,
 };
 
 pub struct ModuleCompileRequest<'a> {
+    /// The text `program` was authored in, used to render link diagnostics.
     pub source: &'a str,
+    /// The lowered module. ADR 0096 leaves the dialect front-end owning the
+    /// parse, so the caller supplies the program rather than the text alone.
+    pub program: Program,
     pub environment: &'a LashlangHostEnvironment,
 }
 
@@ -20,11 +24,13 @@ pub struct ModuleCompileOutput {
     pub introspection: ModuleIntrospection,
 }
 
-/// Parse, link, and inspect a Lashlang module without performing I/O.
+/// Link and inspect a lowered module without performing I/O.
 ///
-/// `parse` and `LinkedModule::link` remain public for tooling and low-level
-/// tests. Host integrations should prefer this facade so diagnostics,
-/// artifact identity, persistence, and introspection are produced consistently.
+/// `LinkedModule::link` remains public for tooling and low-level tests. Host
+/// integrations should prefer this facade so diagnostics, artifact identity,
+/// persistence, and introspection are produced consistently. A front-end
+/// reports its own refusal through [`ModuleCompileError::parse_failure`], so
+/// both stages reach a host as one serialized error shape.
 #[allow(
     clippy::result_large_err,
     reason = "boxing ModuleCompileError would change this public serialized error API"
@@ -32,9 +38,7 @@ pub struct ModuleCompileOutput {
 pub fn compile_module(
     request: ModuleCompileRequest<'_>,
 ) -> Result<ModuleCompileOutput, ModuleCompileError> {
-    let program =
-        parse(request.source).map_err(|err| ModuleCompileError::parse(request.source, err))?;
-    let linked = LinkedModule::link(program, request.environment)
+    let linked = LinkedModule::link(request.program, request.environment)
         .map_err(|err| ModuleCompileError::link(request.source, err))?;
     let introspection = linked
         .artifact
@@ -82,17 +86,35 @@ pub enum ModuleCompileError {
 }
 
 impl ModuleCompileError {
-    fn parse(source: &str, err: ParseError) -> Self {
-        let offset = err.offset();
-        let (line, column) = source_location(source, offset);
+    /// Reports a dialect front-end's refusal as the `parse` stage of this
+    /// facade's error.
+    ///
+    /// lashlang has no parser of its own (ADR 0096): whoever produced the
+    /// `Program` also owns the refusal when there is no program to produce, and
+    /// reports it here so a host reads one shape for both stages. `rendered` is
+    /// the front-end's own rendering of the diagnostic, shown in preference to
+    /// `message`.
+    pub fn parse_failure(
+        source: &str,
+        offset: Option<usize>,
+        message: String,
+        rendered: String,
+    ) -> Self {
+        let (line, column) = match offset {
+            Some(offset) => {
+                let (line, column) = source_location(source, offset);
+                (Some(line), Some(column))
+            }
+            None => (None, None),
+        };
         Self::Parse(ModuleCompileDiagnostic {
             stage: ModuleCompileStage::Parse,
-            message: err.to_string(),
-            offset: Some(offset),
+            message,
+            offset,
             span: None,
-            line: Some(line),
-            column: Some(column),
-            diagnostic: Some(format_parse_diagnostic(source, &err)),
+            line,
+            column,
+            diagnostic: Some(rendered),
         })
     }
 
@@ -159,6 +181,22 @@ fn source_location(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::ast_builders as b;
+
+    /// `process echo(value: str) { finish value }`
+    fn echo_module(source: &str) -> Program {
+        b::with_declaration_spans(
+            b::module(
+                vec![b::process(
+                    "echo",
+                    vec![b::param("value", crate::TypeExpr::Str)],
+                    b::block(vec![b::finish(b::var("value"))]),
+                )],
+                Vec::new(),
+            ),
+            &[(0, source.len())],
+        )
+    }
 
     #[test]
     fn compile_module_facade_returns_artifact_and_introspection() {
@@ -168,8 +206,10 @@ mod tests {
                 .with_processes()
                 .with_process_signals(),
         );
+        let source = "process echo(value: str) { finish value }";
         let output = compile_module(ModuleCompileRequest {
-            source: "process echo(value: str) { finish value }",
+            source,
+            program: echo_module(source),
             environment: &environment,
         })
         .expect("module should compile");
@@ -186,18 +226,21 @@ mod tests {
 
     #[test]
     fn compile_module_facade_reports_parse_errors() {
-        let environment = LashlangHostEnvironment::default();
-        let err = compile_module(ModuleCompileRequest {
-            source: "if true",
-            environment: &environment,
-        })
-        .expect_err("parse should fail");
+        // The front-end owns the parse (ADR 0096) and reports its refusal
+        // through the facade, so a host reads one shape for both stages.
+        let err = ModuleCompileError::parse_failure(
+            "if true",
+            Some(3),
+            "unexpected `true`".to_string(),
+            "unexpected `true`\n--> line 1, column 4".to_string(),
+        );
 
         let ModuleCompileError::Parse(diagnostic) = err else {
             panic!("expected parse error");
         };
         assert_eq!(diagnostic.stage, ModuleCompileStage::Parse);
         assert_eq!(diagnostic.line, Some(1));
+        assert_eq!(diagnostic.column, Some(4));
         assert!(
             diagnostic
                 .diagnostic
@@ -209,8 +252,10 @@ mod tests {
     #[test]
     fn compile_module_facade_reports_link_errors() {
         let environment = LashlangHostEnvironment::default();
+        let source = "process echo(value: str) { finish value }";
         let err = compile_module(ModuleCompileRequest {
-            source: "process echo(value: str) { finish value }",
+            source,
+            program: echo_module(source),
             environment: &environment,
         })
         .expect_err("link should fail");
@@ -271,17 +316,56 @@ mod tests {
         .with_language_features(
             crate::LashlangLanguageFeatures::default().with_label_annotations(),
         );
+        // @label(title: "Watcher", description: "Tracks button presses")
+        // process watch(event: ui.ButtonPressed, file: File) signals { done: str } -> str {
+        //   opened = files.Open({ path: "inbox.txt" })
+        //   text = await files.read(file)?
+        //   finish event.color
+        // }
+        // source = ui.button({})
+        // finish source
+        let watch = crate::Declaration::Process(crate::ProcessDecl {
+            name: "watch".into(),
+            params: vec![
+                b::param("event", crate::TypeExpr::Ref("ui.ButtonPressed".into())),
+                b::param("file", crate::TypeExpr::Ref("File".into())),
+            ],
+            signals: vec![b::signal("done", crate::TypeExpr::Str)],
+            return_ty: Some(crate::TypeExpr::Str),
+            label: Some(b::label("Watcher", Some("Tracks button presses"))),
+            body: b::block(vec![
+                b::assign(
+                    "opened",
+                    b::receiver_call(
+                        b::resource(&["files"]),
+                        "Open",
+                        vec![b::record(vec![("path", b::string("inbox.txt"))])],
+                    ),
+                ),
+                b::assign(
+                    "text",
+                    b::unwrap(b::await_expr(b::receiver_call(
+                        b::resource(&["files"]),
+                        "read",
+                        vec![b::var("file")],
+                    ))),
+                ),
+                b::finish(b::field(b::var("event"), "color")),
+            ]),
+        });
+        let program = b::module(
+            vec![watch],
+            vec![
+                b::assign(
+                    "source",
+                    b::receiver_call(b::resource(&["ui"]), "button", vec![b::record(Vec::new())]),
+                ),
+                b::finish(b::var("source")),
+            ],
+        );
         let output = compile_module(ModuleCompileRequest {
-            source: r#"
-@label(title: "Watcher", description: "Tracks button presses")
-process watch(event: ui.ButtonPressed, file: File) signals { done: str } -> str {
-  opened = files.Open({ path: "inbox.txt" })
-  text = await files.read(file)?
-  finish event.color
-}
-source = ui.button({})
-finish source
-"#,
+            source: "",
+            program,
             environment: &environment,
         })
         .expect("module should compile");
@@ -299,7 +383,6 @@ finish source
             process.return_type.as_ref().expect("return type").display,
             "str"
         );
-        assert!(process.canonical_source.contains("process watch"));
         assert!(
             output
                 .introspection

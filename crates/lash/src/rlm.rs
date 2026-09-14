@@ -207,7 +207,7 @@ pub use lash_rlm_types::{
     RlmCreateExtras, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionConfigConflict,
     RlmTermination, RlmTurnOptions,
 };
-pub use lashlang::{LinkedModule, parse};
+pub use lashlang::LinkedModule;
 
 /// The Lashlang compile APIs are operations over an
 /// [`RlmProtocolPluginFactory`] and a plugin host; they live in

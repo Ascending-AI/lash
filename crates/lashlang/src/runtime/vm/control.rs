@@ -7,7 +7,7 @@ use super::super::{
 use super::effects::VmEffect;
 use super::heap_plan::{SlotExport, StackExport, instruction_heap_plan};
 use super::{Vm, VmRunOutcome};
-use crate::lexer::Span;
+use crate::span::Span;
 
 pub(super) enum VmStep {
     Continue,

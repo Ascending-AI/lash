@@ -116,19 +116,20 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
 }
 
 #[test]
-fn parser_accepts_bounded_while_with_nested_for() {
-    let source = r#"pool_i = 0
-final_ids = []
-candidate_pools = [{ matches: ["a", "b"] }]
-while len(final_ids) < 2 && pool_i < len(candidate_pools) {
-  for m in candidate_pools[pool_i].matches {
-    final_ids = final_ids + [m]
+fn the_dialect_accepts_bounded_while_with_nested_for() {
+    let source = r#"let pool_i = 0;
+let final_ids = [];
+const candidate_pools = [{ matches: ["a", "b"] }];
+while (final_ids.length < 2 && pool_i < candidate_pools.length) {
+  for (const m of candidate_pools[pool_i].matches) {
+    final_ids = [...final_ids, m];
   }
-  pool_i = pool_i + 1
+  pool_i = pool_i + 1;
 }
-finish final_ids"#;
+finish(final_ids);"#;
 
-    lashlang::compile(source).expect("while should compile");
+    let program = lash_typescript::parse(source).expect("while should parse");
+    lashlang::compile_ast(&program).expect("while should compile");
 }
 
 /// Closure-bearing TypeScript cells, mirroring the closure shapes of

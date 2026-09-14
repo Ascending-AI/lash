@@ -56,14 +56,27 @@ async fn inject_message_scopes_emission_to_requested_session() {
         workbench_lashlang_resources(),
         workbench_lashlang_abilities(),
     );
-    let linked = lash::rlm::LinkedModule::link(
-        lash::rlm::parse(
-            "process mail_listener(event: mail.Received) -> str { finish event.title }",
+    // process mail_listener(event: mail.Received) -> str { finish event.title }
+    //
+    // ADR 0096 retired the Lashlang front-end, so the fixture states its AST.
+    let module = {
+        use lashlang::testing::ast_builders as b;
+
+        b::module(
+            vec![b::process_returning(
+                "mail_listener",
+                vec![b::param(
+                    "event",
+                    lashlang::TypeExpr::Ref("mail.Received".into()),
+                )],
+                lashlang::TypeExpr::Str,
+                b::finish(b::field(b::var("event"), "title")),
+            )],
+            Vec::new(),
         )
-        .expect("parse mail-listener process"),
-        environment,
-    )
-    .expect("link mail-listener process");
+    };
+    let linked =
+        lash::rlm::LinkedModule::link(module, environment).expect("link mail-listener process");
     let artifact_store = lash_sqlite_store::Store::open(&data_dir.path().join("artifacts.db"))
         .await
         .expect("open workbench Lashlang artifact store");

@@ -1653,7 +1653,7 @@ jobs:
         working-directory: fuzz
         run: |
           set -euo pipefail
-          for target in remote_wire_dto plugin_payload attachment_metadata lashlang_source; do
+          for target in remote_wire_dto plugin_payload attachment_metadata; do
             cargo +nightly fuzz run "$target" "corpus/$target" -- \
               -max_total_time=60 -timeout=10 -rss_limit_mb=4096
           done

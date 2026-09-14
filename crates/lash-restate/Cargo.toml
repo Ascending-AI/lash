@@ -45,7 +45,7 @@ lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true }
 lash-typescript = { workspace = true }
 lash-llm-tools = { workspace = true }
-lashlang = { workspace = true }
+lashlang = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true }
 lash-protocol-standard = { workspace = true, features = ["lashlang"] }
 lash-plugin-process-controls = { workspace = true }

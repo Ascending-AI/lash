@@ -1151,8 +1151,8 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
             crate::rlm::LashlangModuleCompileRequest::new(
                 "compile-module",
                 r#"
-value = tools.lookup({})
-finish value
+const value = await tools.lookup({});
+finish(value);
 "#,
                 lash_core::ProcessExecutionEnvSpec::new(
                     plugin_options(),

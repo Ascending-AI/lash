@@ -14,8 +14,9 @@ use std::sync::Arc;
 
 use crate::ReopenableProcessExecutionEnvStore;
 use lash_core::ProcessExecutionEnvStore;
+use lashlang::testing::ast_builders as b;
 use lashlang::testing::conformance::ReopenableLashlangArtifactStore;
-use lashlang::{LashlangArtifactStore, ModuleArtifact, parse};
+use lashlang::{LashlangArtifactStore, ModuleArtifact};
 use pretty_assertions::assert_eq;
 
 /// A durable store accessed through both artifact-store traits over the same
@@ -32,8 +33,20 @@ pub struct ReopenableArtifactStore {
     pub reopen: Arc<dyn Fn() -> ArtifactStoreHandles + Send + Sync>,
 }
 
-fn sample_module_artifact(source: &str) -> ModuleArtifact {
-    let program = parse(source).expect("parse sample lashlang module");
+/// `process <name>(root: str) -> str { finish root }`
+///
+/// The fixture only has to be a publishable module; what it computes is never
+/// read.
+fn sample_module_artifact(process_name: &str) -> ModuleArtifact {
+    let program = b::module(
+        vec![b::process_returning(
+            process_name,
+            vec![b::param("root", lashlang::TypeExpr::Str)],
+            lashlang::TypeExpr::Str,
+            b::finish(b::var("root")),
+        )],
+        Vec::new(),
+    );
     ModuleArtifact::from_program(program).expect("build sample module artifact")
 }
 
@@ -186,7 +199,7 @@ where
     F: Fn() -> ReopenableArtifactStore,
 {
     let handles = make().open;
-    let artifact = sample_module_artifact("process delta(root: str) -> str { finish root }");
+    let artifact = sample_module_artifact("delta");
     let env_spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::default(),
         lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

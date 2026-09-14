@@ -866,7 +866,7 @@ symbols = ["ToolFailureClass", "ToolFailureSource", "ToolRetryStatus"]
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lashlang/src/lexer.rs"]
+paths = ["crates/lashlang/src/span.rs"]
 symbols = ["Span"]
 
 [[surface.guard]]

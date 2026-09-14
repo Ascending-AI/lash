@@ -186,8 +186,6 @@ impl Default for CompiledProcessCache {
 #[non_exhaustive]
 pub enum LinkedProgramCacheError {
     #[error(transparent)]
-    Parse(#[from] crate::parser::ParseError),
-    #[error(transparent)]
     Link(#[from] LinkError),
 }
 
@@ -238,30 +236,12 @@ impl LinkedProgramCache {
         }
     }
 
-    /// Links and caches `source`, parsing it only when it is not
-    /// already cached. A hit costs the lookup and nothing else: parsing on
-    /// every call would make the cache pay a full parse per hit, which is the
-    /// cost this cache exists to remove.
-    pub fn get_or_compile(
-        &mut self,
-        source: &str,
-        surface: impl Borrow<LashlangHostEnvironment>,
-    ) -> Result<Arc<CompiledLinkedProgram>, LinkedProgramCacheError> {
-        let surface = surface.borrow();
-        if let Some(program) = self.cached_linked_program(source, surface) {
-            return Ok(program);
-        }
-
-        let program = crate::parse(source)?;
-        self.link_and_cache(source, program, surface)
-            .map_err(LinkedProgramCacheError::Link)
-    }
-
     /// Links and caches an already-parsed shared-AST program.
     ///
-    /// A host that produced the AST itself should ask
-    /// [`Self::cached_linked_program`] first, so that a hit does not pay for
-    /// the parse this method's `program` argument required.
+    /// The dialect front-end owns parsing (ADR 0096), so the cache is only ever
+    /// handed a `Program`. A host should ask [`Self::cached_linked_program`]
+    /// first, so that a hit does not pay for the parse this method's `program`
+    /// argument required.
     pub fn get_or_compile_ast(
         &mut self,
         source: &str,
@@ -389,23 +369,12 @@ impl CompiledProgramCache {
         }
     }
 
-    pub fn get_or_compile(
-        &mut self,
-        source: &str,
-    ) -> Result<Arc<CompiledProgram>, crate::parser::ParseError> {
-        if let Some(compiled) = self.cached_compiled_program(source) {
-            return Ok(compiled);
-        }
-
-        let program = crate::parse(source)?;
-        Ok(self.compile_and_cache(source, program))
-    }
-
     /// Compiles and caches an already-parsed shared-AST program.
     ///
-    /// A host that produced the AST itself should ask
-    /// [`Self::cached_compiled_program`] first, so that a hit does not pay for
-    /// the parse this method's `program` argument required.
+    /// The dialect front-end owns parsing (ADR 0096), so the cache is only ever
+    /// handed a `Program`. A host should ask [`Self::cached_compiled_program`]
+    /// first, so that a hit does not pay for the parse this method's `program`
+    /// argument required.
     pub fn get_or_compile_ast(&mut self, source: &str, program: Program) -> Arc<CompiledProgram> {
         if let Some(compiled) = self.cached_compiled_program(source) {
             return compiled;

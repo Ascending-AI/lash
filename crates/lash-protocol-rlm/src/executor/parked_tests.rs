@@ -99,10 +99,6 @@ pub(crate) async fn execute_parked_cell_for_tests(
     host_environment = host_environment.with_globals(live_global_names);
 
     let cached_program = match language {
-        "lashlang" => state
-            .linked_programs
-            .get_or_compile(code, &host_environment)
-            .map_err(|error| error.to_string())?,
         "typescript" => match state
             .linked_programs
             .cached_linked_program(code, &host_environment)

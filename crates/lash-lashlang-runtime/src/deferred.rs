@@ -579,7 +579,13 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     mod journal_replay;
+    mod programs;
     mod runtime_built_in;
+
+    use programs::{
+        mystery_run_program, web_fetch_program, web_fetch_url_program, web_mystery_web_program,
+        web_then_mystery_program,
+    };
 
     #[derive(Clone, Copy)]
     enum JournalFault {
@@ -950,7 +956,7 @@ mod tests {
     #[tokio::test]
     async fn resolves_deferred_call_path_and_records_grant() {
         let harness = resolver_harness();
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
         let ctx = link_context(&mut record);
 
@@ -979,7 +985,7 @@ mod tests {
     #[tokio::test]
     async fn replay_reuses_record_without_calling_resolver() {
         let harness = resolver_harness();
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
 
         let mut record = DeferredResolutionRecord::default();
         let ctx = link_context(&mut record);
@@ -1023,7 +1029,7 @@ mod tests {
     #[tokio::test]
     async fn not_available_surfaces_clean_link_error_and_is_recorded() {
         let harness = resolver_harness();
-        let program = lashlang::parse(r#"await mystery.run({})?"#).expect("parse");
+        let program = mystery_run_program();
         let mut record = DeferredResolutionRecord::default();
         let ctx = link_context(&mut record);
 
@@ -1060,9 +1066,7 @@ mod tests {
     #[tokio::test]
     async fn resolves_unknown_paths_in_one_record_filtered_batch() {
         let harness = resolver_harness();
-        let program =
-            lashlang::parse("await web.fetch({})?\nawait mystery.run({})?\nawait web.fetch({})?")
-                .expect("parse");
+        let program = web_mystery_web_program();
         let mut record = DeferredResolutionRecord::default();
         let ctx = link_context(&mut record);
 
@@ -1108,8 +1112,7 @@ mod tests {
     #[tokio::test]
     async fn excludes_recorded_paths_from_a_non_empty_batch() {
         let harness = resolver_harness();
-        let program =
-            lashlang::parse("await web.fetch({})?\nawait mystery.run({})?").expect("parse");
+        let program = web_then_mystery_program();
         let mut record = DeferredResolutionRecord::default();
         record.record(
             "web.fetch",
@@ -1142,7 +1145,7 @@ mod tests {
 
     #[tokio::test]
     async fn recorded_unavailable_masks_a_new_ambient_binding() {
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut ambient = empty_host_environment();
         fold_grant(&mut ambient, &grant("ambient_fetch", "web", "fetch"))
             .expect("ambient grant folds");
@@ -1158,7 +1161,7 @@ mod tests {
     #[tokio::test]
     async fn recorded_grant_replaces_a_changed_ambient_binding() {
         let harness = resolver_harness();
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut ambient = empty_host_environment();
         fold_grant(&mut ambient, &grant("ambient_fetch", "web", "fetch"))
             .expect("ambient grant folds");
@@ -1204,7 +1207,7 @@ mod tests {
     #[tokio::test]
     async fn recorded_grant_still_obeys_unrelated_ambient_module_collisions() {
         let harness = resolver_harness();
-        let program = lashlang::parse(r#"await web.fetch({})?"#).expect("parse");
+        let program = web_fetch_program();
         let mut ambient = empty_host_environment();
         for operation in ["fetch", "post"] {
             let definition = lash_core::ToolDefinition::raw(
@@ -1254,7 +1257,7 @@ mod tests {
         let controller = Arc::new(FaultJournalController::new(
             JournalFault::AfterResolverReturn,
         ));
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
         let ctx =
             link_context_with_controller(&mut record, "exec-code:fault-before", controller.clone());
@@ -1296,7 +1299,7 @@ mod tests {
         let controller = Arc::new(FaultJournalController::new(
             JournalFault::AfterDurableRecord,
         ));
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
         let ctx =
             link_context_with_controller(&mut record, "exec-code:fault-after", controller.clone());
@@ -1335,7 +1338,7 @@ mod tests {
     async fn journal_replay_masks_changed_ambient_before_live_lookup() {
         let harness = resolver_harness();
         let controller = Arc::new(FaultJournalController::new(JournalFault::None));
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut first_record = DeferredResolutionRecord::default();
         let first_ctx = link_context_with_controller(
             &mut first_record,
@@ -1390,7 +1393,7 @@ mod tests {
     async fn journal_replay_masks_changed_surface_before_catalog_merge() {
         let harness = resolver_harness();
         let controller = Arc::new(FaultJournalController::new(JournalFault::None));
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut first_record = DeferredResolutionRecord::default();
         let first_ctx = link_context_with_controller(
             &mut first_record,
@@ -1454,7 +1457,7 @@ mod tests {
     async fn journal_replay_preserves_unrelated_surface_catalog_collision() {
         let harness = resolver_harness();
         let controller = Arc::new(FaultJournalController::new(JournalFault::None));
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut first_record = DeferredResolutionRecord::default();
         let first_ctx = link_context_with_controller(
             &mut first_record,
@@ -1513,7 +1516,7 @@ mod tests {
         });
         let shared: SharedDeferredToolResolver = resolver.clone();
         let controller = Arc::new(FaultJournalController::new(JournalFault::None));
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
         let ctx = link_context_with_controller(&mut record, "exec-code:route", controller.clone());
 
@@ -1565,7 +1568,7 @@ mod tests {
         });
         let shared: SharedDeferredToolResolver = resolver.clone();
         let controller = Arc::new(FaultJournalController::new(JournalFault::None));
-        let program = lashlang::parse(r#"await web.fetch({ url: "x" })?"#).expect("parse");
+        let program = web_fetch_url_program();
         let mut record = DeferredResolutionRecord::default();
         let ctx = link_context_with_controller(&mut record, "exec-code:revoked", controller);
 
@@ -1599,7 +1602,7 @@ mod tests {
     #[tokio::test]
     async fn independent_link_can_accept_a_new_ambient_binding() {
         let harness = resolver_harness();
-        let program = lashlang::parse(r#"await mystery.run({})?"#).expect("parse");
+        let program = mystery_run_program();
         let mut first_record = DeferredResolutionRecord::default();
         let first_ctx = link_context_with_controller(
             &mut first_record,
@@ -1633,7 +1636,7 @@ mod tests {
 
     #[tokio::test]
     async fn deferred_record_refuses_a_different_admitted_link_address() {
-        let program = lashlang::parse(r#"await web.fetch({})?"#).expect("parse");
+        let program = web_fetch_program();
         let mut record = DeferredResolutionRecord::default();
         let _record_context = link_context_with_controller(
             &mut record,

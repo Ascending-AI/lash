@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::lexer::Span;
+use crate::span::Span;
 
 use super::super::{
     ErrorKind, ExecutionHost, Instruction, RuntimeError, Value, record_with_capacity,

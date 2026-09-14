@@ -3,7 +3,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
-use crate::lexer::Span;
+use crate::span::Span;
 
 pub type AstString = CompactString;
 
@@ -267,22 +267,6 @@ impl Program {
             declaration_spans: Vec::new(),
             expression_spans: Vec::new(),
             expression_source_spans: Vec::new(),
-        }
-    }
-
-    pub(crate) fn module_with_spans(
-        declarations: Vec<Declaration>,
-        declaration_spans: Vec<Span>,
-        expressions: Vec<Expr>,
-        expression_spans: Vec<Span>,
-        expression_source_spans: Vec<ExpressionSourceSpan>,
-    ) -> Self {
-        Self {
-            declarations,
-            main: Expr::Block(expressions),
-            declaration_spans,
-            expression_spans,
-            expression_source_spans,
         }
     }
 
@@ -1029,10 +1013,7 @@ impl ProcessSignature {
     ) -> Result<Self, ProcessSignatureError> {
         let mut names = std::collections::BTreeSet::new();
         for param in &params {
-            if !crate::parser::is_source_identifier(
-                param.name.as_str(),
-                crate::parser::IdentifierPosition::Identifier,
-            ) {
+            if !crate::identifier::is_process_parameter_name(param.name.as_str()) {
                 return Err(ProcessSignatureError::InvalidParameterName {
                     name: param.name.to_string(),
                 });

@@ -1,4 +1,22 @@
 use super::*;
+
+/// `process <name>(<param>: str) -> str { finish <param> }`, the publishable
+/// one-process module these store fixtures need. ADR 0096 retired the Lashlang
+/// front-end, so the fixture states its AST.
+fn one_process_module(process_name: &str, param: &str) -> lashlang::Program {
+    use lashlang::testing::ast_builders as b;
+
+    b::module(
+        vec![b::process_returning(
+            process_name,
+            vec![b::param(param, lashlang::TypeExpr::Str)],
+            lashlang::TypeExpr::Str,
+            b::finish(b::var(param)),
+        )],
+        Vec::new(),
+    )
+}
+
 use lash_core::{
     ProcessExecutionEnvStore as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
     ProcessRegistrar as _,
@@ -157,11 +175,9 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
         .publish_process_execution_env(&owner, &env_ref, &env_bytes)
         .await
         .expect("publish execution-owned environment");
-    let module = lashlang::ModuleArtifact::from_program(
-        lashlang::parse("process cleanup(value: str) -> str { finish value }")
-            .expect("parse cleanup module"),
-    )
-    .expect("build cleanup module");
+    // process cleanup(value: str) -> str { finish value }
+    let module = lashlang::ModuleArtifact::from_program(one_process_module("cleanup", "value"))
+        .expect("build cleanup module");
     module_store
         .publish_module_artifact(&owner, &module)
         .await
@@ -1085,7 +1101,8 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
 #[tokio::test]
 async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() {
     let store = Store::memory().await.expect("memory store");
-    let module = lashlang::parse("process scan(root: str) { finish root }").expect("parse module");
+    // process scan(root: str) -> str { finish root }
+    let module = one_process_module("scan", "root");
     let linked = lashlang::LinkedModule::link(
         module,
         lashlang::LashlangHostEnvironment::new(
@@ -1121,11 +1138,9 @@ async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_ha
     let path = dir.path().join("artifacts.db");
     let releasing = Store::open(&path).await.expect("open releasing store");
     let cached = Store::open(&path).await.expect("open caching store");
-    let module = lashlang::ModuleArtifact::from_program(
-        lashlang::parse("process cache_probe(root: str) -> str { finish root }")
-            .expect("parse module"),
-    )
-    .expect("build module artifact");
+    // process cache_probe(root: str) -> str { finish root }
+    let module = lashlang::ModuleArtifact::from_program(one_process_module("cache_probe", "root"))
+        .expect("build module artifact");
     let owner = lash_core::ArtifactOwner::host("cross-handle-cache-owner");
 
     releasing

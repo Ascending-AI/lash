@@ -1,4 +1,5 @@
 use super::*;
+use lashlang::testing::ast_builders as b;
 
 struct EmptyResolver {
     calls: AtomicUsize,
@@ -24,7 +25,12 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
     });
     let shared: SharedDeferredToolResolver = resolver.clone();
     let controller = Arc::new(FaultJournalController::new(JournalFault::None));
-    let program = lashlang::parse("await triggers.list({})?\nawait web.fetch({})?").expect("parse");
+    // await triggers.list({})?
+    // await web.fetch({})?
+    let program = b::program(vec![
+        b::module_call(&["triggers"], "list", vec![b::record(Vec::new())]),
+        b::module_call(&["web"], "fetch", vec![b::record(Vec::new())]),
+    ]);
     let surface = LashlangSurface {
         abilities: lashlang::LashlangAbilities::default().with_triggers(),
         ..LashlangSurface::default()
@@ -110,7 +116,7 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
 
 #[tokio::test]
 async fn retained_negative_masks_duplicate_catalog_claimants_before_live_validation() {
-    let program = lashlang::parse("await web.fetch({})?").expect("parse");
+    let program = web_fetch_program();
     let duplicate_catalog = lash_core::ToolCatalog::from_tool_definitions(vec![
         lash_core::ToolDefinition::raw(
             "tool:first_fetch",

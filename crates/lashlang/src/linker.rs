@@ -12,7 +12,7 @@ use crate::ast::{
     AssignPathStep, AstString, Declaration, Expr, ListComprehensionClause, ProcessDecl,
     ProcessParam, Program, ResourceRefExpr, TypeExpr, TypeField, format_type_expr,
 };
-use crate::lexer::Span;
+use crate::span::Span;
 
 mod catalog;
 pub use catalog::{LashlangHostCatalog, OperationContract};

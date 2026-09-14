@@ -1,3 +1,4 @@
+use lashlang::testing::ast_builders as b;
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
     Vm, VmRunOutcome,
@@ -47,7 +48,7 @@ impl ExecutionHost for JournalHost {
 }
 
 #[test]
-fn equivalent_lashlang_and_typescript_share_vm_behavior() {
+fn typescript_lowering_and_the_stated_ir_share_vm_behavior() {
     fn execute(
         program: &lashlang::CompiledProgram,
         host: &JournalHost,
@@ -62,21 +63,38 @@ fn equivalent_lashlang_and_typescript_share_vm_behavior() {
         (outcome, bytes)
     }
 
-    let lashlang = lashlang::compile("value = 1 + 2\nprint value\nfinish value == 3")
-        .expect("compile Lashlang");
+    // value = 1 + 2
+    // print value
+    // finish value == 3
+    //
+    // ADR 0096 retired the Lashlang front-end, so the equivalence is stated
+    // against the IR directly: what the TypeScript lowering must produce.
+    let stated = lashlang::compile_ast(&b::program(vec![
+        b::assign(
+            "value",
+            b::binary(b::num(1.0), lashlang::BinaryOp::Add, b::num(2.0)),
+        ),
+        b::print(b::var("value")),
+        b::finish(b::binary(
+            b::var("value"),
+            lashlang::BinaryOp::Equal,
+            b::num(3.0),
+        )),
+    ]))
+    .expect("compile stated IR");
     let typescript =
         lash_typescript::compile("const value: number = 1 + 2; print(value); finish(value === 3);")
             .expect("compile TypeScript");
-    let lashlang_host = JournalHost::default();
+    let stated_host = JournalHost::default();
     let typescript_host = JournalHost::default();
 
     assert_eq!(
         execute(&typescript, &typescript_host),
-        execute(&lashlang, &lashlang_host)
+        execute(&stated, &stated_host)
     );
     assert_eq!(
         *typescript_host.0.lock().expect("TypeScript journal"),
-        *lashlang_host.0.lock().expect("Lashlang journal")
+        *stated_host.0.lock().expect("stated-IR journal")
     );
 }
 
@@ -357,13 +375,19 @@ fn normalized_continuation_bytes(
 }
 
 #[test]
-fn equivalent_lashlang_and_typescript_have_identical_continuation_bytes() {
-    let lashlang = lashlang::compile("print 1\nfinish 2").expect("compile Lashlang");
+fn typescript_lowering_and_the_stated_ir_have_identical_continuation_bytes() {
+    // print 1
+    // finish 2
+    let stated = lashlang::compile_ast(&b::program(vec![
+        b::print(b::num(1.0)),
+        b::finish(b::num(2.0)),
+    ]))
+    .expect("compile stated IR");
     let typescript = lash_typescript::compile("print(1); finish(2);").expect("compile TypeScript");
 
     assert_eq!(
         normalized_continuation_bytes(&typescript, &Host),
-        normalized_continuation_bytes(&lashlang, &Host)
+        normalized_continuation_bytes(&stated, &Host)
     );
 }
 

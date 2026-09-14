@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use lash_core::{ArtifactOwner, ExecutionScope};
 
-use crate::{DurabilityTier, LashlangArtifactStore, ModuleArtifact, parse};
+use crate::testing::ast_builders as builders;
+use crate::{DurabilityTier, LashlangArtifactStore, ModuleArtifact, TypeExpr};
 
 /// A writer plus a factory that constructs a post-write store handle over the
 /// same durable backing store.
@@ -18,9 +19,27 @@ pub struct ReopenableLashlangArtifactStore {
     pub reopen: Arc<dyn Fn() -> Arc<dyn LashlangArtifactStore> + Send + Sync>,
 }
 
-fn sample_module_artifact(source: &str) -> ModuleArtifact {
-    let program = parse(source).expect("parse sample lashlang module");
+/// `process <name>(root: str) -> str { finish root }`
+///
+/// The fixture only has to be a distinct, publishable module per test; what it
+/// computes is never read.
+fn sample_module_artifact(process_name: &str) -> ModuleArtifact {
+    let program = builders::module(
+        vec![builders::process_returning(
+            process_name,
+            vec![builders::param("root", TypeExpr::Str)],
+            TypeExpr::Str,
+            builders::block(vec![builders::finish(builders::var("root"))]),
+        )],
+        Vec::new(),
+    );
     ModuleArtifact::from_program(program).expect("build sample module artifact")
+}
+
+/// `finish true`
+fn trivial_module_artifact() -> ModuleArtifact {
+    let program = builders::program(vec![builders::finish(builders::bool_lit(true))]);
+    ModuleArtifact::from_program(program).expect("build trivial module artifact")
 }
 
 fn execution_owner(id: &str) -> ArtifactOwner {
@@ -51,7 +70,7 @@ pub async fn lashlang_artifact_store_durability_tier(
 }
 
 pub async fn failed_registration_reclaims_staging_owner(store: Arc<dyn LashlangArtifactStore>) {
-    let artifact = sample_module_artifact("process failed(root: str) -> str { finish root }");
+    let artifact = sample_module_artifact("failed");
     let staged = execution_owner("failed-registration");
     store
         .publish_module_artifact(&staged, &artifact)
@@ -71,7 +90,7 @@ pub async fn failed_registration_reclaims_staging_owner(store: Arc<dyn LashlangA
 }
 
 pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
-    let artifact = sample_module_artifact("process alpha(root: str) -> str { finish root }");
+    let artifact = sample_module_artifact("alpha");
     let first = ArtifactOwner::host("host-a");
     let second = ArtifactOwner::host("host-b");
     assert!(
@@ -122,7 +141,7 @@ pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
 }
 
 pub async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
-    let artifact = sample_module_artifact("process beta(root: str) -> str { finish root }");
+    let artifact = sample_module_artifact("beta");
     let staged = execution_owner("module-transfer");
     let process = ArtifactOwner::process(lash_core::ProcessRef::new(
         "process-beta",
@@ -154,7 +173,7 @@ pub async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
 }
 
 pub async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactStore>) {
-    let artifact = sample_module_artifact("process gamma(root: str) -> str { finish root }");
+    let artifact = sample_module_artifact("gamma");
     let abandoned = execution_owner("abandoned-module-writer");
     store
         .publish_module_artifact(&abandoned, &artifact)
@@ -181,7 +200,7 @@ pub async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactS
 }
 
 pub async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtifactStore>) {
-    let artifact = sample_module_artifact("process slow(root: str) -> str { finish root }");
+    let artifact = sample_module_artifact("slow");
     let abandoned = execution_owner("slow-module-writer");
     let pause = store
         .pause_next_publication_for_testing()
@@ -210,7 +229,7 @@ pub async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtif
 pub async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     let ReopenableLashlangArtifactStore { open, reopen } = reopenable;
     let open_identity = Arc::downgrade(&open);
-    let artifact = sample_module_artifact("process epsilon(root: str) -> str { finish root }");
+    let artifact = sample_module_artifact("epsilon");
     let first = ArtifactOwner::host("reopen-host-first");
     let second = ArtifactOwner::host("reopen-host-second");
     open.publish_module_artifact(&first, &artifact)
@@ -257,7 +276,7 @@ pub async fn hostile_module_references_are_rejected(store: Arc<dyn LashlangArtif
     for raw in ["", "nul\0reference"] {
         let module_ref: crate::ModuleRef = serde_json::from_value(serde_json::json!(raw)).unwrap();
         assert!(store.get_module_artifact(&module_ref).await.is_err());
-        let mut artifact = sample_module_artifact("finish true");
+        let mut artifact = trivial_module_artifact();
         artifact.module_ref = module_ref;
         assert!(
             store
