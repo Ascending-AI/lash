@@ -164,7 +164,9 @@ where
                 {
                     Ok(env_ref) => (env_ref, true),
                     Err(publish_error)
-                        if lash_core::artifact_owner_is_permanently_retired(&publish_error) =>
+                        if lash_core::runtime::artifact_owner_is_permanently_retired(
+                            &publish_error,
+                        ) =>
                     {
                         (expected_ref, false)
                     }
@@ -191,7 +193,7 @@ where
                     .publish_process_execution_env(&staging_owner, env_ref, &bytes)
                     .await
                 {
-                    if lash_core::artifact_owner_is_permanently_retired(&publish_error) {
+                    if lash_core::runtime::artifact_owner_is_permanently_retired(&publish_error) {
                         false
                     } else {
                         return Err(publish_error.into());
@@ -216,7 +218,8 @@ where
                         .protect_start_artifacts(&staging_owner, payload)
                         .await
                     {
-                        if lash_core::artifact_owner_is_permanently_retired(&protect_error) {
+                        if lash_core::runtime::artifact_owner_is_permanently_retired(&protect_error)
+                        {
                             false
                         } else {
                             return Err(protect_error.into());
