@@ -1156,7 +1156,7 @@ finish(await handle);
         .expect("read process immediately after session revocation")
         .expect("session revocation keeps its process record");
     assert!(
-        !immediately_after_delete.terminal,
+        !immediately_after_delete.terminal(),
         "session revocation must leave the independently sleeping process live"
     );
     let immediate_events = harness

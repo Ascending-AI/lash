@@ -135,7 +135,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
         .await?
         .expect("abandoned row observed through the facade");
     assert_eq!(observed.lifecycle, lash_core::ProcessStatus::Abandoned);
-    assert!(observed.terminal);
+    assert!(observed.terminal());
 
     // A foreign worker's sweep never resurrects or re-runs an abandoned row: the
     // row is terminal, so it is off the worklist and untouched.

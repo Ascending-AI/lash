@@ -108,7 +108,7 @@ fn process_list_filter_matches_enriched_facets() {
     let wrong = record(&ProcessId::from("wrong"), "other", 200);
 
     let filter = ProcessListFilter::decode(&json!({
-        "originator_id": "origin-session",
+        "originator": {"type": "session", "session_id": "origin-session"},
         "identity_kind": "test-engine",
         "identity_label": "target",
         "caused_by_occurrence_id": "occurrence-target",

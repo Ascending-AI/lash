@@ -647,11 +647,15 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
 /// Bumped to 62 for FIG-2962/FIG-2963: the parent scope is a registration fact
 /// and the end of a scope is one ledger row. `processes` gains
 /// `parent_scope_kind`, `parent_scope_id`, `on_parent_end` and
-/// `cancel_requested`, and `process_parent_end_plans` is replaced by the
+/// a cancel-request column, and `process_parent_end_plans` is replaced by the
 /// scope-keyed `parent_end_plans`. A pre-62 catalog holds children with no
 /// parent scope and plans keyed by a process id, so it is rejected at open and
 /// recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 62;
+/// Bumped to 63 for FIG-2965: `processes` carries the cancel request as
+/// `cancel_requested_at_ms` instead of a boolean, and gains the partial index a
+/// pending-cancel list reads. A pre-63 database has the boolean column, so it
+/// is rejected at open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 63;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -717,14 +721,13 @@ CREATE TABLE IF NOT EXISTS processes (
     parent_scope_kind     TEXT NOT NULL,
     parent_scope_id       TEXT,
     on_parent_end         TEXT NOT NULL,
-    cancel_requested      INTEGER NOT NULL DEFAULT 0,
+    cancel_requested_at_ms INTEGER,
     record_json           TEXT NOT NULL,
     UNIQUE(process_id, incarnation),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
     CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'process', 'host')),
     CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)),
-    CONSTRAINT ck_processes_on_parent_end CHECK (on_parent_end IN ('abandon', 'cancel')),
-    CONSTRAINT ck_processes_cancel_requested CHECK (cancel_requested IN (0, 1))
+    CONSTRAINT ck_processes_on_parent_end CHECK (on_parent_end IN ('abandon', 'cancel'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_processes_status
@@ -757,6 +760,17 @@ CREATE INDEX IF NOT EXISTS idx_processes_recent_retired
     WHERE status NOT IN ('running', 'waiting');
 CREATE INDEX IF NOT EXISTS idx_processes_wake_session
     ON processes(wake_session_id);
+-- The pending-cancel sweep's scan: rows whose cancel request is older than a
+-- horizon and whose outcome is still open. The predicate is the negation of
+-- the terminal statuses, so `caller_departed` is in: nothing may ever
+-- terminalize such a row, so a cancel request on it stays unanswered forever
+-- and is exactly what an operator asks this index for. It must stay
+-- byte-identical to the generated nonterminal predicate, or SQLite plans
+-- the query without it.
+CREATE INDEX IF NOT EXISTS idx_processes_pending_cancel
+    ON processes(cancel_requested_at_ms, process_id)
+    WHERE cancel_requested_at_ms IS NOT NULL
+      AND status NOT IN ('completed', 'failed', 'cancelled', 'abandoned');
 -- The parent-end sweep's only scan: children of one ended parent scope that
 -- still owe a cancel. The predicate names the live statuses rather than a NOT
 -- IN so a status added later cannot silently widen the index; it is exactly
@@ -768,7 +782,7 @@ CREATE INDEX IF NOT EXISTS idx_processes_parent_scope
 CREATE INDEX IF NOT EXISTS idx_processes_parent_end_pending
     ON processes(parent_scope_kind, parent_scope_id, process_id)
     WHERE on_parent_end = 'cancel'
-      AND cancel_requested = 0
+      AND cancel_requested_at_ms IS NULL
       AND status IN ('running', 'waiting');
 
 CREATE TABLE IF NOT EXISTS process_change_clock (
@@ -974,7 +988,12 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// on-parent-end policy and the cancel request into indexed process columns so
 /// the sweep selects children by index instead of decoding every record.
 /// Version-36 registries are rejected rather than migrated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 37;
+/// Version 38 replaces the boolean `cancel_requested` column with
+/// `cancel_requested_at_ms`, the timestamp of the first accepted cancel, so a
+/// pending-cancel list reads one column through one partial index instead of
+/// decoding every record. Version-37 registries carry a boolean this schema no
+/// longer has, so they are rejected rather than migrated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 38;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (

@@ -21,9 +21,9 @@ pub(crate) use crate::{
     CausalRef, LashSchema, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
     ProcessEventType, ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessListFilter,
-    ProcessLiveReferenceView, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-    ProcessStatus, ProcessStatusFilter, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    RecoveryContract, SessionScope, WaitKind, WaitState,
+    ProcessLiveReferenceView, ProcessOriginatorFilter, ProcessProvenance, ProcessRegistration,
+    ProcessRegistry, ProcessStatus, ProcessStatusFilter, ProcessValueSelector, ProcessWakeDelivery,
+    ProcessWakeSpec, RecoveryContract, SessionScope, WaitKind, WaitState,
 };
 pub(crate) use lash_sansio::{
     AttachmentCreateMeta, AttachmentTypeMetadata, EffectAddress, MediaType, SessionId,

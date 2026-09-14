@@ -9,8 +9,9 @@ use crate::plugin::PluginError;
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     AbandonRequest, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
-    ProcessIncarnation, ProcessInput, ProcessLease, ProcessListFilter, ProcessOriginator,
-    ProcessRecord, ProcessStarted, ProcessStatus, RecoveryContract, SessionScope, WaitState,
+    ProcessIncarnation, ProcessInput, ProcessLease, ProcessLifecyclePolicy, ProcessListFilter,
+    ProcessOriginator, ProcessOriginatorFilter, ProcessRecord, ProcessStarted, ProcessStatus,
+    RecoveryContract, SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
 
@@ -38,8 +39,6 @@ pub struct ObservedWorkItem {
     /// one coherent event position. Consumers must not present lifecycle state
     /// from an item carrying [`ObservedWorkItemState::EventTailMismatch`].
     pub state: ObservedWorkItemState,
-    pub kind: String,
-    pub label: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,12 +57,11 @@ pub struct ObservedProcess {
     pub incarnation: ProcessIncarnation,
     /// Sequence of the newest event folded into this observed record.
     pub last_event_sequence: u64,
-    pub graph_key: String,
-    pub kind: String,
     pub lifecycle: ProcessStatus,
+    /// Declared parent scope and parent-end action. `lifecycle` above is the
+    /// status fold; this is the policy the host chose at registration.
+    pub policy: ProcessLifecyclePolicy,
     pub identity: ProcessIdentity,
-    pub status_label: String,
-    pub terminal: bool,
     /// Declared recovery contract (ADR 0019). Raw fact; hosts classify.
     pub disposition: RecoveryContract,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -98,7 +96,6 @@ pub struct ObservedProcess {
     pub wait: Option<WaitState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<SessionId>,
-    pub label: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -110,6 +107,16 @@ pub struct ObservedProcessEvent {
 }
 
 impl ObservedWorkItem {
+    /// The observed process's identity kind.
+    pub fn kind(&self) -> &str {
+        self.process.kind()
+    }
+
+    /// The observed process's display label.
+    pub fn label(&self) -> &str {
+        self.process.label()
+    }
+
     /// Reports whether the bounded observer retry still left independently
     /// read record and event-tail positions mis-paired.
     pub fn has_mispaired_event_tail(&self) -> bool {
@@ -215,12 +222,6 @@ impl ProcessWorkObserver {
             let event_tail_sequence = events.last().map_or(0, |event| event.sequence);
             let lease = self.registry.get_process_lease(&process_id).await?;
             let process = ObservedProcess::from_record(record, lease);
-            let kind = process.identity.kind.clone();
-            let label = process
-                .identity
-                .label
-                .clone()
-                .unwrap_or_else(|| kind.clone());
             let state = if process.last_event_sequence == event_tail_sequence {
                 ObservedWorkItemState::Coherent
             } else {
@@ -234,8 +235,6 @@ impl ProcessWorkObserver {
                 events,
                 event_tail_sequence,
                 state,
-                kind,
-                label,
             };
             if !item.has_mispaired_event_tail() || attempt + 1 == SNAPSHOT_READ_ATTEMPTS {
                 return Ok(item);
@@ -288,18 +287,24 @@ impl ProcessWorkObserver {
     /// the observer lens: a process matches when its recorded originator is a
     /// session whose id equals `scope.session_id` (and its agent frame, when
     /// `scope` names one), regardless of which sessions currently observe it.
+    ///
+    /// The scope is handed to the store as a typed `ProcessOriginatorFilter`
+    /// rather than pre-flattened to an id string: the store pushes the session
+    /// id down to its `originator_id` index and the shared Rust predicate
+    /// narrows to the named agent frame, so the lens no longer has a
+    /// caller-side copy of the match rule that could drift from the store's.
+    /// A filter the caller already populated with an originator is replaced,
+    /// not intersected — this lens owns that field.
     pub async fn list_originated_by(
         &self,
         scope: &SessionScope,
         filter: &ProcessListFilter,
     ) -> Result<Vec<ObservedProcess>, PluginError> {
-        let records = self
-            .registry
-            .list_processes(filter)
-            .await?
-            .into_iter()
-            .filter(|record| originator_matches(&record.provenance.originator, scope))
-            .collect::<Vec<_>>();
+        let filter = ProcessListFilter {
+            originator: Some(ProcessOriginatorFilter::Session(scope.clone())),
+            ..filter.clone()
+        };
+        let records = self.registry.list_processes(&filter).await?;
         self.observe_records(records).await
     }
 
@@ -349,8 +354,6 @@ impl ObservedProcess {
         let lifecycle = record.status;
         let input = record.input.as_ref().clone();
         let identity = record.identity;
-        let kind = identity.kind.clone();
-        let label = identity.label.clone().unwrap_or_else(|| kind.clone());
         let process_id = record.id;
         let incarnation = record.incarnation;
         let last_event_sequence = record.last_event_sequence;
@@ -359,15 +362,12 @@ impl ObservedProcess {
             None => (None, None),
         };
         Self {
-            graph_key: format!("process:{process_id}:incarnation:{incarnation}"),
             process_id,
             incarnation,
             last_event_sequence,
-            kind,
             lifecycle,
+            policy: record.lifecycle,
             identity,
-            status_label: lifecycle.label().to_string(),
-            terminal: lifecycle.is_terminal(),
             disposition: record.disposition,
             error: terminal_error(record.outcome.as_ref()),
             created_at_ms: record.created_at_ms,
@@ -384,8 +384,42 @@ impl ObservedProcess {
             wait: record.wait,
             child_session_id: child_session_id(&input).map(Into::into),
             input,
-            label,
         }
+    }
+
+    /// Stable identity of this incarnation in a host work graph.
+    ///
+    /// Computed rather than carried: it is a function of the process id and
+    /// incarnation, so a transport that shipped it could only ever agree or
+    /// lie.
+    pub fn graph_key(&self) -> String {
+        format!(
+            "process:{}:incarnation:{}",
+            self.process_id, self.incarnation
+        )
+    }
+
+    /// The identity kind this process was registered under.
+    pub fn kind(&self) -> &str {
+        self.identity.kind.as_str()
+    }
+
+    /// The display label: the registered label, else the kind.
+    pub fn label(&self) -> &str {
+        self.identity
+            .label
+            .as_deref()
+            .unwrap_or(self.identity.kind.as_str())
+    }
+
+    /// The storage label of the current lifecycle status.
+    pub fn status_label(&self) -> &'static str {
+        self.lifecycle.label()
+    }
+
+    /// Whether the lifecycle status is terminal.
+    pub fn terminal(&self) -> bool {
+        self.lifecycle.is_terminal()
     }
 }
 
@@ -421,14 +455,6 @@ fn child_session_id(input: &ProcessInput) -> Option<String> {
         ProcessInput::ToolCall { .. }
         | ProcessInput::Engine { .. }
         | ProcessInput::External { .. } => None,
-    }
-}
-
-/// Whether `originator` names the session identified by `scope`.
-fn originator_matches(originator: &ProcessOriginator, scope: &SessionScope) -> bool {
-    match originator {
-        ProcessOriginator::Host { .. } => false,
-        ProcessOriginator::Session { session_id, .. } => session_id == scope.session_id,
     }
 }
 
@@ -604,7 +630,7 @@ mod tests {
             item.process.last_event_sequence, item.event_tail_sequence,
             "the retry must pair the refreshed terminal record with its event tail"
         );
-        assert!(item.process.terminal);
+        assert!(item.process.terminal());
     }
 
     #[tokio::test]
@@ -738,7 +764,7 @@ mod tests {
             1
         );
         assert_eq!(
-            observed.iter().filter(|process| process.terminal).count(),
+            observed.iter().filter(|process| process.terminal()).count(),
             1
         );
         assert_eq!(*registry.process_lease_batch_reads.lock().await, 1);
@@ -847,11 +873,11 @@ mod tests {
             .expect("read cancelled process")
             .expect("cancelled process");
 
-        assert_eq!(failed.status_label, "failed");
-        assert!(failed.terminal);
+        assert_eq!(failed.status_label(), "failed");
+        assert!(failed.terminal());
         assert_eq!(failed.error.as_deref(), Some("failed loudly"));
-        assert_eq!(cancelled.status_label, "cancelled");
-        assert!(cancelled.terminal);
+        assert_eq!(cancelled.status_label(), "cancelled");
+        assert!(cancelled.terminal());
         assert_eq!(cancelled.error.as_deref(), Some("cancelled intentionally"));
     }
 
@@ -1000,15 +1026,15 @@ mod tests {
             .map(|item| (item.process.process_id.as_str(), item))
             .collect::<std::collections::BTreeMap<_, _>>();
 
-        assert_eq!(by_id["tool"].label, "shell.run");
-        assert_eq!(by_id["engine"].label, "remember");
-        assert_eq!(by_id["engine"].process.kind, "test-engine");
-        assert_eq!(by_id["session"].label, "researcher");
+        assert_eq!(by_id["tool"].label(), "shell.run");
+        assert_eq!(by_id["engine"].label(), "remember");
+        assert_eq!(by_id["engine"].process.kind(), "test-engine");
+        assert_eq!(by_id["session"].label(), "researcher");
         assert_eq!(
             by_id["session"].process.child_session_id.as_deref(),
             Some("child-session")
         );
-        assert_eq!(by_id["external"].label, "external job");
+        assert_eq!(by_id["external"].label(), "external job");
     }
 
     #[tokio::test]

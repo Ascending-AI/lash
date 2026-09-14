@@ -97,7 +97,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             &registry,
             ProcessListFilter {
                 status: ProcessStatusFilter::Any,
-                originator_id: Some(originator_id.to_string()),
+                originator: Some(ProcessOriginatorFilter::session(originator_id.clone())),
                 ..ProcessListFilter::default()
             }
         )
@@ -385,4 +385,232 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
         ],
         "the unbounded list must preserve every status"
     );
+}
+
+/// Parent-scope and pending-cancel narrowing, and the agent-frame half of the
+/// typed originator filter.
+///
+/// Both new filters are index-served conjuncts rather than
+/// `(? IS NULL OR ...)` disjunctions, so the pushdown and the Rust predicate
+/// can disagree silently; every assertion below is therefore paired with a
+/// parity check against `ProcessListFilter::matches_record`.
+pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    async fn filtered_ids(
+        registry: &Arc<dyn ProcessRegistry>,
+        filter: &ProcessListFilter,
+    ) -> Vec<String> {
+        registry
+            .list_processes(filter)
+            .await
+            .expect("list processes")
+            .into_iter()
+            .map(|record| record.id.to_string())
+            .collect()
+    }
+
+    async fn assert_ids(
+        registry: &Arc<dyn ProcessRegistry>,
+        filter: ProcessListFilter,
+        expected: &[&str],
+        message: &str,
+    ) {
+        let mut actual = filtered_ids(registry, &filter).await;
+        actual.sort();
+        assert_eq!(
+            actual,
+            expected
+                .iter()
+                .map(|id| (*id).to_string())
+                .collect::<Vec<_>>(),
+            "{message}"
+        );
+        let all = registry
+            .list_processes(&ProcessListFilter {
+                status: ProcessStatusFilter::Any,
+                ..ProcessListFilter::default()
+            })
+            .await
+            .expect("list reference processes");
+        let mut expected_by_predicate = all
+            .iter()
+            .filter(|record| filter.matches_record(record))
+            .map(|record| record.id.to_string())
+            .collect::<Vec<_>>();
+        expected_by_predicate.sort();
+        assert_eq!(
+            actual, expected_by_predicate,
+            "SQL pushdown must match the Rust predicate: {message}"
+        );
+    }
+
+    let session = SessionId::from("scope-filter-session");
+    let frame_a = SessionScope::for_agent_frame(
+        session.as_str(),
+        crate::session_graph::frame_node_id(&session, "scope-frame-a"),
+    );
+    let frame_b = SessionScope::for_agent_frame(
+        session.as_str(),
+        crate::session_graph::frame_node_id(&session, "scope-frame-b"),
+    );
+    let turn_scope = lash_core::ParentScope::Turn {
+        session_id: session.clone(),
+        turn_id: crate::TurnId::from("scope-turn-one"),
+    };
+    let other_turn_scope = lash_core::ParentScope::Turn {
+        session_id: session.clone(),
+        turn_id: crate::TurnId::from("scope-turn-two"),
+    };
+
+    for (id, scope, parent) in [
+        ("scope-filter-a-child-one", &frame_a, &turn_scope),
+        ("scope-filter-a-child-two", &frame_a, &turn_scope),
+        ("scope-filter-a-other-turn", &frame_a, &other_turn_scope),
+        ("scope-filter-b-child", &frame_b, &turn_scope),
+    ] {
+        let mut request = registration(id);
+        request.provenance = ProcessProvenance::session(scope.clone());
+        request.lifecycle =
+            lash_core::ProcessLifecyclePolicy::new(parent.clone(), lash_core::OnParentEnd::Cancel);
+        registry
+            .register_process(request)
+            .await
+            .expect("register parent-scoped process");
+    }
+    let mut host_parented = registration("scope-filter-a-host");
+    host_parented.provenance = ProcessProvenance::session(frame_a.clone());
+    registry
+        .register_process(host_parented)
+        .await
+        .expect("register host-parented sibling");
+
+    assert_ids(
+        &registry,
+        ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            parent_scope: Some(turn_scope.clone()),
+            ..ProcessListFilter::default()
+        },
+        &[
+            "scope-filter-a-child-one",
+            "scope-filter-a-child-two",
+            "scope-filter-b-child",
+        ],
+        "a turn parent scope returns exactly that turn's children",
+    )
+    .await;
+    assert_ids(
+        &registry,
+        ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            parent_scope: Some(lash_core::ParentScope::Host),
+            originator: Some(ProcessOriginatorFilter::Session(frame_a.clone())),
+            ..ProcessListFilter::default()
+        },
+        &["scope-filter-a-host"],
+        "the Host scope is a value the filter can name, not a wildcard",
+    )
+    .await;
+
+    assert_ids(
+        &registry,
+        ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            originator: Some(ProcessOriginatorFilter::Session(frame_b.clone())),
+            ..ProcessListFilter::default()
+        },
+        &["scope-filter-b-child"],
+        "a frame-scoped originator filter returns only that frame's processes",
+    )
+    .await;
+    let mut session_wide = filtered_ids(
+        &registry,
+        &ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            originator: Some(ProcessOriginatorFilter::session(session.clone())),
+            ..ProcessListFilter::default()
+        },
+    )
+    .await;
+    session_wide.sort();
+    assert_eq!(
+        session_wide,
+        [
+            "scope-filter-a-child-one",
+            "scope-filter-a-child-two",
+            "scope-filter-a-host",
+            "scope-filter-a-other-turn",
+            "scope-filter-b-child",
+        ],
+        "a filter that names no frame stays session-wide"
+    );
+
+    let cancelled = registry
+        .request_process_cancel(
+            &lash_core::ProcessRef::new(
+                ProcessId::from("scope-filter-a-child-one"),
+                registry
+                    .get_process(&ProcessId::from("scope-filter-a-child-one"))
+                    .await
+                    .expect("read cancel target")
+                    .expect("retained cancel target")
+                    .incarnation,
+            ),
+            lash_core::CancelOrigin::OperatorRequested,
+            "actor:scope-filter".to_string(),
+            None,
+        )
+        .await
+        .expect("request cancellation");
+    let requested_at_ms = cancelled
+        .cancel_request
+        .as_ref()
+        .expect("accepted cancel request")
+        .requested_at_ms;
+
+    assert_ids(
+        &registry,
+        ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            cancel_pending_before_ms: Some(requested_at_ms.saturating_add(1)),
+            ..ProcessListFilter::default()
+        },
+        &["scope-filter-a-child-one"],
+        "the pending-cancel bound is exclusive of its own instant and finds the row",
+    )
+    .await;
+    assert_ids(
+        &registry,
+        ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            cancel_pending_before_ms: Some(requested_at_ms),
+            ..ProcessListFilter::default()
+        },
+        &[],
+        "a bound at the request instant excludes it",
+    )
+    .await;
+
+    registry
+        .complete_process(
+            &ProcessId::from("scope-filter-a-child-one"),
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+                lash_core::ToolCancellation::runtime("cancel honoured"),
+            )),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("settle the cancelled process");
+    assert_ids(
+        &registry,
+        ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            cancel_pending_before_ms: Some(requested_at_ms.saturating_add(1)),
+            ..ProcessListFilter::default()
+        },
+        &[],
+        "a settled row is no longer a pending cancel",
+    )
+    .await;
 }

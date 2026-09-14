@@ -174,7 +174,12 @@ pub use usage_activity::*;
 // reference was minted for, `ProcessExternalRef::segment_ordinal`. A window-72
 // peer reads a reference without it and cannot tell a stale segment-0 reference
 // from the live one, so peers must adopt 73.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 73;
+// Window 74: FIG-2965 replaces the process-list originator id with a typed
+// originator selector, adds parent-scope and pending-cancel filters, and drops
+// the five derived fields on an observed process and the two on an observed
+// work item. A window-73 peer requires those fields and refuses a record
+// without them, so peers must adopt 74.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 74;
 
 /// One versioned remote-protocol message.
 ///

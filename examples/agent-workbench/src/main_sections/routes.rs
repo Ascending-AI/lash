@@ -1001,7 +1001,7 @@ pub(crate) async fn cancel_work(
         // Audited: process lookup reads the global registry, which has no session tombstone contract.
         .map_err(AppError::internal)?
         .ok_or_else(|| AppError::not_found(format!("unknown process `{process_id}`")))?;
-    if process.terminal {
+    if process.terminal() {
         return Err(AppError::conflict(format!(
             "process `{process_id}` is already terminal"
         )));

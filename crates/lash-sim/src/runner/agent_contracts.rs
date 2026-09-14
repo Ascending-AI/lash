@@ -1073,10 +1073,10 @@ async fn agent_contract_process_observations(
                 process_ref: process_ref.clone(),
                 observed: json!({
                     "process_ref": process_ref,
-                    "kind": process.kind,
-                    "label": process.label,
+                    "kind": process.kind(),
+                    "label": process.label(),
                     "status": process.lifecycle.label(),
-                    "terminal": process.terminal,
+                    "terminal": process.terminal(),
                     "definition_present": process.identity.definition.is_some(),
                     "child_session_present": process.child_session_id.is_some(),
                 }),
@@ -1088,10 +1088,10 @@ async fn agent_contract_process_observations(
 }
 
 fn agent_contract_process_ref(process: &lash_core::facade_support::ObservedProcess) -> String {
-    let kind = process.kind.as_str();
-    let label = process.label.as_str();
+    let kind = process.kind();
+    let label = process.label();
     let status = process.lifecycle.label();
-    let terminal = process.terminal.to_string();
+    let terminal = process.terminal().to_string();
     let definition_present = process.identity.definition.is_some().to_string();
     let child_session_present = process.child_session_id.is_some().to_string();
     let mut hasher = Sha256::new();

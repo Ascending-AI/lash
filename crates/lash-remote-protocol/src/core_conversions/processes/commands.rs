@@ -122,7 +122,9 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
         let RemoteProcessListFilter {
             definition,
             status,
-            originator_id,
+            originator,
+            parent_scope,
+            cancel_pending_before_ms,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,
@@ -134,7 +136,9 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
         Ok(Self {
             definition: definition.map(Into::into),
             status: status.into(),
-            originator_id,
+            originator: originator.map(TryInto::try_into).transpose()?,
+            parent_scope: parent_scope.map(Into::into),
+            cancel_pending_before_ms,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,
@@ -151,7 +155,9 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
         let lash_core::ProcessListFilter {
             definition,
             status,
-            originator_id,
+            originator,
+            parent_scope,
+            cancel_pending_before_ms,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,
@@ -163,7 +169,9 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
         Self {
             definition: definition.map(Into::into),
             status: status.into(),
-            originator_id,
+            originator: originator.map(Into::into),
+            parent_scope: parent_scope.map(Into::into),
+            cancel_pending_before_ms,
             identity_kind,
             identity_label,
             caused_by_occurrence_id,
@@ -418,5 +426,25 @@ impl TryFrom<RemoteProcessEventsResponse>
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
         ))
+    }
+}
+
+impl From<lash_core::ProcessOriginatorFilter> for RemoteProcessOriginatorFilter {
+    fn from(value: lash_core::ProcessOriginatorFilter) -> Self {
+        match value {
+            lash_core::ProcessOriginatorFilter::Host { scope } => Self::Host { scope },
+            lash_core::ProcessOriginatorFilter::Session(scope) => Self::Session(scope.into()),
+        }
+    }
+}
+
+impl TryFrom<RemoteProcessOriginatorFilter> for lash_core::ProcessOriginatorFilter {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteProcessOriginatorFilter) -> Result<Self, Self::Error> {
+        Ok(match value {
+            RemoteProcessOriginatorFilter::Host { scope } => Self::Host { scope },
+            RemoteProcessOriginatorFilter::Session(scope) => Self::Session(scope.try_into()?),
+        })
     }
 }

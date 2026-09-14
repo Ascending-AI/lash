@@ -4,32 +4,34 @@
 use super::*;
 
 /// The current cutovers are refusal-only: no predecessor shape can be upgraded
-/// by inventing the registry-minted incarnation that qualifies a process
-/// attachment owner (component 90), and none can be upgraded by inventing
-/// durable cancellation facts (component 91), and none can be upgraded by
-/// inventing the positive upload evidence that attachment adoption now
-/// requires (component 92), and none can be upgraded by inventing the parent
-/// scope every child registration now carries (component 93). Component 92 is
-/// therefore retained as the refusal-only endpoint and no row targets
-/// component 93.
+/// by inventing the parent scope every child registration carries (component
+/// 93), and none can be upgraded by inventing the cancellation timestamp the
+/// process rows now index (component 94). Component 93 is therefore retained as
+/// the refusal-only endpoint and no row targets component 94.
 pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
-        from: 91,
-        to: 92,
-        source_missing_tables: &[
-            "lash_turn_cancellation_bindings",
-            "lash_turn_cancel_closure_authorizations",
-            "lash_turn_cancel_retired_scopes",
-            "lash_turn_cancel_closure_participants",
+        from: 92,
+        to: 93,
+        // Current-catalog relations and columns a component-92 store does not
+        // have. The list is keyed to the floor, not to one generation: the
+        // fixture rebuilds the published component-92 catalog by removing
+        // these from the schema this build installs, so a column introduced
+        // after 93 belongs here too.
+        source_missing_tables: &["lash_parent_end_plans"],
+        source_missing_columns: &[
+            ("lash_processes", "parent_scope_kind"),
+            ("lash_processes", "parent_scope_id"),
+            ("lash_processes", "on_parent_end"),
+            ("lash_processes", "cancel_requested_at_ms"),
         ],
-        source_missing_columns: &[("lash_turn_cancel_requests", "intent_revision")],
         source_missing_guards: &[],
         introduced_relations: &[
-            "lash_turn_cancellation_bindings",
-            "lash_turn_cancel_closure_authorizations",
-            "lash_turn_cancel_retired_scopes",
-            "lash_turn_cancel_closure_participants",
+            "lash_parent_end_plans",
+            "idx_lash_parent_end_plans_pending",
+            "idx_lash_processes_parent_scope",
+            "idx_lash_processes_parent_end_pending",
+            "idx_lash_processes_pending_cancel",
         ],
         statements: &[],
     },

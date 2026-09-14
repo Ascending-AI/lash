@@ -287,12 +287,9 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             process_id,
             incarnation,
             last_event_sequence,
-            graph_key,
-            kind,
             identity,
             lifecycle,
-            status_label,
-            terminal,
+            policy,
             disposition,
             error,
             created_at_ms,
@@ -309,18 +306,14 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             external_ref,
             wait,
             child_session_id,
-            label,
         } = value;
         Ok(Self {
             process_id,
             incarnation: incarnation.registration_sequence(),
             last_event_sequence,
-            graph_key,
-            kind,
             identity: identity.into(),
             lifecycle: lifecycle.into(),
-            status_label,
-            terminal,
+            policy: policy.into(),
             disposition: disposition.into(),
             error,
             created_at_ms,
@@ -339,7 +332,6 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             external_ref: external_ref.map(Into::into),
             wait: wait.map(Into::into),
             child_session_id,
-            label,
         })
     }
 }
@@ -353,12 +345,9 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             process_id,
             incarnation,
             last_event_sequence,
-            graph_key: _,
-            kind: _,
             identity,
             lifecycle,
-            status_label: _,
-            terminal: _,
+            policy,
             disposition,
             error,
             created_at_ms,
@@ -375,25 +364,14 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             external_ref,
             wait,
             child_session_id,
-            label: _,
         } = value;
-        let graph_key = format!("process:{process_id}:incarnation:{incarnation}");
-        let identity: lash_core::ProcessIdentity = identity.into();
-        let kind = identity.kind.clone();
-        let label = identity.label.clone().unwrap_or_else(|| kind.clone());
-        let lifecycle: lash_core::ProcessStatus = lifecycle.into();
-        let status_label = lifecycle.label().to_string();
-        let terminal = lifecycle.is_terminal();
         Ok(Self {
             process_id,
             incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
             last_event_sequence,
-            graph_key,
-            kind,
-            identity,
-            lifecycle,
-            status_label,
-            terminal,
+            identity: identity.into(),
+            lifecycle: lifecycle.into(),
+            policy: policy.try_into()?,
             disposition: disposition.into(),
             error,
             created_at_ms,
@@ -412,7 +390,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             external_ref: external_ref.map(Into::into),
             wait: wait.map(Into::into),
             child_session_id,
-            label,
         })
     }
 }
@@ -426,16 +403,12 @@ impl TryFrom<lash_core::facade_support::ObservedWorkItem> for RemoteProcessWorkI
             events,
             event_tail_sequence,
             state,
-            kind,
-            label,
         } = value;
         let item = Self {
             process: process.try_into()?,
             events: events.into_iter().map(Into::into).collect(),
             event_tail_sequence,
             state: state.into(),
-            kind,
-            label,
         };
         item.validate("RemoteProcessWorkItem")?;
         Ok(item)
@@ -452,23 +425,12 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkI
             events,
             event_tail_sequence,
             state,
-            kind: _,
-            label: _,
         } = value;
-        let process: lash_core::facade_support::ObservedProcess = process.try_into()?;
-        let kind = process.identity.kind.clone();
-        let label = process
-            .identity
-            .label
-            .clone()
-            .unwrap_or_else(|| kind.clone());
         Ok(Self {
-            process,
+            process: process.try_into()?,
             events: events.into_iter().map(Into::into).collect(),
             event_tail_sequence,
             state: state.into(),
-            kind,
-            label,
         })
     }
 }

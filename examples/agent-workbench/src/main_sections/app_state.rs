@@ -319,7 +319,9 @@ impl AppState {
                 u64::MAX,
                 Some(&lash::process::ProcessListFilter {
                     status: lash::process::ProcessStatusFilter::Any,
-                    originator_id: Some(session_id.to_string()),
+                    originator: Some(lash::process::ProcessOriginatorFilter::session(
+                        session_id.clone(),
+                    )),
                     ..lash::process::ProcessListFilter::default()
                 }),
                 lash::process::ProjectionWatermark::NoProjector,
@@ -1171,6 +1173,8 @@ pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
 }
 
 pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> WorkItem {
+    let kind = item.kind().to_string();
+    let label = item.label().to_string();
     let mut process = work_process_from_observed(item.process);
     process.status_label = work_item_status_label(item.state, process.status_label);
     WorkItem {
@@ -1181,8 +1185,8 @@ pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> 
             .map(work_event_from_observed)
             .collect(),
         state: item.state,
-        kind: item.kind,
-        label: item.label,
+        kind,
+        label,
     }
 }
 
@@ -1197,12 +1201,16 @@ fn work_item_status_label(
 }
 
 pub(crate) fn work_process_from_observed(process: lash::process::ObservedProcess) -> WorkProcess {
+    let graph_key = process.graph_key();
+    let status_label = process.status_label().to_string();
+    let terminal = process.terminal();
+    let label = process.label().to_string();
     WorkProcess {
         process_id: process.process_id,
-        graph_key: process.graph_key,
+        graph_key,
         lifecycle: process.lifecycle,
-        status_label: process.status_label,
-        terminal: process.terminal,
+        status_label,
+        terminal,
         error: process.error,
         created_at_ms: process.created_at_ms,
         updated_at_ms: process.updated_at_ms,
@@ -1212,7 +1220,7 @@ pub(crate) fn work_process_from_observed(process: lash::process::ObservedProcess
             .and_then(|value| serde_json::to_value(value).ok())
             .map(compact_payload),
         child_session_id: process.child_session_id,
-        label: process.label,
+        label,
     }
 }
 

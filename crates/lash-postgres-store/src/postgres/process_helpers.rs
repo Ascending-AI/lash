@@ -22,6 +22,17 @@ pub(crate) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
 }
 
+/// The `cancel_requested_at_ms` column: the first accepted cancellation's
+/// timestamp, or `NULL` when no cancel has been requested. One column carries
+/// the fact and its age, so "a cancel is pending" and "it was requested at T"
+/// cannot disagree.
+pub(crate) fn cancel_requested_at_ms(record: &ProcessRecord) -> Option<i64> {
+    record
+        .cancel_request
+        .as_ref()
+        .map(|request| request.requested_at_ms as i64)
+}
+
 pub(crate) async fn process_change_horizon_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, PluginError> {
@@ -194,7 +205,7 @@ pub(crate) async fn save_process_tx(
     sqlx::query(
         "UPDATE lash_processes
          SET updated_at_ms = $2, change_seq = $3, status = $4,
-             last_event_sequence = $5, cancel_requested = $6, record_json = $7
+             last_event_sequence = $5, cancel_requested_at_ms = $6, record_json = $7
          WHERE process_id = $1",
     )
     .bind(record.id.as_str())
@@ -202,7 +213,7 @@ pub(crate) async fn save_process_tx(
     .bind(change_seq as i64)
     .bind(process_status_label(record))
     .bind(record.last_event_sequence as i64)
-    .bind(record.cancel_request.is_some())
+    .bind(cancel_requested_at_ms(record))
     .bind(serde_json::to_string(record).map_err(process_decode_error)?)
     .execute(&mut **tx)
     .await

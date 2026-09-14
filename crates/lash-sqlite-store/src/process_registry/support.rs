@@ -76,6 +76,17 @@ pub(super) fn process_status_label(record: &ProcessRecord) -> &'static str {
     record.status.label()
 }
 
+/// The `cancel_requested_at_ms` column: the first accepted cancellation's
+/// timestamp, or `NULL` when no cancel has been requested. One column carries
+/// the fact and its age, so "a cancel is pending" and "it was requested at T"
+/// cannot disagree.
+pub(super) fn cancel_requested_at_ms(record: &ProcessRecord) -> Option<i64> {
+    record
+        .cancel_request
+        .as_ref()
+        .map(|request| request.requested_at_ms as i64)
+}
+
 #[cfg(any(test, feature = "testing"))]
 pub(super) async fn wake_allocation_floor_for_testing(
     registry: &SqliteProcessRegistry,
@@ -421,7 +432,7 @@ impl SqliteProcessRegistry {
         conn.execute(
             "UPDATE processes
              SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
-                 last_event_sequence = ?5, cancel_requested = ?6, record_json = ?7
+                 last_event_sequence = ?5, cancel_requested_at_ms = ?6, record_json = ?7
              WHERE process_id = ?1",
             params![
                 record.id.as_str(),
@@ -429,7 +440,7 @@ impl SqliteProcessRegistry {
                 change_seq as i64,
                 process_status_label(record),
                 record.last_event_sequence as i64,
-                i64::from(record.cancel_request.is_some()),
+                cancel_requested_at_ms(record),
                 process_encode_json(record)?
             ],
         )

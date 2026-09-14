@@ -57,7 +57,9 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
             definition: Some(serde_json::json!({"definition": "target"})),
             status: ProcessStatusFilter::any_of([ProcessStatus::Waiting]),
 
-            originator_id: Some(record.originator_id()),
+            originator: Some(ProcessOriginatorFilter::session("filter-origin")),
+            parent_scope: Some(record.lifecycle.parent.clone()),
+            cancel_pending_before_ms: None,
             identity_kind: Some("indexed-filter-kind".to_string()),
             identity_label: Some("filter-label".to_string()),
             caused_by_occurrence_id: Some("indexed-occurrence-target".to_string()),

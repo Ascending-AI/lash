@@ -21,6 +21,12 @@ pub(crate) fn retired_process_status(column: &str) -> String {
     lash_core::store_backend_support::retired_process_status_predicate_sql(column)
 }
 
+/// `<column> NOT IN ('completed', 'failed', 'cancelled', 'abandoned')`: rows
+/// whose outcome is still open, `caller_departed` included.
+pub(crate) fn nonterminal_process_status(column: &str) -> String {
+    lash_core::store_backend_support::nonterminal_process_status_predicate_sql(column)
+}
+
 /// `<column> IN ('pending', 'enqueuing')`: deliveries still owed to a target.
 pub(crate) fn undelivered_wake_delivery_state(column: &str) -> String {
     lash_core::store_backend_support::undelivered_wake_delivery_state_predicate_sql(column)

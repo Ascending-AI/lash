@@ -50,6 +50,14 @@ fn generated_fragments_match_the_previous_literals() {
         "p.status NOT IN ('running', 'waiting')"
     );
     assert_eq!(
+        terminal_process_statuses_sql(),
+        "'completed', 'failed', 'cancelled', 'abandoned'"
+    );
+    assert_eq!(
+        nonterminal_process_status_predicate_sql("status"),
+        "status NOT IN ('completed', 'failed', 'cancelled', 'abandoned')"
+    );
+    assert_eq!(
         undelivered_wake_delivery_states_sql(),
         "'pending', 'enqueuing'"
     );
@@ -81,4 +89,24 @@ fn generated_fragments_match_the_previous_literals() {
         process_status_sql_literal(ProcessStatus::CallerDeparted),
         "'caller_departed'"
     );
+}
+
+/// `caller_departed` is the status that is neither live nor terminal; the
+/// nonterminal predicate must keep it while the live predicate drops it.
+#[test]
+fn nonterminal_statuses_are_live_plus_caller_departed() {
+    let nonterminal = ProcessStatus::ALL
+        .iter()
+        .copied()
+        .filter(|status| !status.is_terminal())
+        .collect::<Vec<_>>();
+    assert!(nonterminal.contains(&ProcessStatus::CallerDeparted));
+    for status in ProcessStatus::ALL {
+        if status.is_live() {
+            assert!(
+                nonterminal.contains(status),
+                "{status:?} is live, so it cannot be terminal"
+            );
+        }
+    }
 }

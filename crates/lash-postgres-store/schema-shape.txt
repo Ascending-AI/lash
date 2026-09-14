@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 93
+version 94
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -212,7 +212,7 @@ table lash_process_wake_deliveries
   primary-key (delivery_id)
   foreign-key (process_id, process_incarnation) references lash_processes (process_id, incarnation) on delete cascade
 table lash_processes
-  column cancel_requested boolean not-null default
+  column cancel_requested_at_ms bigint nullable
   column change_seq bigint not-null
   column created_at_ms bigint not-null
   column identity_kind text not-null

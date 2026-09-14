@@ -160,8 +160,8 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .await
         .expect("list handles");
     assert_eq!(handles.len(), 3);
-    assert!(handles.iter().all(|handle| handle.kind == "lashlang"));
-    assert!(handles.iter().all(|handle| handle.label == "remember"));
+    assert!(handles.iter().all(|handle| handle.kind() == "lashlang"));
+    assert!(handles.iter().all(|handle| handle.label() == "remember"));
     session.close().await.expect("close session");
 
     let reopened = core
@@ -179,7 +179,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     assert!(
         reopened_handles
             .iter()
-            .all(|handle| handle.status_label == "completed")
+            .all(|handle| handle.status_label() == "completed")
     );
     drop(reopened);
 

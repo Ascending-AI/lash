@@ -631,7 +631,7 @@ finish(value);"#,
 
     let processes = session.admin().processes().list().await?;
     let running_app_lookup = processes.iter().any(|process| {
-        process.kind == "lashlang" && process.label == "lookup" && !process.terminal
+        process.kind() == "lashlang" && process.label() == "lookup" && !process.terminal()
     });
     assert!(
         running_app_lookup,
@@ -711,7 +711,7 @@ finish(value);"#,
     let processes = session.admin().processes().list().await?;
     let running = processes
         .iter()
-        .find(|process| process.label == "lookup")
+        .find(|process| process.label() == "lookup")
         .expect("running lookup process");
     let graph = graph_store
         .graph(&format!("process:{}", running.process_id))

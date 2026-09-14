@@ -147,12 +147,6 @@ pub const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     ),
     sqlite_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
-        "processes",
-        "ck_processes_cancel_requested",
-        "cancel_requested IN (0, 1)",
-    ),
-    sqlite_constraint(
-        SqliteConstraintDatabase::ProcessRegistry,
         "parent_end_plans",
         "ck_parent_end_plans_kind",
         "parent_kind IN ('turn', 'process')",

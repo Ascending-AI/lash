@@ -258,7 +258,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 72;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 73;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -351,9 +351,10 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (crate::PREDECESSOR_EXPECTED_RELATIVE_PATHS, 68, 69),
         (crate::CURRENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 69, 70),
         (crate::IMMEDIATE_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 70, 71),
+        (crate::LATEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 71, 72),
         (
-            crate::LATEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            71,
+            crate::NEWEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            72,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
