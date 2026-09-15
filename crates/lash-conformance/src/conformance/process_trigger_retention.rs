@@ -44,6 +44,8 @@ where
     delivery_delete_is_bound_to_observed_row_identity(make().await).await;
     process_prune_only_deletes_deliveries_for_pruned_processes(make().await).await;
     pruned_delivery_process_is_not_a_recovery_candidate(make().await).await;
+    unregistered_delivery_is_offered_to_the_recovery_sweep(make().await).await;
+    the_narrow_delivery_worklist_agrees_with_the_delivery_table(make().await).await;
     reregistered_between_classification_and_delete_preserves_delivery(make().await).await;
     outstanding_delivery_blocks_interleaved_tombstone_compaction(make().await).await;
 }
@@ -773,6 +775,207 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
             .expect("filter recovery candidates")
             .is_empty(),
         "a tombstoned process must not be offered back to the recovery sweep"
+    );
+}
+
+/// ADR 0021's recovery sweep, from the store side.
+///
+/// `ProcessWorker::reconcile_trigger_deliveries` starts a delivery whose
+/// process row was never registered, and it decides that from exactly two
+/// store reads: `TriggerStore::list_deliveries` for the candidate set, then
+/// `ProcessRegistry::filter_unregistered_process_ids` to narrow it. The
+/// existing law covers the *negative* direction only -- a pruned process is
+/// not offered back. Nothing covered the direction the sweep actually depends
+/// on: that a reserved-but-unstarted delivery IS offered, and that a started
+/// one is not.
+///
+/// This is the reserve/start crash window. A backend whose `list_deliveries`
+/// quietly filtered to deliveries with a live subscription, or whose
+/// `filter_unregistered_process_ids` reported a registered process as missing,
+/// would either strand the delivery forever or start it twice -- and both
+/// backends would still pass every other law in this group.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn unregistered_delivery_is_offered_to_the_recovery_sweep(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const SESSION: &str = "delivery-recovery-sweep-session";
+    register_trigger(
+        &handles.triggers,
+        &SessionId::from(SESSION),
+        "delivery-recovery-sweep-key",
+        "delivery-recovery-sweep-source",
+        "delivery-recovery-sweep-register",
+    )
+    .await;
+    let ingress = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            "delivery-recovery-sweep-source",
+            serde_json::json!({ "button": "Blue" }),
+            "delivery-recovery-sweep-occurrence",
+        ))
+        .await
+        .expect("ingest occurrence");
+    assert_eq!(ingress.reservations.len(), 1);
+    let process_id = ingress.reservations[0].process_id.clone();
+
+    // The crash window itself: the delivery row is reserved and no process row
+    // was ever written. The sweep has to be able to see both facts.
+    let reserved = handles
+        .triggers
+        .list_deliveries()
+        .await
+        .expect("list deliveries");
+    assert!(
+        reserved
+            .iter()
+            .any(|delivery| delivery.process_id == process_id),
+        "a reserved delivery whose process was never registered must stay a \
+         recovery candidate in the direct delivery-table view"
+    );
+    assert_eq!(
+        handles
+            .registry
+            .filter_unregistered_process_ids(std::slice::from_ref(&process_id))
+            .await
+            .expect("filter recovery candidates"),
+        vec![process_id.clone()],
+        "an unregistered delivery process must be reported missing, or the \
+         sweep never starts it"
+    );
+
+    // Starting it closes the window. The same two reads must now agree that
+    // there is nothing to recover, or the sweep starts the process a second
+    // time.
+    handles
+        .registry
+        .register_process(
+            ProcessRegistration::new(
+                process_id.clone(),
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryContract::ExternallyOwned,
+                ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            )
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::new("test"),
+            )),
+        )
+        .await
+        .expect("register delivery process");
+    assert!(
+        handles
+            .registry
+            .filter_unregistered_process_ids(std::slice::from_ref(&process_id))
+            .await
+            .expect("filter recovery candidates after registration")
+            .is_empty(),
+        "a registered delivery process must not be offered to the sweep again"
+    );
+    assert!(
+        handles
+            .triggers
+            .list_deliveries()
+            .await
+            .expect("list deliveries after registration")
+            .iter()
+            .any(|delivery| delivery.process_id == process_id),
+        "the delivery row itself outlives the start: it is retention's to \
+         reclaim, not the sweep's"
+    );
+}
+
+/// `list_delivery_process_ids` is the narrow worklist read, and it had no
+/// conformance use at all -- zero occurrences across the whole suite.
+///
+/// It exists so retention reconciliation can walk delivery process ids without
+/// materializing occurrence or subscription JSON, which means it is a second
+/// projection of the same rows `list_deliveries` returns. Two projections of
+/// one table drift silently: nothing else compares them, so a backend could
+/// answer the narrow query from a stale index and only the reconciler would
+/// notice, long after.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn the_narrow_delivery_worklist_agrees_with_the_delivery_table(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const SESSION: &str = "delivery-worklist-session";
+    for (index, (key, source, operation, occurrence)) in [
+        (
+            "delivery-worklist-key-a",
+            "delivery-worklist-source-a",
+            "delivery-worklist-register-a",
+            "delivery-worklist-occurrence-a",
+        ),
+        (
+            "delivery-worklist-key-b",
+            "delivery-worklist-source-b",
+            "delivery-worklist-register-b",
+            "delivery-worklist-occurrence-b",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        register_trigger(
+            &handles.triggers,
+            &SessionId::from(SESSION),
+            key,
+            source,
+            operation,
+        )
+        .await;
+        let ingress = handles
+            .triggers
+            .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+                "ui.button.pressed",
+                source,
+                serde_json::json!({ "index": index }),
+                occurrence,
+            ))
+            .await
+            .expect("ingest occurrence");
+        assert_eq!(ingress.reservations.len(), 1);
+    }
+
+    let mut from_table = handles
+        .triggers
+        .list_deliveries()
+        .await
+        .expect("list deliveries")
+        .into_iter()
+        .map(|delivery| delivery.process_id)
+        .collect::<Vec<_>>();
+    from_table.sort();
+    from_table.dedup();
+    let mut from_worklist = handles
+        .triggers
+        .list_delivery_process_ids()
+        .await
+        .expect("list delivery process ids");
+    from_worklist.sort();
+    from_worklist.dedup();
+
+    assert_eq!(
+        from_worklist, from_table,
+        "the narrow delivery worklist and the delivery table must name the \
+         same distinct process ids"
+    );
+    assert_eq!(
+        from_table.len(),
+        2,
+        "the law is vacuous unless both reservations reached the delivery table"
     );
 }
 
