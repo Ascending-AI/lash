@@ -761,4 +761,189 @@ mod tests {
         .expect_err("lifecycle absence must be refused");
         assert!(error.to_string().contains("lifecycle"));
     }
+
+    /// Every input the replay key is derived from, as a generated tuple.
+    ///
+    /// The fields are drawn from small alphabets on purpose: injectivity is
+    /// only interesting where collisions are *possible*, and a generator over
+    /// unconstrained strings proves that distinct 32-byte randoms hash apart
+    /// rather than that adjacent scope ids do.
+    fn identity_inputs()
+    -> impl proptest::strategy::Strategy<Value = (String, String, String, u32, Option<String>)>
+    {
+        use proptest::prelude::*;
+        let token = proptest::sample::select(vec!["a", "b", "ab", "a-b", "", "b-a"])
+            .prop_map(str::to_string);
+        (
+            token.clone(),
+            token.clone(),
+            token.clone(),
+            0u32..4,
+            proptest::option::of(token),
+        )
+    }
+
+    fn derive_from(
+        inputs: &(String, String, String, u32, Option<String>),
+    ) -> Result<ToolIntentIdentity, ToolIntentRefusalReason> {
+        let (session_id, execution_scope_id, tool_call_id, intent_index, minting) = inputs;
+        derive_tool_intent_identity_inner(
+            &SessionId::from(session_id.clone()),
+            execution_scope_id,
+            Some(tool_call_id),
+            *intent_index as usize,
+            minting.as_deref(),
+        )
+    }
+
+    proptest::proptest! {
+        /// Distinct inputs derive distinct replay keys, and equal inputs derive
+        /// equal ones.
+        ///
+        /// The replay key *is* the process id for a start declaration
+        /// (`ProcessId::from_intent_identity`), so a collision here is two
+        /// declarations realizing as one process, and a spurious difference is
+        /// a re-submitted declaration starting a second one. The encoder
+        /// length-prefixes each field precisely so that `("a", "b")` and
+        /// `("ab", "")` cannot render to the same bytes; this drives that.
+        #[test]
+        fn tool_intent_identity_derivation_is_injective_in_its_inputs(
+            left in identity_inputs(),
+            right in identity_inputs(),
+        ) {
+            let derived_left = derive_from(&left).expect("left identity");
+            let derived_right = derive_from(&right).expect("right identity");
+            proptest::prop_assert_eq!(
+                left == right,
+                derived_left.replay_key == derived_right.replay_key,
+                "inputs {:?} vs {:?} derived {} vs {}",
+                left,
+                right,
+                derived_left.replay_key,
+                derived_right.replay_key
+            );
+        }
+
+        /// Re-derivation from the record's own durable fields is a fixpoint.
+        ///
+        /// `tool_intent_ingress` reads a record as forged when its stored
+        /// `replay_key` differs from the re-derived one, so any input the
+        /// record fails to retain reads every honest identity as forged --
+        /// which is exactly what dropping `minting_emission_replay_key` did in
+        /// FIG-2994.
+        #[test]
+        fn rederiving_a_tool_intent_identity_reproduces_it(inputs in identity_inputs()) {
+            let derived = derive_from(&inputs).expect("identity");
+            let rederived = rederive_tool_intent_identity(&derived).expect("re-derived identity");
+            proptest::prop_assert_eq!(&derived, &rederived);
+            proptest::prop_assert_eq!(
+                ProcessId::from_intent_identity(&derived),
+                ProcessId::from_intent_identity(&rederived)
+            );
+        }
+    }
+
+    #[test]
+    fn a_tool_intent_index_past_the_encoded_width_is_refused() {
+        // The encoder writes the index as a u32. An index that does not fit has
+        // to be refused rather than truncated: a truncated index collides with
+        // a real one, and the collision is a second intent realizing as the
+        // first. Pinned against `u32::MAX` itself so the boundary is exact.
+        let too_wide = u32::MAX as usize + 1;
+        assert!(matches!(
+            derive_tool_intent_identity_inner(
+                &SessionId::from("session"),
+                "scope",
+                Some("call"),
+                too_wide,
+                None
+            ),
+            Err(ToolIntentRefusalReason::IntentIndexOverflow)
+        ));
+        assert!(
+            derive_tool_intent_identity_inner(
+                &SessionId::from("session"),
+                "scope",
+                Some("call"),
+                u32::MAX as usize,
+                None
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_forged_field_does_not_survive_re_derivation() {
+        // The fence documented on `rederive_tool_intent_identity`: a record
+        // whose `replay_key` does not equal the re-derived one carries a forged
+        // identity. Nothing exercised it, so a field the derivation stopped
+        // reading would have gone unnoticed -- every mutation below must move
+        // the key, or that field is no longer part of the identity.
+        let honest = derive_tool_intent_identity_inner(
+            &SessionId::from("session"),
+            "scope",
+            Some("call"),
+            1,
+            Some("minted"),
+        )
+        .expect("honest identity");
+        assert_eq!(
+            rederive_tool_intent_identity(&honest)
+                .expect("fixpoint")
+                .replay_key,
+            honest.replay_key
+        );
+
+        let forgeries: Vec<(&str, ToolIntentIdentity)> = vec![
+            (
+                "session_id",
+                ToolIntentIdentity {
+                    session_id: SessionId::from("other"),
+                    ..honest.clone()
+                },
+            ),
+            (
+                "execution_scope_id",
+                ToolIntentIdentity {
+                    execution_scope_id: "other".to_string(),
+                    ..honest.clone()
+                },
+            ),
+            (
+                "tool_call_id",
+                ToolIntentIdentity {
+                    tool_call_id: "other".to_string(),
+                    ..honest.clone()
+                },
+            ),
+            (
+                "intent_index",
+                ToolIntentIdentity {
+                    intent_index: 2,
+                    ..honest.clone()
+                },
+            ),
+            (
+                "minting_emission_replay_key",
+                ToolIntentIdentity {
+                    minting_emission_replay_key: Some("other".to_string()),
+                    ..honest.clone()
+                },
+            ),
+            (
+                "minting_emission_replay_key absence",
+                ToolIntentIdentity {
+                    minting_emission_replay_key: None,
+                    ..honest.clone()
+                },
+            ),
+        ];
+        for (field, forged) in forgeries {
+            let rederived = rederive_tool_intent_identity(&forged).expect("re-derive forged");
+            assert_ne!(
+                rederived.replay_key, forged.replay_key,
+                "a forged `{field}` must not re-derive to the key the record carries"
+            );
+        }
+    }
 }

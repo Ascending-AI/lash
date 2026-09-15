@@ -383,6 +383,23 @@ mod tests {
     }
 
     #[test]
+    fn the_module_artifact_identity_version_is_pinned_to_its_literal() {
+        // `LASHLANG_SEMANTIC_HASH_VERSION` is mixed into every module-artifact
+        // hash, so moving it invalidates every stored artifact ref. Nothing
+        // asserted the literal -- the constant's only occurrence in the tree
+        // was its own definition -- so a bump rode along with whatever change
+        // happened to touch it, silently. Pinned here beside the VM ABI
+        // literal, which already works this way: a deliberate bump edits this
+        // line and says why in the diff.
+        assert_eq!(
+            durable_format(DurableFormat::ModuleArtifact)
+                .expect("the module-artifact format is always reported")
+                .version,
+            FormatVersion::Identity("lashlang-semantic-v15")
+        );
+    }
+
+    #[test]
     fn a_version_renders_as_the_operator_would_compare_it() {
         assert_eq!(FormatVersion::Counter(8).to_string(), "8");
         assert_eq!(
