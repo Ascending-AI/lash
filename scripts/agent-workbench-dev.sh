@@ -3492,11 +3492,21 @@ prepare_workbench_binary() {
 
   log "building agent-workbench ($workbench_bazel_label, --config=judged)"
   local symlink_prefix="$launcher_lock_root/$launcher_lock_hash-bazel-"
+  # `kiln build` is the warm path, and it is only a path at all inside a kiln
+  # fork: it identifies the checkout from the kiln configuration and then runs
+  # the driver below with `--config=shared`, which needs the `.kiln.bazelrc`
+  # kiln writes into every fork. A plain checkout — a git worktree, a fresh
+  # clone, a CI runner — has neither, so asking kiln there fails with "cannot
+  # identify this repository" even though kiln is on PATH, and the shared
+  # config would have no executor to reach anyway. `.kiln.bazelrc` is the fact
+  # that separates the two, so it, and not the presence of the kiln binary,
+  # decides. The local build is slower on a cold cache and it works.
   local -a build_command
-  if command -v kiln >/dev/null 2>&1; then
+  if command -v kiln >/dev/null 2>&1 && [[ -f "$repo_root/.kiln.bazelrc" ]]; then
     build_command=(kiln build)
   else
-    build_command=("$repo_root/scripts/hermetic-build.sh" build)
+    log "no kiln fork here (.kiln.bazelrc is absent); building locally"
+    build_command=("$repo_root/scripts/hermetic-build.sh" --local build)
   fi
   "${build_command[@]}" --config=judged "--symlink_prefix=$symlink_prefix" "$workbench_bazel_label" \
     || die "building $workbench_bazel_label --config=judged failed"

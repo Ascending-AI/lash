@@ -2847,4 +2847,70 @@ launcher_env "$data_external_finalize" "$port_external_finalize" \
 pid_identity "$run_external_finalize/workbench-$external_finalize_key.pid" \
   || fail "external run-directory reset did not start its replacement"
 
+# A plain checkout is not a kiln fork. `kiln build` identifies a checkout from
+# the kiln configuration and then builds `--config=shared`, which needs the
+# `.kiln.bazelrc` kiln writes into every fork; a git worktree or a fresh clone
+# has neither, so kiln refuses with "cannot identify this repository" even
+# though the binary is on PATH. The launcher must notice that before it asks,
+# and build locally instead.
+#
+# The checkout below is exactly that: a directory holding nothing but the two
+# scripts, symlinked, so `repo_root` resolves to it and no `.kiln.bazelrc`
+# exists. `bazel` and `generate_build_files.py` are mocked, so what this
+# measures is which driver the launcher chose and which flags it handed over,
+# not a compile.
+plain_checkout="$test_tmp/plain-checkout"
+plain_bin="$test_tmp/plain-bin"
+mkdir -p "$plain_checkout/scripts" "$plain_bin"
+ln -s "$repo_root/scripts/agent-workbench-dev.sh" "$plain_checkout/scripts/agent-workbench-dev.sh"
+ln -s "$repo_root/scripts/hermetic-build.sh" "$plain_checkout/scripts/hermetic-build.sh"
+[[ ! -e "$plain_checkout/.kiln.bazelrc" && ! -e "$plain_checkout/env.sh" ]] \
+  || fail "the plain-checkout fixture accidentally carries kiln fork state"
+
+cat > "$plain_bin/kiln" <<MOCK
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$test_tmp/plain-kiln-invocations"
+printf 'kiln: cannot identify this repository; use a configured Kiln fork\n' >&2
+exit 1
+MOCK
+cat > "$plain_bin/bazel" <<MOCK
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$test_tmp/plain-bazel-invocations"
+exit 1
+MOCK
+cat > "$plain_bin/python3" <<MOCK
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [[ "\$arg" = *generate_build_files.py ]]; then
+    exit 0
+  fi
+done
+exec /usr/bin/python3 "\$@"
+MOCK
+chmod +x "$plain_bin"/*
+: > "$test_tmp/plain-kiln-invocations"
+: > "$test_tmp/plain-bazel-invocations"
+
+plain_data="$test_tmp/data-plain-checkout"
+plain_builds_before="$(<"$mock_state/build-count")"
+if launcher_env "$plain_data" 3102 \
+  PATH="$plain_bin:$mock_bin:$PATH" \
+  AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO= \
+  bash "$plain_checkout/scripts/agent-workbench-dev.sh" up --port 3102 \
+  > "$test_tmp/plain-checkout-build.log" 2>&1; then
+  fail "the mocked local build was expected to fail the launch"
+fi
+grep -Fq 'no kiln fork here' "$test_tmp/plain-checkout-build.log" \
+  || fail "plain checkout did not say it was building locally"
+[[ ! -s "$test_tmp/plain-kiln-invocations" ]] \
+  || fail "plain checkout asked kiln to build a checkout kiln cannot identify"
+grep -Fq -- '--config=local' "$test_tmp/plain-bazel-invocations" \
+  || fail "plain checkout did not build through the local Bazel configuration"
+grep -Fq -- '--config=judged' "$test_tmp/plain-bazel-invocations" \
+  || fail "plain checkout dropped the judged geometry from its local build"
+grep -Fq -- '//examples/agent-workbench:agent-workbench' "$test_tmp/plain-bazel-invocations" \
+  || fail "plain checkout built the wrong label"
+[[ "$(<"$mock_state/build-count")" = "$plain_builds_before" ]] \
+  || fail "plain checkout fell back to cargo instead of a local Bazel build"
+
 printf '%s\n' 'agent-workbench explicit reset lifecycle checks passed'
