@@ -862,6 +862,66 @@ pub(crate) async fn reset_chat(
     }))
 }
 
+/// How long a row that has left the live worklist stays on the rail.
+const WORK_RAIL_RETIRED_WINDOW_MS: u64 = 10_000;
+
+/// The runtime-wide work snapshot: every process whose outcome is still open,
+/// plus the rows that retired recently.
+///
+/// The recent-retirement window is not enough on its own. `retired` in the
+/// registry means "not live", which includes the non-terminal
+/// `caller_departed` status, so a row whose caller went away — exactly what a
+/// dropped foreground await leaves behind — aged off the rail within the
+/// window while its outcome was still open, and the operator lost the work
+/// item (FIG-3155). The non-terminal pass is unwindowed for that reason: a row
+/// leaves the rail when its outcome is recorded, never because time passed.
+async fn runtime_wide_work(
+    state: &AppState,
+) -> Result<Vec<lash::process::ObservedWorkItem>, AppError> {
+    let retired_since_ms = lash::runtime::ClockWallTime::timestamp_ms(&lash::runtime::SystemClock)
+        .saturating_sub(WORK_RAIL_RETIRED_WINDOW_MS);
+    let mut observed = state
+        .process_observer
+        .snapshot_all(&lash::process::ProcessListFilter {
+            status: lash::process::ProcessStatusFilter::Any,
+            retired_since_ms: Some(retired_since_ms),
+            ..lash::process::ProcessListFilter::default()
+        })
+        .await
+        // Audited: runtime-wide process observation reads the global registry without a session store.
+        .map_err(AppError::internal)?;
+    let seen = observed
+        .iter()
+        .map(|item| item.process.process_id.clone())
+        .collect::<BTreeSet<_>>();
+    let open = state
+        .process_observer
+        .snapshot_all(&lash::process::ProcessListFilter {
+            status: lash::process::ProcessStatusFilter::any_of([
+                lash::process::ProcessStatus::Running,
+                lash::process::ProcessStatus::Waiting,
+                lash::process::ProcessStatus::CallerDeparted,
+            ]),
+            ..lash::process::ProcessListFilter::default()
+        })
+        .await
+        // Audited: runtime-wide process observation reads the global registry without a session store.
+        .map_err(AppError::internal)?;
+    observed.extend(
+        open.into_iter()
+            .filter(|item| !seen.contains(&item.process.process_id)),
+    );
+    observed.sort_by(|left, right| {
+        right
+            .process
+            .updated_at_ms
+            .cmp(&left.process.updated_at_ms)
+            .then_with(|| right.process.created_at_ms.cmp(&left.process.created_at_ms))
+            .then_with(|| left.process.process_id.cmp(&right.process.process_id))
+    });
+    Ok(observed)
+}
+
 pub(crate) async fn list_work(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
@@ -883,19 +943,7 @@ pub(crate) async fn list_work(
             .map_err(AppError::internal)?
             .items
     } else {
-        let retired_since_ms =
-            lash::runtime::ClockWallTime::timestamp_ms(&lash::runtime::SystemClock)
-                .saturating_sub(10_000);
-        state
-            .process_observer
-            .snapshot_all(&lash::process::ProcessListFilter {
-                status: lash::process::ProcessStatusFilter::Any,
-                retired_since_ms: Some(retired_since_ms),
-                ..lash::process::ProcessListFilter::default()
-            })
-            .await
-            // Audited: runtime-wide process observation reads the global registry without a session store.
-            .map_err(AppError::internal)?
+        runtime_wide_work(&state).await?
     };
     let work = observed
         .into_iter()

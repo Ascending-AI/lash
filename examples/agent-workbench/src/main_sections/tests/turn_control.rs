@@ -347,6 +347,15 @@ async fn spawn_restate_admin_with_workflow_status(status: Option<&str>) -> Strin
 }
 
 async fn turn_cancel_test_state(data_dir: &std::path::Path, admin_url: String) -> AppState {
+    turn_cancel_test_state_with_ingress(data_dir, admin_url, "http://127.0.0.1:8080".to_string())
+        .await
+}
+
+async fn turn_cancel_test_state_with_ingress(
+    data_dir: &std::path::Path,
+    admin_url: String,
+    restate_ingress_url: String,
+) -> AppState {
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &data_dir.join("processes.db"),
@@ -396,7 +405,7 @@ async fn turn_cancel_test_state(data_dir: &std::path::Path, admin_url: String) -
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
         queued_work_driver: inert_queued_work(),
-        restate_ingress_url: "http://127.0.0.1:8080".to_string(),
+        restate_ingress_url,
         restate_admin_url: admin_url,
         restate_http: reqwest::Client::new(),
         restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
@@ -1063,4 +1072,130 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     assert_eq!(durable.request.origin.as_deref(), Some("user"));
     assert_eq!(durable.request.reason, None);
     let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
+fn both_cancel_modes_request_cancellation_of_the_turns_awaited_process() {
+    run_async_test_on_stack_budget("workbench-turn-cancel-awaited-process-test", || {
+        both_cancel_modes_request_cancellation_of_the_turns_awaited_process_inner()
+    });
+}
+
+/// FIG-3155: an API turn cancellation over a foreground process await used to
+/// commit the turn terminal and leave the process running. Only the browser's
+/// escalation reached it, and only as a side effect of dropping the in-flight
+/// `/api/turn` request; `stop` never reached it at all. Both modes must now
+/// request the awaited subject's cancellation from the turn-cancel path
+/// itself.
+async fn both_cancel_modes_request_cancellation_of_the_turns_awaited_process_inner() {
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-turn-cancel-awaited-process-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+    let admin_url = spawn_restate_admin_with_workflow_status(None).await;
+    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+    let state =
+        turn_cancel_test_state_with_ingress(&data_dir, admin_url, restate_ingress_url).await;
+    let session_id = state.current_session_id();
+    let registry = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(
+            &data_dir.join("processes.db"),
+            data_dir.join("lash-sessions"),
+        )
+        .await
+        .expect("open the registry the workbench state shares"),
+    ) as Arc<dyn lash::process::ProcessRegistry>;
+
+    for (mode, turn_id, process_id) in [
+        (WorkbenchTurnCancelMode::Stop, "stop-turn", "stop-awaited"),
+        (
+            WorkbenchTurnCancelMode::Abort,
+            "abort-turn",
+            "abort-awaited",
+        ),
+    ] {
+        // A process the turn is the durable parent of — the shape a
+        // `processes.start` followed by `await handle` leaves behind, down to
+        // the `Abandon` parent-end policy that keeps the parent-end sweep from
+        // touching it.
+        register_turn_child(&registry, &session_id, turn_id, process_id).await;
+        // A second process parented by a different turn proves the cancel is
+        // addressed, not a session-wide sweep.
+        register_turn_child(&registry, &session_id, "other-turn", "other-awaited").await;
+        state.track_turn(&session_id, &TurnId::from(turn_id));
+
+        let (driver, acknowledge) = expiring_terminal_driver(&state);
+        let (_status, Json(_receipt)) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(
+                cancel_turn_with_driver(
+                    state.clone(),
+                    TurnCancelQuery {
+                        session: SessionQuery {
+                            session_id: Some(session_id.clone())
+                        },
+                        mode,
+                    },
+                    &driver,
+                ),
+                acknowledge
+            )
+            .0
+        })
+        .await
+        .expect("turn cancellation must return")
+        .expect("cancel the turn awaiting a process");
+
+        let request = tokio::time::timeout(Duration::from_secs(5), restate_requests.recv())
+            .await
+            .expect("a process cancellation must be submitted")
+            .expect("Restate request");
+        assert!(
+            request
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path.starts_with("WorkbenchProcessCancelWorkflow/")),
+            "{mode:?} must submit a process cancellation: {request:#}"
+        );
+        assert_eq!(
+            request.pointer("/body/process_id").and_then(Value::as_str),
+            Some(process_id),
+            "{mode:?} must cancel the process its own turn awaited"
+        );
+        assert_eq!(
+            request.pointer("/body/session_id").and_then(Value::as_str),
+            Some(session_id.as_str())
+        );
+        assert!(
+            restate_requests.try_recv().is_err(),
+            "{mode:?} must not cancel a process another turn parents"
+        );
+    }
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+async fn register_turn_child(
+    registry: &Arc<dyn lash::process::ProcessRegistry>,
+    session_id: &str,
+    turn_id: &str,
+    process_id: &str,
+) {
+    registry
+        .register_process(lash::process::ProcessRegistration::new(
+            process_id,
+            lash::process::ProcessInput::External {
+                metadata: json!({ "awaited": true }),
+            },
+            lash::process::RecoveryContract::ExternallyOwned,
+            lash::process::ProcessProvenance::session(lash::process::SessionScope::new(session_id)),
+            lash::process::ProcessLifecyclePolicy::new(
+                lash::process::ParentScope::Turn {
+                    session_id: lash::SessionId::from(session_id),
+                    turn_id: TurnId::from(turn_id),
+                },
+                lash::process::OnParentEnd::Abandon,
+            ),
+        ))
+        .await
+        .expect("register the awaited process");
 }
