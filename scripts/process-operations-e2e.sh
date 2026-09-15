@@ -63,6 +63,23 @@ run_postgres_conformance_test() {
     "$selector" -- --exact --nocapture --test-threads=1
 }
 
+# FIG-3156. The runbook tells its judge to read a typed outcome out of a named
+# artifact, so an artifact that lost its evidence line is a failed gate rather
+# than a quieter pass. Scenarios 2, 5 and 8 already assert on their checkpoints;
+# this is the same rule for the phases whose evidence comes from a Rust fixture's
+# `--nocapture` stdout.
+require_checkpoints() {
+  local log="$1"
+  shift
+  local checkpoint
+  for checkpoint in "$@"; do
+    if ! grep -q "\"checkpoint\":\"${checkpoint}\"" "$log"; then
+      echo "Missing runbook evidence checkpoint '${checkpoint}' in $log" >&2
+      return 5
+    fi
+  done
+}
+
 cleanup() {
   status=$?
   docker rm -f "$crash_container" >/dev/null 2>&1 || true
@@ -154,6 +171,11 @@ postgres_url="postgres://lash:lash@127.0.0.1:${postgres_port}/lash"
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   run_postgres_conformance_test wake_delivery::wake_delivery_crash_matrix \
   2>&1 | tee "$artifact_dir/01-wake-delivery.log" | tee -a "$test_output"
+require_checkpoints "$artifact_dir/01-wake-delivery.log" \
+  wake_discarded_target_gone wake_discarded_expired \
+  blocked_group_redrive_lever blocked_group_cleared_after_redrive \
+  reused_process_id_allocates_above_the_floor \
+  rewound_sequence_is_discarded_without_blocking
 echo "scenario 1 evidence: TargetGone and Expired typed discards plus blocked-head redrive passed on PostgreSQL" | tee -a "$test_output"
 echo "scenario 6 evidence: prune/re-register delivered a strictly higher sequence; forced rewind surfaced sequence_rewound" | tee -a "$test_output"
 
@@ -170,6 +192,9 @@ cargo test --locked -p lash-internal-core \
 cargo test --locked -p lash-runtime \
   process_admin_list_signal_and_cancel_bypass_model_tool_filter -- --nocapture \
   2>&1 | tee -a "$artifact_dir/03-tool-visibility.log" | tee -a "$test_output"
+require_checkpoints "$artifact_dir/03-tool-visibility.log" \
+  model_tool_filter_narrows_without_narrowing_the_host_rail \
+  host_admin_rail_bypasses_the_model_tool_filter
 echo "scenario 3 evidence: model process tools were filtered while host list/signal/cancel remained complete" | tee -a "$test_output"
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
@@ -177,6 +202,8 @@ LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   queued_work_join_groups_by_delivery_policy_and_merge_key \
   -- --nocapture --test-threads=1 \
   2>&1 | tee "$artifact_dir/04-wake-turn-policy.log" | tee -a "$test_output"
+require_checkpoints "$artifact_dir/04-wake-turn-policy.log" \
+  queued_work_claims_join_by_policy_and_merge_key
 echo "scenario 4 evidence: EachWake produced separate claims and Coalesce produced one multi-batch claim on PostgreSQL" | tee -a "$test_output"
 
 DATABASE_URL="$postgres_url" \
@@ -223,6 +250,10 @@ echo "scenario 8 evidence: selected A settled alone; unselected B remained pendi
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
   run_postgres_conformance_test process_trigger_retention \
   2>&1 | tee "$artifact_dir/07-retention.log" | tee -a "$test_output"
+require_checkpoints "$artifact_dir/07-retention.log" \
+  prune_preserves_trigger_mutation_receipt \
+  prune_reconciles_only_pruned_process_deliveries \
+  outstanding_delivery_refuses_tombstone_compaction
 echo "scenario 7 evidence: receipts survived; pruned-process deliveries reconciled; guarded tombstones refused compaction" | tee -a "$test_output"
 
 "${compose[@]}" --profile crash run --rm crash-worker prepare \

@@ -1038,6 +1038,15 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         blocked_group.redrive_delivery_id, blocked_head.delivery_id,
         "the report must name the actionable redrive lever"
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "blocked_group_redrive_lever",
+        "process_id": blocked_process_id,
+        "target_session_id": blocked_group.target_session_id,
+        "discard_reason": format!("{:?}", blocked_group.reason),
+        "blocking_delivery_id": blocked_group.blocking_delivery_id,
+        "redrive_delivery_id": blocked_group.redrive_delivery_id,
+        "claim_behind_discarded_head": "empty",
+    }));
     registry
         .redrive_wake_delivery(&blocked_group.redrive_delivery_id)
         .await
@@ -1052,6 +1061,11 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
             .all(|group| group.process_id != blocked_process_id),
         "redriving the named head must clear the blocked-group report"
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "blocked_group_cleared_after_redrive",
+        "process_id": blocked_process_id,
+        "blocked_after_redrive": false,
+    }));
 
     sender_floor_lifetime(Arc::clone(&factory), probe, Arc::clone(&clock)).await;
 
@@ -1494,6 +1508,15 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
         "new wake must not collide with the old-incarnation delivery id"
     );
     assert_eq!(new_sender.state(), crate::WakeDeliveryState::Pending);
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "reused_process_id_allocates_above_the_floor",
+        "process_id": process_id,
+        "old_sequence": old_wake.sequence,
+        "new_sequence": new_wake.sequence,
+        "old_delivery_id": old_sender_id,
+        "new_delivery_id": new_sender.delivery_id,
+        "new_delivery_state": format!("{:?}", new_sender.state()),
+    }));
 
     let turn_handle = Arc::new(RecordingWakeTurnHandle::default());
     let prior_runs = turn_handle.len().await;
@@ -1871,6 +1894,16 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
             .all(|group| group.process_id != process_id),
         "sequence-rewound discard must not block its ordering group"
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "rewound_sequence_is_discarded_without_blocking",
+        "process_id": process_id,
+        "rewound_sequence": poison.sequence,
+        "healthy_sequence": healthy.sequence,
+        "discarded_sequence_rewound": poison_report.discarded_sequence_rewound,
+        "report_sequence_rewound": delivery_report.sequence_rewound,
+        "retryable_failures": poison_report.retryable_failures,
+        "blocks_ordering_group": false,
+    }));
 
     let healthy_report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
@@ -1972,6 +2005,19 @@ async fn target_gone_is_a_typed_discard(
         delivery.disposition.discard_reason(),
         Some(crate::WakeDiscardReason::TargetGone)
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "wake_discarded_target_gone",
+        "process_id": wake.process_id,
+        "sequence": wake.sequence,
+        "target_session_id": target_session_id,
+        "delivery_state": format!("{:?}", delivery.state()),
+        "discard_reason": delivery
+            .disposition
+            .discard_reason()
+            .map(|reason| format!("{reason:?}")),
+        "discarded_target_gone": report.discarded_target_gone,
+        "retryable_failures": report.retryable_failures,
+    }));
 }
 
 #[expect(
@@ -2044,6 +2090,19 @@ async fn expired_is_a_typed_discard(
         delivery.disposition.discard_reason(),
         Some(crate::WakeDiscardReason::Expired)
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "wake_discarded_expired",
+        "process_id": wake.process_id,
+        "sequence": wake.sequence,
+        "expires_at_ms": expires_at_ms,
+        "delivery_state": format!("{:?}", delivery.state()),
+        "discard_reason": delivery
+            .disposition
+            .discard_reason()
+            .map(|reason| format!("{reason:?}")),
+        "discarded_expired": report.discarded_expired,
+        "retryable_failures": report.retryable_failures,
+    }));
 }
 
 #[async_trait::async_trait]

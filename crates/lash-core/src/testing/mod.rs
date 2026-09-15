@@ -30,6 +30,7 @@ use lash_sansio::sync::MutexExt;
 pub mod attempt_sentinel;
 pub mod behavior_transcript;
 pub mod checkpoint_observer;
+pub mod runbook_evidence;
 pub mod runtime_helpers;
 #[cfg(feature = "testing")]
 pub mod runtime_internals;

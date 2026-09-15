@@ -830,6 +830,15 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
             .any(|event| event.event_type == "process.cancel_requested"),
         "host cancel must bypass the model-tool filter"
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "host_admin_rail_bypasses_the_model_tool_filter",
+        "model_tool_filter": "HideAllProcessTools",
+        "host_list_all_len": 2,
+        "signalled_process_id": "host-filter-signal",
+        "host_signal_event_type": "signal.ready",
+        "cancelled_process_id": "host-filter-cancel",
+        "host_cancel_event_type": "process.cancel_requested",
+    }));
     Ok(())
 }
 

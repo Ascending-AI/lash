@@ -467,6 +467,23 @@ pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
         .expect("third group claim");
     release_session_execution_lease_for_test(&store, &session_lease).await;
     assert_eq!(third_claim.batches[0].batch_id, different_delivery.batch_id);
+    // FIG-3156. The runbook's phase-4 scorecard row asks for "two Each claims
+    // vs one Coalesce claim". No `EachWake`/`Coalesce` delivery policy exists:
+    // `DeliveryPolicy` is `EarliestSafeBoundary | AfterCurrentTurnCommit`
+    // (`crates/lash-core-store/src/queued_work_vocabulary.rs:69-72`). The claim
+    // shapes this law actually establishes are recorded instead, unrenamed.
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "queued_work_claims_join_by_policy_and_merge_key",
+        "first_claim_batch_count": first_claim.batches.len(),
+        "first_claim_delivery_policy": DeliveryPolicy::EarliestSafeBoundary.as_str(),
+        "first_claim_merge_key": "a",
+        "second_claim_batch_count": second_claim.batches.len(),
+        "second_claim_merge_key": "b",
+        "second_claim_split_reason": "merge_key",
+        "third_claim_batch_count": third_claim.batches.len(),
+        "third_claim_delivery_policy": DeliveryPolicy::AfterCurrentTurnCommit.as_str(),
+        "third_claim_split_reason": "delivery_policy",
+    }));
 }
 
 #[expect(

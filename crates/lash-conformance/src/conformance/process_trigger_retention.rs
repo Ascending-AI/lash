@@ -452,6 +452,16 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
             .is_empty(),
         "compaction can never orphan the delivery"
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "outstanding_delivery_refuses_tombstone_compaction",
+        "process_id": process_id,
+        "guarded_compacted_tombstones": 0,
+        "tombstone_durable_while_guarded": true,
+        "deliveries_beside_guarded_tombstone": 1,
+        "reclaimed_delivery_count_after_reconcile": 1,
+        "compacted_tombstones_after_reconcile": 1,
+        "deliveries_after_compaction": 0,
+    }));
 }
 
 fn owner(session_id: &SessionId) -> TriggerOwnerScope {
@@ -575,6 +585,14 @@ async fn process_prune_preserves_trigger_mutation_receipts(
         retried, committed,
         "process prune must preserve the original trigger mutation receipt"
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "prune_preserves_trigger_mutation_receipt",
+        "session_id": SESSION,
+        "subscription_key": KEY,
+        "operation_id": "process-prune-receipt-update",
+        "pruned_processes": report.pruned_processes,
+        "replayed_receipt_matches_committed": retried == committed,
+    }));
 }
 
 #[expect(
@@ -693,6 +711,13 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
         1,
         "process prune must preserve deliveries for processes it did not prune"
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "prune_reconciles_only_pruned_process_deliveries",
+        "pruned_process_id": pruned_id,
+        "live_process_id": live_id,
+        "pruned_process_deliveries": 0,
+        "live_process_deliveries": 1,
+    }));
 }
 
 #[expect(
