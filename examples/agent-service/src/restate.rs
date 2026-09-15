@@ -22,8 +22,9 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::db::{ChatMessage, ChatModelSelection};
 use crate::routes::{
-    ChannelTurnEvents, StreamItem, TurnPersistenceState, assistant_text_for_persistence,
-    model_spec_for_chat_selection, spawn_live_replay_forwarder, wait_for_live_replay_flush,
+    ChannelTurnEvents, StreamItem, TurnAttempt, TurnPersistenceState,
+    assistant_text_for_persistence, model_spec_for_chat_selection,
+    run_turn_with_zero_move_recovery, spawn_live_replay_forwarder, wait_for_live_replay_flush,
 };
 use crate::state::{AppError, AppResult, AppStateData};
 
@@ -273,62 +274,111 @@ async fn run_restate_chat_turn_and_persist(
         model_variant: request.model_variant.clone(),
     })?;
     let session = state.open_session(&request.chat_id, turn_model).await?;
-    let turn_state = Arc::new(Mutex::new(TurnPersistenceState::default()));
-    let ui_events = ChannelTurnEvents::outbox(
-        state.clone(),
-        request.chat_id.clone(),
+    let chat_id = request.chat_id.clone();
+    // The outbox is keyed by the turn id the client is streaming, so every
+    // attempt writes to it even when a re-prompt runs under a fresh Lash turn.
+    let outbox_turn_id = request.turn_id.clone();
+
+    // A re-prompt runs under its own Lash turn id, derived from the workflow's
+    // rather than drawn at random: this closure runs inside the workflow body,
+    // which Restate replays, and a fresh v4 uuid would name a different turn on
+    // every replay.
+    let mut retries = 0_usize;
+    let retry_turn_id = {
+        let turn_id = request.turn_id.clone();
+        move || {
+            retries += 1;
+            TurnId::from(format!("{turn_id}:zero-move-retry-{retries}"))
+        }
+    };
+
+    // A zero-move turn wedges the board in this mode exactly as it does in the
+    // local one, so the same host-level policy runs here (FIG-3181); only the
+    // plumbing passed in below is Restate's.
+    run_turn_with_zero_move_recovery(
+        &state,
+        &chat_id,
+        request.text.clone(),
         request.turn_id.clone(),
-        Arc::clone(&turn_state),
-    );
-
-    let input = TurnInput::text(request.text.clone());
-    let output = session
-        .turn(input)
-        .turn_id(request.turn_id.clone())
-        .require_finish()?
-        // Durable in-flight work crosses the EffectHost boundary; the terminal
-        // product row below is derived from Lash's TurnOutput.
-        .stream_to_with_effects(&ui_events, controller)
-        .await;
-
-    match output {
-        Ok(output) => {
-            let assistant_text = assistant_text_for_persistence(
-                &TurnOutput {
-                    result: output,
-                    activities: Vec::new(),
-                },
-                turn_state.lock_recover().assistant_prose(),
-            );
-            let message = state
-                .with_db({
-                    let chat_id = request.chat_id.clone();
-                    move |db| db.insert_message(&chat_id, "assistant", &assistant_text)
-                })
-                .await?;
-            state
-                .with_db({
-                    let turn_id = request.turn_id.clone();
-                    move |db| {
-                        let item = StreamItem::Message { message };
-                        db.insert_turn_event(&turn_id, &item)
+        retry_turn_id,
+        |turn_input, attempt_turn_id| {
+            let state = state.clone();
+            let chat_id = chat_id.clone();
+            let outbox_turn_id = outbox_turn_id.clone();
+            let session = session.clone();
+            async move {
+                let turn_state = Arc::new(Mutex::new(TurnPersistenceState::default()));
+                let ui_events = ChannelTurnEvents::outbox(
+                    state.clone(),
+                    chat_id.clone(),
+                    outbox_turn_id.clone(),
+                    Arc::clone(&turn_state),
+                );
+                let output = session
+                    .turn(TurnInput::text(turn_input))
+                    .turn_id(attempt_turn_id)
+                    .require_finish()?
+                    // Durable in-flight work crosses the EffectHost boundary;
+                    // the terminal product row below is derived from Lash's
+                    // TurnOutput.
+                    .stream_to_with_effects(&ui_events, controller)
+                    .await;
+                match output {
+                    Ok(output) => {
+                        let assistant_text = assistant_text_for_persistence(
+                            &TurnOutput {
+                                result: output,
+                                activities: Vec::new(),
+                            },
+                            turn_state.lock_recover().assistant_prose(),
+                        );
+                        let message = state
+                            .with_db({
+                                let chat_id = chat_id.clone();
+                                move |db| db.insert_message(&chat_id, "assistant", &assistant_text)
+                            })
+                            .await?;
+                        state
+                            .with_db({
+                                let turn_id = outbox_turn_id.clone();
+                                move |db| {
+                                    let item = StreamItem::Message { message };
+                                    db.insert_turn_event(&turn_id, &item)
+                                }
+                            })
+                            .await?;
+                        Ok(TurnAttempt::Completed)
                     }
-                })
-                .await?;
-        }
-        Err(err) => {
-            state
-                .with_db({
-                    let turn_id = request.turn_id.clone();
-                    let message = err.to_string();
-                    move |db| {
-                        let item = StreamItem::Error { message };
-                        db.insert_turn_event(&turn_id, &item)
+                    Err(err) => {
+                        state
+                            .with_db({
+                                let turn_id = outbox_turn_id.clone();
+                                let message = err.to_string();
+                                move |db| {
+                                    let item = StreamItem::Error { message };
+                                    db.insert_turn_event(&turn_id, &item)
+                                }
+                            })
+                            .await?;
+                        Ok(TurnAttempt::Failed)
                     }
-                })
-                .await?;
-        }
-    }
+                }
+            }
+        },
+        |item| {
+            let state = state.clone();
+            let turn_id = outbox_turn_id.clone();
+            async move {
+                // A write failure here is not fatal to the turn: the Done row
+                // below reports a broken database to the caller.
+                let _ = state
+                    .with_db(move |db| db.insert_turn_event(&turn_id, &item))
+                    .await;
+            }
+        },
+    )
+    .await?;
+
     state
         .with_db({
             let turn_id = request.turn_id;

@@ -273,34 +273,28 @@ pub(crate) mod anyhow_like {
     pub(crate) type Result<T> = std::result::Result<T, String>;
 }
 
+/// Shared test scaffolding: a real `LashCore` over temp stores plus the
+/// `AppStateData` the routes are exercised against.
 #[cfg(test)]
-mod session_language_tests {
+pub(crate) mod test_support {
     use super::*;
 
-    fn system_text(request: &lash::provider::LlmRequest) -> String {
-        request
-            .instructions
-            .as_deref()
-            .unwrap_or_default()
-            .to_owned()
-    }
-
-    fn mock_model_spec() -> ModelSpec {
+    pub(crate) fn mock_model_spec() -> ModelSpec {
         ModelSpec::builder("mock-model")
             .context_window_tokens(200_000)
             .build()
             .expect("model spec")
     }
 
-    async fn test_core(data_dir: &std::path::Path) -> LashCore {
+    pub(crate) async fn test_core(data_dir: &std::path::Path) -> LashCore {
         let provider = lash::testing::TestProvider::builder()
-            .kind("agent-service-session-language")
+            .kind("agent-service-test-support")
             .build()
             .into_handle();
         test_core_with_provider(data_dir, provider).await
     }
 
-    async fn test_core_with_provider(
+    pub(crate) async fn test_core_with_provider(
         data_dir: &std::path::Path,
         provider: lash::provider::ProviderHandle,
     ) -> LashCore {
@@ -344,13 +338,13 @@ mod session_language_tests {
                 data_dir.join("attachments"),
             )))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "agent-service-session-language",
+                "agent-service-test-support",
                 "test",
             ))
             .expect("core")
     }
 
-    fn test_state(core: &LashCore, db: AppDb) -> AppStateData {
+    pub(crate) fn test_state(core: &LashCore, db: AppDb) -> AppStateData {
         #[cfg(feature = "restate")]
         {
             AppStateData::from_shared_db(
@@ -377,6 +371,20 @@ mod session_language_tests {
                 AgentServiceDurability::Local,
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod session_language_tests {
+    use super::test_support::{mock_model_spec, test_core, test_core_with_provider, test_state};
+    use super::*;
+
+    fn system_text(request: &lash::provider::LlmRequest) -> String {
+        request
+            .instructions
+            .as_deref()
+            .unwrap_or_default()
+            .to_owned()
     }
 
     /// FIG-1979: a raw per-turn `dialect` key cannot re-word the host prompt.

@@ -26,9 +26,16 @@ The model plays O however it likes — do not gate on which cell it picks or its
 2. **You play X only when it is X's turn.** Cells are disabled while the agent is
    thinking and on terminal boards. A click that lands while `turn != "X"` (or after the
    game ended) mutating anything is a finding.
-3. **One legal O per reply.** Each of your plies must produce exactly one agent O move —
-   an assistant reply with zero moves on a live board, or two moves, is a finding (the
-   system prompt mandates exactly one `board.play` call per O turn).
+3. **One legal O per reply, and a bounded recovery when there is none.** Each of your
+   plies must produce exactly one agent O move (the system prompt mandates exactly one
+   `board.play` call per O turn); two moves is a finding. Zero moves on a live board is a
+   model failure the **host absorbs** rather than a wedge: it re-prompts the agent once
+   with an explicit "call `board.play` now" nudge, and if that turn plays nothing either it
+   forfeits the O move, hands the board back (`turn` returns to `"X"`, no O is invented)
+   and writes one `system` transcript row saying so. So a ply may legitimately end with
+   zero new O **and** that recovery visible — record it, do not fail it. A ply that ends
+   with zero new O and *no* recovery — `turn` still `"O"`, `legal_moves` non-empty, every
+   cell disabled — is a product finding → FAIL.
 4. **Play to the end.** The game must reach a terminal state (`X won`, `O won`, or
    `draw`) — a run stopped mid-game scores nothing. Any terminal outcome passes; play
    naturally (win if the model lets you).
@@ -47,8 +54,9 @@ The model plays O however it likes — do not gate on which cell it picks or its
 - **UI affordances** (discover selectors yourself; ids current at time of writing):
   `#newChat`, the chat list `#chats`, the 3×3 board `#board` of `button.cell` elements
   with `aria-label="cell 0"`…`"cell 8"`, the status line `#gameStatus` (`X to move` /
-  `O to move` / terminal), the hint line `#gameHint` directly under it, the transcript
-  `#messages`, the composer `#text` + `#send`, `#resetBoard`.
+  `O to move` / terminal) inside the status block `#gameStatusBlock`, the hint line
+  `#gameHint` directly under it, the transcript `#messages`, the composer `#text` +
+  `#send`, `#resetBoard`.
 - **`#gameHint` is a gateable affordance, not decoration.** It is the element that explains
   the current state in a full sentence, and it has exactly three forms: the terminal
   sentence plus `Reset the board to start another round.`, `Agent is thinking and may call
@@ -65,6 +73,11 @@ The model plays O however it likes — do not gate on which cell it picks or its
   both use a hyphenated form — `0 top-left`, `1 top-middle`, `8 bottom-right`. Gate the
   transcript against the space-separated form or compare semantically; a literal
   `I played X in the top-right.` built from `index_map` never matches a correct render.
+- **The zero-move forfeit is a `system` transcript row.** When the agent finishes two
+  turns in a row without playing, the host inserts one message with role `system` —
+  rendered in `#messages` like any other, with its own styling — whose payload carries the
+  yielded board. Its role is neither `user` nor `assistant`, so it does not disturb the
+  Phase 4 row counts; it is the witness that the recovery ran.
 - **Backend truth**: `GET /api/chats`, `GET /api/chats/{id}/messages`,
   `GET /api/chats/{id}/board` → `{cells, turn, legal_moves, status, winner}`.
 - **Disk** (under the data dir): `app.db` (chats/messages/boards),
@@ -95,7 +108,8 @@ Screenshot `01-new-chat.png`.
 
 ## Phase 2 — The game loop
 
-Repeat until the board is terminal. For each ply:
+Repeat until the board is terminal **or a stop trigger below fires**. The loop is bounded:
+it never runs without an exit. For each ply:
 
 1. **Pick** any cell that is a `legal_move` per the endpoint (play naturally).
 2. **Click** it. Gate: the cell renders `X` immediately and the transcript gains the user
@@ -112,16 +126,40 @@ Repeat until the board is terminal. For each ply:
    (golden rule 1).
 
 Screenshot each ply as `10-ply-<n>.png` after step 4. The X-count/O-count on the board
-must track your click count / reply count exactly — any drift is an Abort.
+must track your click count / reply count exactly (counting a forfeited O as a legitimate
+zero under golden rule 3) — any other drift is an Abort.
+
+**Stop triggers.** Check after every step 4:
+
+- **Recovered zero-move ply** — zero new O, `turn` back to `"X"`, and the forfeit `system`
+  row present. Not a stop: continue the loop from step 1. Record it in the scorecard's
+  Zero-move recovery row with the ply screenshot and the `system` row as evidence.
+- **Wedge** — zero new O, `turn` still `"O"`, `legal_moves` non-empty, no forfeit row, and
+  a re-read ~30 s later identical. The board can never progress and golden rule 4 is
+  unreachable, so waiting longer buys nothing. **Stop and score FAIL** (product liveness,
+  not Abort: the harness is sound, the product wedged). Evidence: the `/board` body, a
+  screenshot showing all nine cells disabled, and the ply's transcript rows.
+- **Ply budget** — nine X clicks fill the board. If a tenth iteration begins without the
+  endpoint reporting a terminal `status`, **stop and score FAIL** and treat the extra ply
+  as UI/endpoint drift under golden rule 1.
+
+Never click `#resetBoard` to escape a wedge: it discards the very state this row exists to
+record.
 
 ## Phase 3 — Terminal state
 
 Gates:
 
-- `#gameStatus` shows the terminal text and the status block gains its done styling; on a
-  win the three winning cells get the `win` highlight. The UI label is a **human
-  re-phrasing** of the endpoint's status (`You won` / `Agent won` / `Draw` vs `X won` /
-  `O won` / `draw`) — map them semantically, they never string-match.
+- `#gameStatus` shows the terminal text and `#gameStatusBlock` — the block that wraps the
+  status line and the hint — gains the `done` class. Sample the class on
+  `#gameStatusBlock`; it is not and never was on `#gameStatus` itself
+  (`examples/agent-service/src/ui.rs`, `gameStatusBlockEl.classList.toggle('done', done)`).
+  The UI label is a **human re-phrasing** of the endpoint's status (`You won` / `Agent won`
+  / `Draw` vs `X won` / `O won` / `draw`) — map them semantically, they never string-match.
+- **The `win` highlight is a win-only clause, with a draw branch.** On `X won` / `O won`,
+  exactly the three winning cells carry the `win` class and no other cell does. On a
+  `draw` there is no winning line: gate that **no** cell carries `win`, and score the
+  highlight clause n/a rather than unobserved.
 - `#gameHint` carries the fuller phrasing of the same outcome and is the easier witness to
   read: `You won this round.` / `Agent won this round.` / `The round ended in a draw.`,
   each followed by ` Reset the board to start another round.` Gate it alongside
@@ -140,9 +178,10 @@ ply screenshot — expected, keep both names for the scorecard).
 
 - `GET /api/chats/{chat_id}/messages`: the transcript is **semantically streamed** — each
   agent turn stores several rows (assistant reasoning/code segments, `tool` rows, a
-  final assistant prose row). Gates: one `user` row per click, in order; every user row is
-  followed by at least one `assistant` row; **exactly one `play_move` tool row per agent
-  O move** — count only the move rows, not all `tool` rows: the model may legitimately
+  final assistant prose row), and a zero-move recovery adds one `system` row. Gates: one
+  `user` row per click, in order (the host's nudge is turn input, never a `user` row);
+  every user row is followed by at least one `assistant` row; **exactly one `play_move`
+  tool row per agent O move** — count only the move rows, not all `tool` rows: the model may legitimately
   call `board.read` too, which also persists a `tool` row.
 - `trace.jsonl` records the `board.play` executions. Do **not** substring-count the whole
   file (`board.play` also appears in prompts and streamed model output) — the
@@ -175,9 +214,10 @@ Then fill:
 | Boot + fresh board | listening line; default board via endpoint | | `00-fresh.png`, `01-new-chat.png` |
 | Ply agreement (every ply) | UI cells == `/board` cells; one O per reply | | `10-ply-*.png` |
 | Mid-turn input locked | disabled cells while agent thinks; no mutation | | ply screenshot + endpoint |
-| Terminal state | `#gameStatus` done + endpoint `status`/`winner` agree | | `20-terminal.png` |
+| Terminal state | `#gameStatus` text + `#gameStatusBlock` `done` + endpoint `status`/`winner` agree; `win` highlight on a win, absent on a draw | | `20-terminal.png` |
 | Transcript integrity | messages API rows match click/reply counts | | API output |
 | Tool-call evidence | `trace.jsonl` `board.play` count == O count | | trace excerpt |
+| Zero-move recovery | n/a if no ply played zero O; otherwise `turn` back to `"X"` + one forfeit `system` row, and no wedge | | ply screenshot + `system` row |
 
 **Aggregate:** did one full game run to a terminal state with the UI, the board endpoint,
 the transcript, and the trace in exact agreement at every ply.

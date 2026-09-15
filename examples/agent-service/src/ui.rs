@@ -74,6 +74,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     .messages { min-height:0; overflow:auto; padding:20px; display:grid; align-content:start; gap:14px; overscroll-behavior:contain; }
     .msg { max-width:min(820px, 78%); white-space:pre-wrap; line-height:1.45; border:1px solid var(--line); border-radius:5px; padding:10px 12px; background:oklch(0.18 0.018 78); }
     .msg.user { justify-self:end; border-color:color-mix(in oklch, var(--human), var(--line)); background:oklch(0.18 0.024 150); }
+    .msg.system { border-color:color-mix(in oklch, var(--bad), var(--line)); color:var(--muted); }
     .meta { color:var(--muted); font:12px "Chivo Mono", monospace; margin-bottom:4px; }
     .tool { max-width:min(820px, 82%); border:1px solid var(--line); border-radius:5px; padding:11px; background:oklch(0.17 0.02 78); font-size:13px; display:grid; gap:8px; }
     .tool-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
@@ -146,7 +147,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       </div>
       <section class="game">
         <div id="board" class="board"></div>
-        <div class="game-status">
+        <div id="gameStatusBlock" class="game-status">
           <div class="players">
             <div class="player you"><b>X</b><span>You</span></div>
             <div class="player agent"><b>O</b><span>Agent</span></div>
@@ -172,6 +173,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
     const variantInput = document.querySelector('#variantInput');
     const boardEl = document.querySelector('#board');
     const gameStatusEl = document.querySelector('#gameStatus');
+    const gameStatusBlockEl = document.querySelector('#gameStatusBlock');
     const gameHintEl = document.querySelector('#gameHint');
     const resetBoardBtn = document.querySelector('#resetBoard');
     const pinBranchBtn = document.querySelector('#pinBranch');
@@ -239,7 +241,7 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
         cell.onclick = () => playHuman(index);
         boardEl.appendChild(cell);
       });
-      gameStatusEl.parentElement.classList.toggle('done', done);
+      gameStatusBlockEl.classList.toggle('done', done);
       gameStatusEl.textContent = boardStatus(board);
       resetBoardBtn.disabled = busy || !activeChat;
       pinBranchBtn.disabled = busy || !activeChat;
