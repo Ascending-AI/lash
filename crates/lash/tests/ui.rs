@@ -1,3 +1,51 @@
+//! Compile-time contracts for the `lash` facade surface.
+//!
+//! Two kinds of contract live here and they are enforced by two different
+//! mechanisms.
+//!
+//! *Compile-fail* contracts are trybuild fixtures: each one must fail to
+//! compile with exactly the diagnostic pinned in its `.stderr` file.
+//!
+//! *Compile-pass* contracts are the modules below. They assert the opposite --
+//! that a published surface is reachable and spellable from outside the crate
+//! -- and a `mod` of this test binary proves that as well as a trybuild
+//! `t.pass(..)` did: if any of them stops compiling, this binary stops
+//! building and the suite fails. Keeping them out of trybuild is what lets
+//! trybuild take its batched path. With even one `t.pass` registered,
+//! trybuild sets `has_pass`, which (a) upgrades the fixture project's
+//! dependency build from `cargo check` to `cargo build` and (b) disables the
+//! single `--keep-going` invocation in favour of one `cargo` run per fixture,
+//! each preceded by a `cargo clean --package`. The fixtures are compiled in a
+//! nested target directory that can never reuse the outer build, so that is
+//! four minutes of the seal job spent re-proving what a module of this binary
+//! proves for free.
+// The fixtures are written as standalone programs: each keeps a `fn main`
+// and imports the whole surface it is asserting on, and the surface probes
+// unwrap on values they construct themselves. Under trybuild they compiled
+// as their own crates with `-A dead_code` and were never run through clippy;
+// as modules they inherit this binary's lint scope, so the allowances they
+// relied on are spelled here, scoped to this binary only.
+#![allow(dead_code, unused_imports)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+// The compile-pass surface fixtures. `#[path]` keeps the files where the
+// compile-fail fixtures live, so the directory stays the single home of the
+// fixture set.
+#[cfg(feature = "rlm")]
+#[path = "ui/durable_builder_without_advanced.rs"]
+mod durable_builder_without_advanced;
+#[path = "ui/facade_boundary_types_are_public.rs"]
+mod facade_boundary_types_are_public;
+#[path = "ui/process_surface_types_are_public.rs"]
+mod process_surface_types_are_public;
+#[path = "ui/prompt_types_are_public.rs"]
+mod prompt_types_are_public;
+#[path = "ui/remote_protocol_types_are_public.rs"]
+mod remote_protocol_types_are_public;
+#[cfg(feature = "rlm")]
+#[path = "ui/rlm_facade_boundary_types_are_public.rs"]
+mod rlm_facade_boundary_types_are_public;
+
 #[test]
 fn facade_compile_time_contracts() {
     let t = trybuild::TestCases::new();
@@ -43,13 +91,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/pending_announcement_requires_a_replay_key.rs");
     t.compile_fail("tests/ui/after_turn_cannot_abort.rs");
     t.compile_fail("tests/ui/frame_key_is_not_a_frame_node_id.rs");
-    t.pass("tests/ui/facade_boundary_types_are_public.rs");
-    t.pass("tests/ui/process_surface_types_are_public.rs");
-    t.pass("tests/ui/prompt_types_are_public.rs");
-    t.pass("tests/ui/remote_protocol_types_are_public.rs");
     if cfg!(feature = "rlm") {
-        t.pass("tests/ui/durable_builder_without_advanced.rs");
-        t.pass("tests/ui/rlm_facade_boundary_types_are_public.rs");
         // FIG-1979: the dialect has one carrier, and a memory limit cannot be
         // spelled as an instruction budget.
         t.compile_fail("tests/ui/rlm_turn_options_cannot_name_a_dialect.rs");

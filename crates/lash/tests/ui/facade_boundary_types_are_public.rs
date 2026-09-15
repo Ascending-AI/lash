@@ -1,49 +1,42 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use lash::BatchId;
+use lash::SessionId;
+use lash::TurnId;
 use lash::direct::{
-    AttachmentSource, DirectLlmClient, DirectLlmError, DirectLlmOutcome, DirectRequest, NonNegativeFiniteF64,
-    NonNegativeFiniteF64Error, GenerationReceipt, GenerationOptionOutcome,
-    GenerationOptions, LlmEventSender, LlmOutputPart, LlmUsage,
+    AttachmentSource, DirectLlmClient, DirectLlmError, DirectLlmOutcome, DirectRequest,
+    GenerationOptionOutcome, GenerationOptions, GenerationReceipt, LlmEventSender, LlmOutputPart,
+    LlmUsage, NonNegativeFiniteF64, NonNegativeFiniteF64Error,
 };
 use lash::durability::RuntimeHostConfig;
-use lash::BatchId;
-use lash::TurnId;
-use lash::SessionId;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity,
-    MaintenanceFailure, MaintenanceRefusal, MaintenanceResult, OperationId,
-    OrphanedTurnInputScope, PersistedSessionConfig, PersistedSessionRead, PendingTurnInputDraft,
-    QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkEnqueueOutcome,
-    QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
-    QueuedWorkStore,
-    SelectedQueuedWorkClaimOutcome,
-    RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence,
-    RuntimeSessionState, RuntimeTurnCommitStamp,
-    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionCommitStore,
-    SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseStore,
-    SessionHeadMeta, SessionHeadPayload, SessionMeta,
-    SessionNodeRecord, StoreError,
-    StoreMaintenance, TurnInputClaim, TurnInputCheckpointBoundary, TurnInputIngress,
-    TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
-    load_persisted_session_state,
+    CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure,
+    MaintenanceRefusal, MaintenanceResult, OperationId, OrphanedTurnInputScope,
+    PendingTurnInputDraft, PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome,
+    QueuedWorkClaimPolicy, QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp,
+    RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimeSessionState,
+    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+    SelectedQueuedWorkClaimOutcome, SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta,
+    SessionHeadPayload, SessionMeta, SessionNodeRecord, StoreError, StoreMaintenance,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress, TurnInputState, TurnInputStore,
+    VacuumReport, commit_runtime_state_verified, load_persisted_session_state,
 };
-use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::plugins::{
     AfterToolCallHook, AfterToolCallPluginDirective, BeforeToolCallHook,
     BeforeToolCallPluginDirective, CompactionContext, ContextCompaction, ContextCompactor,
     ContextError, PluginHost, PluginSpec, PluginSpecBuilder, PluginSpecFactory,
     ReplaceToolArgsDirective, ToolCallHookContext, ToolCatalogContribution, ToolResultHookContext,
 };
-use lash::provider::{
-    ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy,
-};
+use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
 use lash::runtime::AdvancedLashCoreBuilder;
 use lash::tools::{ToolActivation, ToolCallRecord, ToolOutputContract};
 use lash::turn::{AssistantOutput, TurnIssue};
+use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::{ModelLimits, ModelSpec, QueuedWorkClaimRefusal};
 
 struct FacadeStore;
@@ -370,7 +363,10 @@ impl QueuedWorkStore for FacadeStore {
         })
     }
 
-    async fn list_queued_work(&self, _session_id: &SessionId) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+    async fn list_queued_work(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         Ok(Vec::new())
     }
 
@@ -576,7 +572,9 @@ fn turn_input_ingress_types_are_nameable(
 }
 
 async fn queued_work_wait_is_nameable(session: &lash::LashSession) -> lash::Result<()> {
-    session.await_queued_work_batch(&BatchId::from("qwb:batch")).await
+    session
+        .await_queued_work_batch(&BatchId::from("qwb:batch"))
+        .await
 }
 
 async fn pending_turn_input_cancel_facade_is_nameable(
@@ -687,7 +685,10 @@ fn main() {
         None,
     );
     let _ = persistence_types_are_nameable(
-        GraphAppend { nodes: Vec::new(), leaf_node_id: None },
+        GraphAppend {
+            nodes: Vec::new(),
+            leaf_node_id: None,
+        },
         Vec::new(),
     );
     let _ = plugin_types_are_nameable();

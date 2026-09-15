@@ -58,9 +58,7 @@ fn main() {
         source_key: Some("source".to_string()),
         turn_id: TurnId::from("turn"),
         committed_message_id: "message".to_string(),
-        checkpoint: Some(
-            lash::remote::observations::RemoteTurnInputCheckpoint::BeforeCompletion,
-        ),
+        checkpoint: Some(lash::remote::observations::RemoteTurnInputCheckpoint::BeforeCompletion),
     };
     let observation = lash::remote::observations::RemoteSessionObservation {
         session_id: SessionId::from("session"),
@@ -122,8 +120,11 @@ fn main() {
         wake_session_id: None,
         observers: Vec::new(),
         event_types: Vec::new(),
-    lifecycle: Some(lash::remote::processes::RemoteProcessLifecyclePolicy { parent: lash::remote::processes::RemoteParentScope::Host, on_parent_end: lash::remote::processes::RemoteOnParentEnd::Abandon }),
-};
+        lifecycle: Some(lash::remote::processes::RemoteProcessLifecyclePolicy {
+            parent: lash::remote::processes::RemoteParentScope::Host,
+            on_parent_end: lash::remote::processes::RemoteOnParentEnd::Abandon,
+        }),
+    };
     process_start.validate().unwrap();
 
     let disposition = lash::remote::llm::RemoteGenerationReceipt {
