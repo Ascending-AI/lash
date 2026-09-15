@@ -93,10 +93,6 @@
               "budget_ms": 198.698,
               "required": true
             },
-            "process.start_child": {
-              "budget_ms": 19.506,
-              "required": true
-            },
             "prompt_build": {
               "budget_ms": 24.01,
               "required": true
@@ -161,10 +157,6 @@
               "budget_ms": 0.25,
               "required": false
             },
-            "rlm_process.prepare_start": {
-              "budget_ms": 0.25,
-              "required": false
-            },
             "rlm_process.resolve_environment": {
               "budget_ms": 2.174,
               "required": false
@@ -172,10 +164,6 @@
             "rlm_process.shutdown": {
               "budget_ms": 0.778,
               "required": false
-            },
-            "rlm_process.start": {
-              "budget_ms": 20.206,
-              "required": true
             },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
@@ -211,7 +199,7 @@
       "embed_rlm": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 51323000,
+          "alloc_bytes_max": 54156000,
           "steady_state_turn_alloc_bytes_max": 4181000
         },
         "advisory_duration": {
@@ -381,6 +369,10 @@
             },
             "effect_loop": {
               "budget_ms": 229.974,
+              "required": true
+            },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.529,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -1011,6 +1003,10 @@
               "budget_ms": 7.462,
               "required": false
             },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 116.79,
+              "required": true
+            },
             "rlm_lashlang.execute": {
               "budget_ms": 2.398,
               "required": false
@@ -1090,6 +1086,10 @@
             "rlm_lashlang.compile_link": {
               "budget_ms": 7.462,
               "required": false
+            },
+            "rlm_lashlang.deferred_resolve": {
+              "budget_ms": 119.833,
+              "required": true
             },
             "rlm_lashlang.execute": {
               "budget_ms": 2.398,
@@ -1255,10 +1255,6 @@
               "budget_ms": 1787.342,
               "required": true
             },
-            "process.start_child": {
-              "budget_ms": 355.606,
-              "required": false
-            },
             "prompt_build": {
               "budget_ms": 6.446,
               "required": true
@@ -1323,20 +1319,12 @@
               "budget_ms": 2.494,
               "required": true
             },
-            "rlm_process.prepare_start": {
-              "budget_ms": 10.406,
-              "required": true
-            },
             "rlm_process.resolve_environment": {
               "budget_ms": 83.682,
               "required": true
             },
             "rlm_process.shutdown": {
               "budget_ms": 12.26,
-              "required": true
-            },
-            "rlm_process.start": {
-              "budget_ms": 357.864,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -1399,10 +1387,6 @@
               "budget_ms": 177.778,
               "required": false
             },
-            "process.start_child": {
-              "budget_ms": 240.494,
-              "required": false
-            },
             "prompt_build": {
               "budget_ms": 3.57,
               "required": true
@@ -1463,20 +1447,12 @@
               "budget_ms": 5.714,
               "required": true
             },
-            "rlm_process.prepare_start": {
-              "budget_ms": 9.094,
-              "required": true
-            },
             "rlm_process.resolve_environment": {
               "budget_ms": 77.348,
               "required": true
             },
             "rlm_process.shutdown": {
               "budget_ms": 11.532,
-              "required": true
-            },
-            "rlm_process.start": {
-              "budget_ms": 244.974,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -1539,10 +1515,6 @@
               "budget_ms": 178.538,
               "required": false
             },
-            "process.start_child": {
-              "budget_ms": 420.866,
-              "required": false
-            },
             "prompt_build": {
               "budget_ms": 7.438,
               "required": true
@@ -1603,20 +1575,12 @@
               "budget_ms": 10.948,
               "required": true
             },
-            "rlm_process.prepare_start": {
-              "budget_ms": 28.644,
-              "required": true
-            },
             "rlm_process.resolve_environment": {
               "budget_ms": 143.088,
               "required": true
             },
             "rlm_process.shutdown": {
               "budget_ms": 32.694,
-              "required": true
-            },
-            "rlm_process.start": {
-              "budget_ms": 425.886,
               "required": true
             },
             "tool_intent.parent_end": {
@@ -1759,10 +1723,6 @@
               "budget_ms": 1276.194,
               "required": false
             },
-            "process.start_child": {
-              "budget_ms": 243.032,
-              "required": false
-            },
             "prompt_build": {
               "budget_ms": 3.864,
               "required": true
@@ -1823,20 +1783,12 @@
               "budget_ms": 2.444,
               "required": false
             },
-            "rlm_process.prepare_start": {
-              "budget_ms": 2.86,
-              "required": false
-            },
             "rlm_process.resolve_environment": {
               "budget_ms": 27.216,
               "required": false
             },
             "rlm_process.shutdown": {
               "budget_ms": 8.576,
-              "required": false
-            },
-            "rlm_process.start": {
-              "budget_ms": 244.706,
               "required": false
             },
             "tool_intent.parent_end": {
@@ -2099,6 +2051,10 @@
               "budget_ms": 187.574,
               "required": true
             },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.499,
+              "required": true
+            },
             "plugin_hook.context_transform.rolling_history": {
               "budget_ms": 1.64,
               "required": false
@@ -2157,6 +2113,10 @@
             },
             "effect_loop": {
               "budget_ms": 702.116,
+              "required": true
+            },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.541,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2223,6 +2183,10 @@
               "budget_ms": 174.866,
               "required": true
             },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.529,
+              "required": true
+            },
             "plugin_hook.context_transform.rolling_history": {
               "budget_ms": 9.944,
               "required": true
@@ -2281,6 +2245,10 @@
             },
             "effect_loop": {
               "budget_ms": 110.264,
+              "required": true
+            },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.521,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2343,6 +2311,10 @@
               "budget_ms": 264.806,
               "required": true
             },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.522,
+              "required": true
+            },
             "plugin_hook.context_transform.rolling_history": {
               "budget_ms": 1.728,
               "required": false
@@ -2401,6 +2373,10 @@
             },
             "effect_loop": {
               "budget_ms": 62.266,
+              "required": true
+            },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.559,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2591,6 +2567,10 @@
               "budget_ms": 160.812,
               "required": true
             },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.516,
+              "required": true
+            },
             "plugin_hook.context_transform.rolling_history": {
               "budget_ms": 4.56,
               "required": false
@@ -2661,6 +2641,10 @@
             },
             "effect_loop": {
               "budget_ms": 822.078,
+              "required": true
+            },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.538,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2838,6 +2822,10 @@
             "turn_cancel.start_gate": {
               "budget_ms": 2.36,
               "required": false
+            },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.507,
+              "required": true
             }
           }
         }
@@ -2901,6 +2889,10 @@
             },
             "turn_cancel.start_gate": {
               "budget_ms": 5.304,
+              "required": true
+            },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.509,
               "required": true
             }
           }
@@ -3018,6 +3010,10 @@
             "effect_loop": {
               "budget_ms": 187.596,
               "required": false
+            },
+            "plugin_hook.after_turn.rolling_history": {
+              "budget_ms": 0.492,
+              "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
               "budget_ms": 1.804,
