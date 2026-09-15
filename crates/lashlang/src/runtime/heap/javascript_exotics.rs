@@ -3,6 +3,59 @@ use crate::runtime::{ProjectedFuture, javascript_to_number, javascript_to_string
 
 pub(crate) const MAX_JAVASCRIPT_LENGTH: u64 = 9_007_199_254_740_991;
 
+/// What an object whose only ECMA string is a type tag — a plain object, a
+/// `Map`, a `Set` — answers when it is converted to a primitive.
+///
+/// ECMA-262 answers `"[object Object]"`, `"[object Map]"` and `"[object Set]"`.
+/// That text is the correct answer wherever something asked for the tag on
+/// purpose: a property key (`obj[{a: 1}]` reads the `"[object Object]"` slot),
+/// `console.log`'s fallback for a value with no JSON body, and an explicit
+/// `map.toString()`. It is a defect wherever a cell meant to render the value —
+/// `"" + result`, `` `${result}` `` and `String(result)` all lower to `+`, and
+/// all three drop everything the cell computed. FIG-3166 refuses those three
+/// rather than silently guessing a JSON body for them, because every other gap
+/// in this dialect is an explicit refusal with a stable code and because the
+/// refusal is what stops a cell finishing an unexamined tool result.
+///
+/// Every other conversion is untouched: arrays, `Date`, `Error`, `RegExp`,
+/// `URL` and the primitives keep their exact ECMA-262 strings under both
+/// variants, and a number-hinted conversion of a plain object is still `NaN`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ObjectStringCoercion {
+    /// ECMA-262's type tag.
+    Ecma,
+    /// `TS_OBJECT_STRING_COERCION`.
+    Refuse,
+}
+
+impl ObjectStringCoercion {
+    /// `ecma` is the exact string ECMA-262 produces; `article` names the value
+    /// in the refusal ("a plain object", "a Map", "a Set"). `depth` is the
+    /// nesting level of the value: above the top level the value reached the
+    /// coercion as an element of a container, and the refusal says so, exactly
+    /// as the `Date` refusal beside it does.
+    fn string_or_refuse(
+        self,
+        ecma: &str,
+        article: &str,
+        depth: usize,
+    ) -> Result<Value, RuntimeError> {
+        match self {
+            Self::Ecma => Ok(Value::String(ecma.into())),
+            Self::Refuse => {
+                let site = if depth > 1 { " inside a container" } else { "" };
+                Err(RuntimeError::ValidationFailed {
+                    reason: format!(
+                        "TS_OBJECT_STRING_COERCION: string coercion of {article}{site} would \
+                         produce `{ecma}` and discard the value; examine it with console.log or \
+                         serialize it explicitly with JSON.stringify(value)"
+                    ),
+                })
+            }
+        }
+    }
+}
+
 /// The brand an error object carries: the `name` it reports, and — for the ECMA
 /// kinds — the one constructor besides `Error` that `instanceof` answers true
 /// for.
@@ -656,11 +709,37 @@ impl Heap {
 
     /// Applies JavaScript's object-to-primitive conversion without detaching a
     /// heap object or recursing through `Value::Ref` unchanged.
+    ///
+    /// This is the ECMA-exact conversion: an object with no string of its own
+    /// answers `"[object Object]"`. Property keys, `console.log`'s fallback
+    /// text and `Map.prototype.toString` all ask for exactly that. The string
+    /// *operators* ask for [`Self::javascript_to_primitive_for_string_operand`]
+    /// instead.
     pub(crate) fn javascript_to_primitive_string_or_number(
         &self,
         value: &Value,
     ) -> Result<Value, RuntimeError> {
-        self.javascript_to_primitive_inner(value, &mut BTreeSet::new(), 1)
+        self.javascript_to_primitive_inner(
+            value,
+            &mut BTreeSet::new(),
+            1,
+            ObjectStringCoercion::Ecma,
+        )
+    }
+
+    /// The same conversion for an operand of `+` — which is also what template
+    /// interpolation and `String(value)` lower to — refusing the objects whose
+    /// only ECMA string is a type tag (FIG-3166).
+    pub(crate) fn javascript_to_primitive_for_string_operand(
+        &self,
+        value: &Value,
+    ) -> Result<Value, RuntimeError> {
+        self.javascript_to_primitive_inner(
+            value,
+            &mut BTreeSet::new(),
+            1,
+            ObjectStringCoercion::Refuse,
+        )
     }
 
     pub(crate) fn javascript_coercion_contains_projected(
@@ -708,8 +787,25 @@ impl Heap {
         &'a self,
         value: &'a Value,
     ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
+        self.javascript_to_primitive_async_with(value, ObjectStringCoercion::Ecma)
+    }
+
+    /// Async twin of [`Self::javascript_to_primitive_for_string_operand`], used
+    /// when an operand of `+` is (or reaches) a projected host binding.
+    pub(crate) fn javascript_to_primitive_for_string_operand_async<'a>(
+        &'a self,
+        value: &'a Value,
+    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
+        self.javascript_to_primitive_async_with(value, ObjectStringCoercion::Refuse)
+    }
+
+    fn javascript_to_primitive_async_with<'a>(
+        &'a self,
+        value: &'a Value,
+        objects: ObjectStringCoercion,
+    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
         Box::pin(async move {
-            self.javascript_to_primitive_inner_async(value, &mut BTreeSet::new(), 1)
+            self.javascript_to_primitive_inner_async(value, &mut BTreeSet::new(), 1, objects)
                 .await
         })
     }
@@ -719,17 +815,18 @@ impl Heap {
         value: &'a Value,
         active: &'a mut BTreeSet<HeapId>,
         depth: usize,
+        objects: ObjectStringCoercion,
     ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
         Box::pin(async move {
             super::ensure_value_depth(depth)?;
             match value {
                 Value::Projected(projected) => {
                     let materialized = projected.materialize_async().await?;
-                    self.javascript_to_primitive_inner_async(&materialized, active, depth)
+                    self.javascript_to_primitive_inner_async(&materialized, active, depth, objects)
                         .await
                 }
                 Value::Tuple(values) | Value::List(values) => Ok(Value::String(
-                    self.javascript_sequence_string_async(values, active, depth)
+                    self.javascript_sequence_string_async(values, active, depth, objects)
                         .await?
                         .into(),
                 )),
@@ -737,7 +834,10 @@ impl Heap {
                     let values = match self.get(*id)? {
                         HeapObject::Tuple(values) | HeapObject::List(values) => values.as_slice(),
                         HeapObject::RegExpMatch(result) => result.items.as_slice(),
-                        _ => return self.javascript_to_primitive_inner(value, active, depth),
+                        _ => {
+                            return self
+                                .javascript_to_primitive_inner(value, active, depth, objects);
+                        }
                     };
                     if !active.insert(*id) {
                         return Err(RuntimeError::ValidationFailed {
@@ -746,13 +846,13 @@ impl Heap {
                         });
                     }
                     let result = self
-                        .javascript_sequence_string_async(values, active, depth)
+                        .javascript_sequence_string_async(values, active, depth, objects)
                         .await
                         .map(|value| Value::String(value.into()));
                     active.remove(id);
                     result
                 }
-                _ => self.javascript_to_primitive_inner(value, active, depth),
+                _ => self.javascript_to_primitive_inner(value, active, depth, objects),
             }
         })
     }
@@ -762,6 +862,7 @@ impl Heap {
         values: &'a [Value],
         active: &'a mut BTreeSet<HeapId>,
         depth: usize,
+        objects: ObjectStringCoercion,
     ) -> ProjectedFuture<'a, Result<String, RuntimeError>> {
         Box::pin(async move {
             let mut strings = Vec::with_capacity(values.len());
@@ -776,7 +877,7 @@ impl Heap {
                     }
                     other => {
                         let primitive = self
-                            .javascript_to_primitive_inner_async(other, active, depth + 1)
+                            .javascript_to_primitive_inner_async(other, active, depth + 1, objects)
                             .await?;
                         javascript_to_string(&primitive)
                     }
@@ -814,6 +915,7 @@ impl Heap {
         value: &Value,
         active: &mut BTreeSet<HeapId>,
         depth: usize,
+        objects: ObjectStringCoercion,
     ) -> Result<Value, RuntimeError> {
         super::ensure_value_depth(depth)?;
         let object = match value {
@@ -830,17 +932,19 @@ impl Heap {
         };
         let primitive = match object.map(|(_, object)| object) {
             Some(HeapObject::Tuple(values) | HeapObject::List(values)) => Value::String(
-                self.javascript_sequence_string(values, active, depth)?
+                self.javascript_sequence_string(values, active, depth, objects)?
                     .into(),
             ),
             Some(HeapObject::RegExpMatch(result)) => Value::String(
-                self.javascript_sequence_string(&result.items, active, depth)?
+                self.javascript_sequence_string(&result.items, active, depth, objects)?
                     .into(),
             ),
-            Some(HeapObject::Record(_)) => Value::String("[object Object]".into()),
+            Some(HeapObject::Record(_)) => {
+                objects.string_or_refuse("[object Object]", "a plain object", depth)?
+            }
             Some(HeapObject::Date(date)) => Value::Number(date.milliseconds),
-            Some(HeapObject::Map(_)) => Value::String("[object Map]".into()),
-            Some(HeapObject::Set(_)) => Value::String("[object Set]".into()),
+            Some(HeapObject::Map(_)) => objects.string_or_refuse("[object Map]", "a Map", depth)?,
+            Some(HeapObject::Set(_)) => objects.string_or_refuse("[object Set]", "a Set", depth)?,
             Some(HeapObject::RegExp(regexp)) => Value::String(regexp_string(regexp).into()),
             Some(HeapObject::Error(error)) => Value::String(
                 if error.message.is_empty() {
@@ -859,11 +963,11 @@ impl Heap {
             }
             None => match value {
                 Value::Tuple(values) | Value::List(values) => Value::String(
-                    self.javascript_sequence_string(values, active, depth)?
+                    self.javascript_sequence_string(values, active, depth, objects)?
                         .into(),
                 ),
                 Value::Record(_) | Value::Image(_) | Value::Resource(_) => {
-                    Value::String("[object Object]".into())
+                    objects.string_or_refuse("[object Object]", "a plain object", depth)?
                 }
                 // A projected handle is a host-side view of a value, not an
                 // object of its own: coerce what is behind it.
@@ -872,6 +976,7 @@ impl Heap {
                         &projected.materialize()?,
                         active,
                         depth,
+                        objects,
                     );
                 }
                 other => other.clone(),
@@ -890,6 +995,7 @@ impl Heap {
         values: &[Value],
         active: &mut BTreeSet<HeapId>,
         depth: usize,
+        objects: ObjectStringCoercion,
     ) -> Result<String, RuntimeError> {
         values
             .iter()
@@ -902,7 +1008,7 @@ impl Heap {
                     })
                 }
                 other => self
-                    .javascript_to_primitive_inner(other, active, depth + 1)
+                    .javascript_to_primitive_inner(other, active, depth + 1, objects)
                     .map(|primitive| javascript_to_string(&primitive)),
             })
             .collect::<Result<Vec<_>, _>>()

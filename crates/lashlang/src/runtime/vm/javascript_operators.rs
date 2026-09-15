@@ -98,14 +98,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.validate_javascript_binary_operands(op, &left, &right)?;
         let (coerce_left, coerce_right) = javascript_binary_operand_coercions(op, &left, &right);
         if coerce_left && matches!(left, Value::Ref(_)) {
-            left = self.heap.javascript_to_primitive_string_or_number(&left)?;
+            left = self.javascript_binary_operand_primitive(op, &left)?;
         }
         if coerce_right && matches!(right, Value::Ref(_)) {
-            right = self.heap.javascript_to_primitive_string_or_number(&right)?;
+            right = self.javascript_binary_operand_primitive(op, &right)?;
         }
         if op == JavaScriptBinaryOp::Add {
-            let left_primitive = self.heap.javascript_to_primitive_string_or_number(&left)?;
-            let right_primitive = self.heap.javascript_to_primitive_string_or_number(&right)?;
+            let left_primitive = self.javascript_binary_operand_primitive(op, &left)?;
+            let right_primitive = self.javascript_binary_operand_primitive(op, &right)?;
             if matches!(left_primitive, Value::String(_))
                 || matches!(right_primitive, Value::String(_))
             {
@@ -137,17 +137,48 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let (coerce_left, coerce_right) = javascript_binary_operand_coercions(op, &left, &right);
         if coerce_left {
             left = self
-                .heap
-                .javascript_to_primitive_string_or_number_async(&left)
+                .javascript_binary_operand_primitive_async(op, &left)
                 .await?;
         }
         if coerce_right {
             right = self
-                .heap
-                .javascript_to_primitive_string_or_number_async(&right)
+                .javascript_binary_operand_primitive_async(op, &right)
                 .await?;
         }
         Ok((left, right))
+    }
+
+    /// `+` is the one binary operator that can put an object's string into the
+    /// program's output — `String(value)` and template interpolation both lower
+    /// to it — so it converts its operands through the refusing path
+    /// (FIG-3166). Every other operator reads the primitive to compare or to do
+    /// arithmetic with it, never to show it, and keeps ECMA's answer.
+    fn javascript_binary_operand_primitive(
+        &self,
+        op: JavaScriptBinaryOp,
+        value: &Value,
+    ) -> Result<Value, RuntimeError> {
+        if op == JavaScriptBinaryOp::Add {
+            self.heap.javascript_to_primitive_for_string_operand(value)
+        } else {
+            self.heap.javascript_to_primitive_string_or_number(value)
+        }
+    }
+
+    async fn javascript_binary_operand_primitive_async(
+        &self,
+        op: JavaScriptBinaryOp,
+        value: &Value,
+    ) -> Result<Value, RuntimeError> {
+        if op == JavaScriptBinaryOp::Add {
+            self.heap
+                .javascript_to_primitive_for_string_operand_async(value)
+                .await
+        } else {
+            self.heap
+                .javascript_to_primitive_string_or_number_async(value)
+                .await
+        }
     }
 
     fn validate_javascript_binary_operands(

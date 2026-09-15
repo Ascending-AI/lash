@@ -364,9 +364,14 @@ language semantics:
   value keeps ECMA `ToString`, which is already the useful text for numbers,
   booleans, `null`, `undefined`, dates, regexps and errors — a `Map` or `Set`
   prints as `[object Map]`/`[object Set]` because it has no JSON body. Node's
-  inspector formatting is still not reproduced. ECMA coercion elsewhere is
-  untouched: `"" + {a: 1}`, `` `${{a: 1}}` `` and `String({a: 1})` all remain
-  `[object Object]`.
+  inspector formatting is still not reproduced.
+- String coercion of a plain object, a `Map` or a `Set` refuses as
+  `TS_OBJECT_STRING_COERCION` instead of producing a type tag: `"" + {a: 1}`,
+  `` `${{a: 1}}` `` and `String({a: 1})` all lower to `+` and all three refuse,
+  pointing at `console.log` or `JSON.stringify(value)`. Every value with a
+  string of its own keeps its exact ECMA text, and property keys,
+  `map.toString()`, `Number({})`, loose equality and `console.log` are
+  untouched.
 - Multi-argument Date construction and ISO date-times without an explicit
   offset are interpreted as UTC, never the host timezone. `Date.parse` and
   string construction accept only ECMA date-time syntax; a structurally valid
@@ -433,8 +438,8 @@ other strings in insertion order.
 
 The dialect intentionally reproduces these frequently surprising Node results:
 `arr[-1]` is `undefined`; `typeof null` is `"object"`; `Object.keys(new Map())`
-and `{...new Map()}` are empty; object string coercion is `"[object Object]"`;
-string `.length` counts UTF-16 units while `for...of` walks code points.
+and `{...new Map()}` are empty; string `.length` counts UTF-16 units while
+`for...of` walks code points.
 Numbers use the ECMA binary64 (`f64`) model. One pinned `ryu-js` conversion
 provides shortest-round-trip decimal text for template interpolation,
 `String(number)`, `join`, and JSON; those string forms print negative zero as

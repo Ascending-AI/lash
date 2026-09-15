@@ -36,6 +36,8 @@ mod fluency_smoke;
 mod grammar_coverage;
 #[path = "no_abort_guarantee.rs"]
 mod no_abort_guarantee;
+#[path = "object_string_coercion.rs"]
+mod object_string_coercion;
 #[path = "process_literal_captures.rs"]
 mod process_literal_captures;
 #[path = "projected_coercion.rs"]

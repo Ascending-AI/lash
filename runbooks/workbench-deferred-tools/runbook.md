@@ -113,8 +113,9 @@ order:
    path. Keep the prose check — the rendered assistant row and `/api/state.messages` contain
    the exact digest — as a **secondary** gate: it reads model prose, which this runbook
    elsewhere tells the judge not to gate on, and a re-prompt may satisfy it. A run that meets
-   the structural gate and renders the digest as `[object Object]` has a presentation miss,
-   not a failed deferred call.
+   the structural gate but renders the digest badly — or whose cell refuses with
+   `TS_OBJECT_STRING_COERCION` because it interpolated the whole result object instead of the
+   digest field — has a presentation miss, not a failed deferred call.
 5. SQLite contains a `text.sha256` row. Other rows returned by the same ranked search
    are allowed and must be recorded, not normalized away. Save the ordered result as
    `01-grants.json`; require the `text.sha256` grant to contain the deferred definition,
