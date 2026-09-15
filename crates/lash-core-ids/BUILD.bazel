@@ -64,3 +64,352 @@ filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUILD", "BUILD.bazel"]),
 )
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/bazel/feature_variants.py.
+load(
+    "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_library",
+    "lash_rust_feature_test",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_0b8c5960",
+    build_script = None,
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_c37228b7", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_2998ca5c",
+    build_script = None,
+    crate_features = [
+        "perf-witness",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_76ece385",
+    build_script = None,
+    crate_features = [
+        "otel-trace",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_83f0d150",
+    build_script = None,
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_d8316022"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_83f7c340",
+    build_script = None,
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_cbb58366", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_3719f8c2", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_89e3fb36",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_931d5a5f",
+    build_script = None,
+    crate_features = [
+        "default",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_ba938461"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_be35fe9e",
+    build_script = None,
+    crate_features = [
+        "default",
+        "otel-trace",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_c9d87804", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_e40cd345",
+    build_script = None,
+    crate_features = [
+        "default",
+        "perf-witness",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_daca1039"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_f2f58683",
+    build_script = None,
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core-ids__fv_f8fb2754",
+    build_script = None,
+    crate_features = [
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "lash_core_ids",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-core-ids__unit_test__fv_76ece385",
+    build_script = None,
+    crate_features = [
+        "otel-trace",
+    ],
+    crate_name = "lash_core_ids",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-core-ids__unit_test__fv_89e3fb36",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_core_ids",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-core-ids__unit_test__fv_f2f58683",
+    build_script = None,
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_core_ids",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core-ids",
+    package_name = "lash-internal-core-ids",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)

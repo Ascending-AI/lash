@@ -78,3 +78,78 @@ filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUILD", "BUILD.bazel"]),
 )
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/bazel/feature_variants.py.
+load(
+    "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_library",
+)
+
+lash_rust_feature_library(
+    name = "lash-trace__fv_8ada4082",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_trace",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-trace__fv_971baab0",
+    build_script = None,
+    crate_features = [
+        "otel",
+    ],
+    crate_name = "lash_trace",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    extra_deps = {"@crates//:opentelemetry-0.31.0": "opentelemetry"},
+    variant_deps = {"//crates/lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-trace__fv_edf563c6",
+    build_script = None,
+    crate_features = [
+        "default",
+        "otel",
+    ],
+    crate_name = "lash_trace",
+    declared_features = [
+        "default",
+        "otel",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-trace",
+    package_name = "lash-internal-trace",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    extra_deps = {"@crates//:opentelemetry-0.31.0": "opentelemetry"},
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_76ece385"},
+    version = "0.0.0-dev",
+)

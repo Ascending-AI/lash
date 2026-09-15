@@ -9,6 +9,9 @@ import os
 import pathlib
 import subprocess
 import sys
+import tomllib
+
+import feature_variants
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -297,6 +300,177 @@ def nextest_filter_term(package_name: str, target: dict) -> str:
     return f"(package({package_name}) & {target_filter})"
 
 
+def library_compile_data(package_name: str) -> list[str]:
+    """Sandbox inputs the library compile of one package needs."""
+    data = []
+    if package_name == "slack-clone":
+        data.append("//examples:shared_rust_sources")
+    if package_name == "lash-perf":
+        data.append("//:perf_guard_budgets")
+    return data
+
+
+def unit_test_compile_data(package_name: str) -> list[str]:
+    """Sandbox inputs the unit-test compile of one package needs."""
+    data = []
+    if package_name == "slack-clone":
+        data.append("//examples:shared_rust_sources")
+    if package_name == "lash-internal-sansio":
+        data.append("//:workspace_rust_sources")
+    if package_name == "slack-clone":
+        data.append("//:workspace_test_scripts")
+    if package_name == "lash-perf":
+        data.append("//:perf_guard_budgets")
+    if package_name in ("lash-runtime", "lash-internal-sqlite-store"):
+        data.append("//crates/lashlang:old_module_fixture")
+    return data
+
+
+def target_support(
+    package: dict,
+    targets: list[dict],
+    target: dict,
+    kind: str,
+) -> tuple[list[str], list[str], dict[str, str], list[str]]:
+    """The per-target sandbox inputs, runtime inputs, test env and skips.
+
+    Extracted verbatim from the ordinary target loop so the feature-lane
+    variants of the same Cargo target carry exactly the same support data;
+    a variant that dropped one of these would pass by seeing nothing.
+    """
+    test_env: dict[str, str] = {}
+    extra_data = []
+    if (
+        package["name"] == "lash-internal-core"
+        and target["name"] == "integration_boundary"
+    ):
+        # The checked-in workspace fact that replaces a nested
+        # `cargo metadata` call in the dependency-direction test.
+        extra_data.append("//tools/bazel:target_inventory")
+    if package["name"] == "lash-internal-core" and target["name"] in (
+        "runtime_turns",
+        "runtime_observability",
+    ):
+        # These carry the relocated suites that assert over captured
+        # `tracing` events. Capture installs a scoped default subscriber,
+        # so other cases in the same libtest process must not emit
+        # concurrently; Cargo nextest isolates by process, Bazel does not.
+        test_env["RUST_TEST_THREADS"] = "1"
+    if package["name"] == "lash-internal-sqlite-store" and target["name"] == "integration":
+        # The warning-capture contract installs a scoped tracing subscriber.
+        # Other tests in this libtest process must not emit concurrently.
+        test_env["RUST_TEST_THREADS"] = "1"
+    if package["name"] == "lash-internal-lashlang" and target["name"] in (
+        "append_cost",
+        "dialect_cost",
+    ):
+        # These cost laws read a process-global counting allocator. Cargo
+        # nextest isolates cases by process; serialize libtest so Bazel
+        # observes the same one-at-a-time measurement contract.
+        test_env["RUST_TEST_THREADS"] = "1"
+    extra_compile_data = []
+    if package["name"] in (
+        "agent-service",
+        "agent-workbench",
+        "slack-clone",
+        "toolbench",
+    ):
+        extra_compile_data.append("//examples:shared_rust_sources")
+    if (
+        package["name"] == "lash-internal-typescript"
+        and target["name"] == "integration"
+    ):
+        # The codemode parity module links the checked-in
+        # `examples/codemode-parity/*.ts` cells with `include_str!`, so the
+        # cells are compile inputs of this test and of no other.
+        extra_compile_data.append("//examples:codemode_parity_cells")
+    if package["name"] == "lash-internal-lashlang" and target["name"] == "dialect_cost":
+        # It holds the dialect to the corpus's own checked-in budget by
+        # reading the budget file with `include_str!`, the way lash-perf
+        # does, so the file is a compile input of this test.
+        extra_compile_data.append("//:perf_guard_budgets")
+    if package["name"] in (
+        "lash-internal-postgres-store",
+        "lash-internal-sqlite-store",
+    ):
+        if target["name"] == "conformance":
+            helper_name = (
+                "postgres-await-event-helper"
+                if package["name"] == "lash-internal-postgres-store"
+                else "sqlite-await-event-helper"
+            )
+            helper_target = next(
+                candidate for candidate in targets if candidate["name"] == helper_name
+            )
+            helper_label = f":{label_name(helper_target, False)}"
+            test_env["LASH_CONFORMANCE_HELPER_EXE"] = (
+                f"$(rootpath {helper_label})"
+            )
+            extra_data.append(helper_label)
+        if target["name"] in (
+            "postgres-await-event-helper",
+            "sqlite-await-event-helper",
+        ):
+            extra_compile_data.append("//crates/lash-core:cold_process_drivers")
+        if target["name"] == "conformance":
+            extra_compile_data.extend([
+                "//crates/lash-core:queued_claim_atomicity",
+            ])
+        if target["name"] == "durable_read_fixture":
+            extra_compile_data.append("//crates/lash-core:durable_read_fixture_source")
+    if (
+        package["name"] == "lash-internal-postgres-store"
+        and target["name"] == "preflight_durable_walk"
+    ):
+        extra_compile_data.append("//crates/lashlang:old_module_fixture")
+    if package["name"] in (
+        "lash-internal-postgres-store",
+        "lash-internal-sqlite-store",
+    ) and target["name"] == "durable_read_fixture":
+        extra_compile_data.append("//:durable_fixtures")
+    target_args = []
+    if (
+        package["name"] == "lash-internal-core"
+        and target["name"] == "runtime_scenarios"
+    ):
+        # The fault-matrix routing probes execute the real
+        # scripts/confidence-gate.sh against a recording `cargo`.
+        extra_data.append("//:confidence_gate_scripts")
+        # The five `..._real_cargo_filters_chunk_*` cases each fork a real
+        # `cargo test ... -- --list` against the workspace to prove the
+        # gate's name filters still select tests. That is a claim about
+        # Cargo's own selection, so it cannot be proved inside a hermetic
+        # action without Cargo; the trunk-only `Test heavy suites` job
+        # (profile.ci-heavy) owns them and is the only place they run.
+        # Excluded by name here so the label is honest about what it
+        # executed.
+        target_args.append(
+            "--skip=runtime::tests::runtime_scenarios::fault_matrix"
+            "::durable_fault_matrix_real_cargo_filters_chunk_"
+        )
+    if package["name"] == "lash-sim" and kind == "test":
+        extra_compile_data.extend([
+            "//crates/lash-postgres-store:package_files",
+            "//crates/lash-sqlite-store:package_files",
+        ])
+        if target["name"] == "cross_backend_store_differential":
+            # Its completeness gates read the real store trait definitions
+            # with `include_str!`, so the lash-core-store sources are
+            # compile inputs of this test and of no other lash-sim test.
+            extra_compile_data.append(
+                "//crates/lash-core-store:package_files"
+            )
+    if (
+        package["name"] == "lash-sim"
+        and target["name"] == "signal_replay_key_constructor"
+    ):
+        # The gate scans every first-party Rust source, runbooks and
+        # examples included, so under Bazel it needs them all in the sandbox
+        # or it would pass by seeing nothing.
+        extra_compile_data.append("//:workspace_rust_sources")
+    return extra_compile_data, extra_data, test_env, target_args
+
+
 def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
     manifest = relative(package["manifest_path"])
     package_dir = pathlib.PurePosixPath(manifest).parent.as_posix()
@@ -351,11 +525,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         })
 
     if library:
-        extra_compile_data = []
-        if package["name"] == "slack-clone":
-            extra_compile_data.append("//examples:shared_rust_sources")
-        if package["name"] == "lash-perf":
-            extra_compile_data.append("//:perf_guard_budgets")
+        extra_compile_data = library_compile_data(package["name"])
         chunks.append(
             "lash_rust_library(\n"
             f"    name = {quote(primary_target)},\n"
@@ -372,20 +542,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         )
         inventory_targets.append({"kind": "lib", "cargo": library["name"], "label": f"//{package_dir}:{primary_target}"})
         if library.get("test", False):
-            unit_compile_data = []
-            if package["name"] == "slack-clone":
-                unit_compile_data.append("//examples:shared_rust_sources")
-            if package["name"] == "lash-internal-sansio":
-                unit_compile_data.append("//:workspace_rust_sources")
-            if package["name"] == "slack-clone":
-                unit_compile_data.append("//:workspace_test_scripts")
-            if package["name"] == "lash-perf":
-                unit_compile_data.append("//:perf_guard_budgets")
-            if package["name"] in (
-                "lash-runtime",
-                "lash-internal-sqlite-store",
-            ):
-                unit_compile_data.append("//crates/lashlang:old_module_fixture")
+            unit_compile_data = unit_test_compile_data(package["name"])
             unit_tags, unit_cargo_reason = cargo_test_policy(
                 package["name"], "unit-test", library["name"]
             )
@@ -473,135 +630,13 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         rustc_env, binary_data = cargo_bin_env(source, binary_labels)
         test_env = {}
         test_env.update(rustc_env)
-        extra_data = []
-        if (
-            package["name"] == "lash-internal-core"
-            and target["name"] == "integration_boundary"
-        ):
-            # The checked-in workspace fact that replaces a nested
-            # `cargo metadata` call in the dependency-direction test.
-            extra_data.append("//tools/bazel:target_inventory")
-        if package["name"] == "lash-internal-core" and target["name"] in (
-            "runtime_turns",
-            "runtime_observability",
-        ):
-            # These carry the relocated suites that assert over captured
-            # `tracing` events. Capture installs a scoped default subscriber,
-            # so other cases in the same libtest process must not emit
-            # concurrently; Cargo nextest isolates by process, Bazel does not.
-            test_env["RUST_TEST_THREADS"] = "1"
-        if package["name"] == "lash-internal-sqlite-store" and target["name"] == "integration":
-            # The warning-capture contract installs a scoped tracing subscriber.
-            # Other tests in this libtest process must not emit concurrently.
-            test_env["RUST_TEST_THREADS"] = "1"
-        if package["name"] == "lash-internal-lashlang" and target["name"] in (
-            "append_cost",
-            "dialect_cost",
-        ):
-            # These cost laws read a process-global counting allocator. Cargo
-            # nextest isolates cases by process; serialize libtest so Bazel
-            # observes the same one-at-a-time measurement contract.
-            test_env["RUST_TEST_THREADS"] = "1"
-        extra_compile_data = []
-        if package["name"] in (
-            "agent-service",
-            "agent-workbench",
-            "slack-clone",
-            "toolbench",
-        ):
-            extra_compile_data.append("//examples:shared_rust_sources")
-        if (
-            package["name"] == "lash-internal-typescript"
-            and target["name"] == "integration"
-        ):
-            # The codemode parity module links the checked-in
-            # `examples/codemode-parity/*.ts` cells with `include_str!`, so the
-            # cells are compile inputs of this test and of no other.
-            extra_compile_data.append("//examples:codemode_parity_cells")
-        if package["name"] == "lash-internal-lashlang" and target["name"] == "dialect_cost":
-            # It holds the dialect to the corpus's own checked-in budget by
-            # reading the budget file with `include_str!`, the way lash-perf
-            # does, so the file is a compile input of this test.
-            extra_compile_data.append("//:perf_guard_budgets")
-        if package["name"] in (
-            "lash-internal-postgres-store",
-            "lash-internal-sqlite-store",
-        ):
-            if target["name"] == "conformance":
-                helper_name = (
-                    "postgres-await-event-helper"
-                    if package["name"] == "lash-internal-postgres-store"
-                    else "sqlite-await-event-helper"
-                )
-                helper_target = next(
-                    candidate for candidate in targets if candidate["name"] == helper_name
-                )
-                helper_label = f":{label_name(helper_target, False)}"
-                test_env["LASH_CONFORMANCE_HELPER_EXE"] = (
-                    f"$(rootpath {helper_label})"
-                )
-                extra_data.append(helper_label)
-            if target["name"] in (
-                "postgres-await-event-helper",
-                "sqlite-await-event-helper",
-            ):
-                extra_compile_data.append("//crates/lash-core:cold_process_drivers")
-            if target["name"] == "conformance":
-                extra_compile_data.extend([
-                    "//crates/lash-core:queued_claim_atomicity",
-                ])
-            if target["name"] == "durable_read_fixture":
-                extra_compile_data.append("//crates/lash-core:durable_read_fixture_source")
-        if (
-            package["name"] == "lash-internal-postgres-store"
-            and target["name"] == "preflight_durable_walk"
-        ):
-            extra_compile_data.append("//crates/lashlang:old_module_fixture")
-        if package["name"] in (
-            "lash-internal-postgres-store",
-            "lash-internal-sqlite-store",
-        ) and target["name"] == "durable_read_fixture":
-            extra_compile_data.append("//:durable_fixtures")
-        target_args = []
-        if (
-            package["name"] == "lash-internal-core"
-            and target["name"] == "runtime_scenarios"
-        ):
-            # The fault-matrix routing probes execute the real
-            # scripts/confidence-gate.sh against a recording `cargo`.
-            extra_data.append("//:confidence_gate_scripts")
-            # The five `..._real_cargo_filters_chunk_*` cases each fork a real
-            # `cargo test ... -- --list` against the workspace to prove the
-            # gate's name filters still select tests. That is a claim about
-            # Cargo's own selection, so it cannot be proved inside a hermetic
-            # action without Cargo; the trunk-only `Test heavy suites` job
-            # (profile.ci-heavy) owns them and is the only place they run.
-            # Excluded by name here so the label is honest about what it
-            # executed.
-            target_args.append(
-                "--skip=runtime::tests::runtime_scenarios::fault_matrix"
-                "::durable_fault_matrix_real_cargo_filters_chunk_"
-            )
-        if package["name"] == "lash-sim" and kind == "test":
-            extra_compile_data.extend([
-                "//crates/lash-postgres-store:package_files",
-                "//crates/lash-sqlite-store:package_files",
-            ])
-            if target["name"] == "cross_backend_store_differential":
-                # Its completeness gates read the real store trait definitions
-                # with `include_str!`, so the lash-core-store sources are
-                # compile inputs of this test and of no other lash-sim test.
-                extra_compile_data.append(
-                    "//crates/lash-core-store:package_files"
-                )
-        if (
-            package["name"] == "lash-sim"
-            and target["name"] == "signal_replay_key_constructor"
-        ):
-            # The gate scans every first-party Rust source, runbooks and
-            # examples included, so under Bazel it needs them all in the sandbox
-            # or it would pass by seeing nothing.
-            extra_compile_data.append("//:workspace_rust_sources")
+        (
+            extra_compile_data,
+            extra_data,
+            support_test_env,
+            target_args,
+        ) = target_support(package, targets, target, kind)
+        test_env.update(support_test_env)
         macro = (
             "lash_rust_binary"
             if kind in ("bin", "example", "bench")
@@ -855,6 +890,37 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     for name, values in groups.items():
         bzl.append(f"{name} = {string_list(values, indent=4)}\n\n")
     outputs[ROOT / "tools/bazel/workspace_targets.bzl"] = "".join(bzl).rstrip() + "\n"
+    feature_chunks, feature_bzl, feature_units = feature_lane_outputs(metadata)
+    for package in inventory:
+        chunk = feature_chunks.get(package["package"])
+        if not chunk:
+            continue
+        macros = sorted(
+            {
+                line.split("(")[0]
+                for line in chunk.splitlines()
+                if line.startswith("lash_rust_feature_")
+            }
+        )
+        header = (
+            "\n# Feature-lane variants. One target per distinct "
+            "`(package, resolved features,\n"
+            "# Cargo target kind)` unit of scripts/feature-coverage.toml; see\n"
+            "# tools/bazel/feature_variants.py.\n"
+            "load(\n"
+            "    \"//tools/bazel:lash_rust.bzl\",\n"
+            + "".join(f"    {quote(macro)},\n" for macro in macros)
+            + ")\n\n"
+        )
+        manifest = ROOT / package["manifest"]
+        outputs[manifest.parent / "BUILD.bazel"] += header + chunk.rstrip("\n") + "\n"
+    outputs[ROOT / "tools/bazel/feature_lanes.bzl"] = feature_bzl
+    inventory_payload["feature_lane_units"] = sorted(
+        feature_units, key=lambda unit: (unit["label"], unit["kind"])
+    )
+    outputs[ROOT / "tools/bazel/target-inventory.json"] = (
+        json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n"
+    )
     def cargo_owned_terms(*exclude_tags: str) -> list[str]:
         excluded = set(exclude_tags)
         return sorted(
@@ -916,6 +982,1045 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     return outputs, inventory
 
 
+# ---------------------------------------------------------------------------
+# Feature-lane variants
+#
+# `scripts/feature-coverage.toml` declares the exact Cargo commands that prove
+# the workspace's feature combinations. Each is a different resolution of one
+# package's first-party closure from the workspace graph above, so it needs its
+# own targets: `tools/bazel/feature_variants.py` reproduces Cargo's resolution
+# for the command and the functions below emit one Bazel target per distinct
+# `(package, resolved features, Cargo target kind)` unit, deduplicated across
+# every command of every lane.
+#
+# Why this is not a rewrite of the coverage semantics: the proof
+# `scripts/check_feature_coverage.py` performs is unchanged and still runs --
+# its cfg-predicate and resolver witnesses are pure analysis over
+# `cargo metadata` and `cargo tree`, which cost seconds. Only the compile half,
+# the part that cost fourteen legs of up to 504 s on 4-vCPU runners, moves to
+# the pool. `--check` reconciles the two halves: the set of units the Bazel
+# lane graph compiles must equal the set Cargo compiles for the same commands.
+# ---------------------------------------------------------------------------
+
+FEATURE_COVERAGE_PLAN = ROOT / "scripts/feature-coverage.toml"
+FEATURE_VARIANT_TAG = "feature-lane"
+# Every variant is `manual`: it belongs to the feature-lane aggregates and to
+# nothing else. `bazel test //...`, `//:workspace_tests` and `kiln test` keep
+# executing exactly the default-feature partition they executed before.
+FEATURE_VARIANT_TAGS = ("feature-lane", "manual")
+
+# The Cargo clippy invocations the Lint job ran on a runner because the feature
+# resolution they lint is outside the default workspace graph. Each is matched
+# against a lane command by (package, default features, requested features,
+# target selector); the variants of the matching command make up the Bazel
+# clippy aggregate that replaces the step. `slack-clone` declares no default
+# feature, so the lane's `--no-default-features --features e2e` and the Cargo
+# step's `--features e2e` are the same resolution.
+FEATURE_LANE_CLIPPY_SCOPES = (
+    ("slack-clone", ("e2e",), "--all-targets"),
+)
+
+# Test-count floors the retired `Runtime feature boundary` matrix carried. The
+# floor is what stops a feature-gated arm from quietly taking the default
+# build's coverage with it: compiling the default-off test binary proves it
+# still builds, only counting its cases proves it still tests anything. Keyed
+# by (package, resolved features, kind) so the generator can name the label
+# whose hash it alone knows.
+FEATURE_LANE_TEST_FLOORS = {
+    ("lash-runtime", (), "unit-test"): 130,
+}
+
+# Compile inputs a feature turns on that the ordinary workspace resolution never
+# needs. `agent-workbench`'s `provider-wire-fixtures` pulls a `lash-sim` script
+# in with `include_str!` across the package boundary, so the file is a compile
+# input of the variant and of no ordinary target. Keyed by (package, feature) so
+# a new one is a one-line addition rather than a rule change.
+FEATURE_VARIANT_COMPILE_DATA = {
+    ("agent-workbench", "provider-wire-fixtures"): ["//crates/lash-sim:package_files"],
+}
+
+
+def feature_compile_data(package_name: str, features: list[str]) -> list[str]:
+    extra: list[str] = []
+    for feature in features:
+        extra.extend(FEATURE_VARIANT_COMPILE_DATA.get((package_name, feature), []))
+    return sorted(set(extra))
+
+
+def satisfies(version: str, requirement: str) -> bool:
+    """Whether one locked version answers a Cargo dependency requirement.
+
+    Only the caret shapes this workspace writes are supported, and an
+    unsupported shape is refused rather than guessed: the version it picks
+    decides which `@crates` label a variant links.
+    """
+    if requirement in ("*", ""):
+        return True
+    parts = [part.strip() for part in requirement.split(",")]
+    for part in parts:
+        if part.startswith("^"):
+            part = part[1:]
+        elif part[0].isdigit():
+            pass
+        else:
+            raise SystemExit(
+                f"unsupported Cargo version requirement for a feature-lane "
+                f"variant: {requirement!r}"
+            )
+        wanted = part.split(".")
+        found = version.split(".")
+        # Caret compatibility is keyed on the leftmost non-zero component.
+        significant = 1
+        for index, component in enumerate(wanted):
+            if component != "0":
+                significant = index + 1
+                break
+        else:
+            significant = len(wanted)
+        if found[:significant] != wanted[:significant]:
+            return False
+    return True
+
+
+def locked_versions(name: str) -> list[str]:
+    """Every version of one crate in Cargo.lock.
+
+    `@crates` is generated from `//:Cargo.lock`, so a crate that only an
+    optional feature enables has a Bazel label even though `cargo metadata`
+    (which resolves the workspace's own default features) never mentions it.
+    """
+    global _LOCKED_PACKAGES
+    if _LOCKED_PACKAGES is None:
+        with (ROOT / "Cargo.lock").open("rb") as handle:
+            lock = tomllib.load(handle)
+        _LOCKED_PACKAGES = {}
+        for entry in lock.get("package", []):
+            _LOCKED_PACKAGES.setdefault(entry["name"], []).append(entry["version"])
+    return _LOCKED_PACKAGES.get(name, [])
+
+
+_LOCKED_PACKAGES: dict[str, list[str]] | None = None
+
+
+def feature_coverage_plan() -> dict:
+    with FEATURE_COVERAGE_PLAN.open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def _variant_suffix(package_name: str, closure: list[tuple[str, list[str]]]) -> str:
+    """A stable short name for one package compiled against one closure.
+
+    Keyed on the whole first-party closure's resolution, not on the package's
+    own feature set: the ordinary label links the ordinary labels of its
+    dependencies, so two commands that resolve this package identically but a
+    dependency differently are two different compilations. Naming them both
+    after the package's own features collapses them into one target and the
+    first one emitted silently wins.
+    """
+    parts = [package_name]
+    for name, features in closure:
+        parts.append(name + "=" + ",".join(features))
+    return feature_variants.variant_hash(package_name, parts)
+
+
+class FeatureLaneGraph:
+    """Every variant target the lanes need, and the labels each lane builds."""
+
+    def __init__(self, metadata: dict, plan: dict) -> None:
+        self.workspace = feature_variants.Workspace.from_metadata(metadata)
+        self.plan = plan
+        self.default_features = {
+            node["id"]: sorted(node["features"]) for node in metadata["resolve"]["nodes"]
+        }
+        members = set(metadata["workspace_members"])
+        self.by_name = {}
+        for package in metadata["packages"]:
+            if package["id"] not in members:
+                continue
+            self.by_name[package["name"]] = package
+        # package name -> its Bazel package directory and primary target name
+        self.dirs = {
+            name: pathlib.PurePosixPath(relative(package["manifest_path"])).parent.as_posix()
+            for name, package in self.by_name.items()
+        }
+        self.primary = {}
+        for name, package in self.by_name.items():
+            targets = [
+                target
+                for target in package["targets"]
+                if "custom-build" not in target["kind"]
+            ]
+            library = next((t for t in targets if "lib" in t["kind"]), None)
+            binaries = [t for t in targets if "bin" in t["kind"]]
+            self.primary[name] = (
+                pathlib.PurePosixPath(self.dirs[name]).name
+                if library
+                else (label_name(binaries[0], True) if len(binaries) == 1 else None)
+            )
+        # (package, features) -> label, and the chunk that defines it
+        self.variants: dict[tuple[str, tuple[str, ...]], str] = {}
+        self.chunks: dict[str, list[tuple[str, str]]] = {}
+        self.lanes: dict[str, dict[str, list[str]]] = {}
+        self.units: list[dict] = []
+        self.clippy: set[str] = set()
+        self.activations: dict[tuple[str, tuple[str, ...]], set[str]] = {}
+        self._workspace_edges: dict[str, set[str]] = {}
+        self._closures: dict[str, set[str]] = {}
+        self._dev_closures: dict[str, set[str]] = {}
+        self.resolve_nodes = {
+            node["id"]: node for node in metadata["resolve"]["nodes"]
+        }
+        self.third_party: dict[str, list[dict]] = {}
+        for package in metadata["packages"]:
+            if package["id"] in members:
+                continue
+            self.third_party.setdefault(package["name"], []).append(package)
+
+    # -- helpers ------------------------------------------------------------
+
+    def default_resolution(self, package_name: str) -> list[str]:
+        package = self.by_name[package_name]
+        return self.default_features.get(package["id"], [])
+
+    def library_of(self, package_name: str):
+        for target in self.by_name[package_name]["targets"]:
+            if "lib" in target["kind"]:
+                return target
+        return None
+
+    def add_chunk(self, package_name: str, name: str, text: str) -> None:
+        self.chunks.setdefault(package_name, [])
+        if any(existing == name for existing, _ in self.chunks[package_name]):
+            return
+        self.chunks[package_name].append((name, text))
+
+    def variant_deps_argument(
+        self, owner: str, resolution: dict[str, list[str]], indent: int = 4
+    ) -> str:
+        """The first-party label swap for one resolution, as Starlark."""
+        mapping = {}
+        for name, features in resolution.items():
+            if name == owner or self.library_of(name) is None:
+                continue
+            label = self.library_label(name, resolution)
+            ordinary = f"//{self.dirs[name]}"
+            if label != f"{ordinary}:{self.primary[name]}":
+                mapping[ordinary] = label
+        if not mapping:
+            return ""
+        spaces = " " * indent
+        return (
+            f"{spaces}variant_deps = "
+            + json.dumps(mapping, sort_keys=True)
+            + ",\n"
+        )
+
+    def record_activations(self, resolved) -> None:
+        """Remember which dependency edges each resolved feature set turns on.
+
+        A variant that enables `lash-trace/otel` links `opentelemetry`, an
+        optional dependency the workspace resolution leaves off. `@crates`
+        carries the crate (it is in `Cargo.lock`), but `all_crate_deps` reports
+        only the workspace's own dependency list, so the label has to be named.
+        """
+        for name, features in resolved.features.items():
+            key = (name, tuple(sorted(features)))
+            self.activations.setdefault(key, set()).update(
+                resolved.activated.get(name, set())
+            )
+
+    def extra_deps_argument(
+        self,
+        package_name: str,
+        features: list[str],
+        resolution: dict[str, list[str]] | None = None,
+        with_dev: bool = True,
+        indent: int = 4,
+    ) -> str:
+        activated = self.activations.get((package_name, tuple(features)), set())
+        missing = sorted(activated - self.workspace_edges(package_name, with_dev))
+        mapping = {}
+        for alias in missing:
+            member = self.member_named(package_name, alias, with_dev)
+            if member is not None:
+                # A package that dev-depends on itself (`lash-internal-core`
+                # does, to arm its `testing` feature in its own tests) is one
+                # compilation, never an edge.
+                if member == package_name:
+                    continue
+                # An OPTIONAL first-party dependency the workspace resolution
+                # leaves off: `all_crate_deps` has no label to rewrite, so the
+                # variant names the dependency's own variant outright.
+                if self.library_of(member) is None:
+                    continue
+                label = self.library_label(member, resolution or {})
+                mapping[label] = alias.replace("-", "_")
+                continue
+            label, extern = self.third_party_label(package_name, alias, with_dev)
+            if label is None:
+                continue
+            mapping[label] = extern
+        if not mapping:
+            return ""
+        spaces = " " * indent
+        return f"{spaces}extra_deps = " + json.dumps(mapping, sort_keys=True) + ",\n"
+
+    def workspace_edges(self, package_name: str, with_dev: bool = True) -> set[str]:
+        """The dependency names the workspace resolution activates for a package.
+
+        Split by context: a library or binary compile links the normal edges
+        only, so a package that is an optional NORMAL dependency and an
+        unconditional DEV dependency at once -- `lash-sim` of `agent-workbench`
+        -- is present for a test variant and absent for a binary variant. Asking
+        the dev-inclusive question everywhere would leave the binary variant
+        without the crate its feature just turned on.
+        """
+        key = (package_name, with_dev)
+        if key in self._workspace_edges:
+            return self._workspace_edges[key]
+        node = self.resolve_nodes.get(self.by_name[package_name]["id"], {})
+        allowed = {None, "dev"} if with_dev else {None}
+        edges = set()
+        for dependency in node.get("deps", []):
+            kinds = {entry.get("kind") for entry in dependency.get("dep_kinds", [])}
+            if kinds and kinds.isdisjoint(allowed):
+                continue
+            edges.add(dependency["name"])
+        # `deps[].name` is the extern name; a feature string and an optional
+        # dependency both name the Cargo alias, so record both spellings.
+        for dependency in self.by_name[package_name]["dependencies"]:
+            alias = feature_variants.dependency_alias(dependency)
+            if alias.replace("-", "_") in edges:
+                edges.add(alias)
+        self._workspace_edges[key] = edges
+        return edges
+
+    def member_named(
+        self, package_name: str, alias: str, with_dev: bool = True
+    ) -> str | None:
+        """The first-party package one dependency alias of a package names."""
+        allowed = (None, "dev") if with_dev else (None,)
+        for dependency in self.by_name[package_name]["dependencies"]:
+            if feature_variants.dependency_alias(dependency) != alias:
+                continue
+            if dependency["kind"] not in allowed:
+                continue
+            if self.workspace.is_member(dependency["name"]):
+                return dependency["name"]
+        return None
+
+    def third_party_label(self, package_name: str, alias: str, with_dev: bool = True):
+        allowed = (None, "dev") if with_dev else (None,)
+        for dependency in self.by_name[package_name]["dependencies"]:
+            if feature_variants.dependency_alias(dependency) != alias:
+                continue
+            if dependency["kind"] not in allowed:
+                continue
+            name = dependency["name"]
+            if self.workspace.is_member(name):
+                return None, None
+            # `cargo metadata --locked` prunes optional dependencies the
+            # workspace resolution never enables, so the version comes from
+            # Cargo.lock -- the same file `crate.from_cargo` builds `@crates`
+            # from, which is why the label exists even when metadata omits it.
+            versions = sorted(
+                version
+                for version in {
+                    *(entry["version"] for entry in self.third_party.get(name, [])),
+                    *locked_versions(name),
+                }
+                if satisfies(version, dependency.get("req", "*"))
+            )
+            if len(versions) != 1:
+                raise SystemExit(
+                    f"{package_name}: optional dependency {alias} resolves to "
+                    f"{len(versions)} versions of {name}; the feature-lane "
+                    "variant cannot name one label"
+                )
+            extern = alias.replace("-", "_")
+            if dependency.get("rename") is None:
+                for entry in self.third_party.get(name, []):
+                    library = next(
+                        (
+                            target
+                            for target in entry["targets"]
+                            if "lib" in target["kind"] or "proc-macro" in target["kind"]
+                        ),
+                        None,
+                    )
+                    if library is not None:
+                        extern = library["name"]
+                        break
+            return f"@crates//:{name}-{versions[0]}", extern
+        return None, None
+
+    def library_closure(self, package_name: str) -> set[str]:
+        """Every first-party package the library compile of one package links."""
+        if package_name in self._closures:
+            return self._closures[package_name]
+        closure: set[str] = set()
+        pending = [package_name]
+        while pending:
+            current = pending.pop()
+            for dependency in self.by_name[current]["dependencies"]:
+                if dependency["kind"] is not None:
+                    continue
+                name = dependency["name"]
+                if not self.workspace.is_member(name) or name in closure:
+                    continue
+                closure.add(name)
+                pending.append(name)
+        self._closures[package_name] = closure
+        return closure
+
+    def dev_closure(self, package_name: str) -> set[str]:
+        """The extra first-party packages a test compile of this package links."""
+        if package_name in self._dev_closures:
+            return self._dev_closures[package_name]
+        closure: set[str] = set()
+        for dependency in self.by_name[package_name]["dependencies"]:
+            if dependency["kind"] != "dev":
+                continue
+            name = dependency["name"]
+            if not self.workspace.is_member(name):
+                continue
+            closure.add(name)
+            closure |= self.library_closure(name)
+        self._dev_closures[package_name] = closure
+        return closure
+
+    def closure_key(
+        self,
+        package_name: str,
+        resolution: dict[str, list[str]],
+        with_dev: bool,
+    ) -> list[tuple[str, list[str]]]:
+        names = {package_name, *self.library_closure(package_name)}
+        if with_dev:
+            names |= self.dev_closure(package_name)
+        return [
+            (name, resolution.get(name, self.default_resolution(name)))
+            for name in sorted(names)
+        ]
+
+    def library_label(
+        self, package_name: str, resolution: dict[str, list[str]]
+    ) -> str:
+        """The label that compiles this package at this resolution.
+
+        The ordinary default-feature label is reused only when the WHOLE
+        first-party closure resolves the way the workspace does. Matching on
+        the package's own feature set alone is not enough: the ordinary label
+        links the ordinary labels of its dependencies, so a package whose own
+        features happen to match while a dependency's do not would pull a
+        second copy of that dependency into the same graph -- rustc reports it
+        as "multiple different versions of crate ... in the dependency graph"
+        and refuses the types that cross the seam.
+        """
+        directory = self.dirs[package_name]
+        primary = self.primary[package_name]
+        unchanged = all(
+            resolution.get(name, self.default_resolution(name))
+            == self.default_resolution(name)
+            for name in {package_name, *self.library_closure(package_name)}
+        )
+        if unchanged:
+            return f"//{directory}:{primary}"
+        return (
+            f"//{directory}:{primary}"
+            f"__fv_{_variant_suffix(package_name, self.closure_key(package_name, resolution, False))}"
+        )
+
+    # -- emission -----------------------------------------------------------
+
+    def emit_library(self, package_name: str, resolution: dict[str, list[str]]) -> str:
+        features = resolution[package_name]
+        label = self.library_label(package_name, resolution)
+        name = label.split(":", 1)[1]
+        package = self.by_name[package_name]
+        library = self.library_of(package_name)
+        directory = self.dirs[package_name]
+        if label == f"//{directory}:{self.primary[package_name]}":
+            return label
+        has_build_script = any(
+            "custom-build" in target["kind"] for target in package["targets"]
+        )
+        self.add_chunk(
+            package_name,
+            name,
+            "lash_rust_feature_library(\n"
+            f"    name = {quote(name)},\n"
+            f"    build_script = {quote(':build_script') if has_build_script else 'None'},\n"
+            f"    crate_features = {string_list(features)},\n"
+            f"    crate_name = {quote(library['name'])},\n"
+            f"    declared_features = {string_list(sorted(package['features']))},\n"
+            + exec_properties_argument(library["name"], "lib")
+            + f"    extra_compile_data = {string_list(library_compile_data(package_name) + feature_compile_data(package_name, features))},\n"
+            f"    manifest_dir = {quote(directory)},\n"
+            f"    package_name = {quote(package_name)},\n"
+            f"    tags = {string_list(list(FEATURE_VARIANT_TAGS))},\n"
+            + self.extra_deps_argument(package_name, features, resolution, with_dev=False)
+            + self.variant_deps_argument(package_name, resolution)
+            + f"    version = {quote(package['version'])},\n"
+            ")\n\n",
+        )
+        return label
+
+    def emit_target(
+        self,
+        package_name: str,
+        resolution: dict[str, list[str]],
+        target: dict,
+        kind: str,
+        runnable: bool,
+        args: list[str],
+    ) -> str | None:
+        package = self.by_name[package_name]
+        directory = self.dirs[package_name]
+        features = resolution[package_name]
+        suffix = _variant_suffix(
+            package_name, self.closure_key(package_name, resolution, True)
+        )
+        targets = [
+            candidate
+            for candidate in package["targets"]
+            if "custom-build" not in candidate["kind"]
+        ]
+        library = self.library_of(package_name)
+        binaries = [t for t in targets if "bin" in t["kind"]]
+        library_label = (
+            self.library_label(package_name, resolution) if library else None
+        )
+        library_crate = library["name"] if library else None
+        target_features = sorted(set(features) | set(target.get("required-features", [])))
+        crate_root = relative(target["src_path"]).replace(directory + "/", "")
+        crate_name = target["name"].replace("-", "_")
+        extra_compile_data, extra_data, test_env, target_args = target_support(
+            package, targets, target, kind
+        )
+        extra_compile_data = extra_compile_data + feature_compile_data(
+            package_name, features
+        )
+        rustc_env, binary_data = cargo_bin_env(
+            pathlib.Path(target["src_path"]),
+            {
+                candidate["name"]: label_name(
+                    candidate, library is None and len(binaries) == 1
+                )
+                for candidate in binaries
+            },
+        )
+        # A binary referenced through `CARGO_BIN_EXE_*` is a runtime input of
+        # the ordinary label; a variant must reach the variant of that binary,
+        # never the default-feature one.
+        binary_data = [
+            f"{d}__fv_{suffix}" if d.startswith(":") else d for d in binary_data
+        ]
+        rustc_env = {
+            key: value.replace(")", f"__fv_{suffix})")
+            for key, value in rustc_env.items()
+        }
+        tags = list(FEATURE_VARIANT_TAGS)
+        policy_tags, _reason = cargo_test_policy(package_name, kind, target["name"])
+        if kind in ("bin", "example", "bench"):
+            base = label_name(target, library is None and len(binaries) == 1)
+            name = f"{base}__fv_{suffix}"
+            self.add_chunk(
+                package_name,
+                name,
+                "lash_rust_feature_binary(\n"
+                f"    name = {quote(name)},\n"
+                f"    crate_features = {string_list(target_features)},\n"
+                f"    crate_name = {quote(crate_name)},\n"
+                f"    crate_root = {quote(crate_root)},\n"
+                f"    declared_features = {string_list(sorted(package['features']))},\n"
+                + exec_properties_argument(crate_name, "bin")
+                + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
+                f"    include_dev_deps = {kind in ('example', 'bench')},\n"
+                f"    library = {quote(library_label) if library_label else 'None'},\n"
+                f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
+                f"    manifest_dir = {quote(directory)},\n"
+                f"    package_name = {quote(package_name)},\n"
+                f"    rustc_env = {json.dumps(rustc_env, sort_keys=True)},\n"
+                f"    tags = {string_list(tags)},\n"
+                + self.extra_deps_argument(package_name, features, resolution, with_dev=kind in ('example', 'bench'))
+            + self.variant_deps_argument(package_name, resolution)
+                + f"    version = {quote(package['version'])},\n"
+                ")\n\n",
+            )
+            return f"//{directory}:{name}"
+
+        if kind == "unit-test":
+            base = self.primary[package_name]
+            name = f"{base}__unit_test__fv_{suffix}"
+            root = relative(library["src_path"]).replace(directory + "/", "")
+            compile_data = unit_test_compile_data(package_name) + feature_compile_data(
+                package_name, features
+            )
+            unit_extra_data = (
+                ["//:confidence_gate_corpus"] if package_name == "lash-sim" else []
+            )
+            unit_env = {"RUST_TEST_THREADS": "1"} if package_name == "lash-perf" else {}
+            self.add_chunk(
+                package_name,
+                name,
+                "lash_rust_feature_test(\n"
+                f"    name = {quote(name)},\n"
+                + (f"    args = {string_list(args)},\n" if args else "")
+                + f"    build_script = {quote(':build_script') if any('custom-build' in t['kind'] for t in package['targets']) else 'None'},\n"
+                f"    crate_features = {string_list(features)},\n"
+                f"    crate_name = {quote(library['name'])},\n"
+                f"    crate_root = {quote(root)},\n"
+                f"    declared_features = {string_list(sorted(package['features']))},\n"
+                + exec_properties_argument(library["name"], "test")
+                + f"    extra_compile_data = {string_list(compile_data)},\n"
+                + (
+                    f"    extra_data = {string_list(unit_extra_data)},\n"
+                    if unit_extra_data
+                    else ""
+                )
+                + f"    manifest_dir = {quote(directory)},\n"
+                f"    package_name = {quote(package_name)},\n"
+                + (
+                    f"    test_env = {json.dumps(unit_env, sort_keys=True)},\n"
+                    if unit_env
+                    else ""
+                )
+                + f"    tags = {string_list(tags)},\n"
+                + self.extra_deps_argument(package_name, features, resolution)
+            + self.variant_deps_argument(package_name, resolution)
+                + f"    version = {quote(package['version'])},\n"
+                ")\n\n",
+            )
+            return f"//{directory}:{name}"
+
+        if kind == "bin-unit-test":
+            base = label_name(target, library is None and len(binaries) == 1)
+            name = f"{base}__unit_test__fv_{suffix}"
+            skips = (
+                [f"--skip={case}" for case in NODE_GATED_WORKBENCH_TESTS]
+                if package_name == "agent-workbench"
+                else []
+            )
+            self.add_chunk(
+                package_name,
+                name,
+                "lash_rust_feature_test(\n"
+                f"    name = {quote(name)},\n"
+                + (
+                    f"    args = {string_list(sorted(set(skips + args)))},\n"
+                    if skips or args
+                    else ""
+                )
+                + f"    crate_features = {string_list(target_features)},\n"
+                f"    crate_name = {quote(crate_name)},\n"
+                f"    crate_root = {quote(crate_root)},\n"
+                f"    declared_features = {string_list(sorted(package['features']))},\n"
+                + exec_properties_argument(crate_name, "test")
+                + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
+                f"    library = {quote(library_label) if library_label else 'None'},\n"
+                f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
+                f"    manifest_dir = {quote(directory)},\n"
+                f"    package_name = {quote(package_name)},\n"
+                + (
+                    f"    rustc_env = {json.dumps(rustc_env, sort_keys=True)},\n"
+                    if rustc_env
+                    else ""
+                )
+                + (
+                    f"    test_env = {json.dumps(rustc_env, sort_keys=True)},\n"
+                    if rustc_env
+                    else ""
+                )
+                + f"    tags = {string_list(tags)},\n"
+                + self.extra_deps_argument(package_name, features, resolution)
+            + self.variant_deps_argument(package_name, resolution)
+                + f"    version = {quote(package['version'])},\n"
+                ")\n\n",
+            )
+            return f"//{directory}:{name}"
+
+        # kind == "test": an integration test target.
+        base = label_name(target, False)
+        name = f"{base}__fv_{suffix}"
+        self.add_chunk(
+            package_name,
+            name,
+            "lash_rust_feature_test(\n"
+            f"    name = {quote(name)},\n"
+            + (
+                f"    args = {string_list(sorted(set(target_args + args)))},\n"
+                if target_args or args
+                else ""
+            )
+            + f"    crate_features = {string_list(target_features)},\n"
+            f"    crate_name = {quote(crate_name)},\n"
+            f"    crate_root = {quote(crate_root)},\n"
+            f"    declared_features = {string_list(sorted(package['features']))},\n"
+            + exec_properties_argument(crate_name, "test")
+            + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
+            + (f"    extra_data = {string_list(extra_data)},\n" if extra_data else "")
+            + f"    library = {quote(library_label) if library_label else 'None'},\n"
+            f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
+            f"    manifest_dir = {quote(directory)},\n"
+            f"    package_name = {quote(package_name)},\n"
+            f'    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],\n'
+            + (
+                f"    rustc_env = {json.dumps(rustc_env, sort_keys=True)},\n"
+                if rustc_env
+                else ""
+            )
+            + (
+                f"    test_env = {json.dumps(test_env | rustc_env, sort_keys=True)},\n"
+                if test_env or rustc_env
+                else ""
+            )
+            + f"    tags = {string_list(tags)},\n"
+            + self.extra_deps_argument(package_name, features, resolution)
+            + self.variant_deps_argument(package_name, resolution)
+            + f"    version = {quote(package['version'])},\n"
+            ")\n\n",
+        )
+        return f"//{directory}:{name}"
+
+    # -- the lane walk ------------------------------------------------------
+
+    def build(self) -> None:
+        for lane in self.plan["lane"]:
+            compile_labels: list[str] = []
+            test_labels: list[str] = []
+            lane_name = lane["name"]
+            for argv in lane["commands"]:
+                command = feature_variants.parse_command(list(argv))
+                resolved = feature_variants.resolve_request(
+                    self.workspace,
+                    command.package,
+                    default_features=command.default_features,
+                    requested=list(command.features),
+                    with_dev=command.with_dev,
+                )
+                resolution = resolved.sorted_features()
+                self.record_activations(resolved)
+                # Every first-party library in the closure, at its own resolved
+                # feature set. These are the units Cargo compiles for the
+                # command's dependency graph.
+                for name in sorted(resolution):
+                    if self.library_of(name) is None:
+                        continue
+                    label = self.emit_library(name, resolution)
+                    compile_labels.append(label)
+                    self.units.append(
+                        {
+                            "features": resolution[name],
+                            "kind": "lib",
+                            "label": label,
+                            "package": name,
+                        }
+                    )
+                roots = self.emit_root_targets(command, resolution, test_labels)
+                compile_labels.extend(roots)
+                scope = (
+                    command.package,
+                    tuple(sorted(set(",".join(command.features).split(",")) - {""})),
+                    command.selector,
+                )
+                if scope in FEATURE_LANE_CLIPPY_SCOPES:
+                    self.clippy.update(roots)
+                    self.clippy.update(
+                        self.library_label(name, resolution)
+                        for name in [command.package]
+                        if self.library_of(name) is not None
+                    )
+            self.lanes[lane["name"]] = {
+                "compile": sorted(set(compile_labels)),
+                "test": sorted(set(test_labels)),
+            }
+
+    def emit_root_targets(
+        self,
+        command,
+        resolution: dict[str, list[str]],
+        test_labels: list[str],
+    ) -> list[str]:
+        package_name = command.package
+        package = self.by_name[package_name]
+        features = set(resolution[package_name])
+        kinds = set(command.kinds)
+        labels = []
+        library = self.library_of(package_name)
+        # `cargo test -p X … <filter>` compiles every selected target and runs
+        # only the cases whose name contains the filter; libtest takes the same
+        # filter as a positional argument, so the variant runs the same subset.
+        args = [
+            token
+            for token in command.argv[2:]
+            if not token.startswith("-")
+            and token not in (package_name, "check", "test")
+            and command.argv[command.argv.index(token) - 1]
+            not in ("-p", "--package", "--features")
+        ]
+        runnable = command.subcommand == "test"
+        if library is not None and library.get("test", False) and "test" in kinds:
+            label = self.emit_target(
+                package_name, resolution, library, "unit-test", runnable, args
+            )
+            labels.append(label)
+            self.units.append(
+                {
+                    "features": resolution[package_name],
+                    "kind": "unit-test",
+                    "label": label,
+                    "package": package_name,
+                }
+            )
+            if runnable and not cargo_test_policy(package_name, "unit-test", library["name"])[0]:
+                test_labels.append(label)
+        for target in package["targets"]:
+            kind = target["kind"][0]
+            if kind in ("lib", "custom-build"):
+                continue
+            if not set(target.get("required-features", [])) <= features:
+                continue
+            if kind not in kinds:
+                continue
+            label = self.emit_target(
+                package_name, resolution, target, kind, runnable, args
+            )
+            labels.append(label)
+            self.units.append(
+                {
+                    "features": sorted(
+                        features | set(target.get("required-features", []))
+                    ),
+                    "kind": kind,
+                    "label": label,
+                    "package": package_name,
+                }
+            )
+            if kind == "test" and runnable:
+                if not cargo_test_policy(package_name, kind, target["name"])[0]:
+                    test_labels.append(label)
+            if kind == "bin" and target.get("test", False) and "test" in kinds:
+                unit_label = self.emit_target(
+                    package_name, resolution, target, "bin-unit-test", runnable, args
+                )
+                labels.append(unit_label)
+                self.units.append(
+                    {
+                        "features": sorted(
+                            features | set(target.get("required-features", []))
+                        ),
+                        "kind": "bin-unit-test",
+                        "label": unit_label,
+                        "package": package_name,
+                    }
+                )
+                if runnable and not cargo_test_policy(
+                    package_name, "bin-unit-test", target["name"]
+                )[0]:
+                    test_labels.append(unit_label)
+        return labels
+
+
+def feature_lane_outputs(metadata: dict) -> tuple[dict[str, str], str, list[dict]]:
+    """Per-package variant chunks plus the generated lane label table."""
+    graph = FeatureLaneGraph(metadata, feature_coverage_plan())
+    graph.build()
+    chunks = {
+        name: "".join(text for _name, text in sorted(entries))
+        for name, entries in graph.chunks.items()
+    }
+    compile_targets = sorted({
+        label for lane in graph.lanes.values() for label in lane["compile"]
+    })
+    test_targets = sorted({
+        label for lane in graph.lanes.values() for label in lane["test"]
+    })
+    # The variants of exactly the commands `FEATURE_LANE_CLIPPY_SCOPES` names:
+    # the resolutions Cargo clippy still linted on a runner. Every other variant
+    # is compiled, not linted, because Cargo never linted it either.
+    clippy_targets = sorted(graph.clippy)
+    floors = {}
+    for unit in graph.units:
+        key = (unit["package"], tuple(unit["features"]), unit["kind"])
+        if key in FEATURE_LANE_TEST_FLOORS:
+            floors[unit["label"]] = FEATURE_LANE_TEST_FLOORS[key]
+    if len(floors) != len(FEATURE_LANE_TEST_FLOORS):
+        raise SystemExit(
+            "feature-lane test floors name units no lane command compiles: "
+            f"{sorted(FEATURE_LANE_TEST_FLOORS)}"
+        )
+    bzl = [
+        GENERATED_HEADER,
+        "FEATURE_LANE_COMPILE_TARGETS = " + string_list(compile_targets, indent=4) + "\n\n",
+        "FEATURE_LANE_TEST_TARGETS = " + string_list(test_targets, indent=4) + "\n\n",
+        "FEATURE_LANE_CLIPPY_TARGETS = " + string_list(clippy_targets, indent=4) + "\n\n",
+        "FEATURE_LANE_TEST_FLOORS = "
+        + json.dumps(floors, indent=4, sort_keys=True)
+        + "\n\n",
+        "FEATURE_LANES = {\n",
+    ]
+    for lane in sorted(graph.lanes):
+        bzl.append(f"    {quote(lane)}: " + string_list(
+            sorted(set(graph.lanes[lane]["compile"]) | set(graph.lanes[lane]["test"])),
+            indent=8,
+        ) + ",\n")
+    bzl.append("}\n")
+    return chunks, "".join(bzl), graph.units
+
+
+def verify_resolution(metadata: dict) -> int:
+    """Reconcile the feature-lane resolver against Cargo's own resolver.
+
+    `tools/bazel/feature_variants.py` reimplements Cargo's feature resolution
+    so the generator can emit a target per resolved unit without compiling
+    anything. That reimplementation is only worth what it is checked against:
+    this mode re-derives every distinct lane request with `cargo tree` and
+    fails on any difference.
+
+    `cargo tree` rather than `cargo check --unit-graph`: the unit graph is
+    nightly-only, and pinning a nightly toolchain to prove a stable build is a
+    larger commitment than the difference costs. The difference is that
+    `cargo tree` reports the dependency graph's feature resolution, not the
+    per-target unit list, so the requests that add dev-dependencies
+    (`--tests`, `--all-targets`, `cargo test`) are reconciled by their normal
+    closure here and by the target enumeration in
+    `scripts/check_feature_coverage.py` -- which reads Cargo's own
+    `compiler-artifact` records -- in the lanes themselves.
+    """
+    workspace = feature_variants.Workspace.from_metadata(metadata)
+    plan = feature_coverage_plan()
+    members = set(workspace.packages)
+    seen = set()
+    failures = []
+    for lane in plan["lane"]:
+        for argv in lane["commands"]:
+            command = feature_variants.parse_command(list(argv))
+            if command.with_dev:
+                continue
+            key = (command.package, command.default_features, command.features)
+            if key in seen:
+                continue
+            seen.add(key)
+            mine = feature_variants.resolve_request(
+                workspace,
+                command.package,
+                default_features=command.default_features,
+                requested=list(command.features),
+                with_dev=False,
+            ).sorted_features()
+            tree = [
+                os.environ.get("KILN_REAL_CARGO", "cargo"),
+                "tree",
+                "-p",
+                command.package,
+                "-e",
+                "normal",
+                "--locked",
+                "--no-dedupe",
+                "--prefix",
+                "none",
+                "--format",
+                "{p}|{f}",
+            ]
+            if not command.default_features:
+                tree.append("--no-default-features")
+            for feature in command.features:
+                tree.extend(["--features", feature])
+            result = subprocess.run(
+                tree, cwd=ROOT, check=True, capture_output=True, text=True
+            )
+            theirs: dict[str, set[str]] = {}
+            for line in result.stdout.splitlines():
+                if "|" not in line:
+                    continue
+                package, features = line.split("|", 1)
+                name = package.split()[0]
+                if name in members:
+                    theirs.setdefault(name, set()).update(
+                        value for value in features.split(",") if value
+                    )
+            resolved = {name: sorted(values) for name, values in theirs.items()}
+            if mine != resolved:
+                failures.append((argv, mine, resolved))
+    for argv, mine, resolved in failures:
+        print("feature-lane resolution differs from cargo:", file=sys.stderr)
+        print("  " + " ".join(argv), file=sys.stderr)
+        for name in sorted(set(mine) | set(resolved)):
+            if mine.get(name) != resolved.get(name):
+                print(
+                    f"    {name}: generator {mine.get(name)} cargo {resolved.get(name)}",
+                    file=sys.stderr,
+                )
+    if failures:
+        return 1
+    print(f"feature-lane resolution reconciled: {len(seen)} distinct lane requests")
+    return 0
+
+
+def reconcile_lane_units(metadata: dict, units: list[dict]) -> list[str]:
+    """The Bazel lane graph compiles exactly the units Cargo would compile.
+
+    Written against `cargo metadata`'s own target tables rather than against
+    the emit loop that produced `units`, so a variant dropped by a name
+    collision, a `required-features` target silently skipped, or a lane target
+    emitted for a unit no command selects is a failure rather than a quieter
+    gate. The other half of the claim -- that each unit's FEATURE SET is the
+    one Cargo resolves -- is `--verify-resolution`, which re-derives every
+    distinct lane request with `cargo tree`; `cargo check --unit-graph` would
+    answer both at once but is nightly-only, and this repo builds on stable.
+    """
+    workspace = feature_variants.Workspace.from_metadata(metadata)
+    manifests = workspace.packages
+    expected: set[tuple[str, str, tuple[str, ...]]] = set()
+    for lane in feature_coverage_plan()["lane"]:
+        for argv in lane["commands"]:
+            command = feature_variants.parse_command(list(argv))
+            resolution = feature_variants.resolve_request(
+                workspace,
+                command.package,
+                default_features=command.default_features,
+                requested=list(command.features),
+                with_dev=command.with_dev,
+            ).sorted_features()
+            for name, features in resolution.items():
+                if any("lib" in t["kind"] for t in manifests[name]["targets"]):
+                    expected.add((name, "lib", tuple(features)))
+            root = command.package
+            root_features = set(resolution[root])
+            kinds = set(command.kinds)
+            for target in manifests[root]["targets"]:
+                kind = target["kind"][0]
+                required = set(target.get("required-features", []))
+                if kind == "custom-build" or not required <= root_features:
+                    continue
+                if kind == "lib":
+                    if target.get("test", False) and "test" in kinds:
+                        expected.add((root, "unit-test", tuple(sorted(root_features))))
+                    continue
+                if kind not in kinds:
+                    continue
+                features = tuple(sorted(root_features | required))
+                expected.add((root, kind, features))
+                if kind == "bin" and target.get("test", False) and "test" in kinds:
+                    expected.add((root, "bin-unit-test", features))
+    recorded = {
+        (unit["package"], unit["kind"], tuple(unit["features"])) for unit in units
+    }
+    failures = []
+    for package, kind, features in sorted(expected - recorded):
+        failures.append(
+            f"no feature-lane target compiles the {kind} of {package} at "
+            f"features {list(features)}"
+        )
+    for package, kind, features in sorted(recorded - expected):
+        failures.append(
+            f"feature-lane target compiles a {kind} of {package} at features "
+            f"{list(features)} that no lane command selects"
+        )
+    return failures
+
+
 def check(outputs: dict[pathlib.Path, str]) -> int:
     stale = []
     for path, expected in outputs.items():
@@ -932,9 +2037,24 @@ def check(outputs: dict[pathlib.Path, str]) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--verify-resolution", action="store_true")
     args = parser.parse_args()
-    outputs, _inventory = generated(cargo_metadata())
+    metadata = cargo_metadata()
+    if args.verify_resolution:
+        return verify_resolution(metadata)
+    outputs, _inventory = generated(metadata)
     if args.check:
+        failures = reconcile_lane_units(
+            metadata,
+            json.loads(outputs[ROOT / "tools/bazel/target-inventory.json"])[
+                "feature_lane_units"
+            ],
+        )
+        if failures:
+            print("feature-lane graph does not match Cargo:", file=sys.stderr)
+            for failure in failures:
+                print(f"  {failure}", file=sys.stderr)
+            return 1
         return check(outputs)
     for path, content in outputs.items():
         path.write_text(content)

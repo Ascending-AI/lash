@@ -787,23 +787,20 @@ class BazelTestContractTests(unittest.TestCase):
             clippy_cargo["run"],
         )
 
-        # The `e2e` feature is outside the resolved default graph, so this
-        # command has no Bazel equivalent and runs on every event — under
-        # Cargo on both branches of the trust decision, with the same lint
-        # set and the same trailing `-D warnings`. On a trusted event it runs
-        # concurrently with `//:workspace_clippy` instead of behind it, so the
-        # command lives in that step; on an untrusted one, where the workspace
-        # clippy beside it is itself Cargo, it keeps its own serial step.
-        e2e_command = (
-            "cargo clippy -p slack-clone --all-targets --features e2e "
-            "--locked --no-deps -- -D warnings"
-        )
-        self.assertIn(e2e_command, clippy_bazel["run"])
-        self.assertIn("scripts/ci/run-gate-commands.sh", clippy_bazel["run"])
+        # The `e2e` feature is outside the resolved default graph, but it is no
+        # longer outside Bazel: the feature-lane generator emits a variant of
+        # every unit that resolution compiles, and `//:feature_lane_clippy`
+        # lints exactly those. The Cargo command stays for untrusted events,
+        # which have no cache credentials and so no pool.
+        self.assertIn("//:feature_lane_clippy", clippy_bazel["run"])
 
         e2e = job_step(jobs["lint"], "Clippy (slack-clone e2e feature)")
         self.assertEqual(untrusted, e2e["if"])
-        self.assertIn(e2e_command, e2e["run"])
+        self.assertIn(
+            "cargo clippy -p slack-clone --all-targets --features e2e "
+            "--locked --no-deps -- -D warnings",
+            e2e["run"],
+        )
 
         doc_bazel = job_step(jobs["check"], "Check workspace with shared cache")
         self.assertEqual(f"matrix.lane == 'workspace' && {trusted}", doc_bazel["if"])

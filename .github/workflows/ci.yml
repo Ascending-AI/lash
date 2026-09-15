@@ -419,6 +419,30 @@ jobs:
       - name: Check workers-E2E proxy health target
         run: python3 scripts/check_restate_workers_proxy_health_target.py
 
+      # The feature-lane graph replaces per-lane Cargo legs, so the resolution
+      # it compiles has to be Cargo's own. This re-derives every distinct lane
+      # request with `cargo tree` and diffs it against the generator's resolver;
+      # `generate_build_files.py --check` reconciles the unit SET, this
+      # reconciles each unit's feature set.
+      - name: Reconcile feature-lane resolution against Cargo
+        run: python3 tools/bazel/generate_build_files.py --verify-resolution
+
+      # The `dependency-boundary` leg of the retired `Runtime feature boundary`
+      # matrix. It never compiled anything -- it reads the resolved graph -- so
+      # it belongs with the other Python-speed gates rather than on a runner
+      # holding a warm Cargo cache.
+      - name: Hold the lash-runtime dependency boundary
+        run: |
+          set -euo pipefail
+          forbidden='lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'
+          for resolution in "--no-default-features" "" "--no-default-features --features testing"; do
+            # shellcheck disable=SC2086
+            if cargo tree -p lash-runtime -e normal $resolution --locked | grep -E "$forbidden"; then
+              echo "lash-runtime pulled RLM/Lashlang dependencies at: ${resolution:-default}"
+              exit 1
+            fi
+          done
+
       # The self-tests are independent processes over a read-only checkout, so
       # they run concurrently; `scripts/ci/run-gate-commands.sh` holds each
       # one's output, prints a wall-time table and runs every command even
@@ -567,53 +591,39 @@ jobs:
         if: always()
         run: bash scripts/ci/report-cache.sh
 
-  # Feature-set coverage the workspace check cannot reach. The executable
-  # registry owns every declared workspace feature, resolves ON/OFF graphs in
-  # normal dependency context, and runs the exact package checks for this lane.
-  # Split out of `check`: these resolve their own feature graphs, so they
-  # neither reuse nor warm anything the workspace check produces.
-  package-feature-checks:
-    name: Package feature check (${{ matrix.lane }})
+  # Feature-set coverage the workspace check cannot reach, on the pool.
+  #
+  # `scripts/feature-coverage.toml` declares the exact Cargo commands that
+  # witness every declared workspace feature ON and OFF. Each is a different
+  # resolution of one package's first-party closure from the workspace graph,
+  # so `tools/bazel/generate_build_files.py` emits one Bazel target per
+  # distinct `(package, resolved features, Cargo target kind)` unit and
+  # `//:feature_lanes` is their aggregate. Fourteen matrix legs of up to 504 s
+  # of sequential `cargo check` on a 4-vCPU runner, plus the four
+  # `Runtime feature boundary` legs, collapse into this one job: the lane
+  # graph shares the pool's cache with every other Bazel job, so a merge group
+  # whose diff touches no lane closure pays a cache lookup rather than a
+  # rebuild.
+  #
+  # The *proof* is unchanged and still Cargo's. `check_feature_coverage.py
+  # check` keeps running in `repo-gates`, and its `--bazel` reconciliation
+  # (below) fails if the Bazel lane graph compiles a different set of units
+  # from the one the declared Cargo commands compile. The resolver witnesses
+  # (`cargo tree`) and the cfg-predicate analysis are pure analysis over
+  # `cargo metadata`; they cost seconds and stay where they are.
+  #
+  # Unlike the matrix it replaces, this runs on pull requests as well as on
+  # merge groups: on the pool the lane graph is a shared-cache lookup, so the
+  # evidence arrives before the queue instead of inside it. Untrusted events
+  # receive no cache credentials, so they keep the Cargo path: the lanes there
+  # are the pull request's `check` baseline plus the merge queue's own run.
+  feature-lanes:
+    name: Feature lanes
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     needs: plan
-    # Deferred on pull requests per the 2026-08-25 CI-scope ruling, but required
-    # on every merge group -- including docs-only ones. Every matrix leg keeps
-    # one exact package feature graph independently visible and cacheable.
-    if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')) || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - lane: sansio-schema-validation
-            command: python3 scripts/check_feature_coverage.py run sansio-schema-validation
-          - lane: otel-feature-chain
-            command: python3 scripts/check_feature_coverage.py run otel-feature-chain
-          - lane: core-internal-features
-            command: python3 scripts/check_feature_coverage.py run core-internal-features
-          - lane: language-testing-features
-            command: python3 scripts/check_feature_coverage.py run language-testing-features
-          - lane: llm-transport-features
-            command: python3 scripts/check_feature_coverage.py run llm-transport-features
-          - lane: store-features
-            command: python3 scripts/check_feature_coverage.py run store-features
-          - lane: runtime-features
-            command: python3 scripts/check_feature_coverage.py run runtime-features
-          - lane: protocol-rlm-testing
-            command: python3 scripts/check_feature_coverage.py run protocol-rlm-testing
-          - lane: remote-protocol-conversions
-            command: python3 scripts/check_feature_coverage.py run remote-protocol-conversions
-          - lane: tool-lashlang-proxies
-            command: python3 scripts/check_feature_coverage.py run tool-lashlang-proxies
-          - lane: provider-testing-features
-            command: python3 scripts/check_feature_coverage.py run provider-testing-features
-          - lane: perf-dhat-heap
-            command: python3 scripts/check_feature_coverage.py run perf-dhat-heap
-          - lane: regress-stable-features
-            command: python3 scripts/check_feature_coverage.py run regress-stable-features
-          - lane: host-features
-            command: python3 scripts/check_feature_coverage.py run host-features
-
+    if: needs.plan.outputs.bazel_trusted == 'true' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')
+    environment: build-cache
     steps:
       - name: Check out repository
         env:
@@ -626,128 +636,57 @@ jobs:
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=http.extraheader
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
-
-      # Main/dispatch runs write dependency outputs for this exact graph. Queue
-      # refs restore the compatible main cache but never publish ephemeral
-      # queue-scoped entries.
-      - name: Restore package feature cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: queue-package-${{ matrix.lane }}
-          save-if: ${{ github.event_name != 'merge_group' }}
-
-      - name: Install protoc
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      - name: Install mold
-        uses: ./.github/actions/setup-mold
-
-      - name: Run exact package feature graph
-        run: ${{ matrix.command }}
-
-      - name: Report cache disk capacity
-        if: always()
-        run: bash scripts/ci/report-cache.sh
-
-  # The default-off boundary lane: lash-runtime without its default features
-  # compiles, tests, and pulls no RLM/Lashlang dependency.
-  runtime-feature-boundary:
-    name: Runtime feature boundary (${{ matrix.lane }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: plan
-    # Deferred on pull requests per the 2026-08-25 CI-scope ruling, but required
-    # on every merge group -- including docs-only ones. The independent feature
-    # resolutions run concurrently; fail-fast stays off so one failure never
-    # suppresses evidence from another required graph.
-    if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')) || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - lane: default-off-check
-            command: cargo check -p lash-runtime --no-default-features --locked
-          - lane: testing-check
-            command: cargo check -p lash-runtime --no-default-features --features testing --locked
-          - lane: default-off-tests
-            command: |
-              cargo test -p lash-runtime --no-default-features --locked
-              count=$(cargo test -p lash-runtime --no-default-features --locked --lib -- --list | grep -c ': test$')
-              [ "$count" -ge 130 ] || { echo "default-build lash-runtime tests regressed: $count"; exit 1; }
-          - lane: dependency-boundary
-            command: |
-              if cargo tree -p lash-runtime -e normal --no-default-features --locked | grep -E 'lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'; then
-                echo "default-off lash-runtime pulled RLM/Lashlang dependencies"
-                exit 1
-              fi
-              if cargo tree -p lash-runtime -e normal --locked | grep -E 'lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'; then
-                echo "default lash-runtime pulled RLM/Lashlang dependencies"
-                exit 1
-              fi
-              if cargo tree -p lash-runtime -e normal --no-default-features --features testing --locked | grep -E 'lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'; then
-                echo "testing-only lash-runtime pulled RLM/Lashlang dependencies"
-                exit 1
-              fi
-
-    steps:
-      - name: Check out repository
+      - name: Configure shared build cache
+        uses: ./.github/actions/bazel-shared-cache
         env:
-          CHECKOUT_TOKEN: ${{ github.token }}
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      # Every unit of every declared lane command, compiled at that command's
+      # own feature resolution. `--remote_download_outputs=minimal` because a
+      # compile-only proof needs the action's exit status, not its rlibs.
+      - name: Compile every feature lane
+        shell: bash
         run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            --remote_download_outputs=minimal \
+            //:feature_lanes
 
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
+      # The lane commands that are `cargo test`, not `cargo check`. They are
+      # service-free, so the pool executes them under the same feature
+      # resolution the compile above used.
+      - name: Run the executable feature lanes
+        shell: bash
+        run: |
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            --cache_test_results=yes --test_output=errors \
+            //:feature_lane_tests
 
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
+      # The `default-off-tests` leg of the retired `Runtime feature boundary`
+      # matrix counted the default build's test cases as well as running them.
+      # Compiling a test binary proves it still builds; only the count proves
+      # it still tests anything.
+      - name: Hold the feature-lane test-case floors
+        shell: bash
+        run: python3 scripts/ci/check_feature_lane_test_floors.py
 
-      - name: Restore runtime feature cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: queue-runtime-${{ matrix.lane }}
-          save-if: ${{ github.event_name != 'merge_group' }}
-
-      - name: Install protoc
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      - name: Install mold
-        uses: ./.github/actions/setup-mold
-
-      - name: Run exact runtime feature graph
-        env:
-          FEATURE_GRAPH_COMMAND: ${{ matrix.command }}
-        run: bash -euo pipefail -c "${FEATURE_GRAPH_COMMAND}"
-
-      - name: Report cache disk capacity
+      - name: Remove client credentials
         if: always()
-        run: bash scripts/ci/report-cache.sh
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
   # The deterministic/default-feature partition is authoritative on trusted
   # events. The job executes locally on a GitHub-hosted runner and only shares
   # action results with that exact runner image identity, never Kiln's executor
@@ -1216,23 +1155,21 @@ jobs:
       # and a trailing `-D warnings`, in the order Cargo emits them. See
       # `tools/bazel/clippy.bzl`.
       #
-      # The slack-clone `e2e` command rides along rather than queueing behind
-      # it. `//:workspace_clippy` spends its wall clock waiting on remote
-      # execution and the Cargo command spends its on this runner's own cores,
-      # so the two overlap almost entirely; run in sequence they were 131 s
-      # and 108 s of a 309 s lint job. `scripts/ci/run-gate-commands.sh` holds
-      # each command's output and prints it whole under its own heading, runs
-      # both to completion even when one fails, and exits non-zero if either
-      # did. Neither command changed: the lint set, the feature set and the
-      # trailing `-D warnings` are the ones each leg carried on its own.
+      # `//:feature_lane_clippy` lints the slack-clone `e2e` variant in the
+      # same invocation. #1591 ran that leg as a Cargo command beside this one
+      # so it would not queue behind it; it is a Bazel label now, so it rides
+      # the same remote execution instead of this runner's four cores. The
+      # lint set, the feature set and the trailing `-D warnings` are the ones
+      # the Cargo leg carried.
       - name: Clippy (workspace, all targets, shared cache)
         if: needs.plan.outputs.bazel_trusted == 'true'
         shell: bash
         run: |
-          bash scripts/ci/run-gate-commands.sh --jobs 2 <<'GATES'
-          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build ${BAZEL_SHARED_CACHE_FLAGS} --remote_download_outputs=minimal //:workspace_clippy
-          cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
-          GATES
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            --remote_download_outputs=minimal \
+            //:workspace_clippy //:feature_lane_clippy
 
       - name: Remove client credentials
         if: always()
@@ -1248,11 +1185,12 @@ jobs:
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
 
       # `slack-clone`'s `e2e` feature is outside the resolved default workspace
-      # graph, so its `cfg(feature = "e2e")` code has no Bazel label: it stays
-      # Cargo on every event. This is the untrusted branch of it. A trusted
-      # event runs the identical command beside `//:workspace_clippy` above;
-      # here the workspace clippy above is itself Cargo, and two Cargo builds
-      # at once would only contend for the same four cores.
+      # graph, so it used to have no Bazel label and this 106 s Cargo compile
+      # ran on every event. It has one now: `//:feature_lane_clippy` lints the
+      # feature-lane variants of the same targets, above. `slack-clone`
+      # declares no `default` feature, so the lane's `--no-default-features
+      # --features e2e` resolution is the resolution this command used.
+      # Untrusted events receive no cache credentials and keep the Cargo path.
       - name: Clippy (slack-clone e2e feature)
         if: needs.plan.outputs.bazel_trusted != 'true'
         run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
@@ -2678,8 +2616,7 @@ jobs:
       - repo-gates
       - unused-deps
       - lashlang-git-consumer
-      - package-feature-checks
-      - runtime-feature-boundary
+      - feature-lanes
       - workspace-tests
       - bazel-tests
       - heavy-tests
