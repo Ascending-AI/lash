@@ -66,8 +66,10 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
    `outcome.frame_switch.frame_key`. Prose claiming a fresh start proves nothing.
 2. **The seed is explicit and inspectable.** Use two distinctive seed values: a baton marker
    needed by the seeded competence probe and a compact supporting fact. Require one RLM seed
-   protocol event on the new frame path with exactly those keys and values. The deliberately
-   non-seeded marker must not occur anywhere in that seed event.
+   protocol event on the new frame path carrying exactly those two **values**. The key
+   spelling is the agent's to choose whenever the organic lever fires, so gate on the values,
+   not on the key names; only the explicit prompt in Phase 2 pins `seed_baton`. The
+   deliberately non-seeded marker must not occur anywhere in that seed event.
 3. **Resolve both frames independently.** Record the old and new frame node ids. No workbench
    endpoint serves frame records, and the stored `frame_open` node carries only `frame_key`,
    `reason`, `assignment`, and `protocol_turn_options` beside its `parent_node_id`, so
@@ -124,7 +126,11 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
   `3200` with:
   `AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS=41000`,
   `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig992a-run/data`, a fresh
-  `AGENT_WORKBENCH_RUN_DIR`, and `AGENT_WORKBENCH_OPEN=0`. Never touch ports 3056, 3057, or
+  `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_OPEN=0`, and `RESTATE_AUTHORITY_ID=<stable-id>`.
+  `RESTATE_AUTHORITY_ID` is required and must stay stable for one Restate state; without it
+  the workbench refuses to start with
+  `Error: RESTATE_AUTHORITY_ID is required and must remain stable for one Restate state`.
+  Never touch ports 3056, 3057, or
   3180. Gate `GET /healthz` to 200 and record the configured model from `/api/state`.
 - Use one fresh session id `<S> = runbook-continue-as-<run-id>` and artifact directory
   `<artifacts>`. Save every named screenshot and JSON/text extract below under `<artifacts>`.
@@ -153,9 +159,13 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
   interval; those reads legitimately emit session-scoped `agent_workbench.api.work.response`
   custom records even before the first turn. Preserve them, but do not count them as runtime
   conversation activity or require a literally empty session-scoped trace at baseline.
-- The restart phase is blocked by FIG-1164. Its historical command is
-  `bash scripts/agent-workbench-dev.sh restart --port 3200`; do not execute it until a verified
-  immutable same-configuration host restart exists. Teardown remains
+- The restart phase runs `bash scripts/agent-workbench-dev.sh restart --port 3200` (equivalently
+  `just agent-workbench-restart 3200`), the verified non-destructive same-configuration
+  replacement named in this runbook's FIG-1164/FIG-3035 header and in
+  [RULES.md](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164). The helper replaces the
+  process and reports that the Restate deployment, its journals and the application data were
+  retained; that line is the readiness evidence for the phase. Never substitute the destructive
+  reset. Teardown remains
   `bash scripts/agent-workbench-dev.sh down --port 3200`, followed by removal of
   `/workspace/tmp/fig992a-run/data` only after all evidence has been copied out.
 
@@ -203,6 +213,12 @@ ending with: `use control.continue_as to start fresh, seed what you need`. Tell 
 the baton marker under `seed_baton` plus the supporting fact, and not to seed
 `unseeded_secret`.
 
+The seed-key spelling is pinned only on this explicit path. When the organic lever fires
+first — the outcome this runbook prefers — the agent chooses its own key, and a run has been
+observed seeding `future_baton`. Gate on the seeded **values** (the baton marker and the
+supporting fact are present in the seed, the non-seeded marker is not), not on the key
+spelling, unless the explicit prompt above was the one that fired.
+
 Before whichever send is expected to switch, save the unchanged boundary answer key and
 the pre-switch transcript as `02-boundary-expected.json` and
 `02-before-switch-{dom,state,store,trace}.json`. Gate, in this order:
@@ -210,8 +226,9 @@ the pre-switch transcript as `02-boundary-expected.json` and
 1. a `turn_completed` with `outcome.status == "agent_frame_switch"` and a non-empty
    `outcome.frame_switch.frame_key`;
 2. one new raw `frame_open` node with `reason == "continue_as"` and matching `frame_key`;
-3. a new-frame RLM seed event containing `seed_baton` and the supporting fact, but not
-   `unseeded_secret` or its marker;
+3. a new-frame RLM seed event containing the baton marker (under `seed_baton` on the explicit
+   path, or under whatever key the agent chose on the organic one) and the supporting fact,
+   but not `unseeded_secret` or its marker;
 4. the new frame's reconstructed previous frame, per golden rule 3, is exactly the recorded
    old frame node id;
 5. the old-frame read model still contains the pre-switch marker rows, while the new-frame
@@ -239,7 +256,8 @@ Abort. Screenshot `03-boundary-rendering.png`; save
 
 ## Phase 4 — Post-switch competence and clean-window proof
 
-**4a — seeded fact.** Submit a short prompt asking for the value of `seed_baton` without
+**4a — seeded fact.** Submit a short prompt asking for the value of the seeded baton — by the
+key actually recorded in Phase 2 — without
 including its value. After structural settlement, judge the single reply: it must contain
 `FIG992A-SEED-<run-id>`. Screenshot `04-seeded-fact.png`; save
 `04-seeded-{dom,state,store,trace,judge}.json`.

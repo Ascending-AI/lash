@@ -48,8 +48,12 @@ the first complete TypeScript cell, and never executes content after that bounda
 
 ## Phase 0 — Boot and baseline
 
-Boot a fresh Workbench on an available port other than 3056/3057 with extended
-tracing enabled. Poll `/healthz`, open the browser, record the trace byte offset,
+Boot a fresh Workbench on an available port other than 3056/3057. Extended tracing is
+always on for the Workbench — `TraceLevel::Extended` is set unconditionally at
+`examples/agent-workbench/src/main_sections/bootstrap.rs:300` — so there is no environment
+variable or flag to enable, and there is nothing to record as "enabled". Do not invent a
+switch; that is the exact failure mode golden rule 1 warns about for stop sequences.
+Poll `/healthz`, open the browser, record the trace byte offset,
 and capture `00-ready.png`. Abort if the rendered session id and `/api/state`
 session id disagree.
 
@@ -69,7 +73,10 @@ deterministic two-cell laws remain the authoritative gate.
 ## Phase 2 — Reconcile wire, evidence, and execution
 
 From trace records after the Phase 0 offset, save the provider request and
-completed LLM record as `02-boundary-trace.json`. Require:
+completed LLM record as `02-boundary-trace.json`. The **attempt ledger is the `attempts[]`
+array inside the `llm_call_completed` record** — there is no separate attempt record type,
+so a driver that goes looking for one finds nothing and must not score the attempt gates
+unobservable. Require:
 
 - the request carries no stop sequence the host could have set: the Workbench
   sets none, so `stop_sequences` is absent or empty wherever the record shows
@@ -80,7 +87,11 @@ completed LLM record as `02-boundary-trace.json`. Require:
   prompt, `body_json_omitted_reason: "size_limit"`; a present `body_json` is
   acceptable only if `body_len` is genuinely under 2 KiB;
 - the response has typed execution evidence;
-- usage reported before a protocol abort appears in the response and attempt;
+- the honest usage disposition (`usage_disposition`) is present on both the response and the
+  attempt, and matches what was actually observed. Do not gate on "usage reported before a
+  protocol abort", which is unfalsifiable when the provider reports none before the abort:
+  gate on the disposition being present and honest, exactly as the stop-sequence gate was
+  re-anchored by FIG-1306/FIG-1402;
 - exactly the first accepted cell appears in the trajectory/tool activity.
 
 Any disagreement is a contract violation. Capture the trace excerpt, rendered

@@ -70,12 +70,20 @@ and work registry are.
 ## Working material
 
 - Require `OPENROUTER_API_KEY`. Boot an empty, port-isolated stack with
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> bash scripts/agent-workbench-dev.sh up --port <port>`.
   Gate `GET /healthz` → 200. Teardown, including Restate, is
-  `just agent-workbench-down <port>` on success or Abort.
-- UI affordances: chat/accounts tabs, account cards and compose forms, transcript,
+  `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env, on success or
+  Abort. (The `just agent-workbench` / `just agent-workbench-down` recipes name the same
+  operations but do not carry this row's environment.)
+- UI affordances: chat/accounts tabs (`button.view-tab[data-view="chat"]` /
+  `button.view-tab[data-view="accounts"]`), account cards and compose forms
+  (`form.account-compose`), transcript,
   running/idle pill, right-hand work rail, and left-hand **registrations** rail with
-  **disable**, **re-enable**, and **delete**.
+  **disable**, **re-enable**, and **delete**. Adding an account submits only on **Enter** in
+  `#accountNameInput`: the input overlays its own submit button and intercepts the click.
+  Two `.view-tabs` containers exist in the DOM, one zero-sized, so a
+  `button.view-tab[data-view=…]` selector resolves to two elements and a naive click times
+  out on the invisible one — select the visible one explicitly.
 - Backend truth: `GET /api/state`, `GET /api/triggers`,
   `PUT /api/triggers/{subscription_key}/enabled` with `{ "enabled": false|true }`,
   `DELETE /api/triggers/{subscription_key}`, `GET /api/accounts/{slug}/inbox`,
@@ -197,10 +205,14 @@ Poll `GET /api/triggers` until it returns exactly one enabled registration named
 `lifecycle-forwarder`. Save `02-registration.json`, record its `subscription_key`,
 `subscription_id`, source type, and source configuration, and require the registrations
 rail to show the target and source with the registration alias in its details/title and a
-**disable** action. The rendered name is the **process label**, not the trigger alias —
-a concierge registered as `lifecycle-forwarder` whose process is `on_mail_forward` renders
-as `on_mail_forward ← mail.received`, with `trigger key lifecycle-forwarder` and
-`alias lifecycle-forwarder` in the row's title. Screenshot `02-registered.png`.
+**disable** action. The rendered name is the **process label**, not the trigger alias, and a
+target defined inline is a *lifted* process named by content hash
+(`LIFTED_PROCESS_NAME_PREFIX = "__process_"`, `crates/lashlang/src/ast.rs:554`), so the row
+renders as `__process_<hash> ← mail.received`, not as a readable process name. The
+`trigger key` is likewise the **derived subscription key** (`derived/v3/<hash>`), not the
+alias; the alias appears as a separate `alias lifecycle-forwarder` field, and only in the
+row's `title` attribute — the visible text truncates it away, so read the alias from the
+`title` of `.trigger-registration-detail`. Screenshot `02-registered.png`.
 
 Send one unrelated calculation turn that declares no trigger and wait for it to settle.
 Poll `GET /api/triggers` again and require the captured registration to be byte-for-byte
@@ -209,6 +221,13 @@ reconciliation warning is a failure: ordinary execution neither publishes nor re
 global declaration set.
 
 ## Phase 2 — Fire repeatedly and gate the loop-breaker
+
+**Take the process-id baseline from the session-scoped
+`GET /api/work?session_id=<session-id>`, not the unscoped form.** Every later phase compares
+against this baseline, so it must be stable: the unscoped endpoint serves the runtime-wide
+snapshot with `retired_since_ms = now - 10_000` and drops terminal rows about ten seconds
+after they settle, which makes an unscoped baseline shrink on its own between probes. This is
+golden rule 2's warning, restated here because Phase 2 is where the baseline is taken.
 
 Record the baseline personal inbox and process-id set. From the `work` compose form,
 deliver two messages sequentially with unique titles
@@ -269,12 +288,27 @@ running pill and new work item visible.
 
 Then poll until the original turn commits and `active_turns` empties, the new process is
 terminal, exactly one personal copy exists, and any resulting queued wake has been
-claimed at either `active_turn_checkpoint` or `idle`. A forwarding concierge that only
-copies mail emits **no** session wake — `queued_work` stays empty and the trace carries no
-`agent_workbench.queued_work.*` record for the phase — so record "no wake produced" and
-pass the claim gate vacuously rather than hunting for a boundary that was never reached. Both boundaries are a PASS:
+claimed at either `active_turn_checkpoint` or `idle`. Both boundaries are a PASS:
 `active_turn_checkpoint` means the wake joined the current turn, while `idle` means it
-was claimed as the next turn. Save `09-midturn-settled-state.json` and
+was claimed as the next turn.
+
+Detect the wake from the transcript and the turn, never from `queued_work`. A forwarding
+concierge can produce a session wake while `queued_work` stays empty and the trace carries
+no `agent_workbench.queued_work.*` record for the phase, so neither of those is evidence
+that no wake occurred. The two observables that do detect it are a `Background process
+wake` row in `/api/state.messages` and a second `exec_code_*` pair inside one turn id.
+Record "no wake produced" only when both of those are absent; a phase that reads
+`queued_work` alone passes this gate vacuously while a wake is being claimed into the
+turn.
+
+Then judge answer preservation. After the wake settles, the foreground turn's committed
+terminal answer must still render: the terminal the turn committed before the wake is
+still present in `/api/state.messages` and in the DOM. A turn id that carries two
+`terminal_finish` values of which only the last is rendered is a FAIL of this phase — the
+user's question was answered and the answer was then replaced. Save the trace slice for
+the turn id alongside the state snapshot so the two layers can be compared.
+
+Save `09-midturn-settled-state.json` and
 `09-midturn-work.json`; screenshot the newest transcript and work rail as
 `09-midturn-settled.png`. A process that appears only after the foreground turn is not a
 failure, but it does not satisfy the overlap gate; the deterministic companion remains
@@ -293,7 +327,7 @@ screenshot `11-deleted-silent.png`.
 
 ## Phase 7 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the workbench and its port-derived
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the workbench and its port-derived
 Restate container are gone.
 
 | Item | Objective gate | Verdict | Evidence |

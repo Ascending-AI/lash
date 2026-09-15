@@ -50,10 +50,20 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 3. **UI and receipt agree.** The UI renders `turn stopped · request <id>` using the same
    request id returned in `terminal.cancellation`; the transcript/API converges on the
    interrupted terminal. Any disagreement is a contract violation → Abort/RCA.
-4. **Restart only the web process (blocked by FIG-1164).** The historical command was
-   `just agent-workbench-restart <port>`. Do not execute it until a verified immutable
-   same-configuration host restart exists. The data directory and Restate container must remain
-   unchanged; tearing down Restate invalidates the durability proof.
+   Note which receipt that is: **one press of the page's Stop control sends two cancels** —
+   `mode=stop` immediately, then `mode=abort` after `STOP_ESCALATION_MS` (15 s) — and the
+   rendered `turn stopped · request <id>` carries the escalated **abort's** id, not the first
+   receipt's. Capture both receipts and compare the rendered id against the escalated one. The
+   escalation also puts a hard 15 s floor under every process-await latency gate in this
+   runbook: a gate that reads "within 10 seconds of the Stop request" means the request that
+   owns the terminal, and a full UI-driven cancel of a process await cannot beat the
+   escalation window.
+4. **Restart only the web process.** Use `just agent-workbench-restart <port>` (equivalently
+   `bash scripts/agent-workbench-dev.sh restart --port <port>`), the verified non-destructive
+   same-configuration replacement named in this runbook's FIG-1164/FIG-3035 header. The data
+   directory and Restate container must remain
+   unchanged; tearing down Restate invalidates the durability proof. Never substitute the
+   destructive reset.
 5. **Break-glass is not success.** Never use Restate Admin cancel/kill to pass a gate. If
    cleanup requires it after an Abort, record that separately; it must not be reported as
    a Lash `Cancelled` terminal.
@@ -85,8 +95,10 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 
 ## Working material
 
-- Boot with a fresh durable directory:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+- Boot with a fresh durable directory through `scripts/agent-workbench-dev.sh`, which since
+  FIG-3153 is the live path and honours `AGENT_WORKBENCH_BIN`:
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> bash scripts/agent-workbench-dev.sh up --port <port>`
+  (`just agent-workbench <port>` predates it and does not carry this row's env).
   Gate `GET /healthz` → 200. The entire Restate stack is port-isolated by default: the
   helper derives its endpoint, ingress, admin port, node port, and container name from
   `<port>`, so concurrent runs on distinct workbench ports do not need manual Restate
@@ -127,8 +139,11 @@ Press **stop turn** while capturing the `POST /api/turn/cancel` response. Gates:
 
 1. response `accepted` is true and has one cancellation for the active address;
 2. its gate outcome is `requested` or `already_requested`;
-3. its terminal is committed, encodes `TurnStop::Cancelled`, and carries evidence per
-   golden rule 2;
+3. the committed terminal attaches to this Stop's request evidence, encodes
+   `TurnStop::Cancelled`, and carries evidence per golden rule 2. The terminal need not ride
+   on *this* response: the first receipt of an `after_step` Stop on a turn whose step outlasts
+   the request answers `cancellation_recorded_terminal_pending`, and the terminal attaches to a
+   later receipt for the same request id. Follow the request id, not the response body;
 4. the UI renders `turn stopped · request <id>` with the same id, returns to idle, and
    hides Stop;
 5. `GET /api/state` no longer lists that address and its messages agree with the rendered
@@ -149,10 +164,9 @@ request row and intent revision after both.
 ## Phase 2 — Restart the web process mid-turn, then Stop
 
 Submit another long-running turn. Gate on Stop plus one `/api/state.active_turns` entry
-and record its session/turn ids. **Stop here for FIG-1164:** the historical
-`just agent-workbench-restart <port>` step is blocked and must not be executed or replaced by
-destructive reset. Once a verified immutable same-configuration host restart exists, run it
-without touching Restate, poll `/healthz` until the replacement process is ready, reload the page,
+and record its session/turn ids. Then run `just agent-workbench-restart <port>` — the
+non-destructive same-configuration replacement of golden rule 4 — without touching Restate,
+poll `/healthz` until the replacement process is ready, reload the page,
 and gate all of the following before pressing Stop:
 
 - the rendered session id is unchanged;
@@ -173,8 +187,9 @@ Submit a prompt that makes the agent declare and start a process with a long sle
 non-terminal (`lifecycle: "running"`) before Stop. If the model does not produce that
 shape, retry the phase; ordinary model or tool work is not process-await evidence.
 
-Issue Stop immediately once the process-await is running (~0.3s dwell, no intentional
-dwell) while capturing the `POST /api/turn/cancel` response. Repeat the Phase 1 receipt
+Issue Stop immediately once the process-await is running — the shallow dwell gate is
+**< 5 s elapsed**, which an immediate press satisfies with room to spare; that single number
+is what the scorecard scores — while capturing the `POST /api/turn/cancel` response. Repeat the Phase 1 receipt
 gates and gate shallow-stop latency:
 
 1. the turn terminal is committed `Cancelled`, with the Stop request evidence;
@@ -182,7 +197,7 @@ gates and gate shallow-stop latency:
    the Stop request;
 3. that process's events include `process.cancel_requested`;
 4. neither terminal waits for the process's original sleep deadline;
-5. pre-Stop dwell was shallow (<5s elapsed).
+5. pre-Stop dwell was shallow (< 5 s elapsed) — the same number as the scorecard row.
 
 Save the pre-Stop and terminal `/api/work` responses as
 `04-process-await-running.json` and `05-process-await-cancelled.json`. Screenshot the
@@ -256,7 +271,7 @@ Restate container are gone.
 | Routing persistence | same session/turn address before and after restart | | `02-restored-running.png`, state files/API |
 | Restored Stop affordance | running pill + Stop restored from `/api/state.active_turns` | | `02-restored-running.png` |
 | Post-restart Stop | committed Cancelled terminal + evidence for original address | | `03-restored-cancelled.png`, `03-cancel-receipt.json` |
-| Shallow-stop latency (process await) | Stop issued ~0.3s after start; turn and awaited process both commit Cancelled within 10s (< original deadline); pre-Stop dwell < 5s | | `04-process-await-running.json`, `05-process-await-cancelled.json`, `05-process-await-cancelled.png` |
+| Shallow-stop latency (process await) | pre-Stop dwell < 5s (press Stop as soon as the await is running); turn and awaited process both commit Cancelled within 10s of the request that owns the terminal, and before the original deadline | | `04-process-await-running.json`, `05-process-await-cancelled.json`, `05-process-await-cancelled.png` |
 | Deep-stop latency (FIG-1445 durable sleep ≥120s) | Stop issued while process is ≥120s parked in durable sleep; turn and process commit Cancelled within 10s of Stop request; durable dwell ≥120s recorded in work events/trace | | `06a-deep-dwell-running.json`, `06b-deep-dwell-cancelled.json`, `06b-deep-dwell-cancelled.png` |
 | Revoked turn settlement | old turn completes with typed `SessionDeleted` refusal | | reset response + trace |
 | Process survives revocation | process stays globally visible, has no cancel event, and reaches its own terminal | | `07-revoked-process-running.json`, `08-revoked-process-survived.json` |

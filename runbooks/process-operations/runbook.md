@@ -31,6 +31,14 @@ volume it owns on exit. PostgreSQL uses the worktree block's `+46` offset unless
 It emits `process-operations e2e passed: scenarios=8` only after all exact assertions pass. The
 artifacts are the backend truth for this judged runbook.
 
+Each phase's typed outcome is written into its named artifact as a one-line JSON
+`{"checkpoint":"<name>", …}` record, emitted from the same scope as the assertion it
+evidences, and the companion fails the run if a named checkpoint is missing from its log.
+Read the phase's outcome off those lines; a log that holds only `Compiling …` lines and a
+`test … ok` summary is not evidence, and per [RULES.md](../RULES.md) a gate the judge could
+not observe is a FAIL of that gate, never a skip. Do not credit the companion's own
+`scenario N evidence:` prose as the judgment.
+
 ## Scenario-specific golden rules
 
 1. **Typed terminals stay inspectable.** `TargetGone`, `Expired`, `Retargeted`, and
@@ -52,8 +60,11 @@ artifacts are the backend truth for this judged runbook.
    Instead, deterministic world-tool and process authorities (`process.start`,
    `process.signal`, `processes.cancel`, `spawn_agent`) run against the fullest-authority
    deterministic host (Agent Workbench with its deterministic mock mail world and process
-   engine), while protocol-standard `batch` runs against the host where the standard
-   protocol is native (`slack-clone`). Each tool must succeed through its leaf-intent or
+   engine). Protocol-standard `batch` is judged there too: the FIG-1293 `protocol-batch`
+   row below is authored against the Agent Workbench RLM profile, and that table — the one
+   carrying executable detail — is the judged host. (An earlier wording named `slack-clone`,
+   where the standard protocol is native; only one host can be the judged one, and it is the
+   Workbench.) Each tool must succeed through its leaf-intent or
    process-replay shape on Restate exactly as it does on in-memory and PostgreSQL. Any
    FIG-1127 ordinal-tier refusal from those public tools is a regression. The legacy
    journal-capable `ToolContext` routes remain fenced until their aggregate removal.
@@ -124,7 +135,7 @@ API/durable messages, trace executions, and the literal outcome below.
 | `process-signal` | In TypeScript, author a process literal that awaits a `ping` signal, start it with `await processes.start({ process })`, and send literal payload `"ping"` with `await processes.signal({ handle, name: "ping", payload: "ping" })`. Require the process's returned value to be the one observed payload; do not expect a public `process.signal` result wrapper. | One `processes.start` leaf call and one `SignalProcess` command for the same prepared process id, with signal `ping` and payload `"ping"`; recovery delivers the signal once and the process returns the observed payload once. |
 | `processes-cancel` | Start a long-lived tracked process, call `processes.cancel` for its exact id, and require `{"process_id":<started-id>,"status":"cancelled"}`. | One `CancelProcess` command and one `process.cancel_requested` event for the exact id; redrive emits neither a duplicate event nor an ordinal-tier refusal. |
 | `spawn-agent` | Call `spawn_agent` with a schema requiring `{"answer":"str"}` and require one matching child result. | The orchestration body has no enclosing `ToolAttempt`; its one start and one await are direct process-replay children for the same prepared child id, and recovery creates one child session/result. |
-| `protocol-batch` | On the Agent Workbench Restate/RLM profile, ensure the deterministic mock `work` and `personal` Inbox authorities are present, then issue two literal side-effect-free `list({})` calls in one aggregate (`await Promise.all([inbox.work.list({}), inbox.personal.list({})])`). Require the ordered two-element result vector. This is the RLM resource-operation batch, not a `tools.batch` call. | The RLM resource-operation batch has no enclosing `ToolAttempt`; only the two Inbox leaves have attempt frames, and recovery retains their source order and exactly one result per leaf. |
+| `protocol-batch` | On the Agent Workbench Restate/RLM profile, ensure the deterministic mock `work` and `personal` Inbox authorities are present — create them with `POST /api/accounts {"name":"work"}` and `POST /api/accounts {"name":"personal"}`; without them the model answers "No inbox accounts are connected yet" and the row is unrunnable — then issue two literal side-effect-free `list({})` calls in one aggregate (`await Promise.all([inbox.work.list({}), inbox.personal.list({})])`). Require the ordered two-element result vector. This is the RLM resource-operation batch, not a `tools.batch` call. | The RLM resource-operation batch has no enclosing `ToolAttempt`; only the two Inbox leaves have attempt frames, and recovery retains their source order and exactly one result per leaf. |
 
 **Pass only if:** all five rows recover to their literal outcomes, the three-layer counts and ids
 agree, each Restate journal has the required shape, no old ordinal-tier refusal appears, and the
@@ -297,7 +308,7 @@ container no longer exist.
 | Typed discard + redrive | exact `TargetGone`/`Expired`; named block clears | | `01-wake-delivery.log` |
 | Retarget | old pending `Retargeted`; audit; next wake reaches new target | | `02-retarget.jsonl` |
 | Visibility lens | model narrowed; host list/signal/cancel complete | | `03-tool-visibility.log` |
-| Wake-turn policy | two Each claims versus one two-batch Coalesce claim | | `04-wake-turn-policy.log` |
+| Wake-turn policy | two absent-key rows yield two distinct single-batch claims; two default-key wakes yield one claim holding both batches | | `04-wake-turn-policy.log` |
 | Worker crash recovery | kill at named seam; one receiver turn after restart | | `05-crash-*.jsonl`, `05-killed-exit-code.txt` |
 | Process-id reuse | fresh monotone sequence delivered; rewind typed and non-blocking | | `01-wake-delivery.log` |
 | Retention | receipts retained; delivery reconciliation; guard blocks compaction | | `07-retention.log` |
@@ -319,8 +330,8 @@ model/host boundary or manufacturing success after a crash?
   that law suite.
 - **FIG-1402**: Re-targeted FIG-1293 migrated-tool atomicity judgments away from host-affecting
   `shell.*` authorities to deterministic world-tool and process authorities on the Agent
-  Workbench, and targeted protocol `batch` on `slack-clone` where the standard protocol is
-  native, upholding the ruling that judged runbooks must never hand agents host-affecting
+  Workbench, and targeted protocol `batch` on the Agent Workbench RLM profile per the
+  FIG-1293 `protocol-batch` row, upholding the ruling that judged runbooks must never hand agents host-affecting
   authorities.
 
 _Stop triggers and the Abort/RCA + reporting protocol are in [../RULES.md](../RULES.md). A

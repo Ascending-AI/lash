@@ -38,34 +38,43 @@ the model's surrounding prose.
 3. **Execution is evidence.** Require a completed deferred call whose raw tool id is
    `workbench_deferred_text_sha256`, plus the exact digest in the assistant reply. A
    model-computed digest without the tool call fails.
-4. **Restart means the web process (blocked by FIG-1164).** The historical command was
-   `just agent-workbench-restart <port>` with the same explicit
-   `AGENT_WORKBENCH_RUN_DIR` and `AGENT_WORKBENCH_DATA_DIR`. Do not execute it until a verified
-   immutable same-configuration host restart exists. Restate, the data directory, the session
-   id, and `deferred-tool-grants.db` must remain unchanged.
+4. **Restart means the web process.** Use `bash scripts/agent-workbench-dev.sh restart
+   --port <port>` (equivalently `just agent-workbench-restart <port>`) with the same explicit
+   `AGENT_WORKBENCH_RUN_DIR` and `AGENT_WORKBENCH_DATA_DIR` — the verified non-destructive
+   same-configuration replacement named in this runbook's FIG-1164/FIG-3035 header. Restate,
+   the data directory, the session
+   id, and `deferred-tool-grants.db` must remain unchanged; never substitute the destructive
+   reset.
 5. **No second search after restart.** Snapshot the trace byte offset before Phase 3.
-   The post-restart slice must contain `workbench_deferred_text_sha256` and no
-   `search_tools`; otherwise the run did not prove grant persistence.
+   The post-restart slice must contain a completed `workbench_deferred_text_sha256` tool call
+   and **no tool-call record named `search_tools`**. Gate on tool-call records, not on the
+   string: the literal `tools.search` legitimately appears many times in the slice inside
+   `llm_call_started` and `composition_changed` records, because it is in the advertised
+   catalogue in the prompt. A `grep` for the string fails a correct run.
 6. **Inspect SQLite read-only.** The row for `text.sha256` must exist before restart and
    after restart with byte-identical `grant_json`. Do not edit the database to make a
    gate pass.
 
 ## Working material
 
-- Use a free port in the **3200 range**, never 3056 or 3057. Verify it is free before
-  boot. Use fresh paths under `/workspace/tmp/fig1116-*/`, for example:
-  `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig1116-deferred-data` and
-  `AGENT_WORKBENCH_RUN_DIR=/workspace/tmp/fig1116-deferred-run`.
-- Boot with both variables exported and `AGENT_WORKBENCH_OPEN=0 just agent-workbench
-  <port>`. Gate `GET /healthz` → 200. The next historical step used those same exports with
-  `just agent-workbench-restart <port>`; it is blocked by FIG-1164 and must not be executed.
+- Use a free port from this row's allocation in the **3200-3299** range per
+  [RULES.md](../RULES.md). Verify it is free before
+  boot. Use a fresh per-row directory under the drive's run root with `data` and `run`
+  subdirectories, exported as `AGENT_WORKBENCH_DATA_DIR` and `AGENT_WORKBENCH_RUN_DIR`.
+  (Earlier wording pinned `/workspace/tmp/fig1116-*/` paths and warned off ports 3056/3057;
+  that is an older layout and conflicts with RULES.md.)
+- Boot with both variables exported plus `AGENT_WORKBENCH_OPEN=0` and
+  `RESTATE_AUTHORITY_ID=<stable-id>`:
+  `bash scripts/agent-workbench-dev.sh up --port <port>`. Gate `GET /healthz` → 200. Phase 2
+  restarts with the same exports and `… restart --port <port>`. (The `just agent-workbench …`
+  recipes name the same operations but do not carry this row's environment.)
 - UI truth: rendered session id, idle/running pill, transcript rows, composer, and
   visible assistant digest.
 - HTTP truth: `GET /healthz` and `GET /api/state?session_id=<S>`.
 - Disk truth: `<data-dir>/deferred-tool-grants.db`, the SQLite session graph in
   `<data-dir>/lash-sessions/durable-core.db`, `<data-dir>/trace.jsonl`, and
   `<data-dir>/lashlang-execution.jsonl`.
-- Teardown: `just agent-workbench-down <port>` with the same run/data variables, then
+- Teardown: `bash scripts/agent-workbench-dev.sh down --port <port>` with the same run/data variables, then
   verify the Workbench process and managed Restate container are gone.
 
 ## Phase 0 — Fresh boot and baseline
@@ -99,8 +108,13 @@ order:
    cells, in that order. Save the matching records as `01-two-blocks.json`.
 3. A completed raw `workbench_deferred_text_sha256` tool call exists after the search
    observation. Save it as `01-deferred-call.json`.
-4. The rendered assistant row and `/api/state.messages` contain the exact digest of
-   `FIG-1116 before restart`; independently compute the answer locally for comparison.
+4. The structural gate is `outcome.payload.digest` on the completed deferred call, which must
+   equal the locally computed SHA-256 of `FIG-1116 before restart`; that is what proves the
+   path. Keep the prose check — the rendered assistant row and `/api/state.messages` contain
+   the exact digest — as a **secondary** gate: it reads model prose, which this runbook
+   elsewhere tells the judge not to gate on, and a re-prompt may satisfy it. A run that meets
+   the structural gate and renders the digest as `[object Object]` has a presentation miss,
+   not a failed deferred call.
 5. SQLite contains a `text.sha256` row. Other rows returned by the same ranked search
    are allowed and must be recorded, not normalized away. Save the ordered result as
    `01-grants.json`; require the `text.sha256` grant to contain the deferred definition,
@@ -115,10 +129,12 @@ newest transcript rows visible.
 ## Phase 2 — Restart with the same durable state
 
 Record the current `trace.jsonl` byte length, Workbench PID, session id, Restate
-container id, and SHA-256 of `01-grants.json`. The historical
-`just agent-workbench-restart <port>` step with the same explicit run/data variables is blocked
-by FIG-1164; stop this scenario here until a verified immutable same-configuration host restart
-exists. After that mechanism runs, poll `/healthz` and reload the same session URL.
+container id, and SHA-256 of `01-grants.json`. Run
+`bash scripts/agent-workbench-dev.sh restart --port <port>` with the same explicit run/data
+variables — the non-destructive same-configuration replacement of golden rule 4. It prints
+`replaced process; the Restate deployment, its journals and the application data … were
+retained`, which is the readiness evidence for this phase. Then poll `/healthz` and reload the
+same session URL.
 
 Require a new Workbench PID, unchanged Restate container id, unchanged session id, and
 the Phase 1 transcript reconstructed exactly. Query SQLite again and require the

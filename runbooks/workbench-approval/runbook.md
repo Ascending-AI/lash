@@ -63,12 +63,22 @@ do not substitute a scripted model for the live rows.
 
 ## Golden rules
 
-1. Use a free port in the 3200 range. Never touch 3056 or 3057. Use fresh
-   `/workspace/tmp/fig1117-approval-{scenario}-{data,run,artifacts}` paths.
-2. Boot only with `just agent-workbench <port>`. Export the same
-   `AGENT_WORKBENCH_DATA_DIR` and `AGENT_WORKBENCH_RUN_DIR` for every restart.
-3. The model must call raw tool id `workbench_ops_apply_change` from a
-   `<typescript>` cell. A model description of approval is not evidence.
+1. Use a free port from this row's allocation in the 3200-3299 range per
+   [RULES.md](../RULES.md), and a fresh per-row directory under the drive's run root with
+   `{data,run,artifacts}` subdirectories. (Earlier wording pinned
+   `/workspace/tmp/fig1117-approval-{scenario}-{data,run,artifacts}` and warned off ports
+   3056/3057; that is an older layout and conflicts with RULES.md.)
+2. Boot with `bash scripts/agent-workbench-dev.sh up --port <port>`, restart with
+   `… restart --port <port>`, tear down with `… down --port <port>`. Export the same
+   `AGENT_WORKBENCH_DATA_DIR`, `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_OPEN=0` and
+   `RESTATE_AUTHORITY_ID` for the boot and every restart; the `just agent-workbench …`
+   recipes name the same operations but do not carry this row's environment.
+3. The call must reach the host as raw tool id `workbench_ops_apply_change` from a
+   `<typescript>` cell — the practical gate is
+   `/api/approvals[].tool == "workbench_ops_apply_change"`. The cell itself spells the
+   **authority path** `ops.apply_change`; the raw id is what the approval ledger records, and
+   requiring the raw id to appear in the cell text would be wrong. A model description of
+   approval is not evidence.
 4. At every park checkpoint, the rendered `.approval-card`, `GET /api/state`
    `pending_approvals`, and `GET /api/approvals` must agree on key, tool,
    arguments, requesting session, and cardinality. The session graph must show
@@ -114,8 +124,8 @@ Reset to a fresh session and submit:
 
 > In one TypeScript cell call `ops.apply_change` with target `demo-cluster` and
 > change `disable audit log`, catching the failure instead of letting it
-> propagate. Inspect the thrown error and `finish` a record carrying the
-> failure code and message from its `cause`. Do not retry it.
+> propagate. Inspect the thrown error and `finish` a record carrying the code from
+> `error.cause.code` and the message from `error.message`. Do not retry it.
 
 1. Gate on one matching approval across DOM, `/api/state`, and
    `/api/approvals`; save `03-deny-parked.png`, `03-deny-state.json`, and
@@ -142,12 +152,18 @@ Reset to a fresh session and submit:
    message ids, and trace execution identity. Save
    `05-restart-before.png`, `05-restart-before-state.json`, and
    `05-restart-before-approvals.json`.
-2. **Blocked by FIG-1164.** The historical step sent SIGTERM through
-   `just agent-workbench-restart <port>` with the same exported data/run directories. Do not
-   execute it until a verified immutable same-configuration host restart exists. Then gate on
-   the listening line and browser
+2. Replace the process with the verified non-destructive same-configuration restart this
+   runbook's FIG-1164/FIG-3035 header names: `just agent-workbench-restart <port>`
+   (equivalently `bash scripts/agent-workbench-dev.sh restart --port <port>`) with the same
+   exported data/run directories. It keeps the Restate deployment, its journals and the
+   application data, and prints the readiness evidence line
+   `replaced process; the Restate deployment, its journals and the application data at <dir>
+   were retained`. Never substitute the destructive reset. Then gate on
+   that line and browser
    reconnection. Require the same session, approval key, arguments, active turn,
-   and pre-restart DOM/message identities. A redrive may append another
+   and pre-restart DOM/message identities — comparing the approval card **excluding its
+   `waiting Ns` age line**, which necessarily changes across a restart and would make any
+   DOM snapshot non-comparable. A redrive may append another
    `turn_started` / `tool_call_started` observation for the same typed call id
    and arguments; require zero tool completions before approval and exactly one
    approvals-ledger row for the original key. Save

@@ -154,7 +154,11 @@ and work snapshot as `03-reconverged-state.json` and `03-reconverged-work.json`.
 
 ## Phase 3 — Stop the replayed turn
 
-Press **abort** (`#abort`) while capturing `POST /api/turn/cancel`. Gate:
+Press **abort** (`#abort`) while capturing `POST /api/turn/cancel`. The route accepts
+exactly two `mode` values, `abort` and `stop`; **abort** sends `mode=abort`. The word
+"immediate" appears in the scorecard below and is echoed back in the receipt body as
+`"mode":"immediate"`, but it is a disposition, not an accepted query value — sending it
+is a request error. Gate:
 
 1. the response is accepted for the exact Phase 1 address;
 2. the gate outcome is `requested` or `already_requested`;
@@ -165,14 +169,20 @@ Press **abort** (`#abort`) while capturing `POST /api/turn/cancel`. Gate:
 5. `/api/state.active_turns` and `active-turns.json` clear the address, and the trace
    records the cancellation against the original turn id;
 6. for the baseline shape, `/api/work` shows the exact Phase 1 process at terminal
-   `Cancelled`, with a `process.cancel_requested` event, before its original sleep
-   deadline.
+   `Cancelled`, with a `process.cancel_requested` event, at or before its original sleep
+   deadline. Cancellation of a durable sleep lands **at wake, never mid-sleep** (settled
+   ruling), so a process that terminalizes exactly at its wake is correct and passes this
+   gate; only a terminal that never arrives, or one that arrives after the wake, fails it.
 
 Save `04-cancel-receipt.json`, `04-cancelled-state.json`,
 `04-cancelled-work.json`, and screenshot `04-restarted-cancelled.png`.
 Once the address is absent from `/api/state`, another workbench Stop must return
 `accepted:false` with an empty `cancellations` list. The session-level route does not
-retain completed addresses. Run `LASH_E2E_TURN_CONTROL_ONLY=1 just
+retain completed addresses. This late-repeat gate is reachable only once the address
+clears: if gate 5 above did not clear it, record the late-repeat gate as **unreachable,
+blocked on the uncleared address**, quote the address and the `/api/state.active_turns`
+snapshot that still holds it, and score it that way — never as a silent pass and never as
+an unremarked blank. Run `LASH_E2E_TURN_CONTROL_ONLY=1 just
 restate-postgres-workers-e2e` for the exact-address late-repeat check after owner-crash
 recovery; it requires `completion_won_race` and preserves the prior terminal,
 cancellation evidence, disposition, and cleared active-address state.
@@ -198,7 +208,14 @@ state as `05-post-restart-state.json`.
 ### Replace the Workbench worker inside the lease TTL
 
 Run this companion after Phase 4, with Restate healthy. It is a separate worker-restart
-geometry: do not count the engine bounce above as either arm. Record the configured session
+geometry: do not count the engine bounce above as either arm.
+
+If Phase 3 or Phase 4 left the session unusable — an address that never clears, a turn
+that redrives forever, or a composer that refuses further turns — do not simply skip this
+companion. Either run it on a fresh session on the same live stack and say so in the
+scorecard, or record all three of its rows as **blocked by the Phase 3/4 failure**, naming
+the address and the phase that left it. A Phase 3 failure must never cost three scorecard
+rows with no recorded reason. Record the configured session
 lease TTL from the store row before the restart.
 
 **Do not gate on either commit landing inside that TTL.** The Workbench pins a

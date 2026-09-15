@@ -54,18 +54,37 @@ structure rather than exact assistant wording.
   `just agent-workbench-down <port>`.
 - UI: composer, **inject now** (`#injectNow`), **queue next** (`#queueNext`), ingress receipt
   rows, transcript, running pill, and the `#stop` / `#abort` controls. Both ingress buttons are
-  disabled unless a turn is running.
+  **hidden**, not merely disabled, unless a turn is running (`inject_visible` is `false` while
+  idle), so a driver that gates on the `disabled` property never sees them at all. Gate on
+  presence and visibility, the same way the multi-tab runbook distinguishes `#idleActions`
+  from `#runningActions`.
 - HTTP truth: `GET /api/state`, `POST /api/turn`, and `POST /api/turn/input` with
   `{ "text": "...", "ingress": "active_turn" | "next_turn" }`.
 - Disk truth: `<data-dir>/lash-sessions/durable-core.db`, table `pending_turn_inputs` — note
   an ordinary composer **send** also lands there, with `ingress {"scope":"next_turn"}`, so a
   one-send run holds three rows, not two — and
   `<data-dir>/trace.jsonl` events named `agent_workbench.turn_input.enqueued` and
-  `turn_input.completed`.
+  `turn_input.completed`. The claim columns on that table are `claim_id`, `claim_owner_id`,
+  `claim_owner_incarnation_id`, `claim_token`, `claim_fencing_token` and
+  `claim_session_lease_generation`; there is no `claimed_turn_id` column, and selecting one
+  fails with `no such column`.
+- Provider truth is the `llm_call_started` trace record, **not** `provider_request`. A
+  `provider_request` record drops its body once the assembled request exceeds the trace's
+  inline limit — it then carries `body_json_omitted_reason: "size_limit"` and a `body_len`
+  with no body — which is routine on a frontier run and makes every marker count read 0. A
+  0 count across every iteration means the evidence was omitted, not that the marker was
+  absent; re-read the same iterations from `llm_call_started`, which carries the assembled
+  messages, before scoring any exactly-once gate.
 - The deterministic companion gate is `just agent-workbench-restate-e2e`. It proves the
   active input id completes exactly once under the in-flight turn, the queued draft
   dispatches only after settle, and runs Lash core's ADR 0029 reclaim-mediated
-  claim-supersession test.
+  claim-supersession test — that ADR 0029 contribution is the
+  `turn_input_claims_supersede_across_session_lease_generations` case. The unfiltered suite
+  is roughly 45 live Restate tests behind a cold workspace build, which is tens of minutes
+  before the one test this row needs even starts; run it as
+  `AGENT_WORKBENCH_E2E_TEST_FILTER=live_restate_turn_input_ingress just agent-workbench-restate-e2e`
+  so the row's own gate is reachable, and run the full suite only when the row is being
+  scored against the whole companion.
 
 ## Phase 0 — Boot and pre-flight
 
@@ -124,8 +143,9 @@ Save `03-queue-receipt.json`, `03-queue-store.json`, and screenshot `03-queued.p
 Poll until the initial turn completes and the queued turn starts and completes; never use
 a fixed delay. Gate in this order:
 
-1. the first provider request after the admitted checkpoint contains the injected marker
-   exactly once as a user message, proving the model received it during the initial turn;
+1. the first provider request after the admitted checkpoint — read from `llm_call_started`,
+   per Working material — contains the injected marker exactly once as a user message,
+   proving the model received it during the initial turn;
    exactly one `turn_input.completed` trace claim also places its input id under that turn id;
 2. the injected marker appears exactly once as a committed user message in the durable
    session graph, `GET /api/state`, and the rendered page; capture all three surfaces and

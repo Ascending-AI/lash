@@ -67,7 +67,7 @@ Use one session id `<S> = runbook-cron-<run-id>` and one distinctive marker
 | Restate object | empty-body `POST <ingress>/WorkbenchCronJob/<url-encoded-job-key>/info` | `source_key` and cron expression match registration; `next_execution_time` advances and `last_fired_at` equals the tick; disabled/deleted reads `null` |
 | Trigger store | `<data-dir>/triggers.db`: `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries` | subscription `source_key` joins each occurrence; occurrence id joins exactly one delivery and its `process_id` |
 | Process registry | `<data-dir>/processes.db`: `processes`, `process_events`, `process_wake_deliveries` | delivery `process_id` joins one `process.wake` event/delivery for `<S>`; record sequence/state |
-| Session store | `<data-dir>/lash-sessions/durable-core.db`: `queued_work_batches`, `queued_work_items`, `graph_nodes` (`node_json.kind == "event"`, conversation at `event.Conversation`) | queued item payload joins the wake/process identity; batch is completed/drained; committed assistant marker count advances by one |
+| Session store | `<data-dir>/lash-sessions/durable-core.db`: `queued_work_batches`, `queued_work_items`, `graph_nodes` (`node_json.kind == "event"`, conversation at `event.Conversation`) | queued item payload joins the wake/process identity; committed assistant marker count advances by one. `queued_work_batches`/`queued_work_items` rows are **deleted when the batch drains**, so "exactly one new completed queued-work batch" cannot be read from them after the fact: either sample those two tables *during* the drain, or take the drain evidence from the trace instead — the `queued_work.restate.start` record plus the queued `turn_completed` for the same turn id. An empty batch table after the tick is the expected steady state, not a missing batch. |
 | Trace | `<data-dir>/trace.jsonl`, filtered by `context.session_id == <S>` | per tick: one `agent_workbench.cron.restate.run`, one `.emit_completed`, one `queued_work.restate.start`, and one `turn_completed`; join `fired_at`, process ids, and queued turn id |
 
 `WorkbenchCronJob.info` takes a **genuinely empty** request: send no body *and no
@@ -89,8 +89,9 @@ include the stored `record_json`/payload JSON needed to establish identities.
 - Require `OPENROUTER_API_KEY`. Pick one free `<port>`, a fresh `<data-dir>` outside any
   other row's tree, and a fresh artifact directory; the whole stack (Restate ingress, admin
   and endpoint ports) is derived from `<port>`, so two rows never share one. Boot with
-  `AGENT_WORKBENCH_DATA_DIR=<data-dir> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`
-  and read the derived ingress URL back from the host's own `agent_workbench.startup`
+  `AGENT_WORKBENCH_DATA_DIR=<data-dir> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> just agent-workbench <port>`
+  — `RESTATE_AUTHORITY_ID` is required and must stay stable for one Restate state, and the
+  workbench refuses to start without it — and read the derived ingress URL back from the host's own `agent_workbench.startup`
   record rather than assuming it. Gate `GET /healthz` to 200.
 - Drive Chromium with a PEP 723 Playwright script under the artifact directory and `uv run`.
   Navigate with `wait_until="domcontentloaded"`, then explicit assertions.
@@ -139,8 +140,11 @@ event })`, where `tick` is the target process's parameter name — a stable lite
 second registration failure voids the run.
 
 Poll until `/api/triggers?session_id=<S>` returns exactly one enabled registration named
-`fig996-cron-reminder` with source type `cron.Schedule`, expression `* * * * *`, timezone
-`UTC`, and a stable literal `subscription_key`. Require the registrations rail to show the
+`fig996-cron-reminder` with source type `cron.Schedule`, a **once-a-minute UTC** expression,
+and a stable literal `subscription_key`. Defer to the Working material rule above: judge the
+schedule, not one spelling of it, and gate on the tick interval the Restate object
+advertises. `* * * * *`, `*/1 * * * *` and the 6-field `0 * * * * *` are all correct
+registrations of that schedule; do not reject a run for the spelling the agent chose. Require the registrations rail to show the
 same name/config and a **disable** action. Query Restate `info` and require matching
 `source_key`/expression, nonempty future `next_execution_time`, and nonempty
 `next_execution_id`. Require exactly one live durable subscription row matching the API.
@@ -220,7 +224,20 @@ screenshot `08-deleted-silent.png`.
 
 This phase distinguishes a valid non-current schedule from a retired-session orphan. Do not use reset for the pointer rotation because reset also deletes the old session.
 
-1. On current session `S0`, register one `cron.Schedule` with a two-second expression. From the `agent_workbench.cron.restate.sync_upserted` record whose trace context is scoped to `S0`, capture its exact `payload.job_key` as `J` and require that `J` has the `{S0}:` prefix.
+0. `S0` is whichever session the workbench currently points at when this phase starts —
+   take it, do not try to choose it. Opening `/?session_id=<X>` scopes the tab but does
+   **not** move the current-session pointer (`/api/state` with no query still answers the
+   previous session), and `POST /api/sessions/select` refuses a tab-scoped id, so there is
+   no mechanical way to place a known session in the current slot. Record the id the
+   workbench reports and use that as `S0`.
+1. On current session `S0`, register one `cron.Schedule` with a two-second expression. Pin
+   the registration in the prompt rather than leaving it to the model, and tell the agent
+   explicitly **not** to disable, re-register or delete the schedule for the rest of the
+   phase: a two-second schedule produces a wake storm, and an unguarded agent has been
+   observed tearing its own registration down under it, which destroys the gate. From the
+   `agent_workbench.cron.restate.sync_upserted` record whose trace context is scoped to
+   `S0`, capture its exact `payload.job_key` as `J` and require that `J` has the `{S0}:`
+   prefix.
 2. Record the current count of `agent_workbench.cron.restate.run` records whose payload has both `job_session_id == S0` and `job_key == J`.
 3. Open a second scoped tab bound to a fresh session `S1` through **new session tab**, which
    is what moves the workbench's current session off `S0`; leave `S0` alive and undeleted,

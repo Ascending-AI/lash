@@ -107,7 +107,15 @@ the post-restart code ran — never on the assistant's ability to recall.
   payload; do not require its full contents in the provider request. Capture
   `04-leaf-recall.png`.
 The deterministic `session_lifecycle_growth::flat_commit_growth_after_large_bindings_stabilize`
-test separately observes accepted commit inputs with production budget accounting. It
+test separately observes accepted commit inputs with production budget accounting. Run it as
+
+```sh
+cargo nextest run -p lash-runtime --all-features --lib session_lifecycle_growth::flat_commit_growth_after_large_bindings_stabilize
+```
+
+— the full module path with `-p lash-runtime --all-features --lib`. The obvious shorter
+invocations select nothing and report `0 passed`, which reads green: require the run to
+report exactly one test passed, or the gate is unobserved. It
 checks forty dirty turns retain sixteen large leaf identities, excludes unchanged bodies,
 and requires exactly one submitted leaf body after rebinding one large value. Browser
 traces establish executed operations; they do not expose exact submitted component bodies.
@@ -122,8 +130,12 @@ traces establish executed operations; they do not expose exact submitted compone
   gate reads the TypeScript surface.
 - Source the fork's `env.sh` before `just` recipes that invoke Cargo.
 - SQLite pass:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
-  Gate `GET /healthz` → 200. Teardown: `just agent-workbench-down <port>`. The dev helper
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`.
+  Gate `GET /healthz` → 200. Restart with `… restart --port <port>` and tear down with
+  `… down --port <port>`. `scripts/agent-workbench-dev.sh` is the live path: since FIG-3153
+  it builds through `kiln build --config=judged //examples/agent-workbench:agent-workbench`
+  and honours `AGENT_WORKBENCH_BIN`. The `just agent-workbench` / `agent-workbench-restart` /
+  `agent-workbench-down` recipes are the same operations by their older names. The dev helper
   explicitly forwards `AGENT_WORKBENCH_DATA_DIR` to the workbench process.
 - PostgreSQL pass: the same command with `AGENT_WORKBENCH_POSTGRES=1` and a **second fresh
   data directory and port**. Gate the startup trace's `store_backend: "postgres"` before
@@ -238,7 +250,9 @@ Save the execution trace as `04-recall-exec.json`, save `/api/state` as
 ## Phase 5 — Repeat the whole scenario on PostgreSQL
 
 Tear the SQLite stack down, then run Phases 0–4 again on the PostgreSQL stack with a fresh
-data directory, a fresh port, and a new run id. Save the second pass's artifacts under a
+data directory, a **second port taken from this row's own allocation in the parity matrix and
+the RULES.md port budget** (never a port another row may hold — two concurrent rows that both
+"pick a fresh port" can collide), and a new run id. Save the second pass's artifacts under a
 `postgres/` prefix. Require both passes to reach the same verdict on every gate; record
 any per-gate divergence explicitly, because a backend-specific loss of execution state is
 the exact defect class this scenario exists to catch.
@@ -252,7 +266,7 @@ its Restate container, and (PostgreSQL pass) its Postgres container are gone.
 |------|----------------|---------|----------|
 | Boot identity | rendered/API/disk session ids agree; Postgres pass reports its backend | | `00-ready.png` |
 | Variable bound | `exec_code_started.code` binds the name to the marker | | `01-bound-exec.json`, `01-bound-state.json` |
-| No-new-binding turn | one further committed pair; traced code mutates no binding and finishes | | `02-reference-only-exec.json`, `02-no-new-binding-turn.png` |
+| No-new-binding turn | one further committed pair; traced code mutates no binding and finishes | | `02-reference-only-exec.json` (the authoritative trace evidence; `02-no-new-binding-turn.png` is a checkpoint screenshot only — per golden rule 3 the absence of a code block proves nothing, so the shot corroborates and never carries this gate) |
 | Cold reconstruction | PID changed; session id and every pre-restart row survived | | `03-reconstructed.png` |
 | Hydration before execution | post-restart provider request carries the bound variable and marker | | `04-provider-request.json` |
 | Recall by reading | traced code references the variable without assigning it | | `04-recall-exec.json`, `04-recall.png` |
