@@ -955,7 +955,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     let session_id = harness.state.current_session_id();
     harness
         .state
-        .open_session(&session_id)
+        .open_session(&session_id, "test")
         .await
         .expect("materialize the session before its failed delete");
     harness
@@ -1670,8 +1670,11 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     admission_gate.arm();
     let state_for_holder = harness.state.clone();
     let session_id_for_holder = session_id.clone();
-    let held_open =
-        tokio::spawn(async move { state_for_holder.open_session(&session_id_for_holder).await });
+    let held_open = tokio::spawn(async move {
+        state_for_holder
+            .open_session(&session_id_for_holder, "test")
+            .await
+    });
     admission_gate.wait_until_admitted().await;
     let exhausted = Box::pin(app_state(
         State(harness.state.clone()),
@@ -1706,7 +1709,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
 
     let settled_session = harness
         .state
-        .open_session(&session_id)
+        .open_session(&session_id, "test")
         .await
         .expect("open settled ingress session through the host retry boundary");
     let read_view = settled_session.read_view();

@@ -339,7 +339,7 @@ pub(crate) async fn send_turn(
     }
     drop(
         state
-            .open_session(&session_id)
+            .open_session(&session_id, "api.turn")
             .await
             .map_err(|error| state.session_admission_error(&session_id, "api.turn", error))?,
     );
@@ -662,9 +662,12 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
     reason: &str,
 ) -> Result<lash::SessionCommandReceipt, AppError> {
     let session_id = state.current_session_id();
-    let session = state.open_session(&session_id).await.map_err(|error| {
-        state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
-    })?;
+    let session = state
+        .open_session(&session_id, "mail.tool_catalog.refresh")
+        .await
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
+        })?;
     let receipt = session
         .admin()
         .commands()
@@ -824,7 +827,7 @@ pub(crate) async fn reset_chat(
         }),
     );
     let session = state
-        .open_session(&new_session_id)
+        .open_session(&new_session_id, "api.reset")
         .await
         .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
@@ -957,9 +960,12 @@ pub(crate) async fn run_queued_work_batch(
             "queued work cannot be run while this session has an active turn",
         ));
     }
-    let session = state.open_session(&session_id).await.map_err(|error| {
-        state.session_admission_error(&session_id, "api.queued_work.run", error)
-    })?;
+    let session = state
+        .open_session(&session_id, "api.queued_work.run")
+        .await
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.queued_work.run", error)
+        })?;
     if !session
         .queued_work()
         .await
@@ -1036,9 +1042,12 @@ pub(crate) async fn cancel_queued_work_batch(
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
             session_id: session_id.clone(),
         })?;
-    let session = state.open_session(&session_id).await.map_err(|error| {
-        state.session_admission_error(&session_id, "api.queued_work.cancel", error)
-    })?;
+    let session = state
+        .open_session(&session_id, "api.queued_work.cancel")
+        .await
+        .map_err(|error| {
+            state.session_admission_error(&session_id, "api.queued_work.cancel", error)
+        })?;
     if session
         .cancel_queued_work_batch(&lash::BatchId::from(batch_id.as_str()))
         .await

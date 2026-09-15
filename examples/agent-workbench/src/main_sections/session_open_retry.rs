@@ -7,8 +7,10 @@ pub(crate) const SESSION_OPEN_RETRY_BUDGET: Duration = Duration::from_millis(75)
 pub(crate) async fn open_session_with_bounded_retry(
     state: &AppState,
     session_id: &SessionId,
+    surface: &str,
 ) -> Result<lash::LashSession, lash::EmbedError> {
     retry_session_open(
+        surface,
         || state.session_builder(session_id.to_string()).open(),
         |event, payload| state.trace_for_session(session_id, event, payload),
     )
@@ -20,7 +22,12 @@ pub(crate) async fn open_session_with_bounded_retry(
     reason = "every break out of the retry loop follows a contended attempt that just \
               recorded last_contended; reaching attempt > 1 requires one"
 )]
+/// `surface` is the route that wanted the session. Every contention record
+/// carries it: a storm is only actionable once it names which caller is
+/// contending, and 156 unattributed `contended` records name nothing
+/// (FIG-3151).
 pub(crate) async fn retry_session_open<T, Open, OpenFuture, Trace>(
+    surface: &str,
     mut open: Open,
     mut trace: Trace,
 ) -> Result<T, lash::EmbedError>
@@ -43,6 +50,7 @@ where
                     trace(
                         "session.open.retried",
                         json!({
+                            "surface": surface,
                             "attempt": attempt,
                             "elapsed_ms": started.elapsed().as_millis(),
                             "outcome": "opened",
@@ -55,6 +63,7 @@ where
                 trace(
                     "session.open.contended",
                     json!({
+                        "surface": surface,
                         "attempt": attempt,
                         "attempt_cap": SESSION_OPEN_MAX_ATTEMPTS,
                         "elapsed_ms": started.elapsed().as_millis(),
@@ -81,6 +90,7 @@ where
     trace(
         "session.open.retry_exhausted",
         json!({
+            "surface": surface,
             "attempt_cap": SESSION_OPEN_MAX_ATTEMPTS,
             "elapsed_ms": started.elapsed().as_millis(),
             "latency_budget_ms": SESSION_OPEN_RETRY_BUDGET.as_millis(),

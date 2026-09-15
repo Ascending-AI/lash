@@ -145,7 +145,7 @@ pub(crate) async fn reject_if_active_turn_settled(
     }
 
     let session = state
-        .open_session(&acceptance.session_id)
+        .open_session(&acceptance.session_id, "api.turn.input.cancel")
         .await
         .map_err(AppError::runtime)?;
     let outcome = session
