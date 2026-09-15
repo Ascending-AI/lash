@@ -19,7 +19,7 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         self._original_root = GATE.ROOT
         self._tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self._tmp.name)
-        for name in ("Cargo.toml", "justfile"):
+        for name in ("Cargo.toml", "justfile", ".bazelrc"):
             shutil.copy2(ROOT / name, self.root / name)
         for relative in ("examples", "scripts", "runbooks"):
             shutil.copytree(
@@ -40,6 +40,9 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         GATE.check_boot_sites(failures)
         GATE.check_artifact_dirs(failures)
         GATE.check_profile_overrides_exported(failures)
+        GATE.check_bazel_judged_config(failures)
+        GATE.check_bazel_boot_sites(failures)
+        GATE.check_build_precedes_launcher_locks(failures)
         return failures
 
     def test_repository_tree_is_clean(self) -> None:
@@ -164,6 +167,58 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         failures = self.run_gate()
         self.assertTrue(
             any("without `export`" in f for f in failures), failures
+        )
+
+    def test_bazel_judged_config_without_debug_assertions_fails(self) -> None:
+        # The defect this exists for: rustc turns debug assertions ON at
+        # `-C opt-level=0`, so a Bazel config that simply omits the flag ships
+        # the geometry `[profile.judged]` was created to remove — and the host
+        # still boots, so nothing else notices.
+        bazelrc = self.root / ".bazelrc"
+        text = bazelrc.read_text(encoding="utf-8")
+        flag_line = (
+            "build:judged --@rules_rust//rust/settings:"
+            "extra_rustc_flag=-Cdebug-assertions=off\n"
+        )
+        self.assertIn(flag_line, text)
+        bazelrc.write_text(text.replace(flag_line, "", 1), encoding="utf-8")
+        failures = self.run_gate()
+        self.assertTrue(any("-Cdebug-assertions=off" in f for f in failures), failures)
+
+    def test_bazel_build_without_the_judged_config_fails(self) -> None:
+        script = self.root / "scripts" / "agent-workbench-dev.sh"
+        text = script.read_text(encoding="utf-8")
+        invocation = '"${build_command[@]}" --config=judged '
+        self.assertIn(invocation, text)
+        script.write_text(
+            text.replace(invocation, '"${build_command[@]}" ', 1), encoding="utf-8"
+        )
+        failures = self.run_gate()
+        self.assertTrue(
+            any("without `--config=judged`" in f for f in failures), failures
+        )
+
+    def test_build_taken_inside_a_launcher_lock_fails(self) -> None:
+        # The measured defect: the launcher compiled while holding
+        # `/tmp/lash-agent-workbench-$UID/data-ownership.lock`, which every
+        # checkout on the box shares, so one lane's cold build was every other
+        # stack's boot latency.
+        script = self.root / "scripts" / "agent-workbench-dev.sh"
+        text = script.read_text(encoding="utf-8")
+        call = (
+            "      foreground|run|restart)\n"
+            "        prepare_workbench_binary\n"
+            "        ;;\n"
+        )
+        self.assertIn(call, text)
+        anchor = '    exec {launcher_data_lock_fd}>"$launcher_data_lock_file"\n'
+        self.assertIn(anchor, text)
+        text = text.replace(call, "", 1).replace(anchor, anchor + call, 1)
+        script.write_text(text, encoding="utf-8")
+        failures = self.run_gate()
+        self.assertTrue(
+            any("builds the host after a launcher lock is taken" in f for f in failures),
+            failures,
         )
 
 

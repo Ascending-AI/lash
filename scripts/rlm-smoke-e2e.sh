@@ -15,7 +15,29 @@ mkdir -p "$artifact_root"
 artifact_root="$(cd "$artifact_root" && pwd -P)"
 build_log="$artifact_root/build.log"
 
-cargo build -p rlm-smoke-host --locked 2>&1 | tee "$build_log"
+# Built through Bazel so this gate shares the box's action cache with every
+# other checkout instead of compiling the workspace again into its own Cargo
+# target directory (FIG-3153). The geometry is unchanged: `cargo build` without
+# a profile and Bazel's default `fastbuild` are both `-C opt-level=0` with
+# debug assertions on, which is what this host has always run under.
+# `LASH_RLM_SMOKE_HOST_BIN` launches a prebuilt binary and skips the build.
+smoke_host_label='//runbooks/rlm-smoke:rlm-smoke'
+smoke_host_bin="${LASH_RLM_SMOKE_HOST_BIN:-}"
+if [[ -z "$smoke_host_bin" ]]; then
+  symlink_prefix="$artifact_root/bazel-"
+  if command -v kiln >/dev/null 2>&1; then
+    build_command=(kiln build)
+  else
+    build_command=("$repo/scripts/hermetic-build.sh" build)
+  fi
+  "${build_command[@]}" "--symlink_prefix=$symlink_prefix" "$smoke_host_label" \
+    2>&1 | tee "$build_log"
+  smoke_host_bin="${symlink_prefix}bin/runbooks/rlm-smoke/rlm-smoke"
+fi
+[[ -x "$smoke_host_bin" ]] || {
+  echo "rlm-smoke-host binary is missing at $smoke_host_bin" >&2
+  exit 1
+}
 
 if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
   echo "STOP: OPENROUTER_API_KEY is unset; built rlm-smoke-host but ran no live-model rows. Artifacts: $artifact_root" >&2
@@ -59,7 +81,7 @@ for scenario in "${scenarios[@]}"; do
     cp -a "$scenario_dir/workspace/." "$workspace/"
     chmod -R u+rwX "$workspace"
 
-    "$CARGO_TARGET_DIR/debug/rlm-smoke-host" \
+    "$smoke_host_bin" \
         --scenario "$scenario" \
         --scenario-dir "$scenario_dir" \
         --workspace "$workspace" \

@@ -11,7 +11,11 @@ record: one call, one exchange, terminal evidence retained, and zero assistant b
 
 **No real tokens.** Set `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO` to exactly
 `valid-empty-completion`. The launcher then enables the opt-in
-`provider-wire-fixtures` feature. The checked-in
+`provider-wire-fixtures` feature, and this is the one workbench row that still
+builds through Cargo (`--profile judged`) rather than Bazel: the feature turns on an
+optional dependency outside the single workspace feature resolution the generated BUILD
+files describe, so no label builds this shape. Expect a cold build here where other
+workbench rows boot from the shared Bazel cache. The checked-in
 `openai-compatible.chat-valid-empty-stop` Provider Wire Script is the only transport;
 an OpenRouter request or a missing development-provider startup warning invalidates the
 run.
