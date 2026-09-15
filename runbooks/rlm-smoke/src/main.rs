@@ -340,6 +340,102 @@ fn string_fields(fields: &[&str]) -> Value {
     })
 }
 
+/// Typed payload keys each workspace tool puts on its own trace record, so a
+/// judge reading `trace.jsonl` sees which file or command the row touched
+/// without decoding `graph_node_id`.
+fn required_payload_keys(tool: &str) -> Option<&'static [&'static str]> {
+    match tool {
+        "workspace_list" => Some(&["path", "entries"]),
+        "workspace_read" => Some(&["path", "content"]),
+        "workspace_write" => Some(&["path", "bytes_written"]),
+        "workspace_exec" => Some(&["command", "exit_code"]),
+        _ => None,
+    }
+}
+
+/// What the row's flushed trace proves on its own, without the host's summary.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct TraceJudgement {
+    served_models: Vec<String>,
+    tools_recorded: BTreeSet<String>,
+}
+
+/// Judges the row's own trace records the way the README tells a reader to:
+/// every successful workspace tool record carries its typed payload, and every
+/// completed LLM attempt carries the provider-reported served model.
+fn judge_trace(records: &[Value]) -> Result<TraceJudgement, String> {
+    let mut judgement = TraceJudgement::default();
+    let mut served = BTreeSet::new();
+    for record in records {
+        match record.get("type").and_then(Value::as_str) {
+            Some("tool_call_completed") => {
+                let name = record
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let Some(keys) = required_payload_keys(name) else {
+                    continue;
+                };
+                let outcome = record
+                    .pointer("/output/outcome")
+                    .ok_or_else(|| format!("`{name}` record carries no tool outcome"))?;
+                if outcome.get("status").and_then(Value::as_str) != Some("success") {
+                    continue;
+                }
+                let payload = outcome
+                    .get("payload")
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| format!("`{name}` success record carries no payload object"))?;
+                for key in keys {
+                    if !payload.contains_key(*key) {
+                        return Err(format!(
+                            "`{name}` payload is missing `{key}`; a judge cannot see what the row touched"
+                        ));
+                    }
+                }
+                judgement.tools_recorded.insert(name.to_string());
+            }
+            Some("llm_call_completed") => {
+                let attempts = record
+                    .get("attempts")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| "llm_call_completed record carries no attempts".to_string())?;
+                for attempt in attempts {
+                    if attempt.get("outcome").and_then(Value::as_str) != Some("completed") {
+                        continue;
+                    }
+                    let model = attempt
+                        .pointer("/execution_evidence/served_model")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            "completed LLM attempt carries no provider-reported served model"
+                                .to_string()
+                        })?;
+                    served.insert(model.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    if judgement.tools_recorded.is_empty() {
+        return Err("row recorded no workspace tool call".to_string());
+    }
+    if served.is_empty() {
+        return Err("row recorded no provider-reported served model".to_string());
+    }
+    judgement.served_models = served.into_iter().collect();
+    Ok(judgement)
+}
+
+fn read_trace_records(path: &Path) -> Result<Vec<Value>> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("read row trace {}", path.display()))?;
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).context("parse trace record"))
+        .collect()
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -477,6 +573,15 @@ async fn main() -> Result<()> {
         "row emitted code languages {code_languages:?}, expected only `{RLM_LANGUAGE_ID}`"
     );
     core.flush_trace_sink().context("flush row trace")?;
+    // The README points a judge at the row's own trace records rather than at
+    // this host's summary, so the row fails when the trace cannot carry that
+    // reading.
+    let judgement = judge_trace(&read_trace_records(&trace_path)?).map_err(anyhow::Error::msg)?;
+    ensure!(
+        judgement.served_models == served_models,
+        "trace served models {:?} disagree with the turn output's {served_models:?}",
+        judgement.served_models
+    );
 
     let evidence = HostEvidence {
         scenario: args.scenario,
@@ -532,6 +637,102 @@ mod tests {
         let tools = tools(directory.path());
         assert!(tools.existing_path("outside").is_err());
         assert!(tools.writable_path("outside/file").is_err());
+    }
+
+    fn tool_record(name: &str, payload: Value) -> Value {
+        json!({
+            "type": "tool_call_completed",
+            "name": name,
+            "output": { "outcome": { "status": "success", "payload": payload } },
+        })
+    }
+
+    fn llm_record(served_model: Option<&str>) -> Value {
+        let evidence = match served_model {
+            Some(model) => json!({ "served_model": model }),
+            None => json!({ "provider_finish_reason": "stop" }),
+        };
+        json!({
+            "type": "llm_call_completed",
+            "attempts": [{ "ordinal": 1, "outcome": "completed", "execution_evidence": evidence }],
+        })
+    }
+
+    fn judgeable_records() -> Vec<Value> {
+        vec![
+            tool_record("workspace_list", json!({ "path": ".", "entries": [] })),
+            tool_record(
+                "workspace_read",
+                json!({ "path": "calc.sh", "content": "" }),
+            ),
+            tool_record(
+                "workspace_write",
+                json!({ "path": "calc.sh", "bytes_written": 12 }),
+            ),
+            tool_record(
+                "workspace_exec",
+                json!({ "command": "sh test.sh", "exit_code": 0, "stdout": "ok\n", "stderr": "" }),
+            ),
+            llm_record(Some("deepseek/deepseek-v4-flash")),
+        ]
+    }
+
+    #[test]
+    fn a_typed_trace_names_every_tool_and_the_served_model() {
+        let judgement = judge_trace(&judgeable_records()).expect("typed trace is judgeable");
+        assert_eq!(
+            judgement.served_models,
+            vec!["deepseek/deepseek-v4-flash".to_string()]
+        );
+        assert_eq!(
+            judgement.tools_recorded.iter().cloned().collect::<Vec<_>>(),
+            vec![
+                "workspace_exec".to_string(),
+                "workspace_list".to_string(),
+                "workspace_read".to_string(),
+                "workspace_write".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_untyped_tool_payload_fails_the_row() {
+        let mut records = judgeable_records();
+        records[2] = tool_record("workspace_write", json!({}));
+        let error = judge_trace(&records).expect_err("an empty payload must fail the row");
+        assert!(
+            error.contains("workspace_write") && error.contains("a judge cannot see"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn a_write_record_without_its_byte_count_fails_the_row() {
+        let mut records = judgeable_records();
+        records[2] = tool_record("workspace_write", json!({ "path": "calc.sh" }));
+        let error = judge_trace(&records).expect_err("a byteless write must fail the row");
+        assert!(
+            error.contains("`bytes_written`"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn a_completed_attempt_without_a_served_model_fails_the_row() {
+        let mut records = judgeable_records();
+        records[4] = llm_record(None);
+        let error = judge_trace(&records).expect_err("an unreported served model must fail");
+        assert!(error.contains("served model"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn a_trace_with_no_workspace_tool_call_fails_the_row() {
+        let error = judge_trace(&[llm_record(Some("deepseek/deepseek-v4-flash"))])
+            .expect_err("a toolless row must fail");
+        assert!(
+            error.contains("no workspace tool call"),
+            "unexpected error: {error}"
+        );
     }
 
     #[tokio::test]
