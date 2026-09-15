@@ -30,7 +30,9 @@ async fn settled_assistant_rows(
         .iter()
         .filter_map(|row| match row {
             TranscriptRow::Reasoning { text, .. } => Some(text.clone()),
-            TranscriptRow::Message { .. } | TranscriptRow::CodeBlock { .. } => None,
+            TranscriptRow::Message { .. }
+            | TranscriptRow::CodeBlock { .. }
+            | TranscriptRow::Note { .. } => None,
         })
         .collect::<Vec<_>>();
     (assistant_texts, reasoning_rows)

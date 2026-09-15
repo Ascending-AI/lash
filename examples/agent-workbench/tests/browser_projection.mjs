@@ -197,6 +197,7 @@ test("resident replacement async refetch preserves an actual provisional tool ro
   const modelInput = element("modelInput");
   const variantSelect = element("variantSelect");
   const modelList = element("modelList");
+  const modelPending = element("modelPending");
   const sessionDialect = element("sessionDialect");
   let resolveSnapshot;
   let fetchCalls = 0;
@@ -207,6 +208,7 @@ test("resident replacement async refetch preserves an actual provisional tool ro
     Set,
     timeline,
     modelInput,
+    modelPending,
     variantSelect,
     sessionDialect,
     knownModels: new Set(),
@@ -262,7 +264,9 @@ test("resident replacement async refetch preserves an actual provisional tool ro
   };
 
   vm.runInNewContext(
-    `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+    `${markedSource("WORKBENCH_MODEL_SELECTION", "WORKBENCH_MODEL_SELECTION")}
+     const modelSelection = createModelSelection();
+     ${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
      this.projectionState = createWorkbenchProjectionState();
      this.renderedProductEvents = projectionState.renderedProductEvents;
      this.appliedObservationEvents = projectionState.appliedObservationEvents;
@@ -1450,8 +1454,11 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       value: "",
       innerHTML: "",
       textContent: "",
+      hidden: false,
+      className: "",
       appendChild() {},
       addEventListener() {},
+      classList: { toggle() {} },
     });
     const scorecardContext = {
       Map,
@@ -1483,6 +1490,7 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
         if (event.type === "model_call_recorded") handledModelCalls += 1;
       },
       modelInput: element(),
+      modelPending: element(),
       variantSelect: element(),
       knownModels: new Set(),
       modelListenersBound: false,
@@ -1503,7 +1511,9 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
       setBusy(value) { this.busy = value; },
     };
     vm.runInNewContext(
-      `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+      `${markedSource("WORKBENCH_MODEL_SELECTION", "WORKBENCH_MODEL_SELECTION")}
+       const modelSelection = createModelSelection();
+       ${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
        ${markedSource("WORKBENCH_EXECUTION_SCORECARD", "WORKBENCH_EXECUTION_SCORECARD")}
        ${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
        this.executionScorecardState = createExecutionScorecardState();
@@ -3830,4 +3840,82 @@ test("a failed turn's Done re-derives the transcript from durable truth", () => 
 test("a completed turn's Done re-derives nothing", () => {
   assert.deepEqual(doneReducerContext("completed"), []);
   assert.deepEqual(doneReducerContext(undefined), []);
+});
+
+test("a typed model survives an intervening snapshot and is what the turn sends", () => {
+  function control() {
+    const node = {
+      className: "",
+      value: "",
+      hidden: false,
+      classList: {
+        toggle(token, force) {
+          const tokens = node.className.split(" ").filter(Boolean).filter(item => item !== token);
+          if (force) tokens.push(token);
+          node.className = tokens.join(" ");
+        },
+      },
+    };
+    return node;
+  }
+  const modelInput = control();
+  const modelPending = control();
+  const variantSelect = control();
+  variantSelect.value = "high";
+  const context = {
+    modelInput,
+    modelPending,
+    variantSelect,
+    validateModel() {},
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_MODEL_SELECTION", "WORKBENCH_MODEL_SELECTION")}
+     this.modelSelection = createModelSelection();
+     const modelSelection = this.modelSelection;
+     this.applyProjectedModel = applyProjectedModel;
+     this.onModelInput = onModelInput;
+     this.selectedModelPayload = selectedModelPayload;`,
+    context,
+  );
+
+  // The server's model at load.
+  context.applyProjectedModel("dev/replay-route-a");
+  assert.equal(modelInput.value, "dev/replay-route-a");
+  assert.equal(modelPending.hidden, true);
+
+  // The operator types the route they want and pauses.
+  modelInput.value = "dev/replay-route-b";
+  context.onModelInput();
+  assert.equal(modelPending.hidden, false, "a pending edit must be visible");
+  assert.match(modelInput.className, /pending/);
+
+  // A snapshot lands in that pause. It used to overwrite the edit silently.
+  context.applyProjectedModel("dev/replay-route-a");
+  assert.equal(
+    modelInput.value,
+    "dev/replay-route-b",
+    "a snapshot between typing and sending must not change what is sent",
+  );
+  assert.equal(modelPending.hidden, false);
+
+  // The send reads the control, so the typed route is what POST /api/turn carries.
+  const body = context.selectedModelPayload();
+  assert.equal(body.model, "dev/replay-route-b");
+  assert.equal(body.model_variant, "high");
+
+  // The server adopts the sent model, and the edit stops being pending on its own.
+  context.applyProjectedModel("dev/replay-route-b");
+  assert.equal(modelInput.value, "dev/replay-route-b");
+  assert.equal(modelPending.hidden, true, "an adopted edit is no longer pending");
+  assert.doesNotMatch(modelInput.className, /pending/);
+
+  // Typing back to the projected value is not an edit at all.
+  modelInput.value = "dev/replay-route-b ";
+  context.onModelInput();
+  assert.equal(modelPending.hidden, true);
+
+  // The snapshot path owns exactly one model write, and it goes through here.
+  const snapshot = markedSource("WORKBENCH_STATE_SNAPSHOT", "WORKBENCH_STATE_SNAPSHOT");
+  assert.match(snapshot, /applyProjectedModel\(state\.settings\.model\)/);
+  assert.doesNotMatch(snapshot, /modelInput\.value\s*=/);
 });

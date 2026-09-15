@@ -130,6 +130,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
@@ -389,6 +390,7 @@ async fn turn_cancel_test_state_with_ingress(
         .observer()
         .expect("process observer configured");
     AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
@@ -431,7 +433,9 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let admin_url = spawn_restate_admin_with_workflow_status(None).await;
-    let state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let mut state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let trace_path = data_dir.join("dangling-cancel.jsonl");
+    state.trace_sink = Some(Arc::new(JsonlTraceSink::new(trace_path.clone())));
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);
     state.track_turn(&session_id, &TurnId::from("dangling-turn"));
@@ -470,6 +474,72 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
     let recovered =
         ActiveTurns::persistent(data_dir.join("active-turns.json")).expect("reopen active turns");
     assert!(recovered.for_session(&session_id).is_empty());
+
+    // FIG-3163: the disclosure outlives the DOM node that first showed it. It
+    // has to be readable on the state projection, which the timeline re-renders
+    // from on every poll, and in the trace, which a later reader reaches
+    // without the UI at all.
+    let Json(snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
+        .await
+        .expect("read the post-abort snapshot");
+    let disclosed = snapshot
+        .state
+        .unknown_turn_terminals
+        .iter()
+        .map(|record| (record.turn_id.to_string(), record.note.to_string()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        disclosed,
+        vec![(
+            "dangling-turn".to_string(),
+            "turn route cleared · terminal outcome unknown".to_string(),
+        )],
+        "the pruned turn's unknown terminal must ride the projection"
+    );
+    let note_rows = snapshot
+        .transcript
+        .iter()
+        .filter_map(|row| match row {
+            TranscriptRow::Note { turn_id, text, .. } => Some((turn_id.to_string(), text.clone())),
+            TranscriptRow::Message { .. }
+            | TranscriptRow::Reasoning { .. }
+            | TranscriptRow::CodeBlock { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        note_rows,
+        vec![(
+            "dangling-turn".to_string(),
+            "turn route cleared · terminal outcome unknown".to_string(),
+        )],
+        "the timeline renders the disclosure from the same transcript it renders every other row from"
+    );
+    assert!(
+        ui::INDEX_HTML.contains("if (row.type === \"note\" && !renderedMessages.has(row.id))"),
+        "the timeline must render a projected note row"
+    );
+
+    let traces = std::fs::read_to_string(&trace_path)
+        .expect("read the cancel trace")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("trace record"))
+        .filter(|record| record["name"] == "agent_workbench.turn.terminal_unknown")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        traces.len(),
+        1,
+        "the unknown terminal is recorded exactly once"
+    );
+    assert_eq!(traces[0]["payload"]["turn_id"], "dangling-turn");
+    assert_eq!(
+        traces[0]["payload"]["note"],
+        "turn route cleared · terminal outcome unknown"
+    );
+    assert!(
+        traces[0]["payload"]["cancellation"]["request_id"].is_string(),
+        "the trace carries the cancellation that was recorded in place of a terminal"
+    );
+
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -622,6 +692,7 @@ finish(await handle);
         .expect("process observer configured");
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),

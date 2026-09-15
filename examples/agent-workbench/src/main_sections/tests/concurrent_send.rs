@@ -158,7 +158,9 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
             TranscriptRow::Message { message } => {
                 Some((message.role.clone(), message.text.clone()))
             }
-            TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
+            TranscriptRow::Reasoning { .. }
+            | TranscriptRow::CodeBlock { .. }
+            | TranscriptRow::Note { .. } => None,
         })
         .collect()
 }

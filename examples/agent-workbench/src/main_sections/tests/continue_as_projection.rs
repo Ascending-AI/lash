@@ -242,7 +242,9 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
                         message.text.clone(),
                     ))
                 }
-                TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
+                TranscriptRow::Reasoning { .. }
+                | TranscriptRow::CodeBlock { .. }
+                | TranscriptRow::Note { .. } => None,
             })
             .collect::<Vec<_>>(),
         expected_rows

@@ -445,6 +445,7 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
@@ -525,6 +526,7 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
@@ -816,6 +818,7 @@ finish("snapshot cursor");
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
@@ -972,6 +975,7 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
@@ -1266,6 +1270,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
@@ -1478,6 +1483,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
@@ -2033,6 +2039,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
     let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
         .expect("open durable product events");
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),

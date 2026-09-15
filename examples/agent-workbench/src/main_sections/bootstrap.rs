@@ -408,6 +408,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
 
         let state = AppState {
             core,
+            unknown_turn_terminals: UnknownTurnTerminals::default(),
             attachment_store,
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store,

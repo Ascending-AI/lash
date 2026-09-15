@@ -81,9 +81,10 @@ pub(crate) async fn app_state(
             | StreamItem::Done { .. } => None,
         })
         .collect::<Vec<_>>();
+    let unknown_turn_terminals = state.unknown_turn_terminals.for_session(&session_id);
     let ChatProjection {
         messages,
-        transcript,
+        mut transcript,
     } = project_chat(
         &state,
         &read_view,
@@ -91,6 +92,7 @@ pub(crate) async fn app_state(
         &current_frame_input_turn_ids,
         product_messages,
     );
+    splice_unknown_turn_terminal_notes(&mut transcript, &unknown_turn_terminals);
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
     let turn_failure_settlements = read_view.turn_failure_settlements().to_vec();
     let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
@@ -110,6 +112,7 @@ pub(crate) async fn app_state(
             queued_work,
             turn_input_applications,
             turn_failure_settlements,
+            unknown_turn_terminals,
             usage,
             pending_approvals,
         },
@@ -817,6 +820,9 @@ pub(crate) async fn reset_chat(
 ) -> Result<Json<StateSnapshot>, AppError> {
     let old_session_id = query.resolve(&state)?;
     let (new_session_id, replaced_current) = retire_for_reset(&state, &old_session_id).await?;
+    // The retired id is never served again, so its unknown-terminal disclosures
+    // have no reader left; drop them rather than hold them for the process's life.
+    state.unknown_turn_terminals.remove(&old_session_id);
     state.trace_for_session(
         &old_session_id,
         "api.reset",
@@ -857,6 +863,7 @@ pub(crate) async fn reset_chat(
         queued_work: Vec::new(),
         turn_input_applications: Vec::new(),
         turn_failure_settlements: Vec::new(),
+        unknown_turn_terminals: Vec::new(),
         usage: session.usage_report(),
         pending_approvals: state.approvals.pending().map_err(AppError::internal)?,
     }))

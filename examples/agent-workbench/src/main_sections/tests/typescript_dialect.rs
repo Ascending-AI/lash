@@ -85,7 +85,7 @@ fn transcript_answers(snapshot: &StateReadSnapshot) -> Vec<String> {
         .flat_map(|row| match row {
             TranscriptRow::Message { message } => vec![message.text.clone()],
             TranscriptRow::CodeBlock { output, .. } => vec![output.clone()],
-            TranscriptRow::Reasoning { .. } => Vec::new(),
+            TranscriptRow::Reasoning { .. } | TranscriptRow::Note { .. } => Vec::new(),
         })
         .collect()
 }
