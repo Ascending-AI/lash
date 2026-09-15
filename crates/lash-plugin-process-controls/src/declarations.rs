@@ -256,18 +256,35 @@ pub async fn execute_process_start_tool_call(
         Err(error) => return refuse(error),
     };
     let session_id = SessionId::from(context.session_id());
+    // A child started from inside a running process belongs to the chain that
+    // started that process, not to the ephemeral session the run executes in:
+    // it inherits the chain's originator and its wake target, and the execution
+    // scope never reaches a record. The in-attempt start path has always read
+    // this off the runtime execution context; since ADR 0095 a start is a leaf
+    // tool, so the declaration is where the inheritance has to be stamped —
+    // without it a process's children are owned by (and observed from) a
+    // session that disappears when the run ends.
+    let spawn = context.process_spawn_provenance().cloned();
+    let (originator, wake_session_id) = match spawn {
+        Some(spawn) => (spawn.originator, spawn.wake_session_id),
+        None => (
+            lash_core::ProcessOriginator::Session {
+                session_id: session_id.clone(),
+                agent_frame_id: Some(context.agent_frame_id().clone()),
+            },
+            None,
+        ),
+    };
     let declaration = lash_core::ProcessStartDeclaration::new(
         lash_core::ProcessInput::Engine {
             kind: engine_kind(args),
             payload,
         },
         lash_core::RecoveryContract::Rerunnable,
-        lash_core::ProcessOriginator::Session {
-            session_id: session_id.clone(),
-            agent_frame_id: Some(context.agent_frame_id().clone()),
-        },
+        originator,
         lash_core::ProcessLifecyclePolicy::new(parent, lash_core::OnParentEnd::Abandon),
     )
+    .with_wake_session_id(wake_session_id)
     // The attempt bound this host stamps onto a child. It lives on the runtime
     // execution context, which only the in-attempt start path could read before
     // FIG-2999; a leaf start that could not reach it registered its child with

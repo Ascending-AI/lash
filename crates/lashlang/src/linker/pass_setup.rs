@@ -61,6 +61,17 @@ pub(super) struct Linker<'module> {
     pub(super) collect_signals: Cell<bool>,
     pub(super) inferred_signals: RefCell<BTreeMap<String, TypeExpr>>,
     pub(super) lifted_declarations: RefCell<Vec<(Declaration, Option<Span>)>>,
+    /// Cell locals bound to a lifted process literal, by source name: the
+    /// lifted declaration's digest name and the process type the lift settled.
+    ///
+    /// A lifted literal *is* a module-level process declaration (ADR 0095), so
+    /// one literal naming another names a declaration, not a runtime value. The
+    /// body of a lifting literal resolves such a name to that declaration's
+    /// `Expr::ProcessRef`, which is the only spelling that survives: a capture
+    /// carries the value a variable had when the process *started*, and a
+    /// nested definition has to reach the child's own start site — one level
+    /// deeper than any start argument the enclosing start can carry.
+    pub(super) lifted_process_aliases: RefCell<BTreeMap<String, (String, TypeExpr)>>,
     /// The AST path of every expression in the program, keyed by node pointer:
     /// `main`-rooted paths are the `children()` index chain, and a declaration
     /// body's path is prefixed with `u32::MAX` plus the declaration index so a
@@ -89,6 +100,7 @@ impl<'module> Linker<'module> {
             collect_signals: Cell::new(false),
             inferred_signals: RefCell::new(BTreeMap::new()),
             lifted_declarations: RefCell::new(Vec::new()),
+            lifted_process_aliases: RefCell::new(BTreeMap::new()),
             expression_paths: expression_paths_by_pointer(program),
         }
     }

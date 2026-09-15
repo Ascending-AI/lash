@@ -313,11 +313,17 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
             .iter()
             .any(|event| event.event_type == "process.completed")
     );
+    // The wake-carrying progress emission. ADR 0095 deleted the `wake` special
+    // form this line was written against: the source now emits through
+    // `processes.emit`, which appends under `process.yield`, and that event type
+    // is what carries the wake to the declaring session. #1535 re-spelled the
+    // identical assertions in `crates/lash/src/testing.rs` and missed this one;
+    // the assertion is the same one, on the live event name.
     assert!(
         work[0]
             .events
             .iter()
-            .any(|event| event.event_type == "process.wake")
+            .any(|event| event.event_type == "process.yield")
     );
     let _ = std::fs::remove_dir_all(data_dir);
 }
