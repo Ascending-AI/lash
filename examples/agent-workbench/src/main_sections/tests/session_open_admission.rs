@@ -13,7 +13,6 @@ pub(crate) struct SessionOpenAdmissionGate {
     pub(super) session_id: SessionId,
     pub(super) state: std::sync::Mutex<SessionOpenAdmissionGateState>,
     pub(super) admitted: tokio::sync::Notify,
-    pub(super) contended: tokio::sync::Notify,
     pub(super) release: tokio::sync::Notify,
     pub(super) attempts: std::sync::atomic::AtomicUsize,
     pub(super) acquisitions: std::sync::atomic::AtomicUsize,
@@ -21,13 +20,24 @@ pub(crate) struct SessionOpenAdmissionGate {
     pub(super) contentions: std::sync::atomic::AtomicUsize,
 }
 
+/// How long a gate wait may block before the premise it rests on is declared
+/// dead, and how long a gated admission may stay held.
+///
+/// A wait that cannot be satisfied leaves the admitted open held, and the
+/// handler that opened it parked inside `admit_session_state`. Restate then
+/// retries that handler on a growing backoff, and every retry re-arms the gate
+/// against a still-held admission — 16 panics over the job's 40-minute timeout,
+/// with the real cause (a premise that no longer holds) nowhere in the log.
+/// Both bounds turn that into one named failure in seconds (FIG-3151).
+pub(super) const ADMISSION_GATE_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const ADMISSION_GATE_MAX_HOLD: Duration = Duration::from_secs(60);
+
 impl SessionOpenAdmissionGate {
     pub(super) fn new(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: session_id.into(),
             state: std::sync::Mutex::new(SessionOpenAdmissionGateState::default()),
             admitted: tokio::sync::Notify::new(),
-            contended: tokio::sync::Notify::new(),
             release: tokio::sync::Notify::new(),
             attempts: std::sync::atomic::AtomicUsize::new(0),
             acquisitions: std::sync::atomic::AtomicUsize::new(0),
@@ -84,7 +94,6 @@ impl SessionOpenAdmissionGate {
             }
             lash::persistence::SessionExecutionLeaseClaimOutcome::Busy { .. } => {
                 self.contentions.fetch_add(1, Ordering::SeqCst);
-                self.contended.notify_waiters();
             }
         }
     }
@@ -107,6 +116,7 @@ impl SessionOpenAdmissionGate {
             return;
         }
         self.admitted.notify_waiters();
+        let hold_deadline = tokio::time::Instant::now() + ADMISSION_GATE_MAX_HOLD;
         loop {
             let notified = self.release.notified();
             if self
@@ -117,7 +127,12 @@ impl SessionOpenAdmissionGate {
             {
                 break;
             }
-            notified.await;
+            if tokio::time::timeout_at(hold_deadline, notified)
+                .await
+                .is_err()
+            {
+                break;
+            }
         }
         self.state
             .lock()
@@ -128,24 +143,16 @@ impl SessionOpenAdmissionGate {
     pub(super) async fn wait_until_admitted(&self) {
         use std::sync::atomic::Ordering;
 
+        let deadline = tokio::time::Instant::now() + ADMISSION_GATE_WAIT_TIMEOUT;
         loop {
             let notified = self.admitted.notified();
             if self.admissions.load(Ordering::SeqCst) > 0 {
                 return;
             }
-            notified.await;
-        }
-    }
-
-    pub(super) async fn wait_until_contended(&self) {
-        use std::sync::atomic::Ordering;
-
-        loop {
-            let notified = self.contended.notified();
-            if self.contentions.load(Ordering::SeqCst) > 0 {
-                return;
-            }
-            notified.await;
+            assert!(
+                tokio::time::timeout_at(deadline, notified).await.is_ok(),
+                "no gated open reached admit_session_state within {ADMISSION_GATE_WAIT_TIMEOUT:?}"
+            );
         }
     }
 
