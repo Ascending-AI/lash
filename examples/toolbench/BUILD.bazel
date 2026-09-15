@@ -35,6 +35,7 @@ lash_rust_unit_test(
     crate_name = "toolbench",
     crate_root = "src/main.rs",
     declared_features = [],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],

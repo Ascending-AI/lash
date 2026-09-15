@@ -1,0 +1,416 @@
+{
+  "agent_service/bin": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 1378639872,
+    "samples": 1
+  },
+  "agent_workbench/bin": {
+    "cpu_count": 1,
+    "memory_kb": 3145728,
+    "peak_bytes": 1866870784,
+    "samples": 1
+  },
+  "agent_workbench/test": {
+    "cpu_count": 1,
+    "memory_kb": 3670016,
+    "peak_bytes": 2171011072,
+    "samples": 1
+  },
+  "ast_node/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 174452736,
+    "samples": 1
+  },
+  "build_script_main/bin": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 188006400,
+    "samples": 1
+  },
+  "clap_derive/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 217186304,
+    "samples": 1
+  },
+  "conformance/test": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1627484160,
+    "samples": 2
+  },
+  "cross_backend_active_turn_divergence/test": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1453436928,
+    "samples": 1
+  },
+  "cross_backend_store_differential/test": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1724821504,
+    "samples": 1
+  },
+  "darling_macro/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 125829120,
+    "samples": 2
+  },
+  "derive_builder_macro/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 123731968,
+    "samples": 1
+  },
+  "diagnostic_locations/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 802189312,
+    "samples": 1
+  },
+  "embedded_builder/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 1046986752,
+    "samples": 1
+  },
+  "from_variant/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 140247040,
+    "samples": 1
+  },
+  "futures_macro/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 168828928,
+    "samples": 1
+  },
+  "integration/test": {
+    "cpu_count": 2,
+    "memory_kb": 3670016,
+    "peak_bytes": 2276757504,
+    "samples": 5
+  },
+  "is_macro/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 156246016,
+    "samples": 1
+  },
+  "lash/test": {
+    "cpu_count": 1,
+    "memory_kb": 3145728,
+    "peak_bytes": 1812410368,
+    "samples": 1
+  },
+  "lash_conformance/lib": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1597247488,
+    "samples": 1
+  },
+  "lash_conformance/test": {
+    "cpu_count": 1,
+    "memory_kb": 3145728,
+    "peak_bytes": 2044026880,
+    "samples": 1
+  },
+  "lash_core/lib": {
+    "cpu_count": 2,
+    "memory_kb": 4194304,
+    "peak_bytes": 2794967040,
+    "samples": 2
+  },
+  "lash_core/test": {
+    "cpu_count": 2,
+    "memory_kb": 6815744,
+    "peak_bytes": 4563087360,
+    "samples": 1
+  },
+  "lash_core_llm/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 402018304,
+    "samples": 1
+  },
+  "lash_e2e_context_overflow_recovery/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1534095360,
+    "samples": 1
+  },
+  "lash_e2e_frame_crash/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1470062592,
+    "samples": 1
+  },
+  "lash_e2e_process_operator_flow/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1440247808,
+    "samples": 1
+  },
+  "lash_e2e_runner/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1512370176,
+    "samples": 1
+  },
+  "lash_e2e_session_lease_triage/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1555988480,
+    "samples": 1
+  },
+  "lash_e2e_version_bump/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1437380608,
+    "samples": 1
+  },
+  "lash_e2e_worker/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1573072896,
+    "samples": 1
+  },
+  "lash_http_transport/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 329728000,
+    "samples": 1
+  },
+  "lash_llm_tools/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 885706752,
+    "samples": 1
+  },
+  "lash_perf/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1611358208,
+    "samples": 1
+  },
+  "lash_perf/test": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1614450688,
+    "samples": 2
+  },
+  "lash_plugin_process_controls/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 899792896,
+    "samples": 1
+  },
+  "lash_plugin_tool_output_budget/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 851738624,
+    "samples": 1
+  },
+  "lash_remote_protocol/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 924643328,
+    "samples": 2
+  },
+  "lash_restate/test": {
+    "cpu_count": 1,
+    "memory_kb": 3145728,
+    "peak_bytes": 1887412224,
+    "samples": 1
+  },
+  "lash_sim/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1625976832,
+    "samples": 1
+  },
+  "lash_sim/test": {
+    "cpu_count": 1,
+    "memory_kb": 3145728,
+    "peak_bytes": 1796739072,
+    "samples": 2
+  },
+  "lash_subagents/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 1085685760,
+    "samples": 1
+  },
+  "lash_tool_support/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 849088512,
+    "samples": 1
+  },
+  "lashlang/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 1102188544,
+    "samples": 2
+  },
+  "lashlang/test": {
+    "cpu_count": 1,
+    "memory_kb": 3670016,
+    "peak_bytes": 2313981952,
+    "samples": 1
+  },
+  "logical_turn/test": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1472155648,
+    "samples": 1
+  },
+  "mcp/test": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1499394048,
+    "samples": 1
+  },
+  "native_tools/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 893960192,
+    "samples": 1
+  },
+  "object_store/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 498982912,
+    "samples": 1
+  },
+  "perf/bin": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 735739904,
+    "samples": 1
+  },
+  "phf_macros/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 171622400,
+    "samples": 1
+  },
+  "process_wrap/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 201674752,
+    "samples": 1
+  },
+  "prost_derive/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 210198528,
+    "samples": 1
+  },
+  "protocol_drivers/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 1071955968,
+    "samples": 1
+  },
+  "protocol_scenarios/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 969728000,
+    "samples": 1
+  },
+  "ref_cast_impl/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 150675456,
+    "samples": 1
+  },
+  "restate_sdk_macros/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 191295488,
+    "samples": 1
+  },
+  "rmcp/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 873803776,
+    "samples": 1
+  },
+  "rmcp_macros/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 183963648,
+    "samples": 1
+  },
+  "schemars_derive/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 198352896,
+    "samples": 2
+  },
+  "slack_clone/test": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1462394880,
+    "samples": 1
+  },
+  "slack_clone_bot/bin": {
+    "cpu_count": 1,
+    "memory_kb": 2621440,
+    "peak_bytes": 1468833792,
+    "samples": 1
+  },
+  "string_enum/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 149893120,
+    "samples": 1
+  },
+  "swc_eq_ignore_macros/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 151801856,
+    "samples": 1
+  },
+  "toolbench/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 1252450304,
+    "samples": 1
+  },
+  "tracing_attributes/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 194297856,
+    "samples": 1
+  },
+  "typify_macro/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 195948544,
+    "samples": 1
+  },
+  "unicode_property_escapes/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 297947136,
+    "samples": 1
+  },
+  "workflow_graph/test": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 775921664,
+    "samples": 1
+  },
+  "zeroize_derive/lib": {
+    "cpu_count": 2,
+    "memory_kb": 2097152,
+    "peak_bytes": 159932416,
+    "samples": 1
+  }
+}

@@ -47,6 +47,7 @@ lash_rust_unit_test(
         "perf-witness",
         "testing",
     ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-core-ids",
     package_name = "lash-internal-core-ids",

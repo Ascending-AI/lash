@@ -18,6 +18,7 @@ lash_rust_binary(
     declared_features = [
         "restate",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -39,6 +40,7 @@ lash_rust_unit_test(
     declared_features = [
         "restate",
     ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -58,6 +60,7 @@ lash_rust_integration_test(
     declared_features = [
         "restate",
     ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":agent-service",

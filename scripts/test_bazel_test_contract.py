@@ -335,9 +335,14 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertIn(
             "/.kiln.bazelrc", (ROOT / ".gitignore").read_text(encoding="utf-8")
         )
-        # What the pool is asked FOR stays in the repository.
+        # What the pool is asked FOR stays in the repository. The values are
+        # the small-action defaults; anything heavier carries its own
+        # `exec_properties` from `tools/bazel/action-sizes.json`.
         self.assertIn(
-            "build:shared --remote_default_exec_properties=cpu_count=4", bazelrc
+            "build:shared --remote_default_exec_properties=cpu_count=1", bazelrc
+        )
+        self.assertIn(
+            "build:shared --remote_default_exec_properties=memory_kb=2097152", bazelrc
         )
         self.assertIn("build:shared --remote_local_fallback=false", bazelrc)
 

@@ -435,6 +435,7 @@ jobs:
 
       - name: Test repository scripts
         run: |
+          python3 scripts/test_action_sizes_from_log.py
           python3 scripts/test_agent_workbench_restate_e2e.py
           python3 scripts/test_bazel_test_contract.py
           python3 scripts/test_check_facade_only_examples.py
