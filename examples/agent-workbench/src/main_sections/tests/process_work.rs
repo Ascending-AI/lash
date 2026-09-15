@@ -1350,3 +1350,144 @@ fn watched_process_work(
     let wiring = lash::process::ProcessWorkWiring::new(watched, Arc::new(process_work));
     (registry, wiring)
 }
+
+#[test]
+fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window() {
+    run_async_test_on_stack_budget("workbench-work-rail-nonterminal-window-test", || {
+        work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner()
+    });
+}
+
+/// FIG-3155: the runtime-wide rail bounded retired rows by a recent-update
+/// window, and "retired" in the registry means "not live" — which includes the
+/// non-terminal `caller_departed` status a dropped foreground await leaves
+/// behind. Such a row aged off the rail while its outcome was still open and
+/// the operator lost the work item. A row now leaves the rail when its outcome
+/// is recorded, never because time passed.
+async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner() {
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-work-rail-window-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+    let process_registry = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(
+            &data_dir.join("processes.db"),
+            data_dir.join("lash-sessions"),
+        )
+        .await
+        .expect("open registry"),
+    ) as Arc<dyn lash::process::ProcessRegistry>;
+    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
+    );
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-test")
+        .complete_error("work rail window test should not call the provider")
+        .build()
+        .into_handle();
+    let model = lash::ModelSpec::builder("test-model")
+        .context_window_tokens(4096)
+        .build()
+        .expect("model spec");
+    let core = explicit_durable_test_facets(&data_dir)
+        .provider(provider)
+        .model(model)
+        .store_factory(Arc::clone(&core_store_factory))
+        .process_registry(Arc::clone(&process_registry))
+        .build(crate::test_core_owner())
+        .expect("build core");
+    let process_observer = core
+        .processes()
+        .observer()
+        .expect("process observer configured");
+    let state = AppState {
+        core,
+        attachment_store: test_attachment_store(),
+        session_store_factory: Arc::clone(&core_store_factory),
+        trigger_store: in_memory_trigger_store(),
+        process_observer,
+        // Process work is resolved through the core.
+        sessions: WorkbenchSessions::fresh(),
+        messages: Arc::new(Mutex::new(Vec::new())),
+        selected_model: Arc::new(Mutex::new(ModelSelection {
+            model: "test-model".to_string(),
+            model_variant: Default::default(),
+        })),
+        trace_sink: None,
+        lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
+        event_tx: SessionEventRegistry::new(16),
+        queued_work_driver: inert_queued_work(),
+        restate_ingress_url: "http://127.0.0.1:8080".to_string(),
+        restate_admin_url: "http://127.0.0.1:9070".to_string(),
+        restate_http: reqwest::Client::new(),
+        restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
+        mail_world: mail::MailWorld::new(),
+        active_turns: ActiveTurns::default(),
+        authorization: WorkbenchAuthorization::allow_all(),
+        approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
+    };
+    let session_id = state.current_session_id();
+
+    // Every write below is stamped a full minute before the rail's window, so
+    // the window alone decides visibility.
+    let stale_ms = lash::runtime::ClockWallTime::timestamp_ms(&lash::runtime::SystemClock)
+        .saturating_sub(60_000);
+    let stale_registry = process_registry
+        .with_runtime_clock(Arc::new(lash::testing::TestClock::new(stale_ms)))
+        .expect("the sqlite registry rebinds its clock");
+    for process_id in ["departed-process", "settled-process"] {
+        stale_registry
+            .register_process(lash::process::ProcessRegistration::new(
+                process_id,
+                lash::process::ProcessInput::External {
+                    metadata: json!({ "test": true }),
+                },
+                lash::process::RecoveryContract::ExternallyOwned,
+                lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
+                    &session_id,
+                )),
+                lash::process::ProcessLifecyclePolicy::new(
+                    lash::process::ParentScope::Host,
+                    lash::process::OnParentEnd::Abandon,
+                ),
+            ))
+            .await
+            .expect("register process");
+    }
+    let departed = stale_registry
+        .record_caller_departure(&ProcessId::from("departed-process"))
+        .await
+        .expect("record the caller departure");
+    assert!(
+        !departed.status.is_terminal(),
+        "caller departure is not an outcome"
+    );
+    stale_registry
+        .complete_process(
+            &ProcessId::from("settled-process"),
+            lash::process::ProcessAwaitOutput::from_tool_output(
+                lash::tools::ToolCallOutput::success(json!("done")),
+            ),
+            lash::process::ProcessCompletionAuthority::ExternalOwner,
+        )
+        .await
+        .expect("record the terminal outcome");
+
+    let Json(work) = list_work(State(state.clone()), Query(SessionQuery::default()))
+        .await
+        .expect("list runtime-wide work");
+    let listed = work
+        .iter()
+        .map(|item| item.process.process_id.to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        listed.iter().any(|id| id == "departed-process"),
+        "a non-terminal process must stay on the rail until its terminal lands: {listed:?}"
+    );
+    assert!(
+        !listed.iter().any(|id| id == "settled-process"),
+        "a terminal older than the retirement window still leaves the rail: {listed:?}"
+    );
+    let _ = std::fs::remove_dir_all(data_dir);
+}
