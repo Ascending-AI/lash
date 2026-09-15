@@ -375,9 +375,18 @@ pub(super) fn fixed_texts_provider(
             let responses = Arc::clone(&responses);
             async move {
                 let Some(text) = responses.lock().await.pop_front() else {
+                    // A fixed contract that asks for one more completion than it
+                    // scripted is a defect in the contract, never a flaky
+                    // transport. Classifying it retryable is what turned that
+                    // defect into a turn-driver backoff against the simulated
+                    // clock -- which no contract advances -- and so into an
+                    // unbounded hang instead of a named failure.
                     return Err(LlmTransportError::new(format!(
                         "{kind} provider exhausted its fixed response"
-                    )));
+                    ))
+                    .with_retry_verdict(
+                        lash::provider::TransportRetryVerdict::NotRetryable,
+                    ));
                 };
                 let expected_text = text.clone();
                 let response = text_llm_response(text);

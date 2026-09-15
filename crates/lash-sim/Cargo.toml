@@ -28,6 +28,7 @@ lash = { workspace = true, features = ["rlm"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-llm-transport = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
+lash-plugin-process-controls = { workspace = true }
 lash-provider-anthropic = { workspace = true }
 lash-provider-google = { workspace = true }
 lash-provider-openai = { workspace = true }

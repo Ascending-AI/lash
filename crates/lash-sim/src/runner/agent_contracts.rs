@@ -370,7 +370,7 @@ finish({ len: chunk.length });
 
 async fn agent_session_turn_process_child_execution() -> Result<Value, FixedScriptRunnerError> {
     let expected = json!({ "child": "done" });
-    let result = facade_final_value_execution(
+    let result = facade_final_value_execution_with_process_surface(
         "lash_runtime agent session-turn process child",
         &SessionId::from("sim-agent-session-turn-process-child-contract"),
         "Start a child process and await its result.",
@@ -467,7 +467,7 @@ await task.fail({ reason: "parent observed child failure" });
 
 async fn agent_parallel_spawn_and_join_execution() -> Result<Value, FixedScriptRunnerError> {
     let expected = json!({ "joined": ["left", "right"] });
-    let result = facade_final_value_execution(
+    let result = facade_final_value_execution_with_process_surface(
         "lash_runtime agent parallel process join",
         &SessionId::from("sim-agent-parallel-spawn-join-contract"),
         "Start two processes, await both, and finish their joined result.",
@@ -501,13 +501,43 @@ async fn facade_final_value_execution(
     provider_response: &'static str,
     expected_final_value: &Value,
 ) -> Result<Value, FixedScriptRunnerError> {
-    facade_final_value_execution_with_tools(
+    facade_final_value_execution_inner(
         provider_kind,
         session_id,
         prompt,
         vec![provider_response],
-        expected_final_value,
+        expected_final_value.clone(),
         None,
+        ProcessSurface::Absent,
+    )
+    .await
+}
+
+/// A cell that names `processes.*` only compiles when the host installs the
+/// plugin that renders the process surface into the tool catalogue. Contracts
+/// declare that the same way their mirrored facade agent scenarios do, rather
+/// than every fixed contract paying for a surface it never names.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProcessSurface {
+    Absent,
+    Installed,
+}
+
+async fn facade_final_value_execution_with_process_surface(
+    provider_kind: &'static str,
+    session_id: &SessionId,
+    prompt: &'static str,
+    provider_response: &'static str,
+    expected_final_value: &Value,
+) -> Result<Value, FixedScriptRunnerError> {
+    facade_final_value_execution_inner(
+        provider_kind,
+        session_id,
+        prompt,
+        vec![provider_response],
+        expected_final_value.clone(),
+        None,
+        ProcessSurface::Installed,
     )
     .await
 }
@@ -527,6 +557,7 @@ async fn facade_final_value_execution_with_tools(
         provider_responses,
         expected_final_value.clone(),
         tools,
+        ProcessSurface::Absent,
     )
     .await
 }
@@ -538,6 +569,7 @@ async fn facade_final_value_execution_inner(
     provider_responses: Vec<&'static str>,
     expected_final_value: Value,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
+    process_surface: ProcessSurface,
 ) -> Result<Value, FixedScriptRunnerError> {
     let clock = crate::clock::SimClock::new();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
@@ -577,6 +609,11 @@ async fn facade_final_value_execution_inner(
         );
     if let Some(tools) = tools {
         builder = builder.tools(tools);
+    }
+    if process_surface == ProcessSurface::Installed {
+        builder = builder.plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        ));
     }
     let core = builder
         .build(crate::sim_process_owner())
@@ -882,6 +919,14 @@ fn agent_process_contract_core_with_options_and_effect_host(
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
     let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        // The process surface is rendered from the tool catalogue, so a host that
+        // wants `processes.*` inside a cell installs the plugin that supplies it.
+        // Without it every fixed process contract's first cell dies on
+        // "unknown module `processes`" -- the mirrored facade agent scenarios
+        // install `SessionProcessAdminPluginFactory` for exactly this reason.
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        ))
         .with_native_queued_work()
         .effect_host(effect_host)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
@@ -1338,6 +1383,29 @@ fn normalize_contract_tool_output(value: Value) -> Value {
     let Some(object) = value.as_object() else {
         return value;
     };
+    // A started process hands back a live handle whose id carries the turn's
+    // tool-intent replay key. That key is stable across a replay of one turn
+    // and deliberately distinct between two independent executions, so a
+    // contract payload that kept the digest would compare two fresh runs on an
+    // identity neither is meant to share. Keep the handle's shape -- the
+    // sequence prefix and the replay-key scheme -- and mask the digest, the
+    // same way process refs and labels already travel as masked hashes.
+    if object.contains_key("__handle__") && object.contains_key("process_id") {
+        let process_id = object.get("process_id").and_then(Value::as_str);
+        let id = object.get("id").and_then(Value::as_str);
+        return json!({
+            "__handle__": object.get("__handle__").cloned().unwrap_or(Value::Null),
+            "id_prefix": id
+                .and_then(|id| process_id.and_then(|key| id.strip_suffix(key)))
+                .unwrap_or_default(),
+            "process_id_scheme": process_id
+                .and_then(|key| key.rsplit_once(':').map(|(scheme, _)| scheme))
+                .unwrap_or_default(),
+            "process_id_digest_present": process_id
+                .and_then(|key| key.rsplit_once(':').map(|(_, digest)| !digest.is_empty()))
+                .unwrap_or(false),
+        });
+    }
     if !object.contains_key("full_output_path") {
         if object.contains_key("wall_time_seconds")
             && object.contains_key("status")
