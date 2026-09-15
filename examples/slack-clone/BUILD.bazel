@@ -57,7 +57,7 @@ lash_rust_binary(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],

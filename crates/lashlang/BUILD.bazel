@@ -20,7 +20,7 @@ lash_rust_library(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lashlang",
     package_name = "lash-internal-lashlang",
@@ -77,7 +77,7 @@ lash_rust_binary(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [],
     include_dev_deps = True,
     library = ":lashlang",
