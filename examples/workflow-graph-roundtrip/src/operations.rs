@@ -13,6 +13,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             node_kind: "call".to_string(),
             subkind: None,
             operation: Some(operation.operation.to_string()),
+            receiver: Some(display::RECEIVER.to_string()),
             effect: None,
             terminal_kind: None,
             fields: operation
@@ -33,6 +34,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             node_kind: "call".to_string(),
             subkind: None,
             operation: Some(operation.operation.to_string()),
+            receiver: Some(operation.module.to_string()),
             effect: None,
             terminal_kind: None,
             fields: operation
@@ -198,6 +200,10 @@ fn entry(
         node_kind: node_kind.to_string(),
         subkind: subkind.map(str::to_string),
         operation: operation.map(str::to_string),
+        // Only catalog entries that synthesize a receiver call carry a
+        // receiver, and every one of those is built above from its own
+        // module rather than through this helper.
+        receiver: None,
         effect: effect.map(str::to_string),
         terminal_kind: terminal_kind.map(str::to_string),
         fields,

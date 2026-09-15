@@ -55,6 +55,18 @@ export function operationsForKind(catalog, nodeKind) {
   return (catalog ?? []).filter((op) => op.nodeKind === nodeKind);
 }
 
+// The raw source text of a catalog field's default.
+//
+// The catalog serves an expression-valued default as `{ "$expr": "<source>" }`
+// (see `EditableValue::Expr` on the wire), so `String(default)` on one yields
+// `[object Object]` — the literal that used to reach both the seeded arg form
+// and the synthesized receiver call (FIG-3178). Everything else is already its
+// own slot text.
+export function defaultSource(value) {
+  if (value && typeof value === 'object' && typeof value.$expr === 'string') return value.$expr;
+  return String(value ?? '');
+}
+
 // A single field's default as an EditableValue for the `data.fields` map.
 export function fieldDefaultValue(field) {
   switch (field.type) {
@@ -63,9 +75,9 @@ export function fieldDefaultValue(field) {
     case 'boolean':
       return !!field.default;
     case 'expression':
-      return { $expr: String(field.default ?? '') };
+      return { $expr: defaultSource(field.default) };
     default:
-      return String(field.default ?? '');
+      return defaultSource(field.default);
   }
 }
 

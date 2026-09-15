@@ -103,6 +103,7 @@ pub(crate) fn document_from_graph(
                     .map(editable_process_signal)
                     .collect(),
                 operation: None,
+                receiver: None,
                 effect: None,
                 terminal_kind: None,
                 fields: BTreeMap::new(),
@@ -584,6 +585,10 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
         params: Vec::new(),
         signals: Vec::new(),
         operation,
+        // A projected node already carries the authored expression, which
+        // names its own receiver; the field exists for synthesis, not for
+        // projection.
+        receiver: None,
         effect,
         terminal_kind: terminal_kind(node).map(str::to_string),
         fields: editable_fields(node, graph_scope),

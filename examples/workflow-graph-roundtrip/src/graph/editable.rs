@@ -56,10 +56,15 @@ pub(super) fn editable_call_expression(
         })?,
         None => {
             let operation = required_text(id, data.operation.as_ref(), "operation")?;
-            // `display` stays undeclared so the fragment lowers it as the host
-            // receiver it is; declaring it would make TypeScript treat the call
-            // as a runtime method and reject the host operation.
-            parse_fragment(&format!("await display.{operation}({{}})"), &scope).map_err(
+            // The receiver rides on the node because the operation name alone
+            // does not name it: `list_recent` belongs to `gmail`, not to
+            // `display`. A node from a client that predates the catalog field
+            // still means the display catalog it could reach (FIG-3178).
+            let receiver = data.receiver.as_deref().unwrap_or(crate::display::RECEIVER);
+            // The receiver stays undeclared so the fragment lowers it as the
+            // host receiver it is; declaring it would make TypeScript treat the
+            // call as a runtime method and reject the host operation.
+            parse_fragment(&format!("await {receiver}.{operation}({{}})"), &scope).map_err(
                 |error| RenderErrorResponse::invalid_expression(id, "operation", error.to_string()),
             )?
         }

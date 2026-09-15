@@ -1,5 +1,5 @@
 import { layoutDocument } from './layout.js';
-import { fieldDefaultValue } from './operations.js';
+import { defaultSource, fieldDefaultValue } from './operations.js';
 
 // Build SvelteFlow nodes + edges from a draft WorkflowDocument.
 //
@@ -161,7 +161,7 @@ function slotText(field) {
   if (!field) return '';
   if (field.type === 'number') return String(Number(field.default ?? 0) || 0);
   if (field.type === 'boolean') return field.default ? 'true' : 'false';
-  return String(field.default ?? '');
+  return defaultSource(field.default);
 }
 
 function seedFields(fields) {
@@ -181,7 +181,7 @@ function recordArg(field) {
     case 'string':
       return `${field.name}: ${JSON.stringify(String(value ?? ''))}`;
     default:
-      return `${field.name}: ${String(value ?? '')}`; // expression / identifier — raw
+      return `${field.name}: ${defaultSource(value)}`; // expression / identifier — raw
   }
 }
 
@@ -193,7 +193,10 @@ function recordArg(field) {
 // synthesizes for itself when a call node arrives with no expression.
 function synthCallExpression(op) {
   const args = (op.fields ?? []).map(recordArg).join(', ');
-  return `await display.${op.operation}({ ${args} })`;
+  // The receiver comes from the catalog entry, not from the operation name:
+  // `list_recent` belongs to `gmail`, and synthesizing `display.list_recent`
+  // gives the lowerer a receiver that has no such operation (FIG-3178).
+  return `await ${op.receiver ?? 'display'}.${op.operation}({ ${args} })`;
 }
 
 function synthEffectExpression(op, byName) {
@@ -218,6 +221,9 @@ function nodeDataFromOperation(op) {
       data.source = String(byName.source?.default ?? '');
       break;
     case 'call':
+      // The receiver rides on the node too, so a save that omits the
+      // expression is synthesized against the same receiver by the backend.
+      if (op.receiver) data.receiver = op.receiver;
       data.expression = synthCallExpression(op);
       data.fields = seedFields(op.fields);
       break;

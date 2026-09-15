@@ -77,6 +77,13 @@ pub struct OperationCatalogEntry {
     pub subkind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
+    /// The host receiver the operation is reached through (`display`, `gmail`,
+    /// `llm`, …). A call entry's synthesized expression is
+    /// `await {receiver}.{operation}({..})`, and both the editor and the
+    /// backend fallback read the receiver from here rather than assuming
+    /// `display` (FIG-3178).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effect: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -189,6 +196,11 @@ pub struct NodeData {
     pub signals: Vec<EditableProcessField>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
+    /// The receiver the catalog entry this node came from belongs to, carried
+    /// so a call node posted with no `expression` can be synthesized against
+    /// the receiver it actually names (FIG-3178).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
