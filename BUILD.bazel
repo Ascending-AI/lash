@@ -1,5 +1,11 @@
 load("//tools/bazel:clippy.bzl", "lash_rust_clippy")
 load(
+    "//tools/bazel:feature_lanes.bzl",
+    "FEATURE_LANE_CLIPPY_TARGETS",
+    "FEATURE_LANE_COMPILE_TARGETS",
+    "FEATURE_LANE_TEST_TARGETS",
+)
+load(
     "//tools/bazel:workspace_targets.bzl",
     "WORKSPACE_CLIPPY_TARGETS",
     "WORKSPACE_COMPILE_TARGETS",
@@ -30,6 +36,25 @@ filegroup(
 test_suite(
     name = "workspace_tests",
     tests = WORKSPACE_BAZEL_TEST_TARGETS,
+)
+
+# The feature-coverage lanes of scripts/feature-coverage.toml, compiled at each
+# command's own feature resolution rather than the workspace's. One pool build
+# replaces the fourteen `Package feature check` matrix legs and the
+# `Runtime feature boundary` Cargo legs; `tools/bazel/feature_variants.py`
+# explains how the resolutions are derived and what is NOT re-resolved.
+filegroup(
+    name = "feature_lanes",
+    srcs = FEATURE_LANE_COMPILE_TARGETS,
+    testonly = True,
+)
+
+# The lane commands that are `cargo test`, not `cargo check`. They are
+# service-free, so the pool executes them; the rest of the lane graph is a
+# compile-only proof exactly as `cargo check` is.
+test_suite(
+    name = "feature_lane_tests",
+    tests = FEATURE_LANE_TEST_TARGETS,
 )
 
 # Slow suites excluded from the PR Bazel partition. CI runs this aggregate
@@ -112,6 +137,20 @@ lash_rust_clippy(
     name = "workspace_clippy",
     testonly = True,
     deps = WORKSPACE_CLIPPY_TARGETS,
+)
+
+# `slack-clone`'s `e2e` and `live-e2e` features are outside the resolved default
+# workspace graph, so their `cfg(feature = ...)` code used to be linted by a
+# `cargo clippy -p slack-clone --all-targets --features e2e` step on the Lint
+# runner -- 106 s of Cargo compile inside an otherwise Bazel job. The
+# feature-lane variants of the same targets carry the same lint config as every
+# other label, so the aspect lints them here instead. `slack-clone` declares no
+# `default` feature, so the lane's `--no-default-features --features e2e`
+# resolution is byte-for-byte the resolution the Cargo command used.
+lash_rust_clippy(
+    name = "feature_lane_clippy",
+    testonly = True,
+    deps = FEATURE_LANE_CLIPPY_TARGETS,
 )
 
 # This target keeps the complete Bazel and Cargo-owned test label set queryable.

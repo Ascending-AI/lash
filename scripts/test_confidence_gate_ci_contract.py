@@ -10,6 +10,7 @@ import re
 import runpy
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 import yaml
@@ -26,6 +27,15 @@ GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
 STORE_TESTS = ROOT / "scripts" / "ci" / "store-tests.sh"
 FEATURE_COVERAGE = ROOT / "scripts" / "feature-coverage.toml"
+GENERATOR = ROOT / "tools" / "bazel" / "generate_build_files.py"
+LANE_TABLE = ROOT / "tools" / "bazel" / "feature_lanes.bzl"
+
+
+def feature_lane_table() -> dict[str, list[str]]:
+    """The generated lane -> Bazel label table; a Starlark dict is a Python one."""
+    source = LANE_TABLE.read_text(encoding="utf-8")
+    marker = "FEATURE_LANES = "
+    return ast.literal_eval(source[source.index(marker) + len(marker) :].strip())
 PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
 PERF_SCENARIOS_RS = ROOT / "crates" / "lash-perf" / "src" / "runtime_perf" / "scenarios.rs"
@@ -500,10 +510,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "functional-e2e-process-operations",
             "fuzz-smoke",
         }
+        # `package-feature-checks` and `runtime-feature-boundary` were two more
+        # of these until the feature lanes moved onto the pool: one Bazel job
+        # now compiles every lane command's own resolution, cheaply enough to
+        # run on pull requests, so it is not a merge-group-only compile lane.
         queue_required = {
             "lashlang-git-consumer",
-            "package-feature-checks",
-            "runtime-feature-boundary",
         }
         guard = "github.event_name == 'workflow_dispatch'"
         for job in sorted(dispatch_only):
@@ -1875,13 +1887,16 @@ derive_mutation_jobs() {{
                 feature_coverage,
             )
 
-    def test_queue_feature_graphs_are_parallel_and_independently_cached(self) -> None:
-        jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    def test_every_declared_lane_reaches_the_pool_graph(self) -> None:
+        """Each coverage lane is compiled by the one Bazel feature job.
 
-        package = jobs["package-feature-checks"]
-        package_lanes = {
-            row["lane"] for row in package["strategy"]["matrix"]["include"]
-        }
+        The fourteen `Package feature check` legs and the four
+        `Runtime feature boundary` legs were a matrix of Cargo commands; they
+        are now one job building `//:feature_lanes`. The lane names are still
+        the contract, so they are spelled out here rather than read out of the
+        table under test.
+        """
+        lanes = feature_lane_table()
         self.assertEqual(
             {
                 "sansio-schema-validation",
@@ -1899,53 +1914,48 @@ derive_mutation_jobs() {{
                 "regress-stable-features",
                 "host-features",
             },
-            package_lanes,
+            set(lanes),
         )
-        self.assertFalse(package["strategy"]["fail-fast"])
+        for lane, labels in sorted(lanes.items()):
+            with self.subTest(lane=lane):
+                self.assertTrue(labels, f"lane {lane} compiles nothing")
 
-        runtime = jobs["runtime-feature-boundary"]
-        runtime_lanes = {
-            row["lane"] for row in runtime["strategy"]["matrix"]["include"]
-        }
-        self.assertEqual(
-            {
-                "default-off-check",
-                "testing-check",
-                "default-off-tests",
-                "dependency-boundary",
-            },
-            runtime_lanes,
-        )
-        self.assertFalse(runtime["strategy"]["fail-fast"])
-
-        for job_id, prefix in (
-            ("package-feature-checks", "queue-package-${{ matrix.lane }}"),
-            ("runtime-feature-boundary", "queue-runtime-${{ matrix.lane }}"),
-        ):
-            block = workflow_job_block(WORKFLOW.read_text(encoding="utf-8"), job_id)
-            self.assertIn(f"shared-key: {prefix}", block)
-            self.assertIn("save-if: ${{ github.event_name != 'merge_group' }}", block)
-
-    def test_lash_runtime_default_tests_are_pinned_to_the_feature_boundary_lane(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        boundary_job = workflow_job_block(workflow, "runtime-feature-boundary")
-        push_gate = PUSH_GATE.read_text(encoding="utf-8")
-        feature_boundary = shell_function_body(
-            push_gate, "run_runtime_feature_boundary_check"
-        )
-        command = "cargo test -p lash-runtime --no-default-features --locked"
-        count_command = (
-            "count=$(cargo test -p lash-runtime --no-default-features --locked "
-            "--lib -- --list | grep -c ': test$')"
-        )
-        count_floor = (
-            '[ "$count" -ge 130 ] || { echo '
-            '"default-build lash-runtime tests regressed: $count"; exit 1; }'
+        job = workflow_job_block(WORKFLOW.read_text(encoding="utf-8"), "feature-lanes")
+        self.assertIn("//:feature_lanes", job)
+        self.assertIn("//:feature_lane_tests", job)
+        self.assertIn(
+            "python3 scripts/ci/check_feature_lane_test_floors.py", job
         )
 
-        for snippet in (command, count_command, count_floor):
-            self.assertIn(snippet, boundary_job)
-            self.assertIn(snippet, feature_boundary)
+    def test_lash_runtime_default_build_still_runs_and_counts_its_tests(self) -> None:
+        """The `default-off-tests` leg survived the move onto the pool.
+
+        It carried two claims: the default build's own suite runs, and its case
+        count does not fall. The suite is a lane command in
+        `scripts/feature-coverage.toml` (so it is a pool test target); the floor
+        is `FEATURE_LANE_TEST_FLOORS`, held by a step of the feature job.
+        """
+        plan = tomllib.loads(FEATURE_COVERAGE.read_text(encoding="utf-8"))
+        runtime = next(
+            lane for lane in plan["lane"] if lane["name"] == "runtime-features"
+        )
+        self.assertIn(
+            ["cargo", "test", "-p", "lash-runtime", "--no-default-features", "--locked"],
+            runtime["commands"],
+        )
+
+        generator = GENERATOR.read_text(encoding="utf-8")
+        self.assertIn('("lash-runtime", (), "unit-test"): 130,', generator)
+        lanes = LANE_TABLE.read_text(encoding="utf-8")
+        marker = "FEATURE_LANE_TEST_FLOORS = "
+        floors = json.loads(
+            lanes[lanes.index(marker) + len(marker) : lanes.index("\n\nFEATURE_LANES")]
+        )
+        self.assertEqual([130], sorted(floors.values()))
+        self.assertTrue(
+            all("crates/lash:" in label for label in floors),
+            f"the runtime floor names an unexpected target: {sorted(floors)}",
+        )
 
     def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -2058,15 +2068,10 @@ derive_mutation_jobs() {{
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
             ),
-            "package-feature-checks": (
-                "python3 scripts/check_feature_coverage.py run protocol-rlm-testing",
-                "python3 scripts/check_feature_coverage.py run host-features",
-                "python3 scripts/check_feature_coverage.py run remote-protocol-conversions",
-            ),
-            "runtime-feature-boundary": (
-                "cargo check -p lash-runtime --no-default-features --locked",
-                "cargo check -p lash-runtime --no-default-features --features testing --locked",
-                "cargo tree -p lash-runtime -e normal --no-default-features --locked",
+            "feature-lanes": (
+                "//:feature_lanes",
+                "//:feature_lane_tests",
+                "python3 scripts/ci/check_feature_lane_test_floors.py",
             ),
         }
         for job_id, commands in moved_gates.items():
@@ -2086,9 +2091,12 @@ derive_mutation_jobs() {{
             with self.subTest(self_test=name):
                 self.assertIn(f"python3 scripts/{name}", repo_gates)
 
+        # The `dependency-boundary` leg reads the resolved graph and compiles
+        # nothing, so it moved to the Python-speed gates rather than onto the
+        # pool with the compile legs.
         self.assertIn(
-            "bash scripts/ci-reclaim-disk.sh",
-            workflow_job_block(workflow, "runtime-feature-boundary"),
+            "cargo tree -p lash-runtime -e normal $resolution --locked",
+            repo_gates,
         )
 
     def test_one_ci_run_per_head_branch_whatever_the_trigger(self) -> None:
@@ -2309,8 +2317,6 @@ derive_mutation_jobs() {{
         for job_id in (
             "check",
             "workspace-tests",
-            "package-feature-checks",
-            "runtime-feature-boundary",
             "lint",
         ):
             block = workflow_job_block(workflow, job_id)
