@@ -229,13 +229,33 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
             "const my_process = async () => {\n  return 0;\n};\nconst blank = async ("
         )
     );
+    // FIG-3118: the added process renders as `const my_process = async () => ..`
+    // and reprojects the way every top-level arrow now does — a statement node
+    // in `main` carrying the authored binding, plus a process container whose
+    // name is the lens's derived lift identity. `roots.processes` follows the
+    // statement order, so the added process is the first container.
     let added = saved
         .document
         .nodes
         .iter()
-        .find(|node| node.data.process_name.as_deref() == Some("my_process"))
-        .expect("reprojected added process");
+        .find(|node| node.data.binding.as_deref() == Some("my_process"))
+        .expect("reprojected added process binding");
+    assert_eq!(added.data.kind, "computation");
+    let container_id = &saved.document.roots.processes[0];
+    let added = saved
+        .document
+        .nodes
+        .iter()
+        .find(|node| &node.id == container_id)
+        .expect("reprojected added process container");
     assert_eq!(added.data.kind, "process");
+    assert!(
+        added
+            .data
+            .process_name
+            .as_deref()
+            .is_some_and(|name| name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX))
+    );
     assert!(added.data.params.is_empty());
     assert!(added.data.signals.is_empty());
     let body = added
@@ -280,12 +300,26 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
     let client = reqwest::Client::new();
     let base = format!("http://{addr}");
 
+    // FIG-3118: a top-level arrow is a lifted process literal, so a process
+    // container's signature splits in two. Its parameter list is authored —
+    // it is the arrow's own parameter list, and the lens splices it back into
+    // the literal. Its name and signal set are not: the name is the lens's
+    // derived lift identity (the authored name is the `const` binding on the
+    // statement node) and the signals are read back out of the body's
+    // `waitSignal` calls. A client that echoes the derived fields back is
+    // echoing a projection, and the echo is dropped on save.
     let mut document = select_workflow(&client, &base, "blank").await;
     let process = document
         .nodes
         .iter_mut()
         .find(|node| node.data.kind == "process")
         .expect("blank process");
+    let derived_name = process
+        .data
+        .process_name
+        .clone()
+        .expect("projected process name");
+    assert!(derived_name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX));
     process.data.process_name = Some("renamed".to_string());
     process.data.params = vec![
         EditableProcessField {
@@ -297,16 +331,16 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
             field_type: "bool".to_string(),
         },
     ];
-    process.data.signals = vec![
-        EditableProcessField {
-            name: "continue".to_string(),
-            field_type: "any".to_string(),
-        },
-        EditableProcessField {
-            name: "stop".to_string(),
-            field_type: "str".to_string(),
-        },
-    ];
+    process.data.signals = vec![EditableProcessField {
+        name: "continue".to_string(),
+        field_type: "any".to_string(),
+    }];
+    let statement = document
+        .nodes
+        .iter_mut()
+        .find(|node| node.data.binding.as_deref() == Some("blank"))
+        .expect("the statement that binds the process");
+    statement.data.binding = Some("renamed".to_string());
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -323,6 +357,8 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         String::from_utf8_lossy(&body)
     );
     let mut saved: SaveWorkflowResponse = serde_json::from_slice(&body).expect("saved workflow");
+    // The parameters and the renamed binding land; the echoed process name
+    // does not become a second module declaration.
     assert_eq!(
         saved.document.source,
         "const renamed = async (input, enabled) => {\n  return 0;\n};\n"
@@ -333,10 +369,22 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .nodes
         .iter_mut()
         .find(|node| node.data.kind == "process")
-        .expect("reprojected renamed process");
-    process.data.process_name = Some("revised".to_string());
+        .expect("reprojected process");
+    assert!(
+        process
+            .data
+            .process_name
+            .as_deref()
+            .is_some_and(|name| name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)),
+        "a lifted process keeps its derived name: {:?}",
+        process.data.process_name
+    );
+    assert!(
+        process.data.signals.is_empty(),
+        "signals are read out of the body, not carried on the container: {:?}",
+        process.data.signals
+    );
     process.data.params.pop();
-    process.data.signals.pop();
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -348,15 +396,14 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
     let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
     assert_eq!(
         saved.document.source,
-        "const revised = async (input) => {\n  return 0;\n};\n"
+        "const renamed = async (input) => {\n  return 0;\n};\n"
     );
     let process = saved
         .document
         .nodes
         .iter()
         .find(|node| node.data.kind == "process")
-        .expect("reprojected revised process");
-    assert_eq!(process.data.process_name.as_deref(), Some("revised"));
+        .expect("reprojected reduced process");
     // FIG-3033: a canonical process arrow prints its parameters without
     // type annotations, so an authored parameter type does not survive the
     // round trip. The parameter itself, and its position, do.
@@ -364,13 +411,6 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         process.data.params,
         [EditableProcessField {
             name: "input".to_string(),
-            field_type: "any".to_string(),
-        }]
-    );
-    assert_eq!(
-        process.data.signals,
-        [EditableProcessField {
-            name: "continue".to_string(),
             field_type: "any".to_string(),
         }]
     );

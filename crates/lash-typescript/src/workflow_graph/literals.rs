@@ -26,13 +26,19 @@ impl GraphProjector<'_> {
         for param in &literal.params {
             versions.seed(param.name.as_str());
         }
+        // The body is addressed the way a declared process's body is: by the
+        // path *inside the lifted declaration*, not by where the literal sits
+        // in `main`. The linker lifts the literal to a module process, so at
+        // run time its execution sites are owned by `process:<lifted name>`
+        // and pathed from that declaration's own body root. Keying the
+        // projection on the literal's `main` path instead left every site
+        // inside a process container uncorrelated, so a run emitted no events
+        // for it at all (FIG-3118). The literal's `main` path still decides
+        // the lifted *name*, which is what keeps one container distinct from
+        // another.
         let (wrapper_path, authored) = match crate::lower::process_run_body_path_of(&literal.body) {
-            Some((relative, body)) => {
-                let mut wrapper_path = path.to_vec();
-                wrapper_path.extend(relative);
-                (wrapper_path, body)
-            }
-            None => (path.to_vec(), literal.body.as_ref()),
+            Some((relative, body)) => (relative, body),
+            None => (Vec::new(), literal.body.as_ref()),
         };
         WorkflowProcess {
             id: self.node_id(&owner, &[], "process"),

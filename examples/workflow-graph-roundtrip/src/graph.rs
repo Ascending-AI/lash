@@ -329,7 +329,7 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
 ///
 /// A lifted process has no module declaration of its own, so nothing about it
 /// is authored under this name.
-fn is_lifted_process(name: &str) -> bool {
+pub(super) fn is_lifted_process(name: &str) -> bool {
     name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
 }
 

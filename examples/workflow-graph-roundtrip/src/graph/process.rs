@@ -28,20 +28,31 @@ pub(super) fn process_from_data(
         body: WorkflowSubgraph::default(),
     });
     let process_id = ProcessId::from(process.id.to_string());
-    let name = data.process_name.as_deref().unwrap_or(data.name.title());
-    process.name = editable_identifier(&process_id, "name", name)?;
-    process.display_name = data.name.title().to_string();
-    process.description = data.name.description().map(str::to_string);
-    process.name_source = data.name.name_source();
+    // A lifted process's name, title and signals are derived, not authored
+    // (FIG-2999, FIG-3118): the name digests the body, the displayed title is
+    // that name, and the signal set is read back out of the body's
+    // `waitSignal` calls. The authored name is the `const` binding, which the
+    // host edits on the statement node that carries the arrow. So a client
+    // that echoes these fields back is echoing a projection, and the echo is
+    // dropped here the way a type facet's is — accepting it would leave the
+    // module with a second declaration nothing binds.
+    let derived = super::is_lifted_process(&process.name);
+    if !derived {
+        let name = data.process_name.as_deref().unwrap_or(data.name.title());
+        process.name = editable_identifier(&process_id, "name", name)?;
+        process.display_name = data.name.title().to_string();
+        process.description = data.name.description().map(str::to_string);
+        process.name_source = data.name.name_source();
+        process.signals = data
+            .signals
+            .iter()
+            .map(|field| process_signal_from_data(&process_id, field))
+            .collect::<Result<_, _>>()?;
+    }
     process.params = data
         .params
         .iter()
         .map(|field| process_param_from_data(&process_id, field))
-        .collect::<Result<_, _>>()?;
-    process.signals = data
-        .signals
-        .iter()
-        .map(|field| process_signal_from_data(&process_id, field))
         .collect::<Result<_, _>>()?;
     Ok(process)
 }
