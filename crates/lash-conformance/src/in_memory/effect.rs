@@ -243,6 +243,15 @@ mod shared_effect_group_host_laws {
 
 // No cancelled-terminal durability invocation: the native host has no journal to reopen.
 
+// No store_effect_group_drain_tests!: the group drain has one implementation, the
+// blanket one over `EffectReplayRowStore` (`effect_replay_driver/drain.rs:38`), and
+// that trait is sealed to lash's own SQL stores (`effect_replay_driver.rs:756-759`).
+// The native host cannot supply an `Arc<dyn StoreEffectGroupDrain>` at all.
+
+// No attachment_owner_cold_replay_tests!: the fixture requires two effect controllers
+// independently opened over the same journal (`conformance/attachment_owner.rs:16-18`),
+// and the native host has no journal to reopen.
+
 /// First-settlement wake: the caller resumes on the winner while the loser is
 /// still running.
 ///
