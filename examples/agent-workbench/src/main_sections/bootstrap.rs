@@ -138,8 +138,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let model = dev_provider_scenario
         .map(|scenario| scenario.initial_model().to_string())
         .unwrap_or_else(|| {
-            std::env::var("OPENROUTER_MODEL")
-                .unwrap_or_else(|_| "anthropic/claude-sonnet-4.6".to_string())
+            std::env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "z-ai/glm-5.3-flash".to_string())
         });
     let model_variant =
         std::env::var("OPENROUTER_MODEL_VARIANT").unwrap_or_else(|_| "high".to_string());

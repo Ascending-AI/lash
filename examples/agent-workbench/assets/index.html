@@ -2475,7 +2475,7 @@
         <label class="field">
           <span>model</span>
           <input id="modelInput" list="modelList" autocomplete="off" spellcheck="false"
-                 title="Provider model slug, e.g. anthropic/claude-sonnet-4.6. Applies to chat sends and button trigger occurrences." />
+                 title="Provider model slug, e.g. z-ai/glm-5.3-flash. Applies to chat sends and button trigger occurrences." />
           <datalist id="modelList"></datalist>
           <small id="modelHint" class="field-hint" hidden></small>
         </label>
@@ -5951,10 +5951,13 @@
         });
         if (application === "ignore") {
           /* A superseded response has a newer recovery owner. A latest response
-             overtaken by live observations does not, so keep the channel down
-             and advance the existing bounded retry ladder. */
+             overtaken by live observations does not: the server answered, so
+             the snapshot channel is reachable and staleness is not an outage —
+             marking it down here flashed the reconnecting banner on every turn
+             start. Keep the channel up and advance the existing bounded retry
+             ladder so the snapshot still converges. */
           if (isLatestRequest) {
-            markShellChannel(shellAvailability, "state", false);
+            markShellChannel(shellAvailability, "state", true);
             scheduleStateRetry();
           }
           renderShellStatus();

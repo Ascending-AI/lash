@@ -1621,13 +1621,13 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
     );
     assert.equal(
       scorecardContext.shellAvailability.channels.state,
-      false,
-      "a stale retry must keep the state channel down while the gap row is missing",
+      true,
+      "a stale retry answered by the server must leave the state channel reachable",
     );
     assert.equal(
       scorecardContext.shellStatusModel(scorecardContext.shellAvailability).banner.hidden,
-      false,
-      "a stale retry must keep the reconnecting banner visible",
+      true,
+      "a stale retry is not an outage: the reconnecting banner must stay hidden",
     );
     assert.doesNotMatch(
       target.textContent,
@@ -2352,6 +2352,105 @@ test("a late snapshot replaces the streams' rows without erasing newer ones", ()
       }
     }
   }
+});
+
+/* The red banner Sam saw flash on every send: `/api/state` answered, but the
+   observation stream had already moved past it, so the shell marked the
+   snapshot channel *unreachable* and painted "reconnecting" until the retry
+   landed. Staleness is ordering, not unreachability — a server that answered
+   is reachable, and only the bounded retry ladder should run. */
+test("a snapshot overtaken by live observations is not an outage", async () => {
+  let resolveSnapshot;
+  let failNextFetch = false;
+  const scheduledRetries = [];
+  const retryDelays = [];
+  let nextRetryTimerId = 0;
+  const context = {
+    Map,
+    Set,
+    Math,
+    Number,
+    String,
+    Boolean,
+    Object,
+    Promise,
+    Error,
+    async fetchStateSnapshot() {
+      if (failNextFetch) throw new Error("fetch failed");
+      return new Promise(resolve => { resolveSnapshot = resolve; });
+    },
+    renderShellStatus() {},
+    setTimeout(callback, delay) {
+      const timer = { id: ++nextRetryTimerId, callback };
+      scheduledRetries.push(timer);
+      retryDelays.push(delay);
+      return timer.id;
+    },
+    clearTimeout(timerId) {
+      const index = scheduledRetries.findIndex(timer => timer.id === timerId);
+      if (index >= 0) scheduledRetries.splice(index, 1);
+    },
+    handleTerminalStateFailure() { return false; },
+    snapshotFailureReason() { return "the workbench stopped answering"; },
+    renderError() {},
+    applyStateSnapshot() {
+      throw new Error("an overtaken snapshot must never be applied");
+    },
+    restartEventStreams() {
+      throw new Error("an overtaken snapshot must never re-attach the streams");
+    },
+    streamGeneration: 1,
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+     ${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
+     ${markedSource("WORKBENCH_STATE_RETRY", "WORKBENCH_STATE_RETRY")}
+     this.projectionState = createWorkbenchProjectionState();
+     this.shellAvailability = createShellAvailability();
+     this.loadState = loadState;`,
+    context,
+  );
+
+  // The shell as it stands mid-session: hydrated, with the snapshot channel
+  // established, which is what makes an established-channel outage claimable.
+  const shell = shellModule();
+  context.projectionState.sessionId = "workbench-a";
+  context.projectionState.observationCursor = "observation-7";
+  shell.markShellChannel(context.shellAvailability, "state", true);
+  shell.markShellHydrated(context.shellAvailability);
+
+  // A turn starts: `loadState()` fires, and a live observation lands before the
+  // response does, so the response is the latest request but no longer current.
+  const overtaken = context.loadState();
+  context.projectionState.observationCursor = "observation-8";
+  resolveSnapshot({
+    settings: { session_id: "workbench-a" },
+    observation: { cursor: "observation-7" },
+    product_events: { cursor: 3, events: [] },
+  });
+  await overtaken;
+
+  assert.equal(
+    context.shellAvailability.channels.state,
+    true,
+    "a server that answered is reachable, whatever the response's ordering",
+  );
+  const model = shell.shellStatusModel(context.shellAvailability, { session: "workbench-a" });
+  assert.equal(shellRender(model).bannerHidden, true, "the outage banner must stay hidden");
+  assert.equal(
+    scheduledRetries.length,
+    1,
+    "the bounded retry ladder must still run so the snapshot converges",
+  );
+  assert.deepEqual(retryDelays, [900]);
+
+  // The real-outage law is untouched: a fetch that fails marks the channel down
+  // and the established-channel banner comes back.
+  failNextFetch = true;
+  await assert.rejects(context.loadState(), /state unavailable/);
+  assert.equal(context.shellAvailability.channels.state, false);
+  const outage = shell.shellStatusModel(context.shellAvailability, { session: "workbench-a" });
+  assert.equal(shellRender(outage).bannerHidden, false);
 });
 
 test("an unattached stream is neither a live channel nor an outage", () => {
