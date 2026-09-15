@@ -16,16 +16,20 @@ name: Seal cache
 # invocation rather than one `cargo` run per fixture, each preceded by a
 # `cargo clean --package`. The tree this workflow saves is therefore a check
 # tree, not a build tree. A `cargo check` unit and a `cargo build` unit have
-# different fingerprints, so the first run against a cache written under the
-# old shape re-checks the nested graph once and reads no faster than before;
-# dispatch this workflow once after that change lands and the seal lane picks
-# up the smaller tree from then on.
+# different fingerprints, so a cache written under the old shape makes every
+# seal run re-check the nested graph (76 s of the 221 s seal step measured on
+# 2026-09-15). Dispatching this workflow alone does not fix that: rust-cache
+# skips the save when it restored the primary key in full, so the old tree
+# stays on main until the key itself changes. That is what the generation
+# suffix on `shared-key` is for: bump it here and in ci.yml together whenever
+# the seal build's output shape changes without touching the lockfiles, then
+# dispatch this workflow.
 #
 # ci.yml's `check` job never runs on `main` itself, so it never writes a cache
 # into the default-branch scope, and a pull request can only restore caches
 # from its own branch or from `main`. Every PR started this job from scratch.
-# This workflow is the sole main-scoped writer of `linux-seal`; ci.yml's seal
-# lane stays a restore-only consumer, and nothing here is gating.
+# This workflow is the sole main-scoped writer of `linux-seal-2`; ci.yml's
+# seal lane stays a restore-only consumer, and nothing here is gating.
 #
 # It is deliberately NOT a job inside ci.yml: it is a twelve-minute build, and
 # it would drag `evaluate_conclusion` and the conclusion-policy tests into a
@@ -35,10 +39,11 @@ name: Seal cache
 # automatically on a push to main. The `linux-seal` key is a function of the
 # lockfiles, the toolchain and the cargo environment — never of crate sources —
 # so a refresh is needed only after a change to `Cargo.lock`, a manifest,
-# `rust-toolchain*`, `.cargo/**`, the toolchain/tool/mold actions, or this
-# workflow. A source-only change keeps the key and restores a tree cargo
-# rebuilds incrementally. Dispatch this workflow after such a change; until it
-# runs, the `check` seal lane pays the cold trybuild build itself.
+# `rust-toolchain*`, `.cargo/**`, the toolchain/tool/mold actions, this
+# workflow, or the generation suffix. A source-only change keeps the key and
+# restores a tree cargo rebuilds incrementally. Dispatch this workflow after
+# such a change; until it runs, the `check` seal lane pays the cold trybuild
+# build itself.
 on:
   workflow_dispatch:
 
@@ -94,7 +99,7 @@ jobs:
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
 
-      # Sole writer of `linux-seal`; ci.yml's seal lane restores it. Every
+      # Sole writer of `linux-seal-2`; ci.yml's seal lane restores it. Every
       # input here mirrors that lane, `workspaces` included: rust-cache derives
       # the cached paths from it, so a different value would cache a different
       # tree under the same key.
@@ -102,7 +107,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
-          shared-key: linux-seal
+          shared-key: linux-seal-2
           workspaces: . -> target-seal
 
       - name: Install protoc

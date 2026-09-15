@@ -294,20 +294,28 @@ jobs:
           cache-bin: false
           shared-key: linux-debug
 
-      # Restore-only. `seal-cache.yml` is the sole writer of `linux-seal`, and
-      # it must stay the writer: this job never runs on main itself, so a
+      # Restore-only. `seal-cache.yml` is the sole writer of `linux-seal-2`,
+      # and it must stay the writer: this job never runs on main itself, so a
       # cache saved here lands in a pull request's own branch scope, which no
       # other branch can read. Every key input below -- shared-key,
       # `workspaces`, CARGO_TARGET_DIR, RUSTFLAGS, CARGO_TERM_COLOR,
       # CARGO_INCREMENTAL, CARGO_HOME -- is mirrored there; changing one here
       # without changing it there writes a cache nothing reads, and this job
       # goes back to a twelve-minute cold build (FIG-3056).
+      # `test_seal_cache_writer_mirrors_the_seal_lane` pins the mirror.
+      #
+      # The `-2` is the cache generation. rust-cache never re-saves a key it
+      # restored in full, so a change to what the seal build produces that
+      # leaves the lockfiles, toolchain and cargo environment alone (the move
+      # to compile-fail-only fixtures was one) keeps the old tree on main
+      # forever, and every run rebuilds the difference. Bump the generation in
+      # both files together, then dispatch `seal-cache.yml`.
       - name: Restore isolated seal dependencies
         if: matrix.lane == 'seal'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
-          shared-key: linux-seal
+          shared-key: linux-seal-2
           workspaces: . -> target-seal
 
       - name: Install protoc

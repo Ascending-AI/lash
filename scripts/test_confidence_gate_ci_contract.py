@@ -21,6 +21,7 @@ CONFIDENCE_WORKFLOW = ROOT / ".github" / "workflows" / "confidence.yml"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_CACHE_WORKFLOW = ROOT / ".github" / "workflows" / "release-cache.yml"
+SEAL_CACHE_WORKFLOW = ROOT / ".github" / "workflows" / "seal-cache.yml"
 MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
@@ -270,6 +271,35 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins",
                       next(s["run"] for s in producer["steps"] if s["name"] == "Build worker binaries once"))
         self.assertIn("LASH_E2E_PREBUILT_BIN_DIR", str(workers["steps"]))
+
+    def test_seal_cache_writer_mirrors_the_seal_lane(self) -> None:
+        # seal-cache.yml is the only main-scoped writer of the seal lane's
+        # rust-cache key. rust-cache builds that key from `shared-key`, the
+        # `workspaces` target dir, the toolchain and every CARGO*/RUST* env
+        # var, so the writer and the reader must agree on all of them or the
+        # lane restores nothing and pays the cold trybuild build. The
+        # generation suffix is the only way to retire a tree whose shape
+        # changed under an unchanged lockfile: rust-cache never re-saves a
+        # key it restored in full.
+        ci = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        writer = yaml.safe_load(SEAL_CACHE_WORKFLOW.read_text(encoding="utf-8"))
+        lane = next(
+            s for s in ci["jobs"]["check"]["steps"]
+            if "rust-cache@" in s.get("uses", "") and s.get("if") == "matrix.lane == 'seal'"
+        )
+        (writer_job,) = writer["jobs"].values()
+        saver = next(s for s in writer_job["steps"] if "rust-cache@" in s.get("uses", ""))
+        self.assertEqual(lane["uses"], saver["uses"])
+        self.assertEqual(lane["with"], saver["with"])
+        self.assertRegex(saver["with"]["shared-key"], r"^linux-seal-[0-9]+$")
+        self.assertNotIn("save-if", lane["with"])
+        seal_entry = next(
+            row for row in ci["jobs"]["check"]["strategy"]["matrix"]["include"] if row["lane"] == "seal"
+        )
+        self.assertEqual("${{ github.workspace }}/${{ matrix.target }}", ci["jobs"]["check"]["env"]["CARGO_TARGET_DIR"])
+        self.assertEqual(f"${{{{ github.workspace }}}}/{seal_entry['target']}", writer_job["env"]["CARGO_TARGET_DIR"])
+        for name in ("CARGO_TERM_COLOR", "LASH_CI_FEATURES", "RUSTFLAGS"):
+            self.assertEqual(ci["env"][name], writer["env"][name], name)
 
     def test_confidence_schedule_matrix_declared_artifacts_have_writers(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
