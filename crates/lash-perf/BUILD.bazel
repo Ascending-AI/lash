@@ -63,7 +63,7 @@ lash_rust_binary(
         "default",
         "dhat-heap",
     ],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [],
     include_dev_deps = False,
     library = ":lash-perf",

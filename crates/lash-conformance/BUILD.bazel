@@ -16,7 +16,7 @@ lash_rust_library(
     crate_features = [],
     crate_name = "lash_conformance",
     declared_features = [],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-conformance",
     package_name = "lash-internal-conformance",

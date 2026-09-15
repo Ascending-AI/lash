@@ -64,6 +64,17 @@ common --experimental_repository_downloader_retries=5
 # 34950810111 failed `//crates/lash-perf:lash-perf__unit_test` on a phase
 # assertion and timed out `//crates/lash-sim:stack_policy__test`, neither of
 # which is failing on main.
+#
+# These two lines are also the LOCAL defaults only. CI never passes
+# `--config=shared`: `.github/actions/bazel-shared-cache` composes its own flag
+# list and asks the pool for `cpu_count=4` / `memory_kb=4194304`. An emitted
+# `exec_properties` pair replaces both of those, so a row measured at one or
+# two cores lowers an action's cap on CI instead of leaving it alone. The
+# generator therefore floors every request it emits at CI's own default
+# (`CI_DEFAULT_CPU_COUNT`), and declares a higher floor by hand for the actions
+# that own the Bazel jobs' critical path (`CPU_FLOORS`): a saturated CPU-bound
+# compile can never raise itself through the measured table, because the
+# measured average cannot exceed the cap the sample ran under.
 build:shared --remote_default_exec_properties=cpu_count=1
 build:shared --remote_default_exec_properties=memory_kb=2097152
 build:shared --remote_local_fallback=false
@@ -78,6 +89,31 @@ test --cache_test_results=yes
 # Local execution remains available for CI, bootstrap, and reproduction.
 build:local --spawn_strategy=local
 test:local --test_output=errors
+
+# A dependent rlib does not need its dependency's object code, only its
+# metadata. With this flag `rules_rust` emits a second, cheap
+# `RustcMetadata` action per library (`-Zno-codegen --emit=metadata`, under the
+# RUSTC_BOOTSTRAP the rules inject for a stable toolchain) and lets downstream
+# libraries start as soon as that hollow rlib lands instead of waiting out the
+# full codegen. The chain that owns this repository's Bazel critical path is
+# exactly that shape - the lash-internal-core rlib, then the facade rlib, then
+# the test binaries that link them - and the metadata half of a 128 s compile
+# is a fraction of it. Only `rlib`/`lib` crate types pipeline; proc-macro and
+# binary targets are unaffected, and any single target can opt out with
+# `disable_pipelining`.
+#
+# It is set here rather than under `build:shared` because CI never passes
+# `--config=shared`: `.github/actions/bazel-shared-cache` composes its own flag
+# list, so a flag that must reach CI cannot live in that config.
+build --@rules_rust//rust/settings:pipelined_compilation=True
+
+# The pool's cache speaks zstd. Action outputs here are rlibs and test binaries
+# measured in hundreds of megabytes, and every one of them crosses the wire at
+# least twice; compressing them costs the workers CPU they are not short of and
+# buys back runner wall clock on a link that is. Same reason as the flag above
+# for living at the `build` level rather than in `build:shared`: an invocation
+# with no remote cache ignores it.
+build --remote_cache_compression
 
 build --incompatible_strict_action_env
 build --jobs=8

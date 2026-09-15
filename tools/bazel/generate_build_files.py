@@ -32,6 +32,41 @@ DEFAULT_CPU_COUNT = 1
 # four cores; libs, bins and build scripts stay exactly as measured.
 TEST_CPU_FLOOR = 4
 TEST_SIZE_KINDS = ("test",)
+# CI never activates the `shared` config: `.github/actions/bazel-shared-cache`
+# composes its own flag list, and it asks the pool for more than this
+# repository's own defaults --- `--remote_default_exec_properties=cpu_count=4`
+# and `memory_kb=4194304`. An emitted `exec_properties` pair replaces BOTH
+# defaults for that action, so a row measured at one or two cores does not
+# "stay as measured" on CI: it LOWERS the cap below what an unsized target
+# already gets, and five targets plus the lash-core rlib were doing exactly
+# that. Every request this generator emits therefore floors at the CI default.
+# Targets with no row are untouched and keep inheriting whichever default the
+# invocation supplies, so the small-action default that keeps a 200 ms genrule
+# out of a lash-core-sized slot still holds.
+CI_DEFAULT_CPU_COUNT = 4
+CI_DEFAULT_MEMORY_KB = 4194304
+# A measured average can never exceed the cap the sample ran under, so a
+# CPU-bound compile cannot argue its own way up the table:
+# `tools/bazel/action_sizes_from_log.py` divides observed CPU seconds by wall
+# seconds, and a saturated action reads as "sized correctly". The
+# lash-internal-core rlib kept 222 cpu-seconds busy over 128 s wall at a cap of
+# two on CI run 35009804570 --- saturated, and the single action that owns the
+# critical path of all three Bazel jobs. rustc's codegen phase parallelises
+# across codegen units (256 of them in the debug geometry), so the cap is the
+# lever, and for the actions on that chain --- the lash-internal-core rlib, the
+# facade rlib compiled on top of it, and the test binaries that link them --- it
+# is declared here rather than measured. A floor is honoured whether or not the
+# key appears in the measured table, so regenerating the table from a log that
+# happens not to contain the crate cannot quietly drop it.
+CPU_FLOORS = {
+    "agent_workbench/bin": 8,
+    "agent_workbench/test": 8,
+    "lash/lib": 8,
+    "lash/test": 8,
+    "lash_core/lib": 8,
+    "lash_core/test": 8,
+    "lash_restate/test": 8,
+}
 # `//crates/lash-sim:lash-sim__unit_test` packs the whole simulation suite into
 # one libtest binary, and a libtest binary is a single Bazel test action. On CI
 # run 34791314196 it ran 313 s and was the last action of a 926 s job: from
@@ -70,15 +105,25 @@ def exec_properties(crate_name: str, kind: str) -> dict[str, str]:
     sized target states its whole request instead of stating one half and
     inheriting the other.
     """
-    entry = ACTION_SIZES.get(f"{crate_name}/{kind}") or {}
+    key = f"{crate_name}/{kind}"
+    entry = ACTION_SIZES.get(key) or {}
     cpu_count = entry.get("cpu_count", DEFAULT_CPU_COUNT)
     if kind in TEST_SIZE_KINDS:
         cpu_count = max(cpu_count, TEST_CPU_FLOOR)
-    memory_kb = entry.get("memory_kb", DEFAULT_MEMORY_KB)
+    cpu_count = max(cpu_count, CPU_FLOORS.get(key, 0))
+    # A declared floor may have no measured row at all --- `lash/lib` is one ---
+    # and the emitted pair replaces the CI default on both axes. The memory half
+    # of such a request is therefore the CI default rather than this
+    # repository's smaller one: a floor must not shrink the action's cgroup
+    # while it widens the action's cap.
+    unmeasured_memory_kb = (
+        CI_DEFAULT_MEMORY_KB if key in CPU_FLOORS else DEFAULT_MEMORY_KB
+    )
+    memory_kb = entry.get("memory_kb", unmeasured_memory_kb)
     if cpu_count <= DEFAULT_CPU_COUNT and memory_kb <= DEFAULT_MEMORY_KB:
         return {}
     return {
-        "cpu_count": str(cpu_count),
+        "cpu_count": str(max(cpu_count, CI_DEFAULT_CPU_COUNT)),
         "memory_kb": str(memory_kb),
     }
 
