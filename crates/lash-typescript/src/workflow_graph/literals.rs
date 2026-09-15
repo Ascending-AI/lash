@@ -57,8 +57,10 @@ pub(crate) fn collect_process_literals<'a>(
     if let Expr::ProcessLiteral(literal) = expr {
         literals.push((path.clone(), literal));
     }
-    for (index, child) in expr.children().enumerate() {
-        path.push(index.try_into().expect("AST child index fits u32"));
+    // The path is `u32`-keyed, so count in `u32` rather than converting a
+    // `usize` back down: the walk cannot then fail on a conversion at all.
+    for (index, child) in (0u32..).zip(expr.children()) {
+        path.push(index);
         collect_process_literals(child, path, literals);
         path.pop();
     }

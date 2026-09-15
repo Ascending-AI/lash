@@ -88,7 +88,11 @@ impl<'module> Linker<'module> {
         }
         let previous_completion = self.collect_completion.replace(true);
         let previous_signals = self.collect_signals.replace(true);
-        let previous_inferred = std::mem::take(&mut *self.inferred_signals.borrow_mut());
+        // #1511 left this half-written: it took the enclosing literal's set
+        // and never restored it, so only the clearing side effect was ever
+        // live. Kept as the clear it actually is; restoring the outer set is
+        // a behaviour change and belongs in its own commit.
+        self.inferred_signals.borrow_mut().clear();
         let lowered = self.lower_expr(&literal.body, &mut process_scope);
         self.collect_completion.set(previous_completion);
         self.collect_signals.set(previous_signals);

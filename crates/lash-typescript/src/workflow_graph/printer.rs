@@ -10,7 +10,7 @@
 //!
 //! * `ProcessDecl { body: Try(Finish(Call(Function))) }` with the generated
 //!   `__typescript_process_error` catch prints back as `defineProcess({ name,
-//!   signals, run: async (..) => { .. } })`.
+//!   run: async (..) => { .. } })`.
 //! * `Print(__typescript_stdlib("__consoleObservationText", x))` prints back as
 //!   `console.log(x)`.
 //! * `__typescript_await_array([..], false)` prints back as
@@ -27,8 +27,8 @@
 
 use lashlang::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessSignalDecl,
-    Program, ResourceRefExpr, TypeExpr, UnaryOp,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, Program,
+    ResourceRefExpr, UnaryOp,
 };
 use thiserror::Error;
 
@@ -204,37 +204,6 @@ impl Printer {
         out.push_str(",\n});\n");
         bound.push(binding.to_string());
         Ok(out)
-    }
-
-    fn signals(&self, signals: &[ProcessSignalDecl]) -> Printed {
-        if signals.is_empty() {
-            return Ok("{}".to_string());
-        }
-        let entries = signals
-            .iter()
-            .map(|signal| {
-                Ok(format!(
-                    "{}: {}",
-                    key(signal.name.as_str()),
-                    self.ty(&signal.ty)?
-                ))
-            })
-            .collect::<Result<Vec<_>, TypeScriptSourceError>>()?;
-        Ok(format!("{{ {} }}", entries.join(", ")))
-    }
-
-    /// The signal-schema literal the dialect accepts, which is a value, not a
-    /// TypeScript type annotation.
-    fn ty(&self, ty: &TypeExpr) -> Printed {
-        match ty {
-            TypeExpr::Any | TypeExpr::Null => Ok("null".to_string()),
-            TypeExpr::Str => Ok("\"\"".to_string()),
-            TypeExpr::Int | TypeExpr::Float => Ok("0".to_string()),
-            TypeExpr::Bool => Ok("false".to_string()),
-            _ => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "this signal schema",
-            }),
-        }
     }
 
     fn block(&self, expression: &Expr, level: usize, bound: &mut Vec<String>) -> Printed {
