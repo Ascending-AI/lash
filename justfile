@@ -308,10 +308,19 @@ confidence-full:
 #     API surface. Only 16s once trybuild's nested target directory is warm,
 #     but each case is a nested `cargo build`, so on a cold cache the pair
 #     costs minutes. The cost is compilation rather than product logic, and
-#     only an API-surface change can move the result.
+#     only an API-surface change can move the result. `just seal` is the way
+#     back in: run it whenever a diff moves the public facade.
 # Drop the leading `not` from the expression to run only the excluded set.
 battery-fast:
   cargo nextest run --workspace --locked -E 'not ((package(lash-runtime) & binary(ui)) + (package(lash-sim) & test(/^(minimize::tests::minimizer_writes_replayable_regression_package|minimize::tests::replay_failure_publishes_no_minimized_package_artifacts|runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)$/)))'
+
+# The API-surface seal, exactly as CI's `seal` lane runs it. `battery-fast`
+# excludes the `ui` binary for wall clock, and nothing else in the local
+# batteries compiles the facade the way a dependent crate sees it, so a diff
+# that moves or re-homes a `pub use` is green locally and red on CI until this
+# runs. Run it whenever a diff touches the public facade.
+seal:
+  cargo test --workspace --locked --test ui
 
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
