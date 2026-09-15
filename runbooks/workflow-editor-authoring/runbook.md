@@ -53,8 +53,13 @@ changes when the lens's printer changes, not with this arc.
    put Set progress before Show message, with both inside `blank` and before Finish. The
    SSE display result must therefore contain progress 73 and `Built from blank`.
 6. **Terminal means UI and SSE terminal.** A green-looking display alone is insufficient.
-   The final `/run` event must be `succeeded`, target the saved terminal node, and carry
-   the saved workflow version; the Canvas terminal and Display panel must visibly settle.
+   The final `/run` event must be `succeeded`, carry the saved workflow version, and name a
+   node that exists in the saved document; the Canvas terminal and Display panel must
+   visibly settle. Do **not** require that node to be the terminal: the process's closing
+   `return` correlates no execution site yet, so the last event is the last authored
+   statement. That is known behaviour, pinned with its reasoning at
+   `examples/workflow-graph-roundtrip/tests/authoring.rs:221-224` (FIG-3057); the authored
+   terminal still reprojects and the run still ends successfully.
 
 ## Working material
 
@@ -113,7 +118,7 @@ until all three surfaces agree:
   and a `Save as blank` data card in the **STEPS** rail. Gate that shape, not a bare Finish;
 - the select response and fresh `GET /workflow` have identical version/source/nodes, with the
   canonical source the TypeScript process-arrow form above (whitespace-insensitive) and
-  node types exactly `{data, process, terminal}`;
+  node types exactly `{computation, process, terminal}`;
 - the source pane renders that version and source, while Display says no run yet.
 
 Record the baseline version and ids in `01-blank.json`. Screenshot `01-blank.png`.
@@ -194,12 +199,13 @@ never sleep, until Play is no longer running and the Display done indicator appe
 Require:
 
 - every SSE event has the saved workflow version and one run id; the last event is
-  `succeeded` for the canonical Finish node, with no failed event;
+  `succeeded` and names a node of the saved document, with no failed event. Per golden
+  rule 6 that node is the last authored statement, not the Finish node (FIG-3057);
 - the final SSE display has `progress: 73` and includes `Built from blank`;
 - the rendered Display shows 73%, the message, the same saved version/run identity, and
   a terminal done state;
-- Canvas marks the progress, message, and terminal nodes succeeded, with the terminal
-  node correlated to the final SSE `nodeId`;
+- Canvas marks the progress, message, and terminal nodes succeeded, and the final SSE
+  `nodeId` correlates to a Canvas node marked succeeded;
 - `GET /workflow` after execution still equals the saved document (running does not edit
   the workflow).
 
@@ -218,7 +224,7 @@ Stop the foreground recipe and confirm `GET /healthz` can no longer connect.
 | Canvas authoring | numeric Set progress added on Canvas, moved into process, reordered | | `03-canvas-scope-order.png`, `03-draft-order.json` |
 | Typed recovery | malformed expression returns typed 422; complete draft remains | | `04-typed-422-draft-kept.png`, `04-malformed-save.json` |
 | Save reconciliation | render/GET/project agree; ids, selection, position, viewport survive | | `05-saved-context-preserved.png`, `05-save-reconciliation.json` |
-| Terminal execution | final SSE and Canvas terminal succeed; Display shows 73 + message | | `06-terminal-run.png`, `06-terminal-run.json` |
+| Terminal execution | final SSE succeeds on a saved-document node and Canvas settles; Display shows 73 + message | | `06-terminal-run.png`, `06-terminal-run.json` |
 
 **Aggregate:** did a non-technical author build one workflow from Blank across both editor
 views, recover from a typed rejection, preserve editing context through canonical id

@@ -101,7 +101,15 @@ rlm-smoke-config-contract-edit = { tier = "economy", model = "deepseek/deepseek-
 # honest without inventing paid runs.
 [deterministic_only]
 agent-service-effect-group-retirement = { tier = "deterministic", model = "scripted-provider" }
-agent-service-effect-groups = { tier = "deterministic", model = "scripted-provider" }
+# FIG-3170: this row names an external harness that boots and tears down the
+# agent-service stack, and no such harness is checked in. Its own text tells a
+# judge to Abort on a missing stack, and CI executes nothing for it either, so
+# it is neither judged nor hermetically run. `blocked` keeps the listing honest
+# — discovery still sees the runbook, and no drive spends a judge on
+# rediscovering the same Abort — until the harness lands or the stack lifecycle
+# is folded into the runbook. It emits no row either way; the 36-row arithmetic
+# below is unchanged.
+agent-service-effect-groups = { tier = "deterministic", model = "scripted-provider", blocked = "FIG-3170: external harness does not exist" }
 example-core-shutdown = { tier = "deterministic", model = "scripted-provider" }
 mcp-naming-refresh = { tier = "deterministic", model = "scripted-provider" }
 runtime-identity = { tier = "deterministic", model = "scripted-provider" }

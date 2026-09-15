@@ -24,9 +24,15 @@ named here. Any provider request invalidates the rehearsal.
 2. Record the exact agent-service PID at boot and confirm that PID is `agent-service`
    before every signal. Never use `pkill`, `killall`, a process-name match, a service name,
    a workflow key, or a wildcard as a kill target.
-3. `cleanup.facts.dispatcher.id` in the pending retired index is the kill authority. It
-   must exactly equal an independently described `EffectGroupDispatch/<group-key>/run`
-   invocation.
+3. `lifecycle.dispatch.id` in the wedged `preparing` index (Phase 1) is the kill
+   authority. It must exactly equal an independently described
+   `EffectGroupDispatch/<group-key>/run` invocation. `cleanup.facts.dispatcher.id` in the
+   retired index carries the same value, but `EffectGroupIndex` is a virtual object with
+   exclusive handlers: the wedged `record_dispatch` holds the object lock while it backs
+   off against the dead endpoint, so the queued `retire` — the handler that writes the
+   tombstone — cannot run until the kill releases the lock. The tombstone is therefore
+   observable only after the kill it would otherwise authorize, and Phase 2 must not wait
+   for it.
 4. Keep the failed deployment endpoint down. Restart the unchanged example on a new
    endpoint port and register that URL as a new revision. Otherwise Restate can redrive the
    pinned dispatcher before the index is tombstoned, proving ordinary completion instead.
@@ -42,6 +48,7 @@ different explicit ports and a different shell-safe slug.
 run_slug=cov2
 container="lash-agent-service-restate-$run_slug"
 run_id="${run_slug}-retirement-witness"
+authority_id="agent-service-runbook:$run_slug"
 group_key="agent-service:effect-group:$run_id"
 group_path=${group_key//:/%3A}
 run_root="$(mktemp -d "/tmp/lash-effect-group-retirement-$run_slug.XXXXXX")"
@@ -83,11 +90,17 @@ the shell replaced by Cargo so `$!` remains the exact host PID:
   export RESTATE_INGRESS_URL="http://127.0.0.1:$ingress_port"
   export AGENT_SERVICE_DATA_DIR="$data_dir"
   export AGENT_SERVICE_TRACE="$data_dir/trace.jsonl"
+  export RESTATE_AUTHORITY_ID="$authority_id"
   exec cargo run -p agent-service --features restate --profile judged --locked -- \
     --durability restate
 ) >>"$run_root/agent-service.log" 2>&1 &
 host_pid=$!
 ```
+
+`RESTATE_AUTHORITY_ID` is required and must stay stable across both boots of this run,
+because they share one Restate state and one data dir. Choose `authority_id` once, before
+Phase 0, and export the identical value in Phase 2. Without it the binary exits
+immediately with `Error: "RESTATE_AUTHORITY_ID is required for Restate durability"`.
 
 Poll both app and old endpoint ports. Require
 `ps -o comm= -p "$host_pid"` to equal `agent-service`, then register and inventory the
@@ -167,7 +180,7 @@ wait "$group_post_pid" || true
 unset host_pid
 ```
 
-## Phase 2 — Tombstone on a replacement deployment
+## Phase 2 — Start the retirement saga on a replacement deployment
 
 Start the unchanged command from Phase 0 with `AGENT_SERVICE_RESTATE_ADDR` set to
 `127.0.0.1:$new_endpoint_port`, retaining the same app port, ingress URL, and data dir.
@@ -184,6 +197,7 @@ old endpoint port down.
   export RESTATE_INGRESS_URL="http://127.0.0.1:$ingress_port"
   export AGENT_SERVICE_DATA_DIR="$data_dir"
   export AGENT_SERVICE_TRACE="$data_dir/trace.jsonl"
+  export RESTATE_AUTHORITY_ID="$authority_id"
   exec cargo run -p agent-service --features restate --profile judged --locked -- \
     --durability restate
 ) >>"$run_root/agent-service.log" 2>&1 &
@@ -211,36 +225,8 @@ curl -sS -X POST \
 retirement_curl_pid=$!
 ```
 
-Poll `restate state get EffectGroupIndex "$group_key" --plain` until it reports
-`lifecycle.type=retired` and `cleanup.type=pending`. Save it as
-`retired-pending-index.json`; require its `cleanup.facts.dispatcher.id` to equal
-`$dispatcher_id`.
-
-```sh
-deadline=$((SECONDS + 30))
-while (( SECONDS < deadline )); do
-  restate state get EffectGroupIndex "$group_key" --plain \
-    >"$run_root/retired-pending-index.json"
-  if python3 - "$run_root/retired-pending-index.json" "$dispatcher_id" <<'PY'
-import json, sys
-state = json.load(open(sys.argv[1], encoding="utf-8"))["effect-group/v1/state"]
-lifecycle = state["lifecycle"]
-pending = lifecycle.get("type") == "retired" and lifecycle.get("cleanup", {}).get("type") == "pending"
-if pending:
-    assert lifecycle["cleanup"]["facts"]["dispatcher"]["id"] == sys.argv[2]
-raise SystemExit(0 if pending else 1)
-PY
-  then
-    break
-  fi
-  sleep 1
-done
-python3 - "$run_root/retired-pending-index.json" <<'PY'
-import json, sys
-lifecycle = json.load(open(sys.argv[1], encoding="utf-8"))["effect-group/v1/state"]["lifecycle"]
-assert lifecycle["type"] == "retired" and lifecycle["cleanup"]["type"] == "pending", lifecycle
-PY
-```
+The index is now wedged behind the dead dispatcher and will not move until Phase 3 kills
+it. Do not wait for the tombstone here.
 
 Capture the retirement invocation ID and prove the saga is still running while the exact
 dispatcher is backing off against the dead old endpoint:
@@ -256,18 +242,55 @@ grep -F "EffectGroupDispatch/$group_key/run" "$run_root/dispatcher-backing-off.t
 grep -F "127.0.0.1:$old_endpoint_port" "$run_root/dispatcher-backing-off.txt"
 ```
 
-## Phase 3 — Kill only the cleanup-recorded invocation
+## Phase 3 — Kill only the index-recorded dispatcher, then read the tombstone
 
-This is the README escape hatch. Pass exactly the ID copied from pending cleanup:
+This is the README escape hatch. Pass exactly the `$dispatcher_id` captured from the
+wedged index in Phase 1 and already cross-checked against a described
+`EffectGroupDispatch/<group-key>/run` invocation:
 
 ```sh
 restate -y invocation kill "$dispatcher_id" | tee "$run_root/dispatcher-kill.txt"
 grep -F 'Killed 1 invocations' "$run_root/dispatcher-kill.txt"
 ```
 
-Poll the retirement curl PID with a 30-second deadline, then `wait` it. Require
+The kill releases the `EffectGroupIndex` object lock, so the queued `retire` handler runs
+and writes the tombstone. Poll the index until `lifecycle.type=retired`, save it as
+`retired-index.json`, and require `cleanup.facts.dispatcher.id` to equal `$dispatcher_id`.
+Cleanup may already have advanced from `pending` to `complete` by the time the first read
+lands; both are a pass, and the dispatcher fact is required in either shape.
+
+```sh
+deadline=$((SECONDS + 60))
+while (( SECONDS < deadline )); do
+  restate state get EffectGroupIndex "$group_key" --plain \
+    >"$run_root/retired-index.json"
+  if python3 - "$run_root/retired-index.json" "$dispatcher_id" <<'PY'
+import json, sys
+lifecycle = json.load(open(sys.argv[1], encoding="utf-8"))["effect-group/v1/state"]["lifecycle"]
+if lifecycle.get("type") != "retired":
+    raise SystemExit(1)
+cleanup = lifecycle["cleanup"]
+assert cleanup["type"] in ("pending", "complete"), cleanup
+assert cleanup["facts"]["dispatcher"]["id"] == sys.argv[2], cleanup
+raise SystemExit(0)
+PY
+  then
+    break
+  fi
+  sleep 1
+done
+python3 - "$run_root/retired-index.json" "$dispatcher_id" <<'PY'
+import json, sys
+lifecycle = json.load(open(sys.argv[1], encoding="utf-8"))["effect-group/v1/state"]["lifecycle"]
+assert lifecycle["type"] == "retired", lifecycle
+assert lifecycle["cleanup"]["facts"]["dispatcher"]["id"] == sys.argv[2], lifecycle
+PY
+```
+
+Poll the retirement curl PID with a 180-second deadline, then `wait` it. Require
 `retirement-response.txt` to contain `HTTP 200`. A successful kill without saga completion
-is not a pass.
+is not a pass. The saga routinely completes one to two minutes after the kill; tearing
+down on a 30-second deadline destroys a run that was about to pass.
 
 ## Phase 4 — Prove every retained retirement fence
 
@@ -290,13 +313,20 @@ The saga journals retained fences in protocol order: READY, then ranks 1 through
 only its first two `retain_resolution` inputs. Recover their exact signed key preimages and
 submit fresh `await_resolution` calls; state reads alone do not prove late registration.
 
+The two addresses are derived differently and must not be confused.
+`crates/lash-restate/src/durable_wait.rs` is the live rule: the `LashDurableWaitIndex`
+object key is the scope key, rendered `scope:{"version":2,"kind":"op",...}` for an
+effect group's runtime-operation scope (`:242`), while the `LashDurableWaitWorkflow` key
+is `sha256hex(key.key_id)` (`:195`) — a bare 64-hex digest, not the index key with a
+prefix stripped.
+
 ```sh
 restate sql --json \
   "select i.target, j.entry_json from sys_invocation i join sys_journal j on i.id = j.id where i.invoked_by_id = '$retirement_id' and i.target_service_name = 'LashDurableWaitIndex' and i.target_handler_name = 'retain_resolution' and j.index = 0 order by i.created_at asc limit 2" \
   >"$run_root/ready-rank-retains.json"
 
 python3 - "$run_root/ready-rank-retains.json" "$RESTATE_INGRESS_URL" <<'PY' | tee "$run_root/late-ready-rank.txt"
-import json, sys, urllib.request
+import hashlib, json, sys, urllib.request
 rows = json.load(open(sys.argv[1], encoding="utf-8"))
 assert len(rows) == 2, rows
 for label, suffix, row in zip(("READY", "RANK-1"), (":ready", ":rank:1"), rows):
@@ -305,8 +335,8 @@ for label, suffix, row in zip(("READY", "RANK-1"), (":ready", ":rank:1"), rows):
     request.pop("resolution")
     assert request["key"]["wait"]["key"].endswith(suffix), request
     object_key = row["target"].split("/", 2)[1]
-    assert object_key.startswith("unscoped:"), object_key
-    workflow_key = object_key.removeprefix("unscoped:")
+    assert object_key.startswith("scope:"), object_key
+    workflow_key = hashlib.sha256(request["key"]["key_id"].encode()).hexdigest()
     call = urllib.request.Request(
         f"{sys.argv[2]}/LashDurableWaitWorkflow/{workflow_key}/await_resolution",
         data=json.dumps(request, separators=(",", ":")).encode(),
@@ -348,7 +378,7 @@ IDs; review it before sharing.
 | --- | --- | --- |
 | Mid-dispatch fault | preparing index had an adopted dispatcher when the exact PID died | `stopped-phase.json`, `wedged-index.json` |
 | Pinned dead invocation | exact `/run` invocation backed off against the old endpoint | `dispatcher-backing-off.txt` |
-| Pending tombstone | retirement ran with the same cleanup-recorded dispatcher ID | `retired-pending-index.json`, `retirement-pending.txt` |
+| Post-kill tombstone | retired index recorded the same dispatcher ID the kill targeted | `retired-index.json`, `retirement-pending.txt` |
 | Exact kill | exactly one recorded invocation killed | `dispatcher-kill.txt` |
 | Saga completion | retirement HTTP 200 and final retired index | `retirement-response.txt`, `index-probe.json` |
 | Late READY/RANK | both late registrations resolved `Retired` | `late-ready-rank.txt` |

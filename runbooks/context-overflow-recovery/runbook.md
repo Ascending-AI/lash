@@ -55,8 +55,9 @@ recovery, and the continued session, none of which are about the dialect at all.
 The dialect is fixed: TypeScript is the sole RLM dialect (ADR 0096) and the cells here are
 TypeScript. **Do not try to confirm a served dialect from this bundle.** The checkpoint's
 `dialect` field is a hardcoded `"typescript"`, not a reading, so confirming it against the
-constant it already is proves nothing. Cleanup tickets for this class are named in
-`RULES.md` (FIG-3055, FIG-3022).
+constant it already is proves nothing. No phase or scorecard row below asks for a dialect
+reading, and none should until FIG-3165 lands a host-served field that carries one. Cleanup
+tickets for this class are named in `RULES.md` (FIG-3055, FIG-3022).
 
 **Fixture honesty.** The oversized payload is a real tool result returned by a real
 registered tool through the ordinary tool seam, not a hand-written message injected into
@@ -127,12 +128,12 @@ or more than one test ran under a filter meant to name one.
 Read `context_overflow_recovered` (injected) and `classified_overflow_recovered`
 (classifier) in the row's `03-observed.jsonl`.
 
-Require, of *each*: `oversized_tool_result_bytes` at least 256 KiB; `provider_calls` at least
-3, so the turn asked the provider again *after* the tool result landed; and `dialect` equal to
-the row's dialect.
+Require, of *each*: `oversized_tool_result_bytes` at least 256 KiB; and `provider_calls` at
+least 3, so the turn asked the provider again *after* the tool result landed. Do not assert
+anything about `dialect` here; see the dialect paragraph above.
 
-**Fail if:** either arm is missing, the tool result was small, a turn made a single provider
-call, or the served dialect is not the row's.
+**Fail if:** either arm is missing, the tool result was small, or a turn made a single
+provider call.
 
 ## Phase 2 — The outcome is its own, and is distinguishable
 
@@ -206,5 +207,5 @@ requirements cannot record which of them was observed if it is collapsed to one 
 | 4 | The continued turn succeeds and does not overflow again, both arms | | `03-observed.jsonl` |
 | 4 | It runs on the same `session_id` as its overflow turn, both arms | | `03-observed.jsonl` |
 
-Record the dialect, the artifact directory, and the companion's final line with the
-scorecard.
+Record the artifact directory and the companion's final line with the scorecard. There is
+no dialect to record: it is a compile-time constant, not an observation.
