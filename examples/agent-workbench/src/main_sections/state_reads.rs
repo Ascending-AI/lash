@@ -105,10 +105,17 @@ pub(crate) async fn read_state_projection(
         .checkpoint_ref
         .as_ref()
         .map_or(persisted.turn_index as u64, |_| persisted.head_revision);
-    let cursor = SessionCursor::from_store_token(format!(
-        "lashsc2:workbench-durable:{revision}:0:{session_id}"
-    ))
-    .map_err(AppError::internal)?;
+    // The cursor handed back with this snapshot has to name the replay
+    // incarnation that will actually serve the attach. A synthesized
+    // `workbench-durable` token names none, so every attach was fenced into
+    // `replay_gap(unavailable)`, the page recovered from state, and the fresh
+    // snapshot handed it another unservable cursor — a re-snapshot loop every
+    // few seconds per open tab, on a perfectly healthy shell (FIG-3162).
+    // `observation_cursor` reads the live-replay store and claims nothing, so
+    // it pairs with the lease-free durable read above.
+    let cursor = state
+        .core
+        .observation_cursor(session_id, lash::observe::SessionRevision(revision));
     let pending_turn_inputs = store
         .list_pending_turn_inputs(session_id)
         .await

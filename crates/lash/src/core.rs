@@ -1684,6 +1684,25 @@ impl PromptLayerSink for LashCoreBuilder {
 }
 
 impl LashCore {
+    /// The live-replay cursor a reader should attach at after taking a durable
+    /// snapshot of `session_id` at `revision`.
+    ///
+    /// A snapshot reader needs a cursor, and the only honest one names the
+    /// replay incarnation that will serve it: a cursor naming any other
+    /// incarnation is fenced at attach and answered with
+    /// `replay_gap(unavailable)`, which sends the reader back for another
+    /// snapshot, and round it goes (FIG-3162). This query reads the live-replay
+    /// store only. Like [`Self::sessions`], it never opens a session, claims
+    /// the execution lease, or hydrates a checkpoint, so a host can pair it
+    /// with a lease-free durable read.
+    pub fn observation_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.live_replay_store.current_cursor(session_id, revision)
+    }
+
     /// Enumerate every durable session catalog entry.
     ///
     /// This is a read-only catalog query. It does not open sessions, acquire
