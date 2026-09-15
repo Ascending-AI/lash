@@ -6571,14 +6571,37 @@
       if (!selectedWorkKey && rows[0]) selectedWorkKey = rows[0].key;
     }
 
+    // BEGIN WORKBENCH_EXECUTION_ROWS
+    /* The work rail is a union of two backend surfaces that name the same
+       process differently. `/api/work` keys it by incarnation
+       (`process:<id>:incarnation:<n>`, ObservedProcess::graph_key) because the
+       incarnation is part of that surface's identity; `/api/lashlang-graphs`
+       keys it `process:<id>` (TraceRuntimeSubject::graph_key), and a trace
+       subject has no incarnation to add. The two strings can never be equal, so
+       matching on them de-duplicated nothing and every running process rendered
+       twice: once with its declared label and a cancel button, and once with the
+       engine-derived Lashlang lift digest `__process_<hash>` and no cancel
+       control. The process id is what both surfaces do agree on, so the rail
+       de-duplicates on that (FIG-3145). */
+    function processIdFromGraphKey(graphKey) {
+      const key = String(graphKey || "");
+      if (!key.startsWith("process:")) return null;
+      const withoutPrefix = key.slice("process:".length);
+      const incarnationAt = withoutPrefix.lastIndexOf(":incarnation:");
+      return incarnationAt === -1 ? withoutPrefix : withoutPrefix.slice(0, incarnationAt);
+    }
+
     function executionRows(workItems, graphSummaries) {
       const rows = [];
-      const processKeys = new Set((workItems || []).map(item => {
+      const processIds = new Set();
+      for (const item of workItems || []) {
         const process = item.process || {};
-        return process.graph_key || ("process:" + process.process_id);
-      }));
+        const processId = process.process_id || processIdFromGraphKey(process.graph_key);
+        if (processId) processIds.add(processId);
+      }
       for (const graph of graphSummaries || []) {
-        if (graph.kind === "process" && processKeys.has(graph.graph_key)) continue;
+        const graphProcessId = processIdFromGraphKey(graph.graph_key);
+        if (graphProcessId && processIds.has(graphProcessId)) continue;
         rows.push({
           key: graph.graph_key,
           graph_key: graph.graph_key,
@@ -6601,7 +6624,12 @@
       for (const item of workItems || []) {
         const process = item.process || {};
         const graphKey = process.graph_key || ("process:" + process.process_id);
-        const graph = graphIndexByKey.get(graphKey);
+        // The surviving row is this one, so it carries what the graph summary
+        // would have said. Its own key is incarnation-scoped, so fall back to
+        // the key the graph surface uses (FIG-3145).
+        const processId = process.process_id || processIdFromGraphKey(graphKey);
+        const graph = graphIndexByKey.get(graphKey)
+          || (processId ? graphIndexByKey.get("process:" + processId) : undefined);
         const recent = (item.events || []).slice(-3).map(event => eventLabel(event.event_type));
         rows.push({
           key: graphKey,
@@ -6629,6 +6657,7 @@
       });
       return rows;
     }
+    // END WORKBENCH_EXECUTION_ROWS
 
     function openExecutionGraph(graphKey, opts = {}) {
       if (!graphKey) return;

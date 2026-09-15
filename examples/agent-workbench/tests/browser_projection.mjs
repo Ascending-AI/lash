@@ -1687,6 +1687,89 @@ test("real provider turns survive cursor replay, recovery races, terminal replac
   }
 });
 
+test("one running process is one row in the work rail", () => {
+  // `/api/work` names a process by incarnation and `/api/lashlang-graphs` names
+  // the same process without one, so matching the two key strings de-duplicated
+  // nothing: every running process rendered twice, and the duplicate carried the
+  // engine's lift digest instead of the declared label and had no cancel control
+  // (FIG-3145).
+  const processId = "tool-intent:v2:blake3:ae0a64ab83bc1fd36";
+  const context = {
+    Set,
+    Map,
+    String,
+    Boolean,
+    kindLabel: kind => String(kind),
+    eventLabel: event => String(event),
+    formatTime: () => "",
+    shortId: value => String(value).slice(0, 8),
+    graphIndexByKey: new Map([["process:" + processId, { node_count: 7 }]]),
+  };
+  const rows = vm.runInNewContext(
+    `${markedSource("WORKBENCH_EXECUTION_ROWS", "WORKBENCH_EXECUTION_ROWS")}
+     executionRows(
+       [{
+         kind: "process",
+         label: "FIG425_cancellable_0915c",
+         process: {
+           process_id: ${JSON.stringify(processId)},
+           graph_key: ${JSON.stringify("process:" + processId + ":incarnation:5")},
+           lifecycle: "running",
+           terminal: false,
+         },
+         events: [],
+       }],
+       [{
+         kind: "process",
+         graph_key: ${JSON.stringify("process:" + processId)},
+         title: "__process_a05f96c8",
+         node_count: 7,
+       }],
+     );`,
+    context,
+  );
+
+  assert.equal(rows.length, 1, "a running process must not render twice");
+  const [row] = rows;
+  assert.equal(row.title, "FIG425_cancellable_0915c", "the surviving row carries the declared label");
+  assert.equal(row.process_id, processId, "the surviving row is the one the cancel control is bound to");
+  assert.ok(
+    !String(row.title).startsWith("__process_"),
+    "the engine's lift digest must not be what the rail names the run",
+  );
+  // The surviving row also inherits what the graph summary would have said,
+  // even though the two surfaces key it differently.
+  assert.ok(row.meta.includes("7 nodes"), `expected the graph node count in ${row.meta}`);
+});
+
+test("a graph-only process still renders, and an incarnation is not needed to match it", () => {
+  const rows = vm.runInNewContext(
+    `${markedSource("WORKBENCH_EXECUTION_ROWS", "WORKBENCH_EXECUTION_ROWS")}
+     executionRows(
+       [{ kind: "process", process: { process_id: "in-the-work-api", lifecycle: "running" }, events: [] }],
+       [
+         { kind: "process", graph_key: "process:in-the-work-api", title: "__process_dedup_me", node_count: 1 },
+         { kind: "process", graph_key: "process:graph-only", title: "__process_keep_me", node_count: 2 },
+       ],
+     );`,
+    {
+      Set,
+      Map,
+      String,
+      Boolean,
+      kindLabel: kind => String(kind),
+      eventLabel: event => String(event),
+      formatTime: () => "",
+      shortId: value => String(value).slice(0, 8),
+      graphIndexByKey: new Map(),
+    },
+  );
+
+  // A work item whose surface reported no graph key at all still de-duplicates
+  // its graph row, and a process only the graph surface knows about is kept.
+  assert.equal(rows.map(row => row.title).join(" | "), "__process_keep_me | in-the-w");
+});
+
 test("execution scorecard ordering follows attempt start time with call id as tie-breaker", () => {
   const target = { textContent: "" };
   const scorecardContext = { Map };
