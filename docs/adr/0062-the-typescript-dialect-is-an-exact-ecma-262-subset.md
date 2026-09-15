@@ -397,8 +397,29 @@ that each entry is a limit taken knowingly.
     informative answer for numbers, booleans, `null`, `undefined`, dates,
     regexps and errors. The observation is bounded by the same byte and depth
     limits as any other string this dialect builds. Node's inspector formatting
-    is still not reproduced, and coercion elsewhere is untouched: `"" + {a: 1}`,
-    `` `${{a: 1}}` `` and `String({a: 1})` all remain `[object Object]`.
+    is still not reproduced.
+
+    String coercion elsewhere is *not* ECMA-262's answer for the three values
+    whose only string is a type tag. `"" + {a: 1}`, `` `${{a: 1}}` `` and
+    `String({a: 1})` all lower to `+`, and each of them refuses as
+    `TS_OBJECT_STRING_COERCION` for a plain object, a `Map` or a `Set`
+    (FIG-3166); the refusal names the value and points at `console.log` or
+    `JSON.stringify(value)`. Refusal, not an automatic JSON body, for three
+    reasons. Exactness: this dialect's promise is that an accepted program means
+    what ECMA-262 says it means, and quietly answering `{"a":1}` where ECMA says
+    `[object Object]` would be a silent divergence in the one direction a cell
+    cannot detect. Gaps are refusals: every other place this dialect cannot
+    honour its own promise — sparse arrays, `Date` coercion, cyclic values,
+    prototype mutation — stops with a stable `TS_*` code rather than guessing,
+    and this is the same kind of gap. And the habit: `[object Object]` reaching
+    an observation is almost always a cell finishing a whole tool result it
+    never examined, so the refusal is the signal that sends the model back to
+    read the value instead of shipping a placeholder for it. Everything with a
+    string of its own is untouched — arrays, `Error`, `RegExp`, `URL`, numbers,
+    booleans, `null` and `undefined` keep their exact ECMA-262 strings; so do
+    property-key coercion (`obj[{a: 1}]` still reads the `"[object Object]"`
+    slot), `map.toString()`, `Number({})`, loose equality, and the `console.log`
+    rendering above.
 14. **Shadowing residual.** A block-scoped binding that shadows a name already
     in scope lowers to a generated slot so the inner binding cannot overwrite
     the outer one. At root that slot is a runtime global, which is the one place

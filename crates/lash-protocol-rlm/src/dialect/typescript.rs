@@ -422,7 +422,7 @@ impl TypescriptDialect {
             ""
         };
         let host_api = format!(
-            r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result.
+            r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object, `Map` or `Set` into a string — with `+`, `` `${{...}}` `` or `String(...)` — refuses instead of producing a placeholder; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
 `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `Promise.race` are not supported.
 
