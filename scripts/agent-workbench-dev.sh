@@ -28,6 +28,16 @@ reset_committed=0
 reset_destructive_started=0
 reset_finalization_active=0
 reset_finalization_phase=""
+# `down` retires a stack's process, engine, managed services, leases and
+# receipts but keeps the records that say who owns the application data, so the
+# durable state survives. Those records name this very stack, stopped: `up`
+# resumes it and `reset` clears it, instead of refusing it as another stack's.
+resuming_stopped_stack=0
+stopped_stack_token=""
+stopped_stack_reset_record=""
+stopped_stack_data_owner_record=""
+stopped_stack_meta_record=""
+reset_stack_already_retired=0
 start_finalization_phase=""
 reset_recovery_command=""
 created_restate_ingress_service_lease_this_attempt=0
@@ -565,7 +575,14 @@ path_overlaps_reset_owner() {
   local path="$1"
   local candidate="$path"
   while [[ "$candidate" != / ]]; do
-    [[ -e "$candidate/.agent-workbench-dev-reset-owner" ]] && return 0
+    if [[ -e "$candidate/.agent-workbench-dev-reset-owner" ]]; then
+      # The stopped stack this command is resuming owns its own application
+      # data: its marker is this stack's, not another stack's.
+      if (( ! resuming_stopped_stack )) \
+        || [[ "$candidate/.agent-workbench-dev-reset-owner" != "$data_owner_file" ]]; then
+        return 0
+      fi
+    fi
     candidate="$(dirname "$candidate")"
   done
 
@@ -582,8 +599,13 @@ path_contains_reset_footprint_record() {
   local path="$1"
   [[ -d "$path" ]] || return 1
   local record=""
+  local -a own_records=()
+  if (( resuming_stopped_stack )); then
+    # The run footprint of the stopped stack being resumed is this stack's own.
+    own_records=(! -path "$run_owner_file")
+  fi
   record="$(
-    find -P "$path" -xdev -mindepth 1 \
+    find -P "$path" -xdev -mindepth 1 ${own_records[@]+"${own_records[@]}"} \
       \( -name '.agent-workbench-dev-run-owner-*' \
       -o -name '.agent-workbench-dev-attempt-owner' \
       -o -name 'workbench-*.process-retired' \
@@ -671,6 +693,114 @@ path_overlaps_start_finalization() {
   return 1
 }
 
+# Every live resource a launched stack publishes — its process metadata and
+# retirement receipt, its teardown transaction, its container ownership markers,
+# its service retirement receipts and its endpoint service leases — proven gone
+# for the given ownership token. This is the state `down` leaves: a stack with
+# nothing left to stop.
+stack_resources_fully_retired() {
+  local token="$1" retired="" lease="" record="" lease_token=""
+  for retired in "$pid_file" "$process_retirement_receipt_file" \
+    "$teardown_transaction_file" "$restate_marker_file" "$postgres_marker_file" \
+    "$restate_service_retirement_receipt_file" "$postgres_service_retirement_receipt_file"; do
+    [[ ! -e "$retired" && ! -L "$retired" ]] || return 1
+  done
+  for lease in "$restate_ingress_service_lease_file" "$restate_admin_service_lease_file" \
+    "$legacy_restate_service_lease_file" "$postgres_service_lease_file"; do
+    record="$(read_service_lease "$lease" 2>/dev/null || true)"
+    [[ -n "$record" ]] || continue
+    read -r _ _ lease_token _ <<<"$record"
+    [[ "$lease_token" != "$token" ]] || return 1
+  done
+}
+
+# The exact shape `down` leaves behind on a wholly launcher-owned stack: the
+# application-data owner marker, the disposable-stack ownership record, the run
+# footprint and the run metadata, all naming one ownership token, with every
+# live resource of that stack proven gone. Nothing here is a liveness guess —
+# each retired resource is proven absent — so a half-torn-down stack, or one
+# that has been started again, is not resumable and keeps every refusal.
+stopped_stack_records_resumable() {
+  stopped_stack_token=""
+  local expected_addr="$workbench_addr" expected_data_dir="$data_dir"
+  local token=""
+  regular_private_file "$data_owner_file" || return 1
+  regular_private_file "$reset_file" || return 1
+  regular_private_file "$meta_file" || return 1
+  token="$(
+    data_owner_schema="" data_owner_token="" data_owner_state_key=""
+    data_owner_path="" data_owner_state_dir=""
+    # shellcheck disable=SC1090
+    source "$data_owner_file"
+    [[ "$data_owner_schema" = 5 && "$data_owner_token" =~ ^[0-9a-fA-F-]{36}$ \
+      && "$data_owner_state_key" = "$state_key" \
+      && "$data_owner_path" = "$expected_data_dir" \
+      && "$data_owner_state_dir" = "$state_dir" ]] || exit 1
+    printf '%s\n' "$data_owner_token"
+  )" || return 1
+  (
+    reset_schema="" owned_token="" owned_state_key="" owned_state_dir=""
+    owned_workbench_addr="" owned_data_dir="" owned_data_identity="" owned_run_owner=""
+    # shellcheck disable=SC1090
+    source "$reset_file"
+    [[ "$reset_schema" = 6 && "$owned_token" = "$token" \
+      && "$owned_state_key" = "$state_key" \
+      && "$owned_state_dir" = "$state_dir" \
+      && "$owned_workbench_addr" = "$expected_addr" \
+      && "$owned_data_dir" = "$expected_data_dir" \
+      && "$owned_run_owner" = "1 $token $state_key $data_path_hash" \
+      && "$owned_data_identity" = "$(stat -c '%d:%i' "$expected_data_dir" 2>/dev/null || true)" ]]
+  ) || return 1
+  (
+    meta_schema="" ownership_token=""
+    # shellcheck disable=SC1090
+    source "$meta_file"
+    [[ "$meta_schema" = 3 && "$ownership_token" = "$token" \
+      && "$workbench_addr" = "$expected_addr" && "$data_dir" = "$expected_data_dir" ]]
+  ) || return 1
+  [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" \
+    = "1 $token $state_key $data_path_hash" ]] || return 1
+  [[ ! -e "$data_creation_receipt_file" && ! -L "$data_creation_receipt_file" ]] || return 1
+  stack_resources_fully_retired "$token" || return 1
+  private_owned_directory "$data_dir" || return 1
+  ! path_has_symlink_component "$configured_data_dir" || return 1
+  [[ "$data_dir" != / && "$data_dir" != "$repo_root" ]] || return 1
+  stopped_stack_token="$token"
+}
+
+stopped_stack_authority_digest() {
+  regular_private_file "$meta_file" || return 1
+  (
+    meta_schema="" restate_authority_digest=""
+    # shellcheck disable=SC1090
+    source "$meta_file"
+    [[ "$meta_schema" = 3 && -n "$restate_authority_digest" ]] || exit 1
+    printf '%s\n' "$restate_authority_digest"
+  )
+}
+
+# Continues the stopped stack's ownership instead of minting a new token: its
+# application data, run footprint and ownership records all carry that token,
+# and its durable Restate state is bound to one trust domain. The records this
+# resume inherits are never destroyed by a failed attempt — cleanup restores
+# them, so the same `up` is always retryable.
+adopt_stopped_stack() {
+  (( resuming_stopped_stack )) || return 0
+  local recorded_authority=""
+  recorded_authority="$(stopped_stack_authority_digest)" \
+    || die "up refused: the stopped stack at $workbench_addr has unreadable run metadata; discard it with scripts/agent-workbench-dev.sh restart --reset-dev-state --addr $workbench_addr"
+  [[ "$recorded_authority" = "$(current_restate_authority_digest)" ]] \
+    || die "up refused: RESTATE_AUTHORITY_ID does not match the durable trust domain the stopped stack at $workbench_addr is bound to; export the original value and run the same up again, or discard that durable state with scripts/agent-workbench-dev.sh restart --reset-dev-state --addr $workbench_addr"
+  stopped_stack_reset_record="$(cat -- "$reset_file")" \
+    || die "up refused: could not read the stopped stack's ownership record $reset_file"
+  stopped_stack_data_owner_record="$(cat -- "$data_owner_file")" \
+    || die "up refused: could not read the stopped stack's application data ownership record $data_owner_file"
+  stopped_stack_meta_record="$(cat -- "$meta_file")" \
+    || die "up refused: could not read the stopped stack's run metadata $meta_file"
+  ownership_token="$stopped_stack_token"
+  log "resuming the stopped disposable stack at $workbench_addr; its application data at $data_dir and its durable state are retained"
+}
+
 require_exclusive_data_path_for_start() {
   if [[ -e "$start_finalization_file" || -L "$start_finalization_file" ]]; then
     die "requested workbench identity has a startup cleanup awaiting finalization"
@@ -683,17 +813,20 @@ require_exclusive_data_path_for_start() {
     || path_overlaps_start_finalization "$state_dir"; then
     die "application or run path overlaps a startup cleanup awaiting finalization"
   fi
+  if stopped_stack_records_resumable; then
+    resuming_stopped_stack=1
+  fi
   if path_overlaps_reset_owner "$data_dir"; then
-    die "application data path overlaps another launcher-owned disposable stack"
+    die "application data path overlaps another launcher-owned disposable stack; stop that stack with scripts/agent-workbench-dev.sh down --addr <its address>, discard it with scripts/agent-workbench-dev.sh restart --reset-dev-state --addr <its address>, or point AGENT_WORKBENCH_DATA_DIR at a path this stack owns"
   fi
   if path_contains_reset_footprint_record "$data_dir"; then
-    die "application data path encloses another launcher-owned reset footprint"
+    die "application data path encloses another launcher-owned reset footprint; discard that stack with scripts/agent-workbench-dev.sh restart --reset-dev-state --addr <its address>, or point AGENT_WORKBENCH_DATA_DIR at a path this stack owns"
   fi
   if path_contains_path "$data_dir" "$launcher_lock_root"; then
     die "application data path encloses launcher private runtime state"
   fi
   if path_overlaps_reset_owner "$state_dir"; then
-    die "launcher run path overlaps another launcher-owned disposable stack"
+    die "launcher run path overlaps another launcher-owned disposable stack; discard that stack with scripts/agent-workbench-dev.sh restart --reset-dev-state --addr <its address>, or point AGENT_WORKBENCH_RUN_DIR at a path this stack owns"
   fi
   if path_overlaps_reset_owner "$launcher_lock_root"; then
     die "launcher private runtime path overlaps another launcher-owned disposable stack"
@@ -782,8 +915,15 @@ write_run_owner() {
 }
 
 claim_run_footprint() {
-  write_run_owner || die "launcher run path is already reserved by another workbench stack"
   run_owner_record="1 $ownership_token $state_key $data_path_hash"
+  if (( resuming_stopped_stack )) \
+    && [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$run_owner_record" ]]; then
+    # The resumed stack's own footprint, written by the run this one continues.
+    # It predates this attempt, so a failed attempt must leave it in place.
+    created_run_owner_this_attempt=0
+    return 0
+  fi
+  write_run_owner || die "launcher run path is already reserved by another workbench stack"
   created_run_owner_this_attempt=1
 }
 
@@ -2253,6 +2393,16 @@ attempt_data_owner_matches() {
 
 remove_attempt_reset_ownership() {
   [[ "${created_reset_ownership_this_attempt:-0}" = 1 ]] || return 0
+  if (( resuming_stopped_stack )); then
+    # These records predate the attempt. Restoring them leaves the same stopped
+    # stack this `up` found, so the identical command stays retryable.
+    printf '%s\n' "$stopped_stack_reset_record" \
+      | publish_private_record replace "$reset_file" || return 1
+    printf '%s\n' "$stopped_stack_data_owner_record" \
+      | publish_private_record replace "$data_owner_file" || return 1
+    created_reset_ownership_this_attempt=0
+    return 0
+  fi
   if [[ -e "$reset_file" || -L "$reset_file" ]]; then
     attempt_reset_metadata_matches "$reset_file" || return 1
   fi
@@ -2931,6 +3081,12 @@ attempt_meta_matches() {
 
 remove_attempt_meta() {
   (( created_meta_this_attempt )) || return 0
+  if (( resuming_stopped_stack )); then
+    printf '%s\n' "$stopped_stack_meta_record" \
+      | publish_private_record replace "$meta_file" || return 1
+    created_meta_this_attempt=0
+    return 0
+  fi
   if [[ ! -e "$meta_file" && ! -L "$meta_file" ]] \
     && (( data_dir_created_this_attempt )) \
     && path_contains_path "$data_dir" "$meta_file"; then
@@ -2996,8 +3152,11 @@ write_reset_metadata() {
     printf 'data_owner_path=%q\n' "$data_dir"
     printf 'data_owner_state_dir=%q\n' "$state_dir"
   })"
-  printf '%s\n' "$reset_content" | publish_private_record create "$reset_file" || return 1
-  printf '%s\n' "$data_owner_content" | publish_private_record create "$data_owner_file"
+  local publication=create
+  # A resumed stack already carries both records under the same ownership token.
+  (( ! resuming_stopped_stack )) || publication=replace
+  printf '%s\n' "$reset_content" | publish_private_record "$publication" "$reset_file" || return 1
+  printf '%s\n' "$data_owner_content" | publish_private_record "$publication" "$data_owner_file"
 }
 
 data_owner_matches() {
@@ -3045,7 +3204,7 @@ prepare_reset_ownership() {
     log "reset unavailable: Restate was not created by this launcher run"
     return 0
   fi
-  if (( data_dir_existed_before_invocation )); then
+  if (( data_dir_existed_before_invocation && ! resuming_stopped_stack )); then
     log "reset unavailable: application data directory predated this launcher run"
     return 0
   fi
@@ -3226,8 +3385,17 @@ validate_reset_ownership() {
       || die "reset refused: teardown transaction does not match disposable-stack ownership"
     return 0
   fi
+  if stack_resources_fully_retired "$owned_token"; then
+    # `down` already retired this stack's process, engine, managed services,
+    # leases and receipts. A stopped stack is the easiest case to reset: what
+    # remains is deleting the application data it still owns and these records.
+    # The live-ownership proofs below have nothing left to prove — every
+    # resource they guard is proven absent here, which is stricter, not weaker.
+    reset_stack_already_retired=1
+    return 0
+  fi
   [[ "$(pid_file_identity "$pid_file" 2>/dev/null || true)" = "$owned_pid_record" ]] \
-    || die "reset refused: workbench PID identity is missing or changed"
+    || die "reset refused: workbench PID identity is missing or changed; finish the interrupted teardown with scripts/agent-workbench-dev.sh down --addr $workbench_addr, then run the same reset again"
   local name id token component
   read -r name id token component <<<"$owned_restate_record"
   [[ "$name" = "$restate_container" \
@@ -3350,6 +3518,7 @@ run_up() {
   fi
   require_restate_endpoint_admission
   require_exclusive_data_path_for_start
+  adopt_stopped_stack
   start_attempt_active=1
   claim_data_directory
   mkdir -p "$state_dir"
@@ -3613,8 +3782,12 @@ run_reset_dev_state() {
   local reset_transaction
   reset_transaction="1 retired $owned_token $reset_pid $reset_start $reset_restate_id $reset_postgres_id"
   if (( ! reset_finalization_active )); then
-    stop_stack_from_meta "$meta_file" 1 \
-      || die "reset stopped before data deletion: resource retirement is incomplete and retryable"
+    if (( reset_stack_already_retired )); then
+      log "the recorded process, engine and managed services are already retired; clearing the application data and ownership records they left behind"
+    else
+      stop_stack_from_meta "$meta_file" 1 \
+        || die "reset stopped before data deletion: resource retirement is incomplete and retryable"
+    fi
     [[ "$(read_run_owner "$run_owner_file" 2>/dev/null || true)" = "$owned_run_owner" ]] \
       || die "reset stopped before data deletion: run-footprint ownership changed"
     [[ "$owned_data_identity" = "$(stat -c '%d:%i' "$owned_data_dir" 2>/dev/null || true)" ]] \
@@ -3742,6 +3915,7 @@ run_foreground() {
   fi
   require_restate_endpoint_admission
   require_exclusive_data_path_for_start
+  adopt_stopped_stack
   start_attempt_active=1
   claim_data_directory
   mkdir -p "$state_dir"

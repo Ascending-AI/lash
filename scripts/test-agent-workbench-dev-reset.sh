@@ -1937,6 +1937,107 @@ launcher_env "$data_down_reuse" "$port_down_success" \
 pid_identity "$test_tmp/run-down-reuse/workbench-127.0.0.1_${port_down_success}.pid" \
   || fail "fresh independent stack could not reuse ports after proven down-all retirement"
 
+# `down` retires the process, engine and managed services but keeps the records
+# that say who owns the application data. That stopped stack is this launcher's
+# own: `up` with the same settings must resume it in place, keeping its durable
+# application state, and it must stay resettable afterwards.
+data_down_resume="$test_tmp/data-down-resume"
+port_down_resume=3164
+run_launcher "$data_down_resume" "$port_down_resume" up > "$test_tmp/down-resume-up.log" 2>&1
+down_resume_pid_file="$data_down_resume/run/workbench-127.0.0.1_${port_down_resume}.pid"
+down_resume_reset_file="$data_down_resume/run/reset-127.0.0.1_${port_down_resume}.meta"
+down_resume_first_pid="$(<"$down_resume_pid_file")"
+printf 'durable application state\n' > "$data_down_resume/durable-seed"
+run_launcher "$data_down_resume" "$port_down_resume" down > "$test_tmp/down-resume-down.log" 2>&1
+[[ ! -e "$down_resume_pid_file" && -f "$data_down_resume/.agent-workbench-dev-reset-owner" \
+  && -f "$down_resume_reset_file" ]] \
+  || fail "down did not leave a stopped launcher-owned stack"
+run_launcher "$data_down_resume" "$port_down_resume" up > "$test_tmp/down-resume-again.log" 2>&1 \
+  || fail "up refused to resume the stopped stack it owns"
+pid_identity "$down_resume_pid_file" || fail "the resumed stopped stack is not alive"
+[[ "$(<"$down_resume_pid_file")" != "$down_resume_first_pid" ]] \
+  || fail "resuming the stopped stack did not start a replacement process"
+[[ "$(<"$data_down_resume/durable-seed")" = 'durable application state' ]] \
+  || fail "resuming the stopped stack discarded its durable application state"
+down_resume_owned_pid="$(sed -n 's/^owned_pid_record=//p' "$down_resume_reset_file" | tr -d '\\')"
+[[ "$down_resume_owned_pid" = "$(<"$down_resume_pid_file")" ]] \
+  || fail "the resumed stack's ownership record does not name its live process"
+grep -Eq '^owned_restate_deployment_id=dp_mock[0-9]+$' "$down_resume_reset_file" \
+  || fail "the resumed stack did not record its own Restate deployment id"
+run_launcher "$data_down_resume" "$port_down_resume" restart --reset-dev-state \
+  > "$test_tmp/down-resume-reset.log" 2>&1 \
+  || fail "the resumed stack could not be reset"
+[[ ! -e "$data_down_resume/durable-seed" ]] \
+  || fail "resetting the resumed stack retained its application state"
+pid_identity "$down_resume_pid_file" || fail "the reset resumed stack is not alive"
+run_launcher "$data_down_resume" "$port_down_resume" down \
+  > "$test_tmp/down-resume-final-down.log" 2>&1
+
+# A stopped stack is the easiest case to reset, not a refused one: `reset`
+# after `down` has nothing left to stop and must clear the data it still owns.
+data_down_reset="$test_tmp/data-down-reset"
+port_down_reset=3166
+run_launcher "$data_down_reset" "$port_down_reset" up > "$test_tmp/down-reset-up.log" 2>&1
+[[ -f "$data_down_reset/.agent-workbench-dev-reset-owner" ]] \
+  || fail "down-then-reset fixture did not record reset ownership"
+down_reset_marker="$data_down_reset/run/restate-127.0.0.1_${port_down_reset}.container"
+down_reset_restate_id="$(cut -d' ' -f2 < "$down_reset_marker")"
+printf 'durable Restate journal\n' > "$mock_state/journal-$down_reset_restate_id"
+printf 'durable application state\n' > "$data_down_reset/durable-seed"
+run_launcher "$data_down_reset" "$port_down_reset" down > "$test_tmp/down-reset-down.log" 2>&1
+[[ -e "$data_down_reset/durable-seed" ]] \
+  || fail "down deleted the application state it is meant to retain"
+run_launcher "$data_down_reset" "$port_down_reset" restart --reset-dev-state \
+  > "$test_tmp/down-reset-reset.log" 2>&1 \
+  || fail "reset refused a launcher-owned stack whose process is already gone"
+[[ ! -e "$data_down_reset/durable-seed" ]] \
+  || fail "resetting the stopped stack retained its application state"
+pid_identity "$data_down_reset/run/workbench-127.0.0.1_${port_down_reset}.pid" \
+  || fail "the stack started after resetting a stopped stack is not alive"
+run_launcher "$data_down_reset" "$port_down_reset" down \
+  > "$test_tmp/down-reset-final-down.log" 2>&1
+
+# Resuming binds the retained durable state to the trust domain it was written
+# under. A different RESTATE_AUTHORITY_ID must be refused, and the refusal must
+# name the command that clears the stack.
+data_resume_authority="$test_tmp/data-resume-authority"
+port_resume_authority=3168
+launcher_env "$data_resume_authority" "$port_resume_authority" \
+  RESTATE_AUTHORITY_ID=fig-3125-original \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_resume_authority" \
+  > "$test_tmp/resume-authority-up.log" 2>&1
+launcher_env "$data_resume_authority" "$port_resume_authority" \
+  RESTATE_AUTHORITY_ID=fig-3125-original \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_resume_authority" \
+  > "$test_tmp/resume-authority-down.log" 2>&1
+if launcher_env "$data_resume_authority" "$port_resume_authority" \
+  RESTATE_AUTHORITY_ID=fig-3125-other \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_resume_authority" \
+  > "$test_tmp/resume-authority-mismatch.log" 2>&1; then
+  fail "up resumed a stopped stack under a different durable trust domain"
+fi
+grep -Fq 'RESTATE_AUTHORITY_ID does not match' "$test_tmp/resume-authority-mismatch.log" \
+  || fail "refused resume did not name the mismatched durable trust domain"
+grep -Fq 'restart --reset-dev-state' "$test_tmp/resume-authority-mismatch.log" \
+  || fail "refused resume did not name the command that clears the stopped stack"
+launcher_env "$data_resume_authority" "$port_resume_authority" \
+  RESTATE_AUTHORITY_ID=fig-3125-original \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" up --port "$port_resume_authority" \
+  > "$test_tmp/resume-authority-match.log" 2>&1 \
+  || fail "up refused the stopped stack under its original durable trust domain"
+pid_identity "$data_resume_authority/run/workbench-127.0.0.1_${port_resume_authority}.pid" \
+  || fail "the stack resumed under its original trust domain is not alive"
+launcher_env "$data_resume_authority" "$port_resume_authority" \
+  RESTATE_AUTHORITY_ID=fig-3125-original \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" restart --reset-dev-state \
+  --port "$port_resume_authority" \
+  > "$test_tmp/resume-authority-reset.log" 2>&1 \
+  || fail "the stack resumed under its original trust domain could not be reset"
+launcher_env "$data_resume_authority" "$port_resume_authority" \
+  RESTATE_AUTHORITY_ID=fig-3125-original \
+  bash "$repo_root/scripts/agent-workbench-dev.sh" down --port "$port_resume_authority" \
+  > "$test_tmp/resume-authority-final-down.log" 2>&1
+
 race_data="$test_tmp/data-race"
 race_run="$test_tmp/run-race"
 race_bin="$test_tmp/race-bin"

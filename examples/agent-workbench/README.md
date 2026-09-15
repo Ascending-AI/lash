@@ -40,7 +40,12 @@ deployment is not supported by this launcher. `reset` is explicitly destructive:
 launcher-owned disposable stack, it clears the Restate journals and corresponding SQLite/data
 directory or managed Postgres state, then starts fresh. It refuses legacy, external, mixed, or
 ambiguous ownership. `down` stops the workbench and every exactly identified container the
-entrypoint started.
+entrypoint started, and leaves the stopped stack's application data and ownership records in
+place. Running `just agent-workbench <port>` again with the same `RESTATE_AUTHORITY_ID` resumes
+that stopped stack: the same data directory and durable state, a fresh engine and process.
+Exporting a different `RESTATE_AUTHORITY_ID` is refused, because the retained durable state is
+bound to the trust domain it was written under. `just agent-workbench-reset <port>` clears a
+stopped stack as readily as a running one.
 
 Durability scenarios that require state to survive a process replacement remain blocked until a
 separately verified immutable same-configuration host-restart mechanism exists. Do not use
