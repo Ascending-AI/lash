@@ -709,12 +709,16 @@ class BazelTestContractTests(unittest.TestCase):
 
         # `cargo clippy --workspace --all-targets` lints every target of the
         # resolved default graph. The Bazel partition is the same set minus the
-        # build scripts, each of which carries its own recorded exemption.
+        # labels that only RUN a build script, each of which carries its own
+        # recorded exemption; the `build.rs` compile behind each of them is in
+        # the partition as its `:build_script_` target.
         self.assertEqual(
             set(generated_list("WORKSPACE_COMPILE_TARGETS")) - build_scripts,
             clippy,
         )
-        self.assertEqual(189, len(clippy))
+        self.assertEqual(190, len(clippy))
+        # The half that actually compiles `build.rs` is linted, not exempted.
+        self.assertIn("//crates/lash-protocol-rlm:build_script_", clippy)
         self.assertTrue(
             all(
                 target.get("clippy_exempt")
@@ -754,7 +758,8 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertEqual(
             {
                 "//crates/lash-protocol-rlm:build_script": (
-                    "cargo_build_script exposes no CrateInfo for the clippy aspect"
+                    "the run action has no CrateInfo; its build.rs compile is "
+                    "linted as :build_script_"
                 )
             },
             exempt,
