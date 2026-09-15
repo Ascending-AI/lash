@@ -76,10 +76,17 @@ wait_log_pattern() {
   return 1
 }
 
+# The third argument is the reap budget in seconds, default 30. A workbench
+# host needs more: its shutdown pays the Restate SDK's fixed 10s drain grace
+# and then deletes the session it opened against the Parallel Search MCP
+# server at boot, which is a live network round trip. Measured runs land just
+# either side of 31s, so a 30s budget fails the case on timing alone while the
+# host is shutting down correctly. The example-core rows keep 30s: they have
+# neither cost.
 wait_reaped() {
-  local pid="$1" label="$2"
-  if ! timeout 30s tail --pid="$pid" -f /dev/null >/dev/null 2>&1; then
-    echo "$label did not exit within 30 seconds" >&2
+  local pid="$1" label="$2" budget="${3:-30}"
+  if ! timeout "${budget}s" tail --pid="$pid" -f /dev/null >/dev/null 2>&1; then
+    echo "$label did not exit within $budget seconds" >&2
     return 1
   fi
   set +e
@@ -244,6 +251,7 @@ run_workbench_signal_with_streams_and_fixture() {
     AGENT_WORKBENCH_TRACE="$trace" \
     AGENT_WORKBENCH_OPEN=0 \
     LASH_HOST_SHUTDOWN_MARKER="$marker" \
+    RESTATE_AUTHORITY_ID="example-core-shutdown-workbench-signal-$port" \
     cargo run -p agent-workbench --profile judged --locked --features provider-wire-fixtures \
     >"$log" 2>&1 &
   runner=$!
@@ -266,14 +274,14 @@ run_workbench_signal_with_streams_and_fixture() {
   kill -0 "$observations"
   app="$(app_descendant "$runner" target/judged/agent-workbench)"
   kill -TERM "$app"
-  wait_reaped "$runner" workbench-signal
+  wait_reaped "$runner" workbench-signal 90
   assert_count "$wait_status" 0 workbench-signal-exit
   if kill -0 "$app" 2>/dev/null; then
     echo "agent-workbench app child remained live after cargo runner exit" >&2
     return 1
   fi
-  wait_reaped "$events" workbench-events-stream
-  wait_reaped "$observations" workbench-observations-stream
+  wait_reaped "$events" workbench-events-stream 90
+  wait_reaped "$observations" workbench-observations-stream 90
   count="$(marker_count "$marker" agent-workbench)"
   nested_count="$(marker_count "$marker" agent-workbench-valid-empty)"
   assert_count "$count" 1 workbench-signal-marker
@@ -313,17 +321,18 @@ PY
     AGENT_WORKBENCH_TRACE="$trace" \
     AGENT_WORKBENCH_OPEN=0 \
     LASH_HOST_SHUTDOWN_MARKER="$marker" \
+    RESTATE_AUTHORITY_ID="example-core-shutdown-workbench-bind-error-$port" \
     cargo run -p agent-workbench --profile judged --locked >"$log" 2>&1 &
   runner=$!
   owned_pids+=("$runner")
   wait_log_pattern "$runner" "$log" 'agent-workbench listening on'
-  wait_reaped "$runner" workbench-bind-error
+  wait_reaped "$runner" workbench-bind-error 90
   if [[ "$wait_status" == 0 ]]; then
     echo "agent-workbench bind-error command unexpectedly succeeded" >&2
     return 1
   fi
   kill -TERM "$holder"
-  wait_reaped "$holder" workbench-bind-holder
+  wait_reaped "$holder" workbench-bind-holder 90
   count="$(marker_count "$marker" agent-workbench)"
   assert_count "$count" 1 workbench-bind-error-marker
   grep -q 'Address already in use' "$log"
