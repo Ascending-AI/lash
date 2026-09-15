@@ -26,6 +26,11 @@ pub(crate) struct DisplayField {
     pub field_type: &'static str,
 }
 
+/// The host receiver every display operation is reached through. The catalog
+/// serves it so the editor and the backend synthesize the same receiver call
+/// instead of both hardcoding the name (FIG-3178).
+pub(crate) const RECEIVER: &str = "display";
+
 pub(crate) const OPERATIONS: &[DisplayOperation] = &[
     DisplayOperation {
         kind: DisplayOperationKind::ShowMessage,

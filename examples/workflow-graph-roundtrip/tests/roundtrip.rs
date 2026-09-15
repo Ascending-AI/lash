@@ -55,6 +55,10 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
             "label": "Show message",
             "nodeKind": "call",
             "operation": "show_message",
+            // FIG-3178: a call entry names the receiver its operation belongs
+            // to, so the editor and the backend synthesize the same call
+            // instead of both hardcoding `display`.
+            "receiver": "display",
             "fields": [{ "name": "text", "type": "string", "default": "" }]
         })
     );
@@ -65,6 +69,7 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
                 "label": "Set progress",
                 "nodeKind": "call",
                 "operation": "set_progress",
+                "receiver": "display",
                 "fields": [{ "name": "pct", "type": "number", "default": 0 }]
             })
     }));
@@ -2313,6 +2318,7 @@ fn new_flow_node(id: &str, kind: &str, subkind: Option<&str>, title: &str) -> Fl
             params: Vec::new(),
             signals: Vec::new(),
             operation: None,
+            receiver: None,
             effect: None,
             terminal_kind: None,
             fields: BTreeMap::new(),

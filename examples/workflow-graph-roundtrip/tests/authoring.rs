@@ -478,6 +478,102 @@ async fn an_authored_action_saves_only_with_the_awaited_receiver_call_the_editor
     server.abort();
 }
 
+/// FIG-3178: a call node the editor inserts from a non-display catalog entry
+/// must name that entry's receiver. Synthesizing `display.<operation>` for a
+/// `gmail` or `llm` operation hands the lowerer a receiver that has no such
+/// operation, and the `$expr` defaults those entries carry used to stringify
+/// into `[object Object]` on the way into the argument record.
+#[tokio::test]
+async fn a_non_display_action_saves_against_its_own_receiver_and_expression_defaults() {
+    let state = AppState::with_run_timing(RunTiming {
+        sleep_cap: Duration::from_millis(2),
+        signal_delay: Duration::from_millis(2),
+    })
+    .expect("default workflow");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("test listener address");
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
+    let client = reqwest::Client::new();
+    let base = format!("http://{addr}");
+
+    let operations: Vec<Value> = client
+        .get(format!("{base}/operations"))
+        .send()
+        .await
+        .expect("GET /operations")
+        .json()
+        .await
+        .expect("operation catalog JSON");
+    // An entry whose defaults include `$expr` values: the synthesized call
+    // names `llm`, and each expression default is its own raw source rather
+    // than a stringified `{"$expr": ...}` object.
+    let expression_defaults = operations
+        .iter()
+        .find(|entry| entry["id"] == "llm.query")
+        .expect("catalog entry llm.query");
+    assert_eq!(expression_defaults["receiver"], "llm");
+    assert_eq!(
+        synth_call_expression(expression_defaults),
+        r#"await llm.query({ task: "Summarize the supplied input", inputs: {}, output: Type { result: str } })"#
+    );
+
+    // An entry the editor can actually insert and save. Posted with no
+    // `expression`, so the save exercises the backend's own synthesis, which
+    // has to reach the same receiver call the editor would have sent.
+    let entry = operations
+        .iter()
+        .find(|entry| entry["id"] == "gmail.list_recent")
+        .expect("catalog entry gmail.list_recent");
+    assert_eq!(entry["receiver"], "gmail");
+    assert_eq!(
+        synth_call_expression(entry),
+        "await gmail.list_recent({ count: 5 })"
+    );
+
+    let baseline = select_workflow(&client, &base, "blank").await;
+    let mut document = baseline;
+    let mut node = catalog_node(entry, "new:gmail-list-recent");
+    node.data.expression = None;
+    assert_eq!(node.data.receiver.as_deref(), Some("gmail"));
+    append_process_node(&mut document, node);
+    let response = client
+        .post(format!("{base}/workflow"))
+        .json(&document)
+        .send()
+        .await
+        .expect("post receiverless call node");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
+    assert!(
+        saved
+            .document
+            .source
+            .contains("gmail.list_recent({ count: 5 })"),
+        "synthesized call missing from canonical source: {}",
+        saved.document.source
+    );
+    assert!(
+        !saved.document.source.contains("display.list_recent"),
+        "synthesized call named the wrong receiver: {}",
+        saved.document.source
+    );
+
+    // Lowering resolved the receiver operation: the projected node the editor
+    // reads back names `list_recent`, which it can only do if the synthesized
+    // fragment parsed as a receiver call rather than as some other value.
+    let projected = saved
+        .document
+        .nodes
+        .iter()
+        .find(|candidate| candidate.data.operation.as_deref() == Some("list_recent"))
+        .expect("projected gmail.list_recent call node");
+    assert_eq!(projected.data.kind, "call");
+
+    server.abort();
+}
+
 /// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
 #[expect(
     clippy::expect_used,
@@ -538,6 +634,7 @@ fn catalog_node(entry: &Value, id: &str) -> FlowNode {
             params: Vec::new(),
             signals: Vec::new(),
             operation: None,
+            receiver: text("receiver").map(str::to_string),
             effect: None,
             terminal_kind: None,
             fields: BTreeMap::new(),
@@ -603,14 +700,26 @@ fn synth_call_expression(entry: &Value) -> String {
                 "boolean" => default.as_bool().unwrap_or(false).to_string(),
                 "string" => serde_json::to_string(default.as_str().unwrap_or_default())
                     .expect("JSON string literal"),
-                _ => default.as_str().unwrap_or_default().to_string(),
+                _ => default_source(default),
             };
             format!("{name}: {value}")
         })
         .collect::<Vec<_>>()
         .join(", ");
     let operation = entry["operation"].as_str().expect("catalog operation");
-    format!("await display.{operation}({{ {args} }})")
+    let receiver = entry["receiver"].as_str().expect("catalog receiver");
+    format!("await {receiver}.{operation}({{ {args} }})")
+}
+
+/// `defaultSource` in `frontend/src/lib/operations.js`: an expression-valued
+/// catalog default arrives as `{"$expr": "<source>"}` and is emitted as that
+/// raw source, not as the JSON object stringified (FIG-3178).
+fn default_source(default: &Value) -> String {
+    default["$expr"]
+        .as_str()
+        .or_else(|| default.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[expect(
