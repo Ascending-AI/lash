@@ -337,7 +337,7 @@ const hold_for_stop = async () => {
   }
   return "unreachable";
 };
-const handle = await processes.start({ definition: hold_for_stop });
+const handle = await processes.start({ definition: hold_for_stop, label: "hold_for_stop" });
 finish(await handle);
 </typescript>"#,
             ))
@@ -1076,7 +1076,7 @@ const survive_revocation = async () => {
   await sleep(90000);
   return "survived session deletion";
 };
-const handle = await processes.start({ definition: survive_revocation });
+const handle = await processes.start({ definition: survive_revocation, label: "survive_revocation" });
 finish(await handle);
 </typescript>"#,
             ))
@@ -1256,8 +1256,8 @@ const cancellable = async () => {
   await sleep(60000);
   return "cancellation failed";
 };
-const survivor_handle = await processes.start({ definition: survivor });
-const cancellable_handle = await processes.start({ definition: cancellable });
+const survivor_handle = await processes.start({ definition: survivor, label: "survivor" });
+const cancellable_handle = await processes.start({ definition: cancellable, label: "cancellable" });
 finish("started lifecycle gates");
 </typescript>"#,
             ))

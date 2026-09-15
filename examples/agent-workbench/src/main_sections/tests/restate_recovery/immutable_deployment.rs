@@ -350,7 +350,7 @@ const immutable_deployment_probe = async () => {
   await sleep(15000);
   return "fixture A process completed";
 };
-const handle = await processes.start({ definition: immutable_deployment_probe });
+const handle = await processes.start({ definition: immutable_deployment_probe, label: "immutable_deployment_probe" });
 print("fixture A journal prefix committed");
 </typescript>"#,
                     )),
