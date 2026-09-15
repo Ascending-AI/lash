@@ -39,25 +39,16 @@ impl AppState {
 
     /// Opens a session through [`Self::session_builder`], so every open states
     /// the model this workbench means that session to run.
+    ///
+    /// `surface` names the caller on the contention traces this open records,
+    /// so a contention storm reads as which route is contending rather than as
+    /// an unattributed count (FIG-3151).
     pub(crate) async fn open_session(
         &self,
         session_id: &SessionId,
+        surface: &str,
     ) -> Result<lash::LashSession, lash::EmbedError> {
-        open_session_with_bounded_retry(self, session_id).await
-    }
-
-    /// Opens a session for a read-only projection through
-    /// [`Self::observer_session_builder`]: no model statement, so observing
-    /// a session never writes config authority over its settled head.
-    pub(crate) async fn open_session_for_observation(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<lash::LashSession, lash::EmbedError> {
-        retry_session_open(
-            || self.observer_session_builder(session_id.to_string()).open(),
-            |event, payload| self.trace_for_session(session_id, event, payload),
-        )
-        .await
+        open_session_with_bounded_retry(self, session_id, surface).await
     }
 
     pub(crate) fn current_session_id(&self) -> SessionId {
@@ -1636,6 +1627,7 @@ mod app_error_tests {
     async fn non_contended_session_open_is_not_retried() {
         let mut attempts = 0;
         let error = retry_session_open(
+            "test",
             || {
                 attempts += 1;
                 std::future::ready(Err::<(), _>(lash::EmbedError::Store(

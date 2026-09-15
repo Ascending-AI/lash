@@ -74,7 +74,7 @@ pub(crate) async fn create_session(
     // poll, through the same builder every route uses.
     drop(
         state
-            .open_session(&session_id)
+            .open_session(&session_id, "api.sessions")
             .await
             .map_err(|error| state.session_admission_error(&session_id, "api.sessions", error))?,
     );

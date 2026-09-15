@@ -801,7 +801,7 @@ async fn slow_delete_retention_is_bounded_and_can_be_retried() {
     state.restate_ingress_url = spawn_slow_session_delete_retention_restate().await;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&old_session_id)
+        .open_session(&old_session_id, "test")
         .await
         .expect("materialize the session before the slow delete");
 
@@ -856,7 +856,7 @@ async fn an_ambiguous_delete_attach_failure_never_claims_the_session_remains_liv
     state.restate_ingress_url = spawn_ambiguous_session_delete_restate().await;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&old_session_id)
+        .open_session(&old_session_id, "test")
         .await
         .expect("materialize the session before the ambiguous delete");
 
@@ -941,7 +941,7 @@ async fn a_failed_delete_call_reconciles_a_committed_tombstone_before_rotating()
     let mut state = queued_send_test_state(data_dir.path(), provider).await;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&old_session_id)
+        .open_session(&old_session_id, "test")
         .await
         .expect("materialize the session before simulated deletion");
     state.restate_ingress_url = spawn_tombstone_then_fail_session_delete_restate(
@@ -998,7 +998,7 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
     let mut state = queued_send_test_state(data_dir.path(), provider).await;
     let retired_session_id = state.current_session_id();
     state
-        .open_session(&SessionId::from(&retired_session_id))
+        .open_session(&SessionId::from(&retired_session_id), "test")
         .await
         .expect("materialize the session before deleting it");
     let selected_session_id = "workbench-selected-during-delete";
@@ -1083,7 +1083,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
     state.restate_ingress_url = restate_ingress_url;
     let old_session_id = state.current_session_id();
     state
-        .open_session(&old_session_id)
+        .open_session(&old_session_id, "test")
         .await
         .expect("materialize the old session before its failed delete");
 
@@ -1319,7 +1319,7 @@ async fn failed_manual_queued_submission_releases_claim_and_can_retry() {
     state.restate_ingress_url = spawn_failing_restate_ingress().await;
     let session_id = state.current_session_id();
     let session = state
-        .open_session(&session_id)
+        .open_session(&session_id, "test")
         .await
         .expect("open manual queued failure session");
     let store = state
@@ -1373,7 +1373,7 @@ async fn failed_automatic_queued_submission_releases_claim_and_can_retry() {
     let state = queued_send_test_state(data_dir.path(), provider).await;
     let session_id = state.current_session_id();
     let session = state
-        .open_session(&session_id)
+        .open_session(&session_id, "test")
         .await
         .expect("open automatic queued failure session");
     let store = state

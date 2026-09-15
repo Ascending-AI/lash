@@ -7651,8 +7651,9 @@
     setInterval(refreshApprovals, 1400);
     setInterval(loadTriggers, 1400);
     setInterval(loadAccounts, 1500);
-    /* Slower than the other rails: the roster opens each listed session, so a
-       poll costs one open per session. */
+    /* Slower than the other rails because the selector changes rarely, not
+       because the read is expensive: `/api/sessions` answers from the durable
+       roster and opens nothing (FIG-3151). */
     setInterval(loadSessions, 5000);
   </script>
 </body>

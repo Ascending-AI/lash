@@ -240,7 +240,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
     .expect("admit the input that is cancelled");
 
     let session = state
-        .open_session(&session_id)
+        .open_session(&session_id, "test")
         .await
         .expect("open the vacuum test session");
     let cancelled = session
@@ -293,7 +293,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
     assert_eq!(report.removed_node_count, 0);
 
     let session = state
-        .open_session(&session_id)
+        .open_session(&session_id, "test")
         .await
         .expect("reopen the vacuumed session");
     let pending_after = session
@@ -618,7 +618,7 @@ async fn store_maintenance_refuses_an_empty_root_set_inner() {
     // references no attachment. The root set is honestly empty, which is
     // exactly the shape a misconfigured factory produces.
     let session = state
-        .open_session(&fixture.session_id)
+        .open_session(&fixture.session_id, "test")
         .await
         .expect("open the empty-root-set session");
     session

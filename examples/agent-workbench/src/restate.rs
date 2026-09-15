@@ -820,7 +820,7 @@ async fn run_user_turn(
     let turn_model_id = request.model.model.clone();
     let turn_model = model_spec_from_selection(request.model);
     let session = state
-        .open_session(&request.session_id)
+        .open_session(&request.session_id, "restate.user_turn")
         .await
         .map_err(AppError::session_open)?;
     apply_model_selection_to_session(&state, &session, turn_model.clone(), "restate_user_turn")
@@ -1131,7 +1131,7 @@ async fn run_queued_turn(
         .clone()
         .unwrap_or_else(|| request.turn_id.clone().to_string());
     let session = state
-        .open_session(&request.session_id)
+        .open_session(&request.session_id, "restate.queued_turn")
         .await
         .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
@@ -1319,7 +1319,7 @@ pub(crate) async fn settle_workbench_turn(
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> Result<(), AppError> {
-    let session = match state.open_session(session_id).await {
+    let session = match state.open_session(session_id, "restate.terminalize").await {
         Ok(session) => session,
         // A turn settling against a tombstoned session: its pending inputs
         // died with the store, so release the in-process claim, then refuse

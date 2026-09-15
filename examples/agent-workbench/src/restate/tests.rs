@@ -350,7 +350,7 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
         "replacement abort must retire the active turn before returning"
     );
     let session = state
-        .open_session(&session_id)
+        .open_session(&session_id, "test")
         .await
         .expect("the settled replacement abort must leave the session reopenable");
     session

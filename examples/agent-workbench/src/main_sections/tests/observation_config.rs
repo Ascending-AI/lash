@@ -4,7 +4,7 @@ async fn observation_get_preserves_config(path: &str) {
     let data_dir = tempfile::tempdir().unwrap();
     let state = recoverable_chat_test_state(data_dir.path(), 16).await;
     let session_id = state.current_session_id();
-    let session = state.open_session(&session_id).await.unwrap();
+    let session = state.open_session(&session_id, "test").await.unwrap();
     let peer_model = lash::ModelSpec::builder("peer-commanded-model")
         .context_window_tokens(8192)
         .build()
