@@ -157,16 +157,16 @@ ply screenshot — expected, keep both names for the scorecard).
 Stop the app with Ctrl-C or SIGTERM. The example stops accepting connections, lets
 in-flight requests finish, then closes its provider and flushes its trace sink.
 
-**Signal the binary, not the wrapper.** The boot command is `cargo run`, so the process
-that holds the listener and installs the drain handler is the `agent-service` binary cargo
-spawned as a child, not cargo itself; the drain is armed on the child's own Ctrl-C and
+**Signal the process that owns the socket.** The boot command is `cargo run`, and on Unix
+cargo `exec`s the binary it built rather than supervising it, so once the build finishes the
+pid you launched *is* `agent-service` and the drain is armed on that pid's own Ctrl-C and
 SIGTERM. Ctrl-C in the launching terminal reaches the whole foreground process group and is
-fine. A `kill` aimed at the pid you backgrounded is not: it stops the wrapper and leaves the
-real listener serving the port, so the next row's port check finds it bound and the drain
-never ran. Take the exact PID from the socket itself — `ss -ltnp` on this row's port — and
-confirm it is `agent-service` before signalling. Then require the port free and
-`GET /api/settings` refused before scoring teardown. Never `pkill`, and never match on a
-name.
+fine. A `kill` aimed at a pid you backgrounded is only as good as your timing: until the exec
+happens that pid is still cargo mid-build, and signalling it kills the build without ever
+starting — or draining — the app. Do not infer the pid from the launch either way. Take the
+exact PID from the socket itself — `ss -ltnp` on this row's port — and confirm its `comm` is
+`agent-service` before signalling. Then require the port free and `GET /api/settings`
+refused before scoring teardown. Never `pkill`, and never match on a name.
 
 Then fill:
 

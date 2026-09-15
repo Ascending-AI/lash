@@ -41,6 +41,12 @@ a fresh agent-service in Restate durability mode, and that host's endpoint regis
 that container. There is no prebooted stack to inherit and no external owner to ask; the
 recipe below is the whole lifecycle, and Phase 4 is the other half of it.
 
+Three tools must be on PATH before Phase 0 starts: `docker`, `cargo`, and the **`restate`
+CLI** — the last one is not implied by the other two and is the only way to finish Phase 0.
+Check it first (`restate --version`); discovering it missing at the registration step leaves a
+booted stack with nowhere to go, and the row must then tear down and abort rather than
+improvise a registration over the admin API.
+
 The host's own stdout and stderr are retained for the whole run at `$host_log`, named in
 Phase 0 and swept in Phase 4. Every other full-host runbook in this tree gates on that sweep,
 and for good reason: this row's gates all read the app's own answers, so a host that panicked
@@ -82,9 +88,10 @@ docker run -d --name "$container" --network host \
 ```
 
 Poll the admin and ingress ports with a 90-second deadline; on failure save only
-`docker logs --tail 80 "$container"` and abort. Then boot the host, with the subshell replaced
-by Cargo so `$host_pid` is the process Phase 4 signals, and both its streams appended to the
-retained log:
+`docker logs --tail 80 "$container"` and abort. Then boot the host. The subshell `exec`s Cargo, and
+Cargo in turn `exec`s the binary it built, so `$host_pid` ends up being the `agent-service`
+process itself — that is what makes it the right thing for Phase 4 to signal. Both streams are
+appended to the retained log:
 
 ```sh
 (
@@ -111,8 +118,11 @@ start without `OPENROUTER_API_KEY`, while this path opens no session and makes n
 call, and any provider request invalidates the row.
 
 Poll `$app_port` and `$endpoint_port` until both accept, failing the row if `$host_pid` exits
-first — a host that dies during boot writes its reason to `$host_log`, and the first
-Cargo-driven boot of a cold worktree spends minutes compiling before it binds anything. Then
+first — a host that dies during boot writes its reason to `$host_log`. Give that poll a
+deadline too, generous enough to cover the build: the first Cargo-driven boot of a cold
+worktree spends minutes compiling before it binds anything, so **10 minutes** rather than the
+stack's 90 seconds. Without a bound the stop trigger is not real — a host that hangs without
+exiting stalls the row forever instead of failing it. Then
 register this host's endpoint with the container this row started:
 
 ```sh
@@ -173,15 +183,26 @@ count gate to this independent read.
 
 POST the same body from Phase 1 again. Save the status and body as
 `03-duplicate-refused.json`. Require a non-success response containing `already exists`.
-Then GET the terminal report once more and require it still equals Phase 2 exactly. A
+Then GET the terminal report once more, save it as `03-post-duplicate-report.json`, and
+require it still equals Phase 2 exactly. The refusal and the unchanged terminal are two halves
+of one gate and need two artifacts: `03-duplicate-refused.json` witnesses only the refusal. A
 duplicate that creates another run, changes a rank, or mutates a terminal is a contract
 violation → Abort/RCA.
 
 ## Phase 4 — Sweep the host log and tear down
 
-Require `grep -F 'panicked at' "$host_log"` to match nothing and save the sweep as
-`04-host-panic-sweep.txt`. A panic anywhere in the run is Abort/RCA even when every gate above
-passed.
+Sweep the binary's **own** output, not Cargo's. `$host_log` holds the build first and the
+running host after it, so sweep from Cargo's `Running` line onward and require the result to
+match nothing, saving it as `04-host-panic-sweep.txt`:
+
+```sh
+awk 'emit; /^[[:space:]]*Running /{emit=1}' "$host_log" \
+  | grep -F 'panicked at' | tee "$run_root/04-host-panic-sweep.txt"
+```
+
+An unscoped grep sweeps compiler diagnostics as well, so a dependency that merely prints that
+phrase in a warning fails a perfectly healthy row. A panic anywhere in the run itself is
+Abort/RCA even when every gate above passed.
 
 Then take down exactly what Phase 0 started, and nothing else:
 
@@ -194,8 +215,10 @@ docker rm -f "$container"
 
 The identity check before the signal is the point: `$host_pid` is only a number, and a PID is
 reused. Confirm afterwards that `$app_port` and `$endpoint_port` are unbound and that
-`docker inspect "$container"` fails. Teardown runs the same way on Abort as on a pass —
-leaving this row's host or container up is itself a finding.
+`docker inspect "$container"` fails, and save that check — the `comm` value read before the
+signal, the port probes and the failed inspect — as `04-teardown-verified.txt`. Nothing
+written in Phase 0 can witness a teardown that happens here. Teardown runs the same way on
+Abort as on a pass — leaving this row's host or container up is itself a finding.
 
 ## Phase 5 — Score
 
@@ -206,9 +229,9 @@ leaving this row's host or container up is itself a finding.
 | First-settlement rank | rank 1 is completed and matches `first_settlement_position` | | `01-effect-group.json` |
 | Loser cancellation | ranks 2 and 3 are cancelled; `cancelled_losers == 2` | | `01-effect-group.json` |
 | Terminal durability | GET exactly reproduces all three ranks and terminal facts | | `02-durable-report.json` |
-| Host health | no `panicked at` in the retained host log | | `04-host-panic-sweep.txt` |
-| Identity fence | duplicate POST is refused and terminal state is unchanged | | `03-duplicate-refused.json` |
-| Teardown | this row's host PID and container gone; ports unbound | | `00-identities.json` |
+| Host health | no `panicked at` in the host's own output | | `04-host-panic-sweep.txt` |
+| Identity fence | duplicate refused; terminal unchanged | | `03-duplicate-refused.json`, `03-post-duplicate-report.json` |
+| Teardown | this row's host PID and container gone; ports unbound | | `04-teardown-verified.txt` |
 
 **Aggregate:** did the app's own HTTP projection prove fresh index admission, three-child
 dispatch, durable first-settlement ordering, two cancelled losers, a stable terminal read,
