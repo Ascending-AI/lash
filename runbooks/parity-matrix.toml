@@ -67,7 +67,7 @@ workbench-shared-session-multi-tab = { tier = "economy", model = "deepseek/deeps
 workbench-trigger-lifecycle = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-turn-ingress = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 workbench-usage-ledger = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the shared `just agent-workbench-attachment-usage-gate` companion; only Phase 1 calls a provider" }
-workbench-weather-dialects = { tier = "frontier", model = "openai/gpt-5.6-sol" }
+workbench-weather = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 
 # These exercise host-language surface that only reaches the model through the
 # TypeScript authoring path rather than through a scenario mechanism. They are

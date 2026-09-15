@@ -37,11 +37,24 @@ registered Restate endpoint, and `<base-url>`. It owns a unique Restate 1.7.0 co
 ports, data directory, exact-name cleanup, and process cleanup. The judge records the base
 URL and a fresh `<run-id>` in `00-identities.json` before sending the first request.
 
+**No such harness is checked in.** Until one exists, this "external harness" names an owner
+that does not exist and a judge cannot start the row: treat a missing harness as an Abort with
+that reason, not as licence to hand-roll a stack. Closing this needs either the harness
+shipped or the stack lifecycle folded into this runbook with worktree-scoped ports and
+exact-name cleanup, the way the other full-host rows do it.
+
+The harness must also retain the agent-service process's own stdout/stderr for the run and
+hand the path to the judge: every other full-host runbook in this tree gates on a panic sweep
+of the host log, and without one a row whose host panicked between the POST and the GET can
+still score green.
+
 ## Phase 0 — Preflight the app surface
 
 Use browser HTTP fetch to require `GET <base-url>/api/settings` → 200 JSON. Then request
-`GET <base-url>/api/effect-groups/<run-id>` and require a non-success response naming that
-the run id does not exist. Save the status and body as `00-preflight.json`. A pre-existing
+`GET <base-url>/api/effect-groups/<run-id>` and require **HTTP 400** with a body naming the
+run id — that is the contract this surface implements for an unknown id, and pinning it is
+the point: an unpinned "non-success" gate cannot distinguish the contract from a shrug. Save
+the status and body as `00-preflight.json`. A pre-existing
 group under the fresh id is a contaminated harness → Abort.
 
 ## Phase 1 — Run the group through agent-service
@@ -60,8 +73,11 @@ these objective gates:
 
 - `run_id` equals `<run-id>` and `group_key` ends with `:<run-id>`;
 - `child_count == 3`, `group_admitted == true`, and `children_dispatched == true`;
-- `first_settlement_rank == 1` and `first_settlement_position` equals the position in the
-  rank-1 settlement;
+- `first_settlement_rank == 1` and `first_settlement_position` equals the position carried on
+  the rank-1 settlement row. This is an internal-consistency check, not an independent fact:
+  the rank-1 row's position is how `first_settlement_position` is computed, so the gate can
+  only fail if the server contradicts itself. Still check it, but do not report it as
+  corroboration;
 - `settlements` contains exactly three rows with ranks `1, 2, 3`, three distinct positions
   `{0, 1, 2}`, and strictly increasing unique `sequence` values;
 - rank 1 is `completed`; ranks 2 and 3 are `cancelled`;
@@ -73,8 +89,9 @@ cancellations prove close wrote loser terminals rather than merely dropping loca
 ## Phase 2 — Read the durable terminal projection
 
 Navigate to `GET <base-url>/api/effect-groups/<run-id>`. Save the exact JSON as
-`02-durable-report.json` and capture the browser-rendered JSON as
-`02-durable-report.png`. Normalize JSON object key order only, then require structural
+`02-durable-report.json`. A browser-rendered screenshot of that JSON is **optional** and
+proves nothing the JSON does not; this row is API-only and needs an HTTP client, not a
+browser. Normalize JSON object key order only, then require structural
 equality with `01-effect-group.json`. Re-apply every Phase 1 rank, position, terminal, and
 count gate to this independent read.
 
@@ -94,7 +111,8 @@ violation → Abort/RCA.
 | Dispatch + READY | three children and `children_dispatched == true` | | `01-effect-group.json` |
 | First-settlement rank | rank 1 is completed and matches `first_settlement_position` | | `01-effect-group.json` |
 | Loser cancellation | ranks 2 and 3 are cancelled; `cancelled_losers == 2` | | `01-effect-group.json` |
-| Terminal durability | GET exactly reproduces all three ranks and terminal facts | | `02-durable-report.json`, `02-durable-report.png` |
+| Terminal durability | GET exactly reproduces all three ranks and terminal facts | | `02-durable-report.json` |
+| Host health | no `panicked at` in the agent-service process log for the run | | host log |
 | Identity fence | duplicate POST is refused and terminal state is unchanged | | `03-duplicate-refused.json` |
 
 **Aggregate:** did the app's own HTTP projection prove fresh index admission, three-child

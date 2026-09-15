@@ -35,11 +35,16 @@ pending input.
 From the repository root, source `./env.sh` and run:
 
 ```sh
-cargo nextest run --workspace --all-targets --locked \
+cargo nextest run -p lash-internal-protocol-standard -p lash-internal-provider-openai \
+  --all-targets --locked \
   -E 'test(valid_empty_terminal_completions_succeed_across_chat_and_responses) | test(eof_tolerance_does_not_turn_empty_unterminated_streams_into_success) | test(standard_protocol_scenario_empty_model_response_finishes_after_checkpoint) | test(post_tool_empty_model_response_finishes_without_repeating_the_tool) | test(empty_model_response_checkpoint_delivers_pending_input_before_completion)'
 ```
 
-Require five executed tests and five passes. The adapter suite covers buffered and streamed
+Require five **executed** tests and five passes. The executed count is the load-bearing half
+of this gate, not the exit code: a name filter that matches nothing still exits 0 and prints
+`0 passed`, so a drifted or renamed test reads as a pass unless the count is checked. The two
+packages named above own all five tests — do not widen this to `--workspace`, which pays for
+a full workspace test build to run the same five. The adapter suite covers buffered and streamed
 Chat and Responses paths inside one test, and its negative companion proves EOF tolerance
 does not turn an empty unterminated stream into success.
 
@@ -51,8 +56,12 @@ Choose an unused `<port>` and fresh `<data-dir>` and run:
 AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
 AGENT_WORKBENCH_DATA_DIR=<data-dir> \
 AGENT_WORKBENCH_OPEN=0 \
-just agent-workbench <port>
+bash scripts/agent-workbench-dev.sh up --port <port>
 ```
+
+(`just agent-workbench <port>` is the same command; it does not export `CARGO_TARGET_DIR`,
+so source the fork's `env.sh` first — this row's cold build is expensive enough that landing
+it in the wrong target directory costs a full rebuild.)
 
 Poll `GET /healthz` for 200. Require the startup log to contain
 `development provider scenario enabled: valid-empty-completion`. Open
@@ -93,7 +102,7 @@ as an error, or more than one model call/attempt/exchange occurs.
 
 ## Phase 3 — Teardown and score
 
-Run `just agent-workbench-down <port>`. Confirm the Workbench port is closed and its
+Run `bash scripts/agent-workbench-dev.sh down --port <port>`. Confirm the Workbench port is closed and its
 port-derived Restate container is gone.
 
 | Item | Objective gate | Verdict | Evidence |

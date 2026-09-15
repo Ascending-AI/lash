@@ -49,7 +49,12 @@ the owner lease to simulate expiry and never writes the terminal directly.
 
 ## Evidence to inspect
 
-- Companion artifacts from the command above; `03-observed.jsonl` is backend truth.
+- Companion artifacts from the command above; `03-observed.jsonl` is backend truth **except**
+  for `lease_cleared` and `observer_terminal_visible`, which the emitter writes as hardcoded
+  `true` beside the `ensure!`s that actually check them
+  (`process_operator_flow.rs`). Score those two from the run's own assertions, not from the
+  field: as emitted they are the script restating its own claim, and a judge cannot tell a
+  reading from a constant. (Product side: FIG-3156's class, one runbook over.)
 - The procedure and expected operator decisions are in this runbook. The companion artifacts
   are the independent behavior evidence; do not score the prose by reading the prose again.
 - Save the completed scorecard in the artifact directory. Do not edit the runbook, companion,
@@ -58,7 +63,13 @@ the owner lease to simulate expiry and never writes the terminal directly.
 ## Phase 0 — Contract and deployment gates
 
 Require the owned PostgreSQL identity in `00-*`, the facade end-to-end contract test green
-in `01-contract-tests.log`, and no container after the companion exits.
+in `01-contract-tests.log`, and no container after the companion exits. `01-contract-tests.log`
+does not name the test it ran — the filter lives in `scripts/process-operator-flow-e2e.sh` —
+so score this gate on the script's own `test result: ok. 1 passed` guard and record the filter
+name from the script alongside the log. Note also that the companion launches its operator
+binary with `cargo run --locked --release -p lash-restate-postgres-workers-e2e`: a cold
+release compile on plain Cargo, not kiln, which is the real cost of this phase and is not
+implied by the "no real tokens, one container" framing.
 
 **Fail if:** the container is outside the `lash-fig897-*` ownership prefix, publishes
 outside `5540-5599`, a prerequisite gate fails, or teardown leaks it.
@@ -67,7 +78,8 @@ outside `5540-5599`, a prerequisite gate fails, or teardown leaks it.
 
 Read `seeded_request_abandon_deployment`. Require process
 `request-abandon-owner-bound` to be non-terminal `Running`, its live lease holder to be
-`request-abandon-live-owner`, a positive token and fencing token, a future expiry, and an
+`request-abandon-live-owner`, a non-empty lease token (a 64-character hex string, so
+"positive" is not a property it can have) and a positive fencing token, a future expiry, and an
 observer edge for `request-abandon-observer`. The checkpoint must also carry the
 non-empty `first_started` object that establishes the durable execution-started fact.
 
@@ -99,7 +111,10 @@ Read `abandon_request_reconciled` and require:
 - final status is terminal `Abandoned`;
 - evidence writer is `ReconciledRequest` and names `request-abandon-live-owner`;
 - the observer lens sees the terminal;
-- `await_output` returned the same evidence;
+- `await_output` returned the same evidence — it is the source of `abandon_writer` and
+  `lapsed_owner_id` in the bundle, which nothing in the artifact labels, and there is no
+  separate registry-read writer beside it to compare against, so read this as one path
+  agreeing with itself until the emitter carries an `awaited_writer` / `registry_writer` pair;
 - the sweep's fenced completion cleared the process lease; and
 - `sweep_admitted` is at least one and `sweep_worker_faults` is zero — the drive is an
   admission call, so the companion wires a `ProcessEventSink` and requires the worker to

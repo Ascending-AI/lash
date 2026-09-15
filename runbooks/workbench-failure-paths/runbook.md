@@ -13,8 +13,11 @@ visible wording and final state are objective gates.
 
 **Deterministic companion.** `just agent-workbench-restate-e2e` asserts the auth terminal,
 same-session recovery, retry attempt reset, and single-copy live/replay observations.
-`cargo test -p lash-internal-core --lib retryable_mid_stream_failure_preserves_paid_output_without_retry`
-asserts the paid-output refusal and single provider call. `cargo test -p agent-workbench
+`cargo nextest run -p lash-internal-core-llm --lib -E 'test(charge_safety)'` asserts the
+paid-output refusal and the charge-safety decision surface — six tests; require that count,
+because a name filter that matches nothing still exits 0. (The previously named
+`retryable_mid_stream_failure_preserves_paid_output_without_retry` does not exist, and the
+command that named it passed vacuously.) `cargo test -p agent-workbench
 process_work_tests` asserts the failed-process `/api/work` projection and UI error rendering.
 The browser run judges the actual transcript and work rail; it does not reproduce those
 internal assertions.
@@ -52,14 +55,17 @@ internal assertions.
 ## Working material
 
 - For each phase choose `<port>` and `<fresh-data-dir>`, then boot:
-  `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=<scenario> AGENT_WORKBENCH_DATA_DIR=<fresh-data-dir> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=<scenario> AGENT_WORKBENCH_DATA_DIR=<fresh-data-dir> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
+  (the `just agent-workbench <port>` recipe is the same command, but it does not export
+  `CARGO_TARGET_DIR`, so source the fork's `env.sh` first).
   No provider key is required. Gate `GET /healthz` → 200 and retain the startup log.
 - Browser affordances: model selector, session id, composer, running/idle pill,
   transcript, the **execution evidence** scorecard, and **work** rail.
-- Backend truth: `GET /api/state`, `POST /api/turn`, `GET /api/work`, and the observation
+- Backend truth: `GET /api/state`, `POST /api/turn`, `GET /api/work` (which returns a bare
+  JSON array, not an object with an `items` or `work` key), and the observation
   stream used by the page. Disk truth: `<fresh-data-dir>/trace.jsonl` and
   `active-turns.json`.
-- End every phase with `just agent-workbench-down <port>` and confirm its managed Restate
+- End every phase with `bash scripts/agent-workbench-dev.sh down --port <port>` and confirm its managed Restate
   container is gone before reusing the port.
 
 ## Phase 0 — Common pre-flight
@@ -151,7 +157,9 @@ purchased` to be absent everywhere.
 Require exactly one LLM call attempt. The structured attempt fields —
 `protocol_position` equal to `output_started` and retry decision `scheduled: false` with
 reason `output_started_without_retry_guarantee` — live on the `model_call_recorded` product
-event in `/api/state.product_events`, not in the trace; the trace's `llm_call_failed` record
+event in `/api/state.product_events` and, verbatim, in the rendered `#executionScorecard`
+(`position output_started`, `retry reason output_started_without_retry_guarantee`), which is
+the cheaper witness; they are not in the trace, whose `llm_call_failed` record
 carries the same facts as prose (`reason` ending `retry: output_started_without_retry_guarantee`),
 plus `charge_safety` (`outcome: denied`, `tokens_at_stake: 4`) and the attempt `usage`. Gate
 each field where it is actually emitted: output usage equal to 4 in either record, and
@@ -168,19 +176,31 @@ Screenshot `04-paid-output-refused.png`; save state, observations, and trace row
 Boot fresh with `failed-process`. **Start the `/api/work` poll before submitting** — see
 golden rule 7: the live projection retires the terminal row about ten seconds after it
 fails. Submit `start deterministic failing process`; the parent
-turn may complete successfully. Poll `GET /api/work` until the row labelled
-`FIG425_deterministic_failure` is terminal with status `failed` and error exactly
-`deterministic durable process failure`. Those fields are nested under the item's `process`
-object (`process.status_label`, `process.terminal`, `process.error`).
+turn may complete successfully. Poll `GET /api/work` — a bare JSON array — until the failing
+process is terminal with status `failed` and error exactly
+`deterministic durable process failure`. Those fields are nested under each element's
+`process` object (`process.status_label`, `process.terminal`, `process.error`). Do **not**
+search for the label `FIG425_deterministic_failure`: that is the TypeScript const in the
+fixture (`examples/agent-workbench/src/failure_provider.rs`), and the string `FIG425` appears
+in no API payload. What reaches `/api/work` and the rail is the compiled process name
+`__process_<64-hex>`; identify the row by its terminal failure and its error text, then carry
+its process id forward.
 
-Open the **work** rail and poll until that same row visibly shows both `failed` and
-`error: deterministic durable process failure`. The UI and `/api/work` must identify the
-same process id. Screenshot `05-failed-process-work-rail.png`; save the API row as
+The `#workList` rail is always rendered in the right-hand rail — there is no work tab or view
+control to open (`[data-view=…]` exists only for `chat` and `accounts`). Poll it until that
+same row visibly shows both the failed status and `error: deterministic durable process
+failure`. Compare the status **case-insensitively**: the rail applies `text-transform`, so
+`innerText` returns `FAILED` and a literal match on `failed` fails against a correct UI. The
+UI and `/api/work` must identify the same process id. Screenshot `05-failed-process-work-rail.png`; save the API row as
 `05-failed-process.json`.
 
 ## Phase 5 — Teardown and score
 
-Tear down the final stack and confirm all four managed Restate containers were removed.
+Tear down the final stack and confirm its managed Restate container
+(`lash-agent-workbench-dev-restate-<port>`) is gone. The four phases are sequential and one
+stack owns exactly one Restate container, so the other three were already removed by their
+own phase teardowns — confirm those retrospectively from the per-phase teardown logs rather
+than expecting four containers to be present here.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

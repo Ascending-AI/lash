@@ -34,7 +34,17 @@ fields.
 
 ## Safety and stop conditions
 
-1. Load `env.sh` from the owned warm workspace before Cargo commands.
+1. Load `env.sh` from the owned warm workspace before Cargo commands. Prefer the
+   crate-and-target-scoped form of every command below (`-p <crate> --test <target>`) over
+   `--workspace --all-targets`: it is the same coverage in one cached invocation per crate
+   instead of a full workspace build per named test, and it makes a stale filter fail loudly
+   instead of silently.
+1b. **Every named test filter in this runbook must be scored on its executed count, never on
+   its exit code.** A Cargo or nextest filter that matches nothing exits 0 and prints
+   `0 passed; N filtered out`, so an exit-0 run is not evidence a test ran. Require a
+   non-zero passed count for each filter — for example by guarding on
+   `test result: ok. <n> passed` — and treat `0 passed` as a failure of the runbook, not a
+   pass of the code.
 2. Use temporary SQLite files. For PostgreSQL, use only a database created for the current Kiln
    gate and named by `LASH_POSTGRES_DATABASE_URL`.
 3. Do not run schema probes against a user or shared database. Do not change schema stamps to
@@ -61,18 +71,28 @@ or Restate `scope_effect_begin`. The graph test must produce distinct addresses 
 local replay keys in different scopes. The header tests must show a required `address` and no
 universal `subject` or optional duplicate `replay` slot, while refusing the old shape.
 
-Run the durable host contracts against fresh storage:
+Run the durable host contracts against fresh storage. The SQLite effect-host scope
+conformance is the shared `effect_controller_` conformance family instantiated for the SQLite
+backend (`crates/lash-sqlite-store/tests/conformance.rs`), not a test of its own:
 
 ```sh
-cargo test --workspace --all-targets sqlite_effect_host_satisfies_scope_conformance
-cargo test --workspace --all-targets restate_scope_controller_refuses_wrong_scope_before_index_or_local_execution
+cargo test -p lash-internal-sqlite-store --locked --test conformance effect_controller_ -- --nocapture
 ```
 
-For an owned PostgreSQL gate, export its fresh database URL and require the test to run rather
-than print its `LASH_POSTGRES_DATABASE_URL is not set` skip message:
+(The former filter `sqlite_effect_host_satisfies_scope_conformance` names no test and matched
+nothing; it passed vacuously.) The Restate refusal
+(`restate_scope_controller_refuses_wrong_scope_before_index_or_local_execution`) is already
+run above in this phase — running it twice adds no coverage and inflates the phase count.
+
+For an owned PostgreSQL gate, let the repository's service owner provide the database rather
+than hand-rolling a container: `scripts/ci/with-service.sh pg16 -- <cmd>` binds an ephemeral
+loopback port, exports `LASH_POSTGRES_DATABASE_URL` into the command, and labels the container
+so the gate's leftover-refusal can see it. Require the test to run rather than print its
+`LASH_POSTGRES_DATABASE_URL is not set` skip message:
 
 ```sh
-cargo test -p lash-internal-postgres-store --locked --test conformance effect_controller_ -- --nocapture
+scripts/ci/with-service.sh pg16 -- \
+  cargo test -p lash-internal-postgres-store --locked --test conformance effect_controller_ -- --nocapture
 ```
 
 ## Phase 2 — Truthful attribution
@@ -93,9 +113,12 @@ that omitted it.
 
 ```sh
 cargo test --workspace --all-targets remote_cause_validation_preserves_partial_trigger_identity_and_checks_effect_scope
-cargo test --workspace --all-targets same_replay_key_in_distinct_scopes_has_distinct_graph_identity
 cargo test --workspace --all-targets turn_keeps_causal_parent_when_present
 ```
+
+(`same_replay_key_in_distinct_scopes_has_distinct_graph_identity` belongs to Phase 1 and is
+run there; repeating it here under a second rationale inflates the phase count without adding
+a witness.)
 
 Inspect failures as identity failures. Do not accept matching display labels as proof. The
 remote round trip must retain every known trigger field, and both core and Restate projections
@@ -107,43 +130,50 @@ must use the same scoped causal graph address while retaining unrelated base tra
 cargo test --workspace --all-targets remote_owner_scope_validation_matches_each_core_owner_grammar
 cargo test --workspace --all-targets journal_identity_v2_bytes_remain_unchanged_for_all_scope_variants
 cargo test --workspace --all-targets direct_effect_identity_golden_corpus
-cargo test --workspace --all-targets trace_schema_version_is_pinned_at_20
+cargo test -p lash-internal-trace --test schema trace_schema_version_is_pinned_at_
 ```
+
+The pin test is named for the version it pins, so it is renamed at every bump. Filter on the
+stable prefix above and score it on its executed count; the fully-spelled
+`trace_schema_version_is_pinned_at_20` was left behind by a bump and matched nothing.
 
 Session owner keys use the existing raw nonempty/no-NUL opaque grammar, so a whitespace-only
 session key remains valid. Host owner keys use the existing trimmed nonempty/no-NUL check. The
 five execution-scope journal encodings remain byte-for-byte version 2.
 
-These versions move together in the FIG-2828 cutover:
+These surfaces move together at a cutover. **This runbook does not quote their values**: it
+is re-run every drive while the constants bump independently, and a table of numbers here is
+stale the moment one of them moves. An operator who provisions from a frozen table provisions
+wrong. Read the value from the constant:
 
-| Surface | Previous | Current |
-| --- | ---: | ---: |
-| Remote protocol | 58 | 59 |
-| Trace schema | 19 | 20 |
-| Direct-effect identity family | 2 | 3 |
-| Runtime effect envelope hash domain | v2 | v3 |
-| Process registration family | 4 | 5 |
-| Process wake-delivery format | 2 | 3 |
-| Append-request identity encoding | 3 | 4 |
-| RLM snapshot | 17 | 18 |
-| SQLite durable core | 55 | 56 |
-| SQLite process registry | 32 | 33 |
-| SQLite effect journal | 17 | 18 |
-| PostgreSQL component | 84 | 85 |
-| Session-head metadata | 7 | 8 |
-| Session-node body | 12 | 13 |
-| Durable-read fixture | 60 | 61 |
+| Surface | Constant | Read it at |
+| --- | --- | --- |
+| Trace schema | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/lib.rs` |
+| Remote protocol | `REMOTE_PROTOCOL_VERSION` | `crates/lash-remote-protocol/src/lib.rs` |
+| PostgreSQL component | `SCHEMA_VERSION` | `crates/lash-postgres-store/src/lib.rs` |
+| SQLite durable core | `SCHEMA_VERSION` | `crates/lash-sqlite-store/src/schema.rs` |
+| RLM snapshot | `RLM_SNAPSHOT_VERSION` | `crates/lash-protocol-rlm/src/executor/snapshot.rs` |
+| Process wake-delivery format | `PROCESS_WAKE_DELIVERY_FORMAT_VERSION` | `crates/lash-core/src/runtime/process/events.rs` |
+| Process registration family | `PROCESS_REGISTRATION_FAMILY_VERSION` | `crates/lash-core/src/runtime/process/validation.rs` |
+| Append-request identity encoding | `APPEND_REQUEST_IDENTITY_ENCODING_VERSION` | `crates/lash-core-store/src/store/commit_identity.rs` |
+| Session-node body | `SESSION_NODE_BODY_SCHEMA_VERSION` | `crates/lash-core-store/src/session_graph.rs` |
+| Durable-read fixture | `DURABLE_READ_FIXTURE_SCHEMA_VERSION` | `crates/lash-core/tests/support/durable_read_fixture.rs` |
+
+`crates/lash/src/formats.rs` is the live registry that binds each durable format to its owning
+crate and constant; read it rather than any list in prose when you need the full inventory.
 
 Journal identity remains v2 for all five execution-scope variants, and process-transfer identity
-remains v1. Those unchanged byte contracts are separate from the affected formats above.
+remains v1. Those unchanged byte contracts are separate from the versioned formats above.
 
-This release is a fresh-trust-domain redeployment boundary. Do not perform a rolling upgrade or
-mix old and new hosts, workers, Restate handlers, or remote peers. Drain in-flight work, stop the
-old deployment, and provision the replacement SQLite/PostgreSQL stores and Restate state from
-this build together; PostgreSQL component 84 has no migration to 85 and the replacement database
-must be created from this build's `schema.sql`. Reset the tombstones, await-event revocation
-ledger, effect journal, and Restate state as one operation, then start every producer and consumer
-on the same build. Old affected encodings must refuse; there is no compatibility alias or
+**A version cutover is a fresh-trust-domain redeployment boundary.** This is a standing
+property of any bump on the surfaces above, not a statement about one particular release: when
+the build you are deploying moves any of them past the store's stamp, do not perform a rolling
+upgrade or mix old and new hosts, workers, Restate handlers, or remote peers. Drain in-flight
+work, stop the old deployment, and provision the replacement SQLite/PostgreSQL stores and
+Restate state from this build together; the PostgreSQL component schema has no migration across
+a cutover, so the replacement database must be created from this build's `schema.sql`. Reset the
+tombstones, await-event revocation ledger, effect journal, and Restate state as one operation,
+then start every producer and consumer on the same build. Old affected encodings must refuse; there is no compatibility alias or
 fabricated default authority. This runbook does not authorize deleting or rewriting a shared
 store: production replacement requires the deployment owner's approved drain and provisioning
 procedure, while local verification may recreate only stores owned by the current test or Kiln.

@@ -30,22 +30,33 @@ LASH_CONTEXT_OVERFLOW_ARTIFACT_DIR=<fresh-dir> just context-overflow-recovery-e2
 ```
 
 It runs the scenario's single TypeScript row and writes it to
-`<artifact-dir>/context-overflow-recovery/typescript/`. A caller may pin
-`LASH_RUNBOOK_DIALECT` to reproduce a row in another dialect by hand. It emits
+`<artifact-dir>/context-overflow-recovery/typescript/`. **Do not set
+`LASH_RUNBOOK_DIALECT`.** This companion does read it — it uses the value as the artifact
+*directory name* — but the binary hardcodes both the cell delimiters and the checkpoint's
+`"dialect"` field to `typescript`. Setting it to anything else produces a directory named for
+a dialect over evidence that says `typescript`, i.e. it silently mislabels the artifacts
+rather than reproducing anything. ADR 0096 leaves one dialect; there is no second row to
+reproduce. It emits
 `context-overflow-recovery e2e passed: rows=N` only after the focused contract test and
 every row's gates pass.
 
-**No container, no token, no network.** The store is a SQLite scratch directory, fresh per
-row; the provider is scripted. Do not configure a live provider — a live model cannot be
+**No container, no token, no network — but not no build.** The store is a SQLite scratch
+directory, fresh per row; the provider is scripted. The companion does run on plain Cargo
+(`cargo run --locked`), not through kiln, so it does not share the Bazel cache and the first
+invocation on a cold fork pays a full build. Do not configure a live provider — a live model cannot be
 made to overflow on demand, and a row that waited for one would be judging the provider.
 
-**Two layers, and the dialect belongs to both.** The scripted layer is the cell that calls
-the oversized tool and the cell that finishes: both must be cells the row's session can
-*execute*, because a foreign cell never commits and the turn then never reaches a terminal
-state — the row hangs rather than failing. The judged layer is everything above it: the
-outcome's identity, the host's recovery, and the continued session, none of which are about
-the dialect at all. Confirm the served dialect from the row's own evidence (the `dialect`
-field each checkpoint records), never from the environment variable you set.
+**Two layers.** The scripted layer is the cell that calls the oversized tool and the cell
+that finishes: both must be cells the row's session can *execute*, because a foreign cell
+never commits and the turn then never reaches a terminal state — the row hangs rather than
+failing. The judged layer is everything above it: the outcome's identity, the host's
+recovery, and the continued session, none of which are about the dialect at all.
+
+The dialect is fixed: TypeScript is the sole RLM dialect (ADR 0096) and the cells here are
+TypeScript. **Do not try to confirm a served dialect from this bundle.** The checkpoint's
+`dialect` field is a hardcoded `"typescript"`, not a reading, so confirming it against the
+constant it already is proves nothing. Cleanup tickets for this class are named in
+`RULES.md` (FIG-3055, FIG-3022).
 
 **Fixture honesty.** The oversized payload is a real tool result returned by a real
 registered tool through the ordinary tool seam, not a hand-written message injected into
@@ -141,14 +152,28 @@ marker the `after_turn` trigger appended rides the overflow turn's own
 commit), `plugin_recovery_completed == true` (the plugin's terminal record is
 in the committed history), and `plugin_recovery_summary_chars > 0`: the
 out-of-band summarizer ran once and its summary is durable, so the recovered
-window no longer contains the oversized body. `history_messages_after_recovery > 0`
-confirms the session kept its history. The original history, including the
-oversized body, stays inspectable — that is the whole point of the durable
-record order; recovery never rewrites it.
+window no longer contains the oversized body.
 
-**Fail if:** the plugin never derecorded the marker or terminal record, no
-summary was produced, or the recovery required the fixture's host hand-rolled
-compaction.
+Two different reads are in play here and the runbook means both, separately:
+
+- `history_messages_after_recovery` is a **read-view** count. After the FIG-3107 frame
+  switch the session is resident in the recovery frame and the read view projects only that
+  frame, so `1` is the correct, expected value — not evidence that history was lost. Require
+  `> 0` and read it as "the recovered window is populated", nothing more.
+- The original history, including the oversized body, stays inspectable in the **durable**
+  tree, which the emitter reads through a different call (`durable_messages`). That is the
+  whole point of the durable record order; recovery never rewrites it. Do not expect the
+  read-view count to reflect it.
+
+Also require the recovery frame's own witness, which this bundle carries and the older text
+left unscored: `recovery_frame_moved` with `recovery_frame_reason: "compaction"`.
+
+**Fail if:** the plugin never derecorded the marker or terminal record, no summary was
+produced, or `recovery_frame_moved` / `recovery_frame_reason: "compaction"` is absent. (The
+older clause "the recovery required the fixture's host hand-rolled compaction" is deleted:
+there is no host compaction path left in the fixture for a recovery to require, so the clause
+could never fire — it described the pre-FIG-2950 world. The frame witness above is its live
+successor.)
 
 ## Phase 4 — The session continues
 
@@ -163,13 +188,23 @@ judged.
 
 ## Scorecard
 
+Score at gate granularity, one row per independent requirement — a phase that states three
+requirements cannot record which of them was observed if it is collapsed to one line.
+
 | Phase | Claim | Verdict | Evidence |
 | --- | --- | --- | --- |
 | 0 | Kernel maps `ContextOverflow` to its own stop | | `01-contract-tests.log` |
-| 1 | Overflow arrives mid-turn on an oversized tool result, both arms | | `03-observed.jsonl` |
-| 2 | Outcome is its own, agrees across arms, and differs from a provider error | | `03-observed.jsonl` |
-| 3 | Recovery is plugin-owned and completed durably, both arms | | `03-observed.jsonl` |
-| 4 | The same session continues and finishes, both arms | | `03-observed.jsonl` |
+| 1 | Overflow arrives mid-turn on an oversized tool result, injected arm | | `03-observed.jsonl` |
+| 1 | Overflow arrives mid-turn on an oversized tool result, refused arm | | `03-observed.jsonl` |
+| 2 | The overflow stop is its own outcome, not `provider_error` | | `03-observed.jsonl` |
+| 2 | Both arms report the same outcome | | `03-observed.jsonl` |
+| 2 | The control turn's stop differs from an overflow turn's | | `03-observed.jsonl` |
+| 2 | The public accessor agrees with the serialized outcome | | `03-observed.jsonl` |
+| 3 | Recovery marker and terminal record are both durable, both arms | | `03-observed.jsonl` |
+| 3 | A summary was produced (`plugin_recovery_summary_chars > 0`), both arms | | `03-observed.jsonl` |
+| 3 | `recovery_frame_moved` with `recovery_frame_reason: "compaction"`, both arms | | `03-observed.jsonl` |
+| 4 | The continued turn succeeds and does not overflow again, both arms | | `03-observed.jsonl` |
+| 4 | It runs on the same `session_id` as its overflow turn, both arms | | `03-observed.jsonl` |
 
 Record the dialect, the artifact directory, and the companion's final line with the
 scorecard.

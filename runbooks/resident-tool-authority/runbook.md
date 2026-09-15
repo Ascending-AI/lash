@@ -18,6 +18,11 @@ set -o pipefail
 mkdir -p "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR"
 ```
 
+`LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR` is a path on the **caller's** side of `kiln gate`: the
+`tee` in each phase runs outside the gate body, so set it to an absolute path the caller owns.
+A relative path resolves against two different directories on the two sides and the evidence
+lands somewhere you will not find it.
+
 ## Phase 1 — deterministic authority witnesses
 
 Do:
@@ -81,38 +86,46 @@ catalog: a separately granted tool remains executable in Lashlang and
 TypeScript without becoming a resident, re-enumerating the provider, or
 consulting a later registry definition.
 
-Abort if the filter runs fewer or more than twenty-one tests, a resolver is called
-after catalog construction, any negative case reaches preparation, a same-ID
-alias or old request loses its route, or a deferred call is admitted through
-resident membership.
+Abort if the filter runs fewer or more than twenty-one tests. The remaining properties —
+no resolver call after catalog construction, no negative case reaching preparation, a same-ID
+alias or old request keeping its route, no deferred call admitted through resident membership
+— are what those twenty-one witnesses assert internally; they are not separate checks the
+operator makes, and from the runner's side the only observable is the passed count. Read them
+as the meaning of the gate, not as a second look.
+
+Budget note: `cargo nextest run --workspace --locked` compiles every test binary in the
+workspace to run these twenty-one tests. That is the honest way to write a cross-crate filter
+and it is correct, but it is a full workspace test build, not a focused one.
 
 ## Phase 2 — durable authority bytes
 
-Run the SQLite witness directly. Then run the PostgreSQL witness against a
-caller-owned disposable database inside `kiln gate`; derive its container name
-from `KILN_GATE_ID` and let Docker allocate the host port. Remove the container
-on exit. Never point this phase at a shared database.
+Both backends run the same conformance body — `session_tool_access_durable_recovery`,
+instantiated per backend by the shared conformance macro — so that is the name to filter on
+for each. (The former per-backend filters
+`explicit_tool_access_survives_sqlite_recovery_and_invalid_bytes_refuse` and
+`explicit_tool_access_survives_postgres_recovery_and_invalid_bytes_refuse` predate the move
+into the macro, name no test, and matched nothing. Because the SQLite line comes first under
+`set -o pipefail`, a runner never reached the PostgreSQL half at all, so this phase's own
+"Abort if PostgreSQL reports a skip" could never fire.)
+
+Run the SQLite witness directly, then the PostgreSQL witness against a disposable database
+supplied by the repository's service owner, `scripts/ci/with-service.sh pg16`. Do not
+hand-roll the container: `with-service.sh` already derives a unique name, lets Docker allocate
+the host port, exports `LASH_POSTGRES_DATABASE_URL`, removes the container on exit, **and**
+labels it so the gate's leftover-refusal machinery can see it — a hand-rolled container
+carries no such label, so a run killed between `docker run` and its trap leaves an orphan
+nothing will refuse or reap. Never point this phase at a shared database.
 
 ```bash
 kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
   set -o pipefail
   . ./env.sh
   cargo nextest run -p lash-internal-sqlite-store \
-    -E "test(explicit_tool_access_survives_sqlite_recovery_and_invalid_bytes_refuse)"
+    -E "test(session_tool_access_durable_recovery)"
 
-  container="lash-access-${KILN_GATE_ID//[^[:alnum:]_.-]/-}"
-  trap '\''docker rm -f "$container" >/dev/null 2>&1 || true'\'' EXIT
-  docker run -d --rm --name "$container" \
-    -e POSTGRES_USER=lash -e POSTGRES_PASSWORD=lash -e POSTGRES_DB=lash \
-    -p 127.0.0.1::5432 postgres:16-alpine >/dev/null
-  until docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1; do
-    sleep 1
-  done
-  port="$(docker port "$container" 5432/tcp | sed '\''s/.*://'\'')"
-  export LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash"
-  export LASH_REQUIRE_POSTGRES=1
-  cargo nextest run -p lash-internal-postgres-store \
-    -E "test(explicit_tool_access_survives_postgres_recovery_and_invalid_bytes_refuse)"
+  LASH_REQUIRE_POSTGRES=1 scripts/ci/with-service.sh pg16 -- \
+    cargo nextest run -p lash-internal-postgres-store \
+      -E "test(session_tool_access_durable_recovery)"
 ' | tee "$LASH_RESIDENT_AUTHORITY_EVIDENCE_DIR/tool-access-durable-readback.log"
 ```
 
@@ -137,7 +150,7 @@ zero tests, or any malformed record restores as ambient.
 | Direct process dispatch uses one captured tool surface | old and fresh process contexts retain distinct definitions and routes | | `resident-tool-authority.log` |
 | Known nonadvertised residents retain their exact route | restored resident remains curated, nonorphaned, and executable | | `resident-tool-authority.log` |
 | Known resident identity mismatches fail atomically | mismatched exact-ID resolution is refused without state or advertised-route changes | | `resident-tool-authority.log` |
-| Deferred replay and execution retain their grant authority | four deferred witnesses pass | | `resident-tool-authority.log` |
+| Deferred replay and execution retain their grant authority | three deferred witnesses pass | | `resident-tool-authority.log` |
 | Ambient and restricted empty remain distinct in native and RLM catalogs | explicit-access witnesses retain ambient residents and render no restricted residents | | `resident-tool-authority.log` |
 | Restricted empty survives real backend recovery | SQLite and PostgreSQL reopen with restricted mode and zero resident definitions | | `tool-access-durable-readback.log` |
 | Historical and malformed access bytes fail closed | predecessor plus current invalid-row cases refuse in both backends | | `tool-access-durable-readback.log` |

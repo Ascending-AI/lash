@@ -6,6 +6,11 @@ The full distributed harness runs with:
 just restate-postgres-workers-e2e
 ```
 
+Budget for a cold build the first time: the harness builds its own binaries with
+`cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins` on
+plain Cargo, not through kiln, so it does not share the Bazel cache and a release
+profile build is paid in full.
+
 That starts Postgres, MinIO, Restate, a mock OpenAI-compatible provider, two
 workers, the h2c proxy, and the runner. Alongside the process, durable-wait,
 frame-switch, and storage gates, the runner verifies first-party turn control:
@@ -19,7 +24,20 @@ frame-switch, and storage gates, the runner verifies first-party turn control:
   manufacturing a Lash `Cancelled` terminal.
 
 The final `turn-control gates passed:` line is the deterministic evidence for
-those assertions. Session and turn IDs used by this test are routing identity,
+the first five. The break-glass gate is **not** in that line: it prints its own
+line from `control_scenarios.rs`, so score it separately and do not read a
+present `turn-control gates passed:` line as covering it. `LASH_E2E_TURN_CONTROL_ONLY=1`
+does not reach the break-glass gate either — `LASH_E2E_WORKFLOW_SEGMENT=2` is the
+only selector that runs it. Three different vocabularies name these gates across
+the runner, the harness and this README; match them by the assertion they make,
+not by name.
+
+The runner writes a `workflow-inventory.tsv` beside the completed-workflow
+manifest, and the harness only checks that the manifest is non-empty. That is a
+liveness check, not coverage: a run that completed one workflow out of the full
+inventory passes it. Score coverage yourself by diffing the two
+(`comm -3` of the sorted inventory against the sorted manifest must be empty)
+before calling a run green. Session and turn IDs used by this test are routing identity,
 not authorization. Production hosts must authorize callers before exposing the
 same driver, and cancellation remains cooperative: detached effects are not
 guaranteed to stop.
@@ -60,7 +78,12 @@ by forced re-registration behind the existing deployment URI. That replaces
 code while live invocations may replay against it and violates the
 [ADR 0043 pin-and-drain contract](../../docs/adr/0043-hosts-register-immutable-deployments.md).
 FIG-1126 changes the Restate command-journal shape at the start of every turn,
-so an in-place rebuild can RT0016 immediately. Publish the rebuilt worker at a
+so an in-place rebuild can RT0016 immediately. Note that a *green* run of this
+harness also logs dozens of `RT0016` journal mismatches: they come from the four
+deliberate crash and failover workflows and are expected there. Do not treat the
+presence of `RT0016` in the logs as evidence of an upgrade violation, and do not
+treat its absence as evidence of a clean upgrade — read the deployment status,
+not the log grep. Publish the rebuilt worker at a
 new deployment URI, register that URI as a new deployment, keep the old worker
 available until all of its invocations drain, and only then retire it.
 
@@ -90,17 +113,15 @@ Without it, the Postgres conformance binary reports a skip. To run the process
 registry conformance locally without the full E2E stack:
 
 ```sh
-docker run --rm --name lash-postgres-conformance \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=lash_conformance \
-  -p 55432:5432 \
-  -d postgres:16
-
-LASH_POSTGRES_DATABASE_URL=postgres://postgres:postgres@localhost:55432/lash_conformance \
+scripts/ci/with-service.sh pg16 -- \
   cargo test -p lash-internal-postgres-store --locked --test conformance \
   process_registry_
-
-docker rm -f lash-postgres-conformance
 ```
 
-Use a fresh database for each run when debugging registry persistence semantics.
+`with-service.sh` owns the container: it binds an ephemeral loopback port
+instead of a fixed one, exports `LASH_POSTGRES_DATABASE_URL` into the command,
+labels the container so leftover-refusal can see it, and removes it on exit. Do
+not hand-roll `docker run` with a fixed host port here — a fixed port collides
+with a concurrent lane and an unlabelled container is invisible to the leftover
+check. Each invocation gets a fresh database, which is what registry persistence
+semantics need.

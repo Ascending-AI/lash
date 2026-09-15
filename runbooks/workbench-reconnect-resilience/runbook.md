@@ -84,7 +84,8 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
 
 1. **Replace only the web process.** A `down`/`up` pair destroys the durable invocation this
    scenario depends on, and destructive reset is equally invalid. The narrow command is
-   `bash scripts/agent-workbench-dev.sh restart --port <p>` (`just agent-workbench-restart <p>`),
+   `bash scripts/agent-workbench-dev.sh restart --port <p>` (`just agent-workbench-restart <p>`
+   is the same command, after sourcing the fork's `env.sh`),
    which replaces only the Workbench process and keeps the Restate engine, its journals and the
    application data. Run it with the same `AGENT_WORKBENCH_DATA_DIR` / `AGENT_WORKBENCH_RUN_DIR`
    and the same `RESTATE_AUTHORITY_ID` as boot; the launcher refuses rather than replacing
@@ -102,8 +103,11 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
 3. **The phase must actually move, and the window is short.** A run in which the phase never
    left `live` proves nothing about reconnection. That is a **void phase, not a pass** —
    retry it, and only score a restart whose phase transition was observed. Do not lengthen an
-   outage by adding a sleep. Observe it properly instead: `restart` completes in about two
-   seconds on a warm build, so per [../RULES.md](../RULES.md) the phase sampler must run **in
+   outage by adding a sleep. Observe it properly instead: `restart` **blocks** — it re-runs its
+   build check before replacing anything, so the driver's own process is inside the command for
+   the whole outage and cannot sample it (measured: ~14 s of command, ~12 s of user-visible
+   outage on a warm fork; do not plan around any particular figure). Per
+   [../RULES.md](../RULES.md) the phase sampler must therefore run **in
    the page** — a `setInterval` recording the phase pair into an array the driver reads
    afterwards — and must be started *before* the kill. Anything the driver must do *during*
    the outage (the degraded screenshot, the "retry now" press) needs the restart launched
@@ -115,10 +119,18 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
 5. **Record which recovery path fired; never gate on it.** Capture the observation and
    product stream traffic across the reconnect and classify it. The paths differ in kind, and
    conflating them is the mistake this rule exists to prevent:
-   - `replay_gap` — reconnect-specific. The replacement process's in-memory replay store
-     (`InMemoryLiveReplayStore`, 2048 events / 120s TTL) holds no buffer for the session, so
-     the browser's retained cursor is unservable and the gap reason is `unavailable`. A >120s
-     outage with later activity trims an existing buffer instead → `trimmed`.
+   - `replay_gap` — **not reconnect evidence on its own; classify it by the incarnation id
+     inside `requested_cursor`, never by the record type.** A snapshot recovery synthesizes a
+     cursor that names no replay incarnation
+     (`read_state_projection`, `examples/agent-workbench/src/main_sections/state_reads.rs`,
+     builds `lashsc2:workbench-durable:<revision>:0:<session-id>`), which
+     `InMemoryLiveReplayStore` can never serve — so an idle healthy shell emits a steady
+     `replay_gap(unavailable)` every few seconds for as long as a tab is open (17 fired in one
+     judged run; exactly one belonged to the reconnect). The reconnect-specific gap is the one
+     whose `requested_cursor` carries the **pre-restart live replay incarnation**: the
+     replacement process's in-memory replay store (`InMemoryLiveReplayStore`, 2048 events /
+     120s TTL) holds no buffer for it, so the reason is `unavailable`. A >120s outage with
+     later activity trims an existing buffer instead → `trimmed`.
    - `terminal_replacement` — **not** reconnect evidence. Every `Committed` observation
      becomes one, so it fires on every turn commit; a healthy run shows many.
    - `resident_replacement` — revision-stable resident authority. It triggers an asynchronous
@@ -155,7 +167,9 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
   port-isolated stack with
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp>/run
   AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <p>`
-  (or `just agent-workbench <p>` with the same environment). Gate `GET /healthz` → 200.
+  (the `just agent-workbench <p>` recipe runs the same command with the same environment, but
+  it does not export `CARGO_TARGET_DIR`, so source the fork's `env.sh` first).
+  Gate `GET /healthz` → 200.
   Export the same `AGENT_WORKBENCH_DATA_DIR` and `AGENT_WORKBENCH_RUN_DIR` on **every**
   subsequent helper invocation.
 - Pick one run session id `<S>` = `runbook-reconnect-<run-id>` and open `/?session_id=<S>`.
@@ -170,9 +184,16 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
 - **Layer 2 — durable state:** the session graph in
   `<data-dir>/lash-sessions/durable-core.db`, table `graph_nodes`, filtered to
   `session_id = <S> AND tombstoned = 0`, reading `node_json` for `kind = "event"` nodes whose
-  `event.Conversation.role` is `User` / `Assistant`; the app projection
-  `GET /api/state?session_id=<S>.messages`; the product-event log
-  `<data-dir>/product-events.json` keyed by `<S>`; and `<data-dir>/active-turns.json`.
+  `event.Conversation.role` is `User` / `Assistant` **and whose node id is a committed-row id**
+  — `m_ingress_ti:*` for user rows and `workbench-assistant:<turn>` for assistant rows.
+  Without the id qualifier the role filter also counts RLM iteration state and over-counts
+  assistant rows several-fold. The app projection is
+  `GET /api/state?session_id=<S>.messages`. The product-event log
+  `<data-dir>/product-events.json` is shaped
+  `{"format_version": 2, "histories": {"<S>": {"cursor": …, "events": [...]}}}` — keyed under
+  `histories`, not by `<S>` at top level — and its `message` events are **user rows only**, so
+  it cannot serve as a durable source of assistant-row identity. `<data-dir>/active-turns.json`
+  is `{"prompts": [], "turns": []}`, not session-keyed: use it as an emptiness check only.
 - **Layer 3 — logs:** `<data-dir>/trace.jsonl`, records with `context.session_id == <S>`;
   count `type == "turn_completed"` and read `context.turn_id`. The workbench log
   (`<run-dir>/workbench-127.0.0.1_<p>.log`) carries the two process incarnations and is where
@@ -282,7 +303,7 @@ reachable here.
 
 **3c — "retry now" forces convergence and changes nothing.** Make the banner appear once more
 with a second `restart`, and press **retry now** exactly once while it is visible. Because the
-window is about two seconds (golden rule 3), arm the press **in the page** — a watcher that
+restart command blocks for the whole outage (golden rule 3), arm the press **in the page** — a watcher that
 clicks `#shellStatusRetry` the first time `#shellStatus` is not hidden, recording the phase
 pair and the row multiset at the moment of the click. That is a user pressing the button as
 soon as they can see it; a driver-side click loop blocked inside the restart command will

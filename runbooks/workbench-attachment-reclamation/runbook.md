@@ -57,7 +57,7 @@ and renders no button for either. `curl` against `/api/admin/store-maintenance`
    rehearsal and torn down at the end.
 3. Record the exact workbench PID the launcher reports. Never use `pkill`,
    `killall`, a process-name match, or a wildcard as a kill target; teardown is
-   `just agent-workbench-down <port>` **with the same `AGENT_WORKBENCH_RUN_DIR`
+   `bash scripts/agent-workbench-dev.sh down --port <port>` **with the same `AGENT_WORKBENCH_RUN_DIR`
    and `AGENT_WORKBENCH_DATA_DIR` exported as the boot**. Without them the
    launcher looks for its stack metadata under the repo-local `.agent-workbench`
    and refuses the teardown rather than tearing down a stack it cannot prove it
@@ -86,11 +86,17 @@ AGENT_WORKBENCH_RUN_DIR="$work/run" \
 AGENT_WORKBENCH_OPEN=0 \
 AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion \
 RESTATE_AUTHORITY_ID="attachment-reclamation-$port" \
-  just agent-workbench "$port"
+  bash scripts/agent-workbench-dev.sh up --port "$port"
 ```
 
-The launcher builds the binary itself, through kiln/Bazel with `--config=judged`,
-before it takes any lock. An operator rehearsing repeatedly can point
+(`just agent-workbench "$port"` is the same command; it does not export
+`CARGO_TARGET_DIR`, which is why `. ./env.sh` comes first above.)
+
+The launcher builds the binary itself before it takes any lock. This row is the one
+exception to the Bazel path RULES.md describes: `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO`
+turns on the `provider-wire-fixtures` feature, and a workbench built with that feature still
+goes through Cargo with `--profile judged` (RULES.md, "The judged build geometry is the
+shipping one"). Expect a Cargo build here, not `kiln build --config=judged`. An operator rehearsing repeatedly can point
 `AGENT_WORKBENCH_BIN` at an already-built executable to skip that build; nothing
 below depends on which of the two produced it.
 
@@ -143,8 +149,10 @@ zero while the mark phase had in fact read nothing at all.
 
 ## Phase 3 — Establish the catalog, then the empty-root refusal
 
-Send one text-only turn. The scripted provider may fail the turn itself; the
-catalog write is what this step needs, not a completion. Then re-run the reclaim
+Send one text-only turn. The scripted provider **does** fail the turn under this fixture —
+both turns in this rehearsal settle as `turn could not be completed`, which is also why
+Phase 7's `removed_node_count` is 0 while the tombstone count is 2. The catalog write is what
+this step needs, not a completion. Then re-run the reclaim
 at a **zero-length** grace period.
 
 ```sh
@@ -195,7 +203,11 @@ Phase 3 request.
 ```sh
 curl -s -X POST "http://127.0.0.1:$port/api/turn" -H 'content-type: application/json' \
   -d '{"text":"describe this","attachment_id":"<id>"}'
-# wait for /api/state to show the user row carrying the attachment, then:
+# Wait for the COMMITTED reference, not the in-flight user row: poll until
+# /api/state.active_turns is empty and the attachment manifest row carries a
+# non-null committed_at_ms (equivalently, until the attachment appears as a
+# graph_nodes reference). committed_at_ms is what promotes the blob to a root.
+# Waiting on the in-flight row instead produces a false Abort here.
 curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-maintenance" \
   -H 'content-type: application/json' \
   -d '{"reclaim_attachments":{"grace_period_ms":0,"empty_root_set":"refuse"}}'
@@ -276,7 +288,7 @@ cleanly is worse than none.
 ```sh
 AGENT_WORKBENCH_DATA_DIR="$work/data" AGENT_WORKBENCH_RUN_DIR="$work/run" \
 RESTATE_AUTHORITY_ID="attachment-reclamation-$port" \
-  just agent-workbench-down "$port"
+  bash scripts/agent-workbench-dev.sh down --port "$port"
 rm -rf "$work"
 ```
 

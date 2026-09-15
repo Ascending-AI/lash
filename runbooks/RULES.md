@@ -30,7 +30,7 @@ judged. **Manual judged** is the semantic browser or artifact-judgment runbook l
 | `agent-service` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs `Test workspace shard`. | `Functional E2E (agent-service)` runs `agent-service-restate-e2e`, including the Restate ingress, process-workflow, and effect-group HTTP live tests; it is not a browser journey. | [`agent-service-branching`](agent-service-branching/runbook.md), [`agent-service-effect-groups`](agent-service-effect-groups/runbook.md), and [`tictactoe-full-game`](tictactoe-full-game/runbook.md). The deterministic, operator-only [`agent-service-effect-group-retirement`](agent-service-effect-group-retirement/runbook.md) rehearsal is inventoried separately and is never a judged browser row. |
 | `agent-workbench` | `Test docs + build cache` runs `Check workspace (all targets)` and `Package feature checks` runs the package-scoped workbench check; `Test shard ${{ matrix.shard }}/4` runs `Test workspace shard`. | `Functional E2E (agent-workbench)` runs `agent-workbench-restate-e2e` with Restate and Postgres live tests; it is not a browser journey. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. The deterministic, operator-only [`workbench-attachment-reclamation`](workbench-attachment-reclamation/runbook.md) rehearsal of the condemn/vacuum/reclaim levers is inventoried separately and is never a judged browser row: the workbench renders no affordance for either lever, so `curl` against the admin route is the operator surface. |
 | `slack-clone` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs the workspace tests, including the Slack package tests. | `Functional E2E (slack-clone-full-host)` is token-free and deterministic. The separate `Slack-clone live-model acceptance` workflow is dispatch-only and uses exact nonce/tool/UI oracles around real OpenRouter turns. | [`slack-clone-bot`](slack-clone-bot/runbook.md), whose Phase 3M carries MCP client depth and runtime integration attach/detach. |
-| `rlm-smoke` | The workspace check compiles `rlm-smoke-host`; its focused tests prove path, symlink, and command jail refusals. | `just rlm-smoke-e2e` runs `file-edit-bugfix`, `missing-helper-file`, and `config-contract-edit` against exact shell oracles after live OpenRouter turns. It is a local/manual paid gate, not per-PR CI. | None. These are scripted deterministic-oracle rows, never judged browser rows. |
+| `rlm-smoke` | The workspace check compiles `rlm-smoke-host`; its focused tests prove path, symlink, and command jail refusals. | `just rlm-smoke-e2e` runs the three separately funded matrix rows `rlm-smoke-file-edit-bugfix`, `rlm-smoke-missing-helper-file` and `rlm-smoke-config-contract-edit` against exact shell oracles after live OpenRouter turns; this one line describes the gate, the three matrix rows are the inventory. It is a local/manual paid gate, not per-PR CI. | None. These are scripted deterministic-oracle rows, never judged browser rows. |
 | `workflow-graph-roundtrip` | `Test docs + build cache` runs `Check workspace (all targets)`; `Test shard ${{ matrix.shard }}/4` runs workspace tests; `Lint` runs `Check workflow graph model`. | Partial: `Functional E2E (workflow-graph-roundtrip)` runs `workflow-graph-integration-verify` (frontend production build, backend tests, and model check); it does not judge the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
 
 ## One judged row per scenario, pinned to TypeScript
@@ -218,7 +218,23 @@ the endpoints a runbook gates on, or carry the wrong geometry, and fake a contra
 violation. A caller that genuinely has a binary to reuse passes it as
 `AGENT_WORKBENCH_BIN` and lets the launcher own the boot. You own everything you started: end the run — success
 or Abort — with the example stopped and any Docker containers it launched torn down
-(`just agent-workbench-down <port>`).
+(`bash scripts/agent-workbench-dev.sh down --port <port>`, wrapped by
+`just agent-workbench-down <port>`).
+
+**The `just` workbench recipes do not export `CARGO_TARGET_DIR`.** `just agent-workbench
+<port>`, `-down`, `-restart` and the rest all exist and all run
+`scripts/agent-workbench-dev.sh`, but a lane that invokes them without sourcing the fork's
+`env.sh` first builds into the default target directory instead of the fork's warm one. Source
+`env.sh`, or call `bash scripts/agent-workbench-dev.sh <verb> --port <port>` directly — which
+is the form every runbook here spells out.
+
+**The launcher's data-ownership lock is box-wide, not per-port.** Lifecycle commands
+(`up`/`down`/`restart`) serialize on `/tmp/lash-agent-workbench-$UID/data-ownership.lock`,
+shared across every port and every checkout for the user. A concurrent lifecycle command
+anywhere on the box makes an unrelated row's command fail with `another launcher lifecycle
+command is updating application data ownership` — a message that reads like data corruption
+and is not one. Retry the command; it succeeds as soon as the other one releases the lock. A
+drive running rows in parallel should expect this and not treat it as an Abort.
 
 **The judged build geometry is the shipping one.** Every judged host is built with no
 `testing` feature on any host dependency and `debug-assertions`/`overflow-checks`
@@ -273,7 +289,10 @@ the Restate engine and its journals, any managed Postgres, the registered deploy
 application data directory. It re-registers no deployment. This is the command a phase that
 proves durable state survives a process replacement uses.
 
-It refuses before stopping anything unless the launcher's own run metadata proves it owns a
+It is verified and is **not** blocked: FIG-3035 landed it, the 2026-09-15 judged drive
+executed it on every workbench row that needs a process replacement, and every continuity gate
+held. A phase that still reads "blocked by FIG-1164" is stale documentation, not a live
+constraint. It refuses before stopping anything unless the launcher's own run metadata proves it owns a
 matching stack at exactly the current settings — including the recorded Restate trust domain,
 so a row that exports a different `RESTATE_AUTHORITY_ID` is refused rather than silently bound
 to a new durable state, and a stack started by an older launcher, which recorded no trust

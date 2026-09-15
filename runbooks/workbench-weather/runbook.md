@@ -10,9 +10,11 @@ whether the agent can turn live web results into a finished, source-backed answe
 entering a repeated execution-error loop. The judged subject is web grounding: whether
 search output becomes parsed values a user can trust, not whether a language works.
 
-**History.** This scenario was authored as a two-dialect comparison. [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)
-retired the second dialect, so it is now one TypeScript row. Every grounding, value,
-conversion and error-loop gate below is unchanged; only the comparison framing is gone.
+**History.** This scenario was authored as a two-dialect comparison and lived at
+`runbooks/workbench-weather-dialects`. [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)
+retired the second dialect, so it is now one TypeScript row and the directory is
+`runbooks/workbench-weather`. Every grounding, value, conversion and error-loop gate below
+is unchanged; only the comparison framing is gone.
 
 **Real tokens.** The row uses OpenRouter and the keyless Parallel Search MCP web tools. Current
 conditions and exact prose vary. Gate the turn on its terminal outcome, successful tool
@@ -74,8 +76,13 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
    `examples/agent-workbench/src/main_sections/tests/ui_contract.rs` asserts that absence on
    purpose, because a badge would be a second place a language could be claimed from. Do not
    gate on either. The live witnesses are the transcript's code-block `language` and the
-   turn's `exec_code_completed` events, which must all read `typescript`; `/api/state.settings`
-   carries only `model`, `model_variant`, `model_variants`, `session_id` and `session_name`.
+   transcript disclosure's `<summary>` text (`typescript completed · N tool(s)`). Do **not**
+   look for a language field on `exec_code_completed`: its keys are `context`, `duration_ms`,
+   `error`, `id`, `observation_count`, `observation_projections`, `output`, `output_chars`,
+   `schema_version`, `terminal_finish`, `timestamp`, `tool_calls`, `type`, and
+   `exec_code_started` carries only `code`, `code_chars`, `context`, `id`, `schema_version`,
+   `timestamp` — a driver taking the older wording literally has no field to read and fails a
+   gate the product satisfies. `/api/state.settings` carries only `model`, `model_variant`, `model_variants`, `session_id` and `session_name`.
    Record the served provider model from the row's model-call evidence, and pin
    `OPENROUTER_MODEL` explicitly: the workbench default is a different provider's model, so an
    unpinned row silently changes tier. A mismatch or unrecorded model substitution is a
@@ -97,14 +104,17 @@ credential values.
 Use these allocations exactly; they are intentionally explicit rather than relying on the
 workbench port-derivation fallback:
 
-| Dialect | Workbench | Restate endpoint | ingress | admin | node | Postgres | Session |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `typescript` | 3302 | 11801 | 10800 | 21790 | 21791 | 18152 | `fig2351-weather-typescript-<run-id>` |
+| Workbench | Restate endpoint | ingress | admin | node | Postgres | Session |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 3302 | 11801 | 10800 | 21790 | 21791 | 18152 | `fig2351-weather-typescript-<run-id>` |
 
 Export all of the following with that table's values before
-`just agent-workbench <workbench-port>`:
+`bash scripts/agent-workbench-dev.sh up --port <workbench-port>` (the
+`just agent-workbench <workbench-port>` recipe is the same command, but it does not export
+`CARGO_TARGET_DIR`, so source the fork's `env.sh` first). `LASH_RUNBOOK_DIALECT` is **not**
+in the list: nothing reads it (`scripts/agent-workbench-dev.sh` never references it), so
+exporting it only creates a variable a driver believes in.
 
-- `LASH_RUNBOOK_DIALECT=typescript`;
 - `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig2351-weather/<run-id>/typescript/data`;
 - `AGENT_WORKBENCH_RUN_DIR=/workspace/tmp/fig2351-weather/<run-id>/typescript/run`;
 - `AGENT_WORKBENCH_RESTATE_ADDR=127.0.0.1:<endpoint>`;
@@ -122,7 +132,7 @@ Before boot, require the row's data/run/artifact directories not to exist and al
 allocated ports to be free. Never inspect, stop, or reuse anything on ports 3063 or 3067.
 Save evidence under
 `/workspace/tmp/fig2351-weather/<run-id>/typescript/artifacts`. Tear the row down with the
-same exported environment and `just agent-workbench-down <workbench-port>`; then require
+same exported environment and `bash scripts/agent-workbench-dev.sh down --port <workbench-port>`; then require
 the workbench port closed and both exact containers absent. Preserve artifacts, but remove
 the row's data and run directories only after evidence has been copied.
 
@@ -137,7 +147,9 @@ read path is
 `docker exec <postgres-container> psql -h 127.0.0.1 -p <postgres> -U lash -d lash`. Its
 `lash_graph_nodes` columns are `session_id, node_id, parent_node_id, generation,
 frame_node_id, node_json, tombstoned`; the rendered pair lives in the `Conversation` events
-inside `node_json`. Trace truth is the row's
+inside `node_json`, and the committed assistant content is the `parts[]` array of
+`node_json.event.Conversation` with `kind: "Text"` entries — not a flat `content` string.
+That shape is what makes the byte comparison below possible. Trace truth is the row's
 `data/trace.jsonl` and `data/lashlang-execution.jsonl`, filtered by the exact session id.
 The `lashlang-` filename names the IR and the VM that wrote the records, not an authoring
 language.
@@ -193,7 +205,10 @@ differences, bounds, and placeholder scan. Keep the raw rendered answer in the s
 
 Expect: golden rules 4 through 7 all pass. Then perform the RULES.md three-layer
 cross-check: the DOM, `/api/state`, and active durable graph ancestry contain the same one
-user/assistant pair by identity and rendered text; the trace contains one matching
+user/assistant pair and the same rendered text. Match the **user** row by text and turn, not
+by a shared id string: its API id is `workbench-user:<turn-id>` while its durable committed id
+is `m_ingress_ti:<hash>`. Only the assistant id (`workbench-assistant:<turn-id>`) is shared
+across surfaces, so it alone may be matched by identity. The trace contains one matching
 completed turn. Any disagreement is a contract violation → Abort/RCA. Save
 `03-crosscheck.json` and screenshot the fully scrolled answer as
 `03-weather-answer.png`.
@@ -214,21 +229,21 @@ generic “looks good.”
 | Gate | Objective gate | Result | Evidence |
 | --- | --- | --- | --- |
 | Fresh isolated boot | six explicit ports free before boot; scoped DOM/API/store/trace are empty and agree | | `00-*` |
-| Dialect and model identity | code-block `language` and execution events read `typescript`; no badge or `settings.rlm_dialect` is expected; served model recorded and pinned | | `00-identities.json`, `01-finished-trace.json` |
+| Dialect and model identity | code-block `language` and the disclosure `<summary>` read `typescript`; no badge, no `settings.rlm_dialect`, and no language field on `exec_code_completed` is expected; served model recorded and pinned | | `00-identities.json`, `01-finished-trace.json` |
 | Do → expect completion | running observed; then idle + no active turn + one completed/final-value terminal within five minutes | | `01-finished.png`, state, trace |
 | Validation-only tools | every agent tool is a Parallel web-search or web-fetch MCP call | | `02-execution-history.json` |
 | Live source support | successful Utrecht current-condition result supports temperature, condition, humidity, and wind | | `02-live-sources.json` |
 | No repeated-identical-error loop | no two consecutive failed executions share a non-empty error; otherwise quote it here | | `02-execution-history.json` |
 | Rendered weather shape | concrete temperature/unit, source condition, humidity, and wind/unit; no broken placeholder token | | `03-weather-answer.png`, `03-answer-values.json` |
 | Internal consistency | source rounding, sanity bounds, and all displayed unit conversions agree | | `03-answer-values.json` |
-| Three-layer fidelity | one user/assistant pair agrees by identity and text across DOM, API, durable graph, and trace | | `03-crosscheck.json` |
+| Three-layer fidelity | one user/assistant pair agrees across DOM, API, durable graph, and trace — assistant by shared id, user by text and turn | | `03-crosscheck.json` |
 | Teardown | exact PID, ports, and containers are gone | | `04-teardown.txt` |
 
 ### Run summary
 
-| Dialect | Verdict | Rendered answer or exact failing error | Evidence directory |
-| --- | --- | --- | --- |
-| `typescript` | | | |
+| Verdict | Rendered answer or exact failing error | Evidence directory |
+| --- | --- | --- |
+| | | |
 
 **Aggregate:** did a fresh session search live Utrecht weather, parse the returned values,
 finish within budget, and render a source-backed, internally consistent answer without
