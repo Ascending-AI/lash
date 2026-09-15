@@ -242,6 +242,9 @@ struct StallingProvider {
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Semaphore>,
     calls: Arc<AtomicUsize>,
+    /// Counts the host's `close` calls, so the drain step reports the closes
+    /// the provider observed rather than asserting its own intention.
+    closes: Arc<AtomicUsize>,
 }
 
 impl StallingProvider {
@@ -254,12 +257,17 @@ impl StallingProvider {
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Semaphore::new(0));
         let calls = Arc::new(AtomicUsize::new(0));
+        let closes = Arc::new(AtomicUsize::new(0));
         let handle = {
             let entered = Arc::clone(&entered);
             let release = Arc::clone(&release);
             let calls = Arc::clone(&calls);
+            let closes = Arc::clone(&closes);
             lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
                 .kind("process-operator-flow")
+                .on_close(move || {
+                    closes.fetch_add(1, Ordering::SeqCst);
+                })
                 .complete(move |_request| {
                     let entered = Arc::clone(&entered);
                     let release = Arc::clone(&release);
@@ -283,6 +291,7 @@ impl StallingProvider {
             entered,
             release,
             calls,
+            closes,
         }
     }
 
@@ -424,10 +433,15 @@ impl RuntimeEffectController for JournalController {
     }
 }
 
+/// Every scenario writes a JSONL trace. A drain step that claims it flushed
+/// the sink has to read the flushed records back, and `flush_trace_sink` is a
+/// no-op when no sink is configured, so the sink is part of the shared core
+/// rather than a per-scenario extra.
 fn core(
     storage: &PostgresStorage,
     provider: ProviderHandle,
     attachments: &tempfile::TempDir,
+    trace_path: &std::path::Path,
 ) -> Result<lash::LashCore> {
     let protocol = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -459,11 +473,100 @@ fn core(
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))
         .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+        .trace_jsonl_path(trace_path)
+        .trace_level(lash::tracing::TraceLevel::Extended)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "process-operator-flow-worker",
             uuid::Uuid::new_v4().to_string(),
         ))
         .context("build process operator-flow core")
+}
+
+/// Where a scenario writes its trace. The gate reads back the same file the
+/// harness read, so when the gate names a directory the trace has to outlive
+/// this process; a direct run keeps its own temporary directory instead.
+enum TraceRoot {
+    Owned(tempfile::TempDir),
+    Given(std::path::PathBuf),
+}
+
+impl TraceRoot {
+    fn open(label: &str) -> Result<Self> {
+        match std::env::var("LASH_PROCESS_OPERATOR_TRACE_DIR") {
+            Ok(dir) if !dir.is_empty() => {
+                let path = std::path::PathBuf::from(dir);
+                std::fs::create_dir_all(&path)
+                    .with_context(|| format!("create the {label} trace directory"))?;
+                Ok(Self::Given(path))
+            }
+            _ => Ok(Self::Owned(tempfile::tempdir().with_context(|| {
+                format!("open a temporary {label} trace directory")
+            })?)),
+        }
+    }
+
+    fn path(&self) -> &std::path::Path {
+        match self {
+            Self::Owned(dir) => dir.path(),
+            Self::Given(path) => path.as_path(),
+        }
+    }
+}
+
+/// The dialect the turn's committed cell ran under, read off the RLM
+/// extraction diagnostic that cell committed. That record names the dialect
+/// twice and never as a constant of this harness: `llm_extraction_payload`
+/// builds the counts key as `{language_id}_cell_count` and the decision as
+/// the dialect's own `execute_<language>` name. ADR 0096 leaves one language
+/// in the tree, which is exactly why a literal here and a second literal in
+/// the gate would agree with each other while agreeing with nothing the turn
+/// did.
+fn recorded_dialect(records: &[Value]) -> Result<String> {
+    for record in records {
+        if record.get("type").and_then(Value::as_str) != Some("protocol_step")
+            || record
+                .pointer("/payload/RlmDiagnostic/phase")
+                .and_then(Value::as_str)
+                != Some("llm_extraction")
+        {
+            continue;
+        }
+        let payload = record
+            .pointer("/payload/RlmDiagnostic/payload")
+            .context("an extraction diagnostic carried no payload")?;
+        let counts = payload
+            .get("counts")
+            .and_then(Value::as_object)
+            .context("an extraction diagnostic carried no counts")?;
+        let Some(dialect) = counts.iter().find_map(|(key, value)| {
+            let dialect = key.strip_suffix("_cell_count")?;
+            (value.as_u64()? > 0).then(|| dialect.to_string())
+        }) else {
+            continue;
+        };
+        let decision = payload.get("decision").and_then(Value::as_str);
+        ensure!(
+            decision == Some(format!("execute_{dialect}").as_str()),
+            "the extraction counted a {dialect} cell but decided {decision:?}"
+        );
+        return Ok(dialect);
+    }
+    bail!("the flushed trace records no executed cell to read a dialect from")
+}
+
+/// The trace records the core flushed, as a judge reads them off disk. A
+/// missing file is an empty flush rather than an error: the gate's reading is
+/// the count, and zero is a failing count, not a crash.
+fn flushed_trace_records(path: &std::path::Path) -> Result<Vec<Value>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error).context("read the flushed trace"),
+    };
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).context("parse a flushed trace record"))
+        .collect()
 }
 
 fn queued_batch_draft(
@@ -509,7 +612,13 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
             .build()
             .into_handle();
     let attachments = tempfile::tempdir().context("selected-drain attachment directory")?;
-    let core = core(storage, provider, &attachments)?;
+    let traces = TraceRoot::open("selected-drain")?;
+    let core = core(
+        storage,
+        provider,
+        &attachments,
+        &traces.path().join("selected-drain.trace.jsonl"),
+    )?;
     let session = core.session(SESSION_ID).open().await?;
     let store_factory = storage.session_store_factory_with_shared_process_registry();
     let store = store_factory
@@ -669,7 +778,9 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     let provider = StallingProvider::new();
     let provider_handle = provider.handle.clone();
     let attachments = tempfile::tempdir().context("drain attachment directory")?;
-    let core = core(storage, provider.handle.clone(), &attachments)?;
+    let traces = TraceRoot::open("drain")?;
+    let trace_path = traces.path().join("graceful-drain.trace.jsonl");
+    let core = core(storage, provider.handle.clone(), &attachments, &trace_path)?;
     let session = { core.session(TURN_SESSION_ID).open().await? };
     let journal = Arc::new(JournalController::default());
     let task_journal = Arc::clone(&journal);
@@ -716,7 +827,6 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
 
     emit(json!({
         "checkpoint": "seeded_drain_deployment",
-        "dialect": "typescript",
         "seeded_session_id": TURN_SESSION_ID,
         "in_flight_turn_id": "graceful-drain-in-flight",
         "provider_calls": provider.calls.load(Ordering::SeqCst),
@@ -748,9 +858,23 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     let parked = session.park().await.context("park drained session")?;
     let parked_session_id = parked.session_id().to_string();
     ensure!(journal.active().is_empty(), "effect journal is not empty");
+    let journal_completed = journal.completed();
     ensure!(
-        !journal.completed().is_empty(),
+        !journal_completed.is_empty(),
         "no completed effect was recorded"
+    );
+    // The step under test is "let the admitted effect settle", so the reading
+    // is which of the effects that were in flight before the drain are in the
+    // controller's completed set afterwards, not a host-authored `true`.
+    let in_flight_effect_completed = active_before_drain
+        .iter()
+        .filter(|effect| journal_completed.contains(effect))
+        .cloned()
+        .collect::<Vec<_>>();
+    ensure!(
+        in_flight_effect_completed == active_before_drain,
+        "the in-flight effect did not settle during drain: before={active_before_drain:?} \
+         completed={journal_completed:?}"
     );
 
     // The process worker's run tasks are represented by released leases here;
@@ -795,7 +919,16 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     );
 
     provider_handle.close().await.context("close provider")?;
+    let provider_closed = provider.closes.load(Ordering::SeqCst);
+    ensure!(provider_closed == 1, "the provider observed no close");
     core.flush_trace_sink().context("flush trace sink")?;
+    let trace_records = flushed_trace_records(&trace_path)?;
+    ensure!(
+        !trace_records.is_empty(),
+        "the flushed trace sink recorded nothing at {}",
+        trace_path.display()
+    );
+    let dialect = recorded_dialect(&trace_records)?;
     let records = records_json(&registry).await?;
     assert_drain_records(&records)?;
     let drain_faults = fault_sink.recorded();
@@ -810,11 +943,13 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
         "ingress_accepting": ingress_accepting.load(Ordering::SeqCst),
         "new_turn_admitted": new_turn_admitted,
         "provider_calls": provider.calls.load(Ordering::SeqCst),
-        "in_flight_effect_completed": true,
+        "dialect": dialect,
+        "trace_path": trace_path,
+        "in_flight_effect_completed": in_flight_effect_completed,
         "turn_final_value": output.final_value(),
         "parked_session_id": parked_session_id,
         "journal_active": journal.active(),
-        "journal_completed": journal.completed(),
+        "journal_completed": journal_completed,
         "drain_report_abandoned": report.abandoned,
         "drain_report_deferred": report.deferred.iter().map(|entry| json!({
             "process_id": entry.process_id,
@@ -823,8 +958,8 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
         "observer_terminal": "Abandoned",
         "observer_abandon_writer": format!("{:?}", evidence.writer),
         "observer_abandon_owner_id": evidence.owner.as_ref().map(|owner| owner.owner_id.clone()),
-        "provider_closed": true,
-        "trace_flushed": true,
+        "provider_closed": provider_closed,
+        "trace_flushed": trace_records.len(),
         "processes": records,
     }));
     Ok(())
@@ -914,7 +1049,13 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
             .complete(|_request| async { Ok(scripted_response("unused")) })
             .build()
             .into_handle();
-    let core = core(storage, provider, &attachments)?;
+    let traces = TraceRoot::open("request-abandon")?;
+    let core = core(
+        storage,
+        provider,
+        &attachments,
+        &traces.path().join("request-abandon.trace.jsonl"),
+    )?;
     let seeded = core
         .processes()
         .get(&ProcessId::from(REQUEST_PROCESS_ID))
@@ -1058,24 +1199,26 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         evidence.owner.as_ref() == Some(&silent_owner),
         "wrong lapsed owner"
     );
+    // Re-read the lease rather than asserting the cleanup happened: the
+    // holder the registry still reports is the reading the gate needs.
+    let reconciled_lease = registry
+        .get_process_lease(&ProcessId::from(REQUEST_PROCESS_ID))
+        .await?;
     ensure!(
-        registry
-            .get_process_lease(&ProcessId::from(REQUEST_PROCESS_ID))
-            .await?
-            .is_none(),
-        "reconciled terminal retained a lease"
+        reconciled_lease.is_none(),
+        "reconciled terminal retained a lease: {reconciled_lease:?}"
     );
     let observed_terminal = core
         .processes()
         .list_observed_by(&SessionScope::new(OBSERVER_SESSION_ID), &all_processes())
         .await?;
+    let observed_row = observed_terminal
+        .iter()
+        .find(|process| process.process_id == REQUEST_PROCESS_ID)
+        .context("observer did not see the reconciled row at all")?;
     ensure!(
-        observed_terminal.iter().any(|process| {
-            process.process_id == REQUEST_PROCESS_ID
-                && process.lifecycle == ProcessStatus::Abandoned
-                && process.terminal()
-        }),
-        "observer did not see the reconciled terminal"
+        observed_row.lifecycle == ProcessStatus::Abandoned && observed_row.terminal(),
+        "observer did not see the reconciled terminal: {observed_row:?}"
     );
     let sweep_faults = fault_sink.recorded();
     ensure!(
@@ -1096,9 +1239,12 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         "terminal": terminal.terminal(),
         "abandon_writer": format!("{:?}", evidence.writer),
         "lapsed_owner_id": evidence.owner.as_ref().map(|owner| owner.owner_id.clone()),
-        "observer_terminal_visible": true,
+        "observer_terminal_status": format!("{:?}", observed_row.lifecycle),
+        "observer_terminal_terminal": observed_row.terminal(),
         "observer_count": observed_terminal.len(),
-        "lease_cleared": true,
+        "reconciled_lease_holder": reconciled_lease
+            .as_ref()
+            .map(|lease| lease.owner.owner_id.clone()),
         "pending_marker_retained_on_terminal": terminal.abandon_request.is_some(),
     }));
     Ok(())
@@ -1107,6 +1253,86 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn extraction_diagnostic(counts: Value, decision: &str) -> Value {
+        json!({
+            "schema_version": 21,
+            "type": "protocol_step",
+            "plugin_id": "rlm_protocol",
+            "payload": {
+                "RlmDiagnostic": {
+                    "phase": "llm_extraction",
+                    "payload": {
+                        "decision": decision,
+                        "termination": "natural",
+                        "counts": counts,
+                    },
+                }
+            },
+        })
+    }
+
+    /// The dialect the gate compares against is read from the record the turn
+    /// committed, so a harness that never ran a cell reports that rather than
+    /// a language name it knew before the turn started.
+    #[test]
+    fn the_dialect_is_read_from_the_committed_cells_own_diagnostic() {
+        let records = vec![
+            json!({ "schema_version": 21, "type": "turn_started" }),
+            extraction_diagnostic(
+                json!({ "code_chars": 18, "typescript_cell_count": 1 }),
+                "execute_typescript",
+            ),
+        ];
+        assert_eq!(
+            recorded_dialect(&records).expect("a committed cell names its dialect"),
+            "typescript"
+        );
+    }
+
+    #[test]
+    fn a_trace_with_no_executed_cell_names_no_dialect() {
+        let records = vec![
+            json!({ "schema_version": 21, "type": "turn_started" }),
+            extraction_diagnostic(
+                json!({ "code_chars": 0, "typescript_cell_count": 0 }),
+                "stop_no_progress",
+            ),
+        ];
+        let error = recorded_dialect(&records).expect_err("no cell ran");
+        assert!(
+            error.to_string().contains("no executed cell"),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// The two spellings in the record come from the same dialect, so a record
+    /// whose decision disagrees with the cell it counted is a defect in the
+    /// reading, not a dialect to report.
+    #[test]
+    fn a_decision_that_disagrees_with_the_counted_cell_is_refused() {
+        let records = vec![extraction_diagnostic(
+            json!({ "code_chars": 18, "typescript_cell_count": 1 }),
+            "execute_lashlang",
+        )];
+        let error = recorded_dialect(&records).expect_err("the record disagrees with itself");
+        assert!(
+            error.to_string().contains("but decided"),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// A trace file the core never wrote is an empty flush, and the drain step
+    /// reports a count of zero rather than failing to read its own evidence.
+    #[test]
+    fn an_unwritten_trace_reads_as_an_empty_flush() {
+        let directory = tempfile::tempdir().expect("trace directory");
+        assert!(
+            flushed_trace_records(&directory.path().join("absent.trace.jsonl"))
+                .expect("an unwritten trace reads")
+                .is_empty()
+        );
+    }
 
     /// A controller that answers `DurableJournaled` must also name the durable
     /// authority that minted its await-event keys, or the runtime refuses the

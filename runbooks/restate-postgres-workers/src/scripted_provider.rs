@@ -8,6 +8,7 @@ type CompletionFuture =
     Pin<Box<dyn Future<Output = Result<LlmResponse, LlmTransportError>> + Send>>;
 type CompletionFn = dyn Fn(LlmRequest) -> CompletionFuture + Send + Sync;
 type SerializeConfigFn = dyn Fn() -> serde_json::Value + Send + Sync;
+type CloseFn = dyn Fn() + Send + Sync;
 
 fn empty_provider_config() -> serde_json::Value {
     serde_json::Value::Object(Default::default())
@@ -22,6 +23,9 @@ pub struct ScriptedProvider {
     options: ProviderOptions,
     serialize_config: Arc<SerializeConfigFn>,
     complete: Arc<CompletionFn>,
+    /// Observed on every `Provider::close`, so a scenario that asserts its
+    /// host closed the provider reads a count rather than a literal.
+    on_close: Arc<CloseFn>,
 }
 
 impl std::fmt::Debug for ScriptedProvider {
@@ -70,6 +74,7 @@ impl ScriptedProviderBuilder {
                         ))
                     })
                 }),
+                on_close: Arc::new(|| {}),
             },
         }
     }
@@ -103,6 +108,15 @@ impl ScriptedProviderBuilder {
         Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
     {
         self.provider.complete = Arc::new(move |request| Box::pin(complete(request)));
+        self
+    }
+
+    /// Records every close the host performs on this provider.
+    pub fn on_close<F>(mut self, on_close: F) -> Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.provider.on_close = Arc::new(on_close);
         self
     }
 
@@ -161,6 +175,11 @@ impl Provider for ScriptedProvider {
 
     fn requires_streaming(&self) -> bool {
         self.requires_streaming
+    }
+
+    async fn close(&self) -> Result<(), LlmTransportError> {
+        (self.on_close)();
+        Ok(())
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
