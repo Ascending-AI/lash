@@ -904,6 +904,21 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         1,
         "the wake driver must never consult the session tool filter"
     );
+    lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
+        "checkpoint": "model_tool_filter_narrows_without_narrowing_the_host_rail",
+        "session_id": session_id,
+        "model_tool_list": listed
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<Vec<_>>(),
+        "host_rail_list_len": 3,
+        "filtered_process_typed_miss": "ProcessNotVisible",
+        "unobserved_process_typed_miss": "ProcessNotVisible",
+        "unknown_process_typed_refusal": "ProcessUnknown",
+        "host_signal_bypassed_filter": true,
+        "host_cancel_bypassed_filter": true,
+        "wake_enqueued_despite_filter": report.enqueued,
+    }));
 }
 
 #[tokio::test]
