@@ -44,6 +44,13 @@ named here. Any provider request invalidates the rehearsal.
 Run from the repository root. The values below are one example; concurrent runs must use
 different explicit ports and a different shell-safe slug.
 
+`run_root` is the run's artifact directory, supplied fresh by the drive the same way every
+other row in the inventory gets one — not a `/tmp` scratch dir. Phase 5 preserves it as the
+evidence bundle and the scorecard cites files inside it by name, so it has to live where
+the drive keeps artifacts; a `mktemp -d /tmp/...` root leaves the scorecard pointing at a
+path nobody retains. It must be empty before Phase 0 and must not be inside another row's
+tree.
+
 ```sh
 run_slug=cov2
 container="lash-agent-service-restate-$run_slug"
@@ -51,7 +58,9 @@ run_id="${run_slug}-retirement-witness"
 authority_id="agent-service-runbook:$run_slug"
 group_key="agent-service:effect-group:$run_id"
 group_path=${group_key//:/%3A}
-run_root="$(mktemp -d "/tmp/lash-effect-group-retirement-$run_slug.XXXXXX")"
+run_root="<fresh artifact directory for this row>"
+mkdir -p "$run_root"
+test -z "$(ls -A "$run_root")"
 data_dir="$run_root/agent-service-data"
 app_port=29200
 admin_port=29270
@@ -122,7 +131,19 @@ Require `EffectGroupIndex`, `EffectGroupPayload`, `EffectGroupDispatch`,
 Submit the public #853 effect-group request in the background. In the same shell, poll
 `EffectGroupIndex/$group_path/probe`; when it first reports `preparing`, confirm the exact
 PID command again and send `kill -STOP "$host_pid"`. If `ready` or `closed` appears first,
-continue the process and restart with a fresh run ID.
+this run is Abort/RCA under safety rule 5: restart with a fresh run ID.
+
+Two different things are called "continuing the process" here, and only one of them is a
+signal. The `ready`/`closed` branch is reached on a probe that did **not** trigger the
+stop, so nothing is stopped yet and there is nothing to resume; what that branch owes is
+reaping the backgrounded request and tearing the stack down, and `kill -CONT` there is
+issued only as a no-op guard against an earlier partial attempt. The path that really can
+strand a stopped process is the window **after** the stop: `kill -STOP` lands, then one of
+the identity gates below fails — the `preparing`/`adopted` assertions, or the
+`EffectGroupDispatch/<group-key>/run` grep — and the shell exits with `host_pid` suspended
+and the container still up. Send `kill -CONT "$host_pid"` before any exit taken inside
+that window, and before the teardown in Phase 5, never after: a SIGKILL to a stopped
+process is delivered, but every other cleanup step that expects the app to answer is not.
 
 ```sh
 curl -sS -X POST "http://127.0.0.1:$app_port/api/effect-groups" \
@@ -142,6 +163,9 @@ while (( SECONDS < deadline )); do
     break
   fi
   if [[ "$phase" == *'"type":"ready"'* || "$phase" == *'"type":"closed"'* ]]; then
+    kill -CONT "$host_pid" 2>/dev/null || true
+    kill "$group_post_pid" 2>/dev/null || true
+    wait "$group_post_pid" 2>/dev/null || true
     exit 1
   fi
 done
@@ -167,6 +191,13 @@ PY
 restate invocations describe "$dispatcher_id" \
   | tee "$run_root/wedged-dispatcher.txt"
 grep -F "EffectGroupDispatch/$group_key/run" "$run_root/wedged-dispatcher.txt"
+```
+
+If either gate above fails, the process is still suspended. Resume it before you abort, so
+teardown runs against a process that can answer:
+
+```sh
+kill -CONT "$host_pid"
 ```
 
 Only after both identity gates pass, kill the exact stopped endpoint PID. Wait for that
@@ -214,7 +245,36 @@ restate -y deployments register --force "http://127.0.0.1:$new_endpoint_port" \
 restate deployments list | tee "$run_root/deployments.txt"
 ```
 
-Require the replacement at the newer revision while the old URL remains in inventory.
+Require the replacement at the newer revision while the old URL remains in inventory, and
+read the revision off the registration, not off the table.
+
+`restate -y deployments register --force` states the bump itself, twice: a
+`Revision: 1 -> 2` line under each service it updates, and a closing `SERVICE`/`REV` table
+for the new deployment ID. That is the signal to gate on. `restate deployments list`
+carries the same fact only as a bracketed suffix on each service's continuation line
+(`- EffectGroupIndex [2]`), and its `CREATED-AT` column holds a bare year, so scanning that
+table for a number finds `2026` on both deployments and the comparison passes on nothing.
+Neither rendering is a product surface: both come from `restate-cli 1.7.0`, matching the
+`restatedev/restate:1.7.0` server pinned in safety rule 1. Use the list output for the
+inventory half only — both URLs still present.
+
+```sh
+grep -F 'SERVICES THAT WILL BE UPDATED:' "$run_root/register-replacement.txt"
+! grep -qF 'SERVICES THAT WILL BE ADDED:' "$run_root/register-replacement.txt"
+for svc in EffectGroupIndex EffectGroupPayload EffectGroupDispatch \
+           LashDurableWaitWorkflow LashDurableWaitIndex; do
+  grep -qE "^ $svc +2 *$" "$run_root/register-replacement.txt"
+done
+test "$(grep -cF 'Revision: 1 -> 2' "$run_root/register-replacement.txt")" \
+  = "$(grep -cF 'Revision: ' "$run_root/register-replacement.txt")"
+grep -F "http://127.0.0.1:$old_endpoint_port/" "$run_root/deployments.txt"
+grep -F "http://127.0.0.1:$new_endpoint_port/" "$run_root/deployments.txt"
+```
+
+Every service the replacement registers must be an update from revision 1 to revision 2: an
+`ADDED` section, or a `Revision:` line that is not `1 -> 2`, means the replacement is not
+the same code at a new URL and the rehearsal is invalid.
+
 Start the retirement saga synchronously in the background:
 
 ```sh
