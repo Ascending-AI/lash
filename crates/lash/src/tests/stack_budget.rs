@@ -25,6 +25,11 @@ finish({
             .store_factory(Arc::new(
                 lash_core::facade_support::InMemorySessionStoreFactory::new(),
             ))
+            // ADR 0095: `processes` is catalogue presence, so a scripted cell
+            // that authors `processes.start` needs this factory installed.
+            .plugin(Arc::new(
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            ))
             .process_registry(Arc::new(TestLocalProcessRegistry::default()))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("stack-budget-rlm-lashlang").open().await?;

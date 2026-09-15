@@ -258,6 +258,7 @@ finish(result);"#,
             })
             .expected_final_value(serde_json::json!({ "ok": true }))
             .tool_provider(Arc::new(AppTools))
+            .install_process_controls()
             .completed_lifted_processes(1)
             .labeled_resource("Lookup app state in process")
             .min_completed_process_graphs(1),
@@ -268,15 +269,18 @@ finish(result);"#,
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="typescript"
-        root         exec      cell.ok                 calls=1
+        root         tool      tool.start              name="start_process" call=call-001
+        root         tool      tool.intent             call=call-001 kind="start_process" status="executed"
+        root         tool      tool.result             name="start_process" outcome=success call=call-001
+        root         exec      cell.ok                 calls=2
         root         outcome   turn.final_value        value={"ok":true}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=2 input=11 output=7 cache_read=3 cache_write=2 reasoning=4 total=23
         root                     turn_state            stored logical=357B
         root                     tool_state            stored logical=<opaque>
-        root                     plugin_state          stored {"embed_tools":{"generation":0,"values":{}},"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
+        root                     plugin_state          stored {"embed_tools":{"generation":0,"values":{}},"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
-        process-001  outcome   process.completed       label="lookup" kind="lashlang" terminal=true
+        process-001  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
         "#);
         Ok(())
     })
@@ -395,6 +399,7 @@ finish(result);"#,
             ])
             .expected_final_value(serde_json::json!({ "len": 2 }))
             .install_subagents()
+            .install_process_controls()
             .completed_lifted_processes(1)
             .labeled_resource("Spawn subagent with web search")
             .min_completed_child_session_exec_graphs(1)
@@ -406,27 +411,30 @@ finish(result);"#,
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="typescript"
-        root         exec      cell.ok                 calls=1
+        root         tool      tool.start              name="start_process" call=call-001
+        root         tool      tool.intent             call=call-001 kind="start_process" status="executed"
+        root         tool      tool.result             name="start_process" outcome=success call=call-001
+        root         exec      cell.ok                 calls=2
         root         outcome   turn.final_value        value={"len":2}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=227B
         root                     tool_state            stored logical=<opaque>
-        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
+        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
         session-001  commit    checkpoint.commit       rev=0->1
         session-001              usage                 entries=0 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=354B
         session-001              tool_state            stored logical=<opaque>
-        session-001              plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
+        session-001              plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"subagents":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         session-001  commit    checkpoint.commit       rev=1->2
         session-001              usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         session-001              turn_state            stored logical=354B
         session-001              tool_state            ref (unchanged)
         session-001              plugin_state          ref (unchanged)
         session-001              execution_state       stored logical=unknown
-        process-001  outcome   process.completed       label="spawn" kind="subagent" terminal=true
-        process-002  outcome   process.completed       label="spawn_child" kind="lashlang" terminal=true
+        process-001  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
+        process-002  outcome   process.completed       label="spawn" kind="subagent" terminal=true
         "#);
         Ok(())
     })
@@ -462,6 +470,7 @@ const result = await handle;
 finish(result);"#,
             ))
             .expected_final_value(serde_json::json!({ "parent": "done" }))
+            .install_process_controls()
             .completed_lifted_processes(3)
             .observer_visible_processes("lashlang", 3)
             .labeled_node("Start nested child process")
@@ -635,6 +644,7 @@ const rightValue = await right;
 finish({ joined: [leftValue, rightValue] });"#,
             ))
             .expected_final_value(serde_json::json!({ "joined": ["left", "right"] }))
+            .install_process_controls()
             .completed_lifted_processes(2)
             .labeled_node("Start left process")
             .labeled_node("Start right process")
@@ -649,16 +659,22 @@ finish({ joined: [leftValue, rightValue] });"#,
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="typescript"
-        root         exec      cell.ok                 calls=2
+        root         tool      tool.start              name="start_process" call=call-001
+        root         tool      tool.intent             call=call-001 kind="start_process" status="executed"
+        root         tool      tool.result             name="start_process" outcome=success call=call-001
+        root         tool      tool.start              name="start_process" call=call-002
+        root         tool      tool.intent             call=call-002 kind="start_process" status="executed"
+        root         tool      tool.result             name="start_process" outcome=success call=call-002
+        root         exec      cell.ok                 calls=4
         root         outcome   turn.final_value        value={"joined":["left","right"]}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=227B
         root                     tool_state            stored logical=<opaque>
-        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
+        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
-        process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
-        process-002  outcome   process.completed       label="child" kind="lashlang" terminal=true
+        process-001  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
+        process-002  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
         "#);
         assert_lashlang_process_ids_unique_for_labels(&run.final_process_list, ["child", "child"]);
 
