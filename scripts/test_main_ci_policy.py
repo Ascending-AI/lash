@@ -123,7 +123,6 @@ def event_context(
 
 
 POLICY_CASES = (
-    ("main push", event_context("push", ref_name="main"), "CI-trunk:push", True),
     (
         "current-main certification",
         event_context("workflow_dispatch", ref_name="main"),
@@ -287,7 +286,9 @@ class MainCiPolicyTest(unittest.TestCase):
 
     def test_ci_event_routes_and_concurrency_expressions_enforce_policy(self) -> None:
         triggers = self.ci["on"]
-        self.assertEqual(["main"], triggers["push"]["branches"])
+        # No `push` trigger: an automatic push to main runs no CI at all, and
+        # the heavy families live on `workflow_dispatch` alone.
+        self.assertNotIn("push", triggers)
         self.assertIn("pull_request", triggers)
         self.assertIn("merge_group", triggers)
         self.assertIn("workflow_dispatch", triggers)
@@ -295,11 +296,8 @@ class MainCiPolicyTest(unittest.TestCase):
 
     def test_concurrency_contract_rejects_red_mutations(self) -> None:
         mutants = {
-            "old main runs do not cancel": self.cancel.replace(
-                "github.event_name == 'push' || ", "", 1
-            ),
-            "certification collides with pushes": self.group.replace(
-                "'trunk:dispatch'", "'trunk:push'", 1
+            "certification collides with branch runs": self.group.replace(
+                "'trunk:dispatch'", "github.ref_name", 1
             ),
             "merge queue entries cancel": self.cancel.replace(
                 " }}", " || github.event_name == 'merge_group' }}", 1

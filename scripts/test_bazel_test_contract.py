@@ -259,7 +259,7 @@ class BazelTestContractTests(unittest.TestCase):
         triggers = parsed["on"]
         jobs = parsed["jobs"]
         self.assertEqual(
-            {"pull_request", "push", "workflow_dispatch", "merge_group"},
+            {"pull_request", "workflow_dispatch", "merge_group"},
             set(triggers),
         )
         self.assertFalse((ROOT / ".github/workflows/bazel.yml").exists())
@@ -267,7 +267,6 @@ class BazelTestContractTests(unittest.TestCase):
         trust_expression = jobs["plan"]["outputs"]["bazel_trusted"]
         self.assertEqual(
             "${{ github.event_name == 'merge_group' "
-            "|| github.event_name == 'push' "
             "|| github.event_name == 'workflow_dispatch' "
             "|| (github.event_name == 'pull_request' "
             "&& github.actor != 'dependabot[bot]' "
@@ -286,7 +285,7 @@ class BazelTestContractTests(unittest.TestCase):
         bazel_job = jobs["bazel-tests"]
         self.assertEqual("build-cache", bazel_job["environment"])
         self.assertEqual(
-            "github.event_name != 'push' && needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'",
+            "needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'",
             bazel_job["if"],
         )
         self.assertIn("bazel-tests", jobs["ci-conclusion"]["needs"])
@@ -909,7 +908,7 @@ class BazelTestContractTests(unittest.TestCase):
             "fail_open": "false",
             **{family: "true" for family in ci_plan.FAMILIES},
         }
-        for job in ci_plan.TRUNK_ONLY_JOBS | ci_plan.QUEUE_REQUIRED_COMPILE_JOBS:
+        for job in ci_plan.DISPATCH_ONLY_JOBS | ci_plan.QUEUE_REQUIRED_COMPILE_JOBS:
             needs[job]["result"] = "skipped"
         needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
         self.assertEqual(

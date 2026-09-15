@@ -9,38 +9,25 @@ name: Seal cache
 # build's `CARGO_TARGET_DIR` with no override. The duplication is therefore
 # permanent; paying it once and caching the result is the only lever.
 #
-# `check` is `if: github.event_name != 'push'`, so it never writes a cache
+# ci.yml's `check` job never runs on `main` itself, so it never writes a cache
 # into the default-branch scope, and a pull request can only restore caches
 # from its own branch or from `main`. Every PR started this job from scratch.
 # This workflow is the sole main-scoped writer of `linux-seal`; ci.yml's seal
 # lane stays a restore-only consumer, and nothing here is gating.
 #
-# It is deliberately NOT a job inside ci.yml: main push runs supersede each
-# other, so a twelve-minute job would often be cancelled before its cache save,
-# and it would drag `evaluate_conclusion` and the push-policy tests into a
+# It is deliberately NOT a job inside ci.yml: it is a twelve-minute build, and
+# it would drag `evaluate_conclusion` and the conclusion-policy tests into a
 # cache fix.
 #
-# Path filter: the `linux-seal` key is a function of the lockfiles, the
-# toolchain and the cargo environment — never of crate sources. So these are
-# exactly the pushes that strand pull requests on a key nothing has written.
-# A source-only change keeps the key and restores a tree cargo rebuilds
-# incrementally, which is why `crates/**` is not listed: running twelve minutes
-# on every merge would buy freshness the key does not need, and successive
-# merges would cancel each other mid-save. `workflow_dispatch` refreshes the
-# contents on demand.
+# It is manual, like every other heavy job in this repository: nothing runs
+# automatically on a push to main. The `linux-seal` key is a function of the
+# lockfiles, the toolchain and the cargo environment — never of crate sources —
+# so a refresh is needed only after a change to `Cargo.lock`, a manifest,
+# `rust-toolchain*`, `.cargo/**`, the toolchain/tool/mold actions, or this
+# workflow. A source-only change keeps the key and restores a tree cargo
+# rebuilds incrementally. Dispatch this workflow after such a change; until it
+# runs, the `check` seal lane pays the cold trybuild build itself.
 on:
-  push:
-    branches: [main]
-    paths:
-      - Cargo.lock
-      - Cargo.toml
-      - "**/Cargo.toml"
-      - "rust-toolchain*"
-      - ".cargo/**"
-      - ".github/actions/rust-toolchain/**"
-      - ".github/actions/install-tools/**"
-      - ".github/actions/setup-mold/**"
-      - ".github/workflows/seal-cache.yml"
   workflow_dispatch:
 
 # Only the newest tree is worth warming; an older run's key is already stale.

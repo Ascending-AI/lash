@@ -125,22 +125,25 @@ GATED_JOBS = {
 # without defaults, and lashlang consumed as an external Git dependency -- so
 # none of them is covered by the workspace check. They stay skipped on
 # pull_request, skip docs-only merge groups (workspace `check` still
-# compiles those heads), skip `push` (the queue already witnessed the SHA),
-# and keep `rust` family behaviour on workflow_dispatch.
+# compiles those heads), and keep `rust` family behaviour on
+# workflow_dispatch.
 QUEUE_REQUIRED_COMPILE_JOBS = {
     "lashlang-git-consumer",
     "package-feature-checks",
     "runtime-feature-boundary",
 }
 
-# Jobs deferred entirely to trunk runs (push / workflow_dispatch): their
-# job-level conditions skip them on pull_request and merge_group events.
+# Jobs deferred entirely to the manual full-profile run (workflow_dispatch):
+# their job-level conditions skip them on pull_request and merge_group events.
+# There is no automatic trunk run to carry them any more — an automatic push to
+# main triggers no CI at all — so a dispatch is their sole home, and it is the
+# profile release.yml certifies against.
 # postgres-store is intentionally absent: its focused runtime Agent Scenario
-# runs on pull requests and merge groups while its heavier steps remain trunk-only.
-# The QUEUE_REQUIRED_COMPILE_JOBS above are absent for the same kind of reason:
-# they are deferred on pull_request only, and required in the queue when rust
-# ran.
-TRUNK_ONLY_JOBS = {
+# runs on pull requests and merge groups while its heavier steps remain
+# dispatch-only. The QUEUE_REQUIRED_COMPILE_JOBS above are absent for the same
+# kind of reason: they are deferred on pull_request only, and required in the
+# queue when rust ran.
+DISPATCH_ONLY_JOBS = {
     "heavy-tests",
     "stack-budget",
     "s3-store",
@@ -151,32 +154,13 @@ TRUNK_ONLY_JOBS = {
     "fuzz-smoke",
 }
 
-# The merge queue already validated these on the SHA that lands on main.
-# Breadth jobs (heavy, S3, E2E, fuzz, stack-budget, unicode) keep running on
-# push; this set does not. `workspace-tests` is deliberately absent: the Cargo
-# partition is the workbench binary's only witness, and it runs on every trunk
-# push so a break is attributed to the merge that caused it.
-PUSH_SKIP_CORE_JOBS = {
-    "facade-only-examples",
-    "check",
-    "repo-gates",
-    "unused-deps",
-    "lashlang-git-consumer",
-    "package-feature-checks",
-    "runtime-feature-boundary",
-    "bazel-tests",
-    "lint",
-    "postgres-store",
-}
-
 DEFERRED_EVENTS = {"pull_request", "merge_group"}
 
 # The PostgreSQL matrix. PG16 is the sole primary lane on pull_request and
 # merge_group. PG14/PG18 compare catalog shape only and run when the diff
 # touches a durable schema crate, or on workflow_dispatch (the full profile,
-# including weekly/release certification). Push skips the postgres job
-# entirely (PUSH_SKIP_CORE_JOBS); weekly confidence backends remain the
-# compatibility witness for unrelated landings.
+# including weekly/release certification). Weekly confidence backends remain
+# the compatibility witness for unrelated landings.
 POSTGRES_PRIMARY_LEG = {"postgres": "16", "role": "primary"}
 POSTGRES_COMPATIBILITY_LEGS = [
     {"postgres": "14", "role": "compatibility"},
@@ -242,7 +226,7 @@ def evaluate_confidence_conclusion(needs: Mapping, event_name: str, selector: st
     for job in sorted(set(needs) - expected):
         problems.append(f"aggregator has unmapped needed job: {job}")
     active = event_name in {"schedule", "workflow_dispatch"}
-    if event_name not in {"schedule", "workflow_dispatch", "push", "pull_request", "merge_group"}:
+    if event_name not in {"schedule", "workflow_dispatch", "pull_request", "merge_group"}:
         problems.append(f"unknown Confidence event: {event_name!r}")
     if event_name == "schedule" and selector != "full":
         problems.append("scheduled Confidence must select full")
@@ -345,11 +329,6 @@ def classify(
             workbench_dirs = workbench_dependency_dirs()
         except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
             return fail_open(f"workbench dependency closure is underivable: {error}")
-    # Push is trunk: CI's `on:` restricts it to `main`, and the push run is the
-    # only run that witnesses main's own tree. It always carries the workbench
-    # partition, so a break that a queue run somehow missed still surfaces on
-    # the branch it broke rather than on the next unrelated pull request.
-    trunk_push = event_name == "push"
     unknown_statuses = sorted({status for status, _ in changes if status not in CHANGE_STATUSES})
     if unknown_statuses:
         statuses = ", ".join(repr(status) for status in unknown_statuses)
@@ -365,7 +344,7 @@ def classify(
     ambiguous = sorted(path for path in paths if not _is_known_path(path))
     docs_only = all(_is_docs_path(path) for path in paths) and not has_deletion
     non_docs = [path for path in paths if not _is_docs_path(path)]
-    workbench_hit = trunk_push or any(
+    workbench_hit = any(
         _is_workbench_path(path) or _is_workbench_dependency_path(path, workbench_dirs)
         for path in paths
     )
@@ -391,7 +370,7 @@ def classify(
     }
     if docs_only:
         outputs.update({family: "false" for family in FAMILIES})
-        outputs["workbench"] = str(trunk_push).lower()
+        outputs["workbench"] = "false"
         return outputs
     if run_everything:
         outputs.update({family: "true" for family in FAMILIES})
@@ -419,14 +398,11 @@ def classify(
 def evaluate_conclusion(
     needs: Mapping[str, Mapping[str, object]],
     event_name: str = "",
-    ref: str = "",
     workers_e2e_enabled: bool | None = None,
     bazel_is_trusted: bool = True,
 ) -> list[str]:
     if workers_e2e_enabled is None:
-        workers_e2e_enabled = not (
-            event_name == "push" and ref != "refs/heads/main"
-        )
+        workers_e2e_enabled = True
 
     expected_jobs = UNGATED_JOBS | set(GATED_JOBS) | {BAZEL_TEST_JOB}
     problems: list[str] = []
@@ -457,9 +433,6 @@ def evaluate_conclusion(
                 )
     elif docs_only == "true":
         for family in FAMILIES:
-            # A trunk push carries the workbench partition whatever it changed.
-            if family == "workbench" and event_name == "push":
-                continue
             expectation = plan_outputs.get(family)
             if expectation not in {"true", "false"}:
                 continue
@@ -475,12 +448,6 @@ def evaluate_conclusion(
 
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
-        if event_name == "push" and job in PUSH_SKIP_CORE_JOBS:
-            if result != "skipped":
-                problems.append(
-                    f"{job} ended with {result!r} on a push event, expected skipped"
-                )
-            continue
         if job == BAZEL_TEST_JOB:
             rust_on = plan_outputs.get("rust") == "true"
             wanted = "success" if bazel_is_trusted and rust_on else "skipped"
@@ -498,10 +465,10 @@ def evaluate_conclusion(
                     f"workers E2E job {job} ended with {result!r} while disabled, expected skipped"
                 )
             continue
-        if job in TRUNK_ONLY_JOBS and event_name in DEFERRED_EVENTS:
+        if job in DISPATCH_ONLY_JOBS and event_name in DEFERRED_EVENTS:
             if result != "skipped":
                 problems.append(
-                    f"trunk-only job {job} ended with {result!r} on a"
+                    f"dispatch-only job {job} ended with {result!r} on a"
                     f" {event_name} event, expected skipped"
                 )
             continue
@@ -530,15 +497,10 @@ def evaluate_conclusion(
             # which compiles against the whole dependency closure, so the
             # `workbench` family stays closure-derived; the build is scoped to
             # the one package instead. An untrusted event has no Bazel
-            # partition and keeps the full Cargo workspace run. A trunk push
-            # always runs it: main is the tree the workbench has to stay green
-            # on.
-            if event_name == "push":
-                required = ref == "refs/heads/main"
-            else:
-                required = plan_outputs.get("workbench") == "true" or (
-                    not bazel_is_trusted and plan_outputs.get("rust") == "true"
-                )
+            # partition and keeps the full Cargo workspace run.
+            required = plan_outputs.get("workbench") == "true" or (
+                not bazel_is_trusted and plan_outputs.get("rust") == "true"
+            )
             wanted = "success" if required else "skipped"
             if result != wanted:
                 problems.append(
@@ -548,7 +510,7 @@ def evaluate_conclusion(
                 )
             continue
         if job == "unicode-tests":
-            if event_name in {"push", "workflow_dispatch"}:
+            if event_name == "workflow_dispatch":
                 wanted = "success"
             else:
                 wanted = "success" if plan_outputs.get("regress") == "true" else "skipped"
@@ -677,7 +639,6 @@ def main() -> int:
     problems = evaluate_conclusion(
         needs,
         os.environ.get("GITHUB_EVENT_NAME", ""),
-        os.environ.get("GITHUB_REF", ""),
         workers_e2e_enabled == "true",
         bazel_is_trusted == "true",
     )

@@ -42,7 +42,7 @@ class ConfidenceConclusionTests(unittest.TestCase):
                 self.assertEqual("confidence-build", jobs[job]["needs"])
 
     def test_confidence_event_and_selector_policy(self):
-        for event in ("schedule", "workflow_dispatch", "push", "merge_group"):
+        for event in ("schedule", "workflow_dispatch", "merge_group"):
             for selector in (("full", "full+area:sim", "fast") if event != "schedule" else ("full",)):
                 with self.subTest(event=event, selector=selector):
                     self.assertEqual([], ci_plan.evaluate_confidence_conclusion(self.needs(event, selector), event, selector))
@@ -139,16 +139,18 @@ class ClassifyTests(unittest.TestCase):
         self.assertIn("crates/lash-core", closure)
         self.assertNotIn("crates/lash-s3-store", closure)
 
-    def test_a_trunk_push_always_runs_the_cargo_partition(self) -> None:
-        for changes in (
-            [("M", "docs/adr/0079-x.md")],
-            [("M", "crates/lash-s3-store/src/lib.rs")],
-            [("M", "crates/lash-core/src/session/mod.rs")],
+    def test_the_cargo_partition_follows_the_workbench_closure_only(self) -> None:
+        """No event forces the partition on: the closure is the sole selector."""
+        for changes, expected in (
+            ([("M", "docs/adr/0079-x.md")], "false"),
+            ([("M", "crates/lash-s3-store/src/lib.rs")], "false"),
+            ([("M", "crates/lash-core/src/session/mod.rs")], "true"),
         ):
             with self.subTest(changes=changes):
-                self.assertEqual(
-                    "true", ci_plan.classify(changes, "push")["workbench"]
-                )
+                for event in ("pull_request", "merge_group"):
+                    self.assertEqual(
+                        expected, ci_plan.classify(changes, event)["workbench"]
+                    )
 
     def test_a_docs_only_pull_request_still_skips_every_expensive_family(self) -> None:
         for event in ("pull_request", "merge_group"):
@@ -234,7 +236,7 @@ def successful_needs() -> dict[str, dict[str, object]]:
 def apply_event_deferrals(needs: dict, event: str) -> dict:
     """Give every event-deferred job the result `event` expects of it."""
 
-    for job in ci_plan.TRUNK_ONLY_JOBS:
+    for job in ci_plan.DISPATCH_ONLY_JOBS:
         needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
     for job in ci_plan.QUEUE_REQUIRED_COMPILE_JOBS:
         rust_on = needs["plan"]["outputs"].get("rust") == "true"
@@ -243,13 +245,8 @@ def apply_event_deferrals(needs: dict, event: str) -> dict:
             needs[job]["result"] = "skipped"
         elif event == "merge_group":
             needs[job]["result"] = "success" if rust_on or fail_open else "skipped"
-        elif event == "push":
-            needs[job]["result"] = "skipped"
         else:
             needs[job]["result"] = "success" if rust_on else "skipped"
-    if event == "push":
-        for job in ci_plan.PUSH_SKIP_CORE_JOBS:
-            needs[job]["result"] = "skipped"
     if event in ci_plan.DEFERRED_EVENTS:
         needs["unicode-tests"]["result"] = (
             "success" if needs["plan"]["outputs"].get("regress") == "true" else "skipped"
@@ -285,7 +282,7 @@ class ConclusionTests(unittest.TestCase):
             self.assertIn(job, ci_plan.UNGATED_JOBS)
             self.assertIn(job, workflow["ci-conclusion"]["needs"])
             self.assertNotIn("if", workflow[job])
-            for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):
+            for event in ("pull_request", "merge_group", "workflow_dispatch"):
                 for result in ("failure", "cancelled", "skipped"):
                     with self.subTest(job=job, event=event, result=result):
                         needs = successful_needs()
@@ -338,21 +335,6 @@ class ConclusionTests(unittest.TestCase):
             any("workspace-tests" in problem for problem in ci_plan.evaluate_conclusion(needs))
         )
 
-    def test_a_trunk_push_requires_the_cargo_workspace_run(self) -> None:
-        """Main's own tree keeps a workbench witness (FIG-3049)."""
-        self.assertNotIn("workspace-tests", ci_plan.PUSH_SKIP_CORE_JOBS)
-        needs = successful_needs()
-        apply_event_deferrals(needs, "push")
-        self.assertEqual(
-            [],
-            ci_plan.evaluate_conclusion(needs, event_name="push", ref="refs/heads/main"),
-        )
-        needs["workspace-tests"]["result"] = "skipped"
-        problems = ci_plan.evaluate_conclusion(
-            needs, event_name="push", ref="refs/heads/main"
-        )
-        self.assertTrue(any("workspace-tests" in problem for problem in problems))
-
     def test_an_untrusted_rust_event_still_requires_the_cargo_workspace_run(self) -> None:
         needs = successful_needs()
         needs["plan"]["outputs"]["workbench"] = "false"
@@ -398,7 +380,7 @@ class ProducerConclusionTests(unittest.TestCase):
         return needs
 
     def evaluate(self, needs, event, enabled=True):
-        return ci_plan.evaluate_conclusion(needs, event, "refs/heads/main", enabled)
+        return ci_plan.evaluate_conclusion(needs, event, enabled)
 
     def assert_producer_rejected(self, event, result):
         for producer in ("worker-artifacts",):
@@ -407,14 +389,14 @@ class ProducerConclusionTests(unittest.TestCase):
                 needs[producer]["result"] = result
                 self.assertTrue(any(producer in p for p in self.evaluate(needs, event)))
 
-    def test_push_main_producer_failure_rejected(self):
-        self.assert_producer_rejected("push", "failure")
+    def test_dispatch_main_producer_failure_rejected(self):
+        self.assert_producer_rejected("workflow_dispatch", "failure")
 
-    def test_push_main_producer_cancelled_rejected(self):
-        self.assert_producer_rejected("push", "cancelled")
+    def test_dispatch_main_producer_cancelled_rejected(self):
+        self.assert_producer_rejected("workflow_dispatch", "cancelled")
 
-    def test_push_main_producer_skipped_rejected(self):
-        self.assert_producer_rejected("push", "skipped")
+    def test_dispatch_main_producer_skipped_rejected(self):
+        self.assert_producer_rejected("workflow_dispatch", "skipped")
 
     def test_dispatch_producer_failure_rejected(self):
         self.assert_producer_rejected("workflow_dispatch", "failure")
@@ -435,7 +417,7 @@ class ProducerConclusionTests(unittest.TestCase):
         self.assert_producer_rejected("pull_request", "skipped")
 
     def test_skipped_consumer_cascade_rejected(self):
-        for event in ("push", "workflow_dispatch", "pull_request"):
+        for event in ("workflow_dispatch", "pull_request"):
             consumers = [
                 "workspace-tests",
                 "restate-postgres-workers",
@@ -448,7 +430,7 @@ class ProducerConclusionTests(unittest.TestCase):
                     self.assertTrue(any(consumer in p for p in self.evaluate(needs, event)))
 
     def test_process_operations_consumer_failure_cancelled_and_skipped_rejected(self):
-        for event in ("push", "workflow_dispatch"):
+        for event in ("workflow_dispatch",):
             for result in ("failure", "cancelled", "skipped"):
                 with self.subTest(event=event, result=result):
                     needs = self.event_needs(event)
@@ -457,7 +439,7 @@ class ProducerConclusionTests(unittest.TestCase):
                                         for p in self.evaluate(needs, event)))
 
     def test_worker_producer_failure_cascading_to_process_operations_rejected(self):
-        for event in ("push", "workflow_dispatch"):
+        for event in ("workflow_dispatch",):
             needs = self.event_needs(event)
             needs["worker-artifacts"]["result"] = "failure"
             needs["functional-e2e-process-operations"]["result"] = "skipped"
@@ -568,7 +550,7 @@ class PostgresMatrixTests(unittest.TestCase):
         )
 
     def test_event_and_role_selection_runs_the_right_real_tests(self) -> None:
-        for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):
+        for event in ("pull_request", "merge_group", "workflow_dispatch"):
             roles = {leg["role"] for leg in ci_plan.postgres_matrix(event)}
             with self.subTest(event=event, role="compatibility"):
                 if event == "workflow_dispatch":
@@ -629,44 +611,34 @@ class PostgresMatrixTests(unittest.TestCase):
                 self.assertIn(oracle, cargo)
 
     def test_postgres_conclusion_fails_closed_for_every_supported_event(self) -> None:
-        for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):
+        for event in ("pull_request", "merge_group", "workflow_dispatch"):
             for result in ("skipped", "failure", "cancelled"):
                 with self.subTest(event=event, result=result):
                     needs = successful_needs()
                     apply_event_deferrals(needs, event)
                     needs["postgres-store"]["result"] = result
-                    problems = ci_plan.evaluate_conclusion(
-                        needs, event_name=event, ref="refs/heads/main"
+                    problems = ci_plan.evaluate_conclusion(needs, event_name=event)
+                    self.assertTrue(
+                        any("postgres-store" in problem for problem in problems)
                     )
-                    if event == "push" and result == "skipped":
-                        self.assertFalse(
-                            any("postgres-store" in problem for problem in problems)
-                        )
-                    else:
-                        self.assertTrue(
-                            any("postgres-store" in problem for problem in problems)
-                        )
             with self.subTest(event=event, result="missing"):
                 needs = successful_needs()
                 apply_event_deferrals(needs, event)
                 del needs["postgres-store"]
-                problems = ci_plan.evaluate_conclusion(
-                    needs, event_name=event, ref="refs/heads/main"
-                )
+                problems = ci_plan.evaluate_conclusion(needs, event_name=event)
                 self.assertTrue(any("postgres-store" in problem for problem in problems))
 
 
 class FuzzSmokeTests(unittest.TestCase):
-    def test_fuzz_smoke_is_gated_rust_and_trunk_only(self) -> None:
+    def test_fuzz_smoke_is_gated_rust_and_dispatch_only(self) -> None:
         self.assertEqual("rust", ci_plan.GATED_JOBS.get("fuzz-smoke"))
-        self.assertIn("fuzz-smoke", ci_plan.TRUNK_ONLY_JOBS)
+        self.assertIn("fuzz-smoke", ci_plan.DISPATCH_ONLY_JOBS)
 
     def test_fuzz_smoke_job_is_bounded_and_off_the_pr_critical_path(self) -> None:
         workflow = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         job = workflow["fuzz-smoke"]
         self.assertIn("timeout-minutes", job, "fuzz smoke must carry an explicit timeout")
-        self.assertIn("github.event_name != 'pull_request'", job["if"])
-        self.assertIn("github.event_name != 'merge_group'", job["if"])
+        self.assertIn("github.event_name == 'workflow_dispatch'", job["if"])
         self.assertIn("fuzz-smoke", workflow["ci-conclusion"]["needs"])
 
     def test_fuzz_smoke_must_be_skipped_on_deferred_events(self) -> None:
@@ -789,7 +761,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
     def test_the_cargo_partition_is_gated_on_the_plan_and_runs_on_trunk(self) -> None:
         workflow = yaml.safe_load(CI_WORKFLOW.read_text())
         job = workflow["jobs"]["workspace-tests"]
-        self.assertNotIn("github.event_name != 'push'", job["if"])
+        self.assertNotIn("github.event_name", job["if"])
         self.assertIn("needs.plan.outputs.workbench == 'true'", job["if"])
         classify = next(
             step for step in workflow["jobs"]["plan"]["steps"]
@@ -832,13 +804,13 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
         apply_event_deferrals(needs, event)
         return needs
 
-    def test_the_three_lanes_are_registered_and_no_longer_trunk_only(self) -> None:
+    def test_the_three_lanes_are_registered_and_not_dispatch_only(self) -> None:
         aggregator_needs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["ci-conclusion"]["needs"]
         for job in self.JOBS:
             with self.subTest(job=job):
                 self.assertEqual("rust", ci_plan.GATED_JOBS.get(job))
                 self.assertIn(job, ci_plan.QUEUE_REQUIRED_COMPILE_JOBS)
-                self.assertNotIn(job, ci_plan.TRUNK_ONLY_JOBS)
+                self.assertNotIn(job, ci_plan.DISPATCH_ONLY_JOBS)
                 self.assertIn(job, aggregator_needs)
         self.assertEqual(set(self.JOBS), set(ci_plan.QUEUE_REQUIRED_COMPILE_JOBS))
 
@@ -892,24 +864,17 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
                         ci_plan.evaluate_conclusion(needs, "pull_request"),
                     )
 
-    def test_push_skips_compile_lanes_and_dispatch_keeps_rust_family(self) -> None:
-        push = self.board("push")
-        self.assertEqual([], ci_plan.evaluate_conclusion(push, "push", "refs/heads/main"))
-        for job in self.JOBS:
-            self.assertEqual("skipped", push[job]["result"])
+    def test_dispatch_keeps_the_rust_family(self) -> None:
         dispatch = self.board("workflow_dispatch")
         self.assertEqual(
-            [],
-            ci_plan.evaluate_conclusion(dispatch, "workflow_dispatch", "refs/heads/main"),
+            [], ci_plan.evaluate_conclusion(dispatch, "workflow_dispatch")
         )
         for job in self.JOBS:
             wrongly_skipped = self.board("workflow_dispatch")
             wrongly_skipped[job]["result"] = "skipped"
             self.assertIn(
                 f"{job} ended with 'skipped' although plan.rust required it to run",
-                ci_plan.evaluate_conclusion(
-                    wrongly_skipped, "workflow_dispatch", "refs/heads/main"
-                ),
+                ci_plan.evaluate_conclusion(wrongly_skipped, "workflow_dispatch"),
             )
 
     def test_the_other_deferred_jobs_are_untouched(self) -> None:
@@ -921,16 +886,16 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
             "functional-e2e-process-operations",
             "fuzz-smoke",
         )
-        self.assertEqual(set(still_deferred), set(ci_plan.TRUNK_ONLY_JOBS))
+        self.assertEqual(set(still_deferred), set(ci_plan.DISPATCH_ONLY_JOBS))
         jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         for job in still_deferred:
             with self.subTest(job=job):
-                self.assertIn("github.event_name != 'merge_group'", jobs[job]["if"])
+                self.assertIn("github.event_name == 'workflow_dispatch'", jobs[job]["if"])
                 needs = self.board("merge_group")
                 needs[job]["result"] = "success"
                 self.assertIn(
-                    f"trunk-only job {job} ended with 'success' on a merge_group event,"
-                    " expected skipped",
+                    f"dispatch-only job {job} ended with 'success' on a merge_group"
+                    " event, expected skipped",
                     ci_plan.evaluate_conclusion(needs, "merge_group"),
                 )
 

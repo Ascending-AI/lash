@@ -475,21 +475,24 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("default-filter", ci_heavy_profile)
         self.assertIn(heavy_filter, ci_heavy_profile)
         # The trybuild ui binary leaves the workspace job without a heavy-side run;
-        # its per-push gate is check's seal step.
+        # its gate is check's seal step.
         self.assertIn("binary(ui)", ci_profile)
         self.assertNotIn("binary(ui)", ci_heavy_profile)
         self.assertIn("--test ui", workflow_job_block(workflow, "check"))
 
-    def test_trunk_only_jobs_defer_on_pr_and_merge_group_events(self) -> None:
-        """Heavy suites run on trunk (push/dispatch) only: 2026-08-25 ruling.
+    def test_dispatch_only_jobs_defer_on_pr_and_merge_group_events(self) -> None:
+        """Heavy suites run on manual dispatch only: 2026-08-25 ruling, tightened.
 
-        Reassess after the FIG-2169 test-prune sweep. The job-level guard, the
-        ci_plan accounting set, and the conclusion's deferral behavior must
-        agree, or a PR either re-pays the heavy suites or merges green while a
-        trunk job silently never runs.
+        There is no automatic trunk run any more — ci.yml has no `push`
+        trigger — so `workflow_dispatch` is the sole home of the heavy
+        families, and it is the profile release.yml certifies. Reassess after
+        the FIG-2169 test-prune sweep. The job-level guard, the ci_plan
+        accounting set, and the conclusion's deferral behavior must agree, or a
+        PR either re-pays the heavy suites or merges green while a heavy job
+        silently never runs.
         """
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        trunk_only = {
+        dispatch_only = {
             "heavy-tests",
             "stack-budget",
             "s3-store",
@@ -502,15 +505,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "package-feature-checks",
             "runtime-feature-boundary",
         }
-        guard = (
-            "github.event_name != 'pull_request' "
-            "&& github.event_name != 'merge_group'"
-        )
-        for job in sorted(trunk_only):
+        guard = "github.event_name == 'workflow_dispatch'"
+        for job in sorted(dispatch_only):
             block = workflow_job_block(workflow, job)
-            self.assertIn(f"if: {guard} && needs.plan.outputs.", block.replace(
-                "if: always() && " + guard, "if: " + guard
-            ), job)
+            self.assertIn(f"if: {guard} && needs.plan.outputs.", block, job)
+        # No `push` trigger at all, and no job may resurrect one.
+        self.assertNotIn("\n  push:\n", workflow)
+        self.assertNotIn("'push'", workflow)
         queue_guard = (
             "if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true'))"
             " || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')"
@@ -519,7 +520,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertIn(queue_guard, workflow_job_block(workflow, job), job)
 
         plan = runpy.run_path(str(ROOT / "scripts" / "ci_plan.py"))
-        self.assertEqual(plan["TRUNK_ONLY_JOBS"], trunk_only)
+        self.assertEqual(plan["DISPATCH_ONLY_JOBS"], dispatch_only)
         self.assertEqual(plan["QUEUE_REQUIRED_COMPILE_JOBS"], queue_required)
         self.assertEqual(plan["DEFERRED_EVENTS"], {"pull_request", "merge_group"})
 
@@ -534,7 +535,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "docs_only": "false",
             "fail_open": "false",
         }
-        for job in trunk_only:
+        for job in dispatch_only:
             needs[job] = {"result": "skipped", "outputs": {}}
         for job in queue_required:
             needs[job] = {"result": "skipped", "outputs": {}}
@@ -542,16 +543,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for job in queue_required:
             needs[job] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group"), [])
-        push_needs = {
+        dispatch_needs = {
             job: {"result": "success", "outputs": dict(value.get("outputs", {}))}
             for job, value in needs.items()
         }
-        push_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
-        for job in plan["PUSH_SKIP_CORE_JOBS"]:
-            push_needs[job] = {"result": "skipped", "outputs": {}}
-        for job in trunk_only:
-            push_needs[job] = {"result": "success", "outputs": {}}
-        self.assertEqual(evaluate(push_needs, "push", "refs/heads/main"), [])
+        dispatch_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
+        self.assertEqual(evaluate(dispatch_needs, "workflow_dispatch"), [])
         for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             needs[job] = {"result": "skipped", "outputs": {}}
         self.assertIn(
@@ -559,34 +556,26 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             plan["evaluate_conclusion"](needs, "pull_request"),
         )
 
-        # Workers E2E is neutral on plain branch pushes, but runs on PRs,
-        # merge-group runs, main pushes, and workflow_dispatch.
-        workers = workflow_job_block(workflow, "restate-postgres-workers")
-        self.assertIn(
-            "if: github.event_name != 'push' || github.ref == 'refs/heads/main'",
-            workers,
+        # Workers E2E runs on the full-profile dispatch and on pull requests
+        # carrying the `ci:workers` label, and nowhere else.
+        workers_guard = (
+            "github.event_name == 'workflow_dispatch'\n"
+            "      || (github.event_name == 'pull_request'"
+            " && contains(github.event.pull_request.labels.*.name, 'ci:workers'))"
         )
         self.assertIn(
-            "if: (github.event_name != 'push' || github.ref == 'refs/heads/main') "
-            "&& needs.plan.outputs.workers_e2e == 'true'",
-            workers,
-        )
-        summary = workflow_job_block(workflow, "restate-postgres-workers-summary")
-        self.assertIn(
-            "if: always() && (github.event_name != 'push' || github.ref == 'refs/heads/main')",
-            summary,
+            workers_guard, workflow_job_block(workflow, "restate-postgres-workers")
         )
         self.assertIn(
-            "if: (github.event_name != 'push' || github.ref == 'refs/heads/main') "
-            "&& needs.plan.outputs.workers_e2e == 'true'",
-            summary,
+            workers_guard,
+            workflow_job_block(workflow, "restate-postgres-workers-summary"),
         )
 
         # The matrix now comes from `scripts/ci_plan.py postgres-matrix`, so the
         # bracket is asserted where it is decided. PG16 is the sole primary lane
         # and runs on every event; the PG14/PG18 compatibility lanes only compare
         # the live catalog artifact, so they are deferred off the pull-request
-        # critical path and run on merge_group, push and workflow_dispatch —
+        # critical path and run on merge_group and workflow_dispatch —
         # nothing reaches trunk without all three majors. The focused contract
         # tests in test_ci_plan.py evaluate per-role step selection.
         postgres = workflow_job_block(workflow, "postgres-store")
@@ -594,7 +583,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for event, expected in (
             ("pull_request", [("16", "primary")]),
             ("merge_group", [("16", "primary")]),
-            ("push", [("16", "primary")]),
             (
                 "workflow_dispatch",
                 [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")],
@@ -620,7 +608,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "docs_only": "true",
             "fail_open": "false",
         }
-        for job in trunk_only:
+        for job in dispatch_only:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
         for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             pr_needs[job] = {"result": "success", "outputs": {}}
@@ -1736,8 +1724,7 @@ derive_mutation_jobs() {{
         self.assertIn(
             "//crates/lash-postgres-store:integration__test", scenario_bazel
         )
-        self.assertIn("needs.plan.outputs.stores == 'true'", postgres_store_job)
-        self.assertIn("github.event_name != 'push'", postgres_store_job)
+        self.assertIn("if: needs.plan.outputs.stores == 'true'", postgres_store_job)
 
         # The differential's skip reason and its `compared_backends` inventory
         # go to stderr, which libtest swallows for a passing test: uncaptured
@@ -2117,13 +2104,11 @@ derive_mutation_jobs() {{
         self.assertIn("|| github.head_ref", group)
         self.assertIn("|| github.ref_name", group)
 
-        # Automatic trunk runs share one newest-wins group. Full-profile release
-        # certification uses a distinct dispatch group, so a newer push cannot
-        # cancel the exact-SHA evidence release.yml requires. Both trunk keys
-        # carry a colon, which `git check-ref-format` forbids in a ref name: that
-        # is what makes them unforgeable by any branch, in this repository or a
-        # fork, rather than merely unlikely to collide.
-        self.assertIn("github.event_name == 'push' && 'trunk:push'", group)
+        # Full-profile release certification uses its own dispatch group, so the
+        # exact-SHA evidence release.yml requires is never cancelled by another
+        # run. The key carries a colon, which `git check-ref-format` forbids in a
+        # ref name: that is what makes it unforgeable by any branch, in this
+        # repository or a fork, rather than merely unlikely to collide.
         self.assertIn(
             "(github.event_name == 'workflow_dispatch' && github.ref_name == 'main')"
             " && 'trunk:dispatch'",
@@ -2136,13 +2121,12 @@ derive_mutation_jobs() {{
             group,
         )
         self.assertIn("format('fork-pr:{0}', github.event.pull_request.number)", group)
-        for key in ("trunk:push", "trunk:dispatch", "fork-pr:{0}"):
+        for key in ("trunk:dispatch", "fork-pr:{0}"):
             with self.subTest(key=key):
                 self.assertIn(":", key, "an unforgeable key needs the forbidden colon")
 
         self.assertIn(
-            "cancel-in-progress: ${{ github.event_name == 'push' || "
-            "github.event_name == 'pull_request' || "
+            "cancel-in-progress: ${{ github.event_name == 'pull_request' || "
             "(github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}",
             group,
         )
@@ -2160,7 +2144,9 @@ derive_mutation_jobs() {{
         # only add the longest job on the board to every queue entry.
         release_cache_workflow = RELEASE_CACHE_WORKFLOW.read_text(encoding="utf-8")
         self.assertNotIn("  linux-release-cache:\n", workflow)
-        self.assertIn("  push:\n    branches: [main]", release_cache_workflow)
+        # The warmer is manual like every other heavy build: nothing in this
+        # repository runs automatically on a push to main.
+        self.assertNotIn("  push:\n", release_cache_workflow)
         self.assertIn("  workflow_dispatch:\n", release_cache_workflow)
         self.assertIn("group: linux-release-cache-main", release_cache_workflow)
         self.assertIn("cancel-in-progress: false", release_cache_workflow)
@@ -2189,9 +2175,9 @@ derive_mutation_jobs() {{
             "  workflow_dispatch:\n",
             "  pull_request:\n",
             "  merge_group:\n",
-            "  push:\n    branches:\n      - main\n",
         ):
             self.assertIn(trigger, workflow)
+        self.assertNotIn("\n  push:\n", workflow)
 
         lint = workflow_job_block(workflow, "lint")
         bumps = workflow_step_block(lint, "Check versioned surface bumps")

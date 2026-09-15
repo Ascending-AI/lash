@@ -1,11 +1,11 @@
 name: Release cache
 
-# Keep this non-gating warmer out of CI's concurrency group. Only trusted main
-# pushes write the cache; workflow_dispatch provides the same main-only manual
-# recovery path without holding required CI or the next main push behind it.
+# Keep this non-gating warmer out of CI's concurrency group. It is a heavy
+# release-profile build, so it is manual like the rest of the heavy CI: a
+# maintainer dispatches it to warm `linux-release` for release.yml and
+# perf.yml. Both of those restore the cache opportunistically and build what is
+# missing, so a cold cache costs wall clock, never correctness.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -43,64 +43,13 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
-      - name: Detect release cache inputs
-        id: detect
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          FORCE_PUSH: ${{ github.event.forced }}
-        run: |
-          set -euo pipefail
-
-          run_build() {
-            echo "run=true" >> "${GITHUB_OUTPUT}"
-            echo "Running Linux release-cache warm build: $1"
-            exit 0
-          }
-
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            run_build "workflow_dispatch always warms the cache."
-          fi
-          if [[ "${FORCE_PUSH}" == "true" ]]; then
-            run_build "the push rewrote history; failing open."
-          fi
-          if [[ "${BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-            run_build "the push has no prior ref (initial/orphan history); failing open."
-          fi
-          if ! git fetch --no-tags --prune --depth=1 origin "${BEFORE_SHA}"; then
-            run_build "the pushed-range base fetch failed; failing open."
-          fi
-          if ! git rev-parse --verify "${BEFORE_SHA}^{commit}" >/dev/null 2>&1; then
-            run_build "the pushed-range base is unavailable after fetch; failing open."
-          fi
-          if ! diff_output=$(git diff --name-only "${BEFORE_SHA}" "${GITHUB_SHA}"); then
-            run_build "the input diff failed; failing open."
-          fi
-
-          changed_paths=()
-          if [[ -n "${diff_output}" ]]; then
-            mapfile -t changed_paths <<< "${diff_output}"
-          fi
-          for path in "${changed_paths[@]}"; do
-            case "${path}" in
-              Cargo.lock | Cargo.toml | */Cargo.toml | rust-toolchain | rust-toolchain.toml | .cargo/* | .github/actions/* | .github/workflows/release-cache.yml)
-                run_build "cache input '${path}' changed in the pushed range ${BEFORE_SHA}..${GITHUB_SHA}."
-                ;;
-            esac
-          done
-
-          echo "run=false" >> "${GITHUB_OUTPUT}"
-          echo "Skipping Linux release-cache warm build: no cache-input paths changed in ${BEFORE_SHA}..${GITHUB_SHA}."
-
       - name: Reclaim runner disk
-        if: steps.detect.outputs.run == 'true'
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        if: steps.detect.outputs.run == 'true'
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        if: steps.detect.outputs.run == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
@@ -108,19 +57,16 @@ jobs:
           shared-key: linux-release
 
       - name: Install protoc
-        if: steps.detect.outputs.run == 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       - name: Install mold
-        if: steps.detect.outputs.run == 'true'
         uses: ./.github/actions/setup-mold
 
       - name: Build release workspace
-        if: steps.detect.outputs.run == 'true'
         run: cargo build --locked --release --workspace
 
       - name: Report cache disk capacity
-        if: always() && steps.detect.outputs.run == 'true'
+        if: always()
         run: bash scripts/ci/report-cache.sh
