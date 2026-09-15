@@ -479,6 +479,95 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
 // backend-agnostic conformance suite so the in-memory and Sqlite registries are
 // held to one spec. See `crate::testing::conformance`.
 
+/// FIG-3123. The three halves of "an announcement is not a wake", written
+/// together because each is only meaningful against the other two: the same
+/// process, the same event type, the same declared wake and the same target
+/// session — and only the delivery differs.
+#[tokio::test]
+async fn a_suppressed_append_is_journaled_in_full_and_wakes_nobody() {
+    let registry = TestLocalProcessRegistry::default();
+    let process_id = ProcessId::from("announcement-suppression");
+    let target_session_id = SessionId::from("announcing-session");
+    registry
+        .register_process(wake_registration(process_id.as_str(), &target_session_id))
+        .await
+        .expect("register a process whose wakes have a target session");
+
+    // (a) The runtime's own announcement of a park. The session it would reach
+    // is the session parked on the announced call, so it gets no work.
+    let announced = registry
+        .append_event(
+            &process_id,
+            ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "input request opened"}),
+            )
+            .with_replay_key("announcement:park")
+            .without_wake(),
+        )
+        .await
+        .expect("append the park announcement");
+    assert!(
+        announced.wake_delivery.is_none(),
+        "a park announcement must not deliver a wake: {:?}",
+        announced.wake_delivery
+    );
+    assert!(
+        registry
+            .claim_pending_wake_deliveries(8)
+            .await
+            .expect("claim wake deliveries after the announcement")
+            .is_empty(),
+        "the announcing session must observe no queued work from its own park"
+    );
+
+    // (c) ...and yet nothing reading the journal can tell: the event is the
+    // same event, semantics included.
+    let journal = registry
+        .events_after(&process_id, 0)
+        .await
+        .expect("read the process journal");
+    let appended = journal
+        .iter()
+        .find(|event| event.sequence == announced.event.sequence)
+        .expect("the announcement is in the journal");
+    assert_eq!(appended.event_type, "producer.wake");
+    assert_eq!(
+        appended.payload,
+        serde_json::json!({"wake_input": "input request opened"})
+    );
+    assert!(
+        appended.semantics.wake.is_some(),
+        "the event keeps the wake its type declares; only the delivery is withheld: {appended:?}"
+    );
+
+    // (b) A progress emission from that same process still says its piece.
+    let emitted = registry
+        .append_event(
+            &process_id,
+            ProcessEventAppendRequest::new(
+                "producer.wake",
+                serde_json::json!({"wake_input": "deploy complete"}),
+            )
+            .with_replay_key("announcement:emit"),
+        )
+        .await
+        .expect("append the progress emission");
+    assert!(
+        emitted.wake_delivery.is_some(),
+        "an unsuppressed append of the same event type still delivers its wake"
+    );
+    let claimed = registry
+        .claim_pending_wake_deliveries(8)
+        .await
+        .expect("claim wake deliveries after the emission");
+    assert_eq!(
+        claimed.len(),
+        1,
+        "exactly the emission reaches the declaring session: {claimed:?}"
+    );
+}
+
 fn wake_registration(id: &str, target_session_id: &SessionId) -> ProcessRegistration {
     registration(id)
         .with_wake_session_id(Some(SessionId::from(target_session_id.to_string())))

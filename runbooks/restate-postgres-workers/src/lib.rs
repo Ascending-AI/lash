@@ -1267,15 +1267,27 @@ impl E2eTools {
             }),
         )
         .await;
-        // This park is deliberately silent. Under ADR 0095 `processes.emit` is
-        // the one progress emission a process can make and `process.yield`
-        // carries the wake to the declaring session, so a park announcement on
-        // that event type wakes the very turn that is awaiting this call: the
-        // session is re-prompted while the call it is waiting on is still
-        // parked. The await key this tool parks on is published to the runner
-        // through `lash_e2e_tool_events` above (`durable_input_request.opened`),
-        // which is what `wait_for_durable_input_key` reads, so nothing here
-        // needs a process event.
+        // The attempt body cannot append process events. It declares the
+        // announcement and the runtime appends it when the call parks, so the
+        // yield can never advertise a wait that did not happen.
+        //
+        // The announcement is progress metadata about a wait that has not
+        // settled, so it carries no wake: the session it would reach is the one
+        // parked on this very call. That is the runtime's rule, not this tool's
+        // (FIG-3123) — the declaration below asks for no such thing.
+        let announcement = lash_core::PendingAnnouncement::new(
+            "process.yield",
+            serde_json::json!({
+                "type": "work.input_request.opened",
+                "workflow_id": workflow_id,
+                "request_id": opened["request_id"].clone(),
+                "await_key_id": key.key_id,
+            }),
+            format!(
+                "tool:{}:input-request-opened",
+                call_id.as_deref().unwrap_or("unknown")
+            ),
+        );
         if args
             .get("attach_after_resolution")
             .and_then(serde_json::Value::as_bool)
@@ -1306,7 +1318,7 @@ impl E2eTools {
                 }
             }
         }
-        ToolOutcome::pending(lash_core::PendingCompletion::new())
+        ToolOutcome::pending(lash_core::PendingCompletion::new().announcing(announcement))
     }
 }
 

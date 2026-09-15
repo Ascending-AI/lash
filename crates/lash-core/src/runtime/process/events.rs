@@ -580,6 +580,25 @@ pub struct ProcessEventAppendRequest {
     pub payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay: Option<crate::RuntimeReplay>,
+    /// Whether this append withholds the wake its event type declares.
+    ///
+    /// A wake is what a process *says to the session*, and the default is to
+    /// say it. An append sets this when the fact it records is not news to the
+    /// session: the runtime's own announcement of a call the session is already
+    /// parked on (see
+    /// [`PendingAnnouncement`](crate::PendingAnnouncement)). Waking a session
+    /// with the park notice of the very call it is waiting for re-prompts that
+    /// turn against an unsettled wait.
+    ///
+    /// Only the wake is withheld. The event is appended, journaled, projected
+    /// and visible to observers exactly as an unsuppressed append of the same
+    /// event type would be, so nothing reading the journal can tell the two
+    /// apart.
+    ///
+    /// Defaulted and omitted when false, so an append that does not set it
+    /// encodes exactly as it did before this field existed.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub wake_suppressed: bool,
 }
 
 impl ProcessEventAppendRequest {
@@ -590,7 +609,18 @@ impl ProcessEventAppendRequest {
             event_type: event_type.into(),
             payload,
             replay: None,
+            wake_suppressed: false,
         }
+    }
+
+    /// Withholds the wake this event type declares, leaving the append itself
+    /// unchanged.
+    ///
+    /// See [`wake_suppressed`](Self::wake_suppressed) for when an append is
+    /// entitled to do this.
+    pub fn without_wake(mut self) -> Self {
+        self.wake_suppressed = true;
+        self
     }
 
     /// Attaches a replay key for process-store implementors so an equivalent event append is

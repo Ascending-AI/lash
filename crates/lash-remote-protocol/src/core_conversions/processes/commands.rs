@@ -295,6 +295,9 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessEventAppendReques
                 key,
                 attribution: None,
             }),
+            // A remote signal is news to the session by definition: a peer sent
+            // it. Only the runtime's own park announcements withhold the wake.
+            wake_suppressed: false,
         })
     }
 }
