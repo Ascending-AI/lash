@@ -279,9 +279,6 @@ async fn run_restate_chat_turn_and_persist(
     // attempt writes to it even when a re-prompt runs under a fresh Lash turn.
     let outbox_turn_id = request.turn_id.clone();
 
-    // A zero-move turn wedges the board in this mode exactly as it does in the
-    // local one, so the same host-level policy runs here (FIG-3181); only the
-    // plumbing below is Restate's.
     // A re-prompt runs under its own Lash turn id, derived from the workflow's
     // rather than drawn at random: this closure runs inside the workflow body,
     // which Restate replays, and a fresh v4 uuid would name a different turn on
@@ -295,6 +292,9 @@ async fn run_restate_chat_turn_and_persist(
         }
     };
 
+    // A zero-move turn wedges the board in this mode exactly as it does in the
+    // local one, so the same host-level policy runs here (FIG-3181); only the
+    // plumbing passed in below is Restate's.
     run_turn_with_zero_move_recovery(
         &state,
         &chat_id,
