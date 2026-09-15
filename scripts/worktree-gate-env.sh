@@ -226,21 +226,33 @@ lash_gate_acquire_locks() {
   export LASH_GATE_LOCK_SLUG="$LASH_GATE_WORKTREE_SLUG"
 }
 
+# Answers whether a gate network still has an owner. `.Containers` counts only
+# endpoints that have joined, so a container Compose has created but not yet
+# started reads as zero attached while its config already names the network;
+# removing on that reading alone races the start into a "network not found"
+# failure. `docker ps -a` lists the created container, so the two readings
+# together are what say the network is unused (FIG-3174).
+lash_gate_network_is_idle() {
+  local net_name="$1" attached members
+  attached="$(docker network inspect -f '{{len .Containers}}' "$net_name" 2>/dev/null || true)"
+  [ "$attached" = "0" ] || return 1
+  members="$(docker ps -a --quiet --filter "network=$net_name" 2>/dev/null || true)"
+  [ -z "$members" ]
+}
+
 lash_gate_cleanup() {
   if ! command -v docker >/dev/null 2>&1; then
     return 0
   fi
-  local attached
   if docker network inspect "$LASH_E2E_NETWORK" >/dev/null 2>&1; then
-    attached="$(docker network inspect -f '{{len .Containers}}' "$LASH_E2E_NETWORK" 2>/dev/null || true)"
-    if [ "$attached" = "0" ]; then
+    if lash_gate_network_is_idle "$LASH_E2E_NETWORK"; then
       docker network rm "$LASH_E2E_NETWORK" >/dev/null 2>&1 || true
     fi
   fi
 }
 
 lash_gate_prune_orphaned_networks() {
-  local net_name attached net_root net_slug wt_line wt_path wt_slug
+  local net_name net_root net_slug wt_line wt_path wt_slug
   local -A live_slugs=()
 
   if [ -d "$LASH_GATE_WORKTREE_ROOT" ]; then
@@ -263,8 +275,7 @@ lash_gate_prune_orphaned_networks() {
     [ -n "$net_name" ] || continue
     [[ "$net_name" == lash-e2e-* ]] || continue
 
-    attached="$(docker network inspect -f '{{len .Containers}}' "$net_name" 2>/dev/null || true)"
-    [ "$attached" = "0" ] || continue
+    lash_gate_network_is_idle "$net_name" || continue
 
     net_root="$(docker network inspect -f '{{index .Labels "com.lash.e2e.worktree.root"}}' "$net_name" 2>/dev/null || true)"
     if [ -n "$net_root" ] && [ "$net_root" != "<no value>" ]; then

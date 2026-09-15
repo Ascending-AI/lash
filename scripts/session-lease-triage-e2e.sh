@@ -470,8 +470,8 @@ print(
 PY
 
 if grep -Fn 'panicked at' "$test_output" >&2; then
-  echo "panic gate: FAILED ('panicked at' found in session-lease-triage E2E output)" >&2
+  echo "panic gate: FAILED (a Rust panic marker found in session-lease-triage E2E output)" >&2
   exit 1
 fi
-echo "panic gate: clean (no 'panicked at' lines in session-lease-triage E2E output)" | tee -a "$test_output"
+echo "panic gate: clean (no Rust panic markers in session-lease-triage E2E output)" | tee -a "$test_output"
 echo "session-lease-triage e2e passed: scenarios=4 backends=$backends artifacts=$artifact_dir" | tee -a "$test_output"

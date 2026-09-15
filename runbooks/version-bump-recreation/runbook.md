@@ -20,7 +20,8 @@ LASH_VERSION_BUMP_ARTIFACT_DIR=<fresh-dir> just version-bump-recreation-e2e
 
 The companion owns one PostgreSQL service on the worktree's deterministic host-port offset
 **+47** under the fixed `lash-version-bump-<worktree-slug>` compose project on the external
-`lash-e2e-<worktree-slug>` network (created idempotently, never destroyed), and removes the
+`lash-e2e-<worktree-slug>` network (created idempotently by the gate harness, and removed by
+the harness's teardown once no container is attached to it or waiting to start), and removes the
 project's services and volume on exit. `LASH_VERSION_BUMP_POSTGRES_PORT` remains an explicit
 port override. Its path-qualified project and ownership label prevent it from touching another
 worktree's PostgreSQL service. It seeds the pre-bump deployment with a real turn
@@ -214,6 +215,9 @@ coupling was tested end to end.
 Require the companion's final `panic gate: clean` and
 `version-bump recreation e2e passed: phases=4 refusal_cases=3` lines, and confirm its compose project
 and volume no longer exist.
+Because the companion's own banners no longer print the literal, `grep -F 'panicked at'
+<artifact-dir>/version-bump-recreation-e2e.log` returning nothing is an independent check rather
+than a match on the gate's own output; require that too.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

@@ -404,7 +404,7 @@ if ! grep -Fq 'test result: ok. 2 passed; 0 failed' "$companion_output"; then
   exit 1
 fi
 if grep -Fn 'panicked at' "$test_output" >&2; then
-  echo "panic gate: FAILED ('panicked at' found in agent-workbench Restate E2E output)" >&2
+  echo "panic gate: FAILED (a Rust panic marker found in agent-workbench Restate E2E output)" >&2
   exit 1
 fi
-echo "panic gate: clean (no 'panicked at' lines in agent-workbench Restate E2E output)"
+echo "panic gate: clean (no Rust panic markers in agent-workbench Restate E2E output)"

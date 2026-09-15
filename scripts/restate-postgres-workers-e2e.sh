@@ -163,10 +163,10 @@ if [ "${LASH_E2E_WAKE_RCA_ONLY:-0}" = "1" ] \
   fi
   "${compose[@]}" logs --no-color 2>&1 | tee -a "$test_output"
   if grep -Fn 'panicked at' "$test_output" >&2; then
-    echo "panic gate: FAILED ('panicked at' found in Restate/Postgres workers E2E output)" >&2
+    echo "panic gate: FAILED (a Rust panic marker found in Restate/Postgres workers E2E output)" >&2
     exit 1
   fi
-  echo "panic gate: clean (no 'panicked at' lines in Restate/Postgres workers E2E output)"
+  echo "panic gate: clean (no Rust panic markers in Restate/Postgres workers E2E output)"
   exit 0
 fi
 
@@ -220,7 +220,7 @@ if [ -n "$completed_manifest" ] && [ ! -s "$completed_manifest" ]; then
 fi
 "${compose[@]}" logs --no-color 2>&1 | tee -a "$test_output"
 if grep -Fn 'panicked at' "$test_output" >&2; then
-  echo "panic gate: FAILED ('panicked at' found in Restate/Postgres workers E2E output)" >&2
+  echo "panic gate: FAILED (a Rust panic marker found in Restate/Postgres workers E2E output)" >&2
   exit 1
 fi
-echo "panic gate: clean (no 'panicked at' lines in Restate/Postgres workers E2E output)"
+echo "panic gate: clean (no Rust panic markers in Restate/Postgres workers E2E output)"

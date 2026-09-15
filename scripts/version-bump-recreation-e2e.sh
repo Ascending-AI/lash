@@ -306,8 +306,8 @@ print(
 PY
 
 if grep -Fn 'panicked at' "$test_output" >&2; then
-  echo "panic gate: FAILED ('panicked at' found in version-bump recreation E2E output)" >&2
+  echo "panic gate: FAILED (a Rust panic marker found in version-bump recreation E2E output)" >&2
   exit 1
 fi
-echo "panic gate: clean (no 'panicked at' lines in version-bump recreation E2E output)" | tee -a "$test_output"
+echo "panic gate: clean (no Rust panic markers in version-bump recreation E2E output)" | tee -a "$test_output"
 echo "version-bump recreation e2e passed: phases=4 refusal_cases=3 artifacts=$artifact_dir" | tee -a "$test_output"

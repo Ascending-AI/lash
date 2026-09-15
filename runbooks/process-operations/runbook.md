@@ -301,6 +301,9 @@ disappears.
 Require the companion's final `panic gate: clean` and
 `process-operations e2e passed: scenarios=8` lines. Confirm its compose project and named crash
 container no longer exist.
+Because the companion's own banners no longer print the literal, `grep -F 'panicked at'
+<artifact-dir>/process-operations-e2e.log` returning nothing is an independent check rather than
+a match on the gate's own output; require that too.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

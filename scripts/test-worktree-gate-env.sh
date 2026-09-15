@@ -188,6 +188,22 @@ case "$cmd" in
     exit 0
     ;;
   ps)
+    net_filter=""
+    shift
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --filter)
+          case "${2:-}" in
+            network=*) net_filter="${2#network=}" ;;
+          esac
+          shift 2
+          ;;
+        *) shift ;;
+      esac
+    done
+    if [ -n "$net_filter" ] && [ -f "$state_dir/networks/$net_filter/created_containers" ]; then
+      cat "$state_dir/networks/$net_filter/created_containers"
+    fi
     exit 0
     ;;
   inspect)
@@ -351,6 +367,30 @@ PATH="$stub_bin:$PATH" DOCKER_STUB_STATE="$docker_state" bash -c '
   || fail "cleanup removed busy network $busy_network with attached containers"
 ! grep -Fq "network rm $busy_network" "$docker_state/calls.log" \
   || fail "cleanup invoked docker network rm on busy network $busy_network"
+
+# (b2) Cleanup leaves a network whose only member is created but not yet started:
+rm -rf "${docker_state:?}"/*
+mkdir -p "$docker_state/networks"
+
+starting_worktree="$test_tmp/starting-checkout"
+mkdir -p "$starting_worktree/scripts"
+cp "$helper" "$repo/scripts/worktree-gate-lock-holder.sh" "$starting_worktree/scripts/"
+starting_slug="$(lash_gate_slug_for_root "$starting_worktree")"
+starting_network="lash-e2e-${starting_slug}"
+
+PATH="$stub_bin:$PATH" DOCKER_STUB_STATE="$docker_state" bash -c '
+  set -euo pipefail
+  source "$1/scripts/worktree-gate-env.sh"
+  lash_gate_acquire test-lifecycle-starting
+  printf "0\n" >"'"$docker_state"'/networks/'"$starting_network"'/attached_containers"
+  printf "deadbeefcafe\n" >"'"$docker_state"'/networks/'"$starting_network"'/created_containers"
+  lash_gate_cleanup
+' _ "$starting_worktree"
+
+[ -d "$docker_state/networks/$starting_network" ] \
+  || fail "cleanup removed $starting_network while a created container still claimed it"
+! grep -Fq "network rm $starting_network" "$docker_state/calls.log" \
+  || fail "cleanup invoked docker network rm on $starting_network with a created container"
 
 # (c) Prune removes only orphaned lash-e2e-* networks of dead worktrees:
 rm -rf "${docker_state:?}"/*

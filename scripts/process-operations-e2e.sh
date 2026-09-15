@@ -310,8 +310,8 @@ PY
 echo "scenario 5 evidence: worker killed after receiver enqueue and before sender mark; restart retained exactly one receiver turn" | tee -a "$test_output"
 
 if grep -Fn 'panicked at' "$test_output" >&2; then
-  echo "panic gate: FAILED ('panicked at' found in process-operations E2E output)" >&2
+  echo "panic gate: FAILED (a Rust panic marker found in process-operations E2E output)" >&2
   exit 1
 fi
-echo "panic gate: clean (no 'panicked at' lines in process-operations E2E output)" | tee -a "$test_output"
+echo "panic gate: clean (no Rust panic markers in process-operations E2E output)" | tee -a "$test_output"
 echo "process-operations e2e passed: scenarios=8 artifacts=$artifact_dir" | tee -a "$test_output"

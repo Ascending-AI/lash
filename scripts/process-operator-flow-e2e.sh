@@ -228,8 +228,8 @@ else:
 PY
 
 if grep -Fn 'panicked at' "$test_output" >&2; then
-  echo "panic gate: FAILED ('panicked at' found in ${runbook_name} E2E output)" >&2
+  echo "panic gate: FAILED (a Rust panic marker found in ${runbook_name} E2E output)" >&2
   exit 1
 fi
-echo "panic gate: clean (no 'panicked at' lines in ${runbook_name} E2E output)" | tee -a "$test_output"
+echo "panic gate: clean (no Rust panic markers in ${runbook_name} E2E output)" | tee -a "$test_output"
 echo "${runbook_name} e2e passed: scenarios=1 artifacts=$artifact_dir" | tee -a "$test_output"

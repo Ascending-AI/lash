@@ -147,6 +147,9 @@ artifact bundle are failures. Preserve the bundle and report the unsupported cla
 
 Require `panic gate: clean`, `request-abandon e2e passed: scenarios=1`, and no
 `lash-fig897-request-abandon-postgres` container.
+Because the companion's own banners no longer print the literal, `grep -F 'panicked at'
+<artifact-dir>/request-abandon-e2e.log` returning nothing is an independent check rather than a
+match on the gate's own output; require that too.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
