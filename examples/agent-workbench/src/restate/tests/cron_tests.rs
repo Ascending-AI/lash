@@ -1533,6 +1533,135 @@ async fn cron_tick_allows_a_live_non_current_session_to_emit_a_delivery() {
     );
 }
 
+/// FIG-3126: a cron trigger registered without `tz` reserved a delivery on
+/// every tick and started nothing. The occurrence carried `"tz": null`, the
+/// captured contract types `tz` as a string, and `start_delivery` refused the
+/// occurrence source *after* the store had reserved the delivery — a refusal no
+/// trace reported, because the workbench logged only started ids.
+#[tokio::test]
+async fn a_cron_schedule_registered_without_a_timezone_is_not_refused_for_its_source() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let session_id = SessionId::from("tz-less-cron-session");
+    let source_key = "cron-source:fig3126";
+    materialize_cron_test_session(&state, &session_id).await;
+
+    // The contract the registration captures is the constructor's own, not the
+    // permissive `untyped()` capture the other fixtures use — that permissive
+    // capture is exactly why this defect reached a live workbench.
+    let config_schema = lash::triggers::LashSchema::new(lashlang::type_expr_to_json_schema(
+        &crate::cron_schedule_config_type(),
+    ));
+    let source_capture = lash::triggers::TriggerSourceCapture::resident(
+        crate::CRON_SCHEDULE_SOURCE_TYPE.split('.'),
+        config_schema.clone(),
+    );
+    assert!(
+        config_schema
+            .validate(&serde_json::json!({ "expr": "*/30 * * * * *", "tz": null }))
+            .is_err(),
+        "precondition: the captured contract refuses the null tz the emitter used to send"
+    );
+
+    lash::triggers::TriggerStore::execute_command(
+        trigger_store.as_ref(),
+        "register:fig3126",
+        lash::triggers::TriggerCommand::Register {
+            owner_scope: lash::triggers::TriggerOwnerScope::session(&session_id),
+            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
+                &session_id,
+            )),
+            draft: lash::triggers::TriggerSubscriptionDraft::for_process(
+                "cron-test:fig3126",
+                lash::process::ProcessExecutionEnvRef::new("process-env:fig3126"),
+                crate::CRON_SCHEDULE_SOURCE_TYPE,
+                source_key,
+                lash::process::ProcessInput::Engine {
+                    kind: "cron-test-engine".to_string(),
+                    payload: serde_json::json!({}),
+                },
+                lash::process::ProcessIdentity::new("cron-test-engine"),
+            )
+            .with_source_capture(source_capture)
+            .with_source(
+                lashlang::HostDescriptor::encode(
+                    crate::CRON_SCHEDULE_SOURCE_TYPE,
+                    // Registered exactly as `cron.Schedule({ expr })` does.
+                    serde_json::json!({ "expr": "*/30 * * * * *" }),
+                )
+                .expect("encode tz-less cron source"),
+            )
+            .with_payload_schema(lash::triggers::LashSchema::any()),
+        },
+    )
+    .await
+    .expect("register tz-less cron trigger")
+    .expect("tz-less cron trigger mutation");
+
+    let controller = CountingProcessEffectController::default();
+    let scoped = lash::runtime::ScopedEffectController::borrowed(
+        &controller,
+        lash::runtime::ExecutionScope::runtime_operation("fig3126-tz-less-cron"),
+    )
+    .expect("scope tz-less cron occurrence");
+    let restate_sdk::prelude::Json(report) = emit_cron_occurrence_with_effect_controller(
+        state,
+        WorkbenchCronRequest {
+            session_id: session_id.clone(),
+            source_key: source_key.to_string(),
+            expr: "*/30 * * * * *".to_string(),
+            tz: None,
+            name: Some("FIG-3126 tz-less cron".to_string()),
+        },
+        "2026-09-15T11:38:30+00:00".to_string(),
+        "fig3126-tz-less-job",
+        scoped,
+    )
+    .await
+    .expect("tz-less cron tick must emit");
+
+    // The emitted source is what `start_delivery` checks, and it now satisfies
+    // the contract the registration captured.
+    assert!(
+        config_schema
+            .validate(&crate::restate::cron_occurrence_source(
+                "*/30 * * * * *",
+                None
+            ))
+            .is_ok(),
+        "a tz-less schedule must emit a source its captured contract admits"
+    );
+    assert_eq!(
+        report.deliveries.len(),
+        1,
+        "the tick must reserve exactly one delivery"
+    );
+    // This fixture's effect controller cannot execute a process command, so the
+    // delivery cannot reach Started here. What it does prove is that the
+    // occurrence is no longer refused for its source: that refusal is the
+    // defect, and it happened before any executor was asked.
+    assert_ne!(
+        report.deliveries[0]["outcome"], "started",
+        "the counting fixture controller cannot start a process"
+    );
+    let reason = report.deliveries[0]["reason"]
+        .as_str()
+        .expect("a refused delivery must carry its reason");
+    assert!(
+        !reason.contains("source contract"),
+        "the delivery must not be refused for its source contract any more: {reason}"
+    );
+    assert!(
+        reason.contains("process executor"),
+        "the only remaining refusal is the fixture's executor: {reason}"
+    );
+}
+
 #[tokio::test]
 async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
     let data_dir = tempfile::tempdir().expect("tempdir");

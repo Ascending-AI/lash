@@ -465,18 +465,7 @@ pub(crate) fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
     resources
         .add_trigger_source_constructor(
             CRON_SCHEDULE_SOURCE_TYPE.split('.'),
-            lashlang::TypeExpr::Object(vec![
-                lashlang::TypeField {
-                    name: "expr".into(),
-                    ty: lashlang::TypeExpr::Str,
-                    optional: false,
-                },
-                lashlang::TypeField {
-                    name: "tz".into(),
-                    ty: lashlang::TypeExpr::Str,
-                    optional: true,
-                },
-            ]),
+            cron_schedule_config_type(),
             cron_tick_event_type(),
         )
         .expect("valid cron trigger source");
@@ -495,6 +484,25 @@ pub(crate) fn workbench_lashlang_resources() -> lashlang::LashlangHostCatalog {
         )
         .expect("valid mail trigger source");
     resources
+}
+
+/// The configuration contract `cron.Schedule` declares, and therefore the
+/// contract a registration captures and `start_delivery` checks every emitted
+/// occurrence source against. `tz` is optional, so an occurrence for a schedule
+/// registered without one must omit the key rather than send `null`.
+pub(crate) fn cron_schedule_config_type() -> lashlang::TypeExpr {
+    lashlang::TypeExpr::Object(vec![
+        lashlang::TypeField {
+            name: "expr".into(),
+            ty: lashlang::TypeExpr::Str,
+            optional: false,
+        },
+        lashlang::TypeField {
+            name: "tz".into(),
+            ty: lashlang::TypeExpr::Str,
+            optional: true,
+        },
+    ])
 }
 
 #[expect(

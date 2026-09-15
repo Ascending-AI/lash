@@ -158,7 +158,7 @@ Configuration is read from `.env` or the process environment:
   among every instance sharing the session store. Set it to a unique pod or
   container id when `/etc/machine-id` may be baked into the image; otherwise
   the workbench uses machine id, then hostname as a fallback.
-- `OPENROUTER_MODEL`: default `anthropic/claude-sonnet-4.6`.
+- `OPENROUTER_MODEL`: default `z-ai/glm-5.3-flash`.
 - `OPENROUTER_MODEL_VARIANT`: default `high`; choose `provider default` in
   the UI to send no variant for models without configurable thinking.
 - `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO`: development-only deterministic provider;

@@ -349,10 +349,7 @@ pub(super) async fn record_cron_tick_outcome_with_effect_controller(
                 json!({ "scheduled_for": scheduled_for }),
                 idempotency_key,
             )
-            .with_source(json!({
-                "expr": request.expr,
-                "tz": request.tz,
-            }))
+            .with_source(cron_occurrence_source(&request.expr, request.tz.as_ref()))
             .for_session(request.session_id)
             .with_outcome(outcome),
             scoped_effect_controller,

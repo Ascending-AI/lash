@@ -2475,7 +2475,7 @@
         <label class="field">
           <span>model</span>
           <input id="modelInput" list="modelList" autocomplete="off" spellcheck="false"
-                 title="Provider model slug, e.g. anthropic/claude-sonnet-4.6. Applies to chat sends and button trigger occurrences." />
+                 title="Provider model slug, e.g. z-ai/glm-5.3-flash. Applies to chat sends and button trigger occurrences." />
           <datalist id="modelList"></datalist>
           <small id="modelHint" class="field-hint" hidden></small>
         </label>
@@ -2891,19 +2891,27 @@
       };
     }
 
+    /* 503 is the workbench's own "ask again": `/api/state` opens the session,
+       and a turn running against it can leave that open contended
+       (`temporarily_unavailable_session_open`, verdict Retryable). The
+       response is proof the server is there, so it is neither terminal nor a
+       transport failure — it is a retry instruction. */
+    const STATE_RETRYABLE_STATUS = 503;
+
     class StateSnapshotHttpError extends Error {
       constructor(status, message) {
         super(message);
         this.name = "StateSnapshotHttpError";
         this.status = status;
-        this.terminal = status >= 400 && status < 500;
+        this.retryable = status === STATE_RETRYABLE_STATUS;
+        this.terminal = !this.retryable && status >= 400 && status < 500;
       }
     }
 
     function stateFailureDisposition(error) {
-      return error instanceof StateSnapshotHttpError && error.terminal
-        ? "terminal"
-        : "transport";
+      if (!(error instanceof StateSnapshotHttpError)) return "transport";
+      if (error.retryable) return "retryable";
+      return error.terminal ? "terminal" : "transport";
     }
 
     /* `/api/state` has no server revision spanning its live and durable reads,
@@ -4690,7 +4698,9 @@
         const state = await fetchStateSnapshot();
         markShellChannel(shellAvailability, "state", true);
         if (!recoveryResponseIsCurrent(projectionState, token, state)) {
-          markShellChannel(shellAvailability, "state", false);
+          /* Same law as loadState's overtaken branch: the server answered, so
+             the channel is reachable. Only the bounded ladder runs. */
+          markShellChannel(shellAvailability, "state", true);
           renderShellStatus();
           scheduleStateRetry();
           return;
@@ -4707,6 +4717,7 @@
           renderError(error.message, { retry: false });
           return;
         }
+        if (handleRetryableStateFailure(error)) return;
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
         scheduleStateRetry();
@@ -5868,6 +5879,10 @@
           renderError(error.message, { retry: false });
           return;
         }
+        if (handleRetryableStateFailure(error)) {
+          retrySettlement = Boolean(settlingTurnId);
+          return;
+        }
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
         scheduleStateRetry();
@@ -5894,6 +5909,7 @@
           renderError(error.message, { retry: false });
           return;
         }
+        if (handleRetryableStateFailure(error)) return;
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
         scheduleStateRetry();
@@ -5938,6 +5954,17 @@
       stateRetryDelay = Math.min(stateRetryDelay * 2, 5000);
     }
 
+    /* A snapshot read that the workbench itself told us to retry never marks
+       the channel down: the server answered, and the session was busy for the
+       moment. Marking it down here painted the outage banner over a turn that
+       was running normally. Run the bounded ladder and say nothing. */
+    function handleRetryableStateFailure(error) {
+      if (stateFailureDisposition(error) !== "retryable") return false;
+      renderShellStatus();
+      scheduleStateRetry();
+      return true;
+    }
+
     async function loadState() {
       const token = beginStateRecovery(projectionState);
       try {
@@ -5951,10 +5978,13 @@
         });
         if (application === "ignore") {
           /* A superseded response has a newer recovery owner. A latest response
-             overtaken by live observations does not, so keep the channel down
-             and advance the existing bounded retry ladder. */
+             overtaken by live observations does not: the server answered, so
+             the snapshot channel is reachable and staleness is not an outage —
+             marking it down here flashed the reconnecting banner on every turn
+             start. Keep the channel up and advance the existing bounded retry
+             ladder so the snapshot still converges. */
           if (isLatestRequest) {
-            markShellChannel(shellAvailability, "state", false);
+            markShellChannel(shellAvailability, "state", true);
             scheduleStateRetry();
           }
           renderShellStatus();
@@ -5986,6 +6016,7 @@
           renderError(error.message, { retry: false });
           return;
         }
+        if (handleRetryableStateFailure(error)) return;
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
         scheduleStateRetry();

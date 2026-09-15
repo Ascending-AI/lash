@@ -166,11 +166,6 @@ struct WorkbenchCronInfo {
     last_fired_at: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct CronEmitReport {
-    started_process_ids: Vec<ProcessId>,
-}
-
 impl From<&WorkbenchCronState> for WorkbenchCronInfo {
     fn from(state: &WorkbenchCronState) -> Self {
         Self {
@@ -593,6 +588,7 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
                 "tz": &state.request.tz,
                 "fired_at": fired_at.to_rfc3339(),
                 "started_process_ids": emit_report.started_process_ids,
+                "deliveries": emit_report.deliveries,
             }),
             "workbench-cron:trace-emit-completed",
         )
@@ -938,6 +934,7 @@ async fn run_button_trigger(
             "button": request.button,
             "occurrence_id": receipt.occurrence_id,
             "started_process_ids": receipt.started_process_ids(),
+            "deliveries": trigger_delivery_trace(&receipt),
         }),
     );
     state.push_message_with_id_for_session(
@@ -991,6 +988,7 @@ async fn run_mail_received(
             "title": request.delivery.title,
             "occurrence_id": receipt.occurrence_id,
             "started_process_ids": receipt.started_process_ids(),
+            "deliveries": trigger_delivery_trace(&receipt),
         }),
     );
     state.push_message_with_id_for_session(
@@ -1562,7 +1560,9 @@ async fn record_turn_output_for_model(
 }
 
 mod cron_sync;
+mod occurrences;
 pub(crate) use cron_sync::*;
+pub(crate) use occurrences::{CronEmitReport, cron_occurrence_source, trigger_delivery_trace};
 
 fn cron_request_from_registration(
     session_id: &SessionId,
