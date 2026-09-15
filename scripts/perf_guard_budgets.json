@@ -3152,11 +3152,11 @@
           "allocations_per_iter_max": 1213
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 66781,
-          "allocations_per_iter_max": 374
+          "allocated_bytes_per_iter_max": 89787,
+          "allocations_per_iter_max": 456
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 84295,
+          "allocated_bytes_per_iter_max": 104980,
           "allocations_per_iter_max": 1050
         },
         "artifact_roundtrip": {
@@ -3172,7 +3172,7 @@
           "allocations_per_iter_max": 1
         },
         "linked_program_cache": {
-          "allocated_bytes_per_iter_max": 90,
+          "allocated_bytes_per_iter_max": 101,
           "allocations_per_iter_max": 1
         },
         "phase_breakdown": {
@@ -3236,11 +3236,11 @@
           "allocations_per_iter_max": 1352
         },
         "compiled_execute": {
-          "allocated_bytes_per_iter_max": 53855,
-          "allocations_per_iter_max": 291
+          "allocated_bytes_per_iter_max": 74120,
+          "allocations_per_iter_max": 342
         },
         "snapshot": {
-          "allocated_bytes_per_iter_max": 71370,
+          "allocated_bytes_per_iter_max": 89313,
           "allocations_per_iter_max": 966
         },
         "artifact_roundtrip": {
@@ -3256,7 +3256,7 @@
           "allocations_per_iter_max": 1
         },
         "linked_program_cache": {
-          "allocated_bytes_per_iter_max": 93,
+          "allocated_bytes_per_iter_max": 100,
           "allocations_per_iter_max": 1
         },
         "phase_breakdown": {
@@ -3634,7 +3634,7 @@
           "allocations_per_iter_max": 1
         },
         "linked_program_cache": {
-          "allocated_bytes_per_iter_max": 112,
+          "allocated_bytes_per_iter_max": 126,
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
@@ -3886,7 +3886,7 @@
           "allocations_per_iter_max": 1
         },
         "linked_program_cache": {
-          "allocated_bytes_per_iter_max": 107,
+          "allocated_bytes_per_iter_max": 113,
           "allocations_per_iter_max": 2
         },
         "phase_breakdown": {
