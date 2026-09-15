@@ -20,7 +20,16 @@ LASH_SESSION_LEASE_ARTIFACT_DIR=<fresh-dir> just session-lease-triage-e2e
 
 The companion owns no container and no host port, so it never serializes against another
 worktree's assigned PostgreSQL service. It runs every phase on SQLite always, and on
-PostgreSQL as well when `LASH_POSTGRES_DATABASE_URL` names one. Session ids carry a
+PostgreSQL as well when `LASH_POSTGRES_DATABASE_URL` names one. Nothing in this runbook
+provisions that database. Get one from the repository's service helper, which starts the
+container, exports the URL, and tears it down again:
+
+```sh
+scripts/ci/with-service.sh pg16 -- bash -c 'just session-lease-triage-e2e'
+```
+
+A run with the variable unset is a SQLite-only run and reports `backends: sqlite`; a judged
+run covers both. Session ids carry a
 per-run suffix (a session id is single-use, ADR 0049), so a shared database needs no
 truncation and repeated runs never collide. It emits
 `session-lease-triage e2e passed: scenarios=4` only after every phase assertion holds on
@@ -36,7 +45,9 @@ shape of a provider hang with no timeout. The takeover is staged as an *abandone
 row*: a TTL-zero claim made straight through the store, so no guard and no renewal task
 exist behind it, which is what a killed or frozen worker leaves behind. Nothing releases the
 lane on the dead worker's behalf and nothing waits for it to notice, because it never will.
-That absence is the scenario, not a shortcut around it.
+That absence is the scenario, not a shortcut around it. Phase 3b stages the same row for the
+same reason: aborting a future and dropping a core is the only kill available in-process, and
+that drop still releases the lane, which a dead worker does not.
 
 Emitter liveness is exactly what separates the two loser shapes, and the harness deliberately
 tests the harder one. A *live* holder that loses its lane additionally logs its own
@@ -109,8 +120,10 @@ worker's.
 **Action.** Read `reading_while_parked`, the `session_execution_lease.acquired` event, the
 three lease-trouble counters, and `reading_after_commit`.
 
-**Expected observable evidence.** `claimed` is `INFO` and carries session id, generation,
-owner id, and incarnation id. The parked reading is `current` with positive
+**Expected observable evidence.** `session_execution_lease.acquired` is `INFO` and carries
+session id, `fencing_token`, owner id, and incarnation id. There is no `claimed` event; the
+claim's name on the wire is `session_execution_lease.acquired`, and that is the string a
+timeline is filtered on. The parked reading is `current` with positive
 `expires_in_ms`, and its `holder_owner_id` is the worker that owns the parked turn. A
 renewal landed before the reading was taken, so `current` reflects a live renewal loop
 rather than the original claim's headroom. `lease_lost_count`, `taken_over_count`, and
@@ -132,15 +145,16 @@ task behind it. A real turn then claims the session.
 readings either side of the sweep, and the sweeping turn's committed outcome.
 
 **Expected observable evidence.** Exactly one `taken_over`, at `INFO`, emitted by the
-successor: its own `generation`/`owner_id`/`incarnation_id` are the winner's, and
+successor: its own `fencing_token`/`owner_id`/`incarnation_id` are the winner's, and
 `displaced_owner_id`/`displaced_fencing_token` name the abandoned holder exactly, strictly
-below the winner's generation. `lease_lost_count` is `0`, because the abandoned holder runs
+below the winner's `fencing_token`. `lease_lost_count` is `0`, because the abandoned holder runs
 nothing. The pre-sweep reading names the abandoned holder as `lapsed`; the post-sweep reading
-names the successor at a higher generation or is already `unheld` after release. The sweeping
+names the successor at a higher `fencing_token` or is already `unheld` after release. The sweeping
 turn commits after takeover.
 
 **Judgment — FAIL if:** no `taken_over` appears, it is emitted by anyone but the winner, it
-names the wrong displaced holder or generation, the generation did not advance, a claim
+names the wrong displaced holder or `displaced_fencing_token`, the `fencing_token` did not
+advance, a claim
 reports displacing itself, the pre-sweep reading is not a lapsed row naming the abandoned
 holder, the operator read still shows the old holder afterwards, or the successor turn does
 not commit. A `session_execution_lease.lost` in this phase is also a failure: it means
@@ -168,8 +182,7 @@ least one per round. Each rejection is `WARN` and carries session id, owner id, 
 id, executor id, `lease_lost = false`, `lane_held = true`, and an `actual_head_revision`
 strictly above `expected_head_revision`. Each real `commit_busy_advisory` is `INFO`, carries
 `session_id`, `holder_owner_id_sha256`, `holder_incarnation_id_sha256`, and
-`holder_executor_id_sha256`, and carries no `generation`, `fencing_token`, or
-`holder_fencing_token`. No `session_execution_lease.lost` and no `taken_over` appear, so the
+`holder_executor_id_sha256`, and carries no `fencing_token` or `holder_fencing_token`. No `session_execution_lease.lost` and no `taken_over` appear, so the
 situation is unambiguously a recurring race rather than a handoff.
 
 **`lane_held = true` is the truthful outcome on `commit_cas_rejected`.** The rejection is
@@ -187,13 +200,21 @@ do not show the head moving on, or a handoff event appears alongside.
 **Setup.** `08-direct-turn-recovery.jsonl`. One committed direct turn materializes the
 session and reports the acceptance identity it was admitted under. A second direct turn is
 then parked inside a provider that never returns, and its worker is killed: the in-flight
-future is aborted and the core dropped, so no lane release, no claim abandonment, and no
-cancellation of the accepted row ever runs. A separate core under a different owner then
-drains the session, told nothing about the abandoned request.
+future is aborted and the core dropped, so no claim abandonment and no cancellation of the
+accepted row ever runs. Dropping the core in-process *does* still spawn a token-scoped
+best-effort lane release, which a killed worker would never have managed, so the lane is
+re-staged afterwards in the Phase 2 shape — a TTL-zero claim made straight through the store
+for the dead worker's identity, no guard and no renewal task behind it. The successor
+therefore has to take a held, lapsed lane over rather than walk into an empty one. A separate
+core under a different owner then drains the session, told nothing about the abandoned
+request.
 
 **Action.** Read `seed_acceptance_input_id`/`seed_acceptance_source_key` and
 `seed_acceptance_settled`, the `pending_reads_while_parked` envelope, then `drain_ran`,
-`recovered_input_id`, `recovered_application_turn_id`, and `pending_after_recovery`.
+`recovered_input_id`, `recovered_application_turn_id`, and `pending_after_recovery`. Then read
+`abandoned_fencing_token`, `abandoned_lane_released_before_takeover`, and the
+`taken_over_from_dead_worker` record, which is the phase's evidence that the recovery faced a
+dead holder rather than a free lane.
 
 **Expected observable evidence.** The seeded direct turn reports an acceptance whose
 `input_id` is what settled, and no `source_key`: direct ingress admits, it does not
@@ -204,14 +225,20 @@ exact `lease_expires_at_ms`. This is a factual lease projection, not evidence th
 process is alive. The row's durability is proved by what happens after the kill — the peer's
 ordinary queued drain, told nothing about the request, runs a turn, commits it, and settles
 that same input identity under a turn id that is *not* the abandoned driver's; no pending row
-survives.
+survives. That drain is a takeover: `taken_over_from_dead_worker` is emitted by the
+successor, names the dead worker as `displaced_owner_id` at the staged
+`displaced_fencing_token`, and carries a strictly higher `fencing_token` of its own, while
+`abandoned_lane_released_before_takeover` is `false` — no release for that owner at that token
+precedes the successor's `session_execution_lease.acquired`.
 
 **Judgment — FAIL if:** the drain finds nothing claimable after the kill (then the turn was
 driven before it was admitted, or post-acceptance recovery is not unified and direct turns
 need a repair path of their own), the parked read is absent, duplicated, loses the nested
 input identity/session, is not `held`, or lacks an exact lease expiry, the successor settles
-a different input or re-commits under the abandoned turn id, a `source_key` appears, or the
-row is still pending after a committed recovery.
+a different input or re-commits under the abandoned turn id, a `source_key` appears, the
+row is still pending after a committed recovery, no takeover from the dead worker appears, it
+names the wrong displaced holder or token, or the abandoned lane was released before the
+successor acquired it — a recovery that walked into a free lane never tested a dead worker.
 
 ## Phase 4 — Judge the triage procedure from observed behavior
 
@@ -233,6 +260,7 @@ collision from recurrence across all three rounds.
 | Recurrence directs the operator to inspect host routing and identity configuration, without prescribing an unproved repair | distinct per-open executors under one host identity in every livelock round |
 | Only `commit_cas_rejected` proves a turn did not publish | `03-lease-takeover.jsonl` versus `04-commit-cas-livelock.jsonl` |
 | A turn accepted by a worker that then dies is finished by its peer, whichever ingress admitted it | `08-direct-turn-recovery.jsonl` (`pending_reads_while_parked` identity, held status and exact expiry; `drain_ran`; matching `recovered_input_id`; `recovered_application_turn_id`) |
+| That peer takes the dead worker's lane over rather than finding it released | `08-direct-turn-recovery.jsonl` (`taken_over_from_dead_worker`, `abandoned_lane_released_before_takeover` false) |
 
 Missing fields, inconsistent identities, or a conclusion that requires facts outside the
 artifact bundle are failures. Preserve the bundle and report the unsupported claim.
@@ -254,13 +282,14 @@ confirm no container or host port was left behind (the companion owns none).
 | Contract coverage | lease-event suite and facade-read suite green | | `00-trace-event-tests.log`, `01-facade-read-tests.log` |
 | Provider hang | `current` reading naming the parked worker, positive headroom, zero lease-trouble events | | `02-provider-hang.jsonl` |
 | Lease release on commit | the committed turn's lane reads `unheld` | | `02-provider-hang.jsonl` |
-| Winner-emitted takeover | one `taken_over` from the winner naming the abandoned holder and generation | | `03-lease-takeover.jsonl` |
+| Winner-emitted takeover | one `taken_over` from the winner naming the abandoned holder and its `displaced_fencing_token` | | `03-lease-takeover.jsonl` |
 | Dead loser stays silent | `lease_lost_count` is 0, so the event does not depend on loser liveness | | `03-lease-takeover.jsonl` |
 | Lease loss is not failure | the sweeping turn's fate recorded and self-consistent | | `03-lease-takeover.jsonl` |
 | CAS livelock recurs | every round: one commit, one rejection with `lease_lost = false` and `lane_held = true` from a different executor under the same host owner | | `04-commit-cas-livelock.jsonl` |
 | Executor recovery dispositions | renewal-backed `current` becomes `unheld`; a lapsed dead holder is named by one winner-emitted `taken_over` with no loser event and a committed successor; Busy proceeds lane-less without wait/give-up and head CAS decides | | `07-executor-recovery-law.json` |
 | Direct-turn acceptance precedes the drive | no input is claimable while the live driver holds it; after that driver dies, the peer settles the exact accepted `ti:` input with no source key | | `08-direct-turn-recovery.jsonl` |
 | Direct-turn recovery is the ordinary drain | an unrelated worker's queued drain commits the orphaned input under its own turn id and leaves no pending row | | `08-direct-turn-recovery.jsonl` |
+| Direct-turn recovery faces a dead holder | the drain's claim displaces the staged abandoned lane at a strictly higher `fencing_token`, and nothing released that lane first | | `08-direct-turn-recovery.jsonl` |
 | Backend agreement | every phase and normalized recovery disposition reported the same verdicts on each configured backend | | all phase artifacts, `07-executor-recovery-law.json` |
 | Procedure judgment | every Phase 4 conclusion matched independent observed evidence | | four scenario artifacts, focused logs, completed scorecard |
 | Teardown | panic gate clean; no owned containers or ports remain | | `session-lease-triage-e2e.log` |
@@ -274,6 +303,14 @@ would the request it had accepted have been finished by its peer rather than los
 
 ## History
 
+- **FIG-3160**: Phase 3b released the abandoned lane before the successor claimed it, so the
+  recovery walked into a free row and never tested a dead worker. The lane is now re-staged in
+  the Phase 2 shape after the kill, and the phase asserts a `taken_over` naming the dead owner
+  at the staged `fencing_token` with no release for that owner and token ahead of the
+  successor's `session_execution_lease.acquired`. Corrected the field names this runbook used
+  (`claimed`, `generation`), named `scripts/ci/with-service.sh pg16` as the way to get the
+  PostgreSQL backend, and routed the companion's build and unit-test legs through kiln with
+  per-test reporting.
 - **FIG-1900**: Moved the Phase 3 collision fixture below public turn admission. ADR 0077
   correctly refuses a new turn while the lane is held, while the persistence-seam fixture
   continues to prove the authoritative CAS and borrowed-fence diagnostics directly.

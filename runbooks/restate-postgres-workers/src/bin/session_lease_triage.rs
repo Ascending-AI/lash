@@ -19,7 +19,9 @@
 //!   `TurnBuilder::run` rather than the queue. Direct ingress accepts before it
 //!   drives (ADR 0069), so the request is durable while the provider is still
 //!   parked, and the peer that takes the lane recovers it through the ordinary
-//!   queued drain under the same generation fence.
+//!   queued drain under the same generation fence. The lane is re-staged after
+//!   the kill in the `takeover` shape, because the in-process drop the harness
+//!   kills with does release the lane and a dead worker does not.
 //! * `livelock`: the cause the procedure names for repeated CAS rejections,
 //!   induced directly at the persistence seam. ADR 0077 admission refuses a
 //!   second public turn while the lane is held, so this phase deliberately
@@ -46,10 +48,11 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use lash::persistence::{
-    LeaseOwnerIdentity, OperationId, RuntimeCommit, RuntimePersistence, SessionLeaseDiagnostics,
-    SessionLeaseRenewal, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    LeaseOwnerIdentity, OperationId, RuntimeCommit, RuntimePersistence, SessionExecutionLease,
+    SessionLeaseDiagnostics, SessionLeaseRenewal, SessionStoreCreateRequest, SessionStoreFactory,
+    StoreError,
 };
 use lash_postgres_store::PostgresStorage;
 use serde_json::{Value, json};
@@ -941,11 +944,16 @@ async fn commit_cas_livelock(
 /// takes the lane rediscovers it through the ordinary queued drain — the same
 /// path, the same generation fence (ADR 0029), no direct-turn-shaped repair.
 ///
-/// Fixture honesty: the worker is killed by aborting the in-flight turn future
-/// and dropping everything behind it. No cleanup runs, exactly as with a
-/// SIGKILL: no lane release, no claim abandonment, no cancellation of the
-/// accepted row. The successor is a separate core with its own owner identity,
-/// and it is given no knowledge that the input was ever direct.
+/// Fixture honesty: aborting the in-flight turn future and dropping the core is
+/// not a SIGKILL. Nothing cancels the accepted row and nothing hands the lane
+/// on, but the guard's `Drop` still runs in this process and spawns a
+/// token-scoped best-effort release, so the lane the successor meets is an
+/// unheld one. That is the easy case, and it is not the one this phase is named
+/// for: the lane is therefore re-staged after the kill as a store-level claim
+/// with no guard and no renewal loop behind it — the Phase 2 shape — so the
+/// successor has to take a held, lapsed lane over from a holder that will never
+/// release it (FIG-3160). The successor is a separate core with its own owner
+/// identity, and it is given no knowledge that the input was ever direct.
 async fn direct_turn_recovery(
     backend: &Backend,
     capture: &LeaseTraceCapture,
@@ -1017,11 +1025,21 @@ async fn direct_turn_recovery(
         .context("read the session's pending inputs while the direct drive is parked")?;
 
     // Kill the worker: abort the future mid-drive and drop the core behind it.
-    // No release, no abandonment, no cancellation runs.
+    // No abandonment and no cancellation runs; the guard drop does still spawn a
+    // token-scoped best-effort release, which is why the lane is re-staged below.
     abandoned.abort();
     let _ = abandoned.await;
     drop(dead);
     drop(provider);
+
+    // Leave the row held by a worker that is gone, exactly as Phase 2 does:
+    // claimed straight through the store at TTL zero, so there is no guard and
+    // no renewal loop behind it. Retried, because the in-process drop release is
+    // asynchronous and the dying lease can still be live for the rest of its
+    // term; a release that lands after this claim is scoped to the older token
+    // and leaves this one untouched.
+    let abandoned_lease = stage_abandoned_lane(store.as_ref(), &session_id, &abandoned_by).await?;
+    capture.reset();
 
     // A peer takes the lane through the ordinary queued drain. It was told
     // nothing about the abandoned request.
@@ -1061,6 +1079,48 @@ async fn direct_turn_recovery(
         .map_err(anyhow::Error::msg)
         .context("read pending inputs after recovery")?;
 
+    // The recovery has to be a takeover. The successor's claim displaced the
+    // staged holder, and it did so without anyone releasing that holder's lane
+    // first: a release for the staged owner and token landing before the
+    // successor's `acquired` would mean the phase tested an unheld row again.
+    let timeline = capture.timeline();
+    let successor_acquired_at = timeline
+        .iter()
+        .position(|event| {
+            lease_event(event, &session_id, "session_execution_lease.acquired")
+                && owner_id_of(event) == Some(successor.owner_id.as_str())
+        })
+        .context("the recovery drain recorded no session execution lease acquisition")?;
+    let abandoned_released_at = timeline.iter().position(|event| {
+        lease_event(event, &session_id, "session_execution_lease.release")
+            && owner_id_of(event) == Some(abandoned_by.owner_id.as_str())
+            && fencing_token_of(event) == Some(abandoned_lease.fencing_token)
+    });
+    ensure!(
+        abandoned_released_at.is_none_or(|released| released > successor_acquired_at),
+        "the abandoned lane at fencing token {} was released before the successor acquired it, \
+         so the recovery never faced a dead holder; timeline: {timeline:?}",
+        abandoned_lease.fencing_token
+    );
+    let taken_over = timeline
+        .iter()
+        .filter(|event| {
+            lease_event(event, &session_id, "session_execution_lease.taken_over")
+                && event.get("displaced_owner_id").and_then(Value::as_str)
+                    == Some(abandoned_by.owner_id.as_str())
+                && event.get("displaced_fencing_token").and_then(Value::as_u64)
+                    == Some(abandoned_lease.fencing_token)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let taken_over_from_dead_worker = taken_over.first().cloned().with_context(|| {
+        format!(
+            "the recovery drain never took the lane over from `{}` at fencing token {}; \
+             timeline: {timeline:?}",
+            abandoned_by.owner_id, abandoned_lease.fencing_token
+        )
+    })?;
+
     Ok(json!({
         "checkpoint": "direct_turn_recovery",
         "dialect": "typescript",
@@ -1085,6 +1145,56 @@ async fn direct_turn_recovery(
         "recovered_application_turn_id": recovered_application
             .map(|application| application.turn_id.as_str().to_string()),
         "pending_after_recovery": pending_after_recovery.len(),
-        "lease_trace": capture.timeline(),
+        "abandoned_fencing_token": abandoned_lease.fencing_token,
+        "abandoned_lane_released_before_takeover": abandoned_released_at.is_some(),
+        "taken_over_from_dead_worker": taken_over_from_dead_worker,
+        "taken_over_from_dead_worker_count": taken_over.len(),
+        "lease_trace": timeline,
     }))
+}
+
+/// Claim `session_id`'s lane for `owner` straight through the store at TTL zero,
+/// leaving a held-but-lapsed row with nothing alive behind it.
+///
+/// The claim is retried rather than asserted once: a lane a killed worker just
+/// let go of can still be live for the rest of its term, and a claim that arrives
+/// inside that window is refused as busy rather than being wrong.
+async fn stage_abandoned_lane(
+    store: &dyn RuntimePersistence,
+    session_id: &SessionId,
+    owner: &LeaseOwnerIdentity,
+) -> Result<SessionExecutionLease> {
+    let deadline = tokio::time::Instant::now() + GATE_TIMEOUT;
+    loop {
+        let outcome = store
+            .try_claim_session_execution_lease(session_id, owner, "lease-triage-direct-executor", 0)
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("stage the abandoned lane")?;
+        if let Some(lease) = outcome.acquired() {
+            return Ok(lease);
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "the abandoned lane stayed held by a live lease for {GATE_TIMEOUT:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// True when `event` is the named session-execution-lease event for `session_id`.
+///
+/// The trace capture is process-wide, so a phase reads its own lane rather than
+/// whichever lease happened to move.
+fn lease_event(event: &Value, session_id: &SessionId, name: &str) -> bool {
+    event.get("event").and_then(Value::as_str) == Some(name)
+        && event.get("session_id").and_then(Value::as_str) == Some(session_id.as_str())
+}
+
+fn owner_id_of(event: &Value) -> Option<&str> {
+    event.get("owner_id").and_then(Value::as_str)
+}
+
+fn fencing_token_of(event: &Value) -> Option<u64> {
+    event.get("fencing_token").and_then(Value::as_u64)
 }
