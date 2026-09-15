@@ -13,8 +13,25 @@ just rlm-smoke-e2e
 
 The runner executes every scenario once: TypeScript is the sole RLM language
 ([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)). Every row gets a fresh workspace copy, durable data
-directory, session id, reserved port, trace offset, and artifact directory. The configured
-driver model is recorded separately from provider-reported served-model evidence.
+directory, session id, reserved port, trace offset, and artifact directory. Ports come from
+the gate's own `LASH_E2E_PORT_BASE` allocation, not from a band a drive pins for its rows.
+
+## What the row's trace proves
+
+`host-evidence.json` is the host's summary; the row's own `trace.jsonl` is the record a
+judge reads. Each row fails unless its trace carries both readings:
+
+- Every workspace tool call carries a typed payload on `tool_call_completed`, under
+  `output.outcome.payload`: `{path, entries}` for `workspace_list`, `{path, content}` for
+  `workspace_read`, `{path, bytes_written}` for `workspace_write`, and
+  `{command, exit_code, stdout, stderr}` for `workspace_exec`. The path or command is read
+  off the record, never decoded out of `graph_node_id`.
+- The configured driver model is recorded separately from the provider-reported served
+  model: the request slug is `llm_call_completed.response.request_model`, and the served
+  slug the provider actually reported is
+  `llm_call_completed.attempts[].execution_evidence.served_model`. The row fails when a
+  completed attempt reports no served model, and when the served models in the trace
+  disagree with the ones the host wrote to `host-evidence.json`.
 
 ## Tool jail
 
