@@ -36,7 +36,7 @@ pub(crate) async fn app_state(
         queued_work,
         turn_input_applications,
         usage,
-    } = read_state_projection(&state, &session_id, !active_turns.is_empty()).await?;
+    } = read_state_projection(&state, &session_id).await?;
     let active_turn_ids = active_turns
         .iter()
         .map(|address| address.turn_id.clone())
@@ -925,14 +925,19 @@ pub(crate) async fn list_queued_work(
         .authorize(WorkbenchAuthorizationAction::Observe {
             session_id: session_id.clone(),
         })?;
-    let session = state
-        .open_session_for_observation(&session_id)
+    // A read-only probe reads the durable records directly. Opening the session
+    // to list them claimed the execution lease and raced the running turn for
+    // it (FIG-3144).
+    let store = state
+        .session_store_factory
+        .create_store(&state_store_request(&state, &session_id))
         .await
-        .map_err(|error| {
-            state.session_admission_error(&session_id, "api.queued_work.list", error)
-        })?;
+        .map_err(AppError::internal)?;
     Ok(Json(
-        session.queued_work().await.map_err(AppError::internal)?,
+        store
+            .list_pending_queued_work(&session_id)
+            .await
+            .map_err(AppError::internal)?,
     ))
 }
 

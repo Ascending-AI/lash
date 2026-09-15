@@ -10,7 +10,11 @@ use crate::{SessionExecutionLease, SessionExecutionLeaseAcquisition};
 /// this claim took the lane over from a lapsed holder.
 pub fn trace_acquisition(acquisition: &SessionExecutionLeaseAcquisition) {
     let lease = &acquisition.lease;
-    tracing::info!(
+    // An uncontended claim is the ordinary case and says nothing an operator
+    // needs: at roughly two claims a second it drowned the host log and made
+    // log-based evidence collection expensive. Contention still reports at
+    // INFO, below and in `trace_busy` (FIG-3144).
+    tracing::debug!(
         session_id = %lease.session_id,
         owner_id = %lease.owner.owner_id,
         incarnation_id = %lease.owner.incarnation_id,
