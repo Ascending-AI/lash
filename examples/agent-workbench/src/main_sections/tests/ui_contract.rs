@@ -49,6 +49,33 @@ fn workbench_ui_renders_the_session_roster_without_a_language_choice() {
     );
 }
 
+/// The accounts view is a fixed overlay over the chat topbar, so the page
+/// carries two tablists. Only the active view's may be in the layout: a covered
+/// tab still answers a selector while the overlay eats every click on it, so a
+/// click on a named tab lands on nothing.
+#[test]
+fn workbench_ui_keeps_one_view_tablist_in_the_layout() {
+    assert!(ui::INDEX_HTML.contains("id=\"chatViewTabs\""));
+    assert!(ui::INDEX_HTML.contains("id=\"accountsViewTabs\""));
+    assert!(ui::INDEX_HTML.contains(".view-tabs[hidden] { display: none; }"));
+    assert!(ui::INDEX_HTML.contains("chatViewTabs.hidden = accountsActive;"));
+    assert!(ui::INDEX_HTML.contains("accountsViewTabs.hidden = !accountsActive;"));
+}
+
+/// The second tab opens on a session the roster carries. A client-minted id is
+/// served but never recorded, so it can never be selected, never becomes the
+/// session a query-less call resolves to, and never appears in any selector:
+/// the operator who opened it has no way to make it current.
+#[test]
+fn workbench_ui_opens_a_second_tab_on_a_rostered_session() {
+    assert!(
+        !ui::INDEX_HTML.contains("crypto.randomUUID()"),
+        "the second tab must not carry a client-minted, unrosterable session id"
+    );
+    assert!(ui::INDEX_HTML.contains("newSessionTab.addEventListener(\"click\", async () => {"));
+    assert!(ui::INDEX_HTML.contains("could not open a session tab"));
+}
+
 #[test]
 fn workbench_ui_renders_accounts_panel() {
     assert!(ui::INDEX_HTML.contains("id=\"accountsView\""));

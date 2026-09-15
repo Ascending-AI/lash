@@ -344,6 +344,11 @@
     /* ─── view tabs ─── */
 
     .view-tabs { display: flex; gap: var(--space-2xs); }
+    /* Two tablists exist, one per view, and the accounts view is a fixed
+       overlay above the chat topbar. Only the active view's tablist may be
+       in the layout: the covered one is still a click target that the
+       overlay intercepts, which is a click that never lands. */
+    .view-tabs[hidden] { display: none; }
 
     .view-tab {
       border: 0;
@@ -2516,7 +2521,7 @@
     <main id="mainPanel" class="main">
       <header class="topbar">
         <div class="title-block">
-          <div class="view-tabs" role="tablist" aria-label="Workbench views">
+          <div class="view-tabs" id="chatViewTabs" role="tablist" aria-label="Workbench views">
             <button class="view-tab active" type="button" data-view="chat" role="tab"
                     aria-selected="true">chat</button>
             <button class="view-tab" type="button" data-view="accounts" role="tab"
@@ -2646,7 +2651,7 @@
 
     <section id="accountsView" class="accounts-view" aria-label="Mock email accounts" hidden>
       <header class="accounts-view-head">
-        <div class="view-tabs" role="tablist" aria-label="Workbench views">
+        <div class="view-tabs" id="accountsViewTabs" role="tablist" aria-label="Workbench views">
           <button class="view-tab" type="button" data-view="chat" role="tab"
                   aria-selected="false">chat</button>
           <button class="view-tab active" type="button" data-view="accounts" role="tab"
@@ -2796,10 +2801,31 @@
     const triggerCount = document.getElementById("triggerCount");
     const newSessionTab = document.getElementById("newSessionTab");
 
-    newSessionTab.addEventListener("click", () => {
-      const url = new URL(window.location.href);
-      url.searchParams.set("session_id", "workbench-tab-" + crypto.randomUUID());
-      window.open(url, "_blank", "noopener");
+    /* The second tab gets a rostered session, not a client-minted id. A
+       client-minted id is served but never recorded, so it can never be
+       selected, never becomes the session a query-less call resolves to, and
+       never appears in anyone's selector: an operator who opened it has no way
+       back to it. Creating it through the roster is the same tab, addressable. */
+    newSessionTab.addEventListener("click", async () => {
+      showSessionError("");
+      try {
+        const response = await nativeFetch("/api/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({})
+        });
+        const body = await response.json().catch(() => null);
+        if (!response.ok || typeof body?.session_id !== "string") {
+          showSessionError(typeof body?.error === "string" ? body.error : "could not open a session tab");
+          return;
+        }
+        const url = new URL(window.location.href);
+        url.searchParams.set("session_id", body.session_id);
+        window.open(url, "_blank", "noopener");
+        loadSessions();
+      } catch (_) {
+        showSessionError("could not open a session tab");
+      }
     });
 
     const sessionSelect = document.getElementById("sessionSelect");
@@ -5492,12 +5518,20 @@
       const subscriptionId = registration.subscription_id || "unknown";
       const subscriptionKey = registration.subscription_key || "unknown";
       const scope = triggerRegistrationScope(registration);
-      const details = [
+      /* The alias is the only human-memorable handle a registration has, and
+         the row's display name is built from the target and the source, not
+         from it. Leaving it to the `title` attribute and the expanded panel
+         put it out of reach of anything reading the rail. */
+      const details = [];
+      if (registration.name) {
+        details.push(["alias", truncateTriggerDetail(registration.name, 24)]);
+      }
+      details.push(
         ["id", truncateSubscriptionId(subscriptionId)],
         ["trigger key", truncateSubscriptionKey(subscriptionKey)],
         ["scope", truncateTriggerScope(scope)],
         ["incarnation", truncateTriggerDetail(registration.incarnation, 12)]
-      ];
+      );
       const titleDetails = [
         ["id", subscriptionId],
         ["trigger key", subscriptionKey],
@@ -5632,6 +5666,8 @@
 
     /* ── mock email accounts (accounts tab) ── */
     const accountsView = document.getElementById("accountsView");
+    const chatViewTabs = document.getElementById("chatViewTabs");
+    const accountsViewTabs = document.getElementById("accountsViewTabs");
     const accountsGrid = document.getElementById("accountsGrid");
     const accountsCount = document.getElementById("accountsCount");
     const accountsError = document.getElementById("accountsError");
@@ -5642,6 +5678,13 @@
     function setView(view) {
       const accountsActive = view === "accounts";
       accountsView.hidden = !accountsActive;
+      /* The accounts view is a fixed overlay over the chat topbar, so the
+         topbar's tablist stays clickable-looking while the overlay eats every
+         click on it. Retiring the inactive tablist from the layout leaves
+         exactly one rendered `.view-tab` per view, so a click on a named tab
+         lands on the tab a reader sees. */
+      chatViewTabs.hidden = accountsActive;
+      accountsViewTabs.hidden = !accountsActive;
       for (const tab of document.querySelectorAll(".view-tab")) {
         const active = tab.dataset.view === view;
         tab.classList.toggle("active", active);
