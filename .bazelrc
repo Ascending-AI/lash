@@ -90,6 +90,23 @@ test --cache_test_results=yes
 build:local --spawn_strategy=local
 test:local --test_output=errors
 
+# A dependent rlib does not need its dependency's object code, only its
+# metadata. With this flag `rules_rust` emits a second, cheap
+# `RustcMetadata` action per library (`-Zno-codegen --emit=metadata`, under the
+# RUSTC_BOOTSTRAP the rules inject for a stable toolchain) and lets downstream
+# libraries start as soon as that hollow rlib lands instead of waiting out the
+# full codegen. The chain that owns this repository's Bazel critical path is
+# exactly that shape - the lash-internal-core rlib, then the facade rlib, then
+# the test binaries that link them - and the metadata half of a 128 s compile
+# is a fraction of it. Only `rlib`/`lib` crate types pipeline; proc-macro and
+# binary targets are unaffected, and any single target can opt out with
+# `disable_pipelining`.
+#
+# It is set here rather than under `build:shared` because CI never passes
+# `--config=shared`: `.github/actions/bazel-shared-cache` composes its own flag
+# list, so a flag that must reach CI cannot live in that config.
+build --@rules_rust//rust/settings:pipelined_compilation=True
+
 build --incompatible_strict_action_env
 build --jobs=8
 build --loading_phase_threads=4
