@@ -431,7 +431,7 @@ where
 /// cell a `{"type":"settled","output":{...}}` record — and with it the internal
 /// `$lash_tool_value` tag — for a wait that inline answers the child's own
 /// value. The language forces the swap between the two spellings inside a batch
-/// (`crates/lashlang/src/runtime/vm/pending_tools.rs`, `PROCESS_HANDLE_LEAF`),
+/// (the language's batch lowering, `PROCESS_HANDLE_LEAF`),
 /// so the swap has to be value-preserving.
 pub(crate) fn tool_output_from_completion_resolution(
     resolution: crate::Resolution,

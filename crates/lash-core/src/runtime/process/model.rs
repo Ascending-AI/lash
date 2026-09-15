@@ -921,27 +921,42 @@ impl ProcessRegistration {
     /// [`AdmittedProcessIdentity`](crate::AdmittedProcessIdentity) is the only
     /// carrier that can hold a definition reference.
     ///
-    /// The label is the one exception, and it is not an exception to the
-    /// authority: a label is display metadata, never an identity input
-    /// (FIG-3122). The engine still writes the kind and the definition
-    /// reference it alone can resolve, but a label the host *declared* for this
-    /// start survives the stamp byte-identical, and the engine's derived label
-    /// is what a start that declared none falls back to. Otherwise the label a
-    /// caller passes to `processes.start` would be silently discarded here,
-    /// since an engine derives its own label from the payload — for Lashlang,
-    /// the lift digest, which is what a listing shows where the author wrote a
-    /// name.
+    /// It replaces the label too. A label already on the registration is not
+    /// evidence that a host declared one: every derivation route puts a label
+    /// here (`ProcessIdentity::from_process_input`), and a fixture or a caller
+    /// may stamp an admitted identity more than once. Reading the label back
+    /// off the registration to decide whether to keep it therefore lets the
+    /// *first* stamp mask the second, which is how #1543 turned the
+    /// `list_processes_filters_by_enriched_fields` conformance law red. A
+    /// host-declared label is restored after admission, from the declaration
+    /// that carried it, by [`Self::with_host_facing_label`].
     pub fn with_admitted_identity(mut self, admitted: crate::AdmittedProcessIdentity) -> Self {
-        let declared_label = self.identity.label.take();
         let (identity, signals) = admitted.into_parts();
-        self.identity = ProcessIdentity {
-            label: declared_label.or(identity.label),
-            ..identity
-        };
+        self.identity = identity;
         for signal in signals {
             if !self.event_types.contains(&signal) {
                 self.event_types.push(signal);
             }
+        }
+        self
+    }
+
+    /// Restores the host-facing label a start *declared*, over the one the
+    /// engine derived (FIG-3122).
+    ///
+    /// A label is display metadata, never an identity input, so this moves
+    /// nothing else: admission stays the sole writer of the kind and of the
+    /// definition reference only the engine can resolve. `None` — a start that
+    /// declared no label — keeps the engine's derived label, which for a
+    /// scripted-program engine is the lift digest.
+    ///
+    /// The declaration is the only authority for "the host declared this
+    /// label", which is why the value is passed in rather than read back off
+    /// the registration: by the time admission has run, a derived label and a
+    /// declared one are indistinguishable on the row.
+    pub fn with_host_facing_label(mut self, label: Option<String>) -> Self {
+        if let Some(label) = label {
+            self.identity.label = Some(label);
         }
         self
     }

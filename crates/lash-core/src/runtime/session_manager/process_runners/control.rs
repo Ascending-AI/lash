@@ -497,6 +497,16 @@ impl ProcessCapability {
             request.observers.clone()
         };
         let originator = request.originator.clone();
+        // The host-facing label the start declared (FIG-3122). It is read off
+        // the declaration here, before the registration exists, because that is
+        // the only place "the host declared this label" is still distinguishable
+        // from a label some derivation route produced; admission overwrites the
+        // row's label with the engine's, and this restores the declared one
+        // afterwards.
+        let declared_label = request
+            .identity
+            .as_ref()
+            .and_then(|identity| identity.label.clone());
         let registration = request.into_registration(None).with_process_provenance(
             crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
         );
@@ -520,7 +530,8 @@ impl ProcessCapability {
         // committed and replays forever.
         let registration = self
             .admit_and_stamp_engine_start(current, registration, env_spec.as_ref())
-            .await?;
+            .await?
+            .with_host_facing_label(declared_label);
         let options = crate::ProcessStartOptions::new().with_initial_observers(observers);
         let execution_context = options.execution_context(&scope);
         self.command_runner(current, &scope)?
