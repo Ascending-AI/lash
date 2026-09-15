@@ -317,6 +317,12 @@ async fn async_main() -> anyhow_like::Result<()> {
                 Arc::new(JsonlTraceSink::new(trace_path)),
             ])))
             .trace_level(TraceLevel::Extended)
+            // The `processes` module is catalogue presence, not an ability bit
+            // (ADR 0095): the served cells author `processes.start`, so the
+            // surface exists only where this factory is installed.
+            .plugin(Arc::new(
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            ))
             .trigger_store(trigger_store);
     if let Some(marker) = shutdown_marker::factory_from_env("agent-service")? {
         core_builder = core_builder.plugin(marker);
