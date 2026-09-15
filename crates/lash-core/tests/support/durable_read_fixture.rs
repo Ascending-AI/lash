@@ -55,21 +55,24 @@
 //! and pending-input identity, process-execution-env specs, await-event keys, and
 //! wake deliveries — plus everything their content-addressed hashes depend on.
 //!
-//! It does not cover payloads absent from `ExpectedFixture`. Trigger subscription,
-//! occurrence, and delivery payloads are the largest gap: the read-back assertions
-//! for them are deliberately shallow (subscription key, enabled flag, reservation
-//! status, occurrence payload), so an additive trigger-payload field — FIG-1377's
-//! class of change in a different store — still lands unflagged. Process
-//! registrations are the same shape of gap: `registration_fingerprint` is only
-//! compared against a re-registration by the same build, so it agrees with itself
-//! whatever the payload became.
+//! Trigger and process-registration payloads were that gap until FIG-1485. The
+//! read-back assertions for triggers are still deliberately shallow (subscription
+//! key, enabled flag, reservation status, occurrence payload), and
+//! `registration_fingerprint` still only agrees with a re-registration by the same
+//! build — so neither could see an additive payload field, which is FIG-1377's
+//! class of change in a different store. `ExpectedFixture` now carries the whole
+//! [`TriggerDeliveryReservation`] (which nests the occurrence and subscription
+//! records) and the whole waiting-process [`ProcessRecord`], so both payloads move
+//! the committed artifact when their shape moves.
+//!
+//! It still does not cover payloads absent from `ExpectedFixture`.
 //!
 //! It also does not cover a new field whose fixture value is skipped during
 //! serialization (e.g. a `None` that serde skips): such a field is invisible to the
 //! law unless a fixture scenario populates it. The `prompt` field was caught only
 //! because it serialized as `Some(empty)`.
 //!
-//! Closing those gaps means extending `ExpectedFixture`, which necessarily
+//! Closing a remaining gap means extending `ExpectedFixture`, which necessarily
 //! regenerates `expected.json` and moves the fixture declaration, so it is follow-up
 //! work on its own ticket rather than something to bundle into an unrelated change.
 //!
@@ -242,23 +245,23 @@ use lash_core::{
     ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
     ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
     ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessOriginator,
-    ProcessProvenance, ProcessRegistration, ProcessRegistry, ProcessStatus, ProcessValueSelector,
-    ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark, ProtocolTurnOptions,
-    RecoveryContract, Resolution, ResolveOutcome, RuntimeCommit, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimePersistence, RuntimeSessionState, SegmentHandover,
-    SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TextProjectionMetadata,
-    TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
-    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
-    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
-    WaitState,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
+    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
+    ProtocolTurnOptions, RecoveryContract, Resolution, ResolveOutcome, RuntimeCommit,
+    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, RuntimeSessionState,
+    SegmentHandover, SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation,
+    SessionScope, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    TextProjectionMetadata, TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
+    TriggerDeliveryReservation, TriggerDeliveryReservationOutcome, TriggerInputBinding,
+    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
+    TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
+    WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 77;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 78;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -334,6 +337,20 @@ pub struct ExpectedFixture {
     pub await_event_key: AwaitEventKey,
     pub revoked_await_event_key: AwaitEventKey,
     pub wake_delivery: ProcessWakeDelivery,
+    /// The trigger subscription, occurrence and delivery payloads as this build
+    /// writes them (FIG-1485). One field covers all three tables:
+    /// [`TriggerDeliveryReservation`] carries the occurrence and subscription
+    /// records whole. The read-back assertions on them are deliberately shallow
+    /// — subscription key, enabled flag, reservation status, occurrence payload
+    /// — so an additive field anywhere else in those payloads used to land
+    /// unflagged, which is FIG-1377's class of change in a different store.
+    pub trigger_delivery: TriggerDeliveryReservation,
+    /// The projected registration payload of the waiting process (FIG-1485).
+    /// `registration_fingerprint` was otherwise compared only against a
+    /// re-registration by the same build, so it agreed with itself whatever the
+    /// payload became; pinning the whole record makes the fingerprint's inputs
+    /// visible alongside it.
+    pub waiting_process: ProcessRecord,
 }
 
 fn assert_fixture_schema_version(found: u32) {
@@ -393,6 +410,11 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (
             crate::LATEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             76,
+            77,
+        ),
+        (
+            crate::NEWEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            77,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -887,6 +909,28 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("load seeded fixture session")
         .expect("seeded fixture session exists");
+    let seeded_occurrences = handles
+        .triggers
+        .list_occurrences(TriggerOccurrenceFilter::default())
+        .await
+        .expect("read seeded fixture trigger occurrence");
+    let [seeded_occurrence] = seeded_occurrences.as_slice() else {
+        panic!("fixture seeds exactly one trigger occurrence");
+    };
+    let seeded_deliveries = handles
+        .triggers
+        .list_deliveries_by_occurrence_id(&seeded_occurrence.occurrence_id)
+        .await
+        .expect("read seeded fixture trigger delivery");
+    let [trigger_delivery] = seeded_deliveries.as_slice() else {
+        panic!("fixture seeds exactly one trigger delivery");
+    };
+    let waiting_process = handles
+        .processes
+        .get_process(&ProcessId::from(PROCESS_ID))
+        .await
+        .expect("read seeded fixture waiting process")
+        .expect("fixture waiting process exists after seeding");
     ExpectedFixture {
         fixture_schema_version: DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         head_revision: read.head_revision,
@@ -905,6 +949,8 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         await_event_key,
         revoked_await_event_key,
         wake_delivery,
+        trigger_delivery: trigger_delivery.clone(),
+        waiting_process,
     }
 }
 
@@ -1196,6 +1242,11 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(process.status, ProcessStatus::Waiting);
     assert_eq!(process.wait.as_ref(), Some(&fixture_wait_state()));
     assert_eq!(process.env_ref.as_ref(), Some(&expected.process_env_ref));
+    assert_eq!(
+        process, expected.waiting_process,
+        "durable fixture drift: the projected registration payload recovered from the committed \
+         rows is not the one the expectations carry"
+    );
     let process_events = handles
         .processes
         .events_after(&ProcessId::from(PROCESS_ID), 0)
@@ -1399,6 +1450,21 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         deliveries[0].occurrence.payload,
         serde_json::json!({"value": 42})
     );
+    assert_eq!(
+        deliveries[0], expected.trigger_delivery,
+        "durable fixture drift: the trigger subscription, occurrence or delivery payload recovered \
+         from the committed rows is not the one the expectations carry"
+    );
+    assert_eq!(
+        subscriptions[0], expected.trigger_delivery.subscription,
+        "durable fixture drift: the subscription read directly disagrees with the one the \
+         delivery row projects"
+    );
+    assert_eq!(
+        occurrences[0], expected.trigger_delivery.occurrence,
+        "durable fixture drift: the occurrence read directly disagrees with the one the delivery \
+         row projects"
+    );
     let replayed_receipt = trigger_receipt(
         handles.triggers.as_ref(),
         TRIGGER_REGISTER_OPERATION,
@@ -1528,9 +1594,10 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
 /// change fails in the diff that introduces it instead of being absorbed by the
 /// next unrelated regeneration.
 ///
-/// Its reach is exactly [`ExpectedFixture`]: payloads that struct does not carry
-/// — trigger subscription/occurrence/delivery rows and process registrations —
-/// can still gain a field unflagged. The fixture README records that bound.
+/// Its reach is exactly [`ExpectedFixture`]: a payload that struct does not carry
+/// can still gain a field unflagged. FIG-1485 brought the trigger
+/// subscription/occurrence/delivery rows and the projected process registration
+/// inside that reach; the module documentation records the remaining bound.
 pub fn assert_committed_expectations_match_current_writes(committed: &[u8], written_now: &[u8]) {
     if committed == written_now {
         return;
