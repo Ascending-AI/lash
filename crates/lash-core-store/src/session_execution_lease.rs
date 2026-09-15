@@ -10,11 +10,13 @@ use crate::{SessionExecutionLease, SessionExecutionLeaseAcquisition};
 /// this claim took the lane over from a lapsed holder.
 pub fn trace_acquisition(acquisition: &SessionExecutionLeaseAcquisition) {
     let lease = &acquisition.lease;
-    // An uncontended claim is the ordinary case and says nothing an operator
-    // needs: at roughly two claims a second it drowned the host log and made
-    // log-based evidence collection expensive. Contention still reports at
-    // INFO, below and in `trace_busy` (FIG-3144).
-    tracing::debug!(
+    // The claim is operator-visible at INFO, unconditionally: it is the event a
+    // triage reader anchors a lane's timeline on, and `session-lease-triage-e2e`
+    // pins that level. It was briefly DEBUG for an uncontended claim to keep the
+    // workbench host log readable, and that motive is gone: the page probes no
+    // longer take the lease, so the ordinary claim rate is no longer per-poll
+    // (FIG-3144).
+    tracing::info!(
         session_id = %lease.session_id,
         owner_id = %lease.owner.owner_id,
         incarnation_id = %lease.owner.incarnation_id,
