@@ -32,9 +32,30 @@ on_exit() {
 }
 trap on_exit EXIT
 
+# Built through Bazel so this companion shares the box's action cache with every
+# other checkout instead of compiling the workspace again into its own Cargo
+# target directory. `cargo build` without a profile and Bazel's default
+# `fastbuild` are both `-C opt-level=0` with debug assertions on, so the geometry
+# the phases run under is unchanged.
+symlink_prefix="$artifact_dir/bazel-"
+if command -v kiln >/dev/null 2>&1; then
+  build_command=(kiln build)
+  test_command=(kiln test)
+else
+  build_command=("$repo/scripts/hermetic-build.sh" build)
+  test_command=("$repo/scripts/hermetic-build.sh" test)
+fi
+"${build_command[@]}" "--symlink_prefix=$symlink_prefix" \
+  //runbooks/restate-postgres-workers:lash-e2e-session-lease-triage__bin \
+  2>&1 | tee "$artifact_dir/build.log"
+harness_bin="${symlink_prefix}bin/runbooks/restate-postgres-workers/lash-e2e-session-lease-triage__bin"
+[ -x "$harness_bin" ] || {
+  echo "session-lease-triage harness binary is missing at $harness_bin" >&2
+  exit 1
+}
+
 harness() {
-  cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
-    --bin lash-e2e-session-lease-triage -- "$1"
+  "$harness_bin" "$1"
 }
 
 backends="sqlite"
@@ -44,12 +65,18 @@ fi
 echo "session-lease-triage backends: $backends" | tee "$test_output"
 
 # The lease trace transitions are contract, so their unit coverage is part of the
-# companion rather than something the judged run takes on trust.
-cargo test --locked --quiet -p lash-internal-core --test runtime_observability session_lease_observability \
+# companion rather than something the judged run takes on trust. Both legs print
+# each test name: a companion whose own unit gates report only a count cannot be
+# read for which transitions were actually covered.
+"${test_command[@]}" "--symlink_prefix=$symlink_prefix" --test_output=all \
+  --test_arg=session_lease_observability \
+  //crates/lash-core:runtime_observability__test \
   2>&1 | tee "$artifact_dir/00-trace-event-tests.log" | tee -a "$test_output"
 # The facade read and its host-side classification, exercised through the example
 # that owns the operator endpoint.
-cargo test --locked --quiet -p agent-service lease_triage \
+"${test_command[@]}" "--symlink_prefix=$symlink_prefix" --test_output=all \
+  --test_arg=lease_triage \
+  //examples/agent-service:agent-service__unit_test \
   2>&1 | tee "$artifact_dir/01-facade-read-tests.log" | tee -a "$test_output"
 
 harness hang 2>&1 | tee "$artifact_dir/02-provider-hang.jsonl" | tee -a "$test_output"
@@ -304,6 +331,25 @@ for backend, record in direct_turn_records.items():
         )
     if record["pending_after_recovery"]:
         fail(f"{backend}: recovery must settle the row rather than leave it claimable: {record}")
+    # The recovery has to face a dead holder. A lane that was released before the
+    # successor claimed it is the easy, uncontested case, and a phase that only
+    # reported "the turn committed" passed under exactly that shape (FIG-3160).
+    if record["abandoned_lane_released_before_takeover"]:
+        fail(
+            f"{backend}: the abandoned lane was released before the successor acquired it, so "
+            f"the recovery never took anything over: {record}"
+        )
+    if not record["taken_over_from_dead_worker_count"]:
+        fail(f"{backend}: the recovery drain recorded no takeover from the dead worker: {record}")
+    taken_over = record["taken_over_from_dead_worker"]
+    if taken_over.get("displaced_owner_id") != record["abandoned_owner_id"]:
+        fail(f"{backend}: the takeover names the wrong displaced holder: {taken_over}")
+    if taken_over.get("displaced_fencing_token") != record["abandoned_fencing_token"]:
+        fail(f"{backend}: the takeover names the wrong displaced generation: {taken_over}")
+    if taken_over.get("owner_id") != record["successor_owner_id"]:
+        fail(f"{backend}: a takeover is the winner's event, not the dead holder's: {taken_over}")
+    if taken_over.get("fencing_token", 0) <= record["abandoned_fencing_token"]:
+        fail(f"{backend}: the successor did not fence the abandoned generation: {taken_over}")
 
 # One normalized law artifact makes backend agreement reviewable as a single
 # row rather than requiring a reader to mentally join three phase files.
@@ -365,6 +411,18 @@ for backend in backends:
             "recovered_turn_committed": direct["recovered_turn_committed"],
             "pending_after_recovery": direct["pending_after_recovery"],
             "acceptance_source_key": direct["seed_acceptance_source_key"],
+            "abandoned_lane_released_before_takeover": direct[
+                "abandoned_lane_released_before_takeover"
+            ],
+            "taken_over_from_dead_worker_count": direct["taken_over_from_dead_worker_count"],
+            "takeover_outcome": direct["taken_over_from_dead_worker"]["outcome"],
+            "takeover_displaced_owner_id": direct["taken_over_from_dead_worker"][
+                "displaced_owner_id"
+            ],
+            "takeover_fences_abandoned_generation": (
+                direct["taken_over_from_dead_worker"]["fencing_token"]
+                > direct["abandoned_fencing_token"]
+            ),
         },
     }
 
