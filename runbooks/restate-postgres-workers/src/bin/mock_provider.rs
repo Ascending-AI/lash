@@ -544,8 +544,12 @@ const parent = async (workflow_id) => {{
   const nested_result = await (await processes.start({{ definition: child, args: {{ value: "nested" }} }}));
   const left_handle = await processes.start({{ definition: child, args: {{ value: "left" }} }});
   const right_handle = await processes.start({{ definition: child, args: {{ value: "right" }} }});
-  const left_result = await left_handle;
-  const right_result = await right_handle;
+  const settled = await Promise.all([
+    processes.await({{ handle: left_handle }}),
+    processes.await({{ handle: right_handle }})
+  ]);
+  const left_result = settled[0];
+  const right_result = settled[1];
   await sleep(1);
   return {{
     parent_lookup: parent_lookup.value,

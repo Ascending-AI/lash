@@ -54,7 +54,9 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:codemode_parity_cells",
+    ],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
     manifest_dir = "crates/lash-typescript",

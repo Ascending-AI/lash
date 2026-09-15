@@ -27,8 +27,8 @@
 
 use lashlang::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, Program,
-    ResourceRefExpr, UnaryOp,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessLiteralExpr,
+    Program, ResourceRefExpr, UnaryOp,
 };
 use thiserror::Error;
 
@@ -855,6 +855,17 @@ impl Printer {
 /// only its function body was authored, so that is what prints back.
 pub(super) fn process_run_body(process: &ProcessDecl) -> Option<&Expr> {
     crate::lower::process_run_body_path(process).map(|(_, body)| strip_completion_value(body))
+}
+
+/// The authored `run` body inside a process *literal*'s wrapper.
+///
+/// FIG-2999 made a top-level `const`-bound `async` arrow a process literal in
+/// `main` rather than a [`ProcessDecl`], so a lens door that re-parses a
+/// fragment inside such an arrow reads the body out of the literal. The
+/// wrapper shape is the same one [`process_run_body`] unwraps.
+pub(super) fn process_literal_run_body(literal: &ProcessLiteralExpr) -> Option<&Expr> {
+    crate::lower::process_run_body_path_of(&literal.body)
+        .map(|(_, body)| strip_completion_value(body))
 }
 
 /// The statements of a block, with the lowerer's block wrapper removed.

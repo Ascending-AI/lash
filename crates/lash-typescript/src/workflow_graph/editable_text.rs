@@ -17,7 +17,6 @@ use super::printer::{
 };
 use super::{
     GraphRenderError, RenderContext, RenderScope, WorkflowListComprehensionClause, WorkflowNode,
-    process_run_body_of,
 };
 
 pub(super) fn expression_text(expression: &Expr, allow_non_sourceable: bool) -> String {
@@ -123,9 +122,24 @@ fn fragment_bindings(node: &WorkflowNode) -> Vec<String> {
 /// The name the opaque-statement wrapper binds. It never reaches a graph.
 const OPAQUE_WRAPPER: &str = "workflowGraphOpaque";
 
-/// The authored `run` body of the opaque-statement wrapper process.
-pub(super) fn opaque_process_run_body(process: &lashlang::ProcessDecl) -> Option<&Expr> {
-    process_run_body_of(process)
+/// The authored statements of the opaque-statement wrapper.
+///
+/// The wrapper is a top-level `const`-bound `async` arrow, which FIG-2999 made
+/// a process *literal* assigned in `main` rather than a `Declaration::Process`
+/// (ADR 0095). So the wrapper is read back out of its own binding, and the
+/// authored body out of the run wrapper the literal carries.
+pub(super) fn opaque_wrapper_run_body(program: &Program) -> Option<&Expr> {
+    let [Expr::Assign { target, expr }] = super::printer::statement_block_contents(&program.main)
+    else {
+        return None;
+    };
+    if target.root.as_str() != OPAQUE_WRAPPER || !target.steps.is_empty() {
+        return None;
+    }
+    let Expr::ProcessLiteral(literal) = expr.as_ref() else {
+        return None;
+    };
+    super::printer::process_literal_run_body(literal)
 }
 
 /// Parse one editable TypeScript expression fragment with `globals` in scope.
@@ -191,13 +205,7 @@ pub fn parse_typescript_process_statement(
     let source = format!("const {OPAQUE_WRAPPER} = async () => {{\n{prelude}{text}\n}};\n");
     let program = crate::parse_workflow_fragment(&source, &BTreeSet::new(), processes)
         .map_err(|error| TypeScriptFragmentError(error.to_string()))?;
-    let Some(lashlang::Declaration::Process(process)) = program.declarations.into_iter().next()
-    else {
-        return Err(TypeScriptFragmentError(
-            "expected one process statement".to_string(),
-        ));
-    };
-    let Some(body) = opaque_process_run_body(&process) else {
+    let Some(body) = opaque_wrapper_run_body(&program) else {
         return Err(TypeScriptFragmentError(
             "expected one process statement".to_string(),
         ));

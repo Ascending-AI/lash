@@ -401,6 +401,14 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             "toolbench",
         ):
             extra_compile_data.append("//examples:shared_rust_sources")
+        if (
+            package["name"] == "lash-internal-typescript"
+            and target["name"] == "integration"
+        ):
+            # The codemode parity module links the checked-in
+            # `examples/codemode-parity/*.ts` cells with `include_str!`, so the
+            # cells are compile inputs of this test and of no other.
+            extra_compile_data.append("//examples:codemode_parity_cells")
         if package["name"] == "lash-internal-lashlang" and target["name"] == "dialect_cost":
             # It holds the dialect to the corpus's own checked-in budget by
             # reading the budget file with `include_str!`, the way lash-perf

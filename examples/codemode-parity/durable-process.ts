@@ -5,5 +5,8 @@ const approval = async (request: unknown) => {
   return { request, decision };
 };
 
-const handle = start(approval, { request: { id: "req-1" } });
+const handle = await processes.start({
+  definition: approval,
+  args: { request: { id: "req-1" } }
+});
 finish(handle);

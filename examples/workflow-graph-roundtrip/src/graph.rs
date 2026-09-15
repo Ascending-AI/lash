@@ -255,6 +255,12 @@ pub(crate) fn graph_from_document(
 /// subgraph never binds a declared process cannot be rendered. A host that adds
 /// a process container gets that binding here rather than having to know the
 /// module shape.
+///
+/// A *lifted* process is the exception (ADR 0095): its authored arrow already
+/// travels inline in the statement that binds or passes it, and the lens
+/// deliberately renders no module declaration for it. Synthesising a
+/// `name = name` binding for one emits a read of a name nothing declares, so
+/// lifted processes are left to the statement that already carries them.
 fn bind_declared_processes(graph: &mut WorkflowGraph) {
     // A renamed process leaves its old module binding pointing at a name no
     // declaration answers to, and that binding cannot be rendered. The binding
@@ -291,7 +297,9 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
         .declarations
         .iter()
         .filter_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) if !bound.contains(&process.name) => {
+            WorkflowDeclaration::Process(process)
+                if !bound.contains(&process.name) && !is_lifted_process(&process.name) =>
+            {
                 Some(process.name.clone())
             }
             _ => None,
@@ -315,6 +323,14 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
         };
         graph.main.nodes.insert(offset, node);
     }
+}
+
+/// Whether a process name is the lens's derived identity for a lifted literal.
+///
+/// A lifted process has no module declaration of its own, so nothing about it
+/// is authored under this name.
+fn is_lifted_process(name: &str) -> bool {
+    name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
 }
 
 /// The freshly declared process a body is being rebuilt for.
@@ -1410,7 +1426,11 @@ finish([state, introduced]);
         assert!(document.nodes.iter().any(|node| {
             node.node_type == "computation"
                 && node.data.binding.as_deref() == Some("runs")
-                && node.data.expression.as_deref() == Some("[start(worker), start(worker)]")
+                && node.data.expression.as_deref()
+                    == Some(
+                        "[await (processes.start({ definition: worker })), \
+                         await (processes.start({ definition: worker }))]",
+                    )
         }));
 
         let rebuilt = graph_from_document(document, &graph).expect("rebuild promoted graph");

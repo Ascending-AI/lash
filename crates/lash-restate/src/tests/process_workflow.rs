@@ -852,6 +852,29 @@ pub(super) fn recovery_worker_with_plugins(
     .expect("valid test native substrate config")
 }
 
+/// The `processes` catalogue a fixture that starts a child links against.
+///
+/// Starting a child is a catalogue tool, not a special form (ADR 0095), so the
+/// operation binds to the shipped `processes.start` tool id and carries that
+/// tool's own contract rather than a fixture-local shape.
+fn process_control_resources() -> lashlang::LashlangHostCatalog {
+    let contract = lash_plugin_process_controls::process_start_tool_definition().contract();
+    let mut resources = lashlang::LashlangHostCatalog::new();
+    resources
+        .add_module_operation_contract(
+            ["processes"],
+            "Processes",
+            "start",
+            "tool:start_process",
+            &lashlang::OperationContract::new(
+                contract.input_schema.canonical().clone(),
+                contract.output_schema.canonical().clone(),
+            ),
+        )
+        .expect("link process start operation");
+    resources
+}
+
 pub(super) async fn segmented_child_await_registration(
     process_id: &ProcessId,
     env_ref: lash_core::ProcessExecutionEnvRef,
@@ -861,7 +884,7 @@ pub(super) async fn segmented_child_await_registration(
     // }
     //
     // process main() {
-    //   handle = start child()
+    //   handle = await processes.start({ definition: child })?
     //   result = (await handle)?
     //   finish result.from
     // }
@@ -887,7 +910,7 @@ pub(super) async fn segmented_child_await_registration(
     let linked = lashlang::LinkedModule::link(
         module,
         lashlang::LashlangHostEnvironment::new(
-            lashlang::LashlangHostCatalog::new(),
+            process_control_resources(),
             lashlang::LashlangAbilities::default(),
         ),
     )
@@ -928,9 +951,14 @@ pub(super) async fn segmented_child_await_registration(
 #[tokio::test]
 pub(super) async fn lashlang_process_retains_child_possession_across_restate_segments() {
     let (registry, continuations) = process_stores();
-    let worker = recovery_worker(
+    // The cell starts its child through `processes.start`, which is a plugin
+    // tool now, so the worker that runs the parent has to serve it.
+    let worker = recovery_worker_with_plugins(
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        vec![Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        )],
     );
     let workflow = Arc::new(
         LashProcessWorkflowImpl::new_for_test(

@@ -308,6 +308,31 @@ pub(super) async fn trigger_lashlang_registration(
     .with_execution_env_ref(Some(env_ref))
 }
 
+/// The name the linker lifted a module's sole process arrow to.
+///
+/// FIG-2999 made a top-level `const` arrow a process *literal*, so the linked
+/// artifact names it by its derived lift identity, not by the binding the
+/// source spelled. A fixture that wants "the process this module declares"
+/// asks the artifact rather than repeating a name the source no longer owns.
+fn sole_lifted_process_name(artifact: &lashlang::ModuleArtifact) -> String {
+    let mut processes = artifact
+        .canonical_ir
+        .declarations
+        .iter()
+        .filter_map(|declaration| match declaration {
+            lashlang::Declaration::Process(process) => Some(process.name.to_string()),
+            _ => None,
+        });
+    let name = processes
+        .next()
+        .expect("the linked module declares one process");
+    assert!(
+        processes.next().is_none(),
+        "the fixture module declares exactly one process"
+    );
+    name
+}
+
 pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> ProcessRegistration {
     let linked = lash_typescript::link(
         r#"
@@ -327,10 +352,11 @@ pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> P
     )
     .await
     .expect("store TypeScript artifact");
+    let worker = sole_lifted_process_name(&linked.artifact);
     let process = linked
         .artifact
         .canonical_ir
-        .process("worker")
+        .process(&worker)
         .expect("worker process declaration");
     let env_ref = persist_recovery_env_ref().await;
     ProcessRegistration::new(
@@ -339,11 +365,11 @@ pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> P
             module_ref: linked.module_ref,
             process_ref: linked
                 .artifact
-                .process_ref("worker")
+                .process_ref(&worker)
                 .expect("worker process ref")
                 .clone(),
             host_requirements_ref: linked.host_requirements_ref,
-            process_name: "worker".to_string(),
+            process_name: worker.clone(),
             args: serde_json::Map::new(),
         }),
         lash_core::RecoveryContract::Rerunnable,
@@ -383,6 +409,7 @@ pub(super) async fn sleeping_process_registration(process_id: &ProcessId) -> Pro
     )
     .await
     .expect("store sleeping process artifact");
+    let worker = sole_lifted_process_name(&linked.artifact);
     let env_ref = persist_recovery_env_ref().await;
     ProcessRegistration::new(
         process_id,
@@ -390,11 +417,11 @@ pub(super) async fn sleeping_process_registration(process_id: &ProcessId) -> Pro
             module_ref: linked.module_ref,
             process_ref: linked
                 .artifact
-                .process_ref("worker")
+                .process_ref(&worker)
                 .expect("worker process ref")
                 .clone(),
             host_requirements_ref: linked.host_requirements_ref,
-            process_name: "worker".to_string(),
+            process_name: worker,
             args: serde_json::Map::new(),
         }),
         lash_core::RecoveryContract::Rerunnable,
