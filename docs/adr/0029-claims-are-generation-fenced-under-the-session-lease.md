@@ -121,6 +121,18 @@ reclaim-mediated rejection LAW would be a contract break.
   for correctness: once an owner loses the lease its claims are eligible for
   successor re-claim, and that re-claim supersedes the old completion.
 
+A terminal checkpoint holds its claim past the finish it did not extend
+(FIG-3157). A wake, user message, or late injection claimed at the
+`BeforeCompletion` boundary is withheld from that checkpoint's delivery so the
+turn finishes on its committed answer, and is carried into a follow-on physical
+turn of the same logical run. The session execution lease is deliberately not
+released at that finish: `should_release` keeps it while a terminal finish
+leaves a withheld claim, so the claim stays generation-valid into the follow-on
+turn. The generation does not change inside the logical run, so the fencing
+rules above are unaffected — the claim is settled by the turn that renders it,
+and a run that ends without driving it (cancellation, abort, a lapsed
+lane, or the follow-on cap) abandons it back to the queue for a later drain.
+
 ## Cross-version consequences
 
 The claim schema changes, so — per lash's reject-and-recreate doctrine (there is

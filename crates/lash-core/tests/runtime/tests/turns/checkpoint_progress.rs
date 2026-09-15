@@ -796,11 +796,14 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
         .collect::<Vec<_>>();
     assert_eq!(admitted.len(), 1);
     // A normal user message that records which turn absorbed it, not a plugin or
-    // process injection (FIG-972).
+    // process injection (FIG-972). The turn that absorbs it is the follow-on
+    // physical turn (FIG-3157): the input was claimed at the terminal
+    // checkpoint of `queued-checkpoint-turn`, which finished on its own
+    // committed answer, so the claim drives the next turn of the same run.
     assert!(matches!(
         admitted[0].origin.as_ref(),
         Some(lash_core::MessageOrigin::TurnInput { turn_id, input_id })
-            if turn_id == "queued-checkpoint-turn" && input_id.is_some()
+            if turn_id == "queued-checkpoint-turn:agent-frame:1" && input_id.is_some()
     ));
 }
 
@@ -1372,7 +1375,9 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
     else {
         panic!("injected input must use the normal user-message representation");
     };
-    assert_eq!(turn_id, "injection-accepted-turn");
+    // FIG-3157: claimed at the terminal checkpoint, absorbed by the follow-on
+    // physical turn rather than by the turn that had already finished.
+    assert_eq!(turn_id, "injection-accepted-turn:agent-frame:1");
     let input_id = input_id
         .as_deref()
         .expect("queued ingress records the durable input id");
@@ -1471,15 +1476,19 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         lash_core::ExecutionScope::turn("root", turn_id),
     )
     .expect("scope the first checkpoint-injected turn");
+    // FIG-3157: the wake claimed at the terminal checkpoint drives a
+    // follow-on physical turn, so the run holds two turns. The acceptance
+    // belongs to the admitted turn, which is the run's first one; the run
+    // carries the same identity for callers that do not index turns.
     let committed = runtime
-        .stream_turn(
+        .stream_turn_with_agent_frames(
             input.clone(),
             TurnOptions::new(CancellationToken::new(), scope),
         )
         .await
         .expect("commit the checkpoint-injected turn");
     let acceptance = committed
-        .turn_input_acceptance
+        .acceptance
         .expect("the committed direct turn exposes its acceptance");
     (input, acceptance)
 }
@@ -1503,9 +1512,17 @@ pub(super) async fn redrive_checkpoint_injected_turn(
         lash_core::ExecutionScope::turn("root", turn_id),
     )
     .expect("scope the checkpoint-injected redrive");
-    runtime
-        .stream_turn(input, TurnOptions::new(CancellationToken::new(), scope))
-        .await
+    // FIG-3157: the run holds the admitted turn plus the follow-on turn the
+    // terminal-checkpoint claim drives. The acceptance identity belongs to
+    // the admitted turn, so that is the one returned here.
+    let run = runtime
+        .stream_turn_with_agent_frames(input, TurnOptions::new(CancellationToken::new(), scope))
+        .await?;
+    Ok(run
+        .turns
+        .into_iter()
+        .next()
+        .expect("a redriven run assembles its admitted turn"))
 }
 
 #[tokio::test]
@@ -1527,13 +1544,16 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
     .await
     .expect("read first turn applications");
     assert_eq!(first_applications.len(), 3);
+    // FIG-3157: the row claimed at the terminal checkpoint is applied as the
+    // follow-on turn's input, not as a checkpoint injection into the turn that
+    // had already committed its answer.
     assert_eq!(
         first_applications
             .iter()
             .filter(|application| application.checkpoint.is_some())
             .count(),
-        1,
-        "the first execution must absorb exactly one checkpoint injection"
+        0,
+        "a terminal checkpoint claim is absorbed by the follow-on turn"
     );
 
     let replay_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(JournalRedriveStore {
@@ -2070,6 +2090,204 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
         .expect("queued work after selected wake drain")
         .is_empty(),
         "selected wake batch should be completed"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_turn() {
+    // FIG-3157: a terminal finish ends the turn. A wake claimed at the
+    // `BeforeCompletion` checkpoint never extends it — the committed answer
+    // stays the turn's answer, and the claim is carried into a follow-on
+    // physical turn of the same logical run: no idle gap, no wait for the
+    // user, and the session execution lease held across the seam so the
+    // claim stays generation-valid (ADR 0029).
+    const SESSION_ID: &str = "terminal-checkpoint-follow-on";
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured_requests = Arc::clone(&requests);
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let captured_calls = Arc::clone(&calls);
+    // Filled after the runtime is built; the provider only reads it when a
+    // call arrives, which is strictly later.
+    let store_cell: Arc<Mutex<Option<Arc<RecordingStore>>>> = Arc::new(Mutex::new(None));
+    let captured_store_cell = Arc::clone(&store_cell);
+    // The lane identity a provider call observed: executor id and generation.
+    type ObservedLease = Option<(String, u64)>;
+    let observed_leases: Arc<Mutex<Vec<ObservedLease>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_observed_leases = Arc::clone(&observed_leases);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |req| {
+            let captured_requests = Arc::clone(&captured_requests);
+            let captured_calls = Arc::clone(&captured_calls);
+            let captured_store_cell = Arc::clone(&captured_store_cell);
+            let captured_observed_leases = Arc::clone(&captured_observed_leases);
+            async move {
+                captured_requests.lock_recover().push(req);
+                let store = captured_store_cell.lock_recover().clone();
+                let observed = match store {
+                    Some(store) => {
+                        lash_core::store::SessionExecutionLeaseStore::get_session_execution_lease(
+                            store.as_ref(),
+                            &SessionId::from(SESSION_ID),
+                        )
+                        .await
+                        .expect("read the session execution lease")
+                        .lease
+                        .map(|lease| (lease.executor_id.clone(), lease.fencing_token))
+                    }
+                    None => None,
+                };
+                captured_observed_leases.lock_recover().push(observed);
+                let call = captured_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let text = if call == 0 {
+                    "committed answer"
+                } else {
+                    "wake answer"
+                };
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: text.to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
+        transport,
+        &SessionId::from(SESSION_ID),
+    )
+    .await;
+    *store_cell.lock_recover() = Some(Arc::clone(&store));
+    let registry = runtime
+        .host
+        .process_registry()
+        .cloned()
+        .expect("process registry");
+    let target_scope = lash_core::SessionScope::new(SESSION_ID);
+    registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                "terminal-checkpoint-wake",
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::session(target_scope.clone()),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            )
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some(target_scope.session_id.clone())),
+        )
+        .await
+        .expect("register wake process");
+    let wake = append_process_wake_to_queue(
+        registry.as_ref(),
+        store.as_ref(),
+        &ProcessId::from("terminal-checkpoint-wake"),
+        lash_core::ProcessEventAppendRequest::new(
+            "process.wake",
+            json!({
+                "text": "wake at the terminal boundary",
+                "value": {
+                    "status": "wake at the terminal boundary"
+                }
+            }),
+        ),
+    )
+    .await;
+
+    let run = runtime
+        .stream_turn_with_agent_frames(
+            TurnInput::text("hello"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope(
+                    &SessionId::from(SESSION_ID),
+                    &TurnId::from("terminal-checkpoint-follow-on-turn"),
+                ),
+            ),
+        )
+        .await
+        .expect("the terminal-checkpoint wake drives its own follow-on turn");
+
+    // One logical run, two physical turns, and the first one is a finish —
+    // not a frame switch, and not a turn that was re-prompted into a second
+    // terminal answer.
+    assert_eq!(run.turns.len(), 2, "the run holds the follow-on turn");
+    assert!(
+        matches!(run.turns[0].outcome, TurnOutcome::Finished(_)),
+        "the foreground turn finishes on its own answer: {:?}",
+        run.turns[0].outcome
+    );
+    assert_eq!(run.turns[0].assistant_output.safe_text, "committed answer");
+    assert_eq!(run.turns[1].assistant_output.safe_text, "wake answer");
+
+    // The committed finish is the turn's answer and is rendered: one
+    // assistant message per physical turn, neither replacing the other.
+    let projected = active_conversation_messages(&run.turns[1].state);
+    for answer in ["committed answer", "wake answer"] {
+        assert_eq!(
+            projected
+                .iter()
+                .filter(|message| message.role == MessageRole::Assistant
+                    && message
+                        .parts
+                        .iter()
+                        .any(|part| part.content.contains(answer)))
+                .count(),
+            1,
+            "`{answer}` must be rendered exactly once"
+        );
+    }
+
+    // The wake is the follow-on turn's input, not part of the turn that had
+    // already committed its answer.
+    let requests = requests.lock_recover().clone();
+    assert_eq!(requests.len(), 2);
+    assert!(!request_contains_text(
+        &requests[0],
+        "wake at the terminal boundary"
+    ));
+    assert!(request_contains_text(
+        &requests[1],
+        "wake at the terminal boundary"
+    ));
+
+    // No idle gap: the wake was drained inside this run, with no drain call
+    // and no further user input.
+    assert!(
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from(SESSION_ID)
+        )
+        .await
+        .expect("queued work after the follow-on turn")
+        .is_empty(),
+        "wake `{}` should be completed by the follow-on turn",
+        wake.wake_id
+    );
+
+    // The lease is the same lane at the same generation on both sides of the
+    // terminal boundary: it was never released between the two turns.
+    let observed_leases = observed_leases.lock_recover().clone();
+    assert_eq!(observed_leases.len(), 2);
+    let held_before = observed_leases[0]
+        .as_ref()
+        .expect("the foreground turn holds the session execution lease");
+    let held_after = observed_leases[1]
+        .as_ref()
+        .expect("the follow-on turn still holds the session execution lease");
+    assert_eq!(
+        held_before, held_after,
+        "the session execution lease must be held across the terminal boundary"
     );
 }
 

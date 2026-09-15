@@ -2325,9 +2325,14 @@ async fn run_crash_matrix_case<F, I>(
             .filter(|part| part.content == content)
             .count()
     };
+    // FIG-3157: queued work claimed at the terminal checkpoint no longer
+    // re-prompts the finishing turn. It is withheld from that delivery and
+    // drives a follow-on turn of the same logical run, so each seeded batch
+    // that lands renders its own terminal output instead of replacing one.
+    let terminal_follow_on_turns = part_count("trace-source");
     assert_eq!(
         part_count("trace turn complete"),
-        1 + drain_turns,
+        1 + drain_turns + terminal_follow_on_turns,
         "{scenario} ({entry:?}): recovery must expose one terminal assistant output per turn"
     );
     for text in &deferred_texts {

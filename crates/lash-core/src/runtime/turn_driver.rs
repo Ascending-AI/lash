@@ -59,6 +59,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(super) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
     pub(super) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
+    /// FIG-3157: work claimed at a terminal checkpoint and withheld from its
+    /// delivery, so the committed finish stays this turn's answer. It is never
+    /// settled by this turn; the logical run drives it in a follow-on turn.
+    pub(super) withheld_terminal_work: super::logical_turn::WithheldTerminalWork,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
     pub(super) session_execution_lease: Option<crate::SessionExecutionLeaseAuthority>,
     pub(super) runtime_lease_owner: crate::LeaseOwnerIdentity,

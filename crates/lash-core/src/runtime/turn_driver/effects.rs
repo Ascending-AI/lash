@@ -109,6 +109,37 @@ fn merge_pending_claim_authority<C: ClaimRows>(
     Ok(())
 }
 
+/// Whether an incoming queued-work claim names a batch this turn already
+/// drives, which marks it as a superseded replay rather than new work.
+fn claim_shares_queued_batches(
+    pending_claims: &[crate::QueuedWorkClaim],
+    incoming: &crate::QueuedWorkClaim,
+) -> bool {
+    pending_claims.iter().any(|pending| {
+        pending.batches.iter().any(|pending_batch| {
+            incoming
+                .batches
+                .iter()
+                .any(|incoming_batch| incoming_batch.batch_id == pending_batch.batch_id)
+        })
+    })
+}
+
+/// Whether an incoming turn-input claim names a row this turn already drives.
+fn claim_shares_turn_input_rows(
+    pending_drives: &[crate::runtime::turn_input_ingress::TurnInputDrive],
+    incoming: &crate::TurnInputClaim,
+) -> bool {
+    pending_drives.iter().any(|drive| {
+        drive.inputs().iter().any(|pending_input| {
+            incoming
+                .inputs
+                .iter()
+                .any(|incoming_input| incoming_input.input_id == pending_input.input_id)
+        })
+    })
+}
+
 fn merge_pending_queue_claim_authority(
     pending_claims: &mut Vec<crate::QueuedWorkClaim>,
     mut incoming: crate::QueuedWorkClaim,
@@ -224,9 +255,26 @@ impl RuntimeTurnDriver<'_> {
             claims: Box::new(crate::runtime::effect::CheckpointClaimSet {
                 // A checkpoint outcome is a self-contained authority snapshot.
                 // Replay must never reconstruct it from mutations to the
-                // driver's resident claim set.
-                queued_work_claims: self.pending_queue_claims.clone(),
-                turn_input_claim: self.pending_checkpoint_turn_input_claim.clone(),
+                // driver's resident claim set. Work withheld from a terminal
+                // checkpoint (FIG-3157) is part of that authority: replay
+                // routes it back by the same rule that withheld it, so the
+                // journal needs no new shape to carry it.
+                queued_work_claims: self
+                    .pending_queue_claims
+                    .iter()
+                    .chain(self.withheld_terminal_work.queued.iter())
+                    .cloned()
+                    .collect(),
+                turn_input_claim: self
+                    .pending_checkpoint_turn_input_claim
+                    .clone()
+                    .or_else(|| {
+                        self.withheld_terminal_work
+                            .turn_inputs
+                            .last()
+                            .and_then(crate::runtime::turn_input_ingress::TurnInputDrive::as_claim)
+                            .cloned()
+                    }),
             }),
         }
     }
@@ -256,14 +304,41 @@ impl RuntimeTurnDriver<'_> {
             .await
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
         let delivery = result.map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        // The same rule the local execution applied, applied to the journalled
+        // authority: at a terminal checkpoint, a claim this turn does not
+        // already drive is withheld work, not this turn's to settle.
+        let withholds_claimed_work = matches!(checkpoint, CheckpointKind::BeforeCompletion);
         for claim in queued_work_claims {
-            self.merge_pending_queue_claim_authority(claim)?;
+            if withholds_claimed_work
+                && !claim_shares_queued_batches(&self.pending_queue_claims, &claim)
+            {
+                merge_pending_queue_claim_authority(
+                    &mut self.withheld_terminal_work.queued,
+                    claim,
+                )?;
+            } else {
+                self.merge_pending_queue_claim_authority(claim)?;
+            }
         }
-        if let Some(claim) = turn_input_claim {
-            merge_pending_checkpoint_turn_input_claim(
-                &mut self.pending_checkpoint_turn_input_claim,
-                claim,
-            )?;
+        if let Some(mut claim) = turn_input_claim {
+            if withholds_claimed_work
+                && !claim_shares_turn_input_rows(&self.pending_turn_input_claims, &claim)
+            {
+                merge_pending_turn_input_claim_authority(
+                    &mut self.withheld_terminal_work.turn_inputs,
+                    &mut claim,
+                )?;
+                if !claim.inputs.is_empty() {
+                    self.withheld_terminal_work.turn_inputs.push(
+                        crate::runtime::turn_input_ingress::TurnInputDrive::Claimed(claim),
+                    );
+                }
+            } else {
+                merge_pending_checkpoint_turn_input_claim(
+                    &mut self.pending_checkpoint_turn_input_claim,
+                    claim,
+                )?;
+            }
         }
         Ok(delivery)
     }
@@ -421,26 +496,57 @@ impl RuntimeTurnDriver<'_> {
             self.pending_checkpoint_turn_input_claim.is_none(),
             "checkpoint claims must be resolved before another checkpoint runs"
         );
-        self.pending_checkpoint_turn_input_claim = turn_input_claim;
-        if let Some(claim) = self.pending_checkpoint_turn_input_claim.as_mut() {
+        // FIG-3157: a terminal finish ends the turn, so work claimed at this
+        // boundary never extends it. The claim is withheld from the delivery
+        // and starts a follow-on turn inside the same logical run instead.
+        // The boundary that claimed it is still the boundary it reports.
+        let withholds_claimed_work = matches!(checkpoint, CheckpointKind::BeforeCompletion);
+        if let Some(mut claim) = turn_input_claim {
             let already_delivered = merge_pending_turn_input_claim_authority(
                 &mut self.pending_turn_input_claims,
-                claim,
+                &mut claim,
             )?;
-            let mut delivery_claim = claim.clone();
-            delivery_claim
-                .inputs
-                .retain(|input| !already_delivered.contains(input.input_id.as_str()));
-            let materialized = delivery_claim
-                .materialize_checkpoint_turn_input(
-                    &self.turn_id,
-                    self.host.core.durability.attachment_store.as_ref(),
-                    self.host.core.attachment_source_policy.as_ref(),
-                )
-                .await
-                .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err))?;
-            committed_user_messages.extend(materialized.messages);
-            turn_causes.extend(materialized.turn_causes);
+            // A claim that re-delivers rows this turn already committed is a
+            // superseded replay of this turn's own work, not new input: it
+            // settles here rather than starting a turn of its own.
+            if withholds_claimed_work && already_delivered.is_empty() && !claim.inputs.is_empty() {
+                merge_pending_turn_input_claim_authority(
+                    &mut self.withheld_terminal_work.turn_inputs,
+                    &mut claim,
+                )?;
+                // The row was accepted at this boundary; only the turn that
+                // renders it moves. Applications are recorded by that turn.
+                let accepted_turn_inputs = claim.accepted_turn_inputs();
+                self.withheld_terminal_work.turn_inputs.push(
+                    crate::runtime::turn_input_ingress::TurnInputDrive::Claimed(claim),
+                );
+                if !accepted_turn_inputs.is_empty() {
+                    send_session_event(
+                        event_tx,
+                        SessionStreamEvent::InjectedTurnInputAccepted {
+                            inputs: accepted_turn_inputs,
+                            checkpoint,
+                        },
+                    )
+                    .await;
+                }
+            } else {
+                let mut delivery_claim = claim.clone();
+                delivery_claim
+                    .inputs
+                    .retain(|input| !already_delivered.contains(input.input_id.as_str()));
+                self.pending_checkpoint_turn_input_claim = Some(claim);
+                let materialized = delivery_claim
+                    .materialize_checkpoint_turn_input(
+                        &self.turn_id,
+                        self.host.core.durability.attachment_store.as_ref(),
+                        self.host.core.attachment_source_policy.as_ref(),
+                    )
+                    .await
+                    .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err))?;
+                committed_user_messages.extend(materialized.messages);
+                turn_causes.extend(materialized.turn_causes);
+            }
         }
         if let Some(claim) = queue_claim {
             let materialized = claim
@@ -467,10 +573,19 @@ impl RuntimeTurnDriver<'_> {
                     ),
                 },
             );
-            committed.extend(materialized.messages);
-            transient_messages.extend(materialized.transient_messages);
-            turn_causes.extend(materialized.turn_causes);
-            self.merge_pending_queue_claim_authority(claim)?;
+            if withholds_claimed_work
+                && !claim_shares_queued_batches(&self.pending_queue_claims, &claim)
+            {
+                merge_pending_queue_claim_authority(
+                    &mut self.withheld_terminal_work.queued,
+                    claim,
+                )?;
+            } else {
+                committed.extend(materialized.messages);
+                transient_messages.extend(materialized.transient_messages);
+                turn_causes.extend(materialized.turn_causes);
+                self.merge_pending_queue_claim_authority(claim)?;
+            }
         }
         let plugins = Arc::clone(self.session.plugins());
         let applied = plugins

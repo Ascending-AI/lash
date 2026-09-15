@@ -296,6 +296,32 @@ impl RuntimeTurnDriver<'_> {
                         .await
                         .map_err(crate::runtime::runtime_error_from_store_commit)?;
                 }
+                // FIG-3157: a terminal checkpoint that failed delivers
+                // nothing and starts no follow-on turn, so work withheld
+                // for that follow-on was never delivered and must go back
+                // to the queue claimable.
+                if let Some(withheld) = self.withheld_terminal_work.take_if_any()
+                    && let Some(store) = self.session.history_store()
+                {
+                    if !withheld.queued.is_empty() {
+                        store
+                            .abandon_queued_work_claims(&withheld.queued)
+                            .await
+                            .map_err(crate::runtime::runtime_error_from_store_commit)?;
+                    }
+                    let turn_input_claims = withheld
+                        .turn_inputs
+                        .iter()
+                        .filter_map(crate::runtime::turn_input_ingress::TurnInputDrive::as_claim)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if !turn_input_claims.is_empty() {
+                        store
+                            .abandon_turn_input_claims(&turn_input_claims)
+                            .await
+                            .map_err(crate::runtime::runtime_error_from_store_commit)?;
+                    }
+                }
                 self.fail_or_abort_runtime_effect_controller(machine, err.into())
                     .await?;
             }

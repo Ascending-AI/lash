@@ -221,6 +221,10 @@ pub(crate) struct TurnEffectStateUpdate {
     pub(crate) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(crate) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
     pub(crate) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
+    /// FIG-3157: work the local execution withheld from a terminal
+    /// checkpoint delivery. It travels back on every outcome, failed ones
+    /// included, so a checkpoint that never delivered can hand it back.
+    pub(crate) withheld_terminal_work: crate::runtime::logical_turn::WithheldTerminalWork,
 }
 
 pub(super) struct LocalTurnEffectRunner {
@@ -661,6 +665,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             pending_queue_claims: driver.pending_queue_claims.clone(),
             pending_turn_input_claims: driver.pending_turn_input_claims.clone(),
             pending_checkpoint_turn_input_claim: driver.pending_checkpoint_turn_input_claim.clone(),
+            // Work this executor withholds from a terminal checkpoint travels
+            // back on the journalled claim set, not on the driver copy.
+            withheld_terminal_work: Default::default(),
             checkpoint_messages: driver.checkpoint_messages.clone(),
             session_execution_lease: driver.session_execution_lease.clone(),
             runtime_lease_owner: driver.runtime_lease_owner.clone(),
@@ -1313,6 +1320,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
             pending_queue_claims: runner.driver.pending_queue_claims,
             pending_turn_input_claims: runner.driver.pending_turn_input_claims,
             pending_checkpoint_turn_input_claim: runner.driver.pending_checkpoint_turn_input_claim,
+            withheld_terminal_work: runner.driver.withheld_terminal_work,
         });
         result
     }

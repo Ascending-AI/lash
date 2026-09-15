@@ -141,15 +141,18 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
         TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { .. })
     ));
     let events = events.snapshot().await;
+    // FIG-3157: an inject-now claimed at the terminal checkpoint no longer
+    // re-prompts the finishing turn. It is withheld from that delivery and
+    // becomes the input of a follow-on turn of the same logical run, so the
+    // acceptance names that turn and applies at its start, not at a checkpoint.
     assert!(events.iter().any(|event| matches!(
         &event.event,
         TurnEvent::QueuedInputAccepted {
             applications,
         } if applications.iter().any(|application| {
             application.source_key.as_deref() == Some("injection:queue-1")
-                && application.turn_id.as_str() == "queued-input-turn"
-                && application.checkpoint
-                    == Some(lash_core::CheckpointKind::BeforeCompletion)
+                && application.turn_id.as_str() == "queued-input-turn:agent-frame:1"
+                && application.checkpoint.is_none()
                 && application.committed_message_id
                     == format!("m_ingress_{}", application.input_id)
         })

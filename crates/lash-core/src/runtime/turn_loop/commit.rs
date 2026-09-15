@@ -552,6 +552,7 @@ impl LashRuntime {
                 turn: assembled,
                 enqueued_queue_batches: Vec::new(),
                 post_commit_delivery_failed: false,
+                withheld_terminal_work: None,
             });
         };
 
@@ -597,8 +598,14 @@ impl LashRuntime {
             turn: returned_turn,
             events: finalized.events,
         };
-        let release_session_execution_lease =
-            session_execution_lease_release_policy.should_release(prepared.outcome());
+        let release_session_execution_lease = session_execution_lease_release_policy
+            .should_release(
+                prepared.outcome(),
+                claims
+                    .withheld_terminal_work
+                    .as_ref()
+                    .is_some_and(|withheld| !withheld.is_empty()),
+            );
         let commit_effects = claims.commit_effects(
             prepared.outcome(),
             &self.state.session_id,
@@ -801,6 +808,7 @@ impl LashRuntime {
             turn: delivery.turn,
             enqueued_queue_batches: delivery.enqueued_queue_batches,
             post_commit_delivery_failed: delivery.post_commit_delivery_failed,
+            withheld_terminal_work: None,
         })
     }
 
@@ -827,10 +835,15 @@ impl LashRuntime {
         let TurnDriverRemainder {
             policy,
             turn_pipeline,
-            pending_queue_claims,
-            pending_turn_input_claims,
+            mut pending_queue_claims,
+            mut pending_turn_input_claims,
+            withheld_terminal_work,
             ..
         } = driver;
+        // A cancelled turn starts no follow-on, so work withheld from its
+        // terminal checkpoint settles with this turn instead (FIG-3157).
+        pending_queue_claims.extend(withheld_terminal_work.queued);
+        pending_turn_input_claims.extend(withheld_terminal_work.turn_inputs);
         emit_terminal_sequence(
             &mut assembler,
             events,
