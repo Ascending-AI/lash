@@ -913,20 +913,22 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
         })
         .collect::<Vec<_>>();
     let mut declarations = Vec::with_capacity(graph.declarations.len());
+    let mut lifted: Vec<&WorkflowProcess> = Vec::new();
     for declaration in &graph.declarations {
         declarations.push(match declaration {
             WorkflowDeclaration::Type(ty) => Declaration::Type(ty.clone()),
             WorkflowDeclaration::Function(function) => Declaration::Function(function.clone()),
             WorkflowDeclaration::Process(process) => {
                 // A lifted literal is not a module declaration: its authored
-                // arrow travels inline at the call site that passed it, so the
-                // rebuilt program carries no declaration for it. Its subgraph
-                // still renders — each node inside re-parses into that arrow's
-                // body — it just reprojects through the call node's text.
+                // arrow travels inline where it sits, so the rebuilt program
+                // carries no declaration for it. It is not skipped either —
+                // the lens owns its body in both directions, so the rendered
+                // subgraph is spliced back into the literal below (FIG-3118).
                 if process
                     .name
                     .starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
                 {
+                    lifted.push(process);
                     continue;
                 }
                 let label =
@@ -954,19 +956,65 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
             }
         });
     }
+    let context = RenderContext {
+        scope: RenderScope::Main,
+        processes: &process_names,
+    };
+    let mut main = subgraph_to_block(&graph.main, context)?;
+    splice_lifted_bodies(&mut main, &mut lifted.into_iter(), context)?;
     Ok(Program {
         declarations,
-        main: subgraph_to_block(
-            &graph.main,
-            RenderContext {
-                scope: RenderScope::Main,
-                processes: &process_names,
-            },
-        )?,
+        main,
         declaration_spans: Vec::new(),
         expression_spans: Vec::new(),
         expression_source_spans: Vec::new(),
     })
+}
+
+/// Splices each lifted process's rendered body back into the literal it was
+/// projected from (FIG-3118).
+///
+/// A top-level `const`-bound `async` arrow is a process literal in `main`
+/// (FIG-2999), and the lens projects it twice: the statement node carries the
+/// arrow as authored text, and the body is projected as its own lifted process
+/// declaration so the nodes inside are editable. The statement's text is the
+/// pre-edit arrow, so rendering `main` alone drops every edit made inside a
+/// process container. The lens owns those bodies, so the rendered subgraph is
+/// spliced over the literal's body here.
+///
+/// Literals are matched to declarations positionally: `project` collects
+/// literals in `Expr::children` walk order and pushes one declaration per
+/// literal in that order, and this walk is the same order over `children_mut`.
+/// Matching on the lifted name instead would not work — the name digests the
+/// body and the *lowered* AST path, and the rebuilt program is the printer's
+/// input, not a lowered program, so neither half survives the round trip.
+///
+/// A host may add or delete a process-literal-bearing statement without
+/// touching the declaration list, so the two sequences can differ in length:
+/// a literal with no declaration left keeps its authored body, and a
+/// declaration with no literal left renders nowhere.
+fn splice_lifted_bodies<'a>(
+    expr: &mut Expr,
+    lifted: &mut impl Iterator<Item = &'a WorkflowProcess>,
+    context: RenderContext<'_>,
+) -> Result<(), GraphRenderError> {
+    if let Expr::ProcessLiteral(literal) = expr
+        && let Some(process) = lifted.next()
+    {
+        let body = subgraph_to_block(
+            &process.body,
+            RenderContext {
+                scope: RenderScope::Process,
+                processes: context.processes,
+            },
+        )?;
+        literal.params = process.params.clone();
+        *literal.body = process_wrapper(&process.params, body);
+    }
+    for child in expr.children_mut() {
+        splice_lifted_bodies(child, lifted, context)?;
+    }
+    Ok(())
 }
 
 /// What a node is being rendered back into.

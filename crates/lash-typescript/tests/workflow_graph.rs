@@ -1186,3 +1186,64 @@ fn an_inline_process_body_projects_as_a_process_container() {
     );
     assert_lens_laws(source);
 }
+
+/// FIG-3118: the lens owns a lifted process's body in *both* directions.
+///
+/// Every top-level `const` arrow is a process literal (FIG-2999), so the lens
+/// projects it twice: the statement node in `main` carries the arrow as
+/// authored text, and the body is projected again as the lifted process's own
+/// subgraph — which is the editable surface. Rendering `main` alone would take
+/// the statement's pre-edit text and silently drop everything a host changed
+/// inside the container, so `graph_to_program` splices the rendered lifted body
+/// back into the literal it was projected from.
+#[test]
+fn an_edit_inside_a_process_container_survives_the_round_trip() {
+    const SOURCE: &str = "const flow = async () => {\n  \
+        await (display.show_message({ text: \"before\" }));\n  \
+        let total = 1;\n  \
+        return total;\n};\n";
+
+    let mut graph = workflow_graph_from_source(SOURCE).expect("the fixture projects");
+    let unedited = workflow_graph_to_source(&graph).expect("the projection renders");
+    assert_eq!(unedited, SOURCE, "GetPut holds before the edit");
+
+    // Edit one node *inside* the process container, which is the only place
+    // the statement text in `main` does not reach.
+    let WorkflowDeclaration::Process(process) = &mut graph.declarations[0] else {
+        panic!("the fixture lifts one process");
+    };
+    let WorkflowNodeKind::Call { expression, .. } = &mut process.body.nodes[0].kind else {
+        panic!("the container's first node is the display call");
+    };
+    assert_eq!(
+        expression,
+        "await (display.show_message({ text: \"before\" }))"
+    );
+    *expression = "await (display.show_message({ text: \"after\" }))".to_string();
+
+    let saved = workflow_graph_to_source(&graph).expect("the edited graph renders");
+    assert_eq!(
+        saved,
+        SOURCE.replace("\"before\"", "\"after\""),
+        "the edit lands and nothing else in the module moves"
+    );
+
+    // PutGet: reprojecting the saved source gives back the edited graph, and
+    // rendering that is a fixpoint.
+    let reprojected = workflow_graph_from_source(&saved).expect("the saved source reprojects");
+    let WorkflowDeclaration::Process(reprojected_process) = &reprojected.declarations[0] else {
+        panic!("the saved source lifts one process");
+    };
+    let WorkflowNodeKind::Call { expression, .. } = &reprojected_process.body.nodes[0].kind else {
+        panic!("the reprojected container's first node is the display call");
+    };
+    assert_eq!(
+        expression,
+        "await (display.show_message({ text: \"after\" }))"
+    );
+    assert_eq!(
+        workflow_graph_to_source(&reprojected).expect("the reprojection renders"),
+        saved,
+        "rendering the reprojection is a fixpoint"
+    );
+}
