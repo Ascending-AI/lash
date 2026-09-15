@@ -587,6 +587,7 @@ pub fn prepare_process_event_append(
     wake_session_id: Option<&SessionId>,
 ) -> Result<ProcessEventAppendPlan, PluginError> {
     let process_id = record.id.as_str();
+    let wake_suppressed = request.wake_suppressed;
     if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str())
         && let Some(existing) = replay_lookup
     {
@@ -611,6 +612,7 @@ pub fn prepare_process_event_append(
                 existing.occurred_at,
                 existing.semantics.wake.clone(),
                 wake_session_id,
+                wake_suppressed,
             )?;
             return Ok(ProcessEventAppendPlan::Replay {
                 event: existing,
@@ -715,6 +717,7 @@ pub fn prepare_process_event_append(
         event.occurred_at,
         semantics.wake.clone(),
         wake_session_id,
+        wake_suppressed,
     )?;
     debug_assert!(
         !is_runtime_lifecycle_event_type(&event.event_type)
@@ -744,7 +747,16 @@ fn prepare_wake_delivery(
     occurred_at: u64,
     wake: Option<super::events::ProcessWake>,
     wake_session_id: Option<&SessionId>,
+    wake_suppressed: bool,
 ) -> Result<Option<ProcessWakeDelivery>, PluginError> {
+    // A suppressed append still materializes its event and its semantics; it
+    // only withholds the delivery. The wake is the one thing a session would
+    // observe, so withholding it here — after the event and its semantics are
+    // settled — is the whole of the suppression, and an observer reading the
+    // journal cannot tell a suppressed append from an unsuppressed one.
+    if wake_suppressed {
+        return Ok(None);
+    }
     let Some(wake) = wake else {
         return Ok(None);
     };
