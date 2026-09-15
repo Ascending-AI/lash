@@ -79,25 +79,36 @@ impl FenceLocations {
         self.fence_schema_for(scope) != self.journal
     }
 
+    /// The single-statement predicate that is true when `scope_id` is fenced
+    /// in any of this view's locations.
+    ///
+    /// Admission asks one question — "is this scope retired anywhere?" — and
+    /// every location still has to be consulted to answer it, so the locations
+    /// are disjoined inside one statement instead of being walked one query at
+    /// a time. `OR` short-circuits left to right, so a journal fence still
+    /// answers without touching the registry file.
+    fn fenced_predicate(self) -> String {
+        self.schemas()
+            .map(|schema| {
+                format!(
+                    "EXISTS(SELECT 1 FROM {schema}.effect_scope_retirements WHERE scope_id = ?1)"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    }
+
     /// Whether `scope_id` is fenced in any location.
     pub(crate) fn is_fenced(
         self,
         connection: &rusqlite::Connection,
         scope_id: &str,
     ) -> rusqlite::Result<bool> {
-        for schema in self.schemas() {
-            let fenced: bool = connection.query_row(
-                &format!(
-                    "SELECT EXISTS(SELECT 1 FROM {schema}.effect_scope_retirements WHERE scope_id = ?1)"
-                ),
-                params![scope_id],
-                |row| row.get(0),
-            )?;
-            if fenced {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        connection.query_row(
+            &format!("SELECT {}", self.fenced_predicate()),
+            params![scope_id],
+            |row| row.get(0),
+        )
     }
 
     /// Delete the fence of `scope_id` everywhere it may be recorded.
@@ -274,4 +285,90 @@ fn lift_journal_fences_of_registered_processes(
         }
     }
     Ok(lifted)
+}
+
+#[cfg(test)]
+mod fenced_predicate_tests {
+    use super::*;
+
+    fn connection_with_both_fence_tables() -> rusqlite::Connection {
+        let connection = rusqlite::Connection::open_in_memory().expect("open in-memory database");
+        connection
+            .execute_batch(&format!(
+                "CREATE TABLE {JOURNAL_SCHEMA}.effect_scope_retirements (scope_id TEXT PRIMARY KEY);
+                 ATTACH ':memory:' AS {PROCESS_REGISTRY_SCHEMA};
+                 CREATE TABLE {PROCESS_REGISTRY_SCHEMA}.effect_scope_retirements (scope_id TEXT PRIMARY KEY);"
+            ))
+            .expect("create both fence tables");
+        connection
+    }
+
+    fn fence(connection: &rusqlite::Connection, schema: &str, scope_id: &str) {
+        connection
+            .execute(
+                &format!("INSERT INTO {schema}.effect_scope_retirements (scope_id) VALUES (?1)"),
+                params![scope_id],
+            )
+            .expect("insert fence row");
+    }
+
+    #[test]
+    fn the_predicate_disjoins_every_location_in_one_statement() {
+        let attached = FenceLocations::attached(JOURNAL_SCHEMA).fenced_predicate();
+
+        assert!(attached.contains(&format!("{JOURNAL_SCHEMA}.effect_scope_retirements")));
+        assert!(attached.contains(&format!(
+            "{PROCESS_REGISTRY_SCHEMA}.effect_scope_retirements"
+        )));
+        assert_eq!(attached.matches(" OR ").count(), 1);
+        assert!(!attached.contains(';'));
+        assert!(
+            !FenceLocations::JOURNAL_ONLY
+                .fenced_predicate()
+                .contains(PROCESS_REGISTRY_SCHEMA)
+        );
+    }
+
+    #[test]
+    fn a_fence_in_either_location_answers_fenced_and_neither_answers_unfenced() {
+        let connection = connection_with_both_fence_tables();
+        let locations = FenceLocations::attached(JOURNAL_SCHEMA);
+
+        assert!(
+            !locations
+                .is_fenced(&connection, "scope-a")
+                .expect("read fence")
+        );
+
+        fence(&connection, JOURNAL_SCHEMA, "scope-a");
+        fence(&connection, PROCESS_REGISTRY_SCHEMA, "scope-b");
+
+        assert!(
+            locations
+                .is_fenced(&connection, "scope-a")
+                .expect("read fence")
+        );
+        assert!(
+            locations
+                .is_fenced(&connection, "scope-b")
+                .expect("read fence")
+        );
+        assert!(
+            !locations
+                .is_fenced(&connection, "scope-c")
+                .expect("read fence")
+        );
+    }
+
+    #[test]
+    fn a_journal_only_view_does_not_see_a_registry_fence() {
+        let connection = connection_with_both_fence_tables();
+        fence(&connection, PROCESS_REGISTRY_SCHEMA, "scope-b");
+
+        assert!(
+            !FenceLocations::JOURNAL_ONLY
+                .is_fenced(&connection, "scope-b")
+                .expect("read fence")
+        );
+    }
 }
