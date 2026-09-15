@@ -15,6 +15,22 @@ this gate existed:
 The fix is the workspace `judged` profile plus a rule that no judged host
 enables a `testing` feature at runtime. This gate keeps both true.
 
+The judged profile now has a second spelling. `scripts/agent-workbench-dev.sh`
+builds its host through Bazel so every checkout on the box shares one action
+cache instead of compiling the workspace again in its own target directory
+(FIG-3153), and Bazel does not read `[profile.judged]`. `--config=judged` in
+`.bazelrc` says the same two things in rustc flags, and nothing in rustc's own
+defaults would: `-C debug-assertions` defaults to ON at `-C opt-level=0`, which
+is exactly the geometry a judged row must not score. So this gate reads both
+spellings out of their own files and refuses them to drift, and it refuses a
+launcher that builds a judged host through Bazel without naming the config.
+
+It also pins where the build happens. The workbench launcher used to compile
+inside `/tmp/lash-agent-workbench-$UID/data-ownership.lock`, a lock every
+checkout on the box shares, so one lane's cold build stalled every other
+stack's boot and teardown. A build proves nothing about ownership; it belongs
+outside the locks, and `check_build_precedes_launcher_locks` keeps it there.
+
 Known limit, accepted rather than fixed: the `testing`-feature check reads the
 `[dependencies]`/`[build-dependencies]` tables only, so it is blind to routes
 through a host's own feature table. `examples/slack-clone`'s `e2e` feature
@@ -207,6 +223,123 @@ def check_profile_overrides_exported(failures: list[str]) -> None:
             )
 
 
+# The Bazel spelling of the judged profile. `[profile.judged]` says
+# `debug-assertions = false` / `overflow-checks = false`; these are the rustc
+# flags that say it to Bazel, and the mapping is written here so a profile key
+# renamed in Cargo.toml cannot leave the Bazel config behind.
+BAZEL_JUDGED_CONFIG = "judged"
+BAZEL_PROFILE_FLAGS = {
+    "debug-assertions": "-Cdebug-assertions=off",
+    "overflow-checks": "-Coverflow-checks=off",
+}
+
+BAZEL_CONFIG_LINE = re.compile(
+    rf"^build:{BAZEL_JUDGED_CONFIG}\s+(\S+)\s*$", re.MULTILINE
+)
+
+
+def check_bazel_judged_config(failures: list[str]) -> None:
+    bazelrc = ROOT / ".bazelrc"
+    if not bazelrc.is_file():
+        failures.append(".bazelrc is missing; the Bazel judged config has no home")
+        return
+    flags = set(BAZEL_CONFIG_LINE.findall(bazelrc.read_text(encoding="utf-8")))
+    for key, expected_off in PROFILE_REQUIREMENTS.items():
+        flag = BAZEL_PROFILE_FLAGS.get(key)
+        if flag is None:
+            continue
+        if expected_off is not False:
+            continue
+        if not any(entry.endswith("=" + flag) or entry == flag for entry in flags):
+            failures.append(
+                f".bazelrc: --config={BAZEL_JUDGED_CONFIG} never passes `{flag}`, so a "
+                f"Bazel-built judged host keeps the `{key}` that "
+                "[profile.judged] turns off (rustc defaults them ON at -C opt-level=0)"
+            )
+
+
+# A launcher that builds a judged host through Bazel must name the config on
+# the same command. Without it the label builds under the ordinary
+# configuration, which is the drift this whole gate exists to catch — and it is
+# silent, because the binary runs.
+BAZEL_BUILD_INVOCATION = re.compile(
+    r"^[^\n#]*(?:kiln build|hermetic-build\.sh|build_command\[@\]\})[^\n]*$",
+    re.MULTILINE,
+)
+# Either the label itself or the variable this repository holds it in. The
+# variable is matched too because the launcher keeps the label in one place,
+# and a gate that only understood the literal would read the invocation as
+# building nothing.
+JUDGED_HOST_LABEL = re.compile(
+    r"(?://examples/(?:" + "|".join(JUDGED_HOSTS) + r"):|workbench_bazel_label)"
+)
+
+
+def check_bazel_boot_sites(failures: list[str]) -> None:
+    seen = False
+    for path in boot_files():
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(ROOT)
+        for match in BAZEL_BUILD_INVOCATION.finditer(text):
+            line_text = match.group(0)
+            if not JUDGED_HOST_LABEL.search(line_text):
+                continue
+            seen = True
+            if f"--config={BAZEL_JUDGED_CONFIG}" in line_text:
+                continue
+            line = text.count("\n", 0, match.start()) + 1
+            failures.append(
+                f"{rel}:{line}: builds a judged host through Bazel without "
+                f"`--config={BAZEL_JUDGED_CONFIG}`; the label would carry the "
+                "development self-checks a judged row must not score"
+            )
+    if not seen:
+        failures.append(
+            "no Bazel build of a judged host found; this gate's file list or its "
+            "idea of the invocation has gone stale"
+        )
+
+
+# The launcher's own build step, and the two `flock` acquisitions it must
+# precede. A build holds no ownership claim, and the data-ownership lock is
+# shared by every checkout on the box, so compiling inside it makes one lane's
+# cold build the whole machine's boot latency (FIG-3153).
+LAUNCHER_LOCK_ORDER_SITE = "scripts/agent-workbench-dev.sh"
+LAUNCHER_BUILD_CALL = re.compile(r"^\s*prepare_workbench_binary$", re.MULTILINE)
+LAUNCHER_LOCK_ACQUISITION = re.compile(r"^\s*flock -n ", re.MULTILINE)
+
+
+def check_build_precedes_launcher_locks(failures: list[str]) -> None:
+    path = ROOT / LAUNCHER_LOCK_ORDER_SITE
+    if not path.is_file():
+        failures.append(f"{LAUNCHER_LOCK_ORDER_SITE} is missing; the lock-order check has gone stale")
+        return
+    text = path.read_text(encoding="utf-8")
+    calls = [match.start() for match in LAUNCHER_BUILD_CALL.finditer(text)]
+    locks = [match.start() for match in LAUNCHER_LOCK_ACQUISITION.finditer(text)]
+    if not calls:
+        failures.append(
+            f"{LAUNCHER_LOCK_ORDER_SITE}: no `prepare_workbench_binary` call; the "
+            "lock-order check has gone stale"
+        )
+        return
+    if not locks:
+        failures.append(
+            f"{LAUNCHER_LOCK_ORDER_SITE}: no `flock` acquisition; the lock-order check "
+            "has gone stale"
+        )
+        return
+    first_lock = min(locks)
+    for start in calls:
+        if start > first_lock:
+            line = text.count("\n", 0, start) + 1
+            failures.append(
+                f"{LAUNCHER_LOCK_ORDER_SITE}:{line}: builds the host after a launcher "
+                "lock is taken; the box-wide data-ownership lock would then hold for "
+                "the length of a compile"
+            )
+
+
 def main() -> int:
     failures: list[str] = []
     check_profile(failures)
@@ -214,6 +347,9 @@ def main() -> int:
     check_boot_sites(failures)
     check_artifact_dirs(failures)
     check_profile_overrides_exported(failures)
+    check_bazel_judged_config(failures)
+    check_bazel_boot_sites(failures)
+    check_build_precedes_launcher_locks(failures)
     if failures:
         print("judged build geometry gate: FAILED", file=sys.stderr)
         for failure in failures:

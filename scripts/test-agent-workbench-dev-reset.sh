@@ -62,6 +62,19 @@ fail() {
   exit 1
 }
 
+# Build counts in the refusal cases below read `+ 1`, not "unchanged". The
+# launcher builds its host binary before it takes any lifecycle lock
+# (FIG-3153): the build proves nothing about ownership, and compiling inside
+# `/tmp/lash-agent-workbench-$UID/data-ownership.lock` — a lock every checkout
+# on the box shares, taken with `flock -n` — turned one lane's cold build into
+# an outright refusal of every other stack's boot and teardown. So a refused
+# launch now pays for a build, and what these cases pin is that it pays for
+# exactly one and mutates nothing: the data directory, containers, leases,
+# owner records and PID identities each still have their own clause here, and
+# a second build would fail this assertion just as a missing one would. A
+# no-op `up` against a stack that is already serving still builds nothing at
+# all, which is the case just below.
+
 synthetic_runtime="$test_tmp/synthetic-runtime"
 mkdir -m 700 "$synthetic_runtime"
 synthetic_lock="$synthetic_runtime/unrelated.lock"
@@ -639,7 +652,7 @@ if launcher_env "$data_existing" "$port_existing" MOCK_EXTERNAL_PORTS='8140 1913
   > "$test_tmp/existing-uri-refusal.log" 2>&1; then
   fail "fresh up replaced an already-registered URI"
 fi
-[[ "$(<"$mock_state/build-count")" = "$builds_before" ]] \
+[[ "$(<"$mock_state/build-count")" = "$((builds_before + 1))" ]] \
   || fail "existing-URI refusal built a new host"
 grep -Fq 'already registered' "$test_tmp/existing-uri-refusal.log" \
   || fail "existing-URI refusal was not precise"
@@ -903,7 +916,7 @@ if launcher_env "$data_shared" 3060 AGENT_WORKBENCH_RUN_DIR="$alternate_run_dir"
   fail "second port with the same owned data directory unexpectedly started"
 fi
 [[ ! -e "$alternate_run_dir" \
-  && "$(<"$mock_state/build-count")" = "$shared_builds_before" \
+  && "$(<"$mock_state/build-count")" = "$((shared_builds_before + 1))" \
   && "$(<"$mock_state/container-counter")" = "$shared_containers_before" \
   && "$(<"$shared_pid_file")" = "$shared_pid_record" \
   && -f "$data_shared/shared-owner-state" ]] \
@@ -947,7 +960,7 @@ if launcher_env "$data_parent" 3066 AGENT_WORKBENCH_RUN_DIR="$test_tmp/alternate
   fail "parent data consumer unexpectedly enclosed an owned data directory"
 fi
 [[ ! -e "$test_tmp/alternate-parent-run" \
-  && "$(<"$mock_state/build-count")" = "$parent_builds_before" \
+  && "$(<"$mock_state/build-count")" = "$((parent_builds_before + 1))" \
   && "$(<"$owned_child_pid_file")" = "$owned_child_pid_record" \
   && -f "$data_owned_child/owned-child-state" ]] \
   || fail "parent data refusal mutated the existing child stack"
@@ -967,7 +980,7 @@ if launcher_env "$test_tmp/data-run-consumer" 3072 \
   fail "disjoint data with a run directory inside owned data unexpectedly started"
 fi
 [[ ! -e "$test_tmp/data-run-consumer" \
-  && "$(<"$mock_state/build-count")" = "$run_owner_builds_before" \
+  && "$(<"$mock_state/build-count")" = "$((run_owner_builds_before + 1))" \
   && "$(<"$mock_state/container-counter")" = "$run_owner_containers_before" \
   && "$(<"$run_owner_pid_file")" = "$run_owner_pid_record" \
   && -f "$data_run_owner/run-owner-state" ]] \
@@ -999,7 +1012,7 @@ if launcher_env "$run_footprint_parent" 3073 \
   fail "candidate data unexpectedly enclosed another stack's external run footprint"
 fi
 [[ ! -e "$test_tmp/run-footprint-candidate-run" \
-  && "$(<"$mock_state/build-count")" = "$run_footprint_builds_before" \
+  && "$(<"$mock_state/build-count")" = "$((run_footprint_builds_before + 1))" \
   && "$(<"$run_footprint_pid_file")" = "$run_footprint_pid_record" \
   && -f "$run_footprint_data/run-footprint-state" ]] \
   || fail "enclosing-run-footprint refusal changed the owner or candidate state"
@@ -1035,7 +1048,7 @@ if env PATH="$mock_bin:$PATH" MOCK_STATE="$mock_state" \
   fail "custom data with the default run directory inside owned data unexpectedly started"
 fi
 [[ ! -e "$default_consumer_data" \
-  && "$(<"$mock_state/build-count")" = "$default_builds_before" \
+  && "$(<"$mock_state/build-count")" = "$((default_builds_before + 1))" \
   && "$(<"$default_owner_pid_file")" = "$default_owner_pid_record" ]] \
   || fail "default-run overlap refusal changed the owner or custom data path"
 
@@ -1066,7 +1079,7 @@ fi
   && -f "$mock_state/container-lash-agent-workbench-dev-restate-$port_service_owner" \
   && "$(<"$mock_state/deployments")" = "$service_deployments_before" \
   && "$(wc -l < "$mock_state/docker-rm.log")" = "$service_rm_before" \
-  && "$(<"$mock_state/build-count")" = "$service_builds_before" ]] \
+  && "$(<"$mock_state/build-count")" = "$((service_builds_before + 1))" ]] \
   || fail "shared Restate refusal changed the owner, engine, deployment, or candidate state"
 grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
   "$test_tmp/shared-engine-refusal.log" \
@@ -1084,7 +1097,7 @@ if launcher_env "$test_tmp/data-split-ingress-consumer" 3080 \
   fail "second launcher unexpectedly shared one owned Restate ingress endpoint"
 fi
 [[ ! -e "$test_tmp/data-split-ingress-consumer" \
-  && "$(<"$mock_state/build-count")" = "$split_ingress_builds_before" \
+  && "$(<"$mock_state/build-count")" = "$((split_ingress_builds_before + 1))" \
   && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" ]] \
   || fail "split-ingress refusal mutated the owner or candidate"
 grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
@@ -1103,7 +1116,7 @@ if launcher_env "$test_tmp/data-split-admin-consumer" 3081 \
   fail "second launcher unexpectedly shared one owned Restate admin endpoint"
 fi
 [[ ! -e "$test_tmp/data-split-admin-consumer" \
-  && "$(<"$mock_state/build-count")" = "$split_admin_builds_before" \
+  && "$(<"$mock_state/build-count")" = "$((split_admin_builds_before + 1))" \
   && "$(<"$service_owner_pid_file")" = "$service_owner_pid_record" ]] \
   || fail "split-admin refusal mutated the owner or candidate"
 grep -Fq 'Restate admin service is reserved by another launcher-owned disposable stack' \
@@ -1235,7 +1248,7 @@ if launcher_env "$test_tmp/data-lease-public-retry" 3091 \
   fail "borrower ignored startup finalization authority for the same data path"
 fi
 [[ ! -e "$test_tmp/lease-public-retry-borrower-run" \
-  && "$(<"$mock_state/build-count")" = "$lease_public_retry_builds_before" ]] \
+  && "$(<"$mock_state/build-count")" = "$((lease_public_retry_builds_before + 1))" ]] \
   || fail "startup finalization borrower refusal mutated candidate state"
 if launcher_env "$test_tmp/data-lease-public-retry" "$lease_public_retry_port" \
   MOCK_START_FINALIZATION="$lease_public_retry_finalization" \
@@ -1365,7 +1378,7 @@ if launcher_env "$test_tmp/data-external-start-finalization-borrower" \
 fi
 [[ ! -e "$test_tmp/data-external-start-finalization-borrower" \
   && ! -e "$test_tmp/run-external-start-finalization-borrower" \
-  && "$(<"$mock_state/build-count")" = "$external_start_finalization_builds_before" ]] \
+  && "$(<"$mock_state/build-count")" = "$((external_start_finalization_builds_before + 1))" ]] \
   || fail "same-identity startup finalization refusal mutated borrower state"
 launcher_env "$external_start_finalization_data" "$external_start_finalization_port" \
   AGENT_WORKBENCH_RUN_DIR="$external_start_finalization_run" \
@@ -1623,7 +1636,7 @@ if launcher_env "$test_tmp/data-partial-ready" "$partial_ready_port" \
   fail "launcher treated one ready Restate endpoint as a coherent external service"
 fi
 [[ ! -e "$test_tmp/data-partial-ready" \
-  && "$(<"$mock_state/build-count")" = "$partial_ready_builds_before" ]] \
+  && "$(<"$mock_state/build-count")" = "$((partial_ready_builds_before + 1))" ]] \
   || fail "partial external endpoint refusal mutated candidate state"
 
 legacy_reservation_port=3087
@@ -1703,7 +1716,7 @@ if launcher_env "$test_tmp/data-nonreset-service-consumer" 3088 \
 fi
 [[ "$(<"$nonreset_service_pid_file")" = "$nonreset_service_pid_record" \
   && ! -e "$test_tmp/data-nonreset-service-consumer" \
-  && "$(<"$mock_state/build-count")" = "$nonreset_service_builds_before" ]] \
+  && "$(<"$mock_state/build-count")" = "$((nonreset_service_builds_before + 1))" ]] \
   || fail "non-resettable service refusal changed the owner or candidate state"
 grep -Fq 'Restate ingress service is reserved by another launcher-owned disposable stack' \
   "$test_tmp/nonreset-shared-engine-refusal.log" \
@@ -2064,7 +2077,7 @@ if launcher_env "$race_data" 3100 PATH="$race_bin:$mock_bin:$PATH" \
 fi
 [[ "$(<"$race_data/foreign-sentinel")" = 'foreign state' \
   && "$(find "$race_data" -mindepth 1 -maxdepth 1 -printf '%f\n')" = foreign-sentinel \
-  && "$(<"$mock_state/build-count")" = "$race_builds_before" ]] \
+  && "$(<"$mock_state/build-count")" = "$((race_builds_before + 1))" ]] \
   || fail "failed admission changed a competing creator's application data"
 
 data_pid_failure="$test_tmp/data-pid-publication"
@@ -2701,7 +2714,7 @@ if launcher_env "$data_delete_retry" 3151 \
   fail "fresh launcher ignored stable authority for a partially deleted reset"
 fi
 [[ ! -e "$test_tmp/delete-retry-borrower-run" \
-  && "$(<"$mock_state/build-count")" = "$delete_retry_builds_before" ]] \
+  && "$(<"$mock_state/build-count")" = "$((delete_retry_builds_before + 1))" ]] \
   || fail "stable reset-finalization refusal mutated borrower state"
 launcher_env "$data_delete_retry" "$port_delete_retry" \
   bash "$delete_retry_recovery" > "$test_tmp/data-delete-retry-second.log" 2>&1

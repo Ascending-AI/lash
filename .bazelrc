@@ -86,3 +86,27 @@ build --local_resources=cpu=8
 build --local_resources=memory=32768
 build --announce_rc
 build --show_timestamps
+
+# `--config=judged` is the Bazel spelling of Cargo's `[profile.judged]`: the
+# development build geometry with the development-only self-checks removed.
+#
+# A judged runbook scores what a host actually ships. `debug_assert!` inside
+# the runtime turns an in-contract outcome (an exhausted execution bound, say)
+# into `effect_panicked`, and the row scores an opaque "turn could not be
+# completed" that no shipped host would ever produce. Cargo's judged profile
+# fixes that by inheriting `dev` and setting `debug-assertions = false` and
+# `overflow-checks = false` for the whole graph, dependencies included.
+#
+# Bazel needs the same two flags said out loud. Nothing here sets
+# `-Cdebug-assertions`, so rustc falls back to its own default, which is ON at
+# `-Copt-level=0` — the geometry the judged profile exists to avoid. These are
+# whole-build flags for the same reason the Cargo profile is whole-graph: the
+# assertions that spoil a judged row live in the dependencies, not in the host
+# binary's own crate. `extra_exec_rustc_flags` is deliberately left alone, so
+# proc macros and build scripts keep their ordinary geometry and their cache
+# entries stay shared with every other build.
+#
+# `scripts/check_judged_build_geometry.py` pins these two flags against
+# `[profile.judged]` in Cargo.toml, so the two spellings cannot drift.
+build:judged --@rules_rust//rust/settings:extra_rustc_flag=-Cdebug-assertions=off
+build:judged --@rules_rust//rust/settings:extra_rustc_flag=-Coverflow-checks=off

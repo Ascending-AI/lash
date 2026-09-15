@@ -15,6 +15,7 @@ state_dir="$(realpath -m -- "$configured_state_dir")"
 
 started_workbench_this_attempt=0
 started_workbench_pid=""
+workbench_bin=""
 started_workbench_start_time=""
 started_restate_this_attempt=0
 started_restate_name=""
@@ -3437,17 +3438,97 @@ validate_reset_ownership() {
     || die "reset refused: Restate deployment registry does not prove exclusive ownership"
 }
 
-start_detached() {
-  log "building agent-workbench (profile: judged)"
-  local -a feature_args=()
-  if [[ "${AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO:-}" = "valid-empty-completion" ]]; then
-    feature_args=(--features provider-wire-fixtures)
-  fi
-  cargo build -p agent-workbench --profile judged "${feature_args[@]}"
+# The Bazel label that builds this launcher's host binary, and the config that
+# gives it the judged geometry. `--config=judged` is the Bazel spelling of
+# Cargo's `[profile.judged]`; the block that defines it in `.bazelrc` says why
+# it has to reach the whole graph rather than this binary's own crate.
+workbench_bazel_label='//examples/agent-workbench:agent-workbench'
 
-  # Launch the binary cargo just built: honor CARGO_TARGET_DIR, or a stale
-  # binary in the repo-local target/ boots instead of the fresh build.
-  local workbench_bin="${CARGO_TARGET_DIR:-$repo_root/target}/judged/agent-workbench"
+# Build the host binary and leave its path in `workbench_bin`.
+#
+# Two things about this are load bearing beyond what it builds.
+#
+# It runs before any launcher lock is taken. A build says nothing about who
+# owns a stack's application data, and `/tmp/lash-agent-workbench-$UID/
+# data-ownership.lock` is shared by every checkout on the box: holding it
+# across a cold compile serialized every workbench on the machine behind one
+# build, and six judged runbook rows spent more wall clock waiting on a
+# sibling lane's compile than on driving runbooks (FIG-3153). The locks now
+# cover the ownership mutation and the launch, not the build.
+#
+# And it goes through Bazel, so every checkout on the box shares one action
+# cache instead of compiling the workspace again into its own Cargo target
+# directory.
+#
+# `AGENT_WORKBENCH_BIN` skips the build entirely: a caller that already has a
+# binary — a matrix driver booting row after row, a job with a prebuilt
+# artifact — launches it and pays nothing.
+prepare_workbench_binary() {
+  if [[ -n "${AGENT_WORKBENCH_BIN:-}" ]]; then
+    workbench_bin="$(realpath -m -- "$AGENT_WORKBENCH_BIN")"
+    [[ -f "$workbench_bin" && -x "$workbench_bin" ]] \
+      || die "AGENT_WORKBENCH_BIN=$AGENT_WORKBENCH_BIN is not an executable file"
+    log "launching prebuilt agent-workbench binary $workbench_bin"
+    return 0
+  fi
+
+  # The `provider-wire-fixtures` scenario is the one launch this script cannot
+  # hand to Bazel. The feature turns on an optional dependency
+  # (`provider-wire-fixtures = ["dep:lash-sim"]`), and the generated BUILD
+  # files describe exactly one feature resolution of this workspace — the
+  # default one — so no label builds this shape and none can be generated from
+  # that resolve. `scripts/feature-coverage.toml` already covers the feature
+  # through Cargo for the same reason. Its single judged row
+  # (`workbench-valid-empty-completion`) keeps the judged profile and pays for
+  # its own build.
+  if [[ "${AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO:-}" = "valid-empty-completion" ]]; then
+    log "building agent-workbench (cargo, profile: judged, provider-wire-fixtures)"
+    cargo build -p agent-workbench --profile judged --features provider-wire-fixtures
+    workbench_bin="${CARGO_TARGET_DIR:-$repo_root/target}/judged/agent-workbench"
+    [[ -x "$workbench_bin" ]] \
+      || die "the judged cargo build produced no binary at $workbench_bin"
+    return 0
+  fi
+
+  log "building agent-workbench ($workbench_bazel_label, --config=judged)"
+  local symlink_prefix="$launcher_lock_root/$launcher_lock_hash-bazel-"
+  local -a build_command
+  if command -v kiln >/dev/null 2>&1; then
+    build_command=(kiln build)
+  else
+    build_command=("$repo_root/scripts/hermetic-build.sh" build)
+  fi
+  "${build_command[@]}" --config=judged "--symlink_prefix=$symlink_prefix" "$workbench_bazel_label" \
+    || die "building $workbench_bazel_label --config=judged failed"
+  local built="${symlink_prefix}bin/examples/agent-workbench/agent-workbench"
+  [[ -x "$built" ]] || die "the judged build produced no binary at $built"
+
+  # Launch a private copy rather than the Bazel output itself. `--config=judged`
+  # adds rustc flags and no output-directory suffix, so the judged and the
+  # ordinary configuration write the same path: a sibling `kiln build` between
+  # this build and the exec below would otherwise replace the file with the
+  # geometry the judged profile exists to avoid. Copy, then rename over the
+  # previous copy — the rename is atomic, so a concurrent launch never reads a
+  # half-written file, and a workbench already running from the old copy keeps
+  # its own inode.
+  local bin_dir="$launcher_lock_root/$launcher_lock_hash-bin"
+  if [[ ! -e "$bin_dir" ]]; then
+    mkdir -m 700 -- "$bin_dir"
+  fi
+  private_owned_directory "$bin_dir" \
+    || die "unsafe launcher binary directory $bin_dir"
+  workbench_bin="$bin_dir/agent-workbench"
+  local staged="$bin_dir/.agent-workbench.$$"
+  cp -f -- "$built" "$staged" \
+    || die "could not stage the judged binary in $bin_dir"
+  chmod 700 -- "$staged"
+  mv -f -- "$staged" "$workbench_bin" \
+    || die "could not publish the judged binary at $workbench_bin"
+}
+
+start_detached() {
+  [[ -n "$workbench_bin" ]] \
+    || die "this workbench was serving when the launch began and is not serving now; no host binary was built for it — run the same command again"
   local -a workbench_env=(
     "AGENT_WORKBENCH_ADDR=$workbench_addr"
     "AGENT_WORKBENCH_RESTATE_ADDR=$restate_endpoint_addr"
@@ -4066,10 +4147,8 @@ run_foreground() {
   trap 'foreground_signal 143' TERM
 
   log "starting workbench at $workbench_url"
-  local -a feature_args=()
-  if [[ "${AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO:-}" = "valid-empty-completion" ]]; then
-    feature_args=(--features provider-wire-fixtures)
-  fi
+  [[ -n "$workbench_bin" ]] \
+    || die "no host binary was built for this launch — run the same command again"
   local -a workbench_env=(
     "AGENT_WORKBENCH_ADDR=$workbench_addr"
     "AGENT_WORKBENCH_RESTATE_ADDR=$restate_endpoint_addr"
@@ -4081,7 +4160,7 @@ run_foreground() {
   (
     exec {launcher_lock_fd}>&-
     exec {launcher_data_lock_fd}>&-
-    exec env "${workbench_env[@]}" cargo run -p agent-workbench --profile judged "${feature_args[@]}"
+    exec env "${workbench_env[@]}" "$workbench_bin"
   ) &
   started_workbench_pid="$!"
   started_workbench_this_attempt=1
@@ -4424,6 +4503,27 @@ case "$action" in
     reset_recovery_file="$launcher_lock_root/$launcher_lock_hash-$state_key-recover.sh"
     reset_finalization_file="$launcher_lock_root/$launcher_lock_hash-$state_key-reset-finalizing"
     start_finalization_file="$launcher_lock_root/$launcher_lock_hash-$state_key-start-finalizing"
+    # Deliberately before the first `flock` below. A build says nothing about
+    # who owns a stack, and the locks it would otherwise sit inside — this
+    # checkout's lifecycle lock, and the box-wide data-ownership lock every
+    # checkout on the machine shares — then hold for the length of a compile.
+    # See `prepare_workbench_binary`.
+    case "$action" in
+      up|start)
+        # `up` against a stack that is already serving is a no-op, and a no-op
+        # must not compile. The readiness probe is a plain HTTP read of the
+        # address this command names — it mutates nothing, so it needs no lock.
+        # If the stack dies between this probe and the launch below, the
+        # attempt refuses and says to run the same `up` again; that is a
+        # better answer than compiling inside the locks to cover a race.
+        if ! workbench_ready; then
+          prepare_workbench_binary
+        fi
+        ;;
+      foreground|run|restart)
+        prepare_workbench_binary
+        ;;
+    esac
     if [[ -e "$launcher_lock_file" ]] && ! regular_private_file "$launcher_lock_file"; then
       die "unsafe launcher lock file $launcher_lock_file"
     fi
