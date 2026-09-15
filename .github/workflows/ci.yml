@@ -1215,15 +1215,24 @@ jobs:
       # shape — with the `[workspace.lints]` table, the nearest `clippy.toml`
       # and a trailing `-D warnings`, in the order Cargo emits them. See
       # `tools/bazel/clippy.bzl`.
+      #
+      # The slack-clone `e2e` command rides along rather than queueing behind
+      # it. `//:workspace_clippy` spends its wall clock waiting on remote
+      # execution and the Cargo command spends its on this runner's own cores,
+      # so the two overlap almost entirely; run in sequence they were 131 s
+      # and 108 s of a 309 s lint job. `scripts/ci/run-gate-commands.sh` holds
+      # each command's output and prints it whole under its own heading, runs
+      # both to completion even when one fails, and exits non-zero if either
+      # did. Neither command changed: the lint set, the feature set and the
+      # trailing `-D warnings` are the ones each leg carried on its own.
       - name: Clippy (workspace, all targets, shared cache)
         if: needs.plan.outputs.bazel_trusted == 'true'
         shell: bash
         run: |
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            --remote_download_outputs=minimal \
-            //:workspace_clippy
+          bash scripts/ci/run-gate-commands.sh --jobs 2 <<'GATES'
+          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build ${BAZEL_SHARED_CACHE_FLAGS} --remote_download_outputs=minimal //:workspace_clippy
+          cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
+          GATES
 
       - name: Remove client credentials
         if: always()
@@ -1239,9 +1248,13 @@ jobs:
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
 
       # `slack-clone`'s `e2e` feature is outside the resolved default workspace
-      # graph, so its `cfg(feature = "e2e")` code has no Bazel label. This
-      # command stays Cargo on every event.
+      # graph, so its `cfg(feature = "e2e")` code has no Bazel label: it stays
+      # Cargo on every event. This is the untrusted branch of it. A trusted
+      # event runs the identical command beside `//:workspace_clippy` above;
+      # here the workspace clippy above is itself Cargo, and two Cargo builds
+      # at once would only contend for the same four cores.
       - name: Clippy (slack-clone e2e feature)
+        if: needs.plan.outputs.bazel_trusted != 'true'
         run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
 
       - name: Check Restate handler panic boundary
