@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 77,
+  "source_commit": "e102f2b9f861",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-1485 schema-78 trigger and process-registration write-shape expectations",
+  "artifacts": {
+    "postgres-expected.json": "fa0dfc6b6eb560b4a37950e2bcc0b0d7fd72e167aaed02a634e405e3ca62472a",
+    "sqlite-expected.json": "da6a298557ca3fce872b092d003cdb389a324267bbec486e8a67290ce7b0e5ec"
+  }
+}
