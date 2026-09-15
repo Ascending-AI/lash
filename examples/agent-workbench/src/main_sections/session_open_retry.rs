@@ -106,5 +106,6 @@ pub(crate) fn temporarily_unavailable_session_open() -> AppError {
         status: StatusCode::SERVICE_UNAVAILABLE,
         message: "session is temporarily busy; retry the request".to_string(),
         verdict: AppErrorVerdict::Retryable,
+        retirement: None,
     }
 }

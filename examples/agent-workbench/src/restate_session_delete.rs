@@ -29,6 +29,50 @@ pub(crate) async fn with_session_delete_attach_ceiling<T>(
         .await
 }
 
+/// The session-delete attach ceiling in force on this task.
+///
+/// The reset route's retirement runs on a task of its own so an abandoned
+/// browser request cannot strand it halfway, and a task does not inherit its
+/// parent's task-locals. Production reads its ceiling from a constant and has
+/// nothing to carry; the tests that shorten it would otherwise silently fall
+/// back to the two-minute default on the far side of that boundary.
+#[cfg(not(test))]
+#[derive(Clone, Copy)]
+pub(crate) struct AmbientAttachCeiling;
+#[cfg(test)]
+pub(crate) type AmbientAttachCeiling = Option<u64>;
+
+#[cfg(not(test))]
+pub(crate) fn ambient_attach_ceiling() -> AmbientAttachCeiling {
+    AmbientAttachCeiling
+}
+
+#[cfg(test)]
+pub(crate) fn ambient_attach_ceiling() -> AmbientAttachCeiling {
+    TEST_SESSION_DELETE_ATTACH_CEILING_MS
+        .try_with(|value| *value)
+        .ok()
+}
+
+#[cfg(not(test))]
+pub(crate) async fn carrying_attach_ceiling<T>(
+    _ceiling: AmbientAttachCeiling,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    future.await
+}
+
+#[cfg(test)]
+pub(crate) async fn carrying_attach_ceiling<T>(
+    ceiling: AmbientAttachCeiling,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    match ceiling {
+        Some(ceiling_ms) => with_session_delete_attach_ceiling(ceiling_ms, future).await,
+        None => future.await,
+    }
+}
+
 pub(crate) async fn call_session_delete(
     state: &AppState,
     request: WorkbenchSessionDeleteWorkflowRequest,

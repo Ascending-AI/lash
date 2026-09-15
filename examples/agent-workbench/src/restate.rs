@@ -45,7 +45,9 @@ use crate::{
 
 #[path = "restate_session_delete.rs"]
 pub(crate) mod session_delete_client;
-pub(crate) use session_delete_client::call_session_delete;
+pub(crate) use session_delete_client::{
+    ambient_attach_ceiling, call_session_delete, carrying_attach_ceiling,
+};
 
 const CRON_STATE_KEY: &str = "state";
 

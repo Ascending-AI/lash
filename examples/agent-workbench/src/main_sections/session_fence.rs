@@ -58,16 +58,14 @@ impl AppState {
         self.admit(session_id, surface, SessionAdmission::Use).await
     }
 
-    /// Resolve `query` and admit the id for deletion on `surface`.
-    pub(crate) async fn admit_session_for_delete(
+    /// Admit an already-resolved id for deletion on `surface`.
+    pub(crate) async fn admit_session_id_for_delete(
         &self,
-        query: &SessionQuery,
+        session_id: &SessionId,
         surface: &'static str,
-    ) -> Result<SessionId, AppError> {
-        let session_id = query.resolve(self)?;
-        self.admit(&session_id, surface, SessionAdmission::Delete)
-            .await?;
-        Ok(session_id)
+    ) -> Result<(), AppError> {
+        self.admit(session_id, surface, SessionAdmission::Delete)
+            .await
     }
 
     async fn admit(
@@ -132,8 +130,10 @@ impl AppState {
             SessionRetirement::Retired => {
                 log_deleted_session_refusal(session_id, Some("workbench_retirement_fence"));
                 AppError::conflict(deleted_session_message(session_id))
+                    .with_retirement(session_id, retirement)
             }
-            SessionRetirement::Retiring => AppError::conflict(retiring_session_message(session_id)),
+            SessionRetirement::Retiring => AppError::conflict(retiring_session_message(session_id))
+                .with_retirement(session_id, retirement),
         }
     }
 
@@ -150,18 +150,43 @@ impl AppState {
         outcome: &Result<(), AppError>,
     ) {
         match outcome {
-            Ok(()) => self.active_turns.confirm_retirement(session_id),
+            Ok(()) => self.confirm_retirement_and_rotate(session_id),
             Err(error) if error.verdict == AppErrorVerdict::Ambiguous => {}
             Err(_) => match self
                 .session_store_factory
                 .session_was_deleted(session_id)
                 .await
             {
-                Ok(true) => self.active_turns.confirm_retirement(session_id),
+                Ok(true) => self.confirm_retirement_and_rotate(session_id),
                 Ok(false) => self.active_turns.abandon_retirement(session_id),
                 Err(_) => {}
             },
         }
+    }
+
+    /// Confirm a retirement and take the roster off the tombstone in the same
+    /// breath.
+    ///
+    /// These were two facts recorded by two different owners: the mark by
+    /// whoever settled the delete, the rotation only by the reset route that
+    /// happened to still be awaiting its Restate call. A delete that completed
+    /// durably while that call's result was lost — the browser's request
+    /// dropped, an ambiguous attach — left the mark `Retired` and the roster's
+    /// current on the tombstoned id, which every session-bound surface then
+    /// refuses forever (FIG-3136). The rotation is idempotent, so the route
+    /// still gets the replacement it must hand back.
+    fn confirm_retirement_and_rotate(&self, session_id: &SessionId) {
+        self.active_turns.confirm_retirement(session_id);
+        let (replacement, replaced_current) = self.sessions.replace_retired(session_id);
+        self.trace_for_session(
+            session_id,
+            "session.retirement_settled",
+            json!({
+                "session_id": session_id,
+                "replacement_session_id": replacement,
+                "replaced_current": replaced_current,
+            }),
+        );
     }
 }
 
