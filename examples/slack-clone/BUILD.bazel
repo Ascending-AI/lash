@@ -37,7 +37,7 @@ lash_rust_unit_test(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         "//:workspace_test_scripts",
@@ -80,6 +80,7 @@ lash_rust_unit_test(
         "e2e",
         "live-e2e",
     ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -122,6 +123,7 @@ lash_rust_unit_test(
         "e2e",
         "live-e2e",
     ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -164,6 +166,7 @@ lash_rust_unit_test(
         "e2e",
         "live-e2e",
     ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -206,6 +209,7 @@ lash_rust_unit_test(
         "e2e",
         "live-e2e",
     ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -226,7 +230,7 @@ lash_rust_integration_test(
         "e2e",
         "live-e2e",
     ],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
         ":slack-clone-mcp-server__bin",

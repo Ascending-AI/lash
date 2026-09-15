@@ -41,7 +41,7 @@ lash_rust_unit_test(
         "default",
         "dhat-heap",
     ],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//:perf_guard_budgets",
     ],
@@ -86,7 +86,7 @@ lash_rust_unit_test(
         "default",
         "dhat-heap",
     ],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     library = ":lash-perf",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",

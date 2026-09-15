@@ -29,7 +29,7 @@ lash_rust_unit_test(
     crate_name = "lash_sim",
     crate_root = "src/lib.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "1", "memory_kb": "3145728"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "3145728"},
     extra_compile_data = [],
     extra_data = [
         "//:confidence_gate_corpus",
@@ -66,7 +66,7 @@ lash_rust_unit_test(
     crate_name = "lash_sim",
     crate_root = "src/main.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "1", "memory_kb": "3145728"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "3145728"},
     library = ":lash-sim",
     library_crate_name = "lash_sim",
     manifest_dir = "crates/lash-sim",
@@ -81,7 +81,7 @@ lash_rust_integration_test(
     crate_name = "cross_backend_active_turn_divergence",
     crate_root = "tests/cross_backend_active_turn_divergence.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -104,7 +104,7 @@ lash_rust_integration_test(
     crate_name = "cross_backend_store_differential",
     crate_root = "tests/cross_backend_store_differential.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -128,7 +128,7 @@ lash_rust_integration_test(
     crate_name = "logical_turn",
     crate_root = "tests/logical_turn.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "1", "memory_kb": "2621440"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -148,6 +148,7 @@ lash_rust_integration_test(
     crate_name = "process_lifecycle_vocabulary",
     crate_root = "tests/process_lifecycle_vocabulary.rs",
     declared_features = [],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -167,6 +168,7 @@ lash_rust_integration_test(
     crate_name = "retention_classification",
     crate_root = "tests/retention_classification.rs",
     declared_features = [],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -186,6 +188,7 @@ lash_rust_integration_test(
     crate_name = "schema_congruence",
     crate_root = "tests/schema_congruence.rs",
     declared_features = [],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -205,6 +208,7 @@ lash_rust_integration_test(
     crate_name = "signal_replay_key_constructor",
     crate_root = "tests/signal_replay_key_constructor.rs",
     declared_features = [],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",
@@ -225,6 +229,7 @@ lash_rust_integration_test(
     crate_name = "stack_policy",
     crate_root = "tests/stack_policy.rs",
     declared_features = [],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
     extra_compile_data = [
         "//crates/lash-postgres-store:package_files",
         "//crates/lash-sqlite-store:package_files",

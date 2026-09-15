@@ -53,6 +53,17 @@ common --experimental_repository_downloader_retries=5
 # these lines moved from 4 cores / 4 GiB to the values below. They do not
 # change again: an action that is OOM-killed or starved is a missing row in
 # action-sizes.json, never a reason to move a default.
+#
+# Test actions are the one exception, and it is applied by the generator rather
+# than here: a test action is a whole libtest binary running a tokio runtime and
+# a store, not a single rustc, so its measured compile-time CPU does not
+# describe it. `tools/bazel/generate_build_files.py` floors every test target's
+# `cpu_count` at 4 (`TEST_CPU_FLOOR`); libs, bins and build scripts stay exactly
+# as measured. At one core the suite's own threads contend for it and
+# time-sensitive cases fail instead of merely running slowly: CI run
+# 34950810111 failed `//crates/lash-perf:lash-perf__unit_test` on a phase
+# assertion and timed out `//crates/lash-sim:stack_policy__test`, neither of
+# which is failing on main.
 build:shared --remote_default_exec_properties=cpu_count=1
 build:shared --remote_default_exec_properties=memory_kb=2097152
 build:shared --remote_local_fallback=false
