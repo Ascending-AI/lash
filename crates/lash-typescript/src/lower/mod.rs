@@ -1194,13 +1194,21 @@ impl Lowerer {
                 })
                 .unwrap_or(lashlang::Span { start: 0, end: 0 }),
         );
+        let body = process_wrapper::process_run_wrapper(closure, call_args);
+        // FIG-2998: `signals` is no longer declared, so the registered set is
+        // the body's own literal `waitSignal` names. The linker infers this for
+        // an inline process literal; a `defineProcess` binding lowers straight
+        // to a declaration and never reaches that pass, so it infers here or it
+        // registers an empty set and refuses every signal it was written to
+        // wait for.
+        let signals = inferred_signal_decls(&body);
         self.declarations.push(Declaration::Process(ProcessDecl {
             name: process_name.as_str().into(),
             params,
-            signals: Vec::new(),
+            signals,
             return_ty: Some(TypeExpr::Any),
             label: None,
-            body: process_wrapper::process_run_wrapper(closure, call_args),
+            body,
         }));
         self.set_role(
             binding_name,
@@ -1586,4 +1594,38 @@ fn source_span(expr: &Expr) -> Option<SourceSpan> {
         Expr::Ident(_, span) => *span,
         _ => None,
     }
+}
+
+/// The signal set a process body declares by waiting on it.
+///
+/// Every `waitSignal(<literal>)` site in the body counts, including ones in
+/// branches this run will not reach: the set is structural, and the payload
+/// type stays gradual because the TypeScript surface annotates no signal
+/// payloads. An inline process literal nested in the body owns its own wait
+/// sites — the linker infers those while it lifts the literal — so the walk
+/// stops at that boundary rather than hoisting an inner process's signals onto
+/// its parent.
+fn inferred_signal_decls(body: &LashExpr) -> Vec<ProcessSignalDecl> {
+    fn walk(expr: &LashExpr, names: &mut BTreeSet<String>) {
+        match expr {
+            LashExpr::ProcessLiteral(_) => return,
+            LashExpr::WaitSignal { name } => {
+                names.insert(name.to_string());
+            }
+            _ => {}
+        }
+        for child in expr.children() {
+            walk(child, names);
+        }
+    }
+
+    let mut names = BTreeSet::new();
+    walk(body, &mut names);
+    names
+        .into_iter()
+        .map(|name| ProcessSignalDecl {
+            name: name.as_str().into(),
+            ty: TypeExpr::Any,
+        })
+        .collect()
 }

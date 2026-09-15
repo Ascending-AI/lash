@@ -491,7 +491,6 @@ three-effect segment budget.
 <typescript>
 const effect_loop = defineProcess({{
   name: "effect_loop",
-  signals: {{}},
   run: async (workflow_id, force_segmentation) => {{
     let n = 0;
     let total = 0;
@@ -544,7 +543,6 @@ Execute this program.
 <typescript>
 const child = defineProcess({{
   name: "child",
-  signals: {{}},
   run: async (value) => {{
     const lookup = await tools.app_lookup({{ key: value }});
     return {{ child: value, lookup: lookup.value }};
@@ -553,14 +551,13 @@ const child = defineProcess({{
 
 const parent = defineProcess({{
   name: "parent",
-  signals: {{}},
   run: async (workflow_id) => {{
     const parent_lookup = await tools.app_lookup({{ key: "parent" }});
     const nested_result = await start(child, {{ value: "nested" }});
-    const [left_result, right_result] = await Promise.all([
-      start(child, {{ value: "left" }}),
-      start(child, {{ value: "right" }})
-    ]);
+    const left_handle = start(child, {{ value: "left" }});
+    const right_handle = start(child, {{ value: "right" }});
+    const left_result = await left_handle;
+    const right_result = await right_handle;
     await sleep(1);
     return {{
       parent_lookup: parent_lookup.value,
@@ -577,7 +574,6 @@ const parent = defineProcess({{
 
 const waker = defineProcess({{
   name: "waker",
-  signals: {{}},
   run: async (workflow_id) => {{
     await sleep(1500);
     wake({{
@@ -619,7 +615,6 @@ Register this trigger.
 <typescript>
 const on_button = defineProcess({
   name: "on_button",
-  signals: {},
   run: async (event: ui.button.Pressed) => {
     return { triggered: event.button, message: event.message };
   }
@@ -645,7 +640,6 @@ Start the signal suspension process but do not await it.
 <typescript>
 const waiter = defineProcess({{
   name: "waiter",
-  signals: {{ first: null, second: null }},
   run: async (workflow_id) => {{
     const first = await waitSignal("first");
     const second = await waitSignal("second");
@@ -688,7 +682,6 @@ Exercise the async host tool completion path.
 <typescript>
 const async_child = defineProcess({{
   name: "async_child",
-  signals: {{}},
   run: async (workflow_id) => {{
     return await tools.async_lookup({{ workflow_id: workflow_id, key: "detached" }});
   }}
@@ -724,7 +717,6 @@ Exercise the exact FIG-446 process-to-llm_query geometry with typed output.
 <typescript>
 const enrich = defineProcess({{
   name: "enrich",
-  signals: {{}},
   run: async (event) => {{
     const enriched = await llm.query({{
       task: "Classify this email. workflow_id={workflow_id} process_llm_query=true",
@@ -754,7 +746,6 @@ Exercise a durable in-process tool that opens an input request and resumes throu
 <typescript>
 const durable_child = defineProcess({{
   name: "durable_child",
-  signals: {{}},
   run: async (workflow_id) => {{
     return await tools.durable_input_request({{
       workflow_id: workflow_id,
@@ -782,7 +773,6 @@ Exercise parent replay after a completed child process and a durable input suspe
 <typescript>
 const immediate_child = defineProcess({{
   name: "immediate_child",
-  signals: {{}},
   run: async (value) => {{
     return {{ child: value }};
   }}
@@ -790,7 +780,6 @@ const immediate_child = defineProcess({{
 
 const parent = defineProcess({{
   name: "parent",
-  signals: {{}},
   run: async (workflow_id) => {{
     const child = await start(immediate_child, {{ value: "ready" }});
     const input = await tools.durable_input_request({{
