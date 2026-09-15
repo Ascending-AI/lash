@@ -83,46 +83,6 @@ pub(crate) fn ui_owned_turn_input_replacements(
     replacements
 }
 
-/// The current frame's opening task is protocol state, not another chat send.
-///
-/// A `continue_as` frame is identified by its typed `AgentFrameReason`; its
-/// first typed `MessageOrigin::TurnInput` is the task that drives the follow
-/// frame. Hiding it does not depend on either the runtime message id or a
-/// textual comparison with the tool arguments. Later turn inputs remain chat
-/// rows, including inputs injected while the follow turn is running.
-pub(crate) fn continue_as_protocol_state_message_ids(
-    read_view: &lash::persistence::SessionReadView,
-) -> BTreeSet<String> {
-    let graph = read_view.session_graph();
-    // Session nodes are sequence-ordered, and frame-open nodes on the active
-    // path therefore end with the current frame. Keep this hand-walk local
-    // until lash-core exposes a current-frame facade accessor.
-    let current_frame_is_continue_as = graph
-        .nodes
-        .iter()
-        .filter(|node| graph.active_path_contains(&node.node_id))
-        .filter_map(|node| node.frame_open().map(|(reason, _, _)| reason))
-        .next_back()
-        .is_some_and(|reason| reason.as_str() == "continue_as");
-    if !current_frame_is_continue_as {
-        return BTreeSet::new();
-    }
-    // This first-TurnInput heuristic rests on the follow task always committing
-    // first: AgentFrameTask materializes a non-empty input, and `task` is
-    // required by the continue_as schema.
-    read_view
-        .messages()
-        .iter()
-        .find(|message| {
-            matches!(
-                message.origin,
-                Some(lash::messages::MessageOrigin::TurnInput { .. })
-            )
-        })
-        .map(|message| BTreeSet::from([message.id.clone()]))
-        .unwrap_or_default()
-}
-
 pub(crate) fn chat_message_from_committed(message: &lash::messages::Message) -> ChatMessage {
     ChatMessage {
         id: message.id.clone(),
@@ -345,7 +305,6 @@ pub(crate) fn transcript_tools(
 pub(crate) fn transcript_rows_from_committed(
     read_view: &lash::persistence::SessionReadView,
     user_replacements: &BTreeMap<String, ChatMessage>,
-    protocol_state_message_ids: &BTreeSet<String>,
     rlm_reply_ids: &BTreeSet<String>,
 ) -> Vec<TranscriptRow> {
     // TypeScript is the sole RLM language (ADR 0096), so every cell carries
@@ -357,9 +316,6 @@ pub(crate) fn transcript_rows_from_committed(
         .into_iter()
         .flat_map(|entry| match entry.payload {
             lash::persistence::ChronologicalPayload::Message(message) => {
-                if protocol_state_message_ids.contains(&message.id) {
-                    return Vec::new();
-                }
                 if is_durable_internal_rlm_message(&message) {
                     // The reply's reasoning still renders as its own collapsed
                     // row, ahead of the prose it reasoned toward.
@@ -422,12 +378,11 @@ pub(crate) struct ChatProjection {
 }
 
 /// Builds the two public chat projections from one set of replacement,
-/// historical-row, protocol-state, and stable-id deduplication rules.
+/// historical-row and stable-id deduplication rules.
 pub(crate) fn project_chat(
     state: &AppState,
     read_view: &lash::persistence::SessionReadView,
     active_turns: &[lash::TurnAddress],
-    committed_input_turn_ids: &BTreeSet<TurnId>,
     current_frame_input_turn_ids: &BTreeSet<TurnId>,
     product_messages: Vec<ChatMessage>,
 ) -> ChatProjection {
@@ -441,19 +396,27 @@ pub(crate) fn project_chat(
         })
         .collect::<BTreeMap<_, _>>();
     let user_replacements = ui_owned_turn_input_replacements(read_view, &ui_user_rows);
-    let protocol_state_message_ids = continue_as_protocol_state_message_ids(read_view);
     let running_turn_ids = active_turns
         .iter()
         .map(|address| address.turn_id.clone())
         .collect::<BTreeSet<_>>();
     let rlm_reply_ids = durable_rlm_reply_message_ids(read_view.messages(), &running_turn_ids);
     let replaced_committed_ids = user_replacements.keys().cloned().collect::<BTreeSet<_>>();
+    // A submitted user row whose turn the current frame does not carry belongs
+    // to the session's history: the frame it was sent into has been retired by
+    // `continue_as`, so the runtime's committed copy is no longer readable and
+    // this row is the only surviving record of what the operator sent. History
+    // renders ahead of the current frame, in the order the rows were submitted.
+    // Requiring the turn to be in `committed_input_turn_ids` made this depend
+    // on the workbench having won a race against the durable commit, which is
+    // the race FIG-3143 removes; a running turn is excluded because its row is
+    // placed by the product log's own anchoring instead.
     let historical_ui_rows = product_messages
         .iter()
         .filter(|message| {
             workbench_turn_id_from_user_message_id(&message.id).is_some_and(|turn_id| {
-                committed_input_turn_ids.contains(turn_id)
-                    && !current_frame_input_turn_ids.contains(turn_id)
+                !current_frame_input_turn_ids.contains(turn_id)
+                    && !running_turn_ids.contains(turn_id)
             })
         })
         .cloned()
@@ -463,9 +426,6 @@ pub(crate) fn project_chat(
         .messages()
         .iter()
         .filter_map(|message| {
-            if protocol_state_message_ids.contains(&message.id) {
-                return None;
-            }
             user_replacements
                 .get(&message.id)
                 .cloned()
@@ -482,7 +442,6 @@ pub(crate) fn project_chat(
     transcript.extend(transcript_rows_from_committed(
         read_view,
         &user_replacements,
-        &protocol_state_message_ids,
         &rlm_reply_ids,
     ));
 

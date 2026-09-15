@@ -88,7 +88,6 @@ pub(crate) async fn app_state(
         &state,
         &read_view,
         &active_turns,
-        &committed_input_turn_ids,
         &current_frame_input_turn_ids,
         product_messages,
     );

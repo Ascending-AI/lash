@@ -2,7 +2,7 @@ use super::*;
 use lash::TurnId;
 
 #[tokio::test]
-async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
+async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_task() {
     let data_dir = tempfile::tempdir().expect("multi-frame send projection tempdir");
     let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let response_index_for_completion = Arc::clone(&response_index);
@@ -186,11 +186,21 @@ async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
     let Json(projected) = app_state(State(state), Query(SessionQuery::default()))
         .await
         .expect("project three-frame conversation");
+    // The task that opened the current frame is the prompt its answer replies
+    // to. Hiding it left the follow frame's transcript opening on an assistant
+    // row answering something the operator could not see (FIG-3143). The task
+    // of a frame that has itself been retired is gone with that frame, and the
+    // seeds stay protocol state in every frame.
     let expected_rows = vec![
         (
             workbench_turn_user_message_id(&initial_turn_id),
             "user".to_string(),
             initial_prompt.to_string(),
+        ),
+        (
+            format!("m_turn_{initial_turn_id}:agent-frame:2_input"),
+            "user".to_string(),
+            "enter the final follow frame".to_string(),
         ),
         (
             workbench_turn_assistant_message_id(&initial_turn_id),
@@ -239,7 +249,6 @@ async fn two_continue_as_switches_keep_real_sends_and_hide_each_follow_task() {
     );
     assert!(projected.messages.iter().all(|message| {
         !message.text.contains("enter the middle follow frame")
-            && !message.text.contains("enter the final follow frame")
             && !message.text.contains("hidden-middle-seed")
             && !message.text.contains("hidden-final-seed")
     }));
@@ -387,12 +396,14 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
             matches!(&event.item, StreamItem::Message { message } if message.role == "user")
         })
         .count();
+    // Six pre-switch rows, the switch request, and the task that opened the
+    // follow frame (FIG-3143).
     assert_eq!(
-        api_user_rows, 7,
+        api_user_rows, 8,
         "committed user rows disappeared from /api/state"
     );
     assert_eq!(
-        transcript_user_rows, 7,
+        transcript_user_rows, 8,
         "committed user rows disappeared from the rendered transcript"
     );
     assert_eq!(
@@ -404,4 +415,184 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
         .await
         .expect("settle switched-frame turn");
     session.close().await.expect("close frame-switch session");
+}
+
+/// The workbench must not need to win a race to keep what the operator sent.
+///
+/// A submitted user row used to retire as soon as one `/api/state` rebuild saw
+/// its turn inactive without yet seeing the runtime's committed copy of the
+/// same text. That window is real — the turn leaves `active_turn_ids` before
+/// its input is readable — and losing it deleted the row for good. While the
+/// committed copy stayed in the current frame the loss was invisible, because
+/// that copy rendered in the row's place; `continue_as` retires the frame the
+/// copy lives in, and the row that stood for it is gone with nothing
+/// underneath. Here every rebuild loses that race, and every submitted turn is
+/// still on screen after the switch (FIG-3143).
+#[tokio::test]
+async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
+    let data_dir = tempfile::tempdir().expect("unobserved-commit projection tempdir");
+    let response_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let response_index_for_completion = Arc::clone(&response_index);
+    let provider = lash::testing::TestProvider::builder()
+        .kind("frame-switch-unobserved-commits")
+        .complete(move |_| {
+            let call = response_index_for_completion
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                Ok(match call {
+                    0 => text_response(
+                        "<typescript>\nawait control.continue_as({ task: \"carry on in the next frame\", seed: { marker: \"protocol-only\" } });\n</typescript>",
+                    ),
+                    1 => text_response(
+                        "<typescript>\nfinish(\"answer in the follow frame\");\n</typescript>",
+                    ),
+                    other => panic!("unexpected unobserved-commit provider call {other}"),
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
+    let product_events_path = data_dir.path().join("product-events.json");
+    state.event_tx = SessionEventRegistry::persistent(product_events_path, 16)
+        .expect("open persistent product event registry");
+    let session_id = state.current_session_id();
+    let session = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open unobserved-commit session");
+
+    let mut committed_inputs = Vec::new();
+    let mut submitted_prompts = Vec::new();
+    for index in 0..4 {
+        let turn_id = TurnId::from(format!("unobserved-before-switch-{index}"));
+        let prompt = format!("submitted prompt before switch {index}");
+        state.push_message_with_id_for_session(
+            &session_id,
+            workbench_turn_user_message_id(&turn_id),
+            "user",
+            &prompt,
+        );
+        submitted_prompts.push((workbench_turn_user_message_id(&turn_id), prompt.clone()));
+        committed_inputs.push(
+            lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, &prompt)
+                .with_id(format!("runtime-{turn_id}"))
+                .with_origin(lash::messages::MessageOrigin::TurnInput {
+                    turn_id,
+                    input_id: Some(format!("input-{index}").into()),
+                }),
+        );
+    }
+    session
+        .admin()
+        .state()
+        .append_messages(committed_inputs)
+        .await
+        .expect("commit pre-switch user inputs");
+
+    // Every rebuild here lands in the race window: the turns are settled and
+    // the workbench has never observed their durable provenance.
+    state.event_tx.reconcile_settled(
+        &session_id,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
+
+    let switch_turn_id = "unobserved-frame-switch-turn";
+    let switch_prompt = "switch frames without an observed commit";
+    state.track_turn_prompt(
+        &session_id,
+        &TurnId::from(switch_turn_id),
+        switch_prompt.to_string(),
+        None,
+    );
+    state.push_message_with_id_for_session(
+        &session_id,
+        workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
+        "user",
+        switch_prompt,
+    );
+    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
+    let output = session
+        .turn(lash::TurnInput::text(switch_prompt))
+        .turn_id(switch_turn_id)
+        .require_finish()
+        .expect("require unobserved-commit finish")
+        .stream_to(&ChannelTurnEvents {
+            turn_state: Arc::clone(&turn_state),
+        })
+        .await
+        .expect("run unobserved-commit frame switch");
+    assert_eq!(
+        output.final_value(),
+        Some(&json!("answer in the follow frame"))
+    );
+    crate::restate::record_turn_output(
+        &state,
+        &session,
+        &TurnId::from(switch_turn_id),
+        output,
+        turn_state,
+        "test.unobserved_commit_frame_switch.completed",
+    )
+    .await
+    .expect("record unobserved-commit switch turn");
+    state.event_tx.reconcile_settled(
+        &session_id,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
+
+    let Json(boundary) = Box::pin(app_state(
+        State(state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("read state after an unobserved-commit frame switch");
+    let user_rows = boundary
+        .state
+        .messages
+        .iter()
+        .filter(|message| message.role == "user")
+        .map(|message| (message.id.clone(), message.text.clone()))
+        .collect::<Vec<_>>();
+    let mut expected_user_rows = submitted_prompts;
+    expected_user_rows.push((
+        workbench_turn_user_message_id(&TurnId::from(switch_turn_id)),
+        switch_prompt.to_string(),
+    ));
+    expected_user_rows.push((
+        format!("m_turn_{switch_turn_id}:agent-frame:1_input"),
+        "carry on in the next frame".to_string(),
+    ));
+    assert_eq!(
+        user_rows, expected_user_rows,
+        "a submitted row must not depend on the workbench winning a race with the durable commit"
+    );
+    let transcript_user_rows = boundary
+        .transcript
+        .iter()
+        .filter_map(|row| match row {
+            TranscriptRow::Message { message } if message.role == "user" => {
+                Some((message.id.clone(), message.text.clone()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        transcript_user_rows, expected_user_rows,
+        "the rendered transcript must match /api/state across the switch"
+    );
+
+    crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(switch_turn_id))
+        .await
+        .expect("settle unobserved-commit switch turn");
+    session
+        .close()
+        .await
+        .expect("close unobserved-commit session");
 }

@@ -1748,6 +1748,14 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
             "user".to_string(),
             switch_prompt.to_string(),
         ),
+        // The task that opened the follow frame is the prompt the answer below
+        // replies to, so it renders between them (FIG-3143). Its seed stays
+        // protocol state.
+        (
+            format!("m_turn_{switch_turn_id}:agent-frame:1_input"),
+            "user".to_string(),
+            "finish in the follow frame".to_string(),
+        ),
         (
             workbench_turn_assistant_message_id(&TurnId::from(switch_turn_id)),
             "assistant".to_string(),
