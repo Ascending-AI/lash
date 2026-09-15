@@ -138,6 +138,27 @@ pub(crate) fn apply_agent_move(board: &BoardState, cell: usize) -> serde_json::V
     })
 }
 
+/// True when the board is live, it is O's turn, and O still has a legal move
+/// — i.e. the host's own system prompt obliges the agent to call
+/// `board.play(...)` before it finishes this turn (FIG-3181).
+///
+/// `legal_moves` is already empty on a won or full board, so a terminal board
+/// never owes a move.
+pub(crate) fn agent_owes_move(board: &BoardState) -> bool {
+    board.turn == "O" && !legal_moves(board).is_empty()
+}
+
+/// Hand a board the agent owes a move on back to the human.
+///
+/// No move is invented on the agent's behalf: the O move is forfeited for this
+/// round and the board becomes X's again, which is the single fact the UI's
+/// disable rule reads (`board.turn !== 'X'`).
+pub(crate) fn yield_to_human(board: &BoardState) -> BoardState {
+    let mut next = board.clone();
+    next.turn = "X".to_string();
+    next
+}
+
 fn winner(cells: &[Option<String>]) -> Option<&'static str> {
     const LINES: [[usize; 3]; 8] = [
         [0, 1, 2],
@@ -164,6 +185,74 @@ fn winner(cells: &[Option<String>]) -> Option<&'static str> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod liveness_tests {
+    use super::*;
+
+    fn board(cells: [Option<&str>; 9], turn: &str) -> BoardState {
+        BoardState {
+            cells: cells
+                .iter()
+                .map(|cell| cell.map(str::to_string))
+                .collect::<Vec<_>>(),
+            turn: turn.to_string(),
+        }
+    }
+
+    /// FIG-3181: the condition the host guards on is exactly "O's turn on a
+    /// board that still has a legal move", not "O's turn".
+    #[test]
+    fn a_live_o_turn_owes_a_move_and_a_terminal_one_does_not() {
+        assert!(agent_owes_move(&board([None; 9], "O")));
+        assert!(!agent_owes_move(&board([None; 9], "X")));
+
+        // A residual `turn: "O"` on a board X just won owes nothing: the
+        // runbook's Phase 3 already says that turn is never played.
+        let won = board(
+            [
+                Some("X"),
+                Some("X"),
+                Some("X"),
+                Some("O"),
+                Some("O"),
+                None,
+                None,
+                None,
+                None,
+            ],
+            "O",
+        );
+        assert!(!agent_owes_move(&won));
+
+        let full = board([Some("X"); 9], "O");
+        assert!(!agent_owes_move(&full));
+    }
+
+    /// Yielding forfeits the move rather than inventing one: the marks are
+    /// untouched and only the turn moves.
+    #[test]
+    fn yielding_moves_the_turn_and_nothing_else() {
+        let owed = board(
+            [
+                Some("X"),
+                None,
+                Some("O"),
+                None,
+                Some("X"),
+                None,
+                None,
+                None,
+                None,
+            ],
+            "O",
+        );
+        let yielded = yield_to_human(&owed);
+        assert_eq!(yielded.turn, "X");
+        assert_eq!(yielded.cells, owed.cells);
+        assert!(!agent_owes_move(&yielded));
+    }
 }
 
 #[cfg(test)]

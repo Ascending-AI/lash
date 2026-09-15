@@ -8,7 +8,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::board::{BoardState, apply_agent_move, default_board};
+use crate::board::{BoardState, agent_owes_move, apply_agent_move, default_board, yield_to_human};
 use crate::state::{AppError, AppResult};
 
 #[derive(Clone, Debug, Serialize)]
@@ -470,6 +470,21 @@ impl AppDb {
             .map_err(|err| AppError::internal(err.to_string()))?;
         self.upsert_chat_board(chat_id, &next_board)?;
         Ok(output)
+    }
+
+    /// Give the board back to the human when the agent finished its turns
+    /// without playing (FIG-3181).
+    ///
+    /// Returns the yielded board, or `None` when the agent owed nothing — so
+    /// the caller cannot re-open a board that is terminal or already X's.
+    pub(crate) fn yield_agent_turn(&mut self, chat_id: &str) -> AppResult<Option<BoardState>> {
+        let board = self.chat_board(chat_id)?;
+        if !agent_owes_move(&board) {
+            return Ok(None);
+        }
+        let next = yield_to_human(&board);
+        self.upsert_chat_board(chat_id, &next)?;
+        Ok(Some(next))
     }
 
     pub(crate) fn insert_message(
@@ -998,6 +1013,42 @@ mod tests {
         let board = db.chat_board(&chat.id).expect("load board");
         assert_eq!(board.turn, "X");
         assert!(board.cells.iter().all(Option::is_none));
+    }
+
+    /// FIG-3181: yielding is idempotent and refuses a board that owes nothing,
+    /// so a stray call can never hand a terminal board back to the human.
+    #[test]
+    fn yielding_an_agent_turn_only_fires_on_an_owed_move() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut db = AppDb::open(&temp.path().join("app.db")).expect("open db");
+        let chat = db
+            .create_chat("wedged game", "mock-model", None)
+            .expect("create chat");
+        let mut cells = vec![None; 9];
+        cells[0] = Some("X".to_string());
+        db.upsert_chat_board(
+            &chat.id,
+            &BoardState {
+                cells: cells.clone(),
+                turn: "O".to_string(),
+            },
+        )
+        .expect("seed a board the agent owes a move on");
+
+        let yielded = db
+            .yield_agent_turn(&chat.id)
+            .expect("yield")
+            .expect("a live O turn is yielded");
+        assert_eq!(yielded.turn, "X");
+        assert_eq!(yielded.cells, cells);
+        assert_eq!(db.chat_board(&chat.id).expect("reload").turn, "X");
+
+        assert!(
+            db.yield_agent_turn(&chat.id)
+                .expect("second yield")
+                .is_none(),
+            "a board that owes nothing is not re-yielded"
+        );
     }
 
     #[test]
