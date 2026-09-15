@@ -1282,7 +1282,7 @@ mod tests {
     /// first, so a fixture that happened to observe the child could not pass
     /// this test by accident.
     ///
-    /// `started_process_ids()` is the possession set a Lashlang segment
+    /// `started_process_ids()` is the possession set a scripted-program segment
     /// handover carries and `restore_started_process_ids` reinstalls, so the
     /// same grant is what survives a segment boundary.
     #[tokio::test]
