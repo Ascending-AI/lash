@@ -79,7 +79,7 @@
                 }
               },
               "target": {
-                "root": "remember"
+                "root": "local#0"
               }
             }
           },
@@ -107,7 +107,7 @@
                 }
               },
               "target": {
-                "root": "source"
+                "root": "local#1"
               }
             }
           },
@@ -123,13 +123,13 @@
                             [
                               "source",
                               {
-                                "Variable": "source"
+                                "Variable": "local#1"
                               }
                             ],
                             [
                               "target",
                               {
-                                "Variable": "remember"
+                                "Variable": "local#0"
                               }
                             ],
                             [
@@ -188,13 +188,13 @@
                 }
               },
               "target": {
-                "root": "handle"
+                "root": "local#2"
               }
             }
           },
           {
             "Finish": {
-              "Variable": "handle"
+              "Variable": "local#2"
             }
           }
         ]
@@ -203,7 +203,7 @@
     "exports": {
       "processes": {
         "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0": {
-          "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
+          "component": "2c1c20a498b68d008d01def099bb71d8219ff73b4f5ffad29be336890f4abe35",
           "pos": 0
         }
       }
@@ -332,26 +332,26 @@
         }
       }
     },
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
-    "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef"
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2db1b719119db663285d78457983f51f2273e98cb3aab9b759d95b103f14feea",
+    "module_ref": "lashlang:v2:blake3:8e72bcbb7934cfb96ee43efb7b71031cbca11875ceb44471795485f2ddb9e557"
   },
   "compiled_program_debug": "CompiledProgram { instruction_count: 21, compile_stats: CompileStats { type_literals_total: 0, type_literals_const_folded: 0, type_literals_dynamic: 0, type_ref_sites: 0 } }",
   "exports": {
     "processes": {
       "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0": {
-        "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
+        "component": "2c1c20a498b68d008d01def099bb71d8219ff73b4f5ffad29be336890f4abe35",
         "pos": 0
       }
     }
   },
-  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
-  "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef",
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2db1b719119db663285d78457983f51f2273e98cb3aab9b759d95b103f14feea",
+  "module_ref": "lashlang:v2:blake3:8e72bcbb7934cfb96ee43efb7b71031cbca11875ceb44471795485f2ddb9e557",
   "process_definition_identity": {
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
-    "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2db1b719119db663285d78457983f51f2273e98cb3aab9b759d95b103f14feea",
+    "module_ref": "lashlang:v2:blake3:8e72bcbb7934cfb96ee43efb7b71031cbca11875ceb44471795485f2ddb9e557",
     "process_name": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0",
     "process_ref": {
-      "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
+      "component": "2c1c20a498b68d008d01def099bb71d8219ff73b4f5ffad29be336890f4abe35",
       "pos": 0
     }
   },
@@ -363,7 +363,11 @@
         "payload_schema": {
           "schema": {}
         },
-        "semantics": {}
+        "semantics": {
+          "wake": {
+            "input": "payload"
+          }
+        }
       },
       {
         "name": "process.wake",
@@ -443,11 +447,11 @@
       "kind": "lashlang",
       "payload": {
         "args": {},
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
-        "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef",
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2db1b719119db663285d78457983f51f2273e98cb3aab9b759d95b103f14feea",
+        "module_ref": "lashlang:v2:blake3:8e72bcbb7934cfb96ee43efb7b71031cbca11875ceb44471795485f2ddb9e557",
         "process_name": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0",
         "process_ref": {
-          "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
+          "component": "2c1c20a498b68d008d01def099bb71d8219ff73b4f5ffad29be336890f4abe35",
           "pos": 0
         }
       },
@@ -457,11 +461,11 @@
       "definition": {
         "definition": {
           "$lash_process": true,
-          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:bb0399f9099cc0e6027827d1414bc4b85d03b48bda67a33b038c4eb977a5788d",
-          "module_ref": "lashlang:v2:blake3:214839f106067ceddee9b7b805b3291fc9bc0f915adb10276d2fdf47fa7b9cef",
+          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:2db1b719119db663285d78457983f51f2273e98cb3aab9b759d95b103f14feea",
+          "module_ref": "lashlang:v2:blake3:8e72bcbb7934cfb96ee43efb7b71031cbca11875ceb44471795485f2ddb9e557",
           "process_name": "__process_21cfb33e9aa7bf217795e5751fd73424174d7dfe587506af10f9f8a16a384ff0",
           "process_ref": {
-            "component": "b3e454ea4fa02ff1831ec125e0e6db664539cf561ec24300def3edc1684f5993",
+            "component": "2c1c20a498b68d008d01def099bb71d8219ff73b4f5ffad29be336890f4abe35",
             "pos": 0
           }
         },

@@ -21,7 +21,7 @@ use write_helpers::{
 };
 
 use crate::ast::{
-    AssignPathStep, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause,
+    AssignPathStep, AstString, BinaryOp, Declaration, Expr, LabelMetadata, ListComprehensionClause,
     ProcessDecl, Program, ResourceRefExpr, TypeExpr, UnaryOp,
 };
 use crate::linker::{
@@ -791,7 +791,124 @@ pub fn canonical_program_ir(mut program: Program) -> Program {
     program.declaration_spans.clear();
     program.expression_spans.clear();
     program.expression_source_spans.clear();
+    normalize_local_binder_names(&mut program);
     program
+}
+
+/// The shape a normalized local binder name is rewritten to.
+///
+/// `#` is not an identifier character in any dialect that reaches the IR, so a
+/// normalized binder can never collide with an authored name, a lifted process
+/// declaration name, or a session global carried by name.
+fn normalized_local_name(index: u32) -> AstString {
+    AstString::from(format!("local#{index}"))
+}
+
+/// Rewrites every local binder name the module identity alpha-normalizes.
+///
+/// `module_ref` writes a local binder as `local:<index>` rather than as its
+/// name (`NameNormalizer`), so two modules that differ only in a local name
+/// share one module ref. The artifact stored under that ref must therefore not
+/// carry the name either: every artifact store addresses a module by its ref
+/// and refuses a second publish whose bytes differ, so a name the identity
+/// drops but the bytes keep makes one ref name two byte strings and the second
+/// session to run an alpha-variant cell fails its turn (FIG-3120). Spans are
+/// already cleared above for exactly this reason; local names are the same
+/// class of fact.
+///
+/// The walk mirrors the hash's unit by unit: a function body binds its params
+/// as ABI names, a process body binds its params plus `input`/`inputs`, and
+/// `main` starts empty — so a name that hashes as `local:<i>` here is the name
+/// renamed here, and equal refs now carry equal bytes.
+fn normalize_local_binder_names(program: &mut Program) {
+    let mut declaration_locals = Vec::with_capacity(program.declarations.len());
+    for declaration in &program.declarations {
+        declaration_locals.push(match declaration {
+            Declaration::Type(_) => LocalNames::default(),
+            Declaration::Function(function) => {
+                let mut normalizer = NameNormalizer::default();
+                for param in &function.params {
+                    normalizer.bind_abi(param.name.as_str());
+                }
+                normalizer.collect_expr(&function.body);
+                normalizer.local_names()
+            }
+            Declaration::Process(process) => {
+                let mut normalizer = NameNormalizer::default();
+                for param in &process.params {
+                    normalizer.bind_abi(param.name.as_str());
+                }
+                normalizer.bind_abi("input");
+                normalizer.bind_abi("inputs");
+                normalizer.collect_expr(&process.body);
+                normalizer.local_names()
+            }
+        });
+    }
+    let main_locals = {
+        let mut normalizer = NameNormalizer::default();
+        normalizer.collect_expr(&program.main);
+        normalizer.local_names()
+    };
+
+    for (declaration, locals) in program.declarations.iter_mut().zip(declaration_locals) {
+        match declaration {
+            Declaration::Type(_) => {}
+            Declaration::Function(function) => rename_local_names(&mut function.body, &locals),
+            Declaration::Process(process) => rename_local_names(&mut process.body, &locals),
+        }
+    }
+    rename_local_names(&mut program.main, &main_locals);
+}
+
+/// Renames one name mention if the identity hashes it as a local.
+fn rename_name(name: &mut AstString, locals: &LocalNames) {
+    if let Some(&index) = locals.get(name.as_str()) {
+        *name = normalized_local_name(index);
+    }
+}
+
+/// Rewrites every name position `write_expr` passes through
+/// `NameNormalizer::name_token`, then recurses through `children_mut`, which is
+/// pinned to visit the same nodes `write_expr` does. A process literal's
+/// parameter names are deliberately absent: the identity writes those verbatim,
+/// so they are not local names.
+fn rename_local_names(expr: &mut Expr, locals: &LocalNames) {
+    if locals.is_empty() {
+        return;
+    }
+    match expr {
+        Expr::Variable(name) => rename_name(name, locals),
+        Expr::Assign { target, .. } => rename_name(&mut target.root, locals),
+        Expr::For { binding, .. } => rename_name(binding, locals),
+        Expr::ListComprehension { clauses, .. } => {
+            for clause in clauses {
+                if let ListComprehensionClause::For { binding, .. } = clause {
+                    rename_name(binding, locals);
+                }
+            }
+        }
+        Expr::Function(function) => {
+            if let Some(name) = function.name.as_mut() {
+                rename_name(name, locals);
+            }
+            for param in &mut function.params {
+                rename_name(param, locals);
+            }
+            for capture in &mut function.captures {
+                rename_name(capture, locals);
+            }
+        }
+        Expr::Try(scope) => {
+            if let Some(catch) = scope.catch.as_mut() {
+                rename_name(&mut catch.binding, locals);
+            }
+        }
+        _ => {}
+    }
+    for child in expr.children_mut() {
+        rename_local_names(child, locals);
+    }
 }
 
 pub fn host_requirements_for_program(program: &Program) -> HostRequirements {
@@ -1343,6 +1460,9 @@ fn write_expr<'program>(
 #[cfg(test)]
 mod tests;
 
+/// The local-bound names of one hashing unit, as `name -> local index`.
+type LocalNames = rustc_hash::FxHashMap<String, u32>;
+
 /// One name's hashed identity, held as a description rather than as a rendered
 /// string.
 ///
@@ -1380,6 +1500,18 @@ impl<'program> NameNormalizer<'program> {
         let token = NameToken::Local(self.next_local);
         self.next_local += 1;
         self.names.insert(name, token);
+    }
+
+    /// The local-bound names this unit carries, owned, for the canonical-IR
+    /// rewrite that has to drop exactly the names the hash drops.
+    fn local_names(&self) -> LocalNames {
+        self.names
+            .iter()
+            .filter_map(|(name, token)| match token {
+                NameToken::Local(index) => Some(((*name).to_string(), *index)),
+                NameToken::Abi(_) | NameToken::Global(_) => None,
+            })
+            .collect()
     }
 
     /// The hashed token for one name reference.

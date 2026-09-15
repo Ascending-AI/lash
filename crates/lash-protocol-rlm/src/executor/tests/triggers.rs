@@ -1601,6 +1601,15 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// is what a version move is supposed to look like. Regenerated with
 /// `cargo nextest run -p lash-internal-protocol-rlm -E
 /// 'test(repin_trigger_inputs_retired_record_form)' --run-ignored all`.
+///
+/// They were re-pinned once more by FIG-3120, which moved
+/// `LASHLANG_SEMANTIC_HASH_VERSION` to `v15` after `canonical_program_ir`
+/// started alpha-normalizing local binder names so that one module ref
+/// addresses one byte string. This re-pin is visible in the capture as well as
+/// in the hashes: the `const` binders `remember`, `source` and `handle` are now
+/// written as `local#0`, `local#1` and `local#2` in the canonical IR. The
+/// process parameter names and the lifted process declaration name are
+/// unchanged, because those are ABI names, not locals.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"

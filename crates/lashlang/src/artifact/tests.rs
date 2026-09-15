@@ -310,3 +310,71 @@ async fn publish_refuses_an_artifact_whose_refs_do_not_match_its_content() {
         .expect("the honest artifact is retained");
     assert_eq!(*stored, honest);
 }
+
+/// One module ref addresses one byte string.
+///
+/// The identity alpha-normalizes a local binder name (`NameNormalizer` writes
+/// `local:<index>`), so two cells that differ only in a local name share one
+/// module ref. Every artifact store refuses a second publish under a ref whose
+/// bytes differ, so the stored canonical IR must drop the same name the
+/// identity drops. Before `canonical_program_ir` normalized local binders, the
+/// perf guard's `durable_agent_child_turn_*` cell (`const spawnChild = ...`)
+/// and its high-traffic twin (`const loadChild = ...`) published one ref with
+/// two byte strings and the second session's turn died at `Stopped(MaxTurns)`
+/// (FIG-3120).
+#[test]
+fn one_module_ref_addresses_one_byte_string_across_local_binder_names() {
+    fn artifact(binding: &str) -> ModuleArtifact {
+        ModuleArtifact::from_program(b::module(
+            vec![b::process_returning(
+                "worker",
+                vec![b::param("tick", TypeExpr::Str)],
+                TypeExpr::Bool,
+                b::block(vec![b::finish(b::bool_lit(true))]),
+            )],
+            vec![
+                b::assign(binding, b::string("seed")),
+                b::finish(b::var(binding)),
+            ],
+        ))
+        .expect("artifact builds")
+    }
+
+    let spawn_child = artifact("spawnChild");
+    let load_child = artifact("loadChild");
+    assert_eq!(
+        spawn_child.module_ref, load_child.module_ref,
+        "alpha variants share one module ref by design"
+    );
+    assert_eq!(
+        spawn_child.to_store_bytes().expect("spawnChild encodes"),
+        load_child.to_store_bytes().expect("loadChild encodes"),
+        "the same module ref must address the same bytes"
+    );
+    let encoded = String::from_utf8(spawn_child.to_store_bytes().expect("encodes"))
+        .expect("artifact bytes are UTF-8");
+    assert!(
+        !encoded.contains("spawnChild") && !encoded.contains("loadChild"),
+        "a local binder name the identity drops must not reach the stored artifact: {encoded}"
+    );
+    assert!(
+        ModuleArtifact::from_store_bytes(&spawn_child.to_store_bytes().expect("encodes"))
+            .expect("normalized artifact decodes")
+            == spawn_child,
+        "the normalized artifact must round-trip"
+    );
+}
+
+/// An ABI name is not a local: a process parameter still names itself in the
+/// stored artifact, and renaming one still moves the module ref.
+#[test]
+fn process_parameter_names_stay_in_the_canonical_ir() {
+    let event = process_typed_artifact("event");
+    let encoded =
+        String::from_utf8(event.to_store_bytes().expect("encodes")).expect("bytes are UTF-8");
+    assert!(encoded.contains("\"event\""), "{encoded}");
+    assert_ne!(
+        event.module_ref,
+        process_typed_artifact("payload").module_ref
+    );
+}
