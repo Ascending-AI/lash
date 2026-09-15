@@ -107,6 +107,14 @@ test:local --test_output=errors
 # list, so a flag that must reach CI cannot live in that config.
 build --@rules_rust//rust/settings:pipelined_compilation=True
 
+# The pool's cache speaks zstd. Action outputs here are rlibs and test binaries
+# measured in hundreds of megabytes, and every one of them crosses the wire at
+# least twice; compressing them costs the workers CPU they are not short of and
+# buys back runner wall clock on a link that is. Same reason as the flag above
+# for living at the `build` level rather than in `build:shared`: an invocation
+# with no remote cache ignores it.
+build --remote_cache_compression
+
 build --incompatible_strict_action_env
 build --jobs=8
 build --loading_phase_threads=4
