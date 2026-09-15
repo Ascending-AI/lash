@@ -283,14 +283,17 @@ async fn trigger_registration_pins_the_resolved_signature_on_the_target() {
     );
 }
 
-/// FIG-3122 law (a): a label the host declared for a start survives admission
+/// FIG-3122 law (a): a label the host declared for a start reaches the row
 /// byte-identical, and law (c): declaring it moves nothing else on the row.
 ///
 /// Admission stays the sole writer of a registration's derived identity — the
-/// kind and the definition reference only the engine can resolve. The label is
-/// not derived identity, it is display metadata, so the engine's own label is
-/// the default a start that declared none falls back to, never an override of
-/// the name a caller asked for.
+/// kind, the definition reference only the engine can resolve, and the label it
+/// derives. The declared label is restored over that derived one afterwards,
+/// from the declaration that carried it; a start that declared none keeps the
+/// engine's. The restoration is deliberately not a decision `with_admitted_identity`
+/// makes by inspecting the row: a label already on a registration is not evidence
+/// that a host declared it, and treating it as evidence let a first admitted stamp
+/// mask a second (#1543, the `list_processes_filters_by_enriched_fields` law).
 #[tokio::test]
 async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
     let engine_label = "__process_02178275819fb79b903c9a8b03a8b2d28c41708383b1728900e429e3a59b6a32";
@@ -320,11 +323,26 @@ async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
         )
     };
 
-    let undeclared = registration().with_admitted_identity(admitted());
+    let undeclared = registration()
+        .with_admitted_identity(admitted())
+        .with_host_facing_label(None);
     assert_eq!(
         undeclared.identity.label.as_deref(),
         Some(engine_label),
         "a start that declares no label keeps the one the engine derived"
+    );
+
+    // A second admitted stamp is the engine speaking again, not a declaration:
+    // it replaces the label outright. This is the regression #1543 shipped.
+    let restamped = registration()
+        .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
+            ProcessIdentity::labelled(SIGNED_ENGINE_KIND, Some("first-stamp")),
+        ))
+        .with_admitted_identity(admitted());
+    assert_eq!(
+        restamped.identity.label.as_deref(),
+        Some(engine_label),
+        "an earlier admitted label never masks a later admitted one"
     );
 
     let declared = registration()
@@ -332,7 +350,8 @@ async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
             SIGNED_ENGINE_KIND,
             Some("immutable_deployment_probe"),
         ))
-        .with_admitted_identity(admitted());
+        .with_admitted_identity(admitted())
+        .with_host_facing_label(Some("immutable_deployment_probe".to_string()));
     assert_eq!(
         declared.identity.label.as_deref(),
         Some("immutable_deployment_probe"),
