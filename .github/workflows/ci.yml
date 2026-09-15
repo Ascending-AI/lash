@@ -463,6 +463,7 @@ jobs:
           python3 scripts/test_restate_workers_e2e_coverage.py
           python3 scripts/test_check_restate_workers_proxy_health_target.py
           python3 scripts/test_runtime_perf_percentiles.py
+          python3 scripts/test_runtime_perf_diff.py
           python3 scripts/test_perfreport.py
           python3 scripts/test_ci_plan.py
           python3 scripts/test_ci_plan_hygiene.py

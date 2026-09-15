@@ -149,6 +149,26 @@ fn open_pragmas(policy: SqliteConnectionPolicy) -> String {
     )
 }
 
+/// Install the feature-gated SQL statement witness on a freshly opened
+/// connection. SQLite's `SQLITE_TRACE_PROFILE` callback fires once per
+/// completed statement, so this is the crate's single chokepoint for
+/// statement-shape counters: no porter module carries instrumentation of its
+/// own. Only the statement is recorded, not the duration the callback also
+/// carries — that clock is quantised to whole milliseconds. The callback and
+/// its registration compile out entirely unless `perf-witness` is enabled.
+#[cfg_attr(not(feature = "perf-witness"), expect(unused_variables))]
+fn install_perf_statement_witness(connection: &Connection) {
+    #[cfg(feature = "perf-witness")]
+    connection.trace_v2(
+        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+        Some(|event: rusqlite::trace::TraceEvent<'_>| {
+            if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                lash_core::perf_witness::record_sql_statement(&statement.sql());
+            }
+        }),
+    );
+}
+
 /// Switch a file-backed connection into WAL mode, retrying on lock contention.
 ///
 /// SQLite acquires an exclusive lock to convert the rollback journal to WAL and,
@@ -248,6 +268,7 @@ impl SqliteConnection {
                 // its own bounded retry loop (see `set_wal_journal_mode`).
                 set_wal_journal_mode(c, policy.busy_timeout)?;
                 c.execute_batch(&pragmas)?;
+                install_perf_statement_witness(c);
                 Ok(())
             })
             .await?;
@@ -274,6 +295,7 @@ impl SqliteConnection {
             .call(move |c| {
                 c.busy_timeout(policy.busy_timeout)?;
                 c.execute_batch(&pragmas)?;
+                install_perf_statement_witness(c);
                 Ok(())
             })
             .await?;
@@ -305,6 +327,7 @@ impl SqliteConnection {
             .call(move |c| {
                 c.busy_timeout(std::time::Duration::from_secs(1))?;
                 c.execute_batch("PRAGMA cache_size = -500;")?;
+                install_perf_statement_witness(c);
                 Ok(())
             })
             .await?;

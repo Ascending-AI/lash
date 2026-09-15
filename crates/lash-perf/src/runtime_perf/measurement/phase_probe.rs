@@ -389,6 +389,16 @@ async fn run_once_inner(
         return Ok(skipped_runtime_perf_result(scenario, chat_turns));
     }
 
+    // The runtime-work witness is process-global and exclusive. Durable
+    // scenarios are the ones whose commit boundary is worth counting, and the
+    // two scenarios with their own collector (the checkpoint curve and the
+    // queued-work contention sweep) return before this point, so installing
+    // here never contends.
+    let work_collector = scenario
+        .is_durable()
+        .then(lash_core::perf_witness::Collector::install)
+        .transpose()?;
+
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
     let total_before_alloc = allocator_stats();
@@ -820,8 +830,40 @@ async fn run_once_inner(
     let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
     let last_turn_memory = turns.last().map(|turn| &turn.memory);
     let store_metrics = runtime.store_metrics();
+    if let Some(collector) = work_collector {
+        let work = collector.snapshot();
+        drop(collector);
+        store_metrics.record_pool_checkout_waits(work.pool_checkout_wait_nanos);
+        for (name, value) in [
+            ("runtime_work.hash_passes", work.hash_passes),
+            ("runtime_work.hashed_bytes", work.hashed_bytes),
+            ("runtime_work.body_copy_passes", work.body_copy_passes),
+            ("runtime_work.copied_bytes", work.copied_bytes),
+        ] {
+            extra_counters.insert(name.to_string(), value);
+        }
+        // Only SQLite carries the statement witness today; emitting a zero for
+        // PostgreSQL would read as "no statements" rather than "not observed".
+        if !scenario.uses_postgres() {
+            extra_counters.insert(
+                "runtime_work.sql_statements".to_string(),
+                work.sql_statements,
+            );
+            for (verb, count) in work.sql_statements_by_verb {
+                extra_counters.insert(format!("runtime_work.sql_statements.{verb}"), count);
+            }
+        }
+    }
     extra_counters.extend(store_metrics.call_counters());
     let metric_samples = store_metrics.observed_latency_samples();
+    let mut metric_samples_ms = BTreeMap::new();
+    let pool_checkout_wait_ms = store_metrics.pool_checkout_wait_samples_ms();
+    if !pool_checkout_wait_ms.is_empty() {
+        metric_samples_ms.insert(
+            "store.pool_checkout_wait_ms".to_string(),
+            pool_checkout_wait_ms,
+        );
+    }
     if let Some(commit) = store_metrics.commit_measurements().last() {
         extra_counters.insert(
             "durable_commit.logical_bytes".to_string(),
@@ -864,7 +906,7 @@ async fn run_once_inner(
             .len(),
         extra_counters,
         metric_samples,
-        metric_samples_ms: BTreeMap::new(),
+        metric_samples_ms,
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,
             rss_after_build_kb: after_build_memory.rss_kb,

@@ -22,7 +22,7 @@ doctest = false
 [features]
 default = ["lashlang"]
 lashlang = ["dep:lashlang"]
-perf-witness = ["lash-core/perf-witness"]
+perf-witness = ["lash-core/perf-witness", "rusqlite/trace"]
 testing = ["lash-core/testing"]
 
 [lints]
