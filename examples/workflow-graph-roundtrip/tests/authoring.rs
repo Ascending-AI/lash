@@ -379,6 +379,105 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
     server.abort();
 }
 
+/// FIG-3177: the editor posts a synthesized receiver call for every action it
+/// inserts, and the `await` in it decides whether the workflow saves at all.
+/// Without it the fragment lowers to a pending-tool value, the node has no
+/// receiver operation, and the save the author just made is refused whole.
+#[tokio::test]
+async fn an_authored_action_saves_only_with_the_awaited_receiver_call_the_editor_emits() {
+    let state = AppState::with_run_timing(RunTiming {
+        sleep_cap: Duration::from_millis(2),
+        signal_delay: Duration::from_millis(2),
+    })
+    .expect("default workflow");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("test listener address");
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
+    let client = reqwest::Client::new();
+    let base = format!("http://{addr}");
+
+    let operations: Vec<Value> = client
+        .get(format!("{base}/operations"))
+        .send()
+        .await
+        .expect("GET /operations")
+        .json()
+        .await
+        .expect("operation catalog JSON");
+    let entry = operations
+        .iter()
+        .find(|entry| entry["id"] == "display.show_message")
+        .expect("catalog entry display.show_message");
+
+    // The literal the browser puts in `data.expression` for a zero-edit
+    // palette insertion of Show message, pinned so the helper above cannot
+    // drift away from `synthCallExpression` unnoticed.
+    let authored = synth_call_expression(entry);
+    assert_eq!(authored, r#"await display.show_message({ text: "" })"#);
+
+    let baseline = select_workflow(&client, &base, "blank").await;
+
+    // The unawaited form the editor used to emit is refused, and the refusal
+    // names the node that carries it.
+    let mut rejected = baseline.clone();
+    let mut bare = catalog_node(entry, "new:bare-call");
+    bare.data.expression = Some(authored.replace("await ", ""));
+    append_process_node(&mut rejected, bare);
+    let response = client
+        .post(format!("{base}/workflow"))
+        .json(&rejected)
+        .send()
+        .await
+        .expect("post unawaited call node");
+    assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+    let error: Value = response.json().await.expect("typed render error");
+    assert_eq!(error["error"]["code"], "invalid_expression");
+    assert_eq!(error["error"]["details"]["nodeId"], "new:bare-call");
+    assert_eq!(error["error"]["details"]["field"], "expression");
+
+    let unchanged: WorkflowDocument = client
+        .get(format!("{base}/workflow"))
+        .send()
+        .await
+        .expect("GET workflow after rejected save")
+        .json()
+        .await
+        .expect("saved workflow after rejected save");
+    assert_eq!(unchanged.version, baseline.version);
+    assert_eq!(unchanged.source, baseline.source);
+
+    // The same node, byte-identical but for the `await`, saves and renders the
+    // authored call into the canonical source.
+    let mut accepted = baseline;
+    let mut awaited = catalog_node(entry, "new:awaited-call");
+    awaited.data.fields.insert(
+        "text".to_string(),
+        EditableValue::String("Authored".to_string()),
+    );
+    assert_eq!(awaited.data.expression.as_deref(), Some(authored.as_str()));
+    append_process_node(&mut accepted, awaited);
+    let response = client
+        .post(format!("{base}/workflow"))
+        .json(&accepted)
+        .send()
+        .await
+        .expect("post awaited call node");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
+    assert!(
+        saved
+            .document
+            .source
+            .contains(r#"display.show_message({ text: "Authored" })"#),
+        "authored call missing from canonical source: {}",
+        saved.document.source
+    );
+
+    server.abort();
+}
+
 /// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
 #[expect(
     clippy::expect_used,
@@ -466,7 +565,52 @@ fn catalog_node(entry: &Value, id: &str) -> FlowNode {
                 .unwrap_or_else(|error| panic!("catalog field {name} default: {error}")),
         );
     }
+    // A palette insertion is not a bare `operation`: the editor seeds the
+    // receiver call it will post in `data.expression`, so these tests post it
+    // too (FIG-3177). Leaving it `None` exercised the backend's own fallback
+    // and hid the frontend's unawaited call from every save test.
+    if kind == "call" {
+        node.data.expression = Some(synth_call_expression(entry));
+    }
     node
+}
+
+/// The exact string the frontend's `synthCallExpression`
+/// (`frontend/src/lib/graph.js`) seeds into a palette-inserted call node, built
+/// from the same catalog entry the browser reads from `GET /operations`.
+///
+/// The `await` is the whole point: an unawaited tool call lowers to a
+/// pending-tool value with no receiver operation, so the backend cannot resolve
+/// the node's operation and refuses the entire save.
+#[expect(
+    clippy::expect_used,
+    reason = "catalog fields always carry a string name and a string type (see the catalog               module the server serves)"
+)]
+fn synth_call_expression(entry: &Value) -> String {
+    let args = entry["fields"]
+        .as_array()
+        .expect("catalog fields")
+        .iter()
+        .map(|field| {
+            let name = field["name"].as_str().expect("catalog field name");
+            let default = &field["default"];
+            // `recordArg` in the same frontend module: numbers and booleans
+            // render bare, strings render JSON-quoted, and anything else is
+            // raw slot text. Every `call` entry the display catalog serves
+            // carries string and number fields only.
+            let value = match field["type"].as_str().expect("catalog field type") {
+                "number" => default.as_f64().unwrap_or(0.0).to_string(),
+                "boolean" => default.as_bool().unwrap_or(false).to_string(),
+                "string" => serde_json::to_string(default.as_str().unwrap_or_default())
+                    .expect("JSON string literal"),
+                _ => default.as_str().unwrap_or_default().to_string(),
+            };
+            format!("{name}: {value}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let operation = entry["operation"].as_str().expect("catalog operation");
+    format!("await display.{operation}({{ {args} }})")
 }
 
 #[expect(

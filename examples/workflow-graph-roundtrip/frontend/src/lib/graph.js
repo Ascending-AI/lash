@@ -185,9 +185,15 @@ function recordArg(field) {
   }
 }
 
+// A call node's expression is the awaited receiver call the lens projects back
+// out of source. The `await` is load-bearing, not cosmetic: an unawaited tool
+// call lowers to a pending-tool value rather than a receiver call, so the
+// backend cannot resolve its operation and refuses the save with
+// `invalid_expression` (FIG-3177). This is the string the backend also
+// synthesizes for itself when a call node arrives with no expression.
 function synthCallExpression(op) {
   const args = (op.fields ?? []).map(recordArg).join(', ');
-  return `display.${op.operation}({ ${args} })`;
+  return `await display.${op.operation}({ ${args} })`;
 }
 
 function synthEffectExpression(op, byName) {
@@ -268,7 +274,7 @@ function seedChildFor(subkind, catalog) {
     title: 'Show message',
     nameSource: 'derived',
     operation: 'show_message',
-    expression: 'display.show_message({ text: "" })',
+    expression: 'await display.show_message({ text: "" })',
     fields: { text: '' },
   };
 }
