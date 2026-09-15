@@ -884,7 +884,7 @@ mod projection_tests {
                 "id": format!("p.{incarnation}.{process_id}"),
                 "process_id": process_id,
                 "incarnation": incarnation,
-                "kind": "lashlang",
+                "kind": "external",
                 "status": "running",
             }),
         )
