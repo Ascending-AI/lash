@@ -5,6 +5,12 @@
 //! `lash-perf` binary and `scripts/profile_runtime*.py`) plus its private
 //! measurement helpers (`perf_support`). Host applications own their own UI
 //! measurement support.
+//!
+//! The ledger a run writes is read back by three scripts:
+//! `scripts/runtime_perf_percentiles.py` reconstructs p50/p95/p99 from the
+//! serialized per-run samples, `scripts/runtime_perf_diff.py` renders the
+//! before/after table two ledgers imply, and `scripts/perf_baseline.py`
+//! archives a quiet-box level under `<root>/<sha>/`.
 
 pub mod perf_support;
 pub mod runtime_perf;
