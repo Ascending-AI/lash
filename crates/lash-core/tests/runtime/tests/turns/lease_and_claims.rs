@@ -1969,16 +1969,16 @@ pub(super) async fn activated_successor_loses_head_cas_after_predecessor_publica
     );
     let successor_input = &pending_inputs[0];
     assert_eq!(
-        successor_input.state,
+        successor_input.input.state,
         lash_core::TurnInputState::DeferredNextTurn,
         "the CAS loser must return its input to the durable next-turn queue"
     );
     assert_eq!(
-        successor_input.ingress,
+        successor_input.input.ingress,
         lash_core::TurnInputIngress::NextTurn
     );
     assert!(
-        successor_input.accepted_input().is_some(),
+        successor_input.input.accepted_input().is_some(),
         "the CAS loser must retain canonical accepted-input evidence for redrive"
     );
 }

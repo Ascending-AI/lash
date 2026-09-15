@@ -73,8 +73,8 @@ use crate::plugin::{PluginSpec, StaticPluginFactory};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::store::{PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt};
 use crate::{
-    CheckpointKind, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputDraft,
-    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeEffectController,
+    CheckpointKind, LeaseOwnerIdentity, PendingTurnInputDraft, QueuedWorkBatchDraft,
+    QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimePersistence, SessionExecutionLease,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionHeadMeta, StoreError,
@@ -83,6 +83,7 @@ use crate::{
 
 mod cold_process;
 mod expectations;
+mod held_turn_input;
 
 use cold_process::ColdProcessTurnAction;
 pub use cold_process::{
@@ -93,6 +94,7 @@ use expectations::{
     durable_recovery_rulings, turn_crash_matrix_outcomes, validate_durable_recovery_rulings,
     validate_outcome_table,
 };
+pub use held_turn_input::held_turn_input_visibility_survives_claim_holder_crash;
 use pretty_assertions::assert_eq;
 
 const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
@@ -2084,16 +2086,16 @@ const DRAIN_TURN_EFFECT_EXECUTIONS: usize = 0;
 /// designed outcome, so the matrix drains it with one more turn and holds the
 /// exactly-once law on the drained input rather than on the intermediate row.
 /// Any other residual state is a settlement defect and fails here.
-fn deferred_to_next_turn(pending_inputs: &[PendingTurnInput]) -> bool {
+fn deferred_to_next_turn(pending_inputs: &[crate::PendingTurnInputRead]) -> bool {
     !pending_inputs.is_empty()
         && pending_inputs
             .iter()
-            .all(|input| input.state.is_next_turn_pending())
+            .all(|read| read.input.state.is_next_turn_pending())
 }
 
 /// The reference turn's committed user text for one pending input row.
-fn pending_input_text(input: &PendingTurnInput) -> String {
-    input
+fn pending_input_text(read: &crate::PendingTurnInputRead) -> String {
+    read.input
         .input
         .items
         .iter()

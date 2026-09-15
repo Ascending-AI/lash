@@ -882,18 +882,21 @@ pub(super) async fn assert_session_turn_cancel_disposition(
             assert!(
                 pending
                     .iter()
-                    .all(|input| input.input_id != undelivered.input_id),
+                    .all(|input| input.input.input_id != undelivered.input_id),
                 "dropped input must be absent from next-turn ingress"
             );
         }
         lash_core::facade_support::TurnCancelDisposition::Defer => {
             let deferred = pending
                 .iter()
-                .find(|input| input.input_id == undelivered.input_id)
+                .find(|input| input.input.input_id == undelivered.input_id)
                 .expect("deferred input remains available for the next turn");
-            assert_eq!(deferred.state, lash_core::TurnInputState::DeferredNextTurn);
+            assert_eq!(
+                deferred.input.state,
+                lash_core::TurnInputState::DeferredNextTurn
+            );
             assert!(matches!(
-                deferred.ingress,
+                deferred.input.ingress,
                 lash_core::TurnInputIngress::NextTurn
             ));
         }
@@ -1021,13 +1024,13 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         1,
         "only the unaccepted active steer should remain"
     );
-    assert_eq!(pending[0].input_id, active.input_id);
+    assert_eq!(pending[0].input.input_id, active.input_id);
     assert!(matches!(
-        pending[0].ingress,
+        pending[0].input.ingress,
         lash_core::TurnInputIngress::NextTurn
     ));
     assert_eq!(
-        pending[0].state,
+        pending[0].input.state,
         lash_core::TurnInputState::DeferredNextTurn
     );
 

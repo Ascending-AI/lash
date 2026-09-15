@@ -4,7 +4,7 @@ use lash::SessionId;
 pub(crate) struct StateProjectionReads {
     pub(crate) read_view: lash::persistence::SessionReadView,
     pub(crate) cursor: SessionCursor,
-    pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInput>,
+    pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInputRead>,
     pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
     pub(crate) turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
     pub(crate) usage: lash::usage::SessionUsageReport,

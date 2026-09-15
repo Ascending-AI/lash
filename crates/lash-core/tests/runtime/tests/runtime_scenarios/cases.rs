@@ -42,7 +42,7 @@ const ACTIVE_CHECKPOINT_WAKE_CLAIM: RuntimeScenarioCoverage = runtime_scenario_c
 const QUEUED_TURN_INPUT_COMPLETION: RuntimeScenarioCoverage = runtime_scenario_coverage!(
     runtime_scenario_claims_queued_turn_input_and_completes_it,
     "queued turn input completion",
-    "Next-turn pending inputs are claimed, hidden while live, and completed by commit."
+    "Next-turn pending inputs are claimed, visible as held while live, and completed by commit."
 );
 const OBSERVATION_REPLAY: RuntimeScenarioCoverage = runtime_scenario_coverage!(
     runtime_scenario_observation_replay_keeps_original_turn_input,
@@ -369,7 +369,7 @@ async fn runtime_scenario_claims_queued_turn_input_and_completes_it() {
                     vec!["first", "second"],
                     vec!["first queued input", "second queued input"],
                 )
-                .expect_pending_hidden_after_claim(),
+                .expect_pending_held_after_claim(),
         )
         .phase(RuntimeCommitPhase::new().expect_pending_turn_inputs_empty())
         .run()
@@ -406,7 +406,7 @@ async fn runtime_scenario_observation_replay_keeps_original_turn_input() {
         .phase(
             RuntimeNextTurnInputClaimPhase::new()
                 .expect_inputs(vec!["observed-live-input"], vec!["observed live input"])
-                .expect_pending_hidden_after_claim(),
+                .expect_pending_held_after_claim(),
         )
         .phase(RuntimeCommitPhase::new().expect_pending_turn_inputs_empty())
         .run()

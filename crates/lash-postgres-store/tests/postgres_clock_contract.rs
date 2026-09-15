@@ -504,7 +504,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
             .await
             .expect("list pending inputs against PostgreSQL time")
             .iter()
-            .map(|input| input.input_id.as_str())
+            .map(|input| input.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![next_input.input_id.as_str()],
         "a live server-clock input claim must stay hidden from pending inputs"

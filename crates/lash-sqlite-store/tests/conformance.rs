@@ -1352,6 +1352,18 @@ lash_conformance::turn_crash_matrix_tests!({
     )
 });
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {
+    let dir = tempfile::tempdir().expect("held-input crash tempdir");
+    Box::pin(
+        lash_conformance::held_turn_input_visibility_survives_claim_holder_crash(
+            |scenario| open_store(&dir.path().join(format!("held-input-crash-{scenario}.db"))),
+            |_| lash_conformance::ConformanceInvocation::native(),
+        ),
+    )
+    .await;
+}
+
 lash_conformance::checkpoint_component_reopen_tests!({
     let dir = tempfile::tempdir().expect("checkpoint-component tempdir");
     let path = dir.path().join("checkpoint-components.db");

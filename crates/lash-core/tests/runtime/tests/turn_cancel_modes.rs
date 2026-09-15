@@ -599,7 +599,7 @@ async fn native_takeover_settles_unresolved_cancel_authorization_before_fresh_wo
             .await
             .expect("list post-cancellation input")
             .into_iter()
-            .all(|input| input.input_id != retained_input.input_id),
+            .all(|input| input.input.input_id != retained_input.input_id),
         "the exact Drop proposal applies to the retained same-turn input"
     );
 
@@ -711,7 +711,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             .await
             .expect("pending inputs")
             .into_iter()
-            .map(|input| input.input_id)
+            .map(|input| input.input.input_id)
             .collect();
             let expected = match disposition {
                 lash_core::TurnCancelDisposition::Defer => vec![undelivered.input_id.clone()],
@@ -804,7 +804,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
                 .await
                 .expect("pending inputs")
                 .into_iter()
-                .map(|input| input.input_id)
+                .map(|input| input.input.input_id)
                 .collect();
         assert_eq!(
             pending,

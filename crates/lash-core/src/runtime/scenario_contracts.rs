@@ -44,7 +44,7 @@ pub const RUNTIME_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     ScenarioContractSpec {
         suite: "runtime",
         test_name: "runtime_scenario_claims_queued_turn_input_and_completes_it",
-        owned_invariant: "Next-turn pending inputs are claimed, hidden while live, and completed by commit.",
+        owned_invariant: "Next-turn pending inputs are claimed, visible as held while live, and completed by commit.",
         semantic_oracle: "runtime.queued_turn_input_completion",
         required_sim_evidence: RUNTIME_REQUIRED_EVIDENCE,
         oracle_id: "sim.oracle.scenario.runtime-contract.v1",
