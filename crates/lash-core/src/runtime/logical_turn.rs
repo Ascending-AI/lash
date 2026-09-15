@@ -8,10 +8,41 @@ use crate::TurnId;
 
 pub const MAX_AGENT_FRAME_SWITCHES: usize = 16;
 
+/// How many follow-on physical turns one logical run may start from work
+/// claimed at a terminal checkpoint (FIG-3157), so a wake storm cannot run a
+/// logical turn forever.
+pub const MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS: usize = 16;
+
+/// Work claimed at a terminal checkpoint and withheld from that checkpoint's
+/// delivery.
+///
+/// FIG-3157: a terminal finish ends the turn. The committed finish is the
+/// turn's answer, so a delivery claimed at `BeforeCompletion` never extends it
+/// — it starts a follow-on physical turn inside the same logical run, carrying
+/// the claimed work as that turn's input.
+#[derive(Default)]
+pub(in crate::runtime) struct WithheldTerminalWork {
+    pub(in crate::runtime) queued: Vec<crate::QueuedWorkClaim>,
+    pub(in crate::runtime) turn_inputs: Vec<TurnInputDrive>,
+}
+
+impl WithheldTerminalWork {
+    pub(in crate::runtime) fn is_empty(&self) -> bool {
+        self.queued.is_empty() && self.turn_inputs.is_empty()
+    }
+
+    pub(in crate::runtime) fn take_if_any(&mut self) -> Option<Self> {
+        (!self.is_empty()).then(|| std::mem::take(self))
+    }
+}
+
 pub(super) struct PhysicalTurnExecution {
     pub(super) turn: AssembledTurn,
     pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     pub(super) post_commit_delivery_failed: bool,
+    /// Claimed at this turn's terminal checkpoint and withheld from it, for
+    /// the logical run to start a follow-on turn with.
+    pub(super) withheld_terminal_work: Option<WithheldTerminalWork>,
 }
 
 pub(super) struct LogicalTurnClaims {
@@ -20,6 +51,11 @@ pub(super) struct LogicalTurnClaims {
     /// settle under: a generation-fenced claim, or none at all when the turn
     /// accepted the row itself and settles it at the head CAS (ADR 0069 §5).
     pub(super) turn_inputs: Vec<TurnInputDrive>,
+    /// Work this turn claimed at its terminal checkpoint and withheld from the
+    /// delivery. It is not settled by this turn: it is the follow-on turn's
+    /// input, and holding it keeps the session execution lease live across the
+    /// commit that ends this turn.
+    pub(super) withheld_terminal_work: Option<WithheldTerminalWork>,
 }
 
 impl LogicalTurnClaims {
@@ -30,7 +66,16 @@ impl LogicalTurnClaims {
         Self {
             queued,
             turn_inputs,
+            withheld_terminal_work: None,
         }
+    }
+
+    pub(super) fn with_withheld_terminal_work(
+        mut self,
+        withheld: Option<WithheldTerminalWork>,
+    ) -> Self {
+        self.withheld_terminal_work = withheld;
+        self
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -148,8 +193,14 @@ impl LashRuntime {
         turn_events: &dyn TurnActivitySink,
         turn_id: &TurnId,
         claims: &LogicalTurnClaims,
+        announce_queued_work: bool,
     ) {
         super::turn_loop::emit_turn_started_to_sink(turn_events, turn_id).await;
+        if !announce_queued_work {
+            // Work withheld from a terminal checkpoint already announced its
+            // start at the boundary that claimed it (FIG-3157).
+            return;
+        }
         for claim in &claims.queued {
             let work = claim.materialize_queued_turn_work();
             super::turn_loop::emit_queued_work_started_to_sink(
@@ -177,6 +228,43 @@ impl LashRuntime {
                 err.code.as_str(),
                 err.message,
             ));
+    }
+
+    /// Hand back work claimed at a terminal checkpoint that this logical run
+    /// will not drive after all. The rows return to the queue exactly as they
+    /// were, for the next drain to claim.
+    async fn abandon_withheld_terminal_work(&self, withheld: WithheldTerminalWork) {
+        let Some(store) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+        else {
+            return;
+        };
+        if !withheld.queued.is_empty()
+            && let Err(err) = store.abandon_queued_work_claims(&withheld.queued).await
+        {
+            tracing::warn!(
+                error = %err,
+                claim_count = withheld.queued.len(),
+                "failed to abandon queued work withheld from a terminal checkpoint"
+            );
+        }
+        let turn_input_claims = withheld
+            .turn_inputs
+            .iter()
+            .filter_map(super::turn_input_ingress::TurnInputDrive::as_claim)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !turn_input_claims.is_empty()
+            && let Err(err) = store.abandon_turn_input_claims(&turn_input_claims).await
+        {
+            tracing::warn!(
+                error = %err,
+                claim_count = turn_input_claims.len(),
+                "failed to abandon turn input claimed at a terminal checkpoint"
+            );
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -223,6 +311,12 @@ impl LashRuntime {
             supplied_trace_turn_id
         };
         let mut turns: Vec<AssembledTurn> = Vec::new();
+        // FIG-3157: work claimed at a terminal checkpoint, withheld from the
+        // delivery so the committed finish stayed the turn's answer, waiting
+        // for the follow-on turn that drives it.
+        let mut carried_withheld: Option<WithheldTerminalWork> = None;
+        let mut announce_queued_work = true;
+        let mut follow_on_turns = 0usize;
 
         loop {
             let turn_trace_turn_id = agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
@@ -236,7 +330,14 @@ impl LashRuntime {
             } else {
                 TurnStopwatch::start(self.host.core.clock.as_ref())
             };
-            Self::emit_physical_turn_start(turn_events, &turn_trace_turn_id, &claims).await;
+            Self::emit_physical_turn_start(
+                turn_events,
+                &turn_trace_turn_id,
+                &claims,
+                announce_queued_work,
+            )
+            .await;
+            announce_queued_work = true;
             let execution_result = match start {
                 LogicalTurnStart::Input(mut input) => {
                     input.trace_turn_id = Some(turn_trace_turn_id.clone());
@@ -317,6 +418,9 @@ impl LashRuntime {
                     )
                     .await;
                     self.invalidate_resident_session_state();
+                    if let Some(withheld) = carried_withheld.take() {
+                        self.abandon_withheld_terminal_work(withheld).await;
+                    }
                     return Err(err);
                 }
                 Err(err) => {
@@ -330,6 +434,9 @@ impl LashRuntime {
                     )
                     .await;
                     self.record_follow_on_failure(&mut turns, err);
+                    if let Some(withheld) = carried_withheld.take() {
+                        self.abandon_withheld_terminal_work(withheld).await;
+                    }
                     return Ok(AgentFrameRun {
                         turns,
                         acceptance: None,
@@ -340,7 +447,13 @@ impl LashRuntime {
                 mut turn,
                 enqueued_queue_batches,
                 post_commit_delivery_failed,
+                withheld_terminal_work,
             } = execution;
+            if let Some(withheld) = withheld_terminal_work {
+                let carried = carried_withheld.get_or_insert_with(WithheldTerminalWork::default);
+                carried.queued.extend(withheld.queued);
+                carried.turn_inputs.extend(withheld.turn_inputs);
+            }
             frame_stopwatch.stamp(&mut turn, self.host.core.clock.as_ref());
             let switched_frame = match &turn.outcome {
                 TurnOutcome::AgentFrameSwitch {
@@ -350,16 +463,55 @@ impl LashRuntime {
             };
             turns.push(turn);
             if post_commit_delivery_failed {
+                if let Some(withheld) = carried_withheld.take() {
+                    self.abandon_withheld_terminal_work(withheld).await;
+                }
                 return Ok(AgentFrameRun {
                     turns,
                     acceptance: None,
                 });
             }
             let Some((frame_key, task)) = switched_frame else {
-                return Ok(AgentFrameRun {
-                    turns,
-                    acceptance: None,
-                });
+                // FIG-3157: the turn ended on its committed answer. Work it
+                // claimed at the terminal checkpoint starts the next turn now
+                // — no idle gap, no wait for the user, the same session
+                // execution lease and generation throughout.
+                let Some(withheld) = carried_withheld.take() else {
+                    return Ok(AgentFrameRun {
+                        turns,
+                        acceptance: None,
+                    });
+                };
+                // The claim is only generation-valid while the lease that
+                // fenced it is live (ADR 0029). A run whose lane lapsed hands
+                // the rows back instead, for a successor to reclaim.
+                let lane_live = session_execution_lease
+                    .as_ref()
+                    .is_some_and(|guard| !guard.is_lost());
+                if !lane_live {
+                    self.abandon_withheld_terminal_work(withheld).await;
+                    return Ok(AgentFrameRun {
+                        turns,
+                        acceptance: None,
+                    });
+                }
+                if follow_on_turns >= MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS {
+                    // Bounded like an agent-frame chain: hand the rows back so
+                    // a later drain takes them instead of running forever.
+                    self.abandon_withheld_terminal_work(withheld).await;
+                    return Ok(AgentFrameRun {
+                        turns,
+                        acceptance: None,
+                    });
+                }
+                follow_on_turns += 1;
+                let mut input = TurnInput::items(Vec::new());
+                input.protocol_turn_options = follow_protocol_turn_options.clone();
+                input.turn_context = follow_turn_context.clone();
+                claims = LogicalTurnClaims::new(withheld.queued, withheld.turn_inputs);
+                announce_queued_work = false;
+                start = LogicalTurnStart::Input(input);
+                continue;
             };
 
             let next = async {
@@ -466,6 +618,9 @@ impl LashRuntime {
                 Ok(next) => next,
                 Err(err) => {
                     self.record_follow_on_failure(&mut turns, err);
+                    if let Some(withheld) = carried_withheld.take() {
+                        self.abandon_withheld_terminal_work(withheld).await;
+                    }
                     return Ok(AgentFrameRun {
                         turns,
                         acceptance: None,
@@ -480,8 +635,13 @@ impl LashRuntime {
                     agent_frame_follow_turn_id(&root_trace_turn_id, turns.len());
                 let terminal_effect_controller = scoped_effect_controller.clone();
                 let terminal_stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-                Self::emit_physical_turn_start(turn_events, &terminal_trace_turn_id, &next_claims)
-                    .await;
+                Self::emit_physical_turn_start(
+                    turn_events,
+                    &terminal_trace_turn_id,
+                    &next_claims,
+                    true,
+                )
+                .await;
                 let terminal_result = Box::pin(self.finish_logical_turn_error(
                         LogicalTurnErrorContext {
                             message: format!(
@@ -499,6 +659,9 @@ impl LashRuntime {
                         },
                     ))
                     .await;
+                if let Some(withheld) = carried_withheld.take() {
+                    self.abandon_withheld_terminal_work(withheld).await;
+                }
                 let mut terminal = match terminal_result {
                     Ok(terminal) => terminal,
                     Err(err) => {

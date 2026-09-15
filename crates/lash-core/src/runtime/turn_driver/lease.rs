@@ -83,6 +83,15 @@ impl<'run> RuntimeTurnDriver<'run> {
             self.pending_queue_claims = update.pending_queue_claims;
             self.pending_turn_input_claims = update.pending_turn_input_claims;
             self.pending_checkpoint_turn_input_claim = update.pending_checkpoint_turn_input_claim;
+            // FIG-3157: extended, not assigned. The journalled claim set is
+            // merged on top of this copy and dedupes against it, so a
+            // successful checkpoint still routes exactly one copy.
+            self.withheld_terminal_work
+                .queued
+                .extend(update.withheld_terminal_work.queued);
+            self.withheld_terminal_work
+                .turn_inputs
+                .extend(update.withheld_terminal_work.turn_inputs);
         }
     }
 }

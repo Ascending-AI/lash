@@ -17,6 +17,7 @@ pub(super) struct TurnDriverRemainder {
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pub(super) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
+    pub(super) withheld_terminal_work: crate::runtime::logical_turn::WithheldTerminalWork,
 }
 
 /// Everything the execute phase needs to drive an already-prepared turn.
@@ -106,6 +107,7 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             failure_evidence,
             pending_queue_claims,
             pending_turn_input_claims,
+            withheld_terminal_work,
             ..
         } = *self.driver.take().expect("turn driver loan is present");
         *self.session = Some(session);
@@ -116,6 +118,7 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             failure_evidence,
             pending_queue_claims,
             pending_turn_input_claims,
+            withheld_terminal_work,
         }
     }
 }
@@ -752,6 +755,7 @@ impl LashRuntime {
             pending_queue_claims: initial_claims.queued,
             pending_turn_input_claims: initial_claims.turn_inputs,
             pending_checkpoint_turn_input_claim: None,
+            withheld_terminal_work: Default::default(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             session_execution_lease: session_execution_fence,
             runtime_lease_owner: self.runtime_lease_owner.clone(),
@@ -821,10 +825,15 @@ impl LashRuntime {
                 let driver = driver.reclaim();
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                 let TurnDriverRemainder {
-                    pending_queue_claims,
-                    pending_turn_input_claims,
+                    mut pending_queue_claims,
+                    mut pending_turn_input_claims,
+                    withheld_terminal_work,
                     ..
                 } = driver;
+                // An aborted turn drives no follow-on, so work withheld from
+                // its terminal checkpoint hands back with everything else.
+                pending_queue_claims.extend(withheld_terminal_work.queued);
+                pending_turn_input_claims.extend(withheld_terminal_work.turn_inputs);
                 self.abandon_queued_work_claims_after_local_abort(&err, &pending_queue_claims)
                     .await;
                 self.abandon_turn_input_claims_after_local_abort(&err, &pending_turn_input_claims)
@@ -847,9 +856,11 @@ impl LashRuntime {
             failure_evidence,
             pending_queue_claims,
             pending_turn_input_claims,
+            mut withheld_terminal_work,
         } = driver;
         let pending_claims =
-            LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims);
+            LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims)
+                .with_withheld_terminal_work(withheld_terminal_work.take_if_any());
         let finish_result = Box::pin(
             self.finish_turn(TurnCommitContext {
                 finish: TurnFinishInput {
@@ -874,12 +885,20 @@ impl LashRuntime {
             }),
         )
         .await;
+        let mut pending_claims = pending_claims;
         if let Err(err) = &finish_result {
+            if let Some(withheld) = pending_claims.withheld_terminal_work.take() {
+                pending_claims.queued.extend(withheld.queued);
+                pending_claims.turn_inputs.extend(withheld.turn_inputs);
+            }
             self.abandon_queued_work_claims_after_local_abort(err, &pending_claims.queued)
                 .await;
             self.abandon_turn_input_claims_after_local_abort(err, &pending_claims.turn_inputs)
                 .await;
         }
-        finish_result
+        finish_result.map(|mut execution| {
+            execution.withheld_terminal_work = pending_claims.withheld_terminal_work.take();
+            execution
+        })
     }
 }

@@ -162,10 +162,14 @@ pub(super) enum SessionExecutionLeaseReleasePolicy {
 }
 
 impl SessionExecutionLeaseReleasePolicy {
-    fn should_release(self, outcome: &TurnOutcome) -> bool {
+    fn should_release(self, outcome: &TurnOutcome, withheld_terminal_work: bool) -> bool {
         match self {
+            // FIG-3157: a terminal finish that withheld claimed work is still
+            // mid-run. The follow-on turn drives that claim, and a claim stays
+            // generation-valid only while the lease that fenced it is held
+            // (ADR 0029), so the guard travels with the work.
             Self::KeepOnAgentFrameSwitch => {
-                !matches!(outcome, TurnOutcome::AgentFrameSwitch { .. })
+                !matches!(outcome, TurnOutcome::AgentFrameSwitch { .. }) && !withheld_terminal_work
             }
         }
     }
