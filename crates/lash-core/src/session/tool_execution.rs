@@ -694,10 +694,12 @@ impl RuntimeExecutionContext<'_> {
         tool_name: String,
         args: serde_json::Value,
         resolution: crate::Resolution,
+        resolver: Option<&crate::PendingResolver>,
         duration_ms: u64,
         attempts: Vec<lash_trace::TraceRetryAttempt>,
     ) -> ToolDispatchOutcome {
-        let output = crate::tool_result::tool_output_from_completion_resolution(resolution);
+        let output =
+            crate::tool_result::tool_output_from_completion_resolution(resolution, resolver);
         let result = finalize_tool_result_with_execution_context(
             self.dispatch.as_ref(),
             &tool_name,
@@ -798,6 +800,7 @@ impl RuntimeExecutionContext<'_> {
             return Self::unarmed_pending_outcome(pending, err);
         }
         let cancellation = cancellation.unwrap_or_default();
+        let resolver = pending.pending.resolved_by.clone();
         let deadline = pending
             .pending
             .deadline
@@ -854,6 +857,7 @@ impl RuntimeExecutionContext<'_> {
             pending.tool_name,
             pending.args,
             resolution,
+            resolver.as_ref(),
             pending.duration_ms,
             pending.attempts,
         )

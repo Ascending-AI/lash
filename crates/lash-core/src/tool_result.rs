@@ -412,9 +412,30 @@ where
     }
 }
 
+/// One wait, one shape: the value a parked call receives is the value the same
+/// wait returns inline.
+///
+/// A wait the runtime armed on a process terminal carries that terminal as its
+/// resolution payload, because a terminal is a fact and a failed or cancelled
+/// process is not an error *of the wait*. The inline path
+/// ([`ProcessAwaitOutput::into_tool_output`](crate::ProcessAwaitOutput::into_tool_output))
+/// is what turns that fact into the call's outcome, so the parked path calls
+/// exactly it. Skipping this and letting the envelope through would hand the
+/// cell a `{"type":"settled","output":{...}}` record — and with it the internal
+/// `$lash_tool_value` tag — for a wait that inline answers the child's own
+/// value. The language forces the swap between the two spellings inside a batch
+/// (`crates/lashlang/src/runtime/vm/pending_tools.rs`, `PROCESS_HANDLE_LEAF`),
+/// so the swap has to be value-preserving.
 pub(crate) fn tool_output_from_completion_resolution(
     resolution: crate::Resolution,
+    resolver: Option<&crate::PendingResolver>,
 ) -> crate::ToolCallOutput {
+    if let (Some(crate::PendingResolver::ProcessTerminal { .. }), crate::Resolution::Ok(value)) =
+        (resolver, &resolution)
+        && let Ok(terminal) = serde_json::from_value::<crate::ProcessAwaitOutput>(value.clone())
+    {
+        return terminal.into_tool_output();
+    }
     match resolution {
         crate::Resolution::Ok(value) => crate::ToolCallOutput::success(value),
         crate::Resolution::Err(err) => {
@@ -489,5 +510,120 @@ mod tests {
         assert!(result.is_pending());
         assert!(result.as_done_output().is_none());
         assert!(result.into_done_output().is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // One wait, one shape (ADR 0095).
+    //
+    // The language refuses `await handle` inside a batch and repairs it to
+    // `processes.await(handle)`; that repair must not change the value. These
+    // compare the two paths directly: the inline path is
+    // `ProcessAwaitOutput::into_tool_output`, the parked path is a resolution
+    // carrying the same terminal through a `ProcessTerminal` resolver.
+    // -----------------------------------------------------------------------
+
+    fn awaited_process() -> crate::PendingResolver {
+        crate::PendingResolver::ProcessTerminal {
+            process_ref: crate::ProcessRef::new(
+                crate::ProcessId::from("child-process"),
+                crate::ProcessIncarnation::from_registration_sequence(1),
+            ),
+        }
+    }
+
+    /// The durable wait carries the terminal itself; this is the payload
+    /// `process_terminal_resolution` journals.
+    fn terminal_resolution(terminal: &crate::ProcessAwaitOutput) -> crate::Resolution {
+        crate::Resolution::Ok(
+            serde_json::to_value(terminal).expect("a process terminal serializes"),
+        )
+    }
+
+    #[test]
+    fn a_settled_process_terminal_answers_the_childs_own_value_not_the_envelope() {
+        let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+            serde_json::json!({ "lookup": "lookup:left" }),
+        ));
+        let inline = terminal.clone().into_tool_output();
+
+        let parked = tool_output_from_completion_resolution(
+            terminal_resolution(&terminal),
+            Some(&awaited_process()),
+        );
+
+        assert_eq!(
+            parked, inline,
+            "the parked wait must answer the inline value"
+        );
+        assert_eq!(
+            parked.value_for_projection(),
+            serde_json::json!({ "lookup": "lookup:left" })
+        );
+        // The precondition the regression is about: without the resolver the
+        // same resolution hands the cell the raw envelope, `$lash_tool_value`
+        // and all.
+        let unconverted =
+            tool_output_from_completion_resolution(terminal_resolution(&terminal), None);
+        assert_ne!(unconverted, inline);
+        assert!(
+            unconverted
+                .value_for_projection()
+                .to_string()
+                .contains("$lash_tool_value"),
+            "{}",
+            unconverted.value_for_projection()
+        );
+    }
+
+    #[test]
+    fn a_failed_process_terminal_answers_the_inline_failure_verbatim() {
+        let mut failure = crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Execution,
+            "process_failed",
+            "child exploded",
+        );
+        failure.raw = Some(crate::ToolValue::untrusted_json(serde_json::json!({
+            "detail": "boom"
+        })));
+        let terminal =
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(failure));
+        let inline = terminal.clone().into_tool_output();
+
+        let parked = tool_output_from_completion_resolution(
+            terminal_resolution(&terminal),
+            Some(&awaited_process()),
+        );
+
+        assert_eq!(parked, inline);
+        assert!(!parked.is_success());
+    }
+
+    #[test]
+    fn a_cancelled_process_terminal_answers_the_inline_cancellation_verbatim() {
+        let terminal =
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+                crate::ToolCancellation::runtime("child cancelled by its parent"),
+            ));
+        let inline = terminal.clone().into_tool_output();
+
+        let parked = tool_output_from_completion_resolution(
+            terminal_resolution(&terminal),
+            Some(&awaited_process()),
+        );
+
+        assert_eq!(parked, inline);
+        assert!(
+            matches!(parked.outcome, crate::ToolCallOutcome::Cancelled(_)),
+            "a cancelled child is a cancelled await on both paths"
+        );
+    }
+
+    #[test]
+    fn a_wait_with_no_named_resolver_is_untouched() {
+        let resolution = crate::Resolution::Ok(serde_json::json!({ "done": true }));
+        assert_eq!(
+            tool_output_from_completion_resolution(resolution, None).value_for_projection(),
+            serde_json::json!({ "done": true })
+        );
     }
 }

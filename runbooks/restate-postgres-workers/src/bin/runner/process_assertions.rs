@@ -387,12 +387,17 @@ pub(super) async fn assert_processes_terminal(pool: &sqlx::PgPool) -> Result<()>
         .map(|(_, _, record)| record.as_str())
         .collect::<Vec<_>>()
         .join("\n");
+    // A process literal is lifted under a content digest (`__process_<digest>`,
+    // `lashlang::LIFTED_PROCESS_NAME_PREFIX`), never under the name it was bound
+    // to in the cell, so a record is pinned on what it carries — the arguments
+    // it was started with and the value it settled — rather than on the binders
+    // `async_child` and `on_button`.
     for needle in [
-        "async_child",
+        "e2e-async-completion",
         "async:detached",
         "parent",
         "child",
-        "on_button",
+        "triggered",
         "lookup:left",
         "lookup:right",
     ] {

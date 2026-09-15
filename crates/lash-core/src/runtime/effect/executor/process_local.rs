@@ -17,9 +17,17 @@ async fn await_process_terminal(
 /// on it.
 ///
 /// A terminal is a *fact*, never an error of the wait: a failed or cancelled
-/// process resolves its waiters successfully with that terminal as the value,
-/// exactly as the inline await path returns it. Only an unobservable terminal
-/// is an error resolution.
+/// process resolves its waiters successfully, carrying the whole
+/// [`ProcessAwaitOutput`](crate::ProcessAwaitOutput) as the resolution payload.
+/// Only an unobservable terminal is an error resolution.
+///
+/// That payload is the journaled fact, not the value a cell sees. The await
+/// site converts it with
+/// [`ProcessAwaitOutput::into_tool_output`](crate::ProcessAwaitOutput::into_tool_output)
+/// — the same conversion the inline await path performs — so
+/// `await processes.await({ handle })` answers exactly what `await handle`
+/// answers, in every terminal state. See
+/// `crate::tool_result::tool_output_from_completion_resolution`.
 pub(crate) fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> Resolution {
     match serde_json::to_value(&output) {
         Ok(value) => Resolution::Ok(value),
