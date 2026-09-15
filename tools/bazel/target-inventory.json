@@ -2,7 +2,7 @@
   "cargo_only_target_count": 1,
   "cargo_package_count": 42,
   "cargo_target_count": 132,
-  "generated_label_count": 190,
+  "generated_label_count": 191,
   "packages": [
     {
       "declared_features": [],
@@ -800,9 +800,16 @@
       ],
       "targets": [
         {
-          "clippy_exempt": "cargo_build_script exposes no CrateInfo for the clippy aspect",
+          "clippy_exempt": "the run action has no CrateInfo; its build.rs compile is linted as :build_script_",
           "kind": "custom-build",
           "label": "//crates/lash-protocol-rlm:build_script"
+        },
+        {
+          "kind": "custom-build-compile",
+          "label": "//crates/lash-protocol-rlm:build_script_",
+          "tags": [
+            "manual"
+          ]
         },
         {
           "cargo": "lash_protocol_rlm",

@@ -340,14 +340,23 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             ")\n\n"
         )
         inventory_targets.append({
-            # `cargo_build_script` wraps its binary and exposes no `CrateInfo`,
-            # so the clippy aspect cannot attach to this label. Cargo lints
-            # `build.rs` under `--all-targets`; keep that coverage with the
-            # Cargo command on untrusted events and record the gap here rather
-            # than dropping it silently.
-            "clippy_exempt": "cargo_build_script exposes no CrateInfo for the clippy aspect",
+            # The label that RUNS the script. `cargo_build_script` exposes no
+            # `CrateInfo` here, so the clippy aspect cannot attach to it -- but
+            # running a script is not a compilation and has no lints of its own.
+            # The `build.rs` compile is the lintable half, and it is the
+            # `:build_script_` target below (FIG-3176).
+            "clippy_exempt": "the run action has no CrateInfo; its build.rs compile is linted as :build_script_",
             "kind": "custom-build",
             "label": f"//{package_dir}:build_script",
+        })
+        inventory_targets.append({
+            # `cargo_build_script` declares the `build.rs` compile as a
+            # `rust_binary` named `<name>_`. It carries `CrateInfo`, so the
+            # clippy aspect does attach, and linting it is what makes the Bazel
+            # partition match `cargo clippy --all-targets` on build scripts.
+            "kind": "custom-build-compile",
+            "label": f"//{package_dir}:build_script_",
+            "tags": ["manual"],
         })
 
     if library:
@@ -820,10 +829,12 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             target["label"] for target in labels if target["label"] is not None
         ),
         # Cargo lints libs, bins, examples, benches and test crates under
-        # `clippy --workspace --all-targets`. Build scripts are excluded here
-        # because `cargo_build_script` exposes no `CrateInfo` for the clippy
-        # aspect to consume; their `cargo-build-script-clippy` exception is
-        # recorded per label in `tools/bazel/target-inventory.json`.
+        # `clippy --workspace --all-targets`, build scripts included. Only the
+        # label that RUNS a build script is excluded here -- it exposes no
+        # `CrateInfo` and compiles nothing -- and its exemption reason is
+        # recorded per label in `tools/bazel/target-inventory.json`. The
+        # `build.rs` compile itself is linted through its `:build_script_`
+        # target (FIG-3176).
         "WORKSPACE_CLIPPY_TARGETS": sorted(
             target["label"]
             for target in labels

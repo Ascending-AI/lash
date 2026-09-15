@@ -16,14 +16,45 @@ carries a `lint_config`, which every generated Lash target does. CI's Cargo
 command is `cargo clippy ... -- -D warnings`, where the lint-table flags are
 emitted first and `-D warnings` last, so the same flag is appended here in the
 same position.
+
+One target carries no `lint_config`: the `build.rs` compile. `cargo_build_script`
+declares it as a `rust_binary` of its own and forwards only a fixed set of
+attributes to it, `lint_config` not among them. Cargo lints a build script
+against the workspace table like any other target, so this aspect supplies that
+table itself when the target under it has none (FIG-3176).
 """
 
+# buildifier: disable=bzl-visibility
+load("@rules_rust//rust/private:providers.bzl", "LintsInfo")
 load("@rules_rust//rust:defs.bzl", "rust_clippy_action", "rust_common")
 
 # Cargo appends the `-- -D warnings` arguments after the lint-table flags, and
 # `rust_clippy_action` appends `extra_clippy_flags` after them too, so a warning
 # the workspace table left at `warn` is denied in both tools identically.
 _DENY_WARNINGS = "-Dwarnings"
+
+def _lint_flags(ctx):
+    """The clippy flags Cargo would pass for the target being linted.
+
+    `rust_clippy_action` reads a target's own `lint_config`, and every rule in
+    `tools/bazel/lash_rust.bzl` sets one. The `build.rs` compile is the
+    exception: `cargo_build_script` declares it as a `rust_binary` of its own
+    and forwards only `testonly` and the compatibility attributes to it, so
+    `lint_config` cannot reach it from the macro call. Cargo applies the
+    workspace `[lints]` table to a build script like any other target, so the
+    table is read here from the same `cargo_lints` target the generated rules
+    name and prepended for a target that carries none (FIG-3176).
+
+    Args:
+        ctx: The aspect context.
+
+    Returns:
+        list: Clippy flags to append, `-Dwarnings` last as Cargo orders it.
+    """
+    flags = []
+    if not getattr(ctx.rule.attr, "lint_config", None):
+        flags = list(ctx.attr._workspace_lints[LintsInfo].clippy_lint_flags)
+    return flags + [_DENY_WARNINGS]
 
 def _nearest_config(package, configs):
     """Picks the declared `clippy.toml` clippy itself would resolve.
@@ -73,7 +104,7 @@ def _lash_clippy_aspect_impl(target, ctx):
         crate_info = crate_info,
         config = _nearest_config(target.label.package, configs),
         success_marker = marker,
-        extra_clippy_flags = [_DENY_WARNINGS],
+        extra_clippy_flags = _lint_flags(ctx),
     )
 
     return [OutputGroupInfo(clippy_checks = depset([marker]))]
@@ -82,6 +113,11 @@ lash_clippy_aspect = aspect(
     implementation = _lash_clippy_aspect_impl,
     fragments = ["cpp"],
     attrs = {
+        "_workspace_lints": attr.label(
+            doc = "The workspace `[lints]` table, for a target that carries no `lint_config`.",
+            default = Label("@crates//:workspace_cargo_lints"),
+            providers = [LintsInfo],
+        ),
         "_configs": attr.label_list(
             doc = "Every `clippy.toml` in the repository, resolved per target.",
             allow_files = True,

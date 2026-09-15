@@ -283,27 +283,35 @@ fenced examples remain as prose; nothing compiles or executes them.
 ## Clippy
 
 `//:workspace_clippy` is the `cargo clippy --workspace --all-targets` shape as
-one cached Bazel action per target: 170 labels, every first-party target of the
-resolved default graph except the one `cargo_build_script` label,
+one cached Bazel action per target: 190 labels, every first-party target of the
+resolved default graph except the one label that merely *runs* a build script,
 whose exemption is recorded as `clippy_exempt` in
-`tools/bazel/target-inventory.json` because `cargo_build_script` exposes no
-`CrateInfo` for a clippy aspect to attach to.
+`tools/bazel/target-inventory.json` because running a script compiles nothing
+and that label exposes no `CrateInfo` for a clippy aspect to attach to. The
+`build.rs` compile behind it is a `rust_binary` of its own,
+`//crates/lash-protocol-rlm:build_script_`, and it is in the partition.
 
-`tools/bazel/clippy.bzl` wraps the upstream `rules_rust` clippy action for two
-reasons, both about matching Cargo's effective lint set rather than an
+`tools/bazel/clippy.bzl` wraps the upstream `rules_rust` clippy action for three
+reasons, all about matching Cargo's effective lint set rather than an
 approximation of it:
 
 - Clippy resolves its configuration by walking up from each crate's manifest
-  directory and stopping at the first `clippy.toml`. This repository has two —
-  the workspace file and `crates/lash-core/clippy.toml`, which carries the
-  `disallowed-methods` list that `clippy::disallowed_methods` denies — while the
+  directory and stopping at the first `clippy.toml`. This repository has three —
+  the workspace file plus `crates/lash-core/clippy.toml` and
+  `crates/lash-core-store/clippy.toml`, which carry the `disallowed-methods`
+  list that `clippy::disallowed_methods` denies — while the
   upstream aspect binds a single config for the whole build. The aspect here
   selects the nearest declared config per target, so `lash-core` sees its own
   list instead of an empty one.
 - The upstream action drops its `-D warnings` default as soon as a target
-  carries a `lint_config`, and every generated Lash target does. `-D warnings`
+  carries a `lint_config`, and every rule in `lash_rust.bzl` sets one. `-D warnings`
   is appended after the `[workspace.lints]` flags, the same position Cargo's
   trailing `-- -D warnings` occupies.
+- `cargo_build_script` declares the `build.rs` compile as a `rust_binary` of its
+  own and forwards only a fixed set of attributes to it, `lint_config` not among
+  them, so that one target reaches the action with no lint table. Cargo lints a
+  build script against `[workspace.lints]` like any other target, so the aspect
+  reads `@crates//:workspace_cargo_lints` itself for a target that carries none.
 
 `slack-clone`'s `e2e` feature is outside the resolved default workspace graph,
 so `cargo clippy -p slack-clone --all-targets --features e2e --no-deps` has no
