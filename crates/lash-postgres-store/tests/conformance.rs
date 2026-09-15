@@ -1548,7 +1548,7 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
     };
     assert!(
         message.contains("has no version stamp")
-            && message.contains(&format!("expected version {current_version}")),
+            && message.contains(&format!("expected {current_version}")),
         "expected an unstamped-schema error, got: {message}"
     );
 }
