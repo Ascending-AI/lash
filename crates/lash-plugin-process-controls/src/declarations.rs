@@ -264,6 +264,14 @@ pub async fn execute_process_start_tool_call(
     // tool, so the declaration is where the inheritance has to be stamped —
     // without it a process's children are owned by (and observed from) a
     // session that disappears when the run ends.
+    // A start that is *not* inside a chain is a session start: the session that
+    // authored the call is both its originator and its wake target, exactly as
+    // the in-session start path stamps it
+    // (`lash_core::runtime::session_manager::process_runners::control`). Leaving
+    // the wake target unset here registers a process whose declared wakes are
+    // materialized and then dropped for want of a delivery target, so a
+    // `processes.emit` from that process never becomes queued work on the
+    // session waiting for it.
     let spawn = context.process_spawn_provenance().cloned();
     let (originator, wake_session_id) = match spawn {
         Some(spawn) => (spawn.originator, spawn.wake_session_id),
@@ -272,7 +280,7 @@ pub async fn execute_process_start_tool_call(
                 session_id: session_id.clone(),
                 agent_frame_id: Some(context.agent_frame_id().clone()),
             },
-            None,
+            Some(session_id.clone()),
         ),
     };
     let declaration = lash_core::ProcessStartDeclaration::new(

@@ -174,6 +174,7 @@ impl RuntimeTurnDriver<'_> {
                                 prepared.tool_name.clone(),
                                 prepared.args.clone(),
                                 resolution,
+                                pending.resolved_by.as_ref(),
                                 duration_ms,
                                 Vec::new(),
                             )

@@ -1655,6 +1655,7 @@ async fn retry_ladder_survives_a_later_pending_completion() {
             pending.tool_name,
             pending.args,
             crate::Resolution::Ok(serde_json::json!({ "done": true })),
+            None,
             pending.duration_ms,
             pending.attempts,
         )

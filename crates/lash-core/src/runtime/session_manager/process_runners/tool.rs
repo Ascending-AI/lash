@@ -207,6 +207,7 @@ impl RuntimeSessionServices {
                     dispatch.process_scope(),
                 )
                 .await?;
+                let resolver = pending.pending.resolved_by.clone();
                 let resolution = Box::pin(await_pending_process_tool(
                     dispatch.effect_controller.controller(),
                     Arc::clone(&dispatch.clock),
@@ -215,7 +216,10 @@ impl RuntimeSessionServices {
                     &turn_cancel_wait,
                 ))
                 .await?;
-                crate::tool_result::tool_output_from_completion_resolution(resolution)
+                crate::tool_result::tool_output_from_completion_resolution(
+                    resolution,
+                    resolver.as_ref(),
+                )
             }
             crate::tool_dispatch::ToolCallLaunch::ControllerAborted(error) => {
                 return Err(crate::PluginError::RuntimeEffectController(error));

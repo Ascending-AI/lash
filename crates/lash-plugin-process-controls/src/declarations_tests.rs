@@ -124,6 +124,45 @@ async fn start_process_declares_a_start_and_answers_with_the_unrealized_handle()
     assert_eq!(output.get("process_id"), Some(&serde_json::json!(expected)));
 }
 
+/// A start outside any chain is a session start, so the calling session is the
+/// wake target of everything the started process declares. Without it the
+/// process runs, its `processes.emit` materializes a wake, and the wake is
+/// dropped for want of a delivery target — the session waiting on it never
+/// sees queued work.
+#[tokio::test]
+async fn a_session_start_declares_the_calling_session_as_its_wake_target() {
+    let outcome = attempt!(
+        "start_process",
+        serde_json::json!({
+            "definition": { "$lash_process": true, "process_name": "waker" },
+        })
+    );
+    let (_, declared) = intents(outcome);
+    let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
+        panic!("expected one start declaration, got {declared:?}");
+    };
+    let session_id = {
+        let tool_context = attempt_context(None);
+        lash_core::SessionId::from(tool_context.session_id())
+    };
+    assert_eq!(
+        intent.declaration.wake_session_id.as_ref(),
+        Some(&session_id),
+        "a session start must name its own session as the wake target"
+    );
+    let lash_core::ProcessOriginator::Session {
+        session_id: originator_session_id,
+        ..
+    } = &intent.declaration.originator
+    else {
+        panic!("a session start is originated by its session");
+    };
+    assert_eq!(
+        originator_session_id, &session_id,
+        "originator and wake target are the same session for a session start"
+    );
+}
+
 #[tokio::test]
 async fn start_process_takes_the_engine_kind_a_third_party_names() {
     let outcome = attempt!(
