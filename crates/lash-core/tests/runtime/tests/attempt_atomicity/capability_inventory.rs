@@ -22,6 +22,7 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let _ = attempt.replay_key();
     let _ = attempt.engine_child_max_attempts();
     let _ = attempt.process_execution_env_spec();
+    let _ = attempt.process_spawn_provenance();
     let _ = attempt.decode_prepared_payload::<serde_json::Value>();
     let _ = attempt.named_phase("attempt-capability-law");
     let _ = attempt.completion_key();
