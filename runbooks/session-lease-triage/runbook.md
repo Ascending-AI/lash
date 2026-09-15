@@ -276,6 +276,9 @@ triples would indicate unintended reentry and must fail the scorecard.
 Require the companion's final `panic gate: clean` and
 `session-lease-triage e2e passed: scenarios=4` lines, and
 confirm no container or host port was left behind (the companion owns none).
+Because the companion's own banners no longer print the literal, `grep -F 'panicked at'
+<artifact-dir>/session-lease-triage-e2e.log` returning nothing is an independent check rather
+than a match on the gate's own output; require that too.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

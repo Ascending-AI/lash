@@ -237,10 +237,10 @@ finish_current_step() {
 
 assert_no_panics_in_artifacts() {
   if [ -d "$out_dir" ] && grep -RFn --include='*.log' 'panicked at' "$out_dir" >&2; then
-    echo "panic gate: FAILED ('panicked at' found in confidence artifacts)" >&2
+    echo "panic gate: FAILED (a Rust panic marker found in confidence artifacts)" >&2
     return 1
   fi
-  echo "panic gate: clean (no 'panicked at' lines in confidence artifacts)"
+  echo "panic gate: clean (no Rust panic markers in confidence artifacts)"
 }
 
 cleanup_mutation_postgres() {

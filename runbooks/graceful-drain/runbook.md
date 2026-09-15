@@ -192,6 +192,9 @@ lease prerequisite: exactly the eligible owned row was abandoned and no row was 
 
 Require `panic gate: clean`, `graceful-drain e2e passed: scenarios=1`, and no
 `lash-fig897-graceful-drain-postgres` container.
+Because the companion's own banners no longer print the literal, `grep -F 'panicked at'
+<artifact-dir>/graceful-drain-e2e.log` returning nothing is an independent check rather than a
+match on the gate's own output; require that too.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
