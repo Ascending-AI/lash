@@ -9,6 +9,18 @@ name: Seal cache
 # build's `CARGO_TARGET_DIR` with no override. The duplication is therefore
 # permanent; paying it once and caching the result is the only lever.
 #
+# What that duplication costs changed shape: the suite holds compile-fail
+# fixtures only, so `project.has_pass` is false, and trybuild takes its cheap
+# path (`src/run.rs`). The nested dependency graph is built with `cargo check`
+# rather than `cargo build`, and the fixtures compile in one `--keep-going`
+# invocation rather than one `cargo` run per fixture, each preceded by a
+# `cargo clean --package`. The tree this workflow saves is therefore a check
+# tree, not a build tree. A `cargo check` unit and a `cargo build` unit have
+# different fingerprints, so the first run against a cache written under the
+# old shape re-checks the nested graph once and reads no faster than before;
+# dispatch this workflow once after that change lands and the seal lane picks
+# up the smaller tree from then on.
+#
 # ci.yml's `check` job never runs on `main` itself, so it never writes a cache
 # into the default-branch scope, and a pull request can only restore caches
 # from its own branch or from `main`. Every PR started this job from scratch.
@@ -105,7 +117,10 @@ jobs:
       # tree is only worth restoring if it was produced by the same command:
       # a narrower build would leave the seal lane rebuilding what it missed.
       # The fixture set, feature unification and `--test ui` selection are the
-      # seal lane's, unchanged.
+      # seal lane's, unchanged. `--test ui` also carries the compile-pass
+      # surface fixtures: they are modules of the ui binary rather than
+      # trybuild `t.pass` cases, so they are proved by the outer build here and
+      # in the seal lane, not by a second nested one.
       - name: Seal-test the API surface
         run: |
           # shellcheck disable=SC2086

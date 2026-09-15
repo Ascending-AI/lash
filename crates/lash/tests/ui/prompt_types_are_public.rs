@@ -1,14 +1,15 @@
 use lash::PromptLayerSink;
 
 fn main() {
-    let template = lash::prompt::PromptTemplate::new(vec![
-        lash::prompt::PromptTemplateSection::untitled(vec![
-            lash::prompt::PromptTemplateEntry::builtin(
-                lash::prompt::PromptBuiltin::MainAgentIntro,
-            ),
-            lash::prompt::PromptTemplateEntry::slot(lash::prompt::PromptSlot::Guidance),
-        ]),
-    ]);
+    let template =
+        lash::prompt::PromptTemplate::new(vec![lash::prompt::PromptTemplateSection::untitled(
+            vec![
+                lash::prompt::PromptTemplateEntry::builtin(
+                    lash::prompt::PromptBuiltin::MainAgentIntro,
+                ),
+                lash::prompt::PromptTemplateEntry::slot(lash::prompt::PromptSlot::Guidance),
+            ],
+        )]);
     let contribution =
         lash::prompt::PromptContribution::guidance("Host", "Host guidance").with_priority(1);
     let layer = lash::prompt::PromptLayer::with_template(template)

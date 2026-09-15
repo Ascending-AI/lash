@@ -18,12 +18,13 @@ async fn durable_core_without_advanced(
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-        Arc::new(
-            lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-                .await
-                .expect("sqlite artifact store"),
+            Arc::new(
+                lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
+                    .await
+                    .expect("sqlite artifact store"),
+            ),
         ),
-    ))
+    )
     .with_native_queued_work()
     .provider(provider)
     .model(model)
