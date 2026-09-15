@@ -117,7 +117,10 @@ three are correct. The answer key is **counts, typed dispositions, and typed pro
 
 ## Working material
 
-- Require `OPENROUTER_API_KEY` (environment or repo `.env`; the platform needs no key).
+- Require `OPENROUTER_API_KEY` (environment or repo `.env`; the platform needs no key), and
+  **pin `OPENROUTER_MODEL` to this row's matrix tier**. The bot defaults to a frontier model
+  when that variable is unset (`provider_from_env` in `examples/slack-clone/src/bot/runtime.rs`),
+  so a run that names only the key silently spends the whole row off-tier and is discarded.
   Boot the processes on a dedicated port with all state outside the repo:
   `SLACK_CLONE_STATE_DIR=<scratch> SLACK_CLONE_OPEN=0 bash scripts/slack-clone-dev.sh up --port <p>`.
   The **bot port is `<p> + 1`** and the **HTTP MCP server's is `<p> + 2`**
@@ -166,7 +169,10 @@ Save every named artifact, both tabs' screenshots, and all four layer extracts p
 ## Phase 0 — Boot, identify two humans, and pin the empty baseline
 
 Boot, gate both `/healthz`, and record the bot's `bot_user_id`, `bot_id` and `team_id`. Open
-two browser contexts, name them (e.g. `ada` and `brix`), and require in **both**: the
+two browser contexts, name them (e.g. `ada` and `brix`), and **select the scenario's channel
+explicitly in each**: the client selects `channels[0]`, which is ordered by channel id and is
+not necessarily `#general`, so a driver that assumes the landing channel gates every later
+phase against the wrong room. Then require in **both**: the
 rendered identity, `#general` selected with the same `#channelId`, the same `#botMention`
 token as the bot's own `bot_user_id`, and an empty stream. `GET /platform/bootstrap` must list
 both humans plus the bot. All four layers start empty for this channel: no `messages` rows, no
@@ -308,9 +314,11 @@ curl -sS -X DELETE "http://127.0.0.1:$((p + 1))/admin/mcp/servers/workspace_http
   -H "authorization: Bearer ${SLACK_CLONE_ADMIN_TOKEN:-slack-clone-dev-admin}"
 ```
 
-- **Layer 3/4:** the new turn contains **no** tool whose name begins
-  `mcp__workspace_http__`
-  record, and `GET /admin/mcp/servers` lists no `workspace_http` row.
+- **Layer 3/4:** the new turn's **tool catalog** — the `tool_schemas` of its
+  `composition_changed` record — contains no name beginning `mcp__workspace_http__`, and
+  `GET /admin/mcp/servers` lists no `workspace_http` row. Gate the catalog, not the turn's
+  text: the prompt replays the earlier turn and a truthful reply names the dead tool when
+  saying it is gone, so a prefix search over the whole turn fails on correct behavior.
 - **Judged:** the reply says the capability is gone rather than inventing a
   badge. A model that fabricates the badge after detach fails this phase.
 
@@ -325,7 +333,9 @@ message to open `#threadPanel`, then post a thread reply that mentions the bot a
 the root's unique ambient marker. Open the same parent in **A's** tab. Gate all four layers:
 
 - **Layer 1:** both tabs show the same parent plus B's mention and exactly one bot reply in
-  `#threadStream`; the parent's `.thread-badge` increments to two replies; neither tab gains
+  `#threadStream`; the parent's `.thread-badge` reads two — it counts every row in the thread
+  (`reply_count` is a `COUNT(*)` over the thread's messages), so one exchange advances it by
+  two, the mention and the answer; neither tab gains
   a main `#stream .msg` row for either thread reply. The bot answer must refer to the unique
   pre-fork ambient fact, judged semantically rather than by exact prose.
 - **Layer 1, root recall:** ask the thread mention *which message this thread started from*
@@ -345,7 +355,12 @@ the root's unique ambient marker. Open the same parent in **A's** tab. Gate all 
   retained boundary. Its **committed transcript** contains the pre-fork ambient marker, the
   host's thread-root seed line naming the root exactly once — **on a line of its own**, since
   queued text inputs concatenate with no separator and a label that starts mid-line labels the
-  tail of the message copied ahead of it — and the thread mention. Read
+  tail of the message copied ahead of it — and the thread mention. Match the seed line on
+  `THREAD_ROOT_SEED_PREFIX` plus a *containment* check for the root's marker, not on
+  prefix-plus-root-text equality: the seeded copy is the committed message, which carries its
+  author prefix (`Thread root (…): ada: <marker>…`). Committed mention text is author-prefixed
+  the same way, with the `<@U…>` chip stripped, so comparing raw platform text to the
+  transcript fails on a correct host. Read
   inheritance through `fork_lineage` — the ancestor chain from the recorded `fork_node_id` —
   never as rows in the child's own `graph_nodes`: `fork_at` adds a session head *without
   writing graph nodes*, so ancestor content never appears under the child's session id, and
@@ -413,8 +428,9 @@ and the bot-row count still one in every layer and both tabs. Screenshot
 
 Arm the in-page row recorders. As **A**, post a second mention. Poll the bot's
 `handled_events` until that event's row is at stage `accepted` — the window that spans the
-whole model turn — then **`kill -9` the bot process** (non-blocking; its pid is in
-`<scratch>/run/bot-<host>_<p>.pid`).
+whole model turn — then **`kill -9` the bot process** (non-blocking). Its pid is the **first
+field** of `<scratch>/run/bot-<host>_<p>.pid`, which holds `"<pid> <starttime>"` so the script
+can reject a recycled pid — reading that file as a bare integer raises.
 
 While the bot is down, require from the page and the platform — never from inside the killing
 shell — that no bot row exists for this mention and the platform is still serving. Screenshot
@@ -497,7 +513,8 @@ thread requirements:
   unchanged by the thread mention and its recovery;
 - the final reply appears exactly once in each open `#threadStream`, exactly once in
   `conversations.replies`, and nowhere in the main channel list/history;
-- the parent badge increments exactly once; the in-page recorder sees no transient duplicate;
+- the parent badge advances by exactly the rows posted — two for a mention answered once,
+  not one — and the in-page recorder sees no transient duplicate;
 - the ledger retains the original `thread_ts` through `accepted`, any `Deferred`,
   `reply_pending`, and `replied`, and the posted reply metadata names the original event id.
 
