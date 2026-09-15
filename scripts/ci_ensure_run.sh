@@ -29,8 +29,9 @@ set -euo pipefail
 # ## Exit codes — read this before gating anything on them
 #
 #   0  a run for <head-sha> concluded success AND that run was triggered by a
-#      real repository event (pull_request / push / merge_group), so the full
-#      gate set applied.
+#      real repository event (pull_request / merge_group), so the full
+#      gate set applied. ci.yml has no `push` trigger: nothing runs
+#      automatically on a push to main.
 #   3  a run for <head-sha> concluded success but it was a workflow_dispatch
 #      RECOVERY run, which is materially weaker than the run it replaced —
 #      see below. Never treat 3 as a pass without deciding you can afford the

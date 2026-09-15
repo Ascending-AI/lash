@@ -1,27 +1,39 @@
 name: CI
 
-# GitHub natively skips push/PR runs when the head commit requests a CI skip,
-# so no per-job guards are needed for that.
+# GitHub natively skips pull-request runs when the head commit requests a CI
+# skip, so no per-job guards are needed for that.
 #
-# CI validates pull requests and the resulting commits on the main trunk.
+# CI validates pull requests and the resulting commits in the merge queue.
 # Releases are separate: a maintainer manually dispatches release.yml for a
-# green commit on main. Ordinary merges never tag or publish.
+# green commit on main, which in turn requires a manual full-profile dispatch
+# of this workflow against that exact commit. Ordinary merges never tag or
+# publish.
+#
+# There is deliberately no `push` trigger, so an automatic push to main runs
+# nothing at all. Trunk breadth on push (FIG-2789) is retired: the queue
+# validates the required core board on its merge-group commit and main merges
+# by fast-forwarding to that same commit, so an automatic push carried a tree
+# CI had already seen. The breadth families — Test heavy suites, Test S3
+# store, Functional E2E, Restate workers E2E, Fuzz smoke, Stack budget,
+# deferred Unicode, worker artifacts — are gated to `workflow_dispatch`
+# alone, which is also the profile release.yml certifies against.
 
 on:
-  # Manual full-profile validation serves release certification and recovery
-  # when GitHub drops an automatic event (merge commit d70ce7ea got zero check
-  # suites). It has no inputs, is never invoked from another workflow, and is
-  # unrelated to the removed pass-2 bump chain.
+  # The full profile, and the only home of the heavy families. A manual
+  # dispatch is what release certification consumes (release.yml accepts only a
+  # green `workflow_dispatch` run whose headSha is the release commit) and it
+  # is also the recovery path when GitHub drops an automatic event (merge
+  # commit d70ce7ea got zero check suites). It has no inputs, is never invoked
+  # from another workflow, and is unrelated to the removed pass-2 bump chain.
   #
-  # Don't drive this recovery by hand: `scripts/ci_ensure_run.sh <branch>
+  # Don't drive the recovery case by hand: `scripts/ci_ensure_run.sh <branch>
   # <head-sha>` waits a bounded window for the run GitHub should have made,
   # dispatches this trigger exactly once if none arrives, then polls that run
-  # to a conclusion. A dispatch run is NOT equivalent to the run it replaces —
-  # the event-conditional `Check versioned surface bumps` step below does not
-  # run, and it builds refs/heads/<branch> rather than the PR merge tree — so
-  # the script exits 3, not 0, on a green dispatch. Callers opt in with
-  # --accept-dispatch-run. Release certification instead relies on the full
-  # dispatch profile and the exact-SHA gate in release.yml.
+  # to a conclusion. A dispatch run is NOT equivalent to the pull-request run
+  # it replaces — the event-conditional `Check versioned surface bumps` step
+  # below does not run, and it builds refs/heads/<branch> rather than the PR
+  # merge tree — so the script exits 3, not 0, on a green dispatch. Callers opt
+  # in with --accept-dispatch-run.
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -29,17 +41,6 @@ on:
   # its own `gh-readonly-queue/...` ref. Without this trigger a queue entry gets
   # no checks at all and the queue stalls.
   merge_group:
-  # Trunk breadth, not a second copy of the queue run (FIG-2789). The queue
-  # validates the required core board on its merge-group commit and merges main
-  # by fast-forwarding to that same commit, so this push carries an identical
-  # tree. Push skips that core board and keeps the breadth families — Test heavy
-  # suites, Test S3 store, Functional E2E, Restate workers E2E, Fuzz smoke,
-  # deferred Unicode — which are off the merge-queue critical path and gated to
-  # `push`/`workflow_dispatch` only. Do not remove this trigger without first
-  # giving the breadth families another home.
-  push:
-    branches:
-      - main
 
 # One live CI run per head branch, whatever event produced it — because a
 # `pull_request` run carries `refs/pull/<n>/merge` while a manual recovery
@@ -52,21 +53,16 @@ on:
 #
 # The key is not *only* the branch name, because a branch name is not unique
 # across repositories: a fork's pull request from a branch literally named `main`
-# would key into main's group and, being a pull-request run, would cancel a live
-# trunk run — destroying the one guarantee below. So each event class that must
-# never be collided into gets its own key, and those keys contain a colon, which
+# would key into main's group. So each event class that must never be collided
+# into gets its own key, and those keys contain a colon, which
 # `git check-ref-format` forbids in a ref name. That is what makes them
 # unforgeable: no branch anyone can push, here or in a fork, can produce one.
 #
-# * `push` (main only) keys on `trunk:push`, so every newer automatic trunk run
-#   cancels the older queued or active one. Cancellation is visible
-#   supersession, not successful CI evidence; release.yml still requires its
-#   own exact-target full-profile dispatch.
 # * a dispatch on main keys on `trunk:dispatch`, so release certification for
-#   the current main tip cannot cancel or be cancelled by automatic pushes. An
-#   older main commit is certified from a temporary branch pinned to that exact
-#   commit; its branch-named group is isolated from `trunk:push`. See the
-#   release procedure in CONTRIBUTING.md.
+#   the current main tip is isolated from every other run, and is never
+#   cancelled. An older main commit is certified from a temporary branch pinned
+#   to that exact commit; its branch-named group is isolated from
+#   `trunk:dispatch` too. See the release procedure in CONTRIBUTING.md.
 # * a *fork* pull request keys on its PR number, which no branch name can
 #   collide with. Same-repo pull requests keep the branch key, which is what lets
 #   a dispatch dedupe with them.
@@ -78,13 +74,12 @@ on:
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
-      github.event_name == 'push' && 'trunk:push'
-      || (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') && 'trunk:dispatch'
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') && 'trunk:dispatch'
       || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && format('fork-pr:{0}', github.event.pull_request.number)
       || github.head_ref
       || github.ref_name
     }}
-  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}
 
 permissions:
   contents: read
@@ -127,7 +122,6 @@ jobs:
       postgres_matrix: ${{ steps.postgres-matrix.outputs.postgres_matrix }}
       bazel_trusted: >-
         ${{ github.event_name == 'merge_group'
-        || github.event_name == 'push'
         || github.event_name == 'workflow_dispatch'
         || (github.event_name == 'pull_request'
         && github.actor != 'dependabot[bot]'
@@ -152,7 +146,6 @@ jobs:
       - name: Classify exact diff
         id: classify
         env:
-          BEFORE_SHA: ${{ github.event.before }}
           CHECKOUT_TOKEN: ${{ github.token }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
@@ -173,9 +166,6 @@ jobs:
               ;;
             merge_group)
               base_sha="${MERGE_GROUP_BASE_SHA}"
-              ;;
-            push)
-              base_sha="${BEFORE_SHA}"
               ;;
             *)
               fail_open "unsupported event ${GITHUB_EVENT_NAME}"
@@ -202,8 +192,7 @@ jobs:
 
       # PG16 is the sole primary lane on rust pull requests and merge groups.
       # PG14/PG18 run when the diff touches a durable schema crate, or on
-      # workflow_dispatch. Push skips the postgres job (queue already witnessed
-      # the SHA). scripts/ci_plan.py owns the rule.
+      # workflow_dispatch. scripts/ci_plan.py owns the rule.
       - name: Resolve PostgreSQL matrix
         id: postgres-matrix
         run: |
@@ -227,7 +216,6 @@ jobs:
     name: Facade-only examples
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    if: github.event_name != 'push'
 
     steps:
       - name: Check out repository
@@ -256,7 +244,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
-    if: github.event_name != 'push'
     # Trusted events replace the workspace check with cached Bazel actions,
     # which need the shared cache credentials. Untrusted events never see them
     # and keep the Cargo command below.
@@ -308,7 +295,7 @@ jobs:
           shared-key: linux-debug
 
       # Restore-only. `seal-cache.yml` is the sole writer of `linux-seal`, and
-      # it must stay the writer: this job never runs on a push to main, so a
+      # it must stay the writer: this job never runs on main itself, so a
       # cache saved here lands in a pull request's own branch scope, which no
       # other branch can read. Every key input below -- shared-key,
       # `workspaces`, CARGO_TARGET_DIR, RUSTFLAGS, CARGO_TERM_COLOR,
@@ -396,7 +383,6 @@ jobs:
     name: Repository gates
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    if: github.event_name != 'push'
 
     steps:
       - name: Check out repository
@@ -483,7 +469,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: plan
-    if: github.event_name != 'push' && needs.plan.outputs.rust == 'true'
+    if: needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -763,7 +749,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: plan
-    if: github.event_name != 'push' && needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'
+    if: needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'
     environment: build-cache
     steps:
       - name: Check out repository
@@ -819,8 +805,8 @@ jobs:
   #
   # `plan.workbench` is the workbench binary's compiled dependency closure, read
   # out of the workspace manifests by scripts/ci_plan.py, not a path prefix: a
-  # change to any crate the binary links selects this job. A trunk push always
-  # selects it, so main keeps a witness of its own tree.
+  # change to any crate the binary links selects this job, on every event that
+  # runs it.
   workspace-tests:
     name: Test Cargo workspace partition
     runs-on: ubuntu-24.04
@@ -996,14 +982,14 @@ jobs:
         if: always()
         run: bash scripts/ci/report-cache.sh
 
-  # The heavy suite excluded from the per-push workspace job by `profile.ci`'s
+  # The heavy suite excluded from the ordinary workspace job by `profile.ci`'s
   # default-filter (see .config/nextest.toml): the five fault-matrix chunk
   # tests, which each fork real `cargo test ... -- --list` invocations and run
   # 3-9 minutes serially. They are the only tests Cargo still owns for their
   # own sake -- the property they prove is Cargo's own name-based test
   # selection, which no hermetic action can supply, so the Bazel label skips
-  # them by name and this job is where they run. Deferred to trunk runs
-  # (push/dispatch) like the other trunk-only jobs: any one of these tests set
+  # them by name and this job is where they run. Deferred to the manual
+  # full-profile dispatch like the other heavy jobs: any one of these tests set
   # the wall-clock of the ordinary suite, and their behavior almost never varies
   # with a PR's diff.
   heavy-tests:
@@ -1011,7 +997,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     needs: plan
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.rust == 'true'
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -1071,7 +1057,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: plan
-    if: github.event_name != 'push'
     # Trusted events run the workspace clippy as cached Bazel actions, which
     # need the shared cache credentials. Untrusted events never see them and
     # keep the Cargo command below.
@@ -1111,9 +1096,8 @@ jobs:
       # PRs compare with their merge-base against main, not their target
       # branch: main is the sole long-lived branch, and a stacked PR whose
       # target is a sibling layer would otherwise be judged against a tree
-      # that already carries the window's one version bump. Main pushes compare
-      # with HEAD~1 so the landed tree is independently rechecked; manual
-      # workflow dispatches have no meaningful base and intentionally skip it.
+      # that already carries the window's one version bump. Manual workflow
+      # dispatches have no meaningful base and intentionally skip it.
       # A merge-queue entry is neither: its head is a queue commit carrying one
       # or more PRs on top of the base the queue chose, so HEAD~1 would check
       # only the last commit of a multi-commit PR — passing vacuously when the
@@ -1134,7 +1118,7 @@ jobs:
             base="$MERGE_GROUP_BASE_SHA"
             [ -n "$base" ] || { echo "merge_group event carried no base_sha"; exit 1; }
           else
-            base="HEAD~1"
+            echo "unexpected event $GITHUB_EVENT_NAME for the bump gate"; exit 1
           fi
           python3 scripts/check_version_bumps.py --base "$base"
 
@@ -1188,7 +1172,8 @@ jobs:
         uses: ./.github/actions/setup-mold
 
       # `cargo fmt --all --check` and the same `--all-targets` clippy the local
-      # push gate runs, plus the two boundary guards that otherwise gate nothing.
+      # `just push-gate` runs, plus the two boundary guards that otherwise gate
+      # nothing.
       # The clippy feature set mirrors the `check` workspace lane so the
       # dependency graph resolves identically.
       - name: Check formatting
@@ -1204,9 +1189,8 @@ jobs:
         if: needs.plan.outputs.bazel_trusted == 'true'
         uses: ./.github/actions/bazel-shared-cache
         # Lint is the designated writer of the shared repository cache:
-        # it is the one Bazel job that runs for every trusted event,
-        # including trunk pushes, so the key stays warm even on a run whose
-        # plan skips the other two.
+        # it is the one Bazel job that runs for every trusted event, so the
+        # key stays warm even on a run whose plan skips the other two.
         with:
           save-repository-cache: "true"
         env:
@@ -1290,7 +1274,6 @@ jobs:
     needs: plan
     if: >-
       needs.plan.outputs.regress == 'true'
-      || github.event_name == 'push'
       || github.event_name == 'workflow_dispatch'
     environment: build-cache
     steps:
@@ -1369,8 +1352,8 @@ jobs:
       LASH_REQUIRE_POSTGRES: "1"
     # The stable matrix always supplies real PostgreSQL evidence on pull requests
     # and merge groups. The heavier PG16 store/perf coverage remains deferred to
-    # relevant trunk runs per the 2026-08-25 CI-scope ruling.
-    if: github.event_name != 'push' && needs.plan.outputs.stores == 'true'
+    # the manual full-profile dispatch per the 2026-08-25 CI-scope ruling.
+    if: needs.plan.outputs.stores == 'true'
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
     # compares the live catalog against a generated expectation artifact, so a
@@ -1381,13 +1364,14 @@ jobs:
     # and the shape suite asserts all three produce the byte-identical artifact.
     # PG14 and PG18 are compatibility lanes: they run only the live catalog
     # artifact comparison and a focused version-stamp gate, so they are deferred
-    # off the pull-request critical path and run on merge_group, push and
+    # off the pull-request critical path and run on merge_group and
     # workflow_dispatch. Nothing reaches trunk without all three majors: the
-    # merge queue runs the full matrix before anything lands, and so does every
-    # push to main. scripts/ci_plan.py `postgres-matrix` owns the per-event
-    # matrix. PG16 is the sole primary lane and runs on every event. On PR-class events it runs the proven runtime identity oracle;
-    # on trunk/full runs it retains the package-wide, pool-wait, runtime, and
-    # cross-backend behavior coverage without triplicating it across majors.
+    # merge queue runs the full matrix before anything lands.
+    # scripts/ci_plan.py `postgres-matrix` owns the per-event matrix. PG16 is
+    # the sole primary lane and runs on every event. On PR-class events it runs
+    # the proven runtime identity oracle; on full-profile runs it retains the
+    # package-wide, pool-wait, runtime, and cross-backend behavior coverage
+    # without triplicating it across majors.
     strategy:
       fail-fast: false
       matrix:
@@ -1519,9 +1503,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: plan
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
+    # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.stores == 'true'
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.stores == 'true'
     # Trusted events build these binaries from the shared cache and execute
     # them uncached against the MinIO `scripts/ci/with-service.sh s3` starts for
     # each step -- the same wrapper, image and bucket setup a developer runs on
@@ -1608,9 +1592,9 @@ jobs:
     timeout-minutes: 45
     needs: plan
     # Off the pull-request critical path by design (FIG-878): the smoke run
-    # guards trunk pushes and dispatches only. scripts/test_ci_plan.py pins
-    # this shape.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.rust == 'true'
+    # happens on the manual full-profile dispatch only.
+    # scripts/test_ci_plan.py pins this shape.
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -1661,9 +1645,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: plan
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
+    # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.rust == 'true'
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -1716,7 +1700,6 @@ jobs:
       producer_attempt: ${{ steps.prepare-worker-binaries.outputs.producer_attempt }}
     if: >-
       github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
       || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
     env:
       RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
@@ -1814,9 +1797,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     needs: plan
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
+    # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.functional_e2e == 'true'
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
 
     strategy:
       fail-fast: false
@@ -1960,9 +1943,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     needs: [plan, worker-artifacts]
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
+    # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
     # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.functional_e2e == 'true'
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
 
     strategy:
       fail-fast: false
@@ -2080,11 +2063,8 @@ jobs:
   restate-postgres-workers:
     name: Restate + Postgres + MinIO Workers (segment ${{ matrix.segment }})
     runs-on: ubuntu-24.04
-    # This label-aware guard replaces `if: github.event_name != 'push' || github.ref == 'refs/heads/main'`.
-    # Worker steps formerly repeated `if: (github.event_name != 'push' || github.ref == 'refs/heads/main') && needs.plan.outputs.workers_e2e == 'true'`.
     if: >-
       github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
       || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
     # The harness has grown to 24 workflows + turn-control gates; 30 minutes
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
@@ -2290,12 +2270,9 @@ jobs:
     name: Restate workers E2E coverage summary
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # This label-aware guard replaces `if: always() && (github.event_name != 'push' || github.ref == 'refs/heads/main')`.
-    # Summary steps formerly repeated `if: (github.event_name != 'push' || github.ref == 'refs/heads/main') && needs.plan.outputs.workers_e2e == 'true'`.
     if: >-
       always()
       && (github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
       || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')))
     needs:
       - plan
@@ -2404,9 +2381,8 @@ jobs:
       # every one fingerprinted to main commit 01677644b). Scan the pull
       # request's own head instead. The auto-generated merge commit resolves no
       # conflicts and so contributes no content of its own. On `merge_group`
-      # this resolves to the queue's merge commit and on `push` to the pushed
-      # commit, both equal to `github.sha`, so those events scan what they scan
-      # today. The exclusion point is then the merge base, not `BASE_SHA`
+      # this resolves to the queue's merge commit, which equals `github.sha`,
+      # so that event scans what it scans today. The exclusion point is then the merge base, not `BASE_SHA`
       # itself: `pull_request.base.sha` is main's tip *now*, which is normally
       # not an ancestor of the head at all.
       SCAN_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
@@ -2719,5 +2695,5 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJson(needs) }}
           BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
-          WORKERS_E2E_ENABLED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
+          WORKERS_E2E_ENABLED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
         run: python3 scripts/ci/conclusion.py conclusion

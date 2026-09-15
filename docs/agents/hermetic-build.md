@@ -155,8 +155,8 @@ selected are in the partition as of 2026-09-14, which retires the
 `Test Cargo workspace partition` Rust run on trusted events entirely — the job
 now runs only the agent-workbench cases that shell out to `node --test`, and
 only when the diff touches the workbench binary's first-party dependency
-closure, which `scripts/ci_plan.py` derives from the workspace manifests (or on
-a push to main, which always runs it). The rest of the workbench unit binary is
+closure, which `scripts/ci_plan.py` derives from the workspace manifests. The
+rest of the workbench unit binary is
 partition-owned and runs on the pool; see "The workbench split" below. Each
 blocker was fixed as a test defect rather than exempted:
 

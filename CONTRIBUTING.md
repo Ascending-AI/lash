@@ -114,14 +114,24 @@ including workspace tests, lint and repository gates, public API checks,
 feature checks, confidence shards, store backends, functional E2E, and worker
 E2E. The single `CI conclusion` job rejects failed, cancelled, missing, or
 incorrectly skipped correctness jobs and is the aggregate merge context.
-The separate `Release cache` workflow warms the cache consumed by release.yml
-and perf.yml on trusted `main` pushes. It is independently serialized so its
-non-gating release build cannot hold required CI or the next main push behind
-it; workflow dispatch supplies the manual recovery path.
 
-The workers E2E family runs when selected on `main` pushes and full-profile
-(`workflow_dispatch`) runs, and on pull requests carrying the `ci:workers`
-label. It does not execute in the merge queue. Run a local worker recipe only
+Nothing heavy runs automatically on a push to `main`. `ci.yml` has no `push`
+trigger at all: the queue already validated the exact tree that main
+fast-forwards to, so a second automatic run over the same tree bought nothing.
+The heavy families — `Test heavy suites`, `Test S3 store against MinIO`, both
+`Functional E2E` jobs, `Restate + Postgres + MinIO Workers` and its coverage
+summary, `Fuzz smoke`, `Stack budget`, `Test deferred Unicode suites` and
+`Build worker release artifacts` — run on a manual `workflow_dispatch` of
+`ci.yml`, which is exactly the full profile release.yml certifies against. The
+`Release cache` and `Seal cache` warmers are manual for the same reason:
+dispatch `Release cache` to warm the `linux-release` cache that release.yml and
+perf.yml restore, and `Seal cache` after a change to `Cargo.lock`, a manifest,
+`rust-toolchain*`, `.cargo/**` or the toolchain actions. Both are non-gating
+warmers: a cold cache costs wall clock, never correctness.
+
+The workers E2E family runs on full-profile (`workflow_dispatch`) runs and on
+pull requests carrying the `ci:workers` label. It does not execute in the merge
+queue. Run a local worker recipe only
 when a changed behavior needs earlier evidence or falls outside that CI
 coverage; name that risk and recipe in the PR.
 
@@ -251,8 +261,8 @@ Merging to `main` does not release. A maintainer manually runs the GitHub
 `Release` workflow after selecting a green commit on `main`; leaving
 `release_sha` blank selects the current head. The workflow accepts only a
 completed, successful full-profile `workflow_dispatch` run whose `headSha`
-equals that release commit. A successful push, merge-queue run, neighboring
-commit, or cancelled run is not release evidence.
+equals that release commit. A merge-queue run, a neighboring commit, or a
+cancelled run is not release evidence.
 
 For the current `main` tip, dispatch `ci.yml` with `--ref main`. To certify an
 older commit that is still an ancestor of `origin/main`, use a fresh temporary
