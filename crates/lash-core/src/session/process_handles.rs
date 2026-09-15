@@ -74,6 +74,39 @@ impl RuntimeExecutionContext<'_> {
         Ok(HandleAuthority::SessionVisible)
     }
 
+    /// Records run-local possession of every child a settled attempt's
+    /// recorded intents actually started.
+    ///
+    /// The in-session start path records possession the moment the registry
+    /// row lands (`record_started_process`), which is what lets this run await
+    /// its own child. A start declared as a tool intent is realized in
+    /// `tool_dispatch`, which holds no runtime execution context, so nothing
+    /// recorded it and the child was unreachable to the very run that started
+    /// it — `await handle` refused with `ProcessNotVisible`, deferred or not.
+    /// The realized handle travels back here with the settled attempt, so
+    /// possession is taken from the same realized outcome the bound value's
+    /// projection is taken from, and it rides the segment handover
+    /// (`restore_started_process_ids`) across a boundary like any other
+    /// run-local possession.
+    pub(super) fn record_processes_started_by_intents(
+        &self,
+        outcomes: &[crate::ToolIntentExecutionOutcome],
+    ) {
+        for outcome in outcomes {
+            let crate::ToolIntentExecutionOutcome::Executed { kind, result, .. } = outcome else {
+                continue;
+            };
+            if *kind != crate::ToolIntentKind::StartProcess {
+                continue;
+            }
+            // The realized start answers the one handle kind, so its id is read
+            // through the one handle parser rather than by field name.
+            if let Ok(process_ref) = Self::parse_process_handle(result) {
+                self.record_started_process(&process_ref.process_id);
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(super) async fn start_tool_process(
         &self,
@@ -1234,6 +1267,170 @@ mod tests {
                 .value_for_projection()
                 .to_string()
                 .contains("outcome is no longer retained")
+        );
+    }
+
+    /// FIG-3117: a start realized from a recorded tool intent must grant the
+    /// run possession of the child it started.
+    ///
+    /// The child a `processes.start` declaration starts carries no observer
+    /// edge, so possession is the only authority that can reach it — exactly
+    /// the authority the in-session start path takes when the registry row
+    /// lands. Realization happens in tool dispatch, which holds no runtime
+    /// execution context, so the realized handle has to grant possession where
+    /// it arrives back: the settled attempt. The precondition is asserted
+    /// first, so a fixture that happened to observe the child could not pass
+    /// this test by accident.
+    ///
+    /// `started_process_ids()` is the possession set a Lashlang segment
+    /// handover carries and `restore_started_process_ids` reinstalls, so the
+    /// same grant is what survives a segment boundary.
+    #[tokio::test]
+    async fn a_realized_start_intent_grants_the_run_possession_of_its_child() {
+        let provider: Arc<dyn ToolProvider> = Arc::new(PrepareRecordingTool {
+            prepares: Arc::new(AtomicUsize::new(0)),
+        });
+        let plugins = PluginHost::empty()
+            .build_session("root")
+            .expect("plugin session");
+        let tool_catalog = Arc::new(catalog_for(&provider));
+        let host = Arc::new(crate::testing::MockSessionManager::default());
+        let child = ProcessId::from("intent-started-child");
+        let started = host
+            .process_registry
+            .register_process(ProcessRegistration::new(
+                child.clone(),
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryContract::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
+            ))
+            .await
+            .expect("register the child a start declaration realizes");
+        host.process_registry
+            .complete_process(
+                &child,
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
+                    "child done"
+                ))),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete the started child");
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(64);
+        let dispatch = Arc::new(ToolDispatchContext {
+            plugins,
+            tools: provider,
+            tool_registry: None,
+            tool_catalog,
+            sessions: host.clone(),
+            session_lifecycle: host.clone(),
+            session_graph: host.clone(),
+            processes: host.clone(),
+            trigger_router: None,
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
+            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
+                crate::NativeRuntimeEffectController::default(),
+            )),
+            direct_completions: crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+            parent_invocation: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ),
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            event_tx,
+            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
+            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+            turn_context: crate::TurnContext::default(),
+            clock: std::sync::Arc::new(crate::SystemClock),
+        });
+        let context = RuntimeExecutionContext::new(
+            SessionId::from("session"),
+            dispatch,
+            Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            Arc::new(crate::SessionAttachmentStore::in_memory()),
+            Arc::new(crate::ChronologicalProjection::default()),
+            None,
+            crate::TurnContext::default(),
+        );
+        let realized_handle =
+            RuntimeExecutionContext::process_handle_json(&crate::ProcessRef::from_record(&started));
+
+        assert!(
+            !context.started_process_ids().contains(&child),
+            "the run must not possess the child before the start is realized"
+        );
+        let before = context
+            .await_process_handle(
+                "await-before-realization".to_string(),
+                realized_handle.clone(),
+            )
+            .await;
+        assert!(
+            !before.output.is_success()
+                && before
+                    .output
+                    .value_for_projection()
+                    .to_string()
+                    .contains("is not live or visible in this session"),
+            "precondition: an unpossessed, unobserved child is refused, got {:?}",
+            before.output.value_for_projection()
+        );
+
+        let identity = crate::ToolIntentIdentity {
+            session_id: SessionId::from("session"),
+            execution_scope_id: "session".to_string(),
+            tool_call_id: "start-child".to_string(),
+            intent_index: 0,
+            replay_key: child.to_string(),
+            minting_emission_replay_key: None,
+        };
+        context
+            .complete_tool_call(
+                "start-child".to_string(),
+                None,
+                crate::tool_dispatch::ToolDispatchOutcome {
+                    record: crate::ToolCallRecord {
+                        call_id: Some("start-child".to_string()),
+                        tool: "start_process".to_string(),
+                        args: json!({}),
+                        output: crate::ToolCallOutput::success(realized_handle.clone()),
+                        duration_ms: 0,
+                    },
+                    attempts: Vec::new(),
+                    intents: crate::ToolIntents::default(),
+                    intent_outcomes: vec![crate::ToolIntentExecutionOutcome::Executed {
+                        identity,
+                        kind: crate::ToolIntentKind::StartProcess,
+                        result: realized_handle.clone(),
+                    }],
+                },
+            )
+            .await;
+
+        assert!(
+            context.started_process_ids().contains(&child),
+            "a realized start intent grants the run possession the segment handover carries"
+        );
+        let awaited = context
+            .await_process_handle("await-after-realization".to_string(), realized_handle)
+            .await;
+        assert!(
+            awaited.output.is_success(),
+            "the run must resolve the handle its own realized start answered: {:?}",
+            awaited.output.value_for_projection()
         );
     }
 }

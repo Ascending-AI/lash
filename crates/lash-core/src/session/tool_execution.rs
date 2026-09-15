@@ -590,6 +590,7 @@ impl RuntimeExecutionContext<'_> {
             &output,
             &mut model_return,
         );
+        self.record_processes_started_by_intents(&outcome.intent_outcomes);
         for intent_outcome in &outcome.intent_outcomes {
             model_return.parts.push(crate::ModelToolReturnPart::text(
                 intent_outcome.model_addendum(),
