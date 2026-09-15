@@ -3,6 +3,7 @@ use lash::TurnId;
 use lash::sync::MutexExt;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -366,78 +367,88 @@ pub(crate) async fn send_message(
                 message: user_message,
             })
             .await;
-        // The agent may finish a turn without ever calling `board.play`. The
-        // board's `turn` only moves inside `play()`, and the UI disables every
-        // cell while `turn != "X"`, so an unguarded zero-move turn wedges the
-        // round for good (FIG-3181). Re-prompt once, then forfeit the move.
-        let mut turn_input = text;
-        let mut turn_id = task_turn_id;
-        let mut turn_failed = false;
-        for attempt in 0..=ZERO_MOVE_RETRIES {
-            let turn_state = Arc::new(Mutex::new(TurnPersistenceState::default()));
-            let ui_events = ChannelTurnEvents::persistence(
-                run_state.clone(),
-                chat_id.clone(),
-                Arc::clone(&turn_state),
-            );
-            let turn = session
-                .turn(TurnInput::text(turn_input.clone()))
-                .turn_id(turn_id.clone())
-                .require_finish();
-            let turn = match turn {
-                Ok(turn) => turn.stream_to(&ui_events).await.map(|result| TurnOutput {
-                    result,
-                    activities: Vec::new(),
-                }),
-                Err(err) => Err(err),
-            };
-            let output = match turn {
-                Ok(output) => output,
-                Err(err) => {
-                    replay.abort();
-                    let _ = tx
-                        .send(StreamItem::Error {
-                            message: err.to_string(),
+        // A turn can finish without ever calling `board.play`, which wedges the
+        // round for good (FIG-3181). The recovery policy is one helper both
+        // send paths run; this path supplies only the local plumbing.
+        let emit_tx = tx.clone();
+        let attempt = run_turn_with_zero_move_recovery(
+            &run_state,
+            &chat_id,
+            text,
+            task_turn_id,
+            || TurnId::from(format!("agent-service-local-turn:{}", uuid::Uuid::new_v4())),
+            |turn_input, turn_id| {
+                let session = session.clone();
+                let run_state = run_state.clone();
+                let chat_id = chat_id.clone();
+                let tx = tx.clone();
+                async move {
+                    let turn_state = Arc::new(Mutex::new(TurnPersistenceState::default()));
+                    let ui_events = ChannelTurnEvents::persistence(
+                        run_state.clone(),
+                        chat_id.clone(),
+                        Arc::clone(&turn_state),
+                    );
+                    let turn = session
+                        .turn(TurnInput::text(turn_input))
+                        .turn_id(turn_id)
+                        .require_finish();
+                    let turn = match turn {
+                        Ok(turn) => turn.stream_to(&ui_events).await.map(|result| TurnOutput {
+                            result,
+                            activities: Vec::new(),
+                        }),
+                        Err(err) => Err(err),
+                    };
+                    let output = match turn {
+                        Ok(output) => output,
+                        Err(err) => {
+                            let _ = tx
+                                .send(StreamItem::Error {
+                                    message: err.to_string(),
+                                })
+                                .await;
+                            return Ok(TurnAttempt::Failed);
+                        }
+                    };
+                    let assistant_text = assistant_text_for_persistence(
+                        &output,
+                        turn_state.lock_recover().assistant_prose(),
+                    );
+                    let inserted = run_state
+                        .with_db({
+                            let chat_id = chat_id.clone();
+                            move |db| db.insert_message(&chat_id, "assistant", &assistant_text)
                         })
                         .await;
-                    turn_failed = true;
-                    break;
+                    match inserted {
+                        Ok(message) => {
+                            let _ = tx.send(StreamItem::Message { message }).await;
+                        }
+                        Err(err) => {
+                            let _ = tx
+                                .send(StreamItem::Error {
+                                    message: err.message,
+                                })
+                                .await;
+                        }
+                    }
+                    Ok(TurnAttempt::Completed)
                 }
-            };
-            let assistant_text = assistant_text_for_persistence(
-                &output,
-                turn_state.lock_recover().assistant_prose(),
-            );
-            let inserted = run_state
-                .with_db({
-                    let chat_id = chat_id.clone();
-                    move |db| db.insert_message(&chat_id, "assistant", &assistant_text)
-                })
-                .await;
-            match inserted {
-                Ok(message) => {
-                    let _ = tx.send(StreamItem::Message { message }).await;
+            },
+            move |item| {
+                let tx = emit_tx.clone();
+                async move {
+                    let _ = tx.send(item).await;
                 }
-                Err(err) => {
-                    let _ = tx
-                        .send(StreamItem::Error {
-                            message: err.message,
-                        })
-                        .await;
-                }
-            }
-            if !agent_still_owes_move(&run_state, &chat_id).await {
-                break;
-            }
-            if attempt == ZERO_MOVE_RETRIES {
-                forfeit_agent_move(&run_state, &chat_id, &tx).await;
-                break;
-            }
-            turn_input = ZERO_MOVE_NUDGE.to_string();
-            turn_id = TurnId::from(format!("agent-service-local-turn:{}", uuid::Uuid::new_v4()));
-        }
-        if !turn_failed {
-            wait_for_live_replay_flush(&mut replay).await;
+            },
+        )
+        .await;
+        match attempt {
+            Ok(TurnAttempt::Completed) => wait_for_live_replay_flush(&mut replay).await,
+            // The turn's own error is already on the stream. This path reports
+            // in band and never hands the helper an error to propagate.
+            Ok(TurnAttempt::Failed) | Err(_) => replay.abort(),
         }
         let _ = tx.send(StreamItem::Done).await;
     });
@@ -880,6 +891,60 @@ fn branch_error(error: lash::EmbedError) -> AppError {
     AppError::internal(error.to_string())
 }
 
+/// What one turn through the zero-move recovery loop did.
+pub(crate) enum TurnAttempt {
+    /// The turn ran to completion and its assistant row is persisted.
+    Completed,
+    /// The turn itself failed. The runner has already reported the error, so
+    /// the loop stops rather than spending a re-prompt on a broken turn.
+    Failed,
+}
+
+/// Run a chat turn, and keep the board playable if it ends owing a move.
+///
+/// An agent can finish a turn without ever calling `board.play`. `play()` is
+/// the only place the board's `turn` flips back to `X`, and the UI disables
+/// every cell while `turn != "X"`, so an unguarded zero-move turn wedges the
+/// round for good (FIG-3181). This is the entire recovery policy -- one nudge,
+/// then forfeit the move and hand the board back -- and it belongs to the host,
+/// not to one of its durability modes: the local and Restate send paths both
+/// run this function and differ only in how a turn executes (`run_turn`) and
+/// how a stream item reaches the client (`emit`).
+pub(crate) async fn run_turn_with_zero_move_recovery<N, R, RF, E, EF>(
+    state: &AppStateData,
+    chat_id: &str,
+    text: String,
+    first_turn_id: TurnId,
+    mut next_turn_id: N,
+    mut run_turn: R,
+    mut emit: E,
+) -> AppResult<TurnAttempt>
+where
+    N: FnMut() -> TurnId,
+    R: FnMut(String, TurnId) -> RF,
+    RF: Future<Output = AppResult<TurnAttempt>>,
+    E: FnMut(StreamItem) -> EF,
+    EF: Future<Output = ()>,
+{
+    let mut turn_input = text;
+    let mut turn_id = first_turn_id;
+    for attempt in 0..=ZERO_MOVE_RETRIES {
+        if matches!(run_turn(turn_input, turn_id).await?, TurnAttempt::Failed) {
+            return Ok(TurnAttempt::Failed);
+        }
+        if !agent_still_owes_move(state, chat_id).await {
+            break;
+        }
+        if attempt == ZERO_MOVE_RETRIES {
+            forfeit_agent_move(state, chat_id, &mut emit).await;
+            break;
+        }
+        turn_input = ZERO_MOVE_NUDGE.to_string();
+        turn_id = next_turn_id();
+    }
+    Ok(TurnAttempt::Completed)
+}
+
 /// Whether the canonical board still owes an O move after a completed turn.
 ///
 /// A read failure answers "no": a broken database is reported by the next
@@ -897,7 +962,11 @@ async fn agent_still_owes_move(state: &AppStateData, chat_id: &str) -> bool {
 /// Forfeit the O move the agent never played: hand the board back to the human
 /// and say so in the transcript, carrying the yielded board so the UI applies
 /// it through the same path a tool result would (FIG-3181).
-async fn forfeit_agent_move(state: &AppStateData, chat_id: &str, tx: &mpsc::Sender<StreamItem>) {
+async fn forfeit_agent_move<E, EF>(state: &AppStateData, chat_id: &str, emit: &mut E)
+where
+    E: FnMut(StreamItem) -> EF,
+    EF: Future<Output = ()>,
+{
     let yielded = state
         .with_db({
             let chat_id = chat_id.to_string();
@@ -909,11 +978,10 @@ async fn forfeit_agent_move(state: &AppStateData, chat_id: &str, tx: &mpsc::Send
         Ok(None) => return,
         Ok(Some(board)) => board,
         Err(err) => {
-            let _ = tx
-                .send(StreamItem::Error {
-                    message: err.message,
-                })
-                .await;
+            emit(StreamItem::Error {
+                message: err.message,
+            })
+            .await;
             return;
         }
     };
@@ -927,15 +995,12 @@ async fn forfeit_agent_move(state: &AppStateData, chat_id: &str, tx: &mpsc::Send
         })
         .await;
     match inserted {
-        Ok(message) => {
-            let _ = tx.send(StreamItem::Message { message }).await;
-        }
+        Ok(message) => emit(StreamItem::Message { message }).await,
         Err(err) => {
-            let _ = tx
-                .send(StreamItem::Error {
-                    message: err.message,
-                })
-                .await;
+            emit(StreamItem::Error {
+                message: err.message,
+            })
+            .await;
         }
     }
 }
@@ -1188,6 +1253,96 @@ mod zero_move_turn_tests {
             system_messages(&lines).is_empty(),
             "no game error on a healthy turn: {lines:#?}"
         );
+    }
+
+    /// The recovery is host policy, not local-mode plumbing: it lives in one
+    /// helper that the local and Restate send paths both call, so this drives
+    /// that helper directly with a turn runner that never plays.
+    ///
+    /// The Restate path cannot be driven end to end in a cheap unit test —
+    /// `run_restate_chat_turn_and_persist` needs a `RestateRuntimeEffectController`
+    /// borrowed from a live `WorkflowContext`, which only exists inside a real
+    /// workflow invocation, and the crate's one such test is `#[ignore]`d behind
+    /// a running Restate server. What both paths share is this function, and
+    /// this is the test of it.
+    #[tokio::test]
+    async fn the_zero_move_policy_is_one_shared_bounded_loop() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path();
+        let core = crate::state::test_support::test_core(data_dir).await;
+        let state = test_state(
+            &core,
+            AppDb::open(&data_dir.join("app.db")).expect("app db"),
+        );
+        let chat = state
+            .with_db(|db| db.create_chat("shared", "mock-model", None))
+            .await
+            .expect("create chat");
+        state
+            .with_db({
+                let chat_id = chat.id.clone();
+                move |db| db.upsert_chat_board(&chat_id, &board_owing_a_move())
+            })
+            .await
+            .expect("seed board");
+
+        let inputs = Arc::new(Mutex::new(Vec::<String>::new()));
+        let emitted = Arc::new(Mutex::new(Vec::<StreamItem>::new()));
+        let outcome = run_turn_with_zero_move_recovery(
+            &state,
+            &chat.id,
+            "I played X in the top left.".to_string(),
+            TurnId::from("shared-turn-1".to_string()),
+            || TurnId::from("shared-turn-2".to_string()),
+            |turn_input, _turn_id| {
+                let inputs = Arc::clone(&inputs);
+                async move {
+                    // A turn that plays nothing: the board is left untouched.
+                    inputs.lock_recover().push(turn_input);
+                    Ok(TurnAttempt::Completed)
+                }
+            },
+            |item| {
+                let emitted = Arc::clone(&emitted);
+                async move {
+                    emitted.lock_recover().push(item);
+                }
+            },
+        )
+        .await
+        .expect("recovery loop");
+
+        assert!(matches!(outcome, TurnAttempt::Completed));
+        let inputs = inputs.lock_recover().clone();
+        assert_eq!(inputs.len(), 2, "exactly one re-prompt: {inputs:?}");
+        assert_eq!(inputs[1], ZERO_MOVE_NUDGE, "the retry carries the nudge");
+
+        let board = state
+            .with_db({
+                let chat_id = chat.id.clone();
+                move |db| db.chat_board(&chat_id)
+            })
+            .await
+            .expect("board");
+        assert_eq!(board.turn, "X", "the board is handed back: {board:?}");
+        assert!(!agent_owes_move(&board));
+        assert_eq!(
+            board.cells[4], None,
+            "no move is invented on the agent's behalf: {board:?}"
+        );
+
+        let emitted = emitted.lock_recover().clone();
+        let notices: Vec<&StreamItem> = emitted
+            .iter()
+            .filter(
+                |item| matches!(item, StreamItem::Message { message } if message.role == "system"),
+            )
+            .collect();
+        assert_eq!(notices.len(), 1, "one forfeit notice: {emitted:#?}");
+        let StreamItem::Message { message } = notices[0] else {
+            unreachable!("filtered to messages");
+        };
+        assert_eq!(message.text, ZERO_MOVE_FORFEIT);
     }
 }
 
