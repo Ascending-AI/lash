@@ -37,12 +37,11 @@ pub use editable_text::{
     parse_typescript_process_statement,
 };
 use editable_text::{
-    assign_target_text, expression_text, opaque_process_run_body, parse_assignment_target_field,
+    assign_target_text, expression_text, opaque_wrapper_run_body, parse_assignment_target_field,
     parse_comprehension_clauses, parse_expression_field, parse_simple_binding_field,
     parse_typescript_fragment, statement_text, with_assignment, workflow_clause,
 };
 use literals::collect_process_literals;
-use printer::process_run_body as process_run_body_of;
 pub use printer::{
     TypeScriptSourceError, typescript_assign_target_source, typescript_expression_source,
     typescript_program_source, typescript_statement_source,
@@ -1237,11 +1236,7 @@ fn parse_opaque_statement(
     let expressions = match context.scope {
         RenderScope::Main => printer::statement_block_contents(&program.main).to_vec(),
         RenderScope::Process => {
-            let Some(Declaration::Process(process)) = program.declarations.into_iter().next()
-            else {
-                return invalid_payload(node, "opaque process wrapper did not produce a process");
-            };
-            let Some(body) = opaque_process_run_body(&process) else {
+            let Some(body) = opaque_wrapper_run_body(&program) else {
                 return invalid_payload(node, "opaque process wrapper did not produce a run body");
             };
             printer::statement_block_contents(body).to_vec()

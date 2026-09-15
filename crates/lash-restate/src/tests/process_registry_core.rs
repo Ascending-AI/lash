@@ -721,7 +721,13 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
         )
         .with_process_lifecycle(true),
     );
-    let plugin_factories = vec![rlm_plugin, tool_plugin];
+    // The process surface is catalogue presence, not an ability bit (ADR 0095):
+    // without the process-controls plugin the cell's `processes.start` is
+    // refused with "unknown module `processes`", the turn executes nothing, and
+    // the replay law under test never gets a pending wait to park on.
+    let process_controls: Arc<dyn lash_core::facade_support::PluginFactory> =
+        Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new());
+    let plugin_factories = vec![rlm_plugin, tool_plugin, process_controls];
     let llm_provider_calls = Arc::new(AtomicUsize::new(0));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("stub")
