@@ -559,21 +559,7 @@ impl SessionCommitStore for Store {
                             .map_err(sqlite_error)?
                             .is_some(),
                     };
-                    let mut occupied_node_ids = std::collections::HashSet::new();
-                    for node in &commit.graph.nodes {
-                        let occupied = tx
-                                .query_row(
-                                    "SELECT 1 FROM graph_nodes WHERE node_id = ?1 LIMIT 1",
-                                    params![node.node_id.as_str()],
-                                    |_| Ok(()),
-                                )
-                                .optional()
-                            .map_err(sqlite_error)?
-                            .is_some();
-                        if occupied {
-                            occupied_node_ids.insert(node.node_id.clone());
-                        }
-                    }
+                    let occupied_node_ids = occupied_node_ids_conn(tx, &commit.graph.nodes)?;
                     let selected_leaf_is_live = match commit.graph.leaf_node_id() {
                         Some(leaf_node_id) => tx
                             .query_row(
@@ -1187,3 +1173,46 @@ impl SessionCommitStore for Store {
         Store::load_session_meta(self).await
     }
 }
+
+/// The subset of `nodes` whose ids already occupy a `graph_nodes` row.
+///
+/// Asked as one statement per commit rather than one per node: the planner
+/// needs the whole occupied set before it decides anything, so walking the
+/// nodes one query at a time bought nothing and cost a round trip per node.
+/// The id list is bound as a single JSON array, the same idiom the checkpoint
+/// ref batches use, so the scalar-parameter ceiling is never in play.
+fn occupied_node_ids_conn(
+    tx: &rusqlite::Connection,
+    nodes: &[lash_core::SessionNodeRecord],
+) -> Result<std::collections::HashSet<lash_core::NodeId>, StoreError> {
+    let mut occupied = std::collections::HashSet::new();
+    if nodes.is_empty() {
+        return Ok(occupied);
+    }
+    let node_ids = nodes
+        .iter()
+        .map(|node| node.node_id.as_str())
+        .collect::<Vec<_>>();
+    for chunk in node_ids.chunks(OCCUPIED_NODE_ID_CHUNK_SIZE) {
+        let encoded = serde_json::to_string(chunk).map_err(|error| {
+            StoreError::Backend(format!("failed to encode commit node id batch: {error}"))
+        })?;
+        let mut statement = tx
+            .prepare(
+                "SELECT node_id FROM graph_nodes
+                 WHERE node_id IN (SELECT value FROM json_each(?1))",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(params![encoded], |row| row.get::<_, String>(0))
+            .map_err(sqlite_error)?;
+        for node_id in rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)? {
+            occupied.insert(lash_core::NodeId::from(node_id));
+        }
+    }
+    Ok(occupied)
+}
+
+/// One JSON-array bind per commit keeps the encoded id list around a MiB while
+/// staying far above any realistic per-commit node count.
+const OCCUPIED_NODE_ID_CHUNK_SIZE: usize = 16_384;
