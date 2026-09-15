@@ -1635,20 +1635,24 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     )
     .await;
     admission_gate.wait_until_admitted().await;
-    let state_for_contended_read = harness.state.clone();
-    let contended_read = tokio::spawn(async move {
-        Box::pin(app_state(
-            State(state_for_contended_read),
-            Query(SessionQuery::default()),
-        ))
-        .await
-    });
-    admission_gate.wait_until_contended().await;
+    // The page's reads answer from the durable head and never claim the session
+    // execution lease (FIG-3144, FIG-3151), so `/api/state` answers *through* a
+    // held admitted open rather than queueing behind it. The gated cron-sync
+    // open is the only place on the live stack where a real held admission can
+    // be observed, so that contract is pinned here.
+    let Json(held_read) = Box::pin(app_state(
+        State(harness.state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("a lease-free read must answer while an admitted open is held");
+    drop(held_read);
+    let (_, _, _, contentions_under_hold) = admission_gate.counts();
+    assert_eq!(
+        contentions_under_hold, 0,
+        "a lease-free read contended with the held cron-sync admission"
+    );
     admission_gate.release();
-    let Json(snapshot) = contended_read
-        .await
-        .expect("join contended workbench HTTP read")
-        .expect("bounded workbench open must retry after cron-sync admission releases");
     wait_for_restate_workflow_success(
         &harness.state,
         "WorkbenchQueuedTurnWorkflow",
@@ -1656,12 +1660,14 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         Duration::from_secs(30),
     )
     .await;
+    let Json(snapshot) = Box::pin(app_state(
+        State(harness.state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("read the settled workbench state");
     admission_gate.finish();
-    let (_attempts, acquisitions, admissions, contentions) = admission_gate.counts();
-    assert!(
-        contentions >= 1,
-        "the deterministic read never observed contention"
-    );
+    let (_attempts, acquisitions, admissions, _contentions) = admission_gate.counts();
     assert_eq!(
         acquisitions, admissions,
         "every successful open claim must pass admit_session_state"
@@ -1676,7 +1682,12 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
             .await
     });
     admission_gate.wait_until_admitted().await;
-    let exhausted = Box::pin(app_state(
+    // The bounded-retry refusal belongs to the surfaces that still take the
+    // lease. `/api/queued_work/<batch>/run` opens the session before it can look
+    // at the batch, so it is the live surface that still answers 503 while the
+    // lane is held; the page's reads no longer reach this path at all.
+    let exhausted = Box::pin(run_queued_work_batch(
+        AxumPath("no-such-batch".to_string()),
         State(harness.state.clone()),
         Query(SessionQuery::default()),
     ))
