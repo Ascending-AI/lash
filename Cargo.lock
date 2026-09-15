@@ -2095,7 +2095,6 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde-content",
- "serde_bytes",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
@@ -2146,8 +2145,6 @@ name = "lash-internal-core-store"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "chrono",
- "futures-util",
  "lash-internal-core-ids",
  "lash-internal-core-llm",
  "lash-internal-sansio",
@@ -2156,10 +2153,8 @@ dependencies = [
  "rmp-serde",
  "schemars 0.8.22",
  "serde",
- "serde-content",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
  "tempfile",
  "thiserror",
  "tokio",
