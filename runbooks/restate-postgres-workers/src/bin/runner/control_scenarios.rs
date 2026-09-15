@@ -717,22 +717,37 @@ pub(super) async fn drive_break_glass_scenario(
         )),
         Arc::new(storage.session_store_factory()),
     );
-    if let Ok(Ok(terminal)) = tokio::time::timeout(
+    // The await has three outcomes and only one of them was being read.
+    // A hard kill must leave no Lash terminal behind, so the elapsed timeout
+    // is this negative gate's expected path. What must never score as a pass
+    // is a driver error: `if let Ok(Ok(..))` swallowed it, so a store or
+    // effect-host failure was indistinguishable from the clean result the
+    // gate is looking for (FIG-3168).
+    match tokio::time::timeout(
         Duration::from_secs(3),
         driver.await_terminal(&turn_address(&break_glass).await?),
     )
     .await
     {
-        anyhow::ensure!(
-            !matches!(
-                terminal,
-                TurnTerminal::Committed {
-                    outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
-                    ..
-                }
-            ),
-            "break-glass invocation kill was reported as Lash cancellation"
-        );
+        Err(_elapsed) => {}
+        Ok(Err(error)) => {
+            return Err(error).context(
+                "await a break-glass terminal: the driver failed, so this run never observed \
+                 whether the hard kill produced a Lash terminal",
+            );
+        }
+        Ok(Ok(terminal)) => {
+            anyhow::ensure!(
+                !matches!(
+                    terminal,
+                    TurnTerminal::Committed {
+                        outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
+                        ..
+                    }
+                ),
+                "break-glass invocation kill was reported as Lash cancellation"
+            );
+        }
     }
     anyhow::ensure!(
         load_terminal_result(storage.pool(), &break_glass.workflow_id)

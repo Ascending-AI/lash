@@ -42,20 +42,57 @@ if ! grep -Eq 'test result: ok\. 1 passed' "$artifact_root/01-contract-tests.log
   exit 1
 fi
 
-# The matrix serves one TypeScript row per scenario; a caller may still pin a
-# dialect to reproduce a row by hand.
-dialects=("${LASH_RUNBOOK_DIALECT:-typescript}")
+# The served dialect is not an operator choice. This companion renders its
+# cells in exactly one RLM language, named once by `SERVED_DIALECT` in
+# runbooks/restate-postgres-workers/src/bin/context_overflow_recovery.rs and
+# reported on every checkpoint it emits. The row directory is named from that
+# reported value, so the directory and the `dialect` field read from the same
+# source and cannot disagree (FIG-3169). `LASH_RUNBOOK_DIALECT` selected
+# nothing here -- it only renamed the directory - so refuse it outright rather
+# than let a caller believe a row was served in the dialect they asked for.
+if [ -n "${LASH_RUNBOOK_DIALECT:-}" ]; then
+  echo "LASH_RUNBOOK_DIALECT is not a knob for this companion: it serves one dialect and reports it on every checkpoint. Unset it; the served dialect names the row directory." >&2
+  exit 1
+fi
 
-for dialect in "${dialects[@]}"; do
-  row_dir="$artifact_root/context-overflow-recovery/$dialect"
-  mkdir -p "$row_dir"
-  echo "context-overflow-recovery row: dialect=$dialect" | tee -a "$run_log"
-  LASH_RUNBOOK_DIALECT="$dialect" \
-    cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
-    --bin lash-e2e-context-overflow-recovery \
-    2>&1 | tee "$row_dir/03-observed.jsonl" | tee -a "$run_log"
+staging="$artifact_root/context-overflow-recovery/.observed"
+mkdir -p "$staging"
+cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
+  --bin lash-e2e-context-overflow-recovery \
+  2>&1 | tee "$staging/03-observed.jsonl" | tee -a "$run_log"
 
-  python3 - "$dialect" "$row_dir" <<'PY'
+dialect="$(python3 - "$staging/03-observed.jsonl" <<'DIALECT'
+import json
+import sys
+from pathlib import Path
+
+served = set()
+for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if "checkpoint" in value and "dialect" in value:
+        served.add(value["dialect"])
+
+if len(served) != 1:
+    raise SystemExit(
+        f"checkpoints did not agree on one served dialect: {sorted(served)}"
+    )
+name = served.pop()
+if not name or "/" in name or name.startswith("."):
+    raise SystemExit(f"served dialect is not a usable row directory name: {name!r}")
+print(name)
+DIALECT
+)"
+
+row_dir="$artifact_root/context-overflow-recovery/$dialect"
+mkdir -p "$row_dir"
+mv "$staging/03-observed.jsonl" "$row_dir/03-observed.jsonl"
+rmdir "$staging"
+echo "context-overflow-recovery row: dialect=$dialect (read off the run, not chosen)" | tee -a "$run_log"
+
+python3 - "$dialect" "$row_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -147,6 +184,5 @@ print(
     "session continued"
 )
 PY
-done
 
-echo "context-overflow-recovery e2e passed: rows=${#dialects[@]}" | tee -a "$run_log"
+echo "context-overflow-recovery e2e passed: rows=1 dialect=$dialect" | tee -a "$run_log"
