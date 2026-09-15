@@ -928,6 +928,157 @@ mod tests {
         );
     }
 
+    /// An unreadable handle is refused by one rule, and the refusal is recorded.
+    ///
+    /// `process_handle_operations_share_one_authority_rule` covers the second
+    /// gate, `authorize_handle`. The first gate — `parse_process_handle` — is
+    /// three separate early returns, one per operation, and nothing drove any
+    /// of them. Two things ride on that arm and neither is implied by "the call
+    /// fails": the reply must carry a `ToolCallRecord` under the operation's
+    /// own tool name and the caller's `call_id`, because a refused handle is
+    /// turn history a later turn reads and replays, not a dropped call; and the
+    /// three operations must agree on the message, because they share one
+    /// parser and a caller cannot be told a handle is unreadable by `await` and
+    /// readable by `cancel`.
+    ///
+    /// The three malformed shapes are kept distinguishable on purpose: they are
+    /// the parser's three branches (`ProcessRef::from_handle_json`), and a
+    /// parser that collapsed them would still refuse every one of them.
+    #[tokio::test]
+    async fn an_unreadable_process_handle_is_refused_and_recorded_by_every_handle_operation() {
+        let provider: Arc<dyn ToolProvider> = Arc::new(PrepareRecordingTool {
+            prepares: Arc::new(AtomicUsize::new(0)),
+        });
+        let plugins = PluginHost::empty()
+            .build_session("root")
+            .expect("plugin session");
+        let tool_catalog = Arc::new(catalog_for(&provider));
+        let host = Arc::new(crate::testing::MockSessionManager::default());
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
+        let dispatch = Arc::new(ToolDispatchContext {
+            plugins,
+            tools: provider,
+            tool_registry: None,
+            tool_catalog,
+            sessions: host.clone(),
+            session_lifecycle: host.clone(),
+            session_graph: host.clone(),
+            processes: host.clone(),
+            trigger_router: None,
+            process_definitions: None,
+            process_engines: crate::ProcessEngineRegistry::default(),
+            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
+                crate::NativeRuntimeEffectController::default(),
+            )),
+            direct_completions: crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+            parent_invocation: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ),
+            session_id: SessionId::from("session"),
+            agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+            event_tx,
+            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
+            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+            turn_context: crate::TurnContext::default(),
+            clock: std::sync::Arc::new(crate::SystemClock),
+        });
+        let context = RuntimeExecutionContext::new(
+            SessionId::from("session"),
+            dispatch,
+            Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            Arc::new(crate::SessionAttachmentStore::in_memory()),
+            Arc::new(crate::ChronologicalProjection::default()),
+            None,
+            crate::TurnContext::default(),
+        );
+
+        let unreadable: [(&str, serde_json::Value); 3] = [
+            ("not a handle record", json!({ "id": "process-7" })),
+            (
+                "a handle that names no process",
+                lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::tool(7, 1)),
+            ),
+            (
+                "a process handle without an incarnation",
+                lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
+                    "process-7",
+                    0,
+                )),
+            ),
+        ];
+
+        let mut messages = BTreeMap::new();
+        for (shape, handle) in unreadable {
+            let awaited = context
+                .await_process_handle(format!("await-{shape}"), handle.clone())
+                .await;
+            let signalled = context
+                .signal_process_handle(
+                    format!("signal-{shape}"),
+                    handle.clone(),
+                    "ready".to_string(),
+                    serde_json::Value::Null,
+                )
+                .await;
+            let cancelled = context
+                .cancel_process_handle(format!("cancel-{shape}"), handle.clone())
+                .await;
+
+            let parse_refusal = awaited.output.value_for_projection();
+            for (operation, reply) in [
+                ("await", &awaited),
+                ("signal", &signalled),
+                ("cancel", &cancelled),
+            ] {
+                assert!(
+                    !reply.output.is_success(),
+                    "{operation} operated on {shape}: {:?}",
+                    reply.output.value_for_projection()
+                );
+                assert_eq!(
+                    reply.output.value_for_projection(),
+                    parse_refusal,
+                    "{operation} must refuse {shape} with the shared parser message"
+                );
+                let record = reply
+                    .record
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{operation} must record its refusal of {shape}"));
+                assert_eq!(
+                    record.call_id.as_deref(),
+                    Some(format!("{operation}-{shape}").as_str()),
+                    "{operation} must record the caller's call id for {shape}"
+                );
+                assert_eq!(
+                    record.tool,
+                    format!("{operation}_process"),
+                    "{operation} must record its refusal under its own tool name"
+                );
+                assert_eq!(
+                    record.args.get("handle"),
+                    Some(&handle),
+                    "{operation} must record the handle it could not read"
+                );
+            }
+            assert!(
+                parse_refusal.to_string().contains("Invalid process handle"),
+                "{shape} must render the parser's refusal: {parse_refusal}"
+            );
+            messages.insert(parse_refusal.to_string(), shape);
+        }
+        assert_eq!(
+            messages.len(),
+            3,
+            "each unreadable shape must stay distinguishable: {messages:?}"
+        );
+    }
+
     #[tokio::test]
     async fn process_handle_operations_share_one_authority_rule() {
         let provider: Arc<dyn ToolProvider> = Arc::new(PrepareRecordingTool {
