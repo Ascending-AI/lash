@@ -736,41 +736,12 @@ impl SessionCommitStore for Store {
                         }
                     }
 
-                    for (node, facts) in commit
-                        .graph
-                        .nodes
-                        .iter()
-                        .zip(plan.planned_node_facts())
-                    {
-                        let node_json = node.encode_storage_body().map_err(|err| {
-                            StoreError::Backend(format!(
-                                "failed to encode graph node body: {err}"
-                            ))
-                        })?;
-                        tx.execute(
-                            "INSERT INTO graph_nodes
-                             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                            params![
-                                commit.session_id.as_str(),
-                                node.node_id.as_str(),
-                                node.parent_node_id.as_deref(),
-                                i64::try_from(facts.generation).map_err(|_| StoreError::Backend(
-                                    "node generation does not fit SQLite INTEGER".to_string()
-                                ))?,
-                                facts.frame_node_id.as_str(),
-                                node_json
-                            ],
-                        )
-                        .map_err(|error| {
-                            sqlite_graph_node_insert_error(
-                                error,
-                                &commit.session_id,
-                                facts.generation,
-                                &node.node_id,
-                            )
-                        })?;
-                    }
+                    insert_graph_nodes_conn(
+                        tx,
+                        &commit.session_id,
+                        &commit.graph.nodes,
+                        plan.planned_node_facts(),
+                    )?;
                     let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());
                     tx.execute(
                         "INSERT OR REPLACE INTO session_head
@@ -1216,3 +1187,117 @@ fn occupied_node_ids_conn(
 /// One JSON-array bind per commit keeps the encoded id list around a MiB while
 /// staying far above any realistic per-commit node count.
 const OCCUPIED_NODE_ID_CHUNK_SIZE: usize = 16_384;
+
+/// Insert every node of one commit's graph.
+///
+/// Asked as one multi-row `INSERT` rather than one statement per node: the rows
+/// are already known in full before any of them is written, and they all land or
+/// none of them do regardless, so a statement per node bought no atomicity — it
+/// bought a round trip per node.
+///
+/// A constraint violation is where the batch would lose something real. The
+/// per-node errors name the colliding generation or node id, and SQLite reports
+/// only that the batch failed, not which row failed it. So a failed batch is
+/// replayed one node at a time to find the offender and raise exactly the error
+/// the loop used to raise. That replay runs only on the failing path, where a
+/// commit is being refused anyway.
+fn insert_graph_nodes_conn(
+    tx: &rusqlite::Connection,
+    session_id: &SessionId,
+    nodes: &[lash_core::SessionNodeRecord],
+    facts: &[lash_core::store::PlannedNodeFacts],
+) -> Result<(), StoreError> {
+    for (nodes, facts) in nodes
+        .chunks(GRAPH_NODE_INSERT_CHUNK_SIZE)
+        .zip(facts.chunks(GRAPH_NODE_INSERT_CHUNK_SIZE))
+    {
+        let mut bound: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(nodes.len() * 6);
+        for (node, facts) in nodes.iter().zip(facts) {
+            let node_json = node.encode_storage_body().map_err(|err| {
+                StoreError::Backend(format!("failed to encode graph node body: {err}"))
+            })?;
+            let generation = i64::try_from(facts.generation).map_err(|_| {
+                StoreError::Backend("node generation does not fit SQLite INTEGER".to_string())
+            })?;
+            bound.push(Box::new(session_id.as_str().to_string()));
+            bound.push(Box::new(node.node_id.as_str().to_string()));
+            bound.push(Box::new(node.parent_node_id.as_deref().map(str::to_string)));
+            bound.push(Box::new(generation));
+            bound.push(Box::new(facts.frame_node_id.as_str().to_string()));
+            bound.push(Box::new(node_json));
+        }
+        let tuples = (0..nodes.len())
+            .map(|index| {
+                let base = index * 6;
+                format!(
+                    "(?{}, ?{}, ?{}, ?{}, ?{}, ?{})",
+                    base + 1,
+                    base + 2,
+                    base + 3,
+                    base + 4,
+                    base + 5,
+                    base + 6,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let statement = format!(
+            "INSERT INTO graph_nodes
+             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
+             VALUES {tuples}"
+        );
+        let bound_refs = bound
+            .iter()
+            .map(|value| value.as_ref() as &dyn rusqlite::ToSql)
+            .collect::<Vec<_>>();
+        if tx
+            .execute(&statement, rusqlite::params_from_iter(bound_refs))
+            .is_err()
+        {
+            insert_graph_nodes_one_at_a_time(tx, session_id, nodes, facts)?;
+        }
+    }
+    Ok(())
+}
+
+/// Six bound values per node, so this chunk is 3,072 parameters — an order of
+/// magnitude under SQLite's 32,766-parameter ceiling, and far above any
+/// per-commit node count, so the chunking never runs in practice and the ceiling
+/// can never turn a large commit into a silent walk of single-row inserts.
+const GRAPH_NODE_INSERT_CHUNK_SIZE: usize = 512;
+
+/// Replay a failed node batch row by row so the refusal names the offending row.
+///
+/// Reached only after the batch has already failed and the transaction is headed
+/// for a rollback, so the extra statements cost nothing a successful commit pays.
+fn insert_graph_nodes_one_at_a_time(
+    tx: &rusqlite::Connection,
+    session_id: &SessionId,
+    nodes: &[lash_core::SessionNodeRecord],
+    facts: &[lash_core::store::PlannedNodeFacts],
+) -> Result<(), StoreError> {
+    for (node, facts) in nodes.iter().zip(facts) {
+        let node_json = node.encode_storage_body().map_err(|err| {
+            StoreError::Backend(format!("failed to encode graph node body: {err}"))
+        })?;
+        tx.execute(
+            "INSERT INTO graph_nodes
+             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                session_id.as_str(),
+                node.node_id.as_str(),
+                node.parent_node_id.as_deref(),
+                i64::try_from(facts.generation).map_err(|_| StoreError::Backend(
+                    "node generation does not fit SQLite INTEGER".to_string()
+                ))?,
+                facts.frame_node_id.as_str(),
+                node_json
+            ],
+        )
+        .map_err(|error| {
+            sqlite_graph_node_insert_error(error, session_id, facts.generation, &node.node_id)
+        })?;
+    }
+    Ok(())
+}

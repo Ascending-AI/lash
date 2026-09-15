@@ -14,7 +14,7 @@ use lash_core::facade_support::await_event_coordinator::{
     PersistedPromise, RegisteredAwaitEvent, TerminalCas,
 };
 use lash_core::{RuntimeError, RuntimeErrorCode};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::params;
 
 use crate::conn::SqliteConnection;
 use crate::scope_fence::{FenceLocations, RegistryAttachment};
@@ -98,10 +98,11 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
-                if identity_is_fenced(tx, fences, &identity)? {
+                let (fenced, stored) = select_fence_and_wait_row(tx, fences, &identity, &key_id)?;
+                if fenced {
                     return Ok(false);
                 }
-                match select_wait_row(tx, &key_id)? {
+                match stored {
                     Some(row) => Ok(row.matches(&identity)),
                     None => {
                         tx.execute(
@@ -141,10 +142,11 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
-                if identity_is_fenced(tx, fences, &identity)? {
+                let (fenced, stored) = select_fence_and_wait_row(tx, fences, &identity, &key_id)?;
+                if fenced {
                     return Ok(TerminalCas::UnknownOrRevoked);
                 }
-                match select_wait_row(tx, &key_id)? {
+                match stored {
                     None => {
                         tx.execute(
                             "INSERT INTO await_event_waits (
@@ -201,8 +203,7 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         self.conn
             .call(move |connection| {
                 let tx = connection.transaction()?;
-                let revoked = identity_is_fenced(&tx, fences, &identity)?;
-                let stored = select_wait_row(&tx, &key_id)?;
+                let (revoked, stored) = select_fence_and_wait_row(&tx, fences, &identity, &key_id)?;
                 tx.commit()?;
                 if revoked {
                     return Ok(PersistedPromise::UnknownOrRevoked);
@@ -324,42 +325,65 @@ impl WaitRow {
     }
 }
 
-fn select_wait_row(
-    connection: &rusqlite::Connection,
-    key_id: &str,
-) -> rusqlite::Result<Option<WaitRow>> {
-    connection
-        .query_row(
-            "SELECT scope_json, wait_json, session_id, turn_control, terminal_json
-             FROM await_event_waits
-             WHERE key_id = ?1",
-            params![key_id],
-            |row| {
-                Ok(WaitRow {
-                    scope_json: row.get(0)?,
-                    wait_json: row.get(1)?,
-                    session_id: row.get::<_, Option<String>>(2)?.map(SessionId::from),
-                    turn_control: row.get(3)?,
-                    terminal_json: row.get(4)?,
-                })
-            },
-        )
-        .optional()
+/// Which durable fence refuses `identity`: the owning session's revocation
+/// tombstone, or the scope's retirement tombstone. Session-free scopes have only
+/// the latter; session scopes are never scope-retired, so one predicate answers
+/// for either kind.
+fn fence_predicate(fences: FenceLocations, identity: &AwaitEventRowIdentity) -> String {
+    if identity.session_id.is_some() {
+        "EXISTS(SELECT 1 FROM await_event_revoked_sessions WHERE session_id = ?2)".to_string()
+    } else {
+        fences.fenced_predicate("?2")
+    }
 }
 
-/// Whether either durable fence refuses `identity`: the owning session's
-/// revocation tombstone, or the scope's retirement tombstone. Session-free
-/// scopes have only the latter; session scopes are never scope-retired, but
-/// reading one primary-key row keeps the two fences one predicate.
-fn identity_is_fenced(
+/// The fence verdict for `identity` and the wait row stored under `key_id`, read
+/// as one statement.
+///
+/// Every caller needs both before it decides anything, and asking them
+/// separately cost a round trip per call for no extra isolation — both reads
+/// already happened inside one transaction. The fence is a scalar subquery over
+/// a one-row probe and the wait row is `LEFT JOIN`ed onto it, so a fenced key
+/// with no stored row and an unfenced key with one are the same single read.
+/// `scope_json` is `NOT NULL` in the table, so a NULL there is the join missing,
+/// not a row with empty columns.
+fn select_fence_and_wait_row(
     connection: &rusqlite::Connection,
     fences: FenceLocations,
     identity: &AwaitEventRowIdentity,
-) -> rusqlite::Result<bool> {
-    if let Some(session_id) = identity.session_id.as_deref() {
-        return session_is_revoked(connection, &SessionId::from(session_id));
-    }
-    fences.is_fenced(connection, &identity.scope_id)
+    key_id: &str,
+) -> rusqlite::Result<(bool, Option<WaitRow>)> {
+    let fence_subject = identity
+        .session_id
+        .as_deref()
+        .unwrap_or(identity.scope_id.as_str());
+    connection.query_row(
+        &format!(
+            "SELECT {},
+                    stored.scope_json, stored.wait_json, stored.session_id,
+                    stored.turn_control, stored.terminal_json
+             FROM (SELECT 1) AS probe
+             LEFT JOIN await_event_waits AS stored ON stored.key_id = ?1",
+            fence_predicate(fences, identity)
+        ),
+        params![key_id, fence_subject],
+        |row| {
+            let fenced: bool = row.get(0)?;
+            let Some(scope_json) = row.get::<_, Option<String>>(1)? else {
+                return Ok((fenced, None));
+            };
+            Ok((
+                fenced,
+                Some(WaitRow {
+                    scope_json,
+                    wait_json: row.get(2)?,
+                    session_id: row.get::<_, Option<String>>(3)?.map(SessionId::from),
+                    turn_control: row.get(4)?,
+                    terminal_json: row.get(5)?,
+                }),
+            ))
+        },
+    )
 }
 
 fn session_is_revoked(

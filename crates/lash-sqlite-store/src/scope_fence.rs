@@ -87,11 +87,12 @@ impl FenceLocations {
     /// are disjoined inside one statement instead of being walked one query at
     /// a time. `OR` short-circuits left to right, so a journal fence still
     /// answers without touching the registry file.
-    fn fenced_predicate(self) -> String {
+    pub(crate) fn fenced_predicate(self, scope_id_parameter: &str) -> String {
         self.schemas()
             .map(|schema| {
                 format!(
-                    "EXISTS(SELECT 1 FROM {schema}.effect_scope_retirements WHERE scope_id = ?1)"
+                    "EXISTS(SELECT 1 FROM {schema}.effect_scope_retirements \
+                     WHERE scope_id = {scope_id_parameter})"
                 )
             })
             .collect::<Vec<_>>()
@@ -105,7 +106,7 @@ impl FenceLocations {
         scope_id: &str,
     ) -> rusqlite::Result<bool> {
         connection.query_row(
-            &format!("SELECT {}", self.fenced_predicate()),
+            &format!("SELECT {}", self.fenced_predicate("?1")),
             params![scope_id],
             |row| row.get(0),
         )
@@ -314,7 +315,7 @@ mod fenced_predicate_tests {
 
     #[test]
     fn the_predicate_disjoins_every_location_in_one_statement() {
-        let attached = FenceLocations::attached(JOURNAL_SCHEMA).fenced_predicate();
+        let attached = FenceLocations::attached(JOURNAL_SCHEMA).fenced_predicate("?1");
 
         assert!(attached.contains(&format!("{JOURNAL_SCHEMA}.effect_scope_retirements")));
         assert!(attached.contains(&format!(
@@ -324,7 +325,7 @@ mod fenced_predicate_tests {
         assert!(!attached.contains(';'));
         assert!(
             !FenceLocations::JOURNAL_ONLY
-                .fenced_predicate()
+                .fenced_predicate("?1")
                 .contains(PROCESS_REGISTRY_SCHEMA)
         );
     }
