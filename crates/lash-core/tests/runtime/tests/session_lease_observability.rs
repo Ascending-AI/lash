@@ -105,7 +105,10 @@ async fn claiming_the_lane_traces_the_session_generation_and_holder() {
     .await;
 
     let claimed = capture.exactly_one("session_execution_lease.acquired");
-    assert_eq!(claimed.level, "INFO");
+    assert_eq!(
+        claimed.level, "DEBUG",
+        "an uncontended claim is routine and stays below INFO (FIG-3144)"
+    );
     assert_eq!(claimed.field("session_id"), "lease-observability");
     assert_eq!(claimed.field("owner_id"), "worker-a");
     assert_eq!(claimed.field("incarnation_id"), "worker-a:boot-1");
