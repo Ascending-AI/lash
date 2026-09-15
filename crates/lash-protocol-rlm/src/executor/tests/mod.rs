@@ -26,6 +26,7 @@ mod lifecycle_and_diagnostics;
 mod projections_and_snapshots;
 mod triggers;
 mod typescript_cells;
+mod typescript_runtime_values;
 
 use deferred_and_processes::*;
 use lifecycle_and_diagnostics::*;

@@ -12,7 +12,10 @@ pub use process_identity::deterministic_lashlang_process_id;
 mod trigger_commands;
 pub use trigger_commands::execute_trigger_operation;
 mod typescript_runtime;
-pub use typescript_runtime::{is_typescript_runtime_receiver, journaled_typescript_runtime_value};
+pub use typescript_runtime::{
+    TYPESCRIPT_RUNTIME_RESOURCE_TYPE, is_typescript_runtime_receiver,
+    journaled_typescript_runtime_value,
+};
 
 pub use lash_trace::{
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
@@ -451,7 +454,7 @@ pub fn lashlang_host_environment_from_tool_catalog(
     ] {
         resources.add_module_operation_contract(
             ["__typescript_runtime"],
-            "typescript.Runtime",
+            typescript_runtime::TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
             operation,
             host_operation,
             &lashlang::OperationContract::new(
