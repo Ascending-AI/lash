@@ -426,6 +426,8 @@ macro_rules! process_registry_tests {
                 (caller_departed_rows_are_reclaimed_by_retention, "caller-departed-retention"),
                 (terminal_completion_atomically_retains_parent_end_plan, "parent-end-plan"),
                 (settled_parent_end_plans_are_reclaimed_by_retention, "parent-end-plan-reclaim"),
+                (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
+                (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
                 (process_prune_scoped_by_originator, "scoped-prune"),
                 (process_prune_batch_tombstones, "batch-prune"),
             ]
