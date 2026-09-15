@@ -89,14 +89,52 @@ export function catalogFieldsMap(op) {
   return out;
 }
 
+// One `name: value` record argument for a synthesized receiver call.
+function recordArg(field) {
+  const value = field.default;
+  switch (field.type) {
+    case 'number':
+      return `${field.name}: ${Number(value ?? 0) || 0}`;
+    case 'boolean':
+      return `${field.name}: ${value ? 'true' : 'false'}`;
+    case 'string':
+      return `${field.name}: ${JSON.stringify(String(value ?? ''))}`;
+    default:
+      return `${field.name}: ${defaultSource(value)}`; // expression / identifier — raw
+  }
+}
+
+// A call node's expression is the awaited receiver call the lens projects back
+// out of source. The `await` is load-bearing, not cosmetic: an unawaited tool
+// call lowers to a pending-tool value rather than a receiver call, so the
+// backend cannot resolve its operation and refuses the save with
+// `invalid_expression` (FIG-3177). This is the string the backend also
+// synthesizes for itself when a call node arrives with no expression.
+export function synthCallExpression(op) {
+  const args = (op.fields ?? []).map(recordArg).join(', ');
+  // The receiver comes from the catalog entry, not from the operation name:
+  // `list_recent` belongs to `gmail`, and synthesizing `display.list_recent`
+  // gives the lowerer a receiver that has no such operation (FIG-3178).
+  return `await ${op.receiver ?? 'display'}.${op.operation}({ ${args} })`;
+}
+
 // The `data` patch to apply when switching an existing call/effect to a
-// different operation: point at the new operation (calls swap the receiver via
-// `operation`; effects rebuild from `effect` + fields, so drop any stored
-// `expression`) and refill the arg form from the new operation's typed defaults.
+// different operation: point at the new operation and refill the arg form from
+// the new operation's typed defaults.
+//
+// A call carries its receiver too, and its expression is re-synthesized from
+// the chosen entry rather than method-renamed: the operation name alone does
+// not name a receiver, so switching `display.show_message` to `gmail.list_recent`
+// by swapping the method leaves `display.list_recent`, which no receiver serves
+// (FIG-3179). Effects rebuild from `effect` + fields, so they drop any stored
+// `expression` instead.
 export function operationSwitchPatch(nodeKind, op) {
   const patch = { fields: catalogFieldsMap(op) };
-  if (nodeKind === 'call') patch.operation = op.operation;
-  else if (nodeKind === 'effect') {
+  if (nodeKind === 'call') {
+    patch.operation = op.operation;
+    patch.receiver = op.receiver ?? null;
+    patch.expression = synthCallExpression(op);
+  } else if (nodeKind === 'effect') {
     patch.effect = op.effect;
     patch.clearExpression = true;
   }

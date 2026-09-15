@@ -81,7 +81,13 @@ pub(crate) const OPERATIONS: &[MockOperation] = &[
             MockField {
                 name: "output",
                 field_type: "expression",
-                default: MockDefault::Expression("Type { result: str }"),
+                // A catalog default is authored source the fragment validator
+                // has to accept: a type expression (`Type { .. }`) is not an
+                // expression, so a palette insertion carrying one could never
+                // be saved. The empty record is the unconstrained output shape
+                // the workflows that call this operation already imply by
+                // leaving the argument off (FIG-3179).
+                default: MockDefault::Expression("{}"),
             },
         ],
     },
@@ -131,7 +137,13 @@ pub(crate) const OPERATIONS: &[MockOperation] = &[
             MockField {
                 name: "output",
                 field_type: "expression",
-                default: MockDefault::Expression("Type { summary: str }"),
+                // A catalog default is authored source the fragment validator
+                // has to accept: a type expression (`Type { .. }`) is not an
+                // expression, so a palette insertion carrying one could never
+                // be saved. The empty record is the unconstrained output shape
+                // the workflows that call this operation already imply by
+                // leaving the argument off (FIG-3179).
+                default: MockDefault::Expression("{}"),
             },
         ],
     },

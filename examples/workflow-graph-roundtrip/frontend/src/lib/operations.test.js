@@ -20,6 +20,7 @@ const CATALOG = [
     label: 'Record',
     nodeKind: 'call',
     operation: 'record',
+    receiver: 'ledger',
     fields: [
       { name: 'count', type: 'number', default: 3 },
       { name: 'value', type: 'expression', default: 'x + 1' },
@@ -57,6 +58,23 @@ describe('operationSwitchPatch', () => {
     expect(patch.effect).toBeUndefined();
     expect(patch.clearExpression).toBeUndefined();
     expect(patch.fields).toEqual({ count: 3, value: { $expr: 'x + 1' } });
+  });
+
+  // FIG-3179: the chosen operation may belong to another receiver entirely, so
+  // a switch carries the receiver and a re-synthesized call. Renaming only the
+  // method left `display.record`, which no receiver serves.
+  it('carries the new receiver and re-synthesizes the call expression', () => {
+    const patch = operationSwitchPatch('call', CATALOG[1]);
+    expect(patch.receiver).toBe('ledger');
+    expect(patch.expression).toBe('await ledger.record({ count: 3, value: x + 1 })');
+  });
+
+  // A receiverless entry means the display catalog, and the patch says so
+  // explicitly so a node switched away from a named receiver does not keep it.
+  it('clears the receiver for an entry that names none', () => {
+    const patch = operationSwitchPatch('call', CATALOG[0]);
+    expect(patch.receiver).toBeNull();
+    expect(patch.expression).toBe('await display.display({ message: "hi" })');
   });
 
   it('rebuilds an effect and clears any seeded expression', () => {

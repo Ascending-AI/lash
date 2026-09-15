@@ -514,9 +514,12 @@ async fn a_non_display_action_saves_against_its_own_receiver_and_expression_defa
         .find(|entry| entry["id"] == "llm.query")
         .expect("catalog entry llm.query");
     assert_eq!(expression_defaults["receiver"], "llm");
+    // Re-pinned for FIG-3179: the `output` default was the type expression
+    // `Type { result: str }`, which the fragment validator refuses, so this
+    // entry could be inserted from the palette but never saved.
     assert_eq!(
         synth_call_expression(expression_defaults),
-        r#"await llm.query({ task: "Summarize the supplied input", inputs: {}, output: Type { result: str } })"#
+        r#"await llm.query({ task: "Summarize the supplied input", inputs: {}, output: {} })"#
     );
 
     // An entry the editor can actually insert and save. Posted with no
@@ -754,4 +757,375 @@ fn append_process_node(document: &mut WorkflowDocument, mut node: FlowNode) {
     body.node_ids.insert(insert_at, node.id.clone());
     node.parent_id = Some(process_id);
     document.nodes.push(node);
+}
+
+/// FIG-3179: switching a call node to an operation of another receiver is not
+/// a method rename. The stored expression still calls the receiver the node
+/// came from, so rewriting only the method name saved `display.list_recent` —
+/// a call no receiver serves.
+#[tokio::test]
+async fn switching_a_call_to_another_receivers_operation_re_synthesizes_the_receiver_call() {
+    let (client, base, server) = start_server().await;
+
+    let operations = catalog(&client, &base).await;
+    let entry = |id: &str| {
+        operations
+            .iter()
+            .find(|entry| entry["id"] == id)
+            .unwrap_or_else(|| panic!("catalog entry {id}"))
+    };
+    let show_message = entry("display.show_message");
+    let list_recent = entry("gmail.list_recent");
+
+    let mut document = select_workflow(&client, &base, "blank").await;
+    append_process_node(
+        &mut document,
+        catalog_node(show_message, "new:switched-call"),
+    );
+    let response = client
+        .post(format!("{base}/workflow"))
+        .json(&document)
+        .send()
+        .await
+        .expect("save the inserted display call");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
+    assert!(saved.document.source.contains("display.show_message("));
+    let switched_id = saved.id_map["new:switched-call"].clone();
+
+    // The editor's operation `<select>`: point the node at the chosen entry,
+    // take its receiver, re-synthesize the call and refill the arg form — the
+    // patch `operationSwitchPatch` builds in `frontend/src/lib/operations.js`.
+    let mut document = saved.document;
+    let node = document
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == switched_id)
+        .expect("saved call node");
+    node.data.operation = list_recent["operation"].as_str().map(str::to_string);
+    node.data.receiver = list_recent["receiver"].as_str().map(str::to_string);
+    node.data.expression = Some(synth_call_expression(list_recent));
+    node.data.fields = catalog_fields(list_recent);
+
+    let response = client
+        .post(format!("{base}/workflow"))
+        .json(&document)
+        .send()
+        .await
+        .expect("save the switched call");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let saved: SaveWorkflowResponse = response.json().await.expect("saved switched workflow");
+    assert!(
+        saved
+            .document
+            .source
+            .contains("gmail.list_recent({ count: 5 })"),
+        "switched call missing from canonical source: {}",
+        saved.document.source
+    );
+    assert!(
+        !saved.document.source.contains("display.list_recent"),
+        "switched call kept the old receiver: {}",
+        saved.document.source
+    );
+    assert!(
+        !saved.document.source.contains("display.show_message"),
+        "switched call kept the old operation: {}",
+        saved.document.source
+    );
+
+    // Front and back agree: the node the editor reads back names the switched
+    // operation, and it names it because the saved source calls it.
+    let projected = saved
+        .document
+        .nodes
+        .iter()
+        .find(|node| node.data.operation.as_deref() == Some("list_recent"))
+        .expect("projected gmail.list_recent call node");
+    assert_eq!(projected.data.kind, "call");
+
+    // The same switch from a client that leaves the old text in
+    // `data.expression`: the node's own receiver still decides, so the save
+    // cannot smuggle the previous receiver's call through.
+    let mut document = select_workflow(&client, &base, "blank").await;
+    let mut stale = catalog_node(show_message, "new:stale-expression");
+    stale.data.operation = list_recent["operation"].as_str().map(str::to_string);
+    stale.data.receiver = list_recent["receiver"].as_str().map(str::to_string);
+    stale.data.fields = catalog_fields(list_recent);
+    assert_eq!(
+        stale.data.expression.as_deref(),
+        Some(synth_call_expression(show_message).as_str())
+    );
+    append_process_node(&mut document, stale);
+    let response = client
+        .post(format!("{base}/workflow"))
+        .json(&document)
+        .send()
+        .await
+        .expect("save a switch that kept the old expression");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
+    assert!(
+        saved
+            .document
+            .source
+            .contains("gmail.list_recent({ count: 5 })")
+            && !saved.document.source.contains("display.list_recent"),
+        "stale switch expression survived the save: {}",
+        saved.document.source
+    );
+
+    server.abort();
+}
+
+/// FIG-3179: the palette offers every catalog entry, so every catalog entry's
+/// defaults have to be source the fragment validator accepts. `llm.query` and
+/// `agents.spawn` served an `output` default that was a type expression
+/// (`Type { result: str }`), so inserting either produced a node the editor
+/// offered and the backend refused, with no saveable edit short of rewriting
+/// the argument by hand.
+#[tokio::test]
+async fn every_catalog_entry_saves_from_a_bare_palette_insertion() {
+    let seed_client = reqwest::Client::new();
+    let (_, seed_base, seed_server) = start_server().await;
+    let operations = catalog(&seed_client, &seed_base).await;
+    seed_server.abort();
+    assert!(!operations.is_empty(), "catalog is empty");
+
+    for entry in &operations {
+        let id = entry["id"].as_str().expect("catalog id");
+        // One server per entry: an insertion is judged on its own, not on
+        // whatever the previous entry left in the saved workflow.
+        let (client, base, server) = start_server().await;
+        let mut document = select_workflow(&client, &base, "blank").await;
+        insert_palette_entry(&mut document, entry, &operations);
+        let response = client
+            .post(format!("{base}/workflow"))
+            .json(&document)
+            .send()
+            .await
+            .unwrap_or_else(|error| panic!("save palette insertion of {id}: {error}"));
+        let status = response.status();
+        let body: Value = response.json().await.expect("save response JSON");
+        assert_eq!(
+            status,
+            reqwest::StatusCode::OK,
+            "palette insertion of {id} was refused: {body}"
+        );
+        server.abort();
+    }
+}
+
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
+#[expect(
+    clippy::expect_used,
+    reason = "binding an ephemeral loopback listener and serving this example's router succeed \
+              in a test process"
+)]
+async fn start_server() -> (
+    reqwest::Client,
+    String,
+    tokio::task::JoinHandle<std::io::Result<()>>,
+) {
+    let state = AppState::with_run_timing(RunTiming {
+        sleep_cap: Duration::from_millis(2),
+        signal_delay: Duration::from_millis(2),
+    })
+    .expect("default workflow");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("test listener address");
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
+    (reqwest::Client::new(), format!("http://{addr}"), server)
+}
+
+/// Test-support helper outside `#[test]`, so clippy.toml's allow-in-tests does not reach it.
+#[expect(
+    clippy::expect_used,
+    reason = "`GET /operations` is always served and always answers with the catalog array"
+)]
+async fn catalog(client: &reqwest::Client, base: &str) -> Vec<Value> {
+    client
+        .get(format!("{base}/operations"))
+        .send()
+        .await
+        .expect("GET /operations")
+        .json()
+        .await
+        .expect("operation catalog JSON")
+}
+
+/// `catalogFieldsMap` in `frontend/src/lib/operations.js`: the seed `data.fields`
+/// map an entry's typed defaults produce.
+#[expect(
+    clippy::expect_used,
+    reason = "catalog fields always carry a string name and a deserializable default (see the \
+              catalog module the server serves)"
+)]
+fn catalog_fields(entry: &Value) -> BTreeMap<String, EditableValue> {
+    let mut fields = BTreeMap::new();
+    for field in entry["fields"].as_array().expect("catalog fields") {
+        let name = field["name"].as_str().expect("catalog field name");
+        fields.insert(
+            name.to_string(),
+            serde_json::from_value(field["default"].clone())
+                .unwrap_or_else(|error| panic!("catalog field {name} default: {error}")),
+        );
+    }
+    fields
+}
+
+/// `slotText` in `frontend/src/lib/graph.js`: a field default as canonical
+/// (unquoted) slot text.
+fn slot_text(field: Option<&Value>) -> String {
+    let Some(field) = field else {
+        return String::new();
+    };
+    let default = &field["default"];
+    match field["type"].as_str().unwrap_or_default() {
+        "number" => default.as_f64().unwrap_or(0.0).to_string(),
+        "boolean" => default.as_bool().unwrap_or(false).to_string(),
+        _ => default_source(default),
+    }
+}
+
+/// `nodeDataFromOperation` + `addNodeToDoc` in `frontend/src/lib/graph.js`: the
+/// node (and, for containers and processes, the seeded child) the palette
+/// inserts for one catalog entry, with nothing edited afterwards.
+#[expect(
+    clippy::expect_used,
+    reason = "catalog entries always carry a string nodeKind and label (see the catalog module \
+              the server serves)"
+)]
+fn insert_palette_entry(document: &mut WorkflowDocument, entry: &Value, catalog: &[Value]) {
+    let kind = entry["nodeKind"].as_str().expect("catalog nodeKind");
+    let id = format!("new:palette-{}", entry["id"].as_str().expect("catalog id"));
+    let by_name = |name: &str| {
+        entry["fields"]
+            .as_array()
+            .and_then(|fields| fields.iter().find(|field| field["name"] == name))
+    };
+    let or_else = |text: String, fallback: &str| {
+        if text.is_empty() {
+            fallback.to_string()
+        } else {
+            text
+        }
+    };
+
+    // The catalog's first `call` entry, which the editor seeds into a fresh
+    // container or process slot.
+    let seed_child = |child_id: &str| {
+        let action = catalog
+            .iter()
+            .find(|candidate| candidate["nodeKind"] == "call")
+            .expect("a call entry to seed a slot with");
+        catalog_node(action, child_id)
+    };
+
+    let mut node = catalog_node(entry, &id);
+    match kind {
+        "opaque" => node.data.source = Some(slot_text(by_name("source"))),
+        "terminal" => node.data.expression = Some(or_else(slot_text(by_name("expression")), "0")),
+        "effect" => {
+            node.data.expression = Some(match entry["effect"].as_str() {
+                Some("sleep") => format!(
+                    "await sleep({})",
+                    or_else(slot_text(by_name("duration")), "\"1s\"")
+                ),
+                Some("wait_signal") => format!(
+                    "await waitSignal({})",
+                    serde_json::to_string(
+                        by_name("signal")
+                            .and_then(|field| field["default"].as_str())
+                            .unwrap_or("continue")
+                    )
+                    .expect("JSON string literal")
+                ),
+                _ => or_else(slot_text(by_name("expression")), "await sleep(\"1s\")"),
+            });
+        }
+        "data" | "computation" => {
+            let binding = slot_text(by_name("binding"));
+            node.data.binding = (!binding.is_empty()).then_some(binding);
+            node.data.expression = Some(or_else(slot_text(by_name("expression")), "0"));
+        }
+        "state_update" => {
+            // An assignment target is a reference by nature: the catalog's
+            // default names `state.count`, mirroring the counter workflow, and
+            // no default could name a binding that is guaranteed to exist. The
+            // binding the default refers to is declared here so the insertion
+            // is judged on its own defaults rather than on the blank
+            // workflow's scope.
+            let mut state = catalog_node(
+                catalog
+                    .iter()
+                    .find(|candidate| candidate["nodeKind"] == "data")
+                    .expect("a data entry to declare the assignment target with"),
+                &format!("{id}:state"),
+            );
+            state.data.binding = Some("state".to_string());
+            state.data.expression = Some("{ count: 0 }".to_string());
+            state.data.fields = BTreeMap::new();
+            append_process_node(document, state);
+            node.data.target = Some(or_else(slot_text(by_name("target")), "state.count"));
+            node.data.expression = Some(or_else(slot_text(by_name("expression")), "0"));
+        }
+        "container" => {
+            let subkind = entry["subkind"].as_str().unwrap_or_default();
+            let slot = match subkind {
+                "if" => "then",
+                _ => "body",
+            };
+            match subkind {
+                "if" | "while" => {
+                    node.data.condition = Some(or_else(
+                        slot_text(by_name("condition")),
+                        if subkind == "while" { "false" } else { "true" },
+                    ));
+                }
+                "for" => {
+                    node.data.binding = Some(or_else(slot_text(by_name("binding")), "item"));
+                    node.data.iterable = Some(or_else(slot_text(by_name("iterable")), "[1, 2, 3]"));
+                }
+                _ => {}
+            }
+            let child_id = format!("{id}:child");
+            let mut child = seed_child(&child_id);
+            child.parent_id = Some(id.clone());
+            node.data
+                .children
+                .push(workflow_graph_roundtrip::ChildGroup {
+                    slot: slot.to_string(),
+                    scope: format!("container:{id}:{slot}"),
+                    node_ids: vec![child_id],
+                });
+            document.nodes.push(child);
+        }
+        "process" => {
+            let name = or_else(slot_text(by_name("name")), "my_process");
+            node.data.name = NodeName::Derived {
+                title: name.clone(),
+            };
+            node.data.process_name = Some(name);
+            let child_id = format!("{id}:child");
+            let mut child = seed_child(&child_id);
+            child.parent_id = Some(id.clone());
+            node.data
+                .children
+                .push(workflow_graph_roundtrip::ChildGroup {
+                    slot: "body".to_string(),
+                    scope: format!("process:{id}"),
+                    node_ids: vec![child_id],
+                });
+            document.nodes.push(child);
+            document.roots.processes.push(id.clone());
+            document.nodes.push(node);
+            return;
+        }
+        _ => {}
+    }
+    node.data.fields = catalog_fields(entry);
+    append_process_node(document, node);
 }
