@@ -108,3 +108,4 @@ mcp-naming-refresh = { tier = "deterministic", model = "scripted-provider" }
 runtime-identity = { tier = "deterministic", model = "scripted-provider" }
 resident-tool-authority = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-deterministic = { tier = "deterministic", model = "scripted-provider" }
+workbench-attachment-reclamation = { tier = "deterministic", model = "scripted-provider" }
