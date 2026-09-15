@@ -90,6 +90,7 @@ else
     --bin lash-e2e-process-operator-flow --)
 fi
 DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
+  LASH_PROCESS_OPERATOR_TRACE_DIR="$artifact_dir" \
   "${operator_command[@]}" "$scenario" \
   2>&1 | tee "$artifact_dir/03-observed.jsonl" | tee -a "$test_output"
 
@@ -100,9 +101,6 @@ from pathlib import Path
 
 scenario = sys.argv[1]
 artifacts = Path(sys.argv[2])
-# TypeScript is the sole RLM language (ADR 0096): the harness records it
-# unconditionally, so the gate pins the literal rather than an environment read.
-expected_dialect = "typescript"
 
 
 def fail(message):
@@ -120,18 +118,55 @@ def checkpoint(name):
     fail(f"missing checkpoint {name!r}")
 
 
+def trace_dialect(path):
+    """The dialect the committed cell ran under, read from the flushed trace.
+
+    The gate deliberately carries no language literal of its own: a literal
+    here would agree with a literal in the harness while proving nothing about
+    the turn. The reading is the extraction diagnostic's own
+    `<language>_cell_count` key, cross-checked against its
+    `execute_<language>` decision.
+    """
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("type") != "protocol_step":
+            continue
+        diagnostic = record.get("payload", {}).get("RlmDiagnostic", {})
+        if diagnostic.get("phase") != "llm_extraction":
+            continue
+        payload = diagnostic.get("payload", {})
+        for key, count in payload.get("counts", {}).items():
+            if key.endswith("_cell_count") and count:
+                dialect = key[: -len("_cell_count")]
+                if payload.get("decision") != f"execute_{dialect}":
+                    fail(
+                        f"extraction counted a {dialect} cell but decided "
+                        f"{payload.get('decision')!r}"
+                    )
+                return dialect
+    return None
+
+
 if scenario == "drain":
     seed = checkpoint("seeded_drain_deployment")
     observed = checkpoint("graceful_drain_observed")
-    if seed.get("dialect") != expected_dialect:
-        fail(
-            f"seeded checkpoint did not record served dialect {expected_dialect!r}: {seed}"
-        )
     if seed["provider_calls"] != 1 or not seed["journal_active"]:
         fail(f"fixture did not hold one in-flight effect: {seed}")
-    for field in ("in_flight_effect_completed", "provider_closed", "trace_flushed"):
-        if observed[field] is not True:
-            fail(f"drain step {field} did not complete: {observed}")
+    expected_dialect = trace_dialect(observed["trace_path"])
+    if not expected_dialect or observed.get("dialect") != expected_dialect:
+        fail(
+            f"drain checkpoint dialect {observed.get('dialect')!r} does not follow the "
+            f"trace at {observed['trace_path']}: {expected_dialect!r}"
+        )
+    if observed["in_flight_effect_completed"] != seed["journal_active"]:
+        fail(f"the in-flight effect did not settle during drain: {observed}")
+    if observed["provider_closed"] != 1:
+        fail(f"the provider observed {observed['provider_closed']} closes: {observed}")
+    if observed["trace_flushed"] < 1:
+        fail(f"the flushed trace sink recorded nothing: {observed}")
     if observed["ingress_accepting"] or observed["new_turn_admitted"]:
         fail(f"ingress was not quiesced: {observed}")
     if observed["journal_active"]:
@@ -178,8 +213,13 @@ else:
         fail(f"sweep did not produce Abandoned: {reconciled}")
     if reconciled["abandon_writer"] != "ReconciledRequest":
         fail(f"wrong reconciliation writer: {reconciled}")
-    if not reconciled["observer_terminal_visible"] or not reconciled["lease_cleared"]:
-        fail(f"observer/lease terminal contract failed: {reconciled}")
+    if (
+        reconciled["observer_terminal_status"] != "Abandoned"
+        or not reconciled["observer_terminal_terminal"]
+    ):
+        fail(f"observer did not see the reconciled terminal: {reconciled}")
+    if reconciled["reconciled_lease_holder"] is not None:
+        fail(f"reconciled terminal retained a lease holder: {reconciled}")
     if reconciled["sweep_admitted"] < 1:
         fail(f"sweep admitted no rows: {reconciled}")
     if reconciled["sweep_worker_faults"] != 0:
