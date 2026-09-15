@@ -1234,8 +1234,10 @@ mod tests {
             "rlm_lashlang.compile_link",
             "rlm_lashlang.store_module_artifact",
             "rlm_lashlang.execute",
-            "rlm_process.prepare_start",
-            "rlm_process.start",
+            // `rlm_process.prepare_start` and `rlm_process.start` are not
+            // listed: #1529 deleted the `start_process` execution-host method
+            // they named when the TypeScript process special forms gave way to
+            // the catalogue-rendered `processes.start`, so no code emits them.
             "rlm_process.await_handle",
             "rlm_process.load_artifact",
             "rlm_process.resolve_environment",
@@ -1332,8 +1334,7 @@ mod tests {
             "rlm_lashlang.compile_link",
             "rlm_lashlang.execute",
             "rlm_lashlang.print_project",
-            "rlm_process.prepare_start",
-            "rlm_process.start",
+            // See the note above: #1529 retired the two process-start phases.
             "rlm_process.await_handle",
             "rlm_process.execute",
             "process.await_handle",
