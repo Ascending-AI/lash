@@ -40,10 +40,11 @@ it does not substitute for the judged browser row.
    `env.sh` first); poll `/healthz` and the rendered compose form.
    Expect the judged host, and confirm the served model from the host's own
    `agent_workbench.startup` record. That record carries `addr`, `data_dir`,
-   `dev_provider_scenario`, `lashlang_execution_path`, `model`, `restate_endpoint_addr`,
-   `restate_ingress_url`, `store_backend` and `trace_path` — **no dialect field**, so do not
-   look for one there. Read the `typescript` dialect from
-   `composition_changed.rendered_system_prompt`, which does carry it. Save `00-ready.png` and
+   `dev_provider_scenario`, `dialect`, `lashlang_execution_path`, `model`,
+   `restate_endpoint_addr`, `restate_ingress_url`, `store_backend` and `trace_path`. Read the
+   served dialect from its `dialect` field and require `typescript`;
+   `composition_changed.rendered_system_prompt` carries the dialect the prompt was rendered
+   for, and the two must agree. Save `00-ready.png` and
    `/api/state` as `00-state.json`.
 2. Workbench enables `TraceLevel::Extended` at bootstrap, so its trace carries
    the outgoing provider request. **Gate it on what that record can actually
@@ -135,7 +136,7 @@ it does not substitute for the judged browser row.
 
 | Gate | Expected | Observed / artifact | Pass |
 | --- | --- | --- | --- |
-| Host and dialect | Fresh judged Workbench; served model from `agent_workbench.startup`, dialect from `composition_changed.rendered_system_prompt` | | |
+| Host and dialect | Fresh judged Workbench; served model and `dialect` from `agent_workbench.startup`, agreeing with the dialect in `composition_changed.rendered_system_prompt` | | |
 | Fault exercised | Output-limit response and a later retry request | | |
 | Cap on the wire | `generation_disposition.output_token_cap` is `applied` or `clamped_to_capacity` on the response and its attempts | | |
 | Request accounted for | `body_len` + `body_sha256` present; `body_json_omitted_reason: "size_limit"` whenever `body_len` exceeds the 2 KiB cap | | |

@@ -440,6 +440,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 "data_dir": data_dir.display().to_string(),
                 "trace_path": trace_path_display,
                 "lashlang_execution_path": lashlang_execution_path.display().to_string(),
+                // The served RLM language, read from the constant the session
+                // list, the settings panel and the rendered system prompt all
+                // select from, so the record cannot disagree with what the host
+                // actually serves (FIG-3165).
+                "dialect": RLM_LANGUAGE_ID,
                 "model": serde_json::to_value(state.selected_model()).unwrap_or(Value::Null),
                 "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
                 "store_backend": stores.backend,
