@@ -226,6 +226,26 @@ fn engine_kind(args: &Value) -> String {
         .to_string()
 }
 
+/// The host-facing label a start declares, when it declares one.
+///
+/// A present-but-unusable label is refused rather than dropped: the argument is
+/// documented, so silently ignoring a non-string or blank value would reproduce
+/// the defect this plumbing fixes.
+fn start_label(args: &Value) -> Result<Option<String>, String> {
+    match args.get("label") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(label)) => {
+            let label = label.trim();
+            if label.is_empty() {
+                Err("`label` must be a non-empty string".to_string())
+            } else {
+                Ok(Some(label.to_string()))
+            }
+        }
+        Some(_) => Err("`label` must be a string".to_string()),
+    }
+}
+
 fn refuse(message: impl std::fmt::Display) -> ToolAttemptOutcome {
     done_without_intents(ToolOutcome::err_fmt(format_args!("{message}")))
 }
@@ -305,6 +325,19 @@ pub async fn execute_process_start_tool_call(
     // the attempt's env spec here rather than leaving realization to substitute
     // one (FIG-2999).
     .with_env_spec(context.process_execution_env_spec());
+    // The documented `label` argument: a host-facing name for this run, never
+    // part of the process's identity (FIG-3122). Declaring it here is the only
+    // way it reaches the row — an engine derives its own label from the
+    // payload, and for Lashlang that is the lift digest, so a run the author
+    // named `probe` lists as `__process_<hash>` unless the start declares the
+    // name. A start that passes no label keeps the engine's derived one.
+    let declaration = match start_label(args) {
+        Ok(None) => declaration,
+        Ok(Some(label)) => declaration.with_declared_identity(
+            lash_core::DeclaredProcessIdentity::labelled(engine_kind(args), Some(label)),
+        ),
+        Err(message) => return refuse(message),
+    };
     let process_id = ProcessId::from_intent_identity(&identity);
     ToolAttemptOutcome::done(
         ToolOutcomeDone::ok(unrealized_start_handle(&process_id)),

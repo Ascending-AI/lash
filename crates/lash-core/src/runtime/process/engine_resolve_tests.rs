@@ -282,3 +282,68 @@ async fn trigger_registration_pins_the_resolved_signature_on_the_target() {
         "registration stores the engine's authority, never the unknown claim"
     );
 }
+
+/// FIG-3122 law (a): a label the host declared for a start survives admission
+/// byte-identical, and law (c): declaring it moves nothing else on the row.
+///
+/// Admission stays the sole writer of a registration's derived identity — the
+/// kind and the definition reference only the engine can resolve. The label is
+/// not derived identity, it is display metadata, so the engine's own label is
+/// the default a start that declared none falls back to, never an override of
+/// the name a caller asked for.
+#[tokio::test]
+async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
+    let engine_label = "__process_02178275819fb79b903c9a8b03a8b2d28c41708383b1728900e429e3a59b6a32";
+    let admitted = || {
+        crate::AdmittedProcessIdentity::for_testing(ProcessIdentity::for_definition(
+            ProcessDefinitionRef::new(
+                SIGNED_ENGINE_KIND,
+                serde_json::json!({"program": "payout"}),
+                authoritative_signature(),
+            ),
+            Some(engine_label),
+        ))
+    };
+    let registration = || {
+        ProcessRegistration::new(
+            crate::ProcessId::from("process-label-law"),
+            crate::ProcessInput::Engine {
+                kind: SIGNED_ENGINE_KIND.to_string(),
+                payload: serde_json::json!({"program": "payout"}),
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        )
+    };
+
+    let undeclared = registration().with_admitted_identity(admitted());
+    assert_eq!(
+        undeclared.identity.label.as_deref(),
+        Some(engine_label),
+        "a start that declares no label keeps the one the engine derived"
+    );
+
+    let declared = registration()
+        .with_declared_identity(crate::DeclaredProcessIdentity::labelled(
+            SIGNED_ENGINE_KIND,
+            Some("immutable_deployment_probe"),
+        ))
+        .with_admitted_identity(admitted());
+    assert_eq!(
+        declared.identity.label.as_deref(),
+        Some("immutable_deployment_probe"),
+        "the declared label is what the row carries, not the engine's derived one"
+    );
+    assert_eq!(
+        declared.identity.kind, undeclared.identity.kind,
+        "a label never moves the engine kind"
+    );
+    assert_eq!(
+        declared.identity.definition, undeclared.identity.definition,
+        "a label never moves the definition reference: it is display metadata, not an identity input"
+    );
+}

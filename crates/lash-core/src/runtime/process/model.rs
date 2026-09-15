@@ -920,9 +920,24 @@ impl ProcessRegistration {
     /// This is the only way a registration's derived identity is replaced, and
     /// [`AdmittedProcessIdentity`](crate::AdmittedProcessIdentity) is the only
     /// carrier that can hold a definition reference.
+    ///
+    /// The label is the one exception, and it is not an exception to the
+    /// authority: a label is display metadata, never an identity input
+    /// (FIG-3122). The engine still writes the kind and the definition
+    /// reference it alone can resolve, but a label the host *declared* for this
+    /// start survives the stamp byte-identical, and the engine's derived label
+    /// is what a start that declared none falls back to. Otherwise the label a
+    /// caller passes to `processes.start` would be silently discarded here,
+    /// since an engine derives its own label from the payload — for Lashlang,
+    /// the lift digest, which is what a listing shows where the author wrote a
+    /// name.
     pub fn with_admitted_identity(mut self, admitted: crate::AdmittedProcessIdentity) -> Self {
+        let declared_label = self.identity.label.take();
         let (identity, signals) = admitted.into_parts();
-        self.identity = identity;
+        self.identity = ProcessIdentity {
+            label: declared_label.or(identity.label),
+            ..identity
+        };
         for signal in signals {
             if !self.event_types.contains(&signal) {
                 self.event_types.push(signal);

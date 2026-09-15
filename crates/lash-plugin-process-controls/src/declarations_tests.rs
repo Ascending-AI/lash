@@ -386,3 +386,101 @@ async fn a_started_definition_is_the_definition_processes_list_filters_by() {
         "a different definition must not select this process"
     );
 }
+
+/// FIG-3122 law (b)/(c) at the declaring seam: two starts of the same
+/// definition with different labels carry the same engine payload — the same
+/// `module_ref`, `process_ref` and `process_name` a lifted literal answers —
+/// and differ only in the declared label. A label is host-facing display
+/// metadata; it is never an input to what the row identifies.
+#[tokio::test]
+async fn two_starts_of_one_definition_differ_only_in_the_declared_label() {
+    let definition = serde_json::json!({
+        "$lash_process": true,
+        "module_ref": "lashlang:v2:blake3:93b4cbf8fa9ac47be98eaec61083ef95dda7df8c6efaf028b81468351c203523",
+        "process_ref": { "component": "57a0dc64da4566efeae196f9607a0278bfbb7913ab9ac9dd44e90d452703d69a", "pos": 0 },
+        "process_name": "__process_02178275819fb79b903c9a8b03a8b2d28c41708383b1728900e429e3a59b6a32",
+    });
+    let start = |label: &str| {
+        let definition = definition.clone();
+        let args = serde_json::json!({ "definition": definition, "label": label });
+        async move {
+            let (_, declared) = intents(attempt!("start_process", args));
+            let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
+                panic!("expected exactly one start declaration, got {declared:?}");
+            };
+            intent.declaration.clone()
+        }
+    };
+
+    let first = start("probe-a").await;
+    let second = start("probe-b").await;
+
+    let lash_core::ProcessInput::Engine {
+        payload: first_payload,
+        ..
+    } = &first.input
+    else {
+        panic!("a start declares an engine input");
+    };
+    let lash_core::ProcessInput::Engine {
+        payload: second_payload,
+        ..
+    } = &second.input
+    else {
+        panic!("a start declares an engine input");
+    };
+    assert_eq!(
+        first_payload, second_payload,
+        "the label is not part of the engine payload, so the definition bytes are identical"
+    );
+    assert_eq!(
+        first_payload.get("module_ref"),
+        Some(&definition["module_ref"]),
+        "the module ref the literal lifted to is untouched"
+    );
+    assert_eq!(
+        first
+            .identity
+            .as_ref()
+            .and_then(|identity| identity.label.as_deref()),
+        Some("probe-a")
+    );
+    assert_eq!(
+        second
+            .identity
+            .as_ref()
+            .and_then(|identity| identity.label.as_deref()),
+        Some("probe-b")
+    );
+}
+
+/// A start that names no label declares none, so the engine's derived label —
+/// for Lashlang, the lift digest — stays the row's label.
+#[tokio::test]
+async fn a_start_without_a_label_declares_no_identity() {
+    let outcome = attempt!(
+        "start_process",
+        serde_json::json!({ "definition": { "$lash_process": true, "process_name": "on_button" } })
+    );
+    let (_, declared) = intents(outcome);
+    let [ToolIntent::StartProcess(intent)] = declared.as_slice() else {
+        panic!("expected one start declaration");
+    };
+    assert!(intent.declaration.identity.is_none());
+}
+
+/// The argument is documented, so an unusable value is refused rather than
+/// dropped: silently ignoring it is the defect this plumbing fixes.
+#[tokio::test]
+async fn start_process_refuses_a_label_that_is_not_a_usable_string() {
+    for label in [serde_json::json!(7), serde_json::json!("   ")] {
+        let message = refusal(attempt!(
+            "start_process",
+            serde_json::json!({
+                "definition": { "$lash_process": true, "process_name": "on_button" },
+                "label": label,
+            })
+        ));
+        assert!(message.contains("`label`"), "{message}");
+    }
+}
