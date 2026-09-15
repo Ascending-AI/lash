@@ -112,7 +112,16 @@ and `Promise.allSettled`. Tool calls must be awaited directly or consumed as pen
 `typescript.tool` module paths; their rendered signatures return `Promise<T>`,
 and unknown module paths enter the executor's deferred tool-resolution path.
 
-**Durable work is a static definition object**, in exactly the shape
+**Amendment (FIG-2999, 2026-09-15): `defineProcess`, `start`, `wake` and
+`registerTrigger` are deleted.** A process is an ordinary uncalled `async` arrow
+bound at top level or passed to a tool whose slot expects one, its signals are
+inferred from the `waitSignal` calls in its body, and starting, signalling,
+yielding and registering a trigger are leaf tools the catalogue declares
+([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)). The
+rest of this section records the design those forms had, and no longer describes
+the dialect.
+
+**Durable work was a static definition object**, in exactly the shape
 `const worker = defineProcess({ name: "worker", signals: {}, run: async (...) => { ... } })`,
 declared at top level. `start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`
 and cell-only `finish` lower to the shared process and effect machinery;

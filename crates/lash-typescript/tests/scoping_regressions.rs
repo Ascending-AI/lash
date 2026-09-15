@@ -362,8 +362,8 @@ fn dead_process_handle_names_do_not_change_await_lowering() {
     // unrelated later binding, turning `await` on a settled value into a
     // process await.
     let source = r#"
-        const worker = defineProcess({ name: "worker", run: async () => 1 });
-        { const handle = start(worker); }
+        const worker = async () => 1;
+        { const handle = await processes.start({ definition: worker }); }
         { const handle = 5; finish(await handle); }
     "#;
     let program = lash_typescript::parse(source).expect("runtime handle classification");
@@ -373,8 +373,8 @@ fn dead_process_handle_names_do_not_change_await_lowering() {
 fn process_handle_program(binding_kind: &str, terminal: &str) -> lashlang::Program {
     let source = format!(
         r#"
-        const worker = defineProcess({{ name: "worker", run: async () => 1 }});
-        {binding_kind} handle = start(worker);
+        const worker = async () => 1;
+        {binding_kind} handle = await processes.start({{ definition: worker }});
         {terminal}
         "#
     );
@@ -409,15 +409,18 @@ fn contains_typed_process_await(expr: &lashlang::Expr) -> bool {
 
 #[test]
 fn let_process_handle_direct_await_matches_const_lowering() {
+    // The typed process-handle binding role is gone with the process special
+    // forms: an await on a handle is classified at runtime whatever the binding
+    // form, so `let` and `const` still lower identically — now both at runtime.
     for binding_kind in ["const", "let"] {
         let program = process_handle_program(binding_kind, "finish(await handle);");
         assert!(
-            !contains_runtime_await(&program.main),
-            "{binding_kind} direct await must not use runtime classification"
+            contains_runtime_await(&program.main),
+            "{binding_kind} direct await is classified at runtime"
         );
         assert!(
-            contains_typed_process_await(&program.main),
-            "{binding_kind} direct await must use the typed process-handle shape"
+            !contains_typed_process_await(&program.main),
+            "{binding_kind} direct await must not take a typed process-handle shape"
         );
     }
     assert_let_handle_matches_const("finish(await handle);");
@@ -436,8 +439,8 @@ fn let_process_handle_all_settled_matches_const_lowering() {
 #[test]
 fn reassigned_let_process_handle_returns_to_runtime_await_classification() {
     let source = r#"
-        const worker = defineProcess({ name: "worker", run: async () => 1 });
-        let handle = start(worker);
+        const worker = async () => 1;
+        let handle = await processes.start({ definition: worker });
         handle = 5;
         finish(await handle);
     "#;
@@ -448,9 +451,9 @@ fn reassigned_let_process_handle_returns_to_runtime_await_classification() {
 #[test]
 fn reassigned_let_process_handle_inside_loop_never_gets_the_typed_role() {
     let source = r#"
-        const worker = defineProcess({ name: "worker", run: async () => 1 });
+        const worker = async () => 1;
         const ts = [1, 2];
-        let handle = start(worker);
+        let handle = await processes.start({ definition: worker });
         for (const t of ts) {
             await handle;
             handle = t;
@@ -467,9 +470,9 @@ fn compound_and_update_back_edges_also_block_the_typed_role() {
     for mutation in ["handle += t;", "handle++;"] {
         let source = format!(
             r#"
-            const worker = defineProcess({{ name: "worker", run: async () => 1 }});
+            const worker = async () => 1;
             const ts = [1, 2];
-            let handle = start(worker);
+            let handle = await processes.start({{ definition: worker }});
             for (const t of ts) {{
                 await handle;
                 {mutation}
@@ -491,30 +494,6 @@ fn assignment_preserves_the_exotic_iterable_role_through_its_rhs() {
         ),
         Value::String("1,2".into())
     );
-}
-
-#[test]
-fn start_resolves_its_target_through_the_scope_stack() {
-    // `start` resolves its argument like every other read: a parameter that
-    // shadows the process binding is not the process.
-    let shadowed = r#"
-        const worker = defineProcess({ name: "worker", run: async () => 1 });
-        const f = (worker: number) => start(worker);
-        finish(f(1));
-    "#;
-    assert_eq!(
-        lash_typescript::parse(shadowed)
-            .expect_err("a shadowing parameter is not a process definition")
-            .code,
-        lash_typescript::DiagnosticCode::ProcessTargetStaticRequired
-    );
-    // The unshadowed target still resolves.
-    let visible = r#"
-        const worker = defineProcess({ name: "worker", run: async () => 1 });
-        const handle = start(worker);
-        finish(1);
-    "#;
-    lash_typescript::parse(visible).expect("a top-level process binding starts");
 }
 
 /// A top-level typo deep in a cell must be refused before a single effect

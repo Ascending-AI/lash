@@ -7,10 +7,7 @@
 
 use lashlang::{AssignTarget, Expr as LashExpr, Program as LashProgram};
 
-use super::{
-    Binding, BindingKind, BindingRole, GENERATED_BINDING_PREFIX, Lowerer, Scope,
-    assigned_identifiers_in_statements,
-};
+use super::{Binding, BindingKind, BindingRole, GENERATED_BINDING_PREFIX, Lowerer, Scope};
 use crate::Diagnostic;
 use crate::adapter;
 
@@ -103,7 +100,6 @@ fn lower_with_ambient_kind(
 ) -> Result<LashProgram, Diagnostic> {
     let mut lowerer = Lowerer {
         root_scope_depth: 2,
-        root_assigned_identifiers: assigned_identifiers_in_statements(&program.statements),
         module_authority_roots: module_authority_roots.clone(),
         called_bindings: super::binding::called_binding_names(&program.statements),
         ..Lowerer::default()
@@ -124,8 +120,6 @@ fn lower_with_ambient_kind(
                 owner_function: 0,
                 role: if process_handles.contains(name) {
                     BindingRole::ProcessHandle
-                } else if ambient_processes.contains(name) {
-                    BindingRole::ProcessDefinition(name.clone())
                 } else {
                     BindingRole::Plain
                 },

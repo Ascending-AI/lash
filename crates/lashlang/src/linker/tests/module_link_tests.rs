@@ -43,6 +43,7 @@ fn linked_module_accepts_restate_board_process_with_imported_schemas() {
     catalog
         .add_module_operation(["board"], "Board", "play", "play", play_input, play_output)
         .expect("host catalog operation must not conflict");
+    crate::testing::harness::add_process_control_operations(&mut catalog);
     let environment = LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
     // process play_center_once(board_tool: Board) {
     //   state = await board_tool.read({})?
@@ -185,28 +186,7 @@ fn linked_module_accepts_top_level_signal_run() {
 }
 
 #[test]
-fn linked_module_rejects_bad_process_args_and_unresolved_operations() {
-    // process scan(tool: Tools, path: str) { finish path }
-    // start scan(tool: tools)
-    let missing_arg = builders::module(
-        vec![builders::process(
-            "scan",
-            vec![
-                builders::param("tool", TypeExpr::Ref("Tools".into())),
-                builders::param("path", TypeExpr::Str),
-            ],
-            builders::block(vec![builders::finish(builders::var("path"))]),
-        )],
-        vec![builders::start(
-            "scan",
-            vec![("tool", builders::resource(&["tools"]))],
-        )],
-    );
-    assert!(matches!(
-        LinkedModule::link(missing_arg, full_host_environment()),
-        Err(LinkError::MissingProcessArgument { arg, .. }) if arg == "path"
-    ));
-
+fn linked_module_rejects_unresolved_operations() {
     // process scan(tool: Tools) { finish await tool.missing({})? }
     let bad_operation = builders::module(
         vec![builders::process(
@@ -228,41 +208,11 @@ fn linked_module_rejects_bad_process_args_and_unresolved_operations() {
     ));
 }
 
+/// `sleep` is the one remaining engine ability (FIG-2999): processes, process
+/// signals and triggers are no longer gated by the linker at all — whether the
+/// host offers them is whether it rendered their tools.
 #[test]
-fn linked_module_rejects_disabled_abilities() {
-    // process worker() { finish null }
-    let process = builders::module(
-        vec![builders::process(
-            "worker",
-            Vec::new(),
-            builders::block(vec![builders::finish(builders::null())]),
-        )],
-        Vec::new(),
-    );
-    assert!(matches!(
-        LinkedModule::link(
-            process,
-            LashlangHostEnvironment::new(resources(), LashlangAbilities::default())
-        ),
-        Err(LinkError::FeatureDisabled {
-            feature: "processes",
-            ..
-        })
-    ));
-
-    // start worker()
-    let start = builders::program(vec![builders::start("worker", Vec::new())]);
-    assert!(matches!(
-        LinkedModule::link(
-            start,
-            LashlangHostEnvironment::new(resources(), LashlangAbilities::default())
-        ),
-        Err(LinkError::FeatureDisabled {
-            feature: "processes",
-            ..
-        })
-    ));
-
+fn linked_module_rejects_disabled_sleep() {
     // sleep for "1s"
     let sleep = builders::program(vec![builders::sleep_for(builders::string("1s"))]);
     assert!(matches!(
@@ -276,67 +226,9 @@ fn linked_module_rejects_disabled_abilities() {
         })
     ));
 
-    // process worker() signals { ready: any } { payload = wait_signal("ready") }
-    let signal = builders::module(
-        vec![builders::process_with_signals(
-            "worker",
-            Vec::new(),
-            vec![builders::signal("ready", TypeExpr::Any)],
-            builders::block(vec![builders::assign(
-                "payload",
-                builders::wait_signal("ready"),
-            )]),
-        )],
-        Vec::new(),
-    );
-    assert!(matches!(
-        LinkedModule::link(
-            signal,
-            LashlangHostEnvironment::new(
-                resources(),
-                LashlangAbilities::default().with_processes()
-            )
-        ),
-        Err(LinkError::FeatureDisabled {
-            feature: "process signals",
-            ..
-        })
-    ));
-
-    // process worker(tick: timer.Tick) { finish true }
-    // source = timer.Schedule({ expr: "0 8 * * *" })
-    // await triggers.register({ source: source, target: worker, inputs: { tick: trigger.event } })?
-    let trigger = builders::module(
-        vec![builders::process(
-            "worker",
-            vec![builders::param("tick", TypeExpr::Ref("timer.Tick".into()))],
-            builders::block(vec![builders::finish(builders::bool_lit(true))]),
-        )],
-        vec![
-            builders::assign("source", timer_schedule("0 8 * * *")),
-            triggers_call(
-                "register",
-                vec![
-                    ("source", builders::var("source")),
-                    ("target", builders::var("worker")),
-                    ("inputs", builders::record(vec![("tick", trigger_event())])),
-                ],
-            ),
-        ],
-    );
-    assert!(matches!(
-        LinkedModule::link(
-            trigger,
-            LashlangHostEnvironment::new(
-                resources(),
-                LashlangAbilities::default().with_processes()
-            )
-        ),
-        Err(LinkError::FeatureDisabled {
-            feature: "triggers",
-            ..
-        })
-    ));
+    // The same module links against a host with every ability granted.
+    let sleep = builders::program(vec![builders::sleep_for(builders::string("1s"))]);
+    LinkedModule::link(sleep, full_host_environment()).expect("granted sleep links");
 }
 
 #[test]
@@ -496,7 +388,7 @@ fn linked_module_hash_ignores_unused_host_abilities() {
     .expect("link minimal");
     let processes = LinkedModule::link(
         program,
-        LashlangHostEnvironment::new(resources(), LashlangAbilities::default().with_processes()),
+        LashlangHostEnvironment::new(resources(), LashlangAbilities::default()),
     )
     .expect("link process ability");
 

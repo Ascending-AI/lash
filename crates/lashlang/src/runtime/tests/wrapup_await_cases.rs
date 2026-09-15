@@ -60,7 +60,7 @@ impl ExecutionHost for ComprehensionBatchHost {
         match op {
             AbilityOp::ResourceOperation(operation) => {
                 self.singles.fetch_add(1, Ordering::SeqCst);
-                Self::perform_operation(operation).map(AbilityResult::Value)
+                Self::perform_operation(*operation).map(AbilityResult::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 self.batches
@@ -117,7 +117,7 @@ impl ExecutionHost for AggregateProcessHost {
                         .collect(),
                 ),
             )),
-            AbilityOp::StartProcess(_) => {
+            AbilityOp::ResourceOperation(_) => {
                 let mut handle = Record::new();
                 handle.insert(
                     lash_sansio::handle::HANDLE_FIELD.to_string(),
@@ -201,6 +201,7 @@ fn comprehension_compile(program: Program) -> CompiledProgram {
             )
             .unwrap();
     }
+    crate::testing::harness::add_process_control_operations(&mut catalog);
     let linked = crate::LinkedModule::link(
         program,
         crate::LashlangHostEnvironment::new(catalog, crate::LashlangAbilities::all()),

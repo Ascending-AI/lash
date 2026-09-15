@@ -351,14 +351,11 @@ impl LashlangSurface {
         }
     }
 
-    pub fn for_process_registry(mut self, process_registry_available: bool) -> Self {
+    /// Durable sleep is the only remaining engine ability. Whether the
+    /// process surface is available is read off the rendered tool catalogue,
+    /// not off an ability flag (FIG-2999).
+    pub fn for_process_registry(mut self, _process_registry_available: bool) -> Self {
         self.abilities = self.abilities.with_sleep();
-        if process_registry_available {
-            self.abilities = self.abilities.with_processes().with_process_signals();
-        } else {
-            self.abilities.processes = false;
-            self.abilities.process_signals = false;
-        }
         self
     }
 
@@ -463,9 +460,7 @@ pub fn lashlang_host_environment_from_tool_catalog(
             ),
         )?;
     }
-    if abilities.triggers {
-        lashlang::add_trigger_resource_operations(&mut resources)?;
-    }
+    lashlang::add_trigger_resource_operations(&mut resources)?;
     Ok(
         LashlangHostEnvironment::new(resources, abilities)
             .with_language_features(language_features),
@@ -526,17 +521,8 @@ pub fn lashlang_host_environment_satisfies_requirements(
 ) -> Result<(), LashlangRuntimeError> {
     let abilities = required.abilities;
     let current_abilities = current.abilities;
-    if abilities.processes && !current_abilities.processes {
-        return Err(LashlangRuntimeError::ProcessesUnavailable);
-    }
     if abilities.sleep && !current_abilities.sleep {
         return Err(LashlangRuntimeError::SleepUnavailable);
-    }
-    if abilities.process_signals && !current_abilities.process_signals {
-        return Err(LashlangRuntimeError::ProcessSignalsUnavailable);
-    }
-    if abilities.triggers && !current_abilities.triggers {
-        return Err(LashlangRuntimeError::TriggersUnavailable);
     }
     if required.language_features.label_annotations && !current.language_features.label_annotations
     {

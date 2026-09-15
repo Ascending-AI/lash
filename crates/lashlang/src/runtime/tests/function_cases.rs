@@ -789,10 +789,7 @@ async fn closures_obey_the_complete_host_boundary_matrix() {
         );
     }
 
-    for (boundary, expr) in [
-        ("yield", Expr::Yield(Box::new(variable("f")))),
-        ("wake", Expr::Wake(Box::new(variable("f")))),
-    ] {
+    for (boundary, expr) in [("yield", Expr::Yield(Box::new(variable("f"))))] {
         let program = compile_program_internal(&Program::block(vec![assign("f", closure()), expr]));
         assert!(
             matches!(

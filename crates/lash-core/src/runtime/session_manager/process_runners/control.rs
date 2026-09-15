@@ -471,6 +471,20 @@ impl ProcessCapability {
         let registration = request.into_registration(None).with_process_provenance(
             crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
         );
+        // The registry row, not the declaration, is the durable truth for an
+        // already-registered child's attempt bound (FIG-2966). A declaring
+        // start stamps the host default in force when the attempt ran; a
+        // redrive of that same attempt after the operator moved the default
+        // would otherwise re-register the same deterministic id under a
+        // different registration fingerprint and conflict forever. Only a child
+        // with no row yet keeps the bound its declaration carried.
+        let registration = match self
+            .recorded_max_attempts(current, &registration.id)
+            .await?
+        {
+            Some(recorded) => registration.with_max_attempts(Some(recorded)),
+            None => registration,
+        };
         // A recorded intent declares its own execution env, so the engine gate
         // runs against the recorded spec instead of a stored env ref. It must
         // run here: once the start command crosses the journal the entry is

@@ -16,7 +16,7 @@ struct Host;
 impl ExecutionHost for Host {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperation(call) => echo_or_fail(call).map(AbilityResult::Value),
+            AbilityOp::ResourceOperation(call) => echo_or_fail(*call).map(AbilityResult::Value),
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
                 ResourceOperationBatchResult::settled_in_input_order(
                     batch

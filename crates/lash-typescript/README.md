@@ -57,19 +57,22 @@ Tool calls require `await` and use explicit `typescript.tool` module paths;
 their prompt signatures return `Promise<T>`. Unknown module paths participate
 in the executor's deferred tool-resolution path.
 
-Durable work has the static shape
-`const worker = defineProcess({ name: "worker", signals: {}, run: async (...) => { ... } })`.
-`start`, `registerTrigger`, `wake`, `waitSignal`, `sleep`, and `finish` lower to
-the shared process/effect machinery. `wake(value)` emits progress from a run;
-`wake(handle, "signal", payload)` sends a declared signal to another run.
-`finish` is cell-only. A normal return from `run` finishes the
+Durable work is an ordinary value: a process is a top-level `const`-bound
+uncalled `async` arrow — `const worker = async (...) => { ... }` — that the
+linker lifts wherever a `Process` is expected. Starting, awaiting, signalling
+and cancelling one are catalogue tools rather than language constructs:
+`await processes.start({ definition: worker, args: { ...args } })` returns a handle,
+`await handle` its result, `await processes.emit({ value })` emits progress
+from a run and `await processes.signal({ handle, name, payload })` sends a
+declared signal to another run. `waitSignal`, `sleep` and `finish` remain
+constructs; `finish` is cell-only. A normal return from the arrow finishes the
 process only after all enclosing `finally` blocks execute; an uncaught throw
-fails it. Dynamic process definitions and targets reject with dedicated
-`TS_PROCESS_*` diagnostics.
+fails it. A capture the lift cannot carry by value rejects as a non-liftable
+capture.
 
 A trigger registration binds the fired event through the `inputs` arrow:
-`inputs: (event) => ({ tick: event })`, on `registerTrigger` and on
-`triggers.register` / `update` / `revive` alike. The arrow is a template the
+`inputs: (event) => ({ tick: event })`, on `triggers.register` / `update` /
+`revive` alike. The arrow is a template the
 compiler erases, not a callback: exactly one plain parameter, no `async`, an
 object-expression body with static unique keys, and the parameter usable only
 as a whole, direct property value — never projected, nested, called or
@@ -211,7 +214,7 @@ language semantics:
   execution with the existing typed VM bound errors.
 - Await permission stops at every function boundary: an async IIFE or async
   `map` callback must await its own tool calls, `sleep`, `waitSignal`, and
-  `registerTrigger` operations.
+  `triggers.register` operations.
 - Durable state is a value *tree*. A cycle is usable inside a cell —
   `JSON.stringify` throws Node's catchable
   `TypeError: Converting circular structure to JSON` — but a durable binding

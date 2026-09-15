@@ -888,7 +888,7 @@ pub(super) async fn segmented_child_await_registration(
         module,
         lashlang::LashlangHostEnvironment::new(
             lashlang::LashlangHostCatalog::new(),
-            lashlang::LashlangAbilities::default().with_processes(),
+            lashlang::LashlangAbilities::default(),
         ),
     )
     .expect("link segmented child-await law");
@@ -1133,10 +1133,7 @@ pub(super) async fn snapshot_lashlang_registration(
         module,
         lashlang::LashlangHostEnvironment::new(
             resources,
-            lashlang::LashlangAbilities::default()
-                .with_processes()
-                .with_sleep()
-                .with_process_signals(),
+            lashlang::LashlangAbilities::default().with_sleep(),
         ),
     )
     .expect("link snapshot lashlang module");

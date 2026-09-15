@@ -12,15 +12,13 @@ use lash_core::{
     facade_support::TraceRecord, facade_support::TraceRuntimeSubject, facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
-    LASHLANG_ENGINE_KIND, TraceLanguageChildExecution, TraceLanguageExecution,
-    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, lashlang_value_to_json,
-    prepare_lashlang_process_start, process_sleep, protocol_tool_output_to_lashlang_value,
-    resolve_lashlang_module_operation,
+    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
+    TraceLanguageExecutionPayload, lashlang_value_to_json, process_sleep,
+    protocol_tool_output_to_lashlang_value, resolve_lashlang_module_operation,
 };
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ProcessSignal, ProcessStart,
-    ProjectedFuture, Record as FlowRecord, Sleep, Value as FlowValue, ValueProjectionContext,
-    ValueProjector,
+    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ProjectedFuture,
+    Record as FlowRecord, Sleep, Value as FlowValue, ValueProjectionContext, ValueProjector,
 };
 use serde_json::Value;
 
@@ -42,8 +40,6 @@ pub(super) struct HostBridge<'run> {
     /// this execution actually starts a child: an execution that never starts
     /// one pins nothing and leaves the durable snapshot root alone.
     child_max_attempts: Mutex<Option<std::num::NonZeroU32>>,
-    /// Host default consulted only when nothing is pinned yet.
-    child_max_attempts_default: std::num::NonZeroU32,
 }
 
 pub(super) struct HostBridgeConfig<'run> {
@@ -55,8 +51,6 @@ pub(super) struct HostBridgeConfig<'run> {
     pub artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
     /// Bound already pinned by an earlier cell of this execution, if any.
     pub child_max_attempts: Option<std::num::NonZeroU32>,
-    /// Host default this cell would pin if it is the first to start a child.
-    pub child_max_attempts_default: std::num::NonZeroU32,
 }
 
 type HostAbilityFuture<'a> =
@@ -77,15 +71,7 @@ impl<'run> HostBridge<'run> {
             deferred_execution_grants: config.deferred_execution_grants,
             artifact_store: config.artifact_store,
             child_max_attempts: Mutex::new(config.child_max_attempts),
-            child_max_attempts_default: config.child_max_attempts_default,
         }
-    }
-
-    /// Resolves the attempt bound for a child this cell is about to start,
-    /// pinning the host default on the first such start.
-    fn pin_child_max_attempts(&self) -> std::num::NonZeroU32 {
-        let mut guard = self.child_max_attempts.lock_recover();
-        *guard.get_or_insert(self.child_max_attempts_default)
     }
 
     /// The bound this execution has pinned, if it started a child at all.
@@ -594,42 +580,6 @@ impl HostBridge<'_> {
         )
     }
 
-    async fn start_process(&self, start: ProcessStart) -> Result<FlowValue, ExecutionHostError> {
-        let prepared = {
-            let _phase = self.ctx.named_phase("rlm_process.prepare_start");
-            let parent_start_seed = lashlang_parent_start_seed(&self.ctx);
-            prepare_lashlang_process_start(
-                std::sync::Arc::clone(&self.artifact_store),
-                &parent_start_seed,
-                start,
-                self.ctx.trigger_actor(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    self.ctx
-                        .child_process_parent_scope()
-                        .await
-                        .map_err(|error| ExecutionHostError::new(error.to_string()))?,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-                lash_core::RecoveryContract::Rerunnable,
-                self.pin_child_max_attempts(),
-            )
-            .await
-            .map_err(|err| ExecutionHostError::new(err.to_string()))?
-        };
-        let reply = {
-            let _phase = self.ctx.named_phase("rlm_process.start");
-            self.ctx
-                .start_child_process(prepared.request, LASHLANG_ENGINE_KIND, prepared.label)
-                .await
-        };
-        let (result, host_record) = self.consume_reply(reply);
-        debug_assert!(
-            host_record.is_none(),
-            "start_process must remain record-free"
-        );
-        result
-    }
-
     async fn await_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
         let index = self.next_index();
         let reply = {
@@ -642,37 +592,6 @@ impl HostBridge<'_> {
                 .await
         };
         self.consume_recorded_reply(index, "await_handle", reply)
-    }
-
-    async fn cancel_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
-        let index = self.next_index();
-        let reply = self
-            .ctx
-            .cancel_tool_handle(
-                uuid::Uuid::new_v4().to_string(),
-                handle_to_json(&handle).await?,
-            )
-            .await;
-        self.consume_recorded_reply(index, "cancel_handle", reply)
-    }
-
-    async fn signal_run(&self, signal: ProcessSignal) -> Result<FlowValue, ExecutionHostError> {
-        let index = self.next_index();
-        let handle = handle_to_json(&signal.run).await?;
-        let payload = handle_to_json(&signal.payload).await?;
-        let reply = self
-            .ctx
-            .signal_tool_handle(
-                uuid::Uuid::new_v4().to_string(),
-                handle,
-                signal.name,
-                payload,
-            )
-            .await;
-        self.consume_recorded_reply(index, "signal_run", reply)?;
-        // `signal_run` evaluates to null in the language; its executed-call host
-        // record is retained without becoming the expression value.
-        Ok(FlowValue::Null)
     }
 
     async fn print(&self, value: FlowValue) -> Result<(), ExecutionHostError> {
@@ -715,7 +634,7 @@ impl HostBridge<'_> {
                     receiver,
                     args,
                     call_site,
-                } = operation;
+                } = *operation;
                 Box::pin(self.resource_operation(operation, receiver, args, call_site))
                     .await
                     .map(AbilityResult::Value)
@@ -725,14 +644,8 @@ impl HostBridge<'_> {
                     self.resource_operation_batch(batch).await,
                 ))
             }),
-            AbilityOp::StartProcess(start) => {
-                Box::pin(async move { self.start_process(*start).await.map(AbilityResult::Value) })
-            }
             AbilityOp::Await(handle) => {
                 Box::pin(async move { self.await_handle(handle).await.map(AbilityResult::Value) })
-            }
-            AbilityOp::Cancel(handle) => {
-                Box::pin(async move { self.cancel_handle(handle).await.map(AbilityResult::Value) })
             }
             AbilityOp::Print(value) => Box::pin(async move {
                 self.print(value).await?;
@@ -751,9 +664,6 @@ impl HostBridge<'_> {
                     "`wait_signal` is only available inside lashlang process bodies",
                 ))
             }),
-            AbilityOp::SignalRun(signal) => {
-                Box::pin(async move { self.signal_run(signal).await.map(AbilityResult::Value) })
-            }
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => {
                 Box::pin(async move { Ok(AbilityResult::Value(value)) })
             }
@@ -865,18 +775,6 @@ async fn handle_to_json(value: &FlowValue) -> Result<Value, ExecutionHostError> 
         FlowValue::Projected(_) => Ok(flow_to_json_value(value).await),
         _ => lashlang_value_to_json(value),
     }
-}
-
-fn lashlang_parent_start_seed(ctx: &RuntimeExecutionContext<'_>) -> String {
-    if let Some(invocation) = ctx.parent_invocation() {
-        if let Some(replay_key) = invocation.replay_key() {
-            return format!("runtime-replay:{replay_key}");
-        }
-        if let Some(effect_id) = invocation.effect_id() {
-            return format!("runtime-effect:{effect_id}");
-        }
-    }
-    format!("runtime-scope:{}", ctx.execution_scope_id())
 }
 
 fn flow_values_to_json<'a>(values: &'a [FlowValue]) -> ProjectedFuture<'a, Vec<Value>> {

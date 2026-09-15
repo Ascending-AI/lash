@@ -5,10 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
 use crate::span::Span;
-use crate::{
-    LashlangExecutionChild, LashlangExecutionObservation, LashlangExecutionSite,
-    ProcessBranchSelection,
-};
+use crate::{LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection};
 use rustc_hash::FxHashMap;
 
 mod continuation;
@@ -845,12 +842,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::WaitSignal { name })));
             }
-            Instruction::ProcessSignalRun { name } => {
-                // `signal_run` (sending) is allowed from the foreground turn as
-                // well as inside a process body, mirroring `await` / `cancel`.
-                // Only `wait_signal` (receiving) is gated to `VmMode::Process`.
-                return Ok(Some(VmStep::Effect(VmEffect::SignalRun { name })));
-            }
             Instruction::ProcessYield => {
                 if self.mode != VmMode::Process {
                     return Err(RuntimeError::SessionProcessAdminOutsideProcess {
@@ -859,16 +850,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 }
                 return Ok(Some(VmStep::Effect(VmEffect::ProcessEvent(
                     ProcessEventKind::Yield,
-                ))));
-            }
-            Instruction::ProcessWake => {
-                if self.mode != VmMode::Process {
-                    return Err(RuntimeError::SessionProcessAdminOutsideProcess {
-                        keyword: "wake".into(),
-                    });
-                }
-                return Ok(Some(VmStep::Effect(VmEffect::ProcessEvent(
-                    ProcessEventKind::Wake,
                 ))));
             }
             Instruction::ProcessFail => {
@@ -1206,17 +1187,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ResourceOperationListBatch(batch) => {
                 return Ok(VmStep::Effect(VmEffect::ResourceOperationListBatch(batch)));
             }
-            Instruction::StartProcess { process, keys } => {
-                return Ok(VmStep::Effect(VmEffect::StartProcess { process, keys }));
-            }
             Instruction::AwaitHandle => {
                 return Ok(VmStep::Effect(VmEffect::AwaitHandle));
             }
             Instruction::AwaitHandleUnwrap => {
                 return Ok(VmStep::Effect(VmEffect::AwaitHandleUnwrap));
-            }
-            Instruction::CancelHandle => {
-                return Ok(VmStep::Effect(VmEffect::CancelHandle));
             }
             Instruction::Intrinsic(op) => {
                 self.execute_intrinsic_instruction(op).await?;
@@ -1323,9 +1298,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::SleepFor
             | Instruction::SleepUntil
             | Instruction::ProcessWaitSignal { .. }
-            | Instruction::ProcessSignalRun { .. }
             | Instruction::ProcessYield
-            | Instruction::ProcessWake
             | Instruction::ProcessFail
             | Instruction::ObserveStep
             | Instruction::Pop

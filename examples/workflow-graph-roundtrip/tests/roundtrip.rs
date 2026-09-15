@@ -225,12 +225,9 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
     assert!(saved.id_map.contains_key("new:process"));
     assert_eq!(saved.document.roots.processes.len(), 2);
     assert!(
-        saved
-            .document
-            .source
-            .starts_with(
-                "const my_process = defineProcess({\n  name: \"my_process\",\n  signals: {},\n  run: async () => {\n    return 0;\n  },\n});\nconst blank = defineProcess("
-            )
+        saved.document.source.starts_with(
+            "const my_process = async () => {\n  return 0;\n};\nconst blank = async ("
+        )
     );
     let added = saved
         .document
@@ -262,7 +259,7 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
     );
 
     // FIG-3057: the seeded process's only statement is the closing `return`,
-    // which still sits inside the projected `defineProcess` wrapper and so
+    // which still sits inside the projected process wrapper and so
     // correlates no execution site. The run still completes without failing.
     let events = run_workflow(&client, &base).await;
     assert!(events.iter().all(|event| event.status != RunStatus::Failed));
@@ -328,7 +325,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
     let mut saved: SaveWorkflowResponse = serde_json::from_slice(&body).expect("saved workflow");
     assert_eq!(
         saved.document.source,
-        "const renamed = defineProcess({\n  name: \"renamed\",\n  signals: { \"continue\": null, stop: \"\" },\n  run: async (input, enabled) => {\n    return 0;\n  },\n});\n"
+        "const renamed = async (input, enabled) => {\n  return 0;\n};\n"
     );
 
     let process = saved
@@ -351,7 +348,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
     let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
     assert_eq!(
         saved.document.source,
-        "const revised = defineProcess({\n  name: \"revised\",\n  signals: { \"continue\": null },\n  run: async (input) => {\n    return 0;\n  },\n});\n"
+        "const revised = async (input) => {\n  return 0;\n};\n"
     );
     let process = saved
         .document
@@ -360,7 +357,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .find(|node| node.data.kind == "process")
         .expect("reprojected revised process");
     assert_eq!(process.data.process_name.as_deref(), Some("revised"));
-    // FIG-3033: a canonical `defineProcess` prints its run parameters without
+    // FIG-3033: a canonical process arrow prints its parameters without
     // type annotations, so an authored parameter type does not survive the
     // round trip. The parameter itself, and its position, do.
     assert_eq!(
@@ -484,7 +481,7 @@ async fn source_projection_is_a_stateless_canonical_fixpoint_with_typed_errors()
     let response = client
         .post(format!("{base}/project"))
         .json(&serde_json::json!({
-            "source": "const drafted = defineProcess({ name: \"drafted\", signals: {}, run: async (input) => { let value = input; return value; } });"
+            "source": "const drafted = async (input) => { let value = input; return value; };"
         }))
         .send()
         .await
@@ -531,7 +528,7 @@ async fn source_projection_is_a_stateless_canonical_fixpoint_with_typed_errors()
 
     let response = client
         .post(format!("{base}/project"))
-        .json(&serde_json::json!({ "source": "const broken = defineProcess({" }))
+        .json(&serde_json::json!({ "source": "const broken = async (" }))
         .send()
         .await
         .expect("POST /project invalid source");
@@ -563,18 +560,14 @@ async fn projected_available_vars_follow_ssa_and_nested_lexical_scope() {
         .post(format!("http://{addr}/project"))
         .json(&serde_json::json!({
             "source": r#"
-                const scoped = defineProcess({
-                  name: "scoped",
-                  signals: {},
-                  run: async (record) => {
-                    let state = { count: 0 };
-                    let first = 1;
-                    for (const item of [1]) {
-                      let nested = first + item;
-                    }
-                    return state;
-                  },
-                });
+                const scoped = async (record) => {
+                  let state = { count: 0 };
+                  let first = 1;
+                  for (const item of [1]) {
+                    let nested = first + item;
+                  }
+                  return state;
+                };
             "#
         }))
         .send()
@@ -940,7 +933,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
 
         let events = run_workflow(&client, &base).await;
         // FIG-3057: a TypeScript process body is still projected through the
-        // `defineProcess` wrapper, so a workflow whose only statement is the
+        // process wrapper, so a workflow whose only statement is the
         // closing `return` correlates no execution site yet. Every corpus that
         // performs work still emits events, and the blank starting point runs
         // to completion without failing.
@@ -978,7 +971,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
                 .all(|pair| pair[0].sequence < pair[1].sequence)
         );
         // FIG-3057: the closing `return` of a TypeScript process still sits
-        // inside the projected `defineProcess` wrapper and correlates no
+        // inside the projected process wrapper and correlates no
         // execution site, so the run's last event is the workflow's last
         // correlated statement rather than its terminal node. The property kept
         // here is the one the assertion exists for: the run ends on a node the
@@ -1785,7 +1778,7 @@ async fn blank_workflow_grows_by_two_nodes_then_saves_and_runs() {
     let mut document = select_workflow(&client, &base, "blank").await;
     assert_eq!(
         document.source,
-        "const blank = defineProcess({\n  name: \"blank\",\n  signals: {},\n  run: async () => {\n    return 0;\n  },\n});\n"
+        "const blank = async () => {\n  return 0;\n};\n"
     );
 
     let mut status = new_flow_node("new:blank-status", "call", None, "Blank status");

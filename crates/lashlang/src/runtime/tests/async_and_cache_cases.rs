@@ -71,35 +71,44 @@ struct AsyncHost;
 impl ExecutionHost for AsyncHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
-            AbilityOp::ResourceOperation(operation) => {
-                Host.perform(AbilityOp::ResourceOperation(operation)).await
-            }
+            AbilityOp::ResourceOperation(operation) => match operation.operation.as_str() {
+                // `processes.start` is the tool spelling of the retired `start`
+                // form (FIG-2999): it answers with the process handle.
+                "start" => {
+                    // The start's own arguments ride in `args`, beside the
+                    // `definition` slot that carries the process itself.
+                    let args = operation
+                        .args
+                        .first()
+                        .and_then(Value::as_record)
+                        .and_then(|record| record.get("args"))
+                        .and_then(Value::as_record)
+                        .cloned()
+                        .unwrap_or_default();
+                    let mut record = Record::default();
+                    record.insert(
+                        lash_sansio::handle::HANDLE_FIELD.to_string(),
+                        Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                    );
+                    record.insert(
+                        "id".to_string(),
+                        Value::String(
+                            lash_sansio::handle::HandleId::process("proc-1", 1)
+                                .as_str()
+                                .into(),
+                        ),
+                    );
+                    record.insert(
+                        "value".to_string(),
+                        args.get("value").cloned().unwrap_or(Value::Null),
+                    );
+                    Ok(AbilityResult::Value(Value::Record(Arc::new(record))))
+                }
+                "cancel" | "signal" => Ok(AbilityResult::Value(Value::Null)),
+                _ => Host.perform(AbilityOp::ResourceOperation(operation)).await,
+            },
             AbilityOp::ResourceOperationBatch(batch) => {
                 Host.perform(AbilityOp::ResourceOperationBatch(batch)).await
-            }
-            AbilityOp::StartProcess(start) => {
-                let mut record = Record::default();
-                record.insert(
-                    lash_sansio::handle::HANDLE_FIELD.to_string(),
-                    Value::String(lash_sansio::handle::HANDLE_KIND.into()),
-                );
-                record.insert(
-                    "id".to_string(),
-                    Value::String(
-                        lash_sansio::handle::HandleId::process(&start.process_name, 1)
-                            .as_str()
-                            .into(),
-                    ),
-                );
-                record.insert(
-                    "process".to_string(),
-                    Value::String(start.process_name.into()),
-                );
-                record.insert(
-                    "value".to_string(),
-                    start.args.get("value").cloned().unwrap_or(Value::Null),
-                );
-                Ok(AbilityResult::Value(Value::Record(Arc::new(record))))
             }
             AbilityOp::Await(handle) => {
                 let record = handle
@@ -111,7 +120,6 @@ impl ExecutionHost for AsyncHost {
                 }
                 Ok(AbilityResult::Value(value))
             }
-            AbilityOp::Cancel(_) => Ok(AbilityResult::Value(Value::Null)),
             AbilityOp::Print(_) => Ok(AbilityResult::Unit),
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new("unsupported host ability")),
@@ -223,83 +231,6 @@ async fn process_handles_can_be_started_awaited_and_cancelled() {
     assert_eq!(record["value"], Value::String("done".into()));
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn start_process_returns_raw_handle_and_passes_explicit_input() {
-    let host = RecordingProcessHost::default();
-    // process scan(root: str) -> str { finish root }
-    // handle = start scan(root: ".")
-    // finish handle
-    let program = builders::module(
-        vec![builders::process_returning(
-            "scan",
-            vec![builders::param("root", TypeExpr::Str)],
-            TypeExpr::Str,
-            builders::block(vec![builders::finish(builders::var("root"))]),
-        )],
-        vec![
-            builders::assign(
-                "handle",
-                builders::start("scan", vec![("root", builders::string("."))]),
-            ),
-            builders::finish(builders::var("handle")),
-        ],
-    );
-    let mut state = State::new();
-    let outcome = execute_program(&program, &mut state, &host)
-        .await
-        .expect("program should run");
-    let ExecutionOutcome::Finished(value) = outcome else {
-        panic!("expected finish");
-    };
-    let handle = value.as_record().expect("start should return a handle");
-    // The one handle record: a marker field naming the one kind, and an opaque
-    // id that carries the process and the incarnation it was taken against.
-    assert_eq!(
-        handle[lash_sansio::handle::HANDLE_FIELD],
-        Value::String(lash_sansio::handle::HANDLE_KIND.into())
-    );
-    assert_eq!(
-        handle["id"],
-        Value::String(
-            lash_sansio::handle::HandleId::process("proc-1", 1)
-                .as_str()
-                .into()
-        )
-    );
-
-    let starts = host.starts.lock_recover();
-    assert_eq!(starts.len(), 1);
-    let start = &starts[0];
-    assert_eq!(start.process_name, "scan");
-    assert_eq!(start.args["root"], Value::String(".".into()));
-    assert!(start.module_ref.as_str().starts_with("lashlang:v2:blake3:"));
-    assert_eq!(start.start_site.site.node_kind, "child_process");
-    assert_eq!(start.start_site.site.label, "start scan");
-    assert_eq!(start.start_site.occurrence, 1);
-    assert!(start.start_site.site.node_id.starts_with("child_process:"));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn unlinked_compiled_program_rejects_unsited_process_starts() {
-    // process scan() { finish 1 }
-    // finish start scan()
-    let program = builders::module(
-        vec![scan_process()],
-        vec![builders::finish(builders::start("scan", Vec::new()))],
-    );
-    let compiled = compile_program(&program);
-    let mut state = State::new();
-
-    let err = execute_compiled(&compiled, &mut state, &RecordingProcessHost::default())
-        .await
-        .expect_err("unsited start should fail");
-
-    assert!(
-        err.to_string()
-            .contains("requires a deterministic lashlang execution site")
-    );
-}
-
 #[test]
 fn compiled_process_cache_reuses_process_ref_and_host_requirements_ref() {
     let linked = crate::LinkedModule::link(
@@ -374,7 +305,6 @@ async fn processes_emit_events_and_terminal_outcomes() {
     let host = RecordingProcessHost::default();
     let program = Program::block(vec![
         Expr::Yield(Box::new(Expr::String("checkpoint".into()))),
-        Expr::Wake(Box::new(Expr::String("ready".into()))),
         Expr::Finish(Box::new(Expr::String("done".into()))),
     ]);
     let mut state = State::new();
@@ -387,11 +317,9 @@ async fn processes_emit_events_and_terminal_outcomes() {
         ExecutionOutcome::Finished(Value::String("done".into()))
     );
     let events = host.events.lock_recover();
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 1);
     assert_eq!(events[0].kind, ProcessEventKind::Yield);
     assert_eq!(events[0].value, Value::String("checkpoint".into()));
-    assert_eq!(events[1].kind, ProcessEventKind::Wake);
-    assert_eq!(events[1].value, Value::String("ready".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -456,21 +384,8 @@ async fn value_position_while_leaves_null() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn process_lifecycle_controls_sleep_wait_and_signal() {
+async fn process_lifecycle_controls_sleep_and_wait() {
     let host = RecordingProcessHost::default();
-    let mut handle = Record::new();
-    handle.insert(
-        lash_sansio::handle::HANDLE_FIELD.to_string(),
-        Value::String(lash_sansio::handle::HANDLE_KIND.into()),
-    );
-    handle.insert(
-        "id".to_string(),
-        Value::String(
-            lash_sansio::handle::HandleId::process("target", 1)
-                .as_str()
-                .into(),
-        ),
-    );
     let program = Program::block(vec![
         Expr::SleepFor(Box::new(Expr::Number(5.0))),
         Expr::Assign {
@@ -479,16 +394,9 @@ async fn process_lifecycle_controls_sleep_wait_and_signal() {
                 name: "ready".into(),
             }),
         },
-        Expr::SignalRun {
-            run: Box::new(Expr::Variable("run".into())),
-            name: "ready".into(),
-            payload: Box::new(Expr::Variable("payload".into())),
-        },
         Expr::Finish(Box::new(Expr::Variable("payload".into()))),
     ]);
-    let mut globals = Record::new();
-    globals.insert("run".to_string(), Value::Record(Arc::new(handle)));
-    let mut state = State::from_snapshot(Snapshot::new(globals));
+    let mut state = State::new();
     let compiled = compile_program(&program);
 
     let outcome = execute_compiled_process(&compiled, &mut state, &host)
@@ -503,9 +411,6 @@ async fn process_lifecycle_controls_sleep_wait_and_signal() {
     assert_eq!(sleeps.len(), 1);
     assert_eq!(sleeps[0].kind, SleepKind::For);
     assert_eq!(sleeps[0].value, Value::Number(5.0));
-    let signals = host.signals.lock_recover();
-    assert_eq!(signals.len(), 1);
-    assert_eq!(signals[0].payload, Value::String("signal-payload".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -545,13 +450,10 @@ async fn process_mode_falling_off_end_finishes_null() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn foreground_rejects_programmatic_processes() {
-    // `signal_run` (sending) is intentionally NOT in this list: it is allowed
-    // from the foreground turn, like `await` / `cancel`. Only the receiving
-    // side, `wait_signal`, plus yield/wake/fail are process-only. `finish`
-    // is valid in foreground code and process code.
+    // The receiving side, `wait_signal`, plus yield/fail are process-only.
+    // `finish` is valid in foreground code and process code.
     for (keyword, stmt) in [
         ("yield", Expr::Yield(Box::new(Expr::String("event".into())))),
-        ("wake", Expr::Wake(Box::new(Expr::String("event".into())))),
         (
             "wait_signal",
             Expr::WaitSignal {
@@ -573,24 +475,6 @@ async fn foreground_rejects_programmatic_processes() {
             }
         );
     }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn foreground_allows_signal_run() {
-    let program = Program::block(vec![Expr::SignalRun {
-        run: Box::new(Expr::String("handle".into())),
-        name: "ready".into(),
-        payload: Box::new(Expr::String("ping".into())),
-    }]);
-    let mut state = State::new();
-    let host = RecordingProcessHost::default();
-    execute_program(&program, &mut state, &host)
-        .await
-        .expect("foreground signal_run should be allowed");
-    let signals = host.signals.lock_recover();
-    assert_eq!(signals.len(), 1);
-    assert_eq!(signals[0].name, "ready");
-    assert_eq!(signals[0].payload, Value::String("ping".into()));
 }
 
 #[tokio::test(flavor = "current_thread")]

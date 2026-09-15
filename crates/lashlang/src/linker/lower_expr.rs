@@ -120,7 +120,6 @@ impl<'module> Linker<'module> {
                 body,
             } => self.lower_for(expr, binding, iterable, body, scope),
             Expr::While { condition, body } => self.lower_while(expr, condition, body, scope),
-            Expr::StartProcess(start) => self.lower_start_process(start, scope),
             Expr::ProcessRef { process } => self.lower_process_ref(process, scope),
             Expr::HostDescriptorConstructor { type_name, input } => {
                 self.lower_host_descriptor_constructor(type_name, input, scope)
@@ -135,14 +134,9 @@ impl<'module> Linker<'module> {
             Expr::SleepFor(inner) => self.lower_sleep_for(inner, scope),
             Expr::SleepUntil(inner) => self.lower_sleep_until(inner, scope),
             Expr::WaitSignal { name } => self.lower_wait_signal(name, scope, expected),
-            Expr::SignalRun { run, name, payload } => {
-                self.lower_signal_run(run, name, payload, scope)
-            }
             Expr::ResultUnwrap(inner) => self.lower_result_unwrap(inner, scope, expected),
-            Expr::Cancel(inner) => self.lower_cancel(inner, scope),
             Expr::Print(inner) => self.lower_print(inner, scope),
             Expr::Yield(inner) => self.lower_yield(inner, scope),
-            Expr::Wake(inner) => self.lower_wake(inner, scope),
             Expr::Finish(inner) => self.lower_finish(expr, inner, scope),
             Expr::Fail(inner) => self.lower_fail(expr, inner, scope),
             Expr::BuiltinCall { name, args } => self.lower_builtin_call(name, args, scope),
@@ -641,62 +635,6 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    pub(super) fn lower_start_process(
-        &self,
-        start: &crate::ast::ProcessStartExpr,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        self.ensure_feature(self.surface.abilities.processes, "processes", scope.span)?;
-        let Some(process) = self.program.process(start.process.as_str()) else {
-            return Err(LinkError::UnknownProcess {
-                name: start.process.to_string(),
-                span: scope.span,
-            });
-        };
-        let mut seen = BTreeSet::new();
-        let mut lowered_args = Vec::with_capacity(start.args.len());
-        for (arg, value) in &start.args {
-            if !seen.insert(arg.to_string()) {
-                return Err(LinkError::DuplicateProcessArgument {
-                    arg: arg.to_string(),
-                    span: scope.span,
-                });
-            }
-            let Some(param) = process.params.iter().find(|param| param.name == *arg) else {
-                return Err(LinkError::UnexpectedProcessArgument {
-                    process: process.name.to_string(),
-                    arg: arg.to_string(),
-                    span: scope.span,
-                });
-            };
-            let (lowered, binding) = self.lower_expr_expected(value, scope, Some(&param.ty))?;
-            self.validate_process_arg_binding(
-                process.name.as_str(),
-                arg.as_str(),
-                &param.ty,
-                &binding,
-                scope.span,
-            )?;
-            lowered_args.push((arg.clone(), lowered));
-        }
-        for param in &process.params {
-            if !seen.contains(param.name.as_str()) {
-                return Err(LinkError::MissingProcessArgument {
-                    process: process.name.to_string(),
-                    arg: param.name.to_string(),
-                    span: scope.span,
-                });
-            }
-        }
-        Ok((
-            Expr::StartProcess(crate::ast::ProcessStartExpr {
-                process: start.process.clone(),
-                args: lowered_args,
-            }),
-            Binding::Value(self.process_output_type(start.process.as_str())),
-        ))
-    }
-
     pub(super) fn lower_process_ref(
         &self,
         process: &AstString,
@@ -855,7 +793,6 @@ impl<'module> Linker<'module> {
             None
         };
         if let Some(trigger_operation) = trigger_operation {
-            self.ensure_feature(self.surface.abilities.triggers, "triggers", scope.span)?;
             validate_trigger_operation_subscription_key(trigger_operation, args, scope.span)?;
         }
         let trigger_operation = trigger_operation.filter(|operation| {
@@ -961,11 +898,6 @@ impl<'module> Linker<'module> {
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
-        self.ensure_feature(
-            self.surface.abilities.process_signals,
-            "process signals",
-            scope.span,
-        )?;
         if !scope.process_body {
             return Err(LinkError::ProcessLifecycleOutsideProcess {
                 keyword: self.wait_signal_keyword(),
@@ -1021,33 +953,6 @@ impl<'module> Linker<'module> {
         }
     }
 
-    pub(super) fn lower_signal_run(
-        &self,
-        run: &Expr,
-        name: &AstString,
-        payload: &Expr,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        self.ensure_feature(
-            self.surface.abilities.process_signals,
-            "process signals",
-            scope.span,
-        )?;
-        Ok(
-            // `signal_run` (sending) is a control-plane op like `await` /
-            // `cancel`, valid from the foreground turn as well as inside a
-            // process body. Only `wait_signal` (receiving) is process-only.
-            (
-                Expr::SignalRun {
-                    run: Box::new(self.lower_expr(run, scope)?.0),
-                    name: name.clone(),
-                    payload: Box::new(self.lower_expr(payload, scope)?.0),
-                },
-                Binding::Value(TypeExpr::Null),
-            ),
-        )
-    }
-
     pub(super) fn lower_result_unwrap(
         &self,
         inner: &Expr,
@@ -1056,17 +961,6 @@ impl<'module> Linker<'module> {
     ) -> Result<(Expr, Binding), LinkError> {
         let (inner, binding) = self.lower_expr_expected(inner, scope, expected)?;
         Ok((Expr::ResultUnwrap(Box::new(inner)), binding))
-    }
-
-    pub(super) fn lower_cancel(
-        &self,
-        inner: &Expr,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        Ok((
-            Expr::Cancel(Box::new(self.lower_expr(inner, scope)?.0)),
-            Binding::Value(TypeExpr::Any),
-        ))
     }
 
     pub(super) fn lower_print(
@@ -1087,17 +981,6 @@ impl<'module> Linker<'module> {
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Yield(Box::new(self.lower_expr(inner, scope)?.0)),
-            Binding::Value(TypeExpr::Null),
-        ))
-    }
-
-    pub(super) fn lower_wake(
-        &self,
-        inner: &Expr,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        Ok((
-            Expr::Wake(Box::new(self.lower_expr(inner, scope)?.0)),
             Binding::Value(TypeExpr::Null),
         ))
     }
@@ -1255,7 +1138,17 @@ impl<'module> Linker<'module> {
         }
         let mut function_scope = Scope::new(scope.process_body, scope.span);
         for capture in &function.captures {
-            function_scope.bind(capture, any_binding());
+            // A closure body sees its captures as `Any`: the value can be
+            // reassigned between the closure's construction and its call, so
+            // the type it had at construction proves nothing. A process value
+            // is the exception — it is immutable by construction and its slot
+            // type is what a trigger target and a start slot are checked
+            // against — so that one type survives the boundary.
+            let binding = match scope.get(capture) {
+                Some(binding) if matches!(binding_type(&binding), TypeExpr::Process(_)) => binding,
+                _ => any_binding(),
+            };
+            function_scope.bind(capture, binding);
         }
         for param in &function.params {
             function_scope.bind(param, any_binding());
@@ -1596,10 +1489,8 @@ fn settled_literal_kind(expr: &Expr) -> Option<&'static str> {
 }
 
 fn contains_awaitable_expression(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::ReceiverCall { .. } | Expr::Await(_) | Expr::StartProcess(_)
-    ) || expr.children().any(contains_awaitable_expression)
+    matches!(expr, Expr::ReceiverCall { .. } | Expr::Await(_))
+        || expr.children().any(contains_awaitable_expression)
 }
 
 fn settled_type_kind(ty: &TypeExpr) -> Option<&'static str> {

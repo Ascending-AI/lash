@@ -174,10 +174,6 @@ pub(super) fn instruction_heap_plan(
             .resource_operation_batches[batch]
             .stack_value_count)),
         I::ResourceOperationListBatch(_) => InstructionHeapPlan::stack(Top(1)),
-        I::StartProcess { keys, .. } => {
-            InstructionHeapPlan::stack(Top(chunk.key_lists[keys].len()))
-        }
-
         I::AwaitArray { .. }
         | I::AwaitPending
         | I::Print
@@ -186,14 +182,11 @@ pub(super) fn instruction_heap_plan(
         | I::SleepUntil
         | I::AwaitHandle
         | I::AwaitHandleUnwrap
-        | I::CancelHandle
         | I::WrapTypeLiteral
         | I::WrapHostDescriptor(_)
         | I::ProcessYield
-        | I::ProcessWake
         | I::ProcessFail => InstructionHeapPlan::stack(Top(1)),
         I::ProcessWaitSignal { .. } => InstructionHeapPlan::stack(Top(0)),
-        I::ProcessSignalRun { .. } => InstructionHeapPlan::stack(Top(2)),
 
         // Slot readers. The fused format opcodes belong here: they read a slot
         // and stringify it, so a heap reference in that slot has to be exported

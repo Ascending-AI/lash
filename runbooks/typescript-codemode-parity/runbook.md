@@ -5,7 +5,7 @@
 > screenshot, objective-gate, Abort/RCA, and teardown rules.
 
 **Purpose.** Prove first-shot TypeScript fluency for aggregate settlement,
-`for...of` agent work, and the complete durable `defineProcess` lifecycle,
+`for...of` agent work, and the complete durable process lifecycle,
 including suspension across a real Workbench worker restart.
 
 ## Golden rules

@@ -66,7 +66,6 @@ impl<'program> RequirementsCollector<'program> {
                     self.collect_expr(&function.body, &mut scope);
                 }
                 Declaration::Process(process) => {
-                    self.requirements.abilities.processes = true;
                     if process.label.is_some() {
                         self.requirements.language_features.label_annotations = true;
                     }
@@ -299,17 +298,7 @@ impl<'program> RequirementsCollector<'program> {
                 self.collect_expr(body, scope);
                 Some(RequirementBinding::Value)
             }
-            Expr::StartProcess(start) => {
-                self.requirements.abilities.processes = true;
-                for (_, value) in &start.args {
-                    self.collect_expr(value, scope);
-                }
-                Some(RequirementBinding::Value)
-            }
-            Expr::ProcessRef { .. } => {
-                self.requirements.abilities.processes = true;
-                Some(RequirementBinding::Value)
-            }
+            Expr::ProcessRef { .. } => Some(RequirementBinding::Value),
             Expr::HostDescriptorConstructor { type_name, input } => {
                 if let Some(catalog) = self.resource_catalog
                     && let Some(constructor) = catalog
@@ -363,22 +352,11 @@ impl<'program> RequirementsCollector<'program> {
                 self.collect_expr(expr, scope);
                 Some(RequirementBinding::Value)
             }
-            Expr::WaitSignal { .. } => {
-                self.requirements.abilities.process_signals = true;
-                Some(RequirementBinding::Value)
-            }
-            Expr::SignalRun { run, payload, .. } => {
-                self.requirements.abilities.process_signals = true;
-                self.collect_expr(run, scope);
-                self.collect_expr(payload, scope);
-                Some(RequirementBinding::Value)
-            }
+            Expr::WaitSignal { .. } => Some(RequirementBinding::Value),
             Expr::Await(expr)
             | Expr::ResultUnwrap(expr)
-            | Expr::Cancel(expr)
             | Expr::Print(expr)
             | Expr::Yield(expr)
-            | Expr::Wake(expr)
             | Expr::Fail(expr)
             | Expr::Unary { expr, .. } => {
                 self.collect_expr(expr, scope);

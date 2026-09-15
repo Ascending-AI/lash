@@ -167,15 +167,11 @@ fn agent_scenario_process_tool_composition() -> Result<()> {
             .responses([
                 typescript_block(
                     r#"
-const worker = defineProcess({
-  name: "worker",
-  signals: {},
-  run: async () => {
-    await sleep(1000);
-    return { done: true };
-  }
-});
-const running = start(worker);
+const worker = async () => {
+  await sleep(1000);
+  return { done: true };
+};
+const running = await processes.start({ definition: worker });
 const cancelled = await processes.cancel({ process_id: running.process_id });
 const child = await agents.spawn({
   capability: "default",
@@ -244,16 +240,12 @@ fn agent_scenario_started_process_labeled_tool_call() -> Result<()> {
             )
             .response(typescript_block(
                 r#"
-const lookup = defineProcess({
-  name: "lookup",
-  signals: {},
-  run: async () => {
-    /** @label Lookup app state in process */
-    const value = await tools.app_lookup({});
-    return value;
-  }
-});
-const handle = start(lookup);
+const lookup = async () => {
+  /** @label Lookup app state in process */
+  const value = await tools.app_lookup({});
+  return value;
+};
+const handle = await processes.start({ definition: lookup });
 const result = await handle;
 finish(result);"#,
             ))
@@ -266,7 +258,7 @@ finish(result);"#,
             })
             .expected_final_value(serde_json::json!({ "ok": true }))
             .tool_provider(Arc::new(AppTools))
-            .completed_process("lookup")
+            .completed_lifted_processes(1)
             .labeled_resource("Lookup app state in process")
             .min_completed_process_graphs(1),
         )
@@ -385,21 +377,17 @@ fn agent_scenario_started_process_labeled_subagent_spawn() -> Result<()> {
             .responses([
                 typescript_block(
                     r#"
-const spawnChild = defineProcess({
-  name: "spawn_child",
-  signals: {},
-  run: async () => {
-    /** @label Spawn subagent with web search */
-    const result = await agents.spawn({
-      capability: "default",
-      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-      seed: { chunk: ["a", "b"] },
-      output: { len: "int" }
-    });
-    return result;
-  }
-});
-const handle = start(spawnChild);
+const spawnChild = async () => {
+  /** @label Spawn subagent with web search */
+  const result = await agents.spawn({
+    capability: "default",
+    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+    seed: { chunk: ["a", "b"] },
+    output: { len: "int" }
+  });
+  return result;
+};
+const handle = await processes.start({ definition: spawnChild });
 const result = await handle;
 finish(result);"#,
                 ),
@@ -407,7 +395,7 @@ finish(result);"#,
             ])
             .expected_final_value(serde_json::json!({ "len": 2 }))
             .install_subagents()
-            .completed_process("spawn_child")
+            .completed_lifted_processes(1)
             .labeled_resource("Spawn subagent with web search")
             .min_completed_child_session_exec_graphs(1)
             .min_completed_process_graphs(1),
@@ -455,41 +443,27 @@ fn agent_scenario_nested_process_start_await() -> Result<()> {
             )
             .response(typescript_block(
                 r#"
-const grandchild = defineProcess({
-  name: "grandchild",
-  signals: {},
-  run: async () => {
-    return { grandchild: "done" };
-  }
-});
-const child = defineProcess({
-  name: "child",
-  signals: {},
-  run: async () => {
-    const inner = await start(grandchild);
-    return { child: inner.grandchild };
-  }
-});
-const parent = defineProcess({
-  name: "parent",
-  signals: {},
-  run: async () => {
-    /** @label Start nested child process */
-    const inner = await start(child);
-    return { parent: inner.child };
-  }
-});
-const handle = start(parent);
+const grandchild = async () => {
+  return { grandchild: "done" };
+};
+const child = async () => {
+  const started = await processes.start({ definition: grandchild });
+  const inner = await started;
+  return { child: inner.grandchild };
+};
+const parent = async () => {
+  /** @label Start nested child process */
+  const started = await processes.start({ definition: child });
+  const inner = await started;
+  return { parent: inner.child };
+};
+const handle = await processes.start({ definition: parent });
 const result = await handle;
 finish(result);"#,
             ))
             .expected_final_value(serde_json::json!({ "parent": "done" }))
-            .completed_process("parent")
-            .completed_process("child")
-            .completed_process("grandchild")
-            .observer_visible_process("lashlang", "parent")
-            .observer_visible_process("lashlang", "child")
-            .observer_visible_process("lashlang", "grandchild")
+            .completed_lifted_processes(3)
+            .observer_visible_processes("lashlang", 3)
             .labeled_node("Start nested child process")
             .min_completed_process_graphs(3),
         )
@@ -554,6 +528,7 @@ finish(result);"#,
                 ),
             ])
             .install_subagents()
+            .expects_refused_cell()
             .max_turns(1),
         )
         .await?;
@@ -648,23 +623,19 @@ fn agent_scenario_parallel_spawn_and_join() -> Result<()> {
             )
             .response(typescript_block(
                 r#"
-const child = defineProcess({
-  name: "child",
-  signals: {},
-  run: async (value) => {
-    return value;
-  }
-});
+const child = async (value) => {
+  return value;
+};
 /** @label Start left process */
-const left = start(child, { value: "left" });
+const left = await processes.start({ definition: child, args: { value: "left" } });
 /** @label Start right process */
-const right = start(child, { value: "right" });
+const right = await processes.start({ definition: child, args: { value: "right" } });
 const leftValue = await left;
 const rightValue = await right;
 finish({ joined: [leftValue, rightValue] });"#,
             ))
             .expected_final_value(serde_json::json!({ "joined": ["left", "right"] }))
-            .completed_process("child")
+            .completed_lifted_processes(2)
             .labeled_node("Start left process")
             .labeled_node("Start right process")
             .min_completed_process_graphs(2),

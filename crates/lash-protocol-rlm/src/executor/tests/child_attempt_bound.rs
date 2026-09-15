@@ -93,7 +93,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
     let surface = LashlangSurface::new(
-        lashlang::LashlangAbilities::default().with_processes(),
+        lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
         lashlang::LashlangHostCatalog::new(),
     );
@@ -121,11 +121,13 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
                     registry: registry.clone(),
                     controller: controller.clone(),
                     originator_override: None,
+                    env_store: Arc::clone(&process_env_store),
+                    engines: fixture_process_engines(published.clone(), surface.clone()),
                 });
             let ctx = lash_core::testing::with_engine_child_max_attempts(
                 lash_core::testing::code_execution_context_with_process_dependencies(
-                    Arc::new(EmptyTypeScriptSignalToolProvider),
-                    lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+                    Arc::new(ProcessControlToolProvider),
+                    process_control_tool_catalog(),
                     None,
                     processes,
                     controller,
@@ -146,8 +148,8 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
                 ExecRequest {
                     language: "typescript".to_string(),
                     code: r#"
-                    const worker = defineProcess({ name: "worker", run: async () => 1 });
-                    start(worker);
+                    const worker = async () => 1;
+                    await processes.start({ definition: worker });
                     finish("started");
                 "#
                     .to_string(),
@@ -238,7 +240,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
             .allow_process_lifetime_completion_keys(),
     );
     let surface = LashlangSurface::new(
-        lashlang::LashlangAbilities::default().with_processes(),
+        lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
         lashlang::LashlangHostCatalog::new(),
     );
@@ -263,7 +265,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
         lash_lashlang_runtime::lashlang_process_engine_registration(
             lash_lashlang_runtime::LashlangProcessEngine::new(
                 Arc::clone(&worker_store),
-                surface.clone(),
+                process_engine_surface(surface.clone()),
             ),
         ),
     );
@@ -287,11 +289,13 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
         registry: registry.clone(),
         controller: controller.clone(),
         originator_override: None,
+        env_store: Arc::clone(&process_env_store),
+        engines: fixture_process_engines(published.clone(), surface.clone()),
     });
     let ctx = lash_core::testing::with_engine_child_max_attempts(
         lash_core::testing::code_execution_context_with_process_dependencies(
-            Arc::new(EmptyTypeScriptSignalToolProvider),
-            lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+            Arc::new(ProcessControlToolProvider),
+            process_control_tool_catalog(),
             None,
             processes,
             controller,
@@ -311,8 +315,8 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
         ExecRequest {
             language: "typescript".to_string(),
             code: r#"
-                    const worker = defineProcess({ name: "worker", run: async () => 1 });
-                    start(worker);
+                    const worker = async () => 1;
+                    await processes.start({ definition: worker });
                     finish("started");
                 "#
             .to_string(),

@@ -200,12 +200,8 @@ mod tests {
 
     #[test]
     fn compile_module_facade_returns_artifact_and_introspection() {
-        let environment = LashlangHostEnvironment::new(
-            Default::default(),
-            crate::LashlangAbilities::default()
-                .with_processes()
-                .with_process_signals(),
-        );
+        let environment =
+            LashlangHostEnvironment::new(Default::default(), crate::LashlangAbilities::default());
         let source = "process echo(value: str) { finish value }";
         let output = compile_module(ModuleCompileRequest {
             source,
@@ -251,11 +247,25 @@ mod tests {
 
     #[test]
     fn compile_module_facade_reports_link_errors() {
+        // FIG-2999: declaring a process is no longer an ability the host can
+        // withhold, so the withheld ability this fixture links against is
+        // `sleep`, which is still one.
         let environment = LashlangHostEnvironment::default();
-        let source = "process echo(value: str) { finish value }";
+        let source = "process nap(value: str) { sleep 1 finish value }";
+        let program = b::with_declaration_spans(
+            b::module(
+                vec![b::process(
+                    "nap",
+                    vec![b::param("value", crate::TypeExpr::Str)],
+                    b::block(vec![b::sleep_for(b::num(1.0)), b::finish(b::var("value"))]),
+                )],
+                Vec::new(),
+            ),
+            &[(0, source.len())],
+        );
         let err = compile_module(ModuleCompileRequest {
             source,
-            program: echo_module(source),
+            program,
             environment: &environment,
         })
         .expect_err("link should fail");
@@ -265,7 +275,7 @@ mod tests {
         };
         assert_eq!(diagnostic.stage, ModuleCompileStage::Link);
         assert_eq!(diagnostic.line, Some(1));
-        assert!(diagnostic.message.contains("processes"));
+        assert!(diagnostic.message.contains("sleep"), "{diagnostic:?}");
     }
 
     #[test]
@@ -307,15 +317,11 @@ mod tests {
                 .expect("valid event type"),
             )
             .expect("valid trigger source");
-        let environment = LashlangHostEnvironment::new(
-            resources,
-            crate::LashlangAbilities::default()
-                .with_processes()
-                .with_process_signals(),
-        )
-        .with_language_features(
-            crate::LashlangLanguageFeatures::default().with_label_annotations(),
-        );
+        let environment =
+            LashlangHostEnvironment::new(resources, crate::LashlangAbilities::default())
+                .with_language_features(
+                    crate::LashlangLanguageFeatures::default().with_label_annotations(),
+                );
         // @label(title: "Watcher", description: "Tracks button presses")
         // process watch(event: ui.ButtonPressed, file: File) signals { done: str } -> str {
         //   opened = files.Open({ path: "inbox.txt" })

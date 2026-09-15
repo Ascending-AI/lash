@@ -818,19 +818,15 @@ mod restate_tests {
             .kind("mock-provider")
             .complete(|_request| async {
                 let text = r#"<typescript>
-const play_center_once = defineProcess({
-  name: "play_center_once",
-  signals: {},
-  run: async () => {
-    const state = await board.read({});
-    if (state.turn == "O" && state.legal_moves.includes(4)) {
-      const move = await board.play({ cell: 4 });
-      return { before: state, move: move, played: true };
-    }
-    return { before: state, played: false };
+const play_center_once = async () => {
+  const state = await board.read({});
+  if (state.turn == "O" && state.legal_moves.includes(4)) {
+    const move = await board.play({ cell: 4 });
+    return { before: state, move: move, played: true };
   }
-});
-const handle = start(play_center_once);
+  return { before: state, played: false };
+};
+const handle = await processes.start({ definition: play_center_once });
 const result = await handle;
 finish("done via Restate E2E");
 </typescript>"#;

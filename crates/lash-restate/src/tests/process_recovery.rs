@@ -311,11 +311,7 @@ pub(super) async fn trigger_lashlang_registration(
 pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> ProcessRegistration {
     let linked = lash_typescript::link(
         r#"
-        const worker = defineProcess({
-          name: "worker",
-          signals: {},
-          run: async () => { return { ok: true }; }
-        });
+        const worker = async () => { return { ok: true }; };
         finish(null);
         "#,
         &lashlang::LashlangHostEnvironment::new(
@@ -371,14 +367,10 @@ pub(super) async fn sleeping_process_registration(process_id: &ProcessId) -> Pro
     );
     let linked = lash_typescript::link(
         r#"
-        const worker = defineProcess({
-          name: "worker",
-          signals: {},
-          run: async () => {
-            await sleep(300000);
-            return "completed after wake";
-          }
-        });
+        const worker = async () => {
+          await sleep(300000);
+          return "completed after wake";
+        };
         finish(null);
         "#,
         &environment,
@@ -461,9 +453,7 @@ pub(super) async fn sleeping_then_tool_process_registration(
         module,
         lashlang::LashlangHostEnvironment::new(
             resources,
-            lashlang::LashlangAbilities::default()
-                .with_processes()
-                .with_sleep(),
+            lashlang::LashlangAbilities::default().with_sleep(),
         ),
     )
     .expect("link sleeping post-wake-effect process");

@@ -84,19 +84,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             });
     }
 
-    pub(super) fn observe_child_started(
-        &self,
-        active: &ActiveLashlangExecutionNode,
-        child: LashlangExecutionChild,
-    ) {
-        self.host
-            .observe_lashlang_execution(LashlangExecutionObservation::ChildStarted {
-                site: active.site.clone(),
-                occurrence: active.occurrence,
-                child,
-            });
-    }
-
     pub(super) fn observe_branch_selection(
         &mut self,
         instruction_ip: usize,

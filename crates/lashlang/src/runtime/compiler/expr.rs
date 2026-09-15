@@ -318,12 +318,6 @@ impl Compiler {
                 let keys = self.push_key_list(entries.iter().map(|(key, _)| key.as_str()));
                 self.code.push(Instruction::BuildHeapRecord(keys));
             }
-            Expr::StartProcess(process) => {
-                let instruction = self.compile_start_process_expr(process);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
-                    self.mark_lashlang_execution_site(instruction, site);
-                }
-            }
             Expr::ProcessRef { process } => self.compile_process_ref_expr(process),
             Expr::HostDescriptorConstructor { type_name, input } => {
                 self.compile_expr(input);
@@ -359,16 +353,6 @@ impl Compiler {
                 let name = self.push_name(name);
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessWaitSignal { name });
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
-                    self.mark_lashlang_execution_site(instruction, site);
-                }
-            }
-            Expr::SignalRun { run, name, payload } => {
-                self.compile_expr(run);
-                self.compile_expr(payload);
-                let name = self.push_name(name);
-                let instruction = self.code.len();
-                self.code.push(Instruction::ProcessSignalRun { name });
                 if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
@@ -472,10 +456,6 @@ impl Compiler {
                 self.patch_jump(jump_to_end, self.code.len());
                 self.clear_const_slots();
             }
-            Expr::Cancel(handle) => {
-                self.compile_expr(handle);
-                self.code.push(Instruction::CancelHandle);
-            }
             Expr::Print(expr) => {
                 self.compile_expr(expr);
                 self.code.push(Instruction::Print);
@@ -484,14 +464,6 @@ impl Compiler {
                 self.compile_expr(value);
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessYield);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
-                    self.mark_lashlang_execution_site(instruction, site);
-                }
-            }
-            Expr::Wake(value) => {
-                self.compile_expr(value);
-                let instruction = self.code.len();
-                self.code.push(Instruction::ProcessWake);
                 if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }

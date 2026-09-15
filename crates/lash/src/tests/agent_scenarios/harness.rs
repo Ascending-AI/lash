@@ -1,7 +1,7 @@
 use super::super::*;
 use super::contracts::{
-    GraphContract, NodeStatusFact, assert_all_processes_terminal, assert_completed_process_graph,
-    assert_labeled_node, assert_labeled_resource_operation,
+    GraphContract, NodeStatusFact, assert_all_processes_terminal,
+    assert_completed_lifted_process_graphs, assert_labeled_node, assert_labeled_resource_operation,
     assert_min_completed_child_session_exec_graphs, assert_min_completed_process_graphs,
     assert_no_duplicate_label_step, assert_session_turn_child_graph,
     assert_successful_agent_scenario,
@@ -14,12 +14,14 @@ use std::collections::VecDeque;
 
 #[derive(Default)]
 pub(super) struct AgentScenarioExpectations {
-    pub(super) completed_process_entries: Vec<&'static str>,
+    pub(super) completed_lifted_processes: Option<usize>,
     pub(super) labeled_resource_titles: Vec<&'static str>,
     pub(super) labeled_node_titles: Vec<&'static str>,
     pub(super) min_completed_child_session_exec_graphs: usize,
     pub(super) min_completed_process_graphs: usize,
-    pub(super) observer_visible_processes: Vec<(&'static str, &'static str)>,
+    /// `(kind, count)`: the labels are lift digests, so a scenario pins how
+    /// many records of a kind the session observer exposes, not their names.
+    pub(super) observer_visible_processes: Vec<(&'static str, usize)>,
 }
 
 pub(super) struct AgentScenario {
@@ -39,6 +41,11 @@ pub(super) struct AgentScenario {
     /// recorded upload evidence, so the scenario must record it rather than
     /// conjure a reference to bytes no store ever accepted.
     pub(super) seeded_attachment_writes: Vec<lash_core::AttachmentId>,
+    /// A scenario that scripts a program the runtime is *meant* to refuse or
+    /// fail sets this. Every other scenario asserts that no scripted cell was
+    /// refused: a refusal otherwise reads downstream as "the process never
+    /// started", which is how a retired-form regression once hid here.
+    pub(super) expects_refused_cell: bool,
     pub(super) expected_contracts: AgentScenarioExpectations,
 }
 
@@ -57,6 +64,7 @@ impl AgentScenario {
             max_turns: None,
             precompleted_process: None,
             seeded_attachment_writes: Vec::new(),
+            expects_refused_cell: false,
             expected_contracts: AgentScenarioExpectations::default(),
         }
     }
@@ -72,6 +80,13 @@ impl AgentScenario {
         S: Into<String>,
     {
         self.scripted_provider_responses = responses.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Declares that this scenario scripts a cell the runtime is expected to
+    /// refuse or fail, so the refusal check below must not fire.
+    pub(super) fn expects_refused_cell(mut self) -> Self {
+        self.expects_refused_cell = true;
         self
     }
 
@@ -122,10 +137,9 @@ impl AgentScenario {
         self
     }
 
-    pub(super) fn completed_process(mut self, entry_name: &'static str) -> Self {
-        self.expected_contracts
-            .completed_process_entries
-            .push(entry_name);
+    /// How many lifted process bodies must show a completed executed graph.
+    pub(super) fn completed_lifted_processes(mut self, count: usize) -> Self {
+        self.expected_contracts.completed_lifted_processes = Some(count);
         self
     }
 
@@ -154,14 +168,10 @@ impl AgentScenario {
         self
     }
 
-    pub(super) fn observer_visible_process(
-        mut self,
-        kind: &'static str,
-        label: &'static str,
-    ) -> Self {
+    pub(super) fn observer_visible_processes(mut self, kind: &'static str, count: usize) -> Self {
         self.expected_contracts
             .observer_visible_processes
-            .push((kind, label));
+            .push((kind, count));
         self
     }
 }
@@ -445,6 +455,9 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .stream_to(events.as_ref())
         .await?;
     session.refresh_background_graph().await?;
+    if !case.expects_refused_cell {
+        assert_no_refused_cell(case.name, &events.snapshot().await);
+    }
     assert_session_process_admission_contract(
         runtime.process_registry.as_ref(),
         &case.session_id,
@@ -486,8 +499,8 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     }
 
     let contract = GraphContract::from_graphs(&run.graph_snapshots);
-    for entry_name in case.expected_contracts.completed_process_entries {
-        assert_completed_process_graph(&contract, entry_name);
+    if let Some(expected) = case.expected_contracts.completed_lifted_processes {
+        assert_completed_lifted_process_graphs(&contract, expected);
     }
     for title in case.expected_contracts.labeled_resource_titles {
         assert_labeled_resource_operation(&contract, title, NodeStatusFact::Completed);
@@ -510,10 +523,39 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
     Ok(run)
 }
 
+/// Fails on the refusal itself rather than on its shadow.
+///
+/// A scripted program the dialect refuses produces a failed cell and no
+/// process, no tool call and no final value. Every downstream assertion then
+/// reports an empty observation, which reads as a runtime defect instead of a
+/// scripted source that no longer parses. This names the refusal directly.
+fn assert_no_refused_cell(name: &str, events: &[TurnActivity]) {
+    for activity in events {
+        let TurnEvent::CodeBlockCompleted { error, success, .. } = &activity.event else {
+            continue;
+        };
+        if *success {
+            continue;
+        }
+        let Some(failure) = error else { continue };
+        assert!(
+            !matches!(
+                failure.kind,
+                lash_core::CellFailureKind::Policy | lash_core::CellFailureKind::Program
+            ),
+            "{name}: the runtime refused the scripted program ({:?}): {}\n\
+             the scripted source must be authored on the live dialect surface; \
+             a scenario that means to script a refusal declares expects_refused_cell()",
+            failure.kind,
+            failure.message,
+        );
+    }
+}
+
 async fn assert_session_process_admission_contract(
     registry: &dyn lash_core::ProcessRegistry,
     session_id: &SessionId,
-    expected_processes: &[(&str, &str)],
+    expected_processes: &[(&str, usize)],
 ) {
     if expected_processes.is_empty() {
         return;
@@ -532,17 +574,22 @@ async fn assert_session_process_admission_contract(
         .iter()
         .map(|process| (&process.id, &process.identity, &process.status))
         .collect::<Vec<_>>();
-    for (kind, label) in expected_processes {
+    for (kind, count) in expected_processes {
+        // The label is the lifted declaration's digest name, so the pin is the
+        // kind and how many records of it the observer exposes.
         let matching = observed
             .iter()
             .filter(|process| {
-                process.identity.kind == *kind && process.identity.label.as_deref() == Some(*label)
+                process.identity.kind == *kind
+                    && process.identity.label.as_deref().is_some_and(|label| {
+                        label.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
+                    })
             })
             .collect::<Vec<_>>();
         assert_eq!(
             matching.len(),
-            1,
-            "the parent session observer must expose one {kind}/{label} process record; observed={observed_identities:?}"
+            *count,
+            "the parent session observer must expose {count} lifted {kind} process records; observed={observed_identities:?}"
         );
         for process in matching {
             assert_eq!(process.status, lash_core::ProcessStatus::Completed);
@@ -914,15 +961,11 @@ impl AgentDurableInputSuspensionScenario {
         AgentScenarioSetup::new(vec![
             typescript_block(
                 r#"
-const requestAnswer = defineProcess({
-  name: "request_answer",
-  signals: {},
-  run: async () => {
-    const result = await tools.mock_input_request({ question: "Need input?" });
-    return result;
-  }
-});
-const handle = start(requestAnswer);
+const requestAnswer = async () => {
+  const result = await tools.mock_input_request({ question: "Need input?" });
+  return result;
+};
+const handle = await processes.start({ definition: requestAnswer });
 const result = await handle;
 finish(result.answer);"#,
             ),
@@ -1058,19 +1101,15 @@ pub(super) async fn run_agent_process_llm_query_scenario() -> Result<()> {
     let runtime = AgentScenarioSetup::new(vec![
         typescript_block(
             r#"
-const enrich = defineProcess({
-  name: "enrich",
-  signals: {},
-  run: async (event) => {
-    const enriched = await llm.query({
-      task: "Classify the supplied email",
-      inputs: { event: event },
-      output: { category: "str", confidence: "float" }
-    });
-    return enriched;
-  }
-});
-const handle = start(enrich, { event: { email: "hello@example.com" } });
+const enrich = async (event) => {
+  const enriched = await llm.query({
+    task: "Classify the supplied email",
+    inputs: { event: event },
+    output: { category: "str", confidence: "float" }
+  });
+  return enriched;
+};
+const handle = await processes.start({ definition: enrich, args: { event: { email: "hello@example.com" } } });
 finish(await handle);"#,
         ),
         r#"{"kind":"value","value":{"category":"personal","confidence":0.98},"error":null}"#
@@ -1108,15 +1147,11 @@ pub(super) async fn run_agent_direct_completion_attempt_retry_scenario() -> Resu
     let runtime = AgentScenarioSetup::new(vec![
         typescript_block(
             r#"
-const retryDirect = defineProcess({
-  name: "retry_direct",
-  signals: {},
-  run: async () => {
-    const value = await tools.retrying_direct({});
-    return value;
-  }
-});
-const handle = start(retryDirect);
+const retryDirect = async () => {
+  const value = await tools.retrying_direct({});
+  return value;
+};
+const handle = await processes.start({ definition: retryDirect });
 finish(await handle);"#,
         ),
         "first-provider-result".to_string(),

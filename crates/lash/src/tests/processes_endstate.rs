@@ -173,10 +173,7 @@ impl LinkedTestProcess {
             program,
             lashlang::LashlangHostEnvironment::new(
                 lashlang::LashlangHostCatalog::new(),
-                lashlang::LashlangAbilities::default()
-                    .with_processes()
-                    .with_sleep()
-                    .with_process_signals(),
+                lashlang::LashlangAbilities::default().with_sleep(),
             ),
         )
         .expect("link lashlang process");

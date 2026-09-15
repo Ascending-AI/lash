@@ -37,15 +37,11 @@ pub(crate) fn effect_kind(expression: &Expr) -> Option<WorkflowEffectKind> {
 
 fn direct_effect_kind(expression: &Expr) -> Option<WorkflowEffectKind> {
     match expression {
-        Expr::StartProcess(_) => Some(WorkflowEffectKind::StartProcess),
         Expr::Await(_) => Some(WorkflowEffectKind::AwaitJoin),
-        Expr::SignalRun { .. } => Some(WorkflowEffectKind::SignalRun),
         Expr::WaitSignal { .. } => Some(WorkflowEffectKind::WaitSignal),
         Expr::SleepFor(_) | Expr::SleepUntil(_) => Some(WorkflowEffectKind::Sleep),
-        Expr::Cancel(_) => Some(WorkflowEffectKind::Cancel),
         Expr::Print(_) => Some(WorkflowEffectKind::Print),
         Expr::Yield(_) => Some(WorkflowEffectKind::Yield),
-        Expr::Wake(_) => Some(WorkflowEffectKind::Wake),
         Expr::Break => Some(WorkflowEffectKind::Break),
         Expr::Continue => Some(WorkflowEffectKind::Continue),
         _ => None,
@@ -62,11 +58,14 @@ pub(crate) fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> Str
     }
     match effect {
         WorkflowEffectKind::AwaitJoin => "await",
-        WorkflowEffectKind::Cancel => "cancel",
         WorkflowEffectKind::Print => "print",
         WorkflowEffectKind::Break => "break",
         WorkflowEffectKind::Continue => "continue",
-        WorkflowEffectKind::StartProcess
+        // The process control effects are tool calls now, and the retired
+        // dialect forms no longer reach this projection; the remaining
+        // execution-site effects all carry a compiler descriptor.
+        WorkflowEffectKind::Cancel
+        | WorkflowEffectKind::StartProcess
         | WorkflowEffectKind::SignalRun
         | WorkflowEffectKind::WaitSignal
         | WorkflowEffectKind::Sleep
@@ -164,7 +163,7 @@ pub(crate) fn opaque_name(expression: &Expr) -> &'static str {
     }
 }
 
-/// Rebuild the lowerer's `defineProcess` wrapper around an authored run body.
+/// Rebuild the lowerer's process wrapper around an authored run body.
 ///
 /// The graph shows the authored body; the wrapper that turns an uncaught error
 /// into process failure is generated, so it is regenerated here rather than

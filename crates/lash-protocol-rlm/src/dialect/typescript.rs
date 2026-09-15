@@ -164,7 +164,20 @@ impl TypescriptDialect {
             .map_err(|error| {
                 SessionError::Protocol(format!("invalid host tool surface: {error}"))
             })?;
-        let inventory = crate::protocol::prompt::host_surface_inventory(&host_environment);
+        let mut inventory = crate::protocol::prompt::host_surface_inventory(&host_environment);
+        // FIG-2999: the trigger operations are no longer gated by an ability,
+        // so the prompt gates them on there being something to register. With
+        // no declared trigger source a cell cannot build a `source` value, and
+        // the whole `triggers.*` block — with the registration row type it
+        // returns — is prose the model can never act on.
+        if inventory.trigger_sources.is_empty() {
+            inventory
+                .operations
+                .retain(|operation| operation.alias != lashlang::TRIGGER_MODULE_ALIAS);
+            inventory
+                .data_types
+                .retain(|(name, _)| name != lashlang::TRIGGER_REGISTRATION_TYPE_NAME);
+        }
         // Catalog tools already have a fully typed declaration under **Tools**,
         // rendered from the same contract; repeating them here would be a
         // second, weaker copy of the same signature.
@@ -256,7 +269,7 @@ impl TypescriptDialect {
                 .iter()
                 .map(|(source_ty, event)| {
                     format!(
-                        "- `{source_ty}` can be passed to `registerTrigger` as its `source` and emits `{}`",
+                        "- `{source_ty}` is a `triggers.register` `source` and emits `{}`",
                         typescript_type_name(event)
                     )
                 })
@@ -268,36 +281,33 @@ impl TypescriptDialect {
     }
 }
 
-pub(crate) fn typescript_process_prompt(abilities: &lashlang::LashlangAbilities) -> String {
-    let mut lines = Vec::new();
-    if abilities.processes {
-        lines.push(r#"interface Process<Params extends readonly unknown[] = readonly unknown[], Output = unknown>{readonly name:string}
-defineProcess(c:{name:string;run:Function; signals?: Record<string, null>}):Process;
-start(p:Process,args?:Record<string,unknown>):Promise<unknown>&{id: string};
-wake(value:unknown):void;
-Literal name, top-level const, async run; start keys match parameter names. Return after finally succeeds; throw fails.
-A started handle outlives the turn; Stop cancels only the awaited handle; cancel is a request the child sees at its next step or wake."#);
-        if abilities.process_signals {
-            lines.push(
-                r#"waitSignal(name:string):Promise<unknown>;
-wake(handle:{id:string},signal:string,payload:unknown):void;
-Signals: {go:null}; waitSignal is run-only."#,
-            );
-        }
-        if abilities.triggers {
-            lines.push(r#"registerTrigger(c: {source: unknown; target: Process; inputs?: (event: unknown) => Record<string, unknown>; name?: string}): Promise<unknown>;
-Literal target; inputs match params, arrow erased."#);
-        }
+/// Whether the rendered catalogue carries the process control surface.
+///
+/// The process operations are leaf tools now (FIG-2999): nothing in the
+/// dialect gates them, so their availability is read off the catalogue the
+/// host actually rendered rather than off an ability flag.
+pub(crate) fn catalogue_has_process_surface(tool_catalog: &lash_core::ToolCatalog) -> bool {
+    tool_catalog.tools.iter().any(|tool| {
+        lash_lashlang_runtime::required_tool_typescript_executable(&tool.manifest)
+            .is_ok_and(|binding| binding.call_path().starts_with("processes."))
+    })
+}
+
+/// The authoring rules the process tool signatures cannot state themselves.
+///
+/// `processes.*` renders from the catalogue like any other tool, so this block
+/// carries only what a signature cannot: that a process is a literal value,
+/// that its captures are copied by value, and that the signal a `run` body
+/// waits for is typed where it is awaited.
+pub(crate) fn typescript_process_prompt(process_surface: bool) -> String {
+    if !process_surface {
+        return String::new();
     }
-    if abilities.sleep {
-        lines.push("`await sleep(ms)` pauses the program.");
-    }
-    let prompt = lines.join("\n");
-    if abilities.process_signals {
-        prompt
-    } else {
-        prompt.replace("; signals?: Record<string, null>", "")
-    }
+    r#"A process is an `async` arrow the cell never calls: `const review = async (request: string) => { ... };`, or one written inline in a process tool's argument. Its name is the `const` it is bound to, and start arguments key by the arrow's parameter names. Returning from it succeeds; throwing fails.
+Captures are by value: a name the body reads from the surrounding cell is copied when the process starts, so a later assignment is not seen, and a name that is not a durable `const` value is refused as a non-liftable capture.
+`waitSignal(name: string): Promise<unknown>` is run-only: it suspends the process until that signal arrives. The signal set is inferred from the literal names waited for, and the payload is typed at the await site: `const go = (await waitSignal("go")) as { at: string };`.
+A started handle outlives the turn; Stop cancels only the awaited handle; cancel is a request the child sees at its next step or wake."#
+        .to_string()
 }
 
 impl TypescriptDialect {
@@ -400,9 +410,7 @@ impl TypescriptDialect {
             .surface
             .host_environment(tool_catalog)
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let mut process_abilities = environment.abilities;
-        process_abilities.sleep = false;
-        let durable = typescript_process_prompt(&process_abilities);
+        let durable = typescript_process_prompt(catalogue_has_process_surface(tool_catalog));
         let durable = if durable.is_empty() {
             durable
         } else {
@@ -652,18 +660,17 @@ mod tests {
             "no reference may keep the dotted spelling: {section}"
         );
         assert!(
-            section.contains("`cron.Schedule` can be passed to `registerTrigger`"),
-            "the reader's own primitive name, not `trigger.register`: {section}"
+            section.contains("`cron.Schedule` is a `triggers.register` `source`"),
+            "the trigger source names the tool that consumes it: {section}"
         );
         assert!(section.contains("triggers.list"), "{section}");
-        assert!(
-            section.contains("interface Process<Params extends readonly unknown[] = readonly unknown[], Output = unknown>"),
-            "{section}"
-        );
-        assert!(section.contains("target: Process"), "{section}");
+        // The process surface is the catalogue now (FIG-2999): an empty
+        // catalogue renders no process vocabulary at all.
+        assert!(!section.contains("defineProcess"), "{section}");
+        assert!(!section.contains("### Processes"), "{section}");
         assert!(!section.contains("ProcessDefinition"), "{section}");
         // And none of it may arrive in Lashlang's type syntax (ADR 0063).
-        for leak in ["list[", "-> str", ": str`", "float`", "trigger.register"] {
+        for leak in ["list[", "-> str", ": str`", "float`", "trigger.register("] {
             assert!(!section.contains(leak), "`{leak}` leaked: {section}");
         }
     }
@@ -716,53 +723,19 @@ mod tests {
         assert!(section.contains("`Date` (UTC)"));
     }
 
-    #[test]
-    fn process_handle_interface_advertises_id_member() {
-        let dialect = TypescriptDialect::new(
-            LashlangSurface {
-                abilities: lashlang::LashlangAbilities::all(),
-                ..LashlangSurface::default()
-            },
-            RlmDialectServices {
-                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-                artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
-                deferred_tool_resolver: None,
-                deferred_trigger_resolver: None,
-                execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                channel: crate::plugin::RlmChannel::Cell,
-            },
-        );
-        let prompt = dialect
-            .render_execution_section(
-                crate::protocol::RlmPromptFeatures::default(),
-                &lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
-            )
-            .expect("render execution section");
-        assert!(
-            prompt.contains("id: string"),
-            "the ProcessHandle interface must advertise its `id` member: {prompt}"
-        );
-    }
-
-    /// The prompt's `start` declaration must teach the calling convention the
-    /// lowerer actually implements.
+    /// The process section is gated by the catalogue, not by an ability.
     ///
-    /// `lower_start` passes the object's keys through verbatim as the process's
-    /// parameter names, so the second argument is a named-parameter record, not
-    /// an options bag with an `input` field. Declaring `{ input?: Input }` is
-    /// true only when the run parameter happens to be called `input`, and false
-    /// for the example this repo ships — a model that names its parameter for
-    /// its domain, which is the natural thing to do, gets a link error the
-    /// prompt gives it no way to read. This pins the rule to the behaviour
-    /// rather than to the sentence, so the sentence cannot drift back.
+    /// FIG-2999 deleted `LashlangAbilities.{processes, process_signals,
+    /// triggers}`: whether a session can run processes is whether the host
+    /// rendered the `processes.*` tools, so the authoring block appears with
+    /// them and disappears without them. It carries only what a tool signature
+    /// cannot say — that the body is an uncalled `async` arrow whose parameter
+    /// names are the start argument keys, that captures are copied by value,
+    /// and where the awaited signal payload is typed.
     #[test]
-    fn the_prompt_teaches_the_real_process_argument_convention() {
+    fn the_process_section_follows_the_catalogue_and_teaches_the_argument_convention() {
         let dialect = TypescriptDialect::new(
-            LashlangSurface {
-                abilities: lashlang::LashlangAbilities::all(),
-                ..LashlangSurface::default()
-            },
+            LashlangSurface::default(),
             RlmDialectServices {
                 projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
@@ -773,41 +746,59 @@ mod tests {
                 channel: crate::plugin::RlmChannel::Cell,
             },
         );
-        let prompt = dialect
-            .render_execution_section(
-                crate::protocol::RlmPromptFeatures::default(),
-                &lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
-            )
-            .expect("render execution section");
-        assert!(
-            !prompt.contains("args?: { input?: Input }"),
-            "the declaration promises an options bag the lowerer does not accept: {prompt}"
-        );
-        assert!(
-            prompt.contains("parameter name"),
-            "the prompt must state that the keys are the run function's parameter names: {prompt}"
-        );
-
-        // The behaviour the sentence describes, asserted directly.
-        let program = |key: &str| {
-            format!(
-                "const approval = defineProcess({{ name: \"approval\", signals: {{}},                  run: async (request: unknown) => {{ return request; }} }});                  const handle = start(approval, {{ {key}: 1 }}); finish(1);"
-            )
+        let render = |catalog: &lash_core::ToolCatalog| {
+            dialect
+                .render_execution_section(crate::protocol::RlmPromptFeatures::default(), catalog)
+                .expect("render execution section")
         };
-        let host = lashlang::LashlangHostEnvironment::new(
-            lashlang::LashlangHostCatalog::default(),
-            lashlang::LashlangAbilities::all(),
-        );
-        lash_typescript::link(&program("request"), &host)
-            .expect("a key matching the run parameter links");
-        let error = lash_typescript::link(&program("input"), &host)
-            .expect_err("a key that is not a parameter name must reject");
+
+        let without = render(&lash_core::ToolCatalog::from_tool_definitions(Vec::new()));
+        assert!(!without.contains("### Processes"), "{without}");
+
+        let start = lash_core::ToolDefinition::raw(
+            "tool:process-controls/start",
+            "processes_start",
+            "Start a process",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "definition": { "type": "object" } },
+                "required": ["definition"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        )
+        .with_tool_binding(ToolBinding::new(["processes"], "start"));
+        let with = render(&lash_core::ToolCatalog::from_tool_definitions(vec![start]));
+        assert!(with.contains("### Processes"), "{with}");
+        // The handle shape is the tool's own return contract now, not prose.
+        assert!(with.contains("processes.start"), "{with}");
+        assert!(with.contains("id: string"), "{with}");
         assert!(
-            error
-                .to_string()
-                .contains("does not accept argument `input`"),
-            "the rejection names the offending key: {error}"
+            with.contains("parameter names"),
+            "the keys are the run arrow's parameter names: {with}"
         );
+        assert!(
+            with.contains("Captures are by value"),
+            "capture-by-value is prompt-only knowledge: {with}"
+        );
+        assert!(
+            with.contains("typed at the await site"),
+            "signal typing belongs at the await site: {with}"
+        );
+        // None of the deleted special forms may come back as prose.
+        for retired in [
+            "defineProcess",
+            "registerTrigger",
+            "wake(",
+            "start(p:Process",
+        ] {
+            assert!(!with.contains(retired), "`{retired}` survived: {with}");
+        }
     }
 
     /// Every `TS_` token the prompt names must be a code the dialect can
@@ -934,20 +925,12 @@ mod tests {
                 "function f(): unknown { return waitSignal(\"go\"); } finish(f());",
             ),
             (
-                "defineProcess not at top level",
-                "function f(): unknown { return defineProcess({ name: \"p\", signals: {}, run: async (a: unknown) => { return a; } }); } finish(f());",
+                "a process body capturing a mutable binding",
+                "let counter = 1; const p = async (a: unknown) => { return counter; }; finish(1);",
             ),
             (
-                "a non-literal process name",
-                "const n = \"p\"; const p = defineProcess({ name: n, signals: {}, run: async (a: unknown) => { return a; } }); finish(1);",
-            ),
-            (
-                "a start key that is not a run parameter",
-                "const p = defineProcess({ name: \"p\", signals: {}, run: async (request: unknown) => { return request; } }); finish(start(p, { input: 1 }));",
-            ),
-            (
-                "registerTrigger with a non-literal target",
-                "const p = defineProcess({ name: \"p\", signals: {}, run: async (a: unknown) => { return a; } }); const t = p; finish(await registerTrigger({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: t, inputs: (event) => ({ a: event }) }));",
+                "a trigger registration whose `inputs` is not the erased arrow",
+                "const p = async (a: unknown) => { return a; }; finish(await triggers.register({ source: timer.Schedule({ expr: \"0 8 * * *\" }), target: p, inputs: { a: 1 } }));",
             ),
             (
                 "an unknown binding",
@@ -975,24 +958,10 @@ mod tests {
             "model-facing TypeScript diagnostics leak Lashlang identifiers: {leaks:#?}"
         );
 
-        // The registration misuse above must reject for the reason the prompt
-        // gives ("Literal target"), not incidentally on some earlier field. A
-        // fixture that only asserts "rejected" cannot tell those apart, and
-        // this one could not: before FIG-2986 the program linked outright once
-        // the host declared `triggers`.
-        let aliased_target = misuses
-            .iter()
-            .find_map(|(label, source)| label.contains("non-literal target").then_some(*source))
-            .expect("the non-literal target misuse is listed");
-        assert_eq!(
-            lash_typescript::link(aliased_target, &host)
-                .expect_err("an aliased trigger target is not a literal target")
-                .code,
-            lash_typescript::DiagnosticCode::ProcessTargetStaticRequired
-        );
-
-        let prompt = typescript_process_prompt(&lashlang::LashlangAbilities::all());
-        assert!(prompt.contains("waitSignal is run-only"));
+        // The process authoring block is catalogue-gated, so the prompt text
+        // itself is asserted directly rather than through a rendered section.
+        let prompt = typescript_process_prompt(true);
+        assert!(prompt.contains("`waitSignal(name: string): Promise<unknown>` is run-only"));
         lash_typescript::link("await sleep(1); finish(1);", &host)
             .expect("the prompt says sleep is also valid in a cell");
     }

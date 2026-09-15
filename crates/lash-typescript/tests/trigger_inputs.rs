@@ -35,12 +35,24 @@ fn environment() -> lashlang::LashlangHostEnvironment {
             .expect("valid timer tick type"),
         )
         .expect("timer trigger source");
-    lashlang::LashlangHostEnvironment::new(
-        catalog,
-        lashlang::LashlangAbilities::default()
-            .with_processes()
-            .with_triggers(),
-    )
+    catalog
+        .add_module_operation_contract(
+            ["processes"],
+            "Processes",
+            "start",
+            "tool:processes/start",
+            &lashlang::OperationContract::new(
+                serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": { "definition": { "x-lash": { "kind": "process_unknown" } } },
+                    "required": ["definition"]
+                }),
+                serde_json::json!({ "x-lash": { "kind": "handle", "payload": {} } }),
+            ),
+        )
+        .expect("process start operation");
+    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
 }
 
 /// A program whose target takes `params`, registering with `inputs`.
@@ -52,12 +64,9 @@ fn program(params: &str, inputs: &str) -> String {
     };
     format!(
         r#"
-        const remember = defineProcess({{
-          name: "remember",
-          run: async ({params}) => {{ return true; }}
-        }});
+        const remember = async ({params}) => {{ return true; }};
         const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
-        finish(await registerTrigger({{
+        finish(await triggers.register({{
           source: schedule,
           target: remember,
         {inputs}  subscription_key: "remembered-key"
@@ -83,7 +92,7 @@ fn the_arrow_template_binds_the_event_and_freezes_every_other_input() {
 }
 
 /// The same contract on every operation that takes a registration record.
-/// Retiring the global for `registerTrigger` alone would strand these three.
+/// Retiring the global for `triggers.register` alone would strand these three.
 #[test]
 fn register_update_and_revive_share_the_arrow() {
     for (operation, extra) in [
@@ -93,10 +102,7 @@ fn register_update_and_revive_share_the_arrow() {
     ] {
         let source = format!(
             r#"
-            const remember = defineProcess({{
-              name: "remember",
-              run: async (tick: unknown) => {{ return true; }}
-            }});
+            const remember = async (tick: unknown) => {{ return true; }};
             const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
             finish(await triggers.{operation}({{
               source: schedule,
@@ -270,12 +276,9 @@ fn a_fixed_value_is_an_ordinary_expression_in_the_enclosing_scope() {
     let error = reject(
         r#"
         const event = "outer";
-        const remember = defineProcess({
-          name: "remember",
-          run: async (tick: unknown, label: unknown) => { return true; }
-        });
+        const remember = async (tick: unknown, label: unknown) => { return true; };
         const schedule = timer.Schedule({ expr: "0 8 * * *" });
-        finish(await registerTrigger({
+        finish(await triggers.register({
           source: schedule,
           target: remember,
           inputs: (event) => ({ tick: event, label: event }),
@@ -290,45 +293,38 @@ fn a_fixed_value_is_an_ordinary_expression_in_the_enclosing_scope() {
     );
 }
 
-/// The prompt's "Literal target" is a rule, not a suggestion.
+/// A process is a value, so a target reaches the registration through any
+/// expression that evaluates to one.
 ///
-/// `start` refused a non-literal target from the day it shipped; the
-/// registration path did not, so an aliased target linked and the runtime
-/// derived a subscription key from a name the registration never shows. The
-/// two paths now refuse with the same diagnostic.
+/// The retired `ProcessTargetStaticRequired` rule existed because `start` and
+/// the registration took a *binding name* rather than a value; with the forms
+/// gone, an alias, a record field and a call all resolve to the same lifted
+/// declaration, and nothing is left to spell wrong.
 #[test]
-fn a_trigger_target_is_a_literal_process_binding() {
-    for target in ["alias", "targets.remember", "picker()"] {
-        let error = reject(&format!(
+fn a_trigger_target_is_any_expression_that_names_a_process() {
+    for target in ["remember", "alias"] {
+        let source = format!(
             r#"
-            const remember = defineProcess({{
-              name: "remember",
-              run: async (tick: unknown) => {{ return true; }}
-            }});
+            const remember = async (tick: unknown) => {{ return true; }};
             const alias = remember;
-            const targets = {{ remember: remember }};
-            const picker = () => remember;
             const schedule = timer.Schedule({{ expr: "0 8 * * *" }});
-            finish(await registerTrigger({{
+            finish(await triggers.register({{
               source: schedule,
               target: {target},
               inputs: (event) => ({{ tick: event }})
             }}));
             "#
-        ));
-        assert_eq!(
-            error.code,
-            DiagnosticCode::ProcessTargetStaticRequired,
-            "{target}: {error}"
         );
+        lash_typescript::link(&source, &environment())
+            .unwrap_or_else(|error| panic!("{target}: {error}"));
     }
     accept(&program("tick: unknown", "(event) => ({ tick: event })"));
 }
 
 /// FIG-3059: a process body could not register a trigger aimed at another
 /// process. The target had to be a literal top-level `defineProcess` binding,
-/// and reading that binding from inside `run` was a capture, which
-/// `defineProcess.run` refuses — the two rules were jointly unsatisfiable.
+/// and reading that binding from inside the body was a capture, which the
+/// process body refuses — the two rules were jointly unsatisfiable.
 ///
 /// A target now lowers to the process it names rather than to a read of the
 /// binding that holds it, so there is nothing to capture.
@@ -336,24 +332,18 @@ fn a_trigger_target_is_a_literal_process_binding() {
 fn a_process_can_register_a_trigger_aimed_at_another_process() {
     accept(
         r#"
-        const remember = defineProcess({
-          name: "remember",
-          run: async (tick: unknown) => { return true; }
-        });
-        const owner = defineProcess({
-          name: "owner",
-          run: async () => {
-            const schedule = timer.Schedule({ expr: "0 8 * * *" });
-            await registerTrigger({
-              source: schedule,
-              target: remember,
-              inputs: (event) => ({ tick: event }),
-              subscription_key: "remembered-key"
-            });
-            return true;
-          }
-        });
-        finish(await start(owner, {}));
+        const remember = async (tick: unknown) => { return true; };
+        const owner = async () => {
+          const schedule = timer.Schedule({ expr: "0 8 * * *" });
+          await triggers.register({
+            source: schedule,
+            target: remember,
+            inputs: (event) => ({ tick: event }),
+            subscription_key: "remembered-key"
+          });
+          return true;
+        };
+        finish(await processes.start({ definition: owner }));
         "#,
     );
 }
@@ -364,55 +354,24 @@ fn a_process_can_register_a_trigger_aimed_at_another_process() {
 fn registrations_in_a_process_body_keep_their_source_order() {
     accept(
         r#"
-        const first = defineProcess({
-          name: "first", run: async (tick: unknown) => { return true; }
-        });
-        const second = defineProcess({
-          name: "second", run: async (tick: unknown) => { return true; }
-        });
-        const owner = defineProcess({
-          name: "owner",
-          run: async () => {
-            const schedule = timer.Schedule({ expr: "0 8 * * *" });
-            await registerTrigger({
-              source: schedule, target: first,
-              inputs: (event) => ({ tick: event }),
-              subscription_key: "first-key"
-            });
-            await registerTrigger({
-              source: schedule, target: second,
-              inputs: (event) => ({ tick: event }),
-              subscription_key: "second-key"
-            });
-            return true;
-          }
-        });
-        finish(await start(owner, {}));
+        const first = async (tick: unknown) => { return true; };
+        const second = async (tick: unknown) => { return true; };
+        const owner = async () => {
+          const schedule = timer.Schedule({ expr: "0 8 * * *" });
+          await triggers.register({
+            source: schedule, target: first,
+            inputs: (event) => ({ tick: event }),
+            subscription_key: "first-key"
+          });
+          await triggers.register({
+            source: schedule, target: second,
+            inputs: (event) => ({ tick: event }),
+            subscription_key: "second-key"
+          });
+          return true;
+        };
+        finish(await processes.start({ definition: owner }));
         "#,
-    );
-}
-
-/// The literal-target rule is what makes the reference honest, so it stays: an
-/// alias still has no name a reader of the registration can see.
-#[test]
-fn an_aliased_trigger_target_is_still_refused() {
-    assert_eq!(
-        reject(
-            r#"
-        const remember = defineProcess({
-          name: "remember", run: async (tick: unknown) => { return true; }
-        });
-        const alias = remember;
-        const schedule = timer.Schedule({ expr: "0 8 * * *" });
-        finish(await registerTrigger({
-          source: schedule, target: alias,
-          inputs: (event) => ({ tick: event }),
-          subscription_key: "remembered-key"
-        }));
-        "#
-        )
-        .code,
-        DiagnosticCode::ProcessTargetStaticRequired
     );
 }
 

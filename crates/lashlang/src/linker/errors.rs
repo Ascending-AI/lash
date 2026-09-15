@@ -16,20 +16,6 @@ pub enum LinkError {
     DuplicateProcessSignal { name: String, span: Option<Span> },
     #[error("unknown process `{name}`")]
     UnknownProcess { name: String, span: Option<Span> },
-    #[error("process `{process}` is missing argument `{arg}`")]
-    MissingProcessArgument {
-        process: String,
-        arg: String,
-        span: Option<Span>,
-    },
-    #[error("process `{process}` does not accept argument `{arg}`")]
-    UnexpectedProcessArgument {
-        process: String,
-        arg: String,
-        span: Option<Span>,
-    },
-    #[error("duplicate process argument `{arg}`")]
-    DuplicateProcessArgument { arg: String, span: Option<Span> },
     #[error("unknown name `{name}`")]
     UnknownName { name: String, span: Option<Span> },
     #[error("unknown builtin `{name}`")]
@@ -258,9 +244,6 @@ impl LinkError {
             | Self::DuplicateProcessParam { span, .. }
             | Self::DuplicateProcessSignal { span, .. }
             | Self::UnknownProcess { span, .. }
-            | Self::MissingProcessArgument { span, .. }
-            | Self::UnexpectedProcessArgument { span, .. }
-            | Self::DuplicateProcessArgument { span, .. }
             | Self::UnknownName { span, .. }
             | Self::UnknownBuiltin { span, .. }
             | Self::UnknownResource { span, .. }

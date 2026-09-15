@@ -428,7 +428,6 @@ pub enum Expr {
     },
     Break,
     Continue,
-    StartProcess(ProcessStartExpr),
     ProcessRef {
         process: AstString,
     },
@@ -448,16 +447,9 @@ pub enum Expr {
     WaitSignal {
         name: AstString,
     },
-    SignalRun {
-        run: Box<Expr>,
-        name: AstString,
-        payload: Box<Expr>,
-    },
     ResultUnwrap(Box<Expr>),
-    Cancel(Box<Expr>),
     Print(Box<Expr>),
     Yield(Box<Expr>),
-    Wake(Box<Expr>),
     Finish(Box<Expr>),
     Fail(Box<Expr>),
     BuiltinCall {
@@ -578,7 +570,7 @@ pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
 ///
 /// `params` carries the parameter names and their declared types, so a
 /// TypeScript arrow's annotations reach the lifted declaration's signature
-/// instead of widening to `Any`. `body` is the same wrapper a `defineProcess`
+/// instead of widening to `Any`. `body` is the same wrapper a process literal
 /// run lowers to: the authored statements inside the process-failure wrapper,
 /// with the params passed through by name.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -681,24 +673,17 @@ impl Expr {
                 buffer.push(condition);
                 buffer.push(body);
             }
-            Expr::StartProcess(start) => buffer.extend(start.args.iter().map(|(_, value)| value)),
             Expr::HostDescriptorConstructor { input, .. } => buffer.push(input),
             Expr::ReceiverCall { receiver, args, .. } => {
                 buffer.push(receiver);
                 buffer.extend(args.iter());
             }
-            Expr::SignalRun { run, payload, .. } => {
-                buffer.push(run);
-                buffer.push(payload);
-            }
             Expr::Await(expr)
             | Expr::SleepFor(expr)
             | Expr::SleepUntil(expr)
             | Expr::ResultUnwrap(expr)
-            | Expr::Cancel(expr)
             | Expr::Print(expr)
             | Expr::Yield(expr)
-            | Expr::Wake(expr)
             | Expr::Fail(expr)
             | Expr::Unary { expr, .. }
             | Expr::JavaScriptUnary { expr, .. }
@@ -860,14 +845,6 @@ where
             condition: Box::new(folder.fold_expr(*condition)),
             body: Box::new(folder.fold_expr(*body)),
         },
-        Expr::StartProcess(mut start) => {
-            start.args = start
-                .args
-                .into_iter()
-                .map(|(name, value)| (name, folder.fold_expr(value)))
-                .collect();
-            Expr::StartProcess(start)
-        }
         Expr::ProcessRef { process } => Expr::ProcessRef { process },
         Expr::HostDescriptorConstructor { type_name, input } => Expr::HostDescriptorConstructor {
             type_name,
@@ -888,16 +865,9 @@ where
         Expr::Await(expr) => Expr::Await(Box::new(folder.fold_expr(*expr))),
         Expr::SleepFor(expr) => Expr::SleepFor(Box::new(folder.fold_expr(*expr))),
         Expr::SleepUntil(expr) => Expr::SleepUntil(Box::new(folder.fold_expr(*expr))),
-        Expr::SignalRun { run, name, payload } => Expr::SignalRun {
-            run: Box::new(folder.fold_expr(*run)),
-            name,
-            payload: Box::new(folder.fold_expr(*payload)),
-        },
         Expr::ResultUnwrap(expr) => Expr::ResultUnwrap(Box::new(folder.fold_expr(*expr))),
-        Expr::Cancel(expr) => Expr::Cancel(Box::new(folder.fold_expr(*expr))),
         Expr::Print(expr) => Expr::Print(Box::new(folder.fold_expr(*expr))),
         Expr::Yield(expr) => Expr::Yield(Box::new(folder.fold_expr(*expr))),
-        Expr::Wake(expr) => Expr::Wake(Box::new(folder.fold_expr(*expr))),
         Expr::Finish(expr) => Expr::Finish(Box::new(folder.fold_expr(*expr))),
         Expr::Fail(expr) => Expr::Fail(Box::new(folder.fold_expr(*expr))),
         Expr::BuiltinCall { name, args } => Expr::BuiltinCall {
@@ -1286,12 +1256,6 @@ pub struct TypeField {
     pub name: AstString,
     pub ty: TypeExpr,
     pub optional: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessStartExpr {
-    pub process: AstString,
-    pub args: Vec<(AstString, Expr)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

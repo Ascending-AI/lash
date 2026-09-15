@@ -15,18 +15,20 @@ use thiserror::Error;
 
 #[derive(Clone, Debug)]
 pub enum AbilityOp {
-    ResourceOperation(ResourceOperation),
+    /// Boxed: a resource operation carries a receiver value, its arguments and
+    /// a call site, and it is several times the size of every other ability.
+    /// Inlining it would make every `AbilityOp` that large.
+    ResourceOperation(Box<ResourceOperation>),
     ResourceOperationBatch(ResourceOperationBatch),
     Await(Value),
-    Cancel(Value),
     Print(Value),
     Finish(Value),
     Fail(Value),
-    StartProcess(Box<ProcessStart>),
     ProcessEvent(ProcessEvent),
     Sleep(Sleep),
-    WaitSignal { name: String },
-    SignalRun(ProcessSignal),
+    WaitSignal {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug)]

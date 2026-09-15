@@ -591,15 +591,11 @@ pub(super) async fn processes_lists_started_lashlang_process_until_awaited_inner
     ))
     .provider(queued_text_provider(vec![typescript_block(
         r#"
-const lookup = defineProcess({
-  name: "lookup",
-  signals: {},
-  run: async () => {
+const lookup = async () => {
     const value = await tools.app_lookup({});
     return value;
-  }
-});
-const h = start(lookup);
+  };
+const h = await processes.start({ definition: lookup });
 const value = await h;
 finish(value);"#,
     )]))
@@ -673,15 +669,11 @@ pub(super) async fn lashlang_execution_graph_store_observes_lashlang_process_fro
     ))
     .provider(queued_text_provider(vec![typescript_block(
         r#"
-const lookup = defineProcess({
-  name: "lookup",
-  signals: {},
-  run: async () => {
+const lookup = async () => {
     const value = await tools.app_lookup({});
     return value;
-  }
-});
-const h = start(lookup);
+  };
+const h = await processes.start({ definition: lookup });
 const value = await h;
 finish(value);"#,
     )]))
@@ -1352,18 +1344,10 @@ pub(super) fn process_list_matches_the_definition_the_cell_started() -> Result<(
     run_async_test_on_stack_budget("process-list-definition-match-test", || async {
         let value = definition_filtered_process_list(
             r#"
-const lookup = defineProcess({
-  name: "lookup",
-  signals: {},
-  run: async () => { return await tools.app_lookup({}); }
-});
-const probe = defineProcess({
-  name: "probe",
-  signals: {},
-  run: async () => { return await tools.app_lookup({}); }
-});
-const first = start(lookup, {});
-const second = start(probe, {});
+const lookup = async () => { return await tools.app_lookup({}); };
+const probe = async () => { return await tools.app_lookup({}); };
+const first = await processes.start({ definition: lookup });
+const second = await processes.start({ definition: probe });
 const matched = await processes.list({ definition: lookup, status: "any" });
 const every = await processes.list({ status: "any" });
 await first;
@@ -1410,17 +1394,9 @@ pub(super) fn process_list_rejects_a_definition_that_was_not_started() -> Result
     run_async_test_on_stack_budget("process-list-definition-mismatch-test", || async {
         let value = definition_filtered_process_list(
             r#"
-const lookup = defineProcess({
-  name: "lookup",
-  signals: {},
-  run: async () => { return await tools.app_lookup({}); }
-});
-const idle = defineProcess({
-  name: "idle",
-  signals: {},
-  run: async () => { return await tools.app_lookup({}); }
-});
-const handle = start(lookup, {});
+const lookup = async () => { return await tools.app_lookup({}); };
+const idle = async () => { return await tools.app_lookup({}); };
+const handle = await processes.start({ definition: lookup });
 const matched = await processes.list({ definition: lookup, status: "any" });
 const other = await processes.list({ definition: idle, status: "any" });
 await handle;

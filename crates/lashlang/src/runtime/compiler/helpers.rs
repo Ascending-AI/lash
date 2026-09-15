@@ -139,18 +139,12 @@ pub fn execution_site_descriptor(expr: &Expr) -> Option<(&'static str, Cow<'_, s
             RESOURCE_OPERATION_EXECUTION_SITE_KIND,
             Cow::Borrowed(operation.as_str()),
         ),
-        Expr::StartProcess(start) => (
-            "child_process",
-            Cow::Owned(format!("start {}", start.process)),
-        ),
         Expr::SleepFor(_) => ("sleep", Cow::Borrowed("sleep for")),
         Expr::SleepUntil(_) => ("sleep", Cow::Borrowed("sleep until")),
         Expr::WaitSignal { .. } => ("wait", Cow::Borrowed("wait_signal")),
-        Expr::SignalRun { .. } => ("signal", Cow::Borrowed("signal_run")),
         Expr::Finish(_) => ("terminal", Cow::Borrowed("result")),
         Expr::Fail(_) => ("terminal", Cow::Borrowed("failure")),
         Expr::Yield(_) => ("process_event", Cow::Borrowed("yield")),
-        Expr::Wake(_) => ("process_event", Cow::Borrowed("wake")),
         Expr::If { .. } => (BRANCH_EXECUTION_SITE_KIND, Cow::Borrowed("if")),
         Expr::Call { .. } => ("call", Cow::Borrowed("function call")),
         _ => return None,
@@ -163,13 +157,10 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         Expr::Assign { expr, .. } => label_attaches_to_assignment_value(expr),
         Expr::Await(expr) | Expr::ResultUnwrap(expr) => label_attaches_to_concrete_node(expr),
         Expr::ReceiverCall { .. }
-        | Expr::StartProcess(_)
         | Expr::SleepFor(_)
         | Expr::SleepUntil(_)
         | Expr::WaitSignal { .. }
-        | Expr::SignalRun { .. }
         | Expr::Yield(_)
-        | Expr::Wake(_)
         | Expr::Finish(_)
         | Expr::Fail(_)
         | Expr::If { .. } => true,
@@ -194,7 +185,6 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::ProcessRef { .. }
         | Expr::HostDescriptorConstructor { .. }
         | Expr::ResourceRef(_)
-        | Expr::Cancel(_)
         | Expr::Print(_)
         | Expr::BuiltinCall { .. }
         | Expr::Function(_)
@@ -219,13 +209,10 @@ fn label_attaches_to_assignment_value(expr: &Expr) -> bool {
     match expr {
         Expr::Await(expr) | Expr::ResultUnwrap(expr) => label_attaches_to_assignment_value(expr),
         Expr::ReceiverCall { .. }
-        | Expr::StartProcess(_)
         | Expr::SleepFor(_)
         | Expr::SleepUntil(_)
         | Expr::WaitSignal { .. }
-        | Expr::SignalRun { .. }
         | Expr::Yield(_)
-        | Expr::Wake(_)
         | Expr::Finish(_)
         | Expr::Fail(_)
         | Expr::If { .. } => true,
@@ -282,16 +269,12 @@ pub fn is_pure_expr(expr: &Expr) -> bool {
         | Expr::Break
         | Expr::Continue
         | Expr::ReceiverCall { .. }
-        | Expr::StartProcess(_)
         | Expr::Await(_)
         | Expr::SleepFor(_)
         | Expr::SleepUntil(_)
         | Expr::WaitSignal { .. }
-        | Expr::SignalRun { .. }
-        | Expr::Cancel(_)
         | Expr::Print(_)
         | Expr::Yield(_)
-        | Expr::Wake(_)
         | Expr::Finish(_)
         | Expr::Fail(_) => false,
     }

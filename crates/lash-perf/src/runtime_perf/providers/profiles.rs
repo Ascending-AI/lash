@@ -339,23 +339,17 @@ finish(first.value);"#,
         RuntimePerfScenario::RlmProcessHandles => {
             let text = typescript_block(
                 r#"
-const benchmarkEchoProcess = defineProcess({
-  name: "benchmark_echo_process",
-  run: async (value: string, ordinal: number) => {
-    return await tools.benchmark_echo({ value: value, ordinal: ordinal });
-  }
-});
+const benchmarkEchoProcess = async (value: string, ordinal: number) => {
+  return await tools.benchmark_echo({ value: value, ordinal: ordinal });
+};
 
-const benchmarkSlowProcess = defineProcess({
-  name: "benchmark_slow_process",
-  run: async (value: string, delay_ms: number) => {
-    return await tools.benchmark_slow({ value: value, delay_ms: delay_ms });
-  }
-});
+const benchmarkSlowProcess = async (value: string, delay_ms: number) => {
+  return await tools.benchmark_slow({ value: value, delay_ms: delay_ms });
+};
 
-const first = start(benchmarkEchoProcess, { value: "runtime perf benchmark ok", ordinal: 1 });
-const second = start(benchmarkEchoProcess, { value: "runtime perf benchmark ok", ordinal: 2 });
-const slow = start(benchmarkSlowProcess, { value: "cancelled", delay_ms: 50 });
+const first = await processes.start({ definition: benchmarkEchoProcess, args: { value: "runtime perf benchmark ok", ordinal: 1 } });
+const second = await processes.start({ definition: benchmarkEchoProcess, args: { value: "runtime perf benchmark ok", ordinal: 2 } });
+const slow = await processes.start({ definition: benchmarkSlowProcess, args: { value: "cancelled", delay_ms: 50 } });
 const live = await processes.list({});
 const first_result = await first;
 const second_result = await second;
@@ -366,18 +360,15 @@ finish(first_result.value);"#,
         RuntimePerfScenario::RlmTriggerMailPipeline => {
             let text = typescript_block(
                 r#"
-const forward_mail = defineProcess({
-  name: "forward_mail",
-  run: async (event: mail.Received) => {
-    if (event.account == "test") {
-      await inbox.test23.send({
-        title: `[Fwd from test] ${event.title}`,
-        text: event.text
-      });
-    }
-    return true;
+const forward_mail = async (event: mail.Received) => {
+  if (event.account == "test") {
+    await inbox.test23.send({
+      title: `[Fwd from test] ${event.title}`,
+      text: event.text
+    });
   }
-});
+  return true;
+};
 
 const existing = await triggers.list({
   name: "runtime-perf-test-to-test23-forwarder",
@@ -388,7 +379,7 @@ let handle;
 if (existing.length > 0) {
   handle = existing[0];
 } else {
-  handle = await registerTrigger({
+  handle = await triggers.register({
     source: mail.received({}),
     target: forward_mail,
     inputs: (event) => ({ event: event }),
@@ -408,15 +399,12 @@ finish("runtime perf benchmark ok");"#,
         RuntimePerfScenario::RlmProcessAsyncToolCompletion => {
             let text = typescript_block(
                 r#"
-const benchmarkAsyncProcess = defineProcess({
-  name: "benchmark_async_process",
-  run: async (value: string) => {
-    return await tools.benchmark_async({ value: value, delay_ms: 0 });
-  }
-});
+const benchmarkAsyncProcess = async (value: string) => {
+  return await tools.benchmark_async({ value: value, delay_ms: 0 });
+};
 
-const first = start(benchmarkAsyncProcess, { value: "runtime perf benchmark ok" });
-const second = start(benchmarkAsyncProcess, { value: "runtime perf benchmark ok" });
+const first = await processes.start({ definition: benchmarkAsyncProcess, args: { value: "runtime perf benchmark ok" } });
+const second = await processes.start({ definition: benchmarkAsyncProcess, args: { value: "runtime perf benchmark ok" } });
 const first_result = await first;
 const second_result = await second;
 finish(first_result.value);"#,
@@ -431,19 +419,16 @@ finish(first_result.value);"#,
             let starts = (0..children)
                 .map(|index| {
                     format!(
-                        "const child_{index} = start(settlementChild, {{ value: \"child-{index}\" }});"
+                        "const child_{index} = await processes.start({{ definition: settlementChild, args: {{ value: \"child-{index}\" }} }});"
                     )
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
             let text = typescript_block(&format!(
                 r#"
-const settlementChild = defineProcess({{
-  name: "settlement_child",
-  run: async (value: string) => {{
-    return await tools.benchmark_async({{ value: value, delay_ms: 0 }});
-  }}
-}});
+const settlementChild = async (value: string) => {{
+  return await tools.benchmark_async({{ value: value, delay_ms: 0 }});
+}};
 
 {starts}
 finish("runtime perf benchmark ok");"#
@@ -455,19 +440,16 @@ finish("runtime perf benchmark ok");"#
         | RuntimePerfScenario::DurableAgentChildTurnPostgres => {
             let text = typescript_block(
                 r#"
-const spawnChild = defineProcess({
-  name: "spawn_child",
-  run: async () => {
-    return await agents.spawn({
-      capability: "default",
-      task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
-      seed: { chunk: ["alpha", "beta", "gamma"] },
-      output: { len: "int" }
-    });
-  }
-});
+const spawnChild = async () => {
+  return await agents.spawn({
+    capability: "default",
+    task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
+    seed: { chunk: ["alpha", "beta", "gamma"] },
+    output: { len: "int" }
+  });
+};
 
-const handle = start(spawnChild);
+const handle = await processes.start({ definition: spawnChild });
 const result = await handle;
 finish("runtime perf benchmark ok");"#,
             );
@@ -480,17 +462,14 @@ finish("runtime perf benchmark ok");"#,
         RuntimePerfScenario::RlmObliqueStackMix => {
             let text = typescript_block(
                 r#"
-const explore = defineProcess({
-  name: "explore",
-  run: async () => {
-    return await agents.spawn({
-      capability: "default",
-      task: "Return `{ len: chunk.length }` using the seeded chunk.",
-      seed: { chunk: ["obliq", "retrieval", "rerank", "trace"] },
-      output: { len: "int" }
-    });
-  }
-});
+const explore = async () => {
+  return await agents.spawn({
+    capability: "default",
+    task: "Return `{ len: chunk.length }` using the seeded chunk.",
+    seed: { chunk: ["obliq", "retrieval", "rerank", "trace"] },
+    output: { len: "int" }
+  });
+};
 
 const first_pool = await obliq.search({
   queries: [
@@ -520,7 +499,7 @@ for (const match of second_pool.matches) {
   candidate_ids.push(match.doc_id);
 }
 
-const subagent_handle = start(explore);
+const subagent_handle = await processes.start({ definition: explore });
 const handles = await obliq.list_async_handles({});
 const judged = await obliq.judge_candidates({
   verifier_predicate: "documents share the same abstract proof strategy, not topic words",
@@ -556,22 +535,19 @@ finish("runtime perf benchmark ok");"#,
             }
             let text = typescript_block(
                 r#"
-const deepChild = defineProcess({
-  name: "deep_child",
-  run: async () => {
-    const pending = await tools.benchmark_async({ value: "parent tool loop", delay_ms: 0 });
-    await sleep(0);
-    const child = await agents.spawn({
-      capability: "default",
-      task: "Use the seeded chunk and return its length after the durable waits.",
-      seed: { chunk: ["parent", "child", "tool", "wait"] },
-      output: { len: "int" }
-    });
-    return { pending: pending.value, child: child.len };
-  }
-});
+const deepChild = async () => {
+  const pending = await tools.benchmark_async({ value: "parent tool loop", delay_ms: 0 });
+  await sleep(0);
+  const child = await agents.spawn({
+    capability: "default",
+    task: "Use the seeded chunk and return its length after the durable waits.",
+    seed: { chunk: ["parent", "child", "tool", "wait"] },
+    output: { len: "int" }
+  });
+  return { pending: pending.value, child: child.len };
+};
 
-const handle = start(deepChild);
+const handle = await processes.start({ definition: deepChild });
 const result = await handle;
 print(result);"#,
             );
@@ -606,31 +582,25 @@ finish(result.value);"#,
     }
     if kind == Some("child") {
         return text_profile(typescript_block(
-            r#"const loadChild = defineProcess({
-  name: "load_child",
-  run: async () => {
-    return await agents.spawn({
-      capability: "default",
-      task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
-      seed: { chunk: ["alpha", "beta", "gamma"] },
-      output: { len: "int" }
-    });
-  }
-});
-const handle = start(loadChild);
+            r#"const loadChild = async () => {
+  return await agents.spawn({
+    capability: "default",
+    task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
+    seed: { chunk: ["alpha", "beta", "gamma"] },
+    output: { len: "int" }
+  });
+};
+const handle = await processes.start({ definition: loadChild });
 const result = await handle;
 finish("runtime perf benchmark ok");"#,
         ));
     }
     if kind == Some("wake") {
         return text_profile(typescript_block(
-            r#"const loadWake = defineProcess({
-  name: "load_wake",
-  run: async () => {
-    return await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
-  }
-});
-const handle = start(loadWake);
+            r#"const loadWake = async () => {
+  return await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
+};
+const handle = await processes.start({ definition: loadWake });
 const result = await handle;
 finish(result.value);"#,
         ));
@@ -640,15 +610,12 @@ finish(result.value);"#,
         let trigger_name = serde_json::to_string(&trigger_name)
             .expect("high-traffic trigger name always serializes");
         return text_profile(typescript_block(&format!(
-            r#"const load_forward = defineProcess({{
-  name: "load_forward",
-  run: async (event: mail.Received) => {{
-    return event.title;
-  }}
-}});
+            r#"const load_forward = async (event: mail.Received) => {{
+  return event.title;
+}};
 const existing = await triggers.list({{ name: {trigger_name}, enabled: true }});
 if (existing.length == 0) {{
-  const handle = await registerTrigger({{
+  const handle = await triggers.register({{
     source: mail.received({{}}),
     target: load_forward,
     inputs: (event) => ({{ event: event }}),

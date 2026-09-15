@@ -1,10 +1,10 @@
-//! The `defineProcess` wrapper: the one place that builds it and the one place
+//! The process-body wrapper: the one place that builds it and the one place
 //! that reads it back.
 //!
-//! `defineProcess({ run })` has no lashlang counterpart. It lowers to a process
-//! declaration whose body is a wrapper — `Try(Finish(Call(Function)))` with a
+//! An authored process literal — a top-level `async` arrow — has no lashlang
+//! counterpart. It lowers to a process declaration whose body is a wrapper — `Try(Finish(Call(Function)))` with a
 //! generated catch that turns an uncaught error into process failure — around
-//! the authored `run` body. Only that inner body was written by a user, so the
+//! the authored arrow body. Only that inner body was written by a user, so the
 //! lens projects and prints it rather than the wrapper, and the AST path to it
 //! is the prefix every node id and execution site inside the process is keyed
 //! on.
@@ -47,7 +47,7 @@ pub(crate) fn process_run_wrapper(closure: Expr, call_args: Vec<Expr>) -> Expr {
     }))
 }
 
-/// The authored `run` body of a lowered `defineProcess`, with its AST path.
+/// The authored body of a lowered process literal, with its AST path.
 ///
 /// The returned path is the prefix that addresses that body inside the process
 /// declaration. It is read off the AST — each step is the position of the

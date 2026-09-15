@@ -99,8 +99,8 @@ pub fn parse_with_globals_and_process_handles(
 /// Unlike a cell, a fragment was cut out of a program the lens projected: its
 /// ambient names are the bindings live where the fragment sits, and a fragment
 /// that reassigns one of them is ordinary edited source, not a const violation.
-/// `processes` names the module's `defineProcess` bindings, so a fragment that
-/// starts one still resolves a static process target.
+/// `processes` names the process bodies the module declares, which a fragment
+/// may start through the catalogue tools.
 pub fn parse_workflow_fragment(
     source: &str,
     globals: &std::collections::BTreeSet<String>,

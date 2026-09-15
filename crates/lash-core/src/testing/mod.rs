@@ -100,6 +100,22 @@ pub fn process_execution_env_fixture() -> (
     (Arc::new(store), env_ref)
 }
 
+/// Publishes `spec` into an existing store and returns the reference a
+/// registration carries.
+///
+/// FIG-2999: a recorded start declares its own execution env, so a fixture
+/// whose `ProcessService` realizes a recorded intent publishes that env the way
+/// the runtime's own start command does instead of leaving the registration
+/// without a reference.
+#[cfg(any(test, feature = "testing"))]
+pub async fn publish_process_execution_env_for_testing(
+    env_store: &dyn crate::ProcessExecutionEnvStore,
+    owner: &crate::ArtifactOwner,
+    spec: &crate::ProcessExecutionEnvSpec,
+) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
+    crate::publish_process_execution_env(env_store, owner, spec).await
+}
+
 /// Engine fixture for trigger-delivery tests that need to exercise the real
 /// engine-only start contract without publishing unrelated language artifacts.
 #[cfg(any(test, feature = "testing"))]

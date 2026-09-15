@@ -69,7 +69,7 @@ macro_rules! attempt {
 }
 
 #[tokio::test]
-async fn start_process_declares_a_start_and_answers_with_the_derived_id() {
+async fn start_process_declares_a_start_and_answers_with_the_unrealized_handle() {
     let outcome = attempt!(
         "start_process",
         serde_json::json!({
@@ -96,16 +96,31 @@ async fn start_process_declares_a_start_and_answers_with_the_derived_id() {
         Some(&serde_json::json!({ "request": { "id": "req-1" } }))
     );
 
-    // The id the attempt answers with is the id the declaration's own identity
-    // derives, so the executor starts that same id on the first run and on
-    // every redrive of this attempt.
+    // FIG-2999 re-pin. The answer is the one handle kind (ADR 0095), not a
+    // `{ id, process_id }` record: `id` is a `HandleId`, and the process id it
+    // carries is the one the declaration's own identity derives, so the
+    // executor starts that same id on the first run and on every redrive.
+    //
+    // The incarnation reads `0` because a declaring attempt cannot know it: the
+    // registry allocates it as a change sequence when the start is realized,
+    // and realization projects the real handle over this one. A record that
+    // escaped without that projection is refused downstream by
+    // `ProcessRef::from_handle_json` ("missing `incarnation`"), so the
+    // unrealized spelling can never be mistaken for a started process.
     let identity = {
         let tool_context = attempt_context(None);
         let context = lash_core::AttemptContext::__for_testing(&tool_context, "declaration-scope");
         context.intent_identity(0).expect("a derivable identity")
     };
     let expected = lash_core::ProcessId::from_intent_identity(&identity);
-    assert_eq!(output.get("id"), Some(&serde_json::json!(expected)));
+    assert_eq!(
+        output.get(lash_sansio::handle::HANDLE_FIELD),
+        Some(&serde_json::json!("lash"))
+    );
+    assert_eq!(
+        output.get("id"),
+        Some(&serde_json::json!(format!("p.0.{expected}")))
+    );
     assert_eq!(output.get("process_id"), Some(&serde_json::json!(expected)));
 }
 

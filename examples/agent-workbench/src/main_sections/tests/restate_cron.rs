@@ -14,16 +14,12 @@ pub(crate) fn live_restate_cron_tick_wait() -> Duration {
 fn test_cron_trigger_source(expr: &str) -> String {
     format!(
         r#"
-        const remember_tick = defineProcess({{
-          name: "remember_tick",
-          signals: {{}},
-          run: async (tick: unknown) => {{
-            wake({{ kind: "cron_tick", fired_at: tick.fired_at }});
-            return {{ fired_at: tick.fired_at }};
-          }}
-        }});
+        const remember_tick = async (tick: unknown) => {{
+          await processes.emit({{ value: {{ kind: "cron_tick", fired_at: tick.fired_at }} }});
+          return {{ fired_at: tick.fired_at }};
+        }};
 
-        const handle = await registerTrigger({{
+        const handle = await triggers.register({{
           source: cron.Schedule({{ expr: "{expr}", tz: "UTC" }}),
           target: remember_tick,
           inputs: (tick) => ({{ tick: tick }}),

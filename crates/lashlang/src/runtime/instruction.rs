@@ -9,7 +9,6 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::artifact::CompiledModuleContext;
 use crate::ast::{BinaryOp, JavaScriptBinaryOp, JavaScriptUnaryOp, UnaryOp};
 use crate::span::Span;
 use crate::tracking::LashlangExecutionSite;
@@ -20,7 +19,6 @@ use super::{CompileStats, FormatError, ProfileReport, ProfileStat, Value};
 
 #[derive(Clone)]
 pub(crate) struct Chunk {
-    pub(crate) module_context: Option<CompiledModuleContext>,
     pub(crate) code: Vec<Instruction>,
     pub(crate) spans: Vec<Option<Span>>,
     pub(crate) lashlang_execution_sites: Vec<Option<LashlangExecutionSite>>,
@@ -360,21 +358,13 @@ pub(crate) enum Instruction {
     AwaitPending,
     ResourceOperationBatch(usize),
     ResourceOperationListBatch(usize),
-    StartProcess {
-        process: usize,
-        keys: usize,
-    },
     AwaitHandle,
     SleepFor,
     SleepUntil,
     ProcessWaitSignal {
         name: usize,
     },
-    ProcessSignalRun {
-        name: usize,
-    },
     AwaitHandleUnwrap,
-    CancelHandle,
     Intrinsic(IntrinsicOp),
     MakeClosure {
         function: usize,
@@ -429,7 +419,6 @@ pub(crate) enum Instruction {
     AppendAssign(usize),
     Print,
     ProcessYield,
-    ProcessWake,
     Finish,
     ProcessFail,
     ObserveStep,
@@ -575,13 +564,10 @@ impl Instruction {
             | Instruction::AwaitPending
             | Instruction::ResourceOperationBatch(_)
             | Instruction::ResourceOperationListBatch(_) => InstructionProfileTag::ResourceCall,
-            Instruction::StartProcess { .. } => InstructionProfileTag::StartProcess,
             Instruction::AwaitHandle
             | Instruction::AwaitHandleUnwrap
             | Instruction::ProcessWaitSignal { .. } => InstructionProfileTag::AwaitHandle,
             Instruction::SleepFor | Instruction::SleepUntil => InstructionProfileTag::Sleep,
-            Instruction::ProcessSignalRun { .. } => InstructionProfileTag::SessionProcessAdmin,
-            Instruction::CancelHandle => InstructionProfileTag::CancelHandle,
             Instruction::Intrinsic(_) => InstructionProfileTag::Intrinsic,
             Instruction::MakeClosure { .. } => InstructionProfileTag::MakeClosure,
             Instruction::Call { .. } | Instruction::CallDynamic => InstructionProfileTag::Call,
@@ -602,7 +588,7 @@ impl Instruction {
             Instruction::AppendAssign(_) => InstructionProfileTag::AppendAssign,
             Instruction::Print => InstructionProfileTag::Print,
             Instruction::Finish => InstructionProfileTag::Finish,
-            Instruction::ProcessYield | Instruction::ProcessWake | Instruction::ProcessFail => {
+            Instruction::ProcessYield | Instruction::ProcessFail => {
                 InstructionProfileTag::SessionProcessAdmin
             }
             Instruction::ObserveStep => InstructionProfileTag::ObserveStep,
@@ -751,9 +737,7 @@ pub(crate) enum InstructionProfileTag {
     JumpIfFalse,
     JumpIfTrue,
     ResourceCall,
-    StartProcess,
     AwaitHandle,
-    CancelHandle,
     Intrinsic,
     AddAssign,
     AppendAssign,
@@ -872,9 +856,7 @@ const INSTRUCTION_PROFILE_NAMES: [&str; INSTRUCTION_PROFILE_COUNT] = [
     "jump_if_false",
     "jump_if_true",
     "resource_call",
-    "start_process",
     "await_handle",
-    "cancel_handle",
     "intrinsic",
     "add_assign",
     "append_assign",

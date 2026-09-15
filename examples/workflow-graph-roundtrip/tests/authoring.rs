@@ -40,7 +40,7 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
     let mut document = select_workflow(&client, &base, "blank").await;
     assert_eq!(
         document.source,
-        "const blank = defineProcess({\n  name: \"blank\",\n  signals: {},\n  run: async () => {\n    return 0;\n  },\n});\n"
+        "const blank = async () => {\n  return 0;\n};\n"
     );
     let baseline_version = document.version;
     let baseline_source = document.source.clone();
@@ -63,7 +63,7 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
         .insert("pct".to_string(), EditableValue::Number(73.0));
     document.roots.main.push(progress.id.clone());
     document.nodes.push(progress);
-    // The module body also holds the `const blank = defineProcess(...)`
+    // The module body also holds the `const blank = async (..) => ..`
     // binding, so the palette's node is the one the host just appended.
     assert_eq!(
         document.roots.main.last().map(String::as_str),

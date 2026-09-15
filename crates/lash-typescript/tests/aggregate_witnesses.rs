@@ -241,15 +241,17 @@ impl ProcessHost {
 impl ExecutionHost for ProcessHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
-            AbilityOp::StartProcess(_) => {
+            // The typed `await handle` seam, and `processes.await`, the tool
+            // that parks on the same durable wait (ADR 0095).
+            AbilityOp::Await(_) => Ok(AbilityResult::Value(self.wait())),
+            // FIG-2999: starting is a leaf tool, so a start arrives as a
+            // resource operation beside `processes.await`.
+            AbilityOp::ResourceOperation(operation) if operation.operation == "start" => {
                 let index = self.starts.fetch_add(1, Ordering::SeqCst);
                 Ok(AbilityResult::Value(process_handle(&format!(
                     "run-{index}"
                 ))))
             }
-            // The typed `await handle` seam, and `processes.await`, the tool
-            // that parks on the same durable wait (ADR 0095).
-            AbilityOp::Await(_) => Ok(AbilityResult::Value(self.wait())),
             AbilityOp::ResourceOperation(operation) => {
                 assert_eq!(operation.operation, "await");
                 Ok(AbilityResult::Value(self.wait()))
@@ -289,10 +291,24 @@ fn process_environment() -> lashlang::LashlangHostEnvironment {
             lashlang::TypeExpr::Any,
         )
         .expect("processes.await binding");
-    lashlang::LashlangHostEnvironment::new(
-        catalog,
-        lashlang::LashlangAbilities::default().with_processes(),
-    )
+    // FIG-2999: `start` is a leaf tool, and its `definition` slot is typed as a
+    // process — that expected type is what lifts the process literal the
+    // fixture starts.
+    catalog
+        .add_module_operation(
+            ["processes"],
+            "Processes",
+            "start",
+            "processes.start",
+            lashlang::TypeExpr::Object(vec![lashlang::TypeField {
+                name: "definition".into(),
+                ty: lashlang::TypeExpr::Process(lashlang::ProcessType::unknown()),
+                optional: false,
+            }]),
+            lashlang::TypeExpr::Any,
+        )
+        .expect("processes.start binding");
+    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
 }
 
 fn execute_linked(
@@ -309,9 +325,9 @@ fn execute_linked(
 
 /// Two live process handles, `a` and `b`, for the re-check below to aggregate.
 const WORKER: &str = r#"
-    const worker = defineProcess({ name: "worker", run: async (input: unknown) => { return input; } });
-    const a = start(worker, { input: 1 });
-    const b = start(worker, { input: 2 });
+    const worker = async (input: unknown) => { return input; };
+    const a = await processes.start({ definition: worker, args: { input: 1 } });
+    const b = await processes.start({ definition: worker, args: { input: 2 } });
 "#;
 
 fn refusal(outcome: Result<ExecutionOutcome, lashlang::RuntimeError>, label: &str) -> String {

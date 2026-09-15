@@ -1632,8 +1632,19 @@ async fn await_list_process_starts_and_joins_handles() {
     impl ExecutionHost for BatchHost {
         async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
             match op {
-                AbilityOp::StartProcess(start) => {
+                AbilityOp::ResourceOperation(operation) => {
+                    assert_eq!(operation.operation, "start");
                     self.calls.fetch_add(1, Ordering::Relaxed);
+                    // The start's own arguments ride in `args`, beside the
+                    // `definition` slot that carries the process itself.
+                    let args = operation
+                        .args
+                        .first()
+                        .and_then(Value::as_record)
+                        .and_then(|record| record.get("args"))
+                        .and_then(Value::as_record)
+                        .cloned()
+                        .unwrap_or_default();
                     let mut handle = Record::new();
                     handle.insert(
                         lash_sansio::handle::HANDLE_FIELD.to_string(),
@@ -1642,18 +1653,14 @@ async fn await_list_process_starts_and_joins_handles() {
                     handle.insert(
                         "id".to_string(),
                         Value::String(
-                            lash_sansio::handle::HandleId::process(&start.process_name, 1)
+                            lash_sansio::handle::HandleId::process("echo", 1)
                                 .as_str()
                                 .into(),
                         ),
                     );
                     handle.insert(
-                        "process".to_string(),
-                        Value::String(start.process_name.into()),
-                    );
-                    handle.insert(
                         "value".to_string(),
-                        start.args.get("value").cloned().unwrap_or(Value::Null),
+                        args.get("value").cloned().unwrap_or(Value::Null),
                     );
                     Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
                 }
@@ -1678,7 +1685,9 @@ async fn await_list_process_starts_and_joins_handles() {
         batches: AtomicUsize::new(0),
     };
     // process echo(value: str) { finish value }
-    // result = await [start echo(value: "a"), start echo(value: "b")]
+    // a = await processes.start({ definition: echo, args: { value: "a" } })?
+    // b = await processes.start({ definition: echo, args: { value: "b" } })?
+    // result = await [a, b]
     // finish [result[0]?, result[1]?]
     let start_echo =
         |value: &str| builders::start("echo", vec![("value", builders::string(value))]);
@@ -1695,9 +1704,11 @@ async fn await_list_process_starts_and_joins_handles() {
             builders::block(vec![builders::finish(builders::var("value"))]),
         )],
         vec![
+            builders::assign("a", start_echo("a")),
+            builders::assign("b", start_echo("b")),
             builders::assign(
                 "result",
-                builders::await_expr(builders::list(vec![start_echo("a"), start_echo("b")])),
+                builders::await_expr(builders::list(vec![builders::var("a"), builders::var("b")])),
             ),
             builders::finish(builders::list(vec![unwrap_result(0.0), unwrap_result(1.0)])),
         ],

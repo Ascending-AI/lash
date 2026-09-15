@@ -381,15 +381,29 @@ pub(super) fn assert_no_duplicate_label_step(contract: &GraphContract, title: &s
     );
 }
 
-pub(super) fn assert_completed_process_graph(contract: &GraphContract, entry_name: &str) {
-    assert!(
-        contract.graphs.iter().any(|graph| {
+/// Every completed process graph is a lifted process body.
+///
+/// A process is an uncalled `const`-bound async arrow (FIG-2997/FIG-2999), and
+/// the lifted declaration's name is a digest over the body and its AST path,
+/// so an authored name is not a thing a scenario can pin. What stays
+/// assertable is that each completed process graph came from a lift, and how
+/// many did.
+pub(super) fn assert_completed_lifted_process_graphs(contract: &GraphContract, expected: usize) {
+    let lifted = contract
+        .graphs
+        .iter()
+        .filter(|graph| {
             graph.entry_kind == "process"
-                && graph.entry_name == entry_name
                 && graph.subject_kind == "process"
+                && graph
+                    .entry_name
+                    .starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
                 && graph.status == crate::tracing::TraceLanguageExecutionStatus::Completed
-        }),
-        "missing completed process graph `{entry_name}`: {contract:#?}"
+        })
+        .count();
+    assert_eq!(
+        lifted, expected,
+        "expected {expected} completed lifted process graphs, got {lifted}: {contract:#?}"
     );
 }
 

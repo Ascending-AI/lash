@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lashlang::{
     AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, ProcessDecl,
-    ProcessParam, ProcessSignalDecl, ProcessStartExpr, ResourceRefExpr, TryExpr, TypeExpr,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, ProcessParam,
+    ResourceRefExpr, TryExpr, TypeExpr,
 };
 
 use crate::adapter::{
@@ -63,7 +63,6 @@ pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
 struct FunctionContext {
     id: usize,
     captures: BTreeSet<String>,
-    assigned_identifiers: BTreeSet<String>,
 }
 
 /// A hoisted function declaration awaiting a place in the emission order.
@@ -92,10 +91,9 @@ struct PositionContext {
 struct Lowerer {
     /// How deep the program's own root scope is. One when the lowerer stands
     /// alone; two when an ambient scope of live session globals sits beneath
-    /// it. Depth is what "top level" means to `defineProcess`, so it has to
+    /// it. Depth is what "top level" means to a process literal, so it has to
     /// count from the program's root rather than from zero.
     root_scope_depth: usize,
-    root_assigned_identifiers: BTreeSet<String>,
     scopes: Vec<Scope>,
     functions: Vec<FunctionContext>,
     next_binding: usize,
@@ -132,13 +130,6 @@ impl Lowerer {
             .iter()
             .rev()
             .any(|scope| scope.bindings.contains_key(name))
-    }
-
-    fn current_owner_assigns(&self, name: &str) -> bool {
-        self.functions.last().map_or_else(
-            || self.root_assigned_identifiers.contains(name),
-            |function| function.assigned_identifiers.contains(name),
-        )
     }
 
     fn lower_statements(
@@ -338,11 +329,9 @@ impl Lowerer {
 
     /// Attaches a statement's `@label` to what the statement lowered to.
     ///
-    /// A process binding is the one statement whose label does not belong on
-    /// the lowered expression: `const p = defineProcess(..)` lowers to a
-    /// declaration plus the binding that names it, and the graph reads a
-    /// process's title off the declaration. Everything else carries the label
-    /// on its own expression, which is the node the graph shows.
+    /// The label rides on the first lowered expression, which is the node the
+    /// graph shows: a lifted process literal is named off its own hoisted
+    /// declaration, not off the binding that starts it.
     fn apply_label(&mut self, label: &NodeLabel, mut lowered: Vec<LashExpr>) -> Vec<LashExpr> {
         let metadata = LabelMetadata {
             title: label.title.as_str().into(),
@@ -352,24 +341,6 @@ impl Lowerer {
             // A statement with nothing to run has no node to name.
             return lowered;
         };
-        if let LashExpr::Assign { expr, .. } = first
-            && let LashExpr::ProcessRef { process } = expr.as_ref()
-        {
-            let process = process.clone();
-            if let Some(declaration) =
-                self.declarations
-                    .iter_mut()
-                    .find_map(|declaration| match declaration {
-                        Declaration::Process(candidate) if candidate.name == process => {
-                            Some(candidate)
-                        }
-                        _ => None,
-                    })
-            {
-                declaration.label = Some(metadata);
-                return lowered;
-            }
-        }
         let expression = std::mem::replace(first, LashExpr::Undefined);
         *first = LashExpr::LabelAnnotated {
             label: metadata,
@@ -441,35 +412,7 @@ impl Lowerer {
                             self.set_role(name, BindingRole::ExoticIterable(kind))?;
                         }
                     }
-                    let value = if let Some(init) = declaration.init.as_ref()
-                        && is_define_process_call(init)
-                    {
-                        if *kind != VarKind::Const {
-                            return Err(Diagnostic::new(
-                                DiagnosticCode::ProcessDefinitionNotTopLevel,
-                                "defineProcess must initialize a top-level const binding",
-                                None,
-                            ));
-                        }
-                        // The program's own root scope, which sits directly
-                        // above the ambient session scope.
-                        if self.scopes.len() != self.root_scope_depth || !self.functions.is_empty()
-                        {
-                            return Err(Diagnostic::new(
-                                DiagnosticCode::ProcessDefinitionNotTopLevel,
-                                "defineProcess must initialize a top-level binding",
-                                None,
-                            ));
-                        }
-                        let Some(process_name) = process_name else {
-                            return Err(Diagnostic::new(
-                                DiagnosticCode::ProcessDefinitionNotTopLevel,
-                                "defineProcess must initialize one identifier binding",
-                                None,
-                            ));
-                        };
-                        self.lower_process_definition(process_name, init)?
-                    } else if let (Some(name), Some(Expr::Function(function))) =
+                    let value = if let (Some(name), Some(Expr::Function(function))) =
                         (process_name, declaration.init.as_ref())
                         && *kind == VarKind::Const
                         && function.is_async
@@ -478,7 +421,7 @@ impl Lowerer {
                         // A `const`-bound arrow the program never calls is an
                         // inline process body (FIG-2997): the linker lifts it
                         // where a `Process` slot asks for it.
-                        self.lower_process_literal_arrow(function)?
+                        self.lower_process_literal_arrow(function, Some(name))?
                     } else {
                         declaration
                             .init
@@ -487,13 +430,6 @@ impl Lowerer {
                             .transpose()?
                             .unwrap_or(LashExpr::Undefined)
                     };
-                    if let Some(name) = process_name
-                        && (*kind == VarKind::Const
-                            || (*kind == VarKind::Let && !self.current_owner_assigns(name)))
-                        && matches!(&value, LashExpr::StartProcess(_))
-                    {
-                        self.set_role(name, BindingRole::ProcessHandle)?;
-                    }
                     output.extend(self.lower_pattern(
                         &declaration.pattern,
                         value,
@@ -768,13 +704,8 @@ impl Lowerer {
     ) -> Result<LashExpr, Diagnostic> {
         self.next_function += 1;
         let id = self.next_function;
-        let assigned_identifiers = match &function.body {
-            FunctionBody::Block(statements) => assigned_identifiers_in_statements(statements),
-            FunctionBody::Expression(_) => BTreeSet::new(),
-        };
         self.functions.push(FunctionContext {
             id,
-            assigned_identifiers,
             ..FunctionContext::default()
         });
         self.scopes.push(Scope::default());
@@ -1052,182 +983,16 @@ impl Lowerer {
         })
     }
 
-    fn lower_process_definition(
-        &mut self,
-        binding_name: &str,
-        expression: &Expr,
-    ) -> Result<LashExpr, Diagnostic> {
-        let Expr::Call { args, .. } = expression else {
-            unreachable!("caller identifies defineProcess calls")
-        };
-        let [CallArg::Value(Expr::Object(properties))] = args.as_slice() else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ProcessConfigLiteralRequired,
-                "defineProcess expects one object literal",
-                None,
-            ));
-        };
-        let entries = properties
-            .iter()
-            .map(|property| match property {
-                ObjectProperty::KeyValue(PropertyKey::Static(key), value) => {
-                    Ok((key.as_str(), value))
-                }
-                _ => Err(Diagnostic::new(
-                    DiagnosticCode::ProcessConfigLiteralRequired,
-                    "defineProcess config requires static properties without spread",
-                    None,
-                )),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let field = |name: &str| {
-            entries
-                .iter()
-                .find_map(|(key, value)| (*key == name).then_some(*value))
-        };
-        let mut seen_fields = BTreeSet::new();
-        if entries.iter().any(|(key, _)| {
-            !matches!(*key, "name" | "signals" | "run") || !seen_fields.insert(*key)
-        }) {
-            return Err(Diagnostic::with_repair(
-                DiagnosticCode::ProcessConfigFieldUnsupported,
-                "defineProcess accepts only name, signals, and run",
-                "drop the extra key; anything else the process needs arrives as a `run` parameter",
-                None,
-            ));
-        }
-        let Some(Expr::String(process_name)) = field("name") else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ProcessNameLiteralRequired,
-                "defineProcess.name must be a string literal",
-                None,
-            ));
-        };
-        // FIG-2998: the `signals` declaration is gone from the dialect. The
-        // registered set is inferred from the body's literal `waitSignal`
-        // names — including unreached branches — so a declaration is now a
-        // second source of truth to disagree with.
-        if field("signals").is_some() {
-            return Err(Diagnostic::with_repair(
-                DiagnosticCode::ProcessSignalsRemoved,
-                "defineProcess.signals is removed: the signal set is inferred from the body's `waitSignal(<literal>)` sites, including unreached branches",
-                "drop the `signals: { .. }` key and write `await waitSignal(<literal>)` where the body waits",
-                None,
-            ));
-        }
-        let Some(Expr::Function(run)) = field("run") else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ProcessRunLiteralRequired,
-                "defineProcess.run must be a function literal",
-                None,
-            ));
-        };
-        if !run.is_async {
-            return Err(Diagnostic::with_repair(
-                DiagnosticCode::AsyncUnsupported,
-                "defineProcess.run must be async",
-                "write it as `run: async (...) => { ... }`",
-                None,
-            ));
-        }
-        if self
-            .declarations
-            .iter()
-            .any(|declaration| matches!(declaration, Declaration::Process(process) if process.name.as_str() == process_name))
-        {
-            return Err(Diagnostic::new(
-                DiagnosticCode::DuplicateBinding,
-                format!("duplicate process name `{process_name}`"),
-                None,
-            ));
-        }
-
-        let closure = self.with_process(|lowerer| lowerer.lower_function(run, None))?;
-        let function = match &closure {
-            LashExpr::Function(function) => function.as_ref(),
-            LashExpr::BuiltinCall { args, .. } => {
-                let [LashExpr::Function(function), ..] = args.as_slice() else {
-                    unreachable!("closure intrinsic contains a function")
-                };
-                function
-            }
-            _ => unreachable!("run lowering returns a function"),
-        };
-        if !function.captures.is_empty() {
-            return Err(Diagnostic::new(
-                DiagnosticCode::ProcessCaptureUnsupported,
-                "defineProcess.run must receive durable inputs as parameters",
-                None,
-            ));
-        }
-        // The lowerer emits one runtime parameter per source parameter, in
-        // order, so the declared types line up by index. Only a plain named
-        // parameter can carry one: a destructured or defaulted parameter has
-        // no single name to blame and stays gradual.
-        let params = function
-            .params
-            .iter()
-            .enumerate()
-            .map(|(index, slot)| {
-                let ty = match run.params.get(index) {
-                    Some(Pattern::Ident(source_name, Some(annotation))) => {
-                        process_param_type(process_name, source_name, annotation)?
-                    }
-                    _ => TypeExpr::Any,
-                };
-                Ok(ProcessParam {
-                    name: slot.clone(),
-                    ty,
-                })
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>()?;
-        let call_args = function
-            .params
-            .iter()
-            .map(|name| LashExpr::Variable(name.clone()))
-            .collect();
-        self.declaration_spans.push(
-            self.current_span
-                .map(|source| lashlang::Span {
-                    start: source.start,
-                    end: source.end,
-                })
-                .unwrap_or(lashlang::Span { start: 0, end: 0 }),
-        );
-        let body = process_wrapper::process_run_wrapper(closure, call_args);
-        // FIG-2998: `signals` is no longer declared, so the registered set is
-        // the body's own literal `waitSignal` names. The linker infers this for
-        // an inline process literal; a `defineProcess` binding lowers straight
-        // to a declaration and never reaches that pass, so it infers here or it
-        // registers an empty set and refuses every signal it was written to
-        // wait for.
-        let signals = inferred_signal_decls(&body);
-        self.declarations.push(Declaration::Process(ProcessDecl {
-            name: process_name.as_str().into(),
-            params,
-            signals,
-            return_ty: Some(TypeExpr::Any),
-            label: None,
-            body,
-        }));
-        self.set_role(
-            binding_name,
-            BindingRole::ProcessDefinition(process_name.clone()),
-        )?;
-        Ok(LashExpr::ProcessRef {
-            process: process_name.as_str().into(),
-        })
-    }
-
-    /// Lowers an inline async arrow as a process literal (FIG-2997).
+    /// Lowers an async arrow to a process literal.
     ///
-    /// The arrow is discovered syntactically — in argument position, or bound
-    /// to a `const` that never calls it — and lowered exactly like a
-    /// `defineProcess.run`: one runtime parameter per source parameter, the
-    /// declared annotation kept as the parameter's type, the authored body
-    /// wrapped so an uncaught error fails the process. Acceptance is the
-    /// linker's decision, made from the slot's expected type.
-    fn lower_process_literal_arrow(&mut self, function: &Function) -> Result<LashExpr, Diagnostic> {
+    /// `name` is the `const` the arrow is bound to when there is one: the
+    /// lifted declaration's own name is a digest, so the authored binding is
+    /// the only spelling a diagnostic can show an author.
+    fn lower_process_literal_arrow(
+        &mut self,
+        function: &Function,
+        name: Option<&str>,
+    ) -> Result<LashExpr, Diagnostic> {
         debug_assert!(function.is_async, "caller checked the arrow is async");
         let closure = self.with_process(|lowerer| lowerer.lower_function(function, None))?;
         let run = match &closure {
@@ -1250,7 +1015,7 @@ impl Lowerer {
                 .binding_by_internal(capture)
                 .ok_or_else(|| {
                     Diagnostic::defect(
-                        DiagnosticCode::ProcessCaptureUnsupported,
+                        DiagnosticCode::NonLiftableCapture,
                         format!("a process body references unknown binding `{capture}`"),
                         None,
                     )
@@ -1258,7 +1023,7 @@ impl Lowerer {
                 .clone();
             if let BindingRole::ProcessHandle = binding.role {
                 return Err(Diagnostic::with_repair(
-                    DiagnosticCode::ProcessCaptureUnsupported,
+                    DiagnosticCode::NonLiftableCapture,
                     format!(
                         "a process body cannot capture the process-handle binding `{}`: a process sees the value a variable had when it started, and a handle is not a durable value it may copy",
                         binding.internal
@@ -1269,7 +1034,7 @@ impl Lowerer {
             }
             if !matches!(binding.kind, BindingKind::Const) {
                 return Err(Diagnostic::with_repair(
-                    DiagnosticCode::ProcessCaptureUnsupported,
+                    DiagnosticCode::NonLiftableCapture,
                     format!(
                         "a process body reads the mutable binding `{}`, and ADR 0011 forbids capturing a mutable name: bind the copy before the cell, or pass the value in as a start argument",
                         binding.internal
@@ -1290,7 +1055,7 @@ impl Lowerer {
             .map(|(index, slot)| {
                 let ty = match function.params.get(index) {
                     Some(Pattern::Ident(source_name, Some(annotation))) => {
-                        process_param_type("process", source_name, annotation)?
+                        process_param_type(name.unwrap_or("process"), source_name, annotation)?
                     }
                     _ => TypeExpr::Any,
                 };
@@ -1483,14 +1248,6 @@ impl Lowerer {
     }
 }
 
-fn is_define_process_call(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::Call { callee, .. }
-            if matches!(callee.as_ref(), Expr::Ident(name, _) if name == "defineProcess")
-    )
-}
-
 /// v1 lowers a closure's captures by value, so a cycle of hoisted function
 /// declarations has no emission order: each member needs its peers' values
 /// before any of them exists. Routing the cycle through a shared mutable frame
@@ -1594,38 +1351,4 @@ fn source_span(expr: &Expr) -> Option<SourceSpan> {
         Expr::Ident(_, span) => *span,
         _ => None,
     }
-}
-
-/// The signal set a process body declares by waiting on it.
-///
-/// Every `waitSignal(<literal>)` site in the body counts, including ones in
-/// branches this run will not reach: the set is structural, and the payload
-/// type stays gradual because the TypeScript surface annotates no signal
-/// payloads. An inline process literal nested in the body owns its own wait
-/// sites — the linker infers those while it lifts the literal — so the walk
-/// stops at that boundary rather than hoisting an inner process's signals onto
-/// its parent.
-fn inferred_signal_decls(body: &LashExpr) -> Vec<ProcessSignalDecl> {
-    fn walk(expr: &LashExpr, names: &mut BTreeSet<String>) {
-        match expr {
-            LashExpr::ProcessLiteral(_) => return,
-            LashExpr::WaitSignal { name } => {
-                names.insert(name.to_string());
-            }
-            _ => {}
-        }
-        for child in expr.children() {
-            walk(child, names);
-        }
-    }
-
-    let mut names = BTreeSet::new();
-    walk(body, &mut names);
-    names
-        .into_iter()
-        .map(|name| ProcessSignalDecl {
-            name: name.as_str().into(),
-            ty: TypeExpr::Any,
-        })
-        .collect()
 }

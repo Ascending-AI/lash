@@ -121,7 +121,6 @@ impl Compiler {
             .unwrap_or_default();
         lashlang_execution_sites.resize(self.code.len(), None);
         Chunk {
-            module_context: self.module_context,
             code: self.code,
             spans,
             lashlang_execution_sites,
@@ -1108,17 +1107,13 @@ impl Compiler {
             | Expr::Break
             | Expr::Continue
             | Expr::ReceiverCall { .. }
-            | Expr::StartProcess(_)
             | Expr::Await(_)
             | Expr::SleepFor(_)
             | Expr::SleepUntil(_)
             | Expr::WaitSignal { .. }
-            | Expr::SignalRun { .. }
             | Expr::ResultUnwrap(_)
-            | Expr::Cancel(_)
             | Expr::Print(_)
             | Expr::Yield(_)
-            | Expr::Wake(_)
             | Expr::Finish(_)
             | Expr::Fail(_) => None,
         }

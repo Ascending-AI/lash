@@ -851,10 +851,7 @@ fn write_exports(writer: &mut HashWriter, exports: &ModuleExports) {
 
 fn write_host_requirements(writer: &mut HashWriter, requirements: &HostRequirements) {
     writer.atom("abilities");
-    writer.bool(requirements.abilities.processes);
     writer.bool(requirements.abilities.sleep);
-    writer.bool(requirements.abilities.process_signals);
-    writer.bool(requirements.abilities.triggers);
     if requirements.language_features.label_annotations {
         writer.atom("language-features");
         writer.atom("label-annotations");
@@ -1194,15 +1191,6 @@ fn write_expr<'program>(
         }
         Expr::Break => writer.atom("break"),
         Expr::Continue => writer.atom("continue"),
-        Expr::StartProcess(start) => {
-            writer.atom("start-process");
-            writer.atom(start.process.as_str());
-            writer.usize(start.args.len());
-            for (key, value) in &start.args {
-                writer.atom(key.as_str());
-                write_expr(writer, value, normalizer);
-            }
-        }
         Expr::ProcessRef { process } => {
             writer.atom("process-ref");
             writer.atom(process.as_str());
@@ -1236,17 +1224,9 @@ fn write_expr<'program>(
             writer.atom("wait-signal");
             writer.atom(name.as_str());
         }
-        Expr::SignalRun { run, name, payload } => {
-            writer.atom("signal-run");
-            writer.atom(name.as_str());
-            write_expr(writer, run, normalizer);
-            write_expr(writer, payload, normalizer);
-        }
         Expr::ResultUnwrap(expr) => write_unary_expr(writer, "unwrap", expr, normalizer),
-        Expr::Cancel(expr) => write_unary_expr(writer, "cancel", expr, normalizer),
         Expr::Print(expr) => write_unary_expr(writer, "print", expr, normalizer),
         Expr::Yield(expr) => write_unary_expr(writer, "yield", expr, normalizer),
-        Expr::Wake(expr) => write_unary_expr(writer, "wake", expr, normalizer),
         Expr::Finish(expr) => write_unary_expr(writer, "finish", expr, normalizer),
         Expr::Fail(expr) => write_unary_expr(writer, "fail", expr, normalizer),
         Expr::BuiltinCall { name, args } => {

@@ -132,7 +132,7 @@ rejection_test!(rejects_unawaited_sleep, "sleep(1);", Code::AwaitRequired);
 
 #[test]
 fn await_permission_stops_at_nested_function_boundaries() {
-    let operations = ["sleep(1)", "waitSignal('ready')", "registerTrigger({})"];
+    let operations = ["sleep(1)", "waitSignal('ready')"];
     for operation in operations {
         for source in [
             format!("await (async () => {{ {operation}; }})();"),
@@ -225,10 +225,13 @@ rejection_test!(
     "const s = 'a'; await s.notAMethod();",
     Code::MethodUnsupported
 );
+// `defineProcess` is not a construct any more (FIG-2999): a process is an
+// uncalled `const`-bound async arrow, so the retired spelling is an unbound
+// name like any other.
 rejection_test!(
-    rejects_dynamic_process_config,
+    rejects_the_retired_define_process_form,
     "const config = {}; const worker = defineProcess(config);",
-    Code::ProcessConfigLiteralRequired
+    Code::UnknownBinding
 );
 rejection_test!(
     rejects_yield,

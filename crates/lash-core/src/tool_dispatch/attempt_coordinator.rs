@@ -623,28 +623,29 @@ fn project_recorded_intent_outcomes(
         return;
     }
 
-    let Some(sequence) = outcomes.iter().find_map(|outcome| match outcome {
-        crate::ToolIntentExecutionOutcome::Executed {
-            kind: crate::ToolIntentKind::SignalProcess,
-            result,
-            ..
-        } => result.get("sequence").and_then(serde_json::Value::as_u64),
-        _ => None,
-    }) else {
+    let projected = projected_intent_fields(outcomes);
+    if projected.is_empty() {
         return;
-    };
+    }
     let crate::ToolCallOutcome::Success(value) = &mut output.outcome else {
         return;
     };
     match value {
         crate::ToolValue::Object(object) => {
-            object.insert(
-                "sequence".to_string(),
-                crate::ToolValue::Number(sequence.into()),
-            );
+            for (name, field) in &projected {
+                object.insert(
+                    name.clone(),
+                    match serde_json::from_value(field.clone()) {
+                        Ok(decoded) => decoded,
+                        Err(_) => return,
+                    },
+                );
+            }
         }
         crate::ToolValue::UntrustedJson(serde_json::Value::Object(object)) => {
-            object.insert("sequence".to_string(), serde_json::json!(sequence));
+            for (name, field) in &projected {
+                object.insert(name.clone(), field.clone());
+            }
         }
         _ => return,
     }
@@ -669,6 +670,45 @@ fn project_recorded_intent_outcomes(
             ));
         }
     }
+}
+
+/// The fields a realized intent contributes back to its declaring attempt's
+/// optimistic output.
+///
+/// An attempt seals its output before its intents run, so anything only the
+/// realization knows has to travel back through here. Two facts do. A signal's
+/// `sequence` is the position the append landed at. A start's handle is the
+/// whole answer: the process handle carries the incarnation the registry
+/// allocated, which no attempt can predict, so the declaration answers a handle
+/// that names no incarnation and the realized one replaces it here. Nothing
+/// else is copied — `incarnation`, `status` and the rest of the realized view
+/// are facts a holder reads through the process tools, and spelling the
+/// incarnation beside the id is exactly what ADR 0095 forbids.
+fn projected_intent_fields(
+    outcomes: &[crate::ToolIntentExecutionOutcome],
+) -> Vec<(String, serde_json::Value)> {
+    let mut projected = Vec::new();
+    for outcome in outcomes {
+        let crate::ToolIntentExecutionOutcome::Executed { kind, result, .. } = outcome else {
+            continue;
+        };
+        match kind {
+            crate::ToolIntentKind::SignalProcess => {
+                if let Some(sequence) = result.get("sequence").and_then(serde_json::Value::as_u64) {
+                    projected.push(("sequence".to_string(), serde_json::json!(sequence)));
+                }
+            }
+            crate::ToolIntentKind::StartProcess => {
+                for name in [lash_sansio::handle::HANDLE_FIELD, "id", "process_id"] {
+                    if let Some(field) = result.get(name) {
+                        projected.push((name.to_string(), field.clone()));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    projected
 }
 
 fn runtime_failure_outcome(

@@ -1402,15 +1402,11 @@ pub(super) async fn rlm_process_pending_host_tool_completion_resumes_process_awa
     ))
     .provider(queued_text_provider(vec![typescript_block(
         r#"
-const lookup = defineProcess({
-  name: "lookup",
-  signals: {},
-  run: async () => {
+const lookup = async () => {
     const value = await tools.app_lookup({});
     return value;
-  }
-});
-const handle = start(lookup);
+  };
+const handle = await processes.start({ definition: lookup });
 const result = await handle;
 finish(result);"#,
     )]))

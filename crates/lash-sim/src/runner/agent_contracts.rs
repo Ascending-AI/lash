@@ -262,16 +262,12 @@ async fn agent_started_process_tool_call_graph_execution() -> Result<Value, Fixe
         "Start a process that calls the app lookup tool.",
         vec![
             r#"<typescript>
-const lookup = defineProcess({
-  name: "lookup",
-  signals: {},
-  run: async () => {
-    /** @label Lookup app state in process */
-    const value = await tools.app_lookup({});
-    return value;
-  }
-});
-const handle = start(lookup);
+const lookup = async () => {
+  /** @label Lookup app state in process */
+  const value = await tools.app_lookup({});
+  return value;
+};
+const handle = await processes.start({ definition: lookup });
 const result = await handle;
 finish(result);
 </typescript>"#,
@@ -307,23 +303,15 @@ async fn agent_nested_process_start_await_execution() -> Result<Value, FixedScri
         "Start a parent process that starts and awaits a child process.",
         vec![
             r#"<typescript>
-const child = defineProcess({
-  name: "child",
-  signals: {},
-  run: async () => {
-    return { child: "done" };
-  }
-});
-const parent = defineProcess({
-  name: "parent",
-  signals: {},
-  run: async () => {
-    /** @label Start nested child process */
-    const inner = await start(child);
-    return { parent: inner.child };
-  }
-});
-const handle = start(parent);
+const child = async () => {
+  return { child: "done" };
+};
+const parent = async () => {
+  /** @label Start nested child process */
+  const inner = await (await processes.start({ definition: child }));
+  return { parent: inner.child };
+};
+const handle = await processes.start({ definition: parent });
 const result = await handle;
 finish(result);
 </typescript>"#,
@@ -348,21 +336,17 @@ async fn agent_started_process_subagent_spawn_execution() -> Result<Value, Fixed
         "Run a Lashlang process that spawns a subagent and returns its value.",
         vec![
             r#"<typescript>
-const spawnChild = defineProcess({
-  name: "spawn_child",
-  signals: {},
-  run: async () => {
-    /** @label Spawn subagent with web search */
-    const result = await agents.spawn({
-      capability: "default",
-      task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-      seed: { chunk: ["a", "b"] },
-      output: { len: "int" }
-    });
-    return result;
-  }
-});
-const handle = start(spawnChild);
+const spawnChild = async () => {
+  /** @label Spawn subagent with web search */
+  const result = await agents.spawn({
+    capability: "default",
+    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
+    seed: { chunk: ["a", "b"] },
+    output: { len: "int" }
+  });
+  return result;
+};
+const handle = await processes.start({ definition: spawnChild });
 const result = await handle;
 finish(result);
 </typescript>"#,
@@ -391,14 +375,10 @@ async fn agent_session_turn_process_child_execution() -> Result<Value, FixedScri
         &SessionId::from("sim-agent-session-turn-process-child-contract"),
         "Start a child process and await its result.",
         r#"<typescript>
-const child = defineProcess({
-  name: "child",
-  signals: {},
-  run: async () => {
-    return { child: "done" };
-  }
-});
-const handle = start(child);
+const child = async () => {
+  return { child: "done" };
+};
+const handle = await processes.start({ definition: child });
 const result = await handle;
 finish(result);
 </typescript>"#,
@@ -492,17 +472,13 @@ async fn agent_parallel_spawn_and_join_execution() -> Result<Value, FixedScriptR
         &SessionId::from("sim-agent-parallel-spawn-join-contract"),
         "Start two processes, await both, and finish their joined result.",
         r#"<typescript>
-const child = defineProcess({
-  name: "child",
-  signals: {},
-  run: async (value) => {
-    return value;
-  }
-});
+const child = async (value) => {
+  return value;
+};
 /** @label Start left process */
-const left = start(child, { value: "left" });
+const left = await processes.start({ definition: child, args: { value: "left" } });
 /** @label Start right process */
-const right = start(child, { value: "right" });
+const right = await processes.start({ definition: child, args: { value: "right" } });
 const leftValue = await left;
 const rightValue = await right;
 finish({ joined: [leftValue, rightValue] });
@@ -761,15 +737,11 @@ async fn facade_agent_durable_input_execution_with(
         "lash_runtime agent durable input",
         vec![
             r#"<typescript>
-const requestAnswer = defineProcess({
-  name: "request_answer",
-  signals: {},
-  run: async () => {
-    const result = await tools.mock_input_request({ question: "Need input?" });
-    return result;
-  }
-});
-const handle = start(requestAnswer);
+const requestAnswer = async () => {
+  const result = await tools.mock_input_request({ question: "Need input?" });
+  return result;
+};
+const handle = await processes.start({ definition: requestAnswer });
 const result = await handle;
 finish(result.answer);
 </typescript>"#,

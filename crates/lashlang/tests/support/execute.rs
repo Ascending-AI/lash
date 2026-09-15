@@ -39,31 +39,10 @@ pub async fn execute<H: ExecutionHost>(
     let program = lash_typescript::parse_with_globals(source, &globals)?;
     let compiled = if let Ok(linked) = lashlang::LinkedModule::link(program.clone(), &environment) {
         lashlang::compile_linked(&linked)
-    } else if program_contains_start_process(&program.main) {
-        let linked = lashlang::LinkedModule::link(program, &environment)?;
-        lashlang::compile_linked(&linked)
     } else {
         lashlang::compile_ast(&program)?
     };
     lashlang::execute(&compiled, state, host)
         .await
         .map_err(ExecuteError::Runtime)
-}
-
-pub fn program_contains_start_process(expr: &lashlang::Expr) -> bool {
-    struct Finder(bool);
-
-    impl lashlang::ExprVisitor for Finder {
-        fn visit_expr(&mut self, expr: &lashlang::Expr) {
-            if matches!(expr, lashlang::Expr::StartProcess(_)) {
-                self.0 = true;
-                return;
-            }
-            lashlang::walk_expr(self, expr);
-        }
-    }
-
-    let mut finder = Finder(false);
-    lashlang::ExprVisitor::visit_expr(&mut finder, expr);
-    finder.0
 }

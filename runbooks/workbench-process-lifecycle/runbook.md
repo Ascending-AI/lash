@@ -63,8 +63,8 @@ session id. Screenshot `00-ready.png`.
 ## Phase 1 — Start two durable Runtime Processes
 
 Ask the agent to define and start two explicitly named durable Runtime Processes in one
-turn. `defineProcess` takes a string-literal `name` and must initialize a top-level
-`const`, so use underscores in both; the work rail renders the definition name verbatim:
+turn. A process is an `async` arrow bound to a top-level `const` the cell never calls, and
+that `const` is the name a reader sees, so use underscores in it:
 
 - `FIG425_survivor_<runid>` waits roughly 4 minutes, then returns successfully with a
   literal terminal marker. The longer wait leaves enough time for browser-paced evidence

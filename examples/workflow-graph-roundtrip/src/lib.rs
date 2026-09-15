@@ -50,38 +50,34 @@ pub use runtime::RunTiming;
 /// writes back — so the corpus exercises both the authored and the derived
 /// naming paths.
 pub const DEFAULT_WORKFLOW: &str = r#"/** @label Onboarding — Welcome a new operator and wait for their approval */
-const onboarding = defineProcess({
-  name: "onboarding",
-  signals: { continue: null },
-  run: async () => {
-    /** @label Start the run */
-    await display.set_status({ key: "phase", value: "starting" });
-    await sleep("400ms");
-    await display.show_message({ text: "Welcome to the workflow graph" });
-    await display.set_light({ name: "ready", state: "green" });
-    await sleep("400ms");
-    if (true) {
-      await display.set_progress({ pct: 35 });
-    } else {
-      await display.show_message({ text: "Alternate path" });
-    }
-    /** @label Wait for approval — Hold until the operator signals continue */
-    const approval = await waitSignal("continue");
-    await display.highlight({ target: "checklist" });
-    await display.add_item({ list: "steps", item: "Approved" });
-    let count = 0;
-    /** @label Replay the checklist */
-    while (count < 2) {
-      await display.add_item({ list: "steps", item: "Loop item" });
-      count = count + 1;
-      await sleep("250ms");
-    }
-    await sleep("400ms");
-    await display.set_progress({ pct: 100 });
-    await display.set_light({ name: "complete", state: "blue" });
-    return approval;
+const onboarding = async () => {
+  /** @label Start the run */
+  await display.set_status({ key: "phase", value: "starting" });
+  await sleep("400ms");
+  await display.show_message({ text: "Welcome to the workflow graph" });
+  await display.set_light({ name: "ready", state: "green" });
+  await sleep("400ms");
+  if (true) {
+    await display.set_progress({ pct: 35 });
+  } else {
+    await display.show_message({ text: "Alternate path" });
   }
-});
+  /** @label Wait for approval — Hold until the operator signals continue */
+  const approval = await waitSignal("continue");
+  await display.highlight({ target: "checklist" });
+  await display.add_item({ list: "steps", item: "Approved" });
+  let count = 0;
+  /** @label Replay the checklist */
+  while (count < 2) {
+    await display.add_item({ list: "steps", item: "Loop item" });
+    count = count + 1;
+    await sleep("250ms");
+  }
+  await sleep("400ms");
+  await display.set_progress({ pct: 100 });
+  await display.set_light({ name: "complete", state: "blue" });
+  return approval;
+};
 "#;
 
 #[derive(Clone)]

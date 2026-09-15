@@ -27,8 +27,7 @@ use crate::{
         lashlang_value_to_json, process_event_payload, process_sleep,
         protocol_tool_reply_to_lashlang_value,
     },
-    prepare_lashlang_process_start, resolve_lashlang_module_operation,
-    validate_lashlang_process_admission,
+    resolve_lashlang_module_operation, validate_lashlang_process_admission,
 };
 
 static SEGMENT_BOUNDARY_DECLINED_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -831,56 +830,6 @@ impl LashlangProcessHost<'_> {
         protocol_tool_reply_to_lashlang_value(reply)
     }
 
-    async fn cancel_handle(
-        &self,
-        handle: lashlang::Value,
-    ) -> Result<lashlang::Value, ExecutionHostError> {
-        let reply = self
-            .ctx
-            .cancel_tool_handle(
-                uuid::Uuid::new_v4().to_string(),
-                lashlang_value_to_json(&handle)?,
-            )
-            .await;
-        protocol_tool_reply_to_lashlang_value(reply)
-    }
-
-    async fn start_process(
-        &self,
-        start: lashlang::ProcessStart,
-    ) -> Result<lashlang::Value, ExecutionHostError> {
-        let prepared = {
-            let _phase = self.ctx.named_phase("rlm_process.prepare_start");
-            let parent_start_seed = format!("parent-process:{}", self.process_id);
-            prepare_lashlang_process_start(
-                Arc::clone(&self.artifact_store),
-                &parent_start_seed,
-                start,
-                self.ctx.trigger_actor(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    self.ctx
-                        .child_process_parent_scope()
-                        .await
-                        .map_err(|error| ExecutionHostError::new(error.to_string()))?,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-                lash_core::RecoveryContract::Rerunnable,
-                self.child_max_attempts,
-            )
-            .await
-            .map_err(|error| LashlangHostError::PrepareProcessStart {
-                message: error.to_string(),
-            })?
-        };
-        let reply = {
-            let _phase = self.ctx.named_phase("rlm_process.start");
-            self.ctx
-                .start_child_process(prepared.request, LASHLANG_ENGINE_KIND, prepared.label)
-                .await
-        };
-        protocol_tool_reply_to_lashlang_value(reply)
-    }
-
     async fn process_event(&self, event: lashlang::ProcessEvent) -> Result<(), ExecutionHostError> {
         let event_type = match event.kind {
             lashlang::ProcessEventKind::Yield => "process.yield",
@@ -999,26 +948,6 @@ impl LashlangProcessHost<'_> {
         Ok(lash_core::facade_support::current_epoch_ms())
     }
 
-    async fn signal_run(
-        &self,
-        signal: lashlang::ProcessSignal,
-    ) -> Result<lashlang::Value, ExecutionHostError> {
-        let target = process_id_from_lashlang_handle(&signal.run)?;
-        let payload = lashlang_value_to_json(&signal.payload)?;
-        let sequence = self.signal_send_sequence.fetch_add(1, Ordering::Relaxed);
-        let signal_id = format!(
-            "lashlang:{}:signal.{}:{sequence}",
-            self.process_id, signal.name
-        );
-        self.ctx
-            .signal_process_by_id(&ProcessId::from(target), &signal.name, signal_id, payload)
-            .await
-            .map_err(|error| LashlangHostError::SignalProcess {
-                message: error.to_string(),
-            })?;
-        Ok(lashlang::Value::Null)
-    }
-
     fn perform_selected_ability<'a>(
         &'a self,
         op: lashlang::AbilityOp,
@@ -1044,16 +973,6 @@ impl LashlangProcessHost<'_> {
                     .await
                     .map(lashlang::AbilityResult::Value)
             }),
-            lashlang::AbilityOp::Cancel(handle) => Box::pin(async move {
-                self.cancel_handle(handle)
-                    .await
-                    .map(lashlang::AbilityResult::Value)
-            }),
-            lashlang::AbilityOp::StartProcess(start) => Box::pin(async move {
-                self.start_process(*start)
-                    .await
-                    .map(lashlang::AbilityResult::Value)
-            }),
             lashlang::AbilityOp::ProcessEvent(event) => Box::pin(async move {
                 self.process_event(event).await?;
                 Ok(lashlang::AbilityResult::Unit)
@@ -1063,11 +982,6 @@ impl LashlangProcessHost<'_> {
             }
             lashlang::AbilityOp::WaitSignal { name } => Box::pin(async move {
                 self.wait_signal(name)
-                    .await
-                    .map(lashlang::AbilityResult::Value)
-            }),
-            lashlang::AbilityOp::SignalRun(signal) => Box::pin(async move {
-                self.signal_run(signal)
                     .await
                     .map(lashlang::AbilityResult::Value)
             }),
@@ -1500,27 +1414,6 @@ fn process_lashlang_cancelled(message: impl Into<String>) -> lash_core::ProcessA
     lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
         lash_core::ToolCancellation::runtime(message),
     ))
-}
-
-fn process_id_from_lashlang_handle(handle: &lashlang::Value) -> Result<String, ExecutionHostError> {
-    let value = lashlang_value_to_json(handle)?;
-    let Some(object) = value.as_object() else {
-        return Err(LashlangHostError::InvalidProcessHandle.into());
-    };
-    // The one parse (ADR 0095). Reading the marker field and the id separately
-    // here is what let this reader disagree with the VM's about what a handle
-    // was; it now asks the same question core and the language ask.
-    let Some(id) = lash_sansio::handle::parse_handle_json(&value) else {
-        return Err(if object.contains_key("__handle__") {
-            LashlangHostError::ProcessHandleMissingId.into()
-        } else {
-            LashlangHostError::InvalidProcessHandle.into()
-        });
-    };
-    match id.target() {
-        Some(lash_sansio::handle::HandleTarget::Process { process_id, .. }) => Ok(process_id),
-        _ => Err(LashlangHostError::InvalidProcessHandle.into()),
-    }
 }
 
 pub fn lashlang_process_event_types() -> Vec<lash_core::ProcessEventType> {

@@ -32,8 +32,40 @@ impl TestHost {
 impl ExecutionHost for TestHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
+            // A started process is a real handle record, never its bare
+            // result: awaiting a resolved value is a guest error (FIG-2764).
+            AbilityOp::ResourceOperation(operation) if operation.operation == "start" => {
+                // The `definition` slot carries a process value, not a tool
+                // name the host could dispatch on, and every fixture process
+                // here echoes its input: the handle settles to the `value` the
+                // start passed in `args`.
+                let args = operation
+                    .args
+                    .first()
+                    .and_then(Value::as_record)
+                    .and_then(|record| record.get("args"))
+                    .and_then(Value::as_record)
+                    .cloned()
+                    .unwrap_or_default();
+                let value = args.get("value").cloned().unwrap_or(Value::Null);
+                let mut handle = Record::new();
+                handle.insert(
+                    lash_sansio::handle::HANDLE_FIELD.to_string(),
+                    Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                );
+                handle.insert(
+                    "id".to_string(),
+                    Value::String(
+                        lash_sansio::handle::HandleId::process("language", 1)
+                            .as_str()
+                            .into(),
+                    ),
+                );
+                handle.insert("value".to_string(), value);
+                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
+            }
             AbilityOp::ResourceOperation(operation) => self
-                .perform_resource_operation(operation)
+                .perform_resource_operation(*operation)
                 .await
                 .map(AbilityResult::Value),
             AbilityOp::ResourceOperationBatch(batch) => {
@@ -50,26 +82,6 @@ impl ExecutionHost for TestHost {
                 Ok(AbilityResult::ResourceOperationBatch(
                     lashlang::ResourceOperationBatchResult::settled_in_input_order(results),
                 ))
-            }
-            // A started process is a real handle record, never its bare
-            // result: awaiting a resolved value is a guest error (FIG-2764).
-            AbilityOp::StartProcess(start) => {
-                let value = self.call_tool(&start.process_name, &start.args).await?;
-                let mut handle = Record::new();
-                handle.insert(
-                    lash_sansio::handle::HANDLE_FIELD.to_string(),
-                    Value::String(lash_sansio::handle::HANDLE_KIND.into()),
-                );
-                handle.insert(
-                    "id".to_string(),
-                    Value::String(
-                        lash_sansio::handle::HandleId::process("language", 1)
-                            .as_str()
-                            .into(),
-                    ),
-                );
-                handle.insert("value".to_string(), value);
-                Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
             }
             AbilityOp::Await(handle) => handle
                 .as_record()
@@ -236,6 +248,35 @@ fn test_host_environment() -> lashlang::LashlangHostEnvironment {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
+    // FIG-2999: starting, signalling and yielding are leaf tools now. `start`
+    // types its `definition` slot as a process, and that expected type is what
+    // lifts a process literal out of the argument.
+    resources
+        .add_module_operation(
+            ["processes"],
+            "Processes",
+            "start",
+            "start",
+            TypeExpr::Object(vec![lashlang::TypeField {
+                name: "definition".into(),
+                ty: TypeExpr::Process(lashlang::ProcessType::unknown()),
+                optional: false,
+            }]),
+            TypeExpr::Any,
+        )
+        .expect("host catalog operation must not conflict");
+    for operation in ["signal", "cancel", "emit"] {
+        resources
+            .add_module_operation(
+                ["processes"],
+                "Processes",
+                operation,
+                operation,
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("host catalog operation must not conflict");
+    }
     lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all())
 }
 

@@ -20,13 +20,9 @@ canonical printer over the IR — the `/project` and `/workflow` seams round-tri
 **That printer now emits TypeScript.** The Blank baseline reads
 
 ```ts
-const blank = defineProcess({
-  name: "blank",
-  signals: {},
-  run: async () => {
-    return 0;
-  },
-});
+const blank = async () => {
+  return 0;
+};
 ```
 
 and the old lashlang form `process blank() { finish 0 }` is rejected by `POST /project`
@@ -96,7 +92,7 @@ After readiness, gate these API facts before opening the editor:
 - projecting the TypeScript probe
 
   ```ts
-  const probe = defineProcess({ name: "probe", signals: {}, run: async () => { return 0; } });
+  const probe = async () => { return 0; };
   ```
 
   through `POST /project` returns 200 with the canonical source, one process and one terminal
@@ -116,7 +112,7 @@ until all three surfaces agree:
   it renders the `blank` process under a **BACKGROUND TASKS** rail (Finish nested inside it)
   and a `Save as blank` data card in the **STEPS** rail. Gate that shape, not a bare Finish;
 - the select response and fresh `GET /workflow` have identical version/source/nodes, with the
-  canonical source the TypeScript `defineProcess` form above (whitespace-insensitive) and
+  canonical source the TypeScript process-arrow form above (whitespace-insensitive) and
   node types exactly `{data, process, terminal}`;
 - the source pane renders that version and source, while Display says no run yet.
 

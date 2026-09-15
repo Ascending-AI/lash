@@ -601,18 +601,8 @@ async fn every_effectful_construct_is_rejected_in_a_function() {
         (Expr::SleepFor(Box::new(string("1s"))), "sleep for"),
         (Expr::SleepUntil(Box::new(string("1s"))), "sleep until"),
         (finish(number(1.0)), "finish"),
-        (Expr::Cancel(Box::new(number(1.0))), "cancel"),
         (Expr::WaitSignal { name: "go".into() }, "wait_signal"),
-        (
-            Expr::SignalRun {
-                run: Box::new(number(1.0)),
-                name: "go".into(),
-                payload: Box::new(number(1.0)),
-            },
-            "signal_run",
-        ),
         (Expr::Yield(Box::new(Expr::Null)), "yield"),
-        (Expr::Wake(Box::new(Expr::Null)), "wake"),
         (Expr::Fail(Box::new(Expr::Null)), "fail"),
         (
             // A label names a step in the workflow graph; a pure body
@@ -631,31 +621,6 @@ async fn every_effectful_construct_is_rejected_in_a_function() {
         assert_eq!(function, "f");
         assert_eq!(construct, expected);
     }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn starting_a_process_is_rejected_in_a_function() {
-    let worker = Declaration::Process(lashlang::ProcessDecl {
-        name: "work".into(),
-        params: vec![lashlang::ProcessParam {
-            name: "n".into(),
-            ty: TypeExpr::Int,
-        }],
-        signals: Vec::new(),
-        return_ty: None,
-        label: None,
-        body: Expr::Block(vec![finish(var("n"))]),
-    });
-    let (function, construct) = forbidden_construct(
-        vec![worker],
-        Expr::StartProcess(lashlang::ProcessStartExpr {
-            process: "work".into(),
-            args: vec![("n".into(), number(1.0))],
-        }),
-    );
-
-    assert_eq!(function, "f");
-    assert_eq!(construct, "start");
 }
 
 #[tokio::test(flavor = "current_thread")]

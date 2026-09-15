@@ -1287,11 +1287,7 @@ pub(crate) async fn enqueue_mail_received_trigger_command(
 }
 
 pub(crate) fn workbench_lashlang_abilities() -> lashlang::LashlangAbilities {
-    lashlang::LashlangAbilities::default()
-        .with_processes()
-        .with_sleep()
-        .with_process_signals()
-        .with_triggers()
+    lashlang::LashlangAbilities::default().with_sleep()
 }
 
 #[cfg(test)]

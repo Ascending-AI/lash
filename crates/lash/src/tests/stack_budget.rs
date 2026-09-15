@@ -6,17 +6,13 @@ fn stack_budget_rlm_lashlang_process_turn() -> Result<()> {
         let core = explicit_ephemeral_facets(rlm_core_builder())
             .provider(queued_text_provider(vec![typescript_block(
                 r#"
-const child = defineProcess({
-  name: "child",
-  signals: {},
-  run: async (value) => {
+const child = async (value) => {
     const lookup = await tools.app_lookup({});
     return { value: value, ok: lookup.ok };
-  }
-});
+  };
 
-const left = start(child, { value: "left" });
-const right = start(child, { value: "right" });
+const left = await processes.start({ definition: child, args: { value: "left" } });
+const right = await processes.start({ definition: child, args: { value: "right" } });
 const joined = { left: await left, right: await right };
 finish({
   left: joined.left,

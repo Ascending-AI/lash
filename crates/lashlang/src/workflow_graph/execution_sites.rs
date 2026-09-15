@@ -90,15 +90,12 @@ fn collect_execution_sites(
             collect_execution_sites(expr, owner, &child_path(path, 0), label, sites);
         }
         Expr::ReceiverCall { .. }
-        | Expr::StartProcess(_)
         | Expr::SleepFor(_)
         | Expr::SleepUntil(_)
         | Expr::WaitSignal { .. }
-        | Expr::SignalRun { .. }
         | Expr::Finish(_)
         | Expr::Fail(_)
         | Expr::Yield(_)
-        | Expr::Wake(_)
         | Expr::Call { .. } => {
             push_execution_site_descriptor(expression, owner, path, sites);
             collect_child_execution_sites(expression, owner, path, sites);

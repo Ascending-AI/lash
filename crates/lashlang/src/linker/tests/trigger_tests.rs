@@ -669,7 +669,7 @@ fn linked_module_accepts_button_trigger_source_constructor() {
         )
         .expect("valid button trigger source");
     // process on_button(event: ui.button.Pressed) {
-    //   wake { kind: "button_pressed", button: event.button, message: event.message }
+    //   yield { kind: "button_pressed", button: event.button, message: event.message }
     //   finish true
     // }
     //
@@ -688,7 +688,7 @@ fn linked_module_accepts_button_trigger_source_constructor() {
                 TypeExpr::Ref("ui.button.Pressed".into()),
             )],
             builders::block(vec![
-                builders::wake(builders::record(vec![
+                builders::yield_expr(builders::record(vec![
                     ("kind", builders::string("button_pressed")),
                     ("button", builders::field(builders::var("event"), "button")),
                     (

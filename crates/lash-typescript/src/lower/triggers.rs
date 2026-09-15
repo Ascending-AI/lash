@@ -91,12 +91,6 @@ impl Lowerer {
         let source = entries
             .iter()
             .find_map(|(name, value)| (*name == "source").then_some(*value));
-        if let Some(target) = entries
-            .iter()
-            .find_map(|(name, value)| (*name == "target").then_some(*value))
-        {
-            self.require_literal_process_target(target)?;
-        }
         for (_, value) in &entries {
             self.reject_trigger_event_spellings(value, source)?;
         }
@@ -105,88 +99,19 @@ impl Lowerer {
             let value = if name == "inputs" {
                 self.lower_trigger_input_template(value)?
             } else if name == "target" {
-                self.lower_process_target(value)?
+                // Two shapes name a process: an inline async arrow — a process
+                // literal the linker lifts where the `target` slot's expected
+                // type is `Process` (the same rule every other process slot
+                // uses) — and a const-bound arrow binding whose read the
+                // linker already lifted. A plain arrow is refused here, before
+                // the linker has to say so.
+                self.lower_call_argument(value)?
             } else {
                 self.lower_expr(value)?
             };
             lowered.push((name.into(), value));
         }
         Ok(LashExpr::Record(lowered))
-    }
-
-    /// Lowers a registration target to the process it names.
-    ///
-    /// Two shapes name a process: a top-level `defineProcess` binding, and an
-    /// inline async arrow — the arrow is a process literal, and the linker
-    /// lifts it where the `target` slot's expected type is `Process` (the same
-    /// rule every other process slot uses; FIG-2997).
-    ///
-    /// A binding read is not the same *program* as a reference: a variable
-    /// read is a capture, and `defineProcess.run` refuses captures, so reading
-    /// the binding made a process registering a trigger against another
-    /// process unwritable (FIG-3059). A reference has nothing to capture.
-    ///
-    /// Only a registration written *inside* a process body takes the binding
-    /// route. At the top level the binding is in scope with nothing to
-    /// capture, and the variable read is the form every stored artifact was
-    /// built from; the canonical IR there is durable, so it does not move for
-    /// a rewrite that buys nothing.
-    fn lower_process_target(&mut self, target: &Expr) -> Result<LashExpr, Diagnostic> {
-        if let Expr::Function(function) = target {
-            if !function.is_async {
-                return Err(Diagnostic::new(
-                    DiagnosticCode::ProcessTargetStaticRequired,
-                    "a trigger target written inline must be an async arrow; a plain arrow is not a process body",
-                    None,
-                ));
-            }
-            return self.lower_process_literal_arrow(function);
-        }
-        if self.process_depth > 0
-            && let Expr::Ident(name, _) = target
-            && let Ok(BindingRole::ProcessDefinition(process)) =
-                self.binding(name).map(|binding| binding.role.clone())
-        {
-            return Ok(LashExpr::ProcessRef {
-                process: process.as_str().into(),
-            });
-        }
-        self.lower_expr(target)
-    }
-
-    /// The registration target names a top-level `defineProcess` binding, or
-    /// is an inline async arrow the linker will lift.
-    ///
-    /// `start` has always required that (`ProcessTargetStaticRequired`); the
-    /// registration path did not, so `const t = p` followed by
-    /// `registerTrigger({ target: t, ... })` linked, and the runtime derived a
-    /// subscription key from an alias no reader of the registration can see.
-    /// The prompt has said "Literal target" the whole time; this is the rule
-    /// that makes it true, on all four registration spellings.
-    fn require_literal_process_target(&self, target: &Expr) -> Result<(), Diagnostic> {
-        if let Expr::Function(function) = target {
-            if function.is_async {
-                return Ok(());
-            }
-            return Err(Diagnostic::new(
-                DiagnosticCode::ProcessTargetStaticRequired,
-                "a trigger target written inline must be an async arrow; a plain arrow is not a process body",
-                None,
-            ));
-        }
-        if let Expr::Ident(name, _) = target
-            && matches!(
-                self.binding(name).map(|binding| &binding.role),
-                Ok(BindingRole::ProcessDefinition(_))
-            )
-        {
-            return Ok(());
-        }
-        Err(Diagnostic::new(
-            DiagnosticCode::ProcessTargetStaticRequired,
-            "a trigger target is the name of a top-level defineProcess binding or an inline async arrow, never an alias or an expression",
-            None,
-        ))
     }
 
     /// The two spellings a model reaches for that no longer exist.

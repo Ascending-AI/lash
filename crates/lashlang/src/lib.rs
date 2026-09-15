@@ -32,9 +32,9 @@ pub use ast::{
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LIFTED_PROCESS_NAME_PREFIX,
     LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl,
     ProcessLiteralExpr, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessSignatureError,
-    ProcessStartExpr, ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr,
-    TypeField, UnaryOp, check_ast_nesting_depth, fold_expr_children, format_type_expr,
-    lifted_process_identity, validate_ast, walk_expr,
+    ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
+    check_ast_nesting_depth, fold_expr_children, format_type_expr, lifted_process_identity,
+    validate_ast, walk_expr,
 };
 
 /// Names of every source Lashlang builtin, in registry order.
@@ -102,19 +102,20 @@ pub use span::Span;
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 16;
+pub const BYTECODE_FORMAT_VERSION: u32 = 17;
 pub use tracking::{
     LashlangBranchSite, LashlangExecutionCallSite, LashlangExecutionChild,
     LashlangExecutionObservation, LashlangExecutionSite, ProcessBranchSelection,
     WorkflowExecutionSite, process_ref_key,
 };
 pub use trigger::{
-    HostDescriptor, HostDescriptorError, LASH_TRIGGER_EVENT_KEY, TriggerCompatibility,
-    TriggerCompatibilityError, TriggerCompatibilityRequest, TriggerHostOperation,
-    TriggerInputBinding, TriggerInputTemplate, TriggerListRequest, TriggerPruneRequest,
-    TriggerRegistrationRequest, add_trigger_resource_operations, check_trigger_compatibility,
-    event_type_for_source, is_resolved_type_assignable, is_trigger_resource_type, list_call_args,
-    register_call_args, trigger_event_placeholder_expr,
+    HostDescriptor, HostDescriptorError, LASH_TRIGGER_EVENT_KEY, TRIGGER_MODULE_ALIAS,
+    TRIGGER_REGISTRATION_TYPE_NAME, TriggerCompatibility, TriggerCompatibilityError,
+    TriggerCompatibilityRequest, TriggerHostOperation, TriggerInputBinding, TriggerInputTemplate,
+    TriggerListRequest, TriggerPruneRequest, TriggerRegistrationRequest,
+    add_trigger_resource_operations, check_trigger_compatibility, event_type_for_source,
+    is_resolved_type_assignable, is_trigger_resource_type, list_call_args, register_call_args,
+    trigger_event_placeholder_expr,
 };
 pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{
