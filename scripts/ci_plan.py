@@ -106,8 +106,7 @@ def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
 
 GATED_JOBS = {
     "lashlang-git-consumer": "rust",
-    "package-feature-checks": "rust",
-    "runtime-feature-boundary": "rust",
+    "feature-lanes": "rust",
     "workspace-tests": "rust",
     "heavy-tests": "rust",
     "stack-budget": "rust",
@@ -120,17 +119,17 @@ GATED_JOBS = {
     "unicode-tests": "regress",
 }
 
-# Dedicated compile configurations that witness a queued rust head. Each
-# resolves its own feature graph -- named package features, `lash-runtime`
-# without defaults, and lashlang consumed as an external Git dependency -- so
-# none of them is covered by the workspace check. They stay skipped on
-# pull_request, skip docs-only merge groups (workspace `check` still
-# compiles those heads), and keep `rust` family behaviour on
-# workflow_dispatch.
+# Dedicated compile configurations that witness a queued rust head, resolving
+# their own feature graph rather than the workspace one, so the workspace check
+# does not cover them. `feature-lanes` used to belong here: its predecessors
+# were deferred on pull requests because fourteen Cargo legs of up to 504 s
+# were too expensive to run twice. On the pool the lane graph is a shared-cache
+# lookup, so it now runs on pull requests too and is an ordinary `rust` family
+# job. What remains here stays skipped on pull_request, skips docs-only merge
+# groups (workspace `check` still compiles those heads), and keeps `rust`
+# family behaviour on workflow_dispatch.
 QUEUE_REQUIRED_COMPILE_JOBS = {
     "lashlang-git-consumer",
-    "package-feature-checks",
-    "runtime-feature-boundary",
 }
 
 # Jobs deferred entirely to the manual full-profile run (workflow_dispatch):

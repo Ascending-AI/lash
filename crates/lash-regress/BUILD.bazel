@@ -159,3 +159,468 @@ filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUILD", "BUILD.bazel"]),
 )
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/bazel/feature_variants.py.
+load(
+    "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_library",
+    "lash_rust_feature_test",
+)
+
+lash_rust_feature_test(
+    name = "integration__test__fv_419bd085",
+    crate_features = [
+        "backend-pikevm",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    crate_name = "integration",
+    crate_root = "tests/main.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "3670016"},
+    extra_compile_data = [],
+    library = "//crates/lash-regress:lash-regress__fv_419bd085",
+    library_crate_name = "lash_regress",
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "integration__test__fv_7f10c809",
+    crate_features = [
+        "backend-pikevm",
+        "index-positions",
+        "std",
+        "utf16",
+    ],
+    crate_name = "integration",
+    crate_root = "tests/main.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "3670016"},
+    extra_compile_data = [],
+    library = "//crates/lash-regress:lash-regress__fv_7f10c809",
+    library_crate_name = "lash_regress",
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-regress__fv_419bd085",
+    build_script = None,
+    crate_features = [
+        "backend-pikevm",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    crate_name = "lash_regress",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-regress__fv_5284371b",
+    build_script = None,
+    crate_features = [
+        "prohibit-unsafe",
+    ],
+    crate_name = "lash_regress",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-regress__fv_674cb0d0",
+    build_script = None,
+    crate_features = [
+        "backend-pikevm",
+    ],
+    crate_name = "lash_regress",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-regress__fv_7f10c809",
+    build_script = None,
+    crate_features = [
+        "backend-pikevm",
+        "index-positions",
+        "std",
+        "utf16",
+    ],
+    crate_name = "lash_regress",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-regress__fv_92f44db3",
+    build_script = None,
+    crate_features = [
+        "std",
+    ],
+    crate_name = "lash_regress",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-regress__fv_9f4b2b51",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_regress",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-regress__fv_e033ca68",
+    build_script = None,
+    crate_features = [
+        "index-positions",
+    ],
+    crate_name = "lash_regress",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-regress__fv_fc138b67",
+    build_script = None,
+    crate_features = [
+        "utf16",
+    ],
+    crate_name = "lash_regress",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-regress__unit_test__fv_419bd085",
+    build_script = None,
+    crate_features = [
+        "backend-pikevm",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    crate_name = "lash_regress",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-regress__unit_test__fv_7f10c809",
+    build_script = None,
+    crate_features = [
+        "backend-pikevm",
+        "index-positions",
+        "std",
+        "utf16",
+    ],
+    crate_name = "lash_regress",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "unicode_property_escapes__test__fv_419bd085",
+    crate_features = [
+        "backend-pikevm",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    crate_name = "unicode_property_escapes",
+    crate_root = "tests/unicode_property_escapes.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-regress:lash-regress__fv_419bd085",
+    library_crate_name = "lash_regress",
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "unicode_property_escapes__test__fv_7f10c809",
+    crate_features = [
+        "backend-pikevm",
+        "index-positions",
+        "std",
+        "utf16",
+    ],
+    crate_name = "unicode_property_escapes",
+    crate_root = "tests/unicode_property_escapes.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-regress:lash-regress__fv_7f10c809",
+    library_crate_name = "lash_regress",
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "unicodesets__test__fv_419bd085",
+    crate_features = [
+        "backend-pikevm",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    crate_name = "unicodesets",
+    crate_root = "tests/unicodesets.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-regress:lash-regress__fv_419bd085",
+    library_crate_name = "lash_regress",
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "unicodesets__test__fv_7f10c809",
+    crate_features = [
+        "backend-pikevm",
+        "index-positions",
+        "std",
+        "utf16",
+    ],
+    crate_name = "unicodesets",
+    crate_root = "tests/unicodesets.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-regress:lash-regress__fv_7f10c809",
+    library_crate_name = "lash_regress",
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)

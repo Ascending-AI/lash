@@ -327,3 +327,848 @@ filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUILD", "BUILD.bazel"]),
 )
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/bazel/feature_variants.py.
+load(
+    "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_library",
+    "lash_rust_feature_test",
+)
+
+lash_rust_feature_test(
+    name = "integration_boundary__test__fv_1eb0f09e",
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "integration_boundary",
+    crate_root = "tests/integration_boundary.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    extra_data = [
+        "//tools/bazel:target_inventory",
+    ],
+    library = "//crates/lash-core:lash-core__fv_1eb0f09e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "integration_boundary__test__fv_3cc9cee5",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "integration_boundary",
+    crate_root = "tests/integration_boundary.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    extra_data = [
+        "//tools/bazel:target_inventory",
+    ],
+    library = "//crates/lash-core:lash-core__fv_3cc9cee5",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core__fv_1a93d1d4",
+    build_script = None,
+    crate_features = [
+        "perf-witness",
+    ],
+    crate_name = "lash_core",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_e40cd345", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_941b2643", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_92695417"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core__fv_1eb0f09e",
+    build_script = None,
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "lash_core",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core__fv_3cc9cee5",
+    build_script = None,
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "lash_core",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core__fv_44735e5c",
+    build_script = None,
+    crate_features = [
+        "default",
+    ],
+    crate_name = "lash_core",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_78ee5988", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_b97211b9", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_cfbb0ac4", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_77b84af3", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_9b2621ac"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core__fv_454ba1e4",
+    build_script = None,
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_core",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core__fv_59a8a68d",
+    build_script = None,
+    crate_features = [
+        "default",
+        "otel-trace",
+    ],
+    crate_name = "lash_core",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_dcf70733", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_be35fe9e", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_e62031c0", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c9fcc2be", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_c7a5c05b", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_567cb7a8", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_d3e7f57b", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_515b1105", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core__fv_5f5823d6",
+    build_script = None,
+    crate_features = [
+        "default",
+        "perf-witness",
+    ],
+    crate_name = "lash_core",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_e40cd345", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_941b2643", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_92695417", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_971956a2"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core__fv_d1a6b4bc",
+    build_script = None,
+    crate_features = [
+        "otel-trace",
+    ],
+    crate_name = "lash_core",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_be35fe9e", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_e62031c0", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c9fcc2be", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-core__fv_de49d0bb",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_core",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-core__unit_test__fv_1eb0f09e",
+    build_script = None,
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "lash_core",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "6815744"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-core__unit_test__fv_3cc9cee5",
+    build_script = None,
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "lash_core",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "8", "memory_kb": "6815744"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "panic_containment__test__fv_1eb0f09e",
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "panic_containment",
+    crate_root = "tests/panic_containment.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_1eb0f09e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "panic_containment__test__fv_3cc9cee5",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "panic_containment",
+    crate_root = "tests/panic_containment.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_3cc9cee5",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_effect__test__fv_1eb0f09e",
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "runtime_effect",
+    crate_root = "tests/runtime_effect.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_1eb0f09e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_effect__test__fv_3cc9cee5",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "runtime_effect",
+    crate_root = "tests/runtime_effect.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_3cc9cee5",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_lifecycle__test__fv_1eb0f09e",
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "runtime_lifecycle",
+    crate_root = "tests/runtime_lifecycle.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_1eb0f09e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_lifecycle__test__fv_3cc9cee5",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "runtime_lifecycle",
+    crate_root = "tests/runtime_lifecycle.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_3cc9cee5",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_observability__test__fv_1eb0f09e",
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "runtime_observability",
+    crate_root = "tests/runtime_observability.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_1eb0f09e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"RUST_TEST_THREADS": "1"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_observability__test__fv_3cc9cee5",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "runtime_observability",
+    crate_root = "tests/runtime_observability.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_3cc9cee5",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"RUST_TEST_THREADS": "1"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_scenarios__test__fv_1eb0f09e",
+    args = [
+        "--skip=runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_",
+    ],
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "runtime_scenarios",
+    crate_root = "tests/runtime_scenarios.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    extra_data = [
+        "//:confidence_gate_scripts",
+    ],
+    library = "//crates/lash-core:lash-core__fv_1eb0f09e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_scenarios__test__fv_3cc9cee5",
+    args = [
+        "--skip=runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_",
+    ],
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "runtime_scenarios",
+    crate_root = "tests/runtime_scenarios.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    extra_data = [
+        "//:confidence_gate_scripts",
+    ],
+    library = "//crates/lash-core:lash-core__fv_3cc9cee5",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_turns__test__fv_1eb0f09e",
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "runtime_turns",
+    crate_root = "tests/runtime_turns.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_1eb0f09e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"RUST_TEST_THREADS": "1"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "runtime_turns__test__fv_3cc9cee5",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "runtime_turns",
+    crate_root = "tests/runtime_turns.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_3cc9cee5",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"RUST_TEST_THREADS": "1"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "tool_execution_grant_layout__test__fv_1eb0f09e",
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "tool_execution_grant_layout",
+    crate_root = "tests/tool_execution_grant_layout.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_1eb0f09e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "tool_execution_grant_layout__test__fv_3cc9cee5",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "tool_execution_grant_layout",
+    crate_root = "tests/tool_execution_grant_layout.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_3cc9cee5",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "turn_event_schema__test__fv_1eb0f09e",
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "turn_event_schema",
+    crate_root = "tests/turn_event_schema.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_1eb0f09e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "turn_event_schema__test__fv_3cc9cee5",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "turn_event_schema",
+    crate_root = "tests/turn_event_schema.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    extra_compile_data = [],
+    library = "//crates/lash-core:lash-core__fv_3cc9cee5",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_0b8c5960", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_dc35607d", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_e78f1d8d", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_edf563c6"},
+    version = "0.0.0-dev",
+)

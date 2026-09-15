@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import itertools
 import json
 import os
@@ -879,6 +880,19 @@ def workflow_job_block(workflow: str, job: str) -> str:
     return workflow[start : start + len(marker) + next_job.start()]
 
 
+def bazel_feature_lanes(root: Path) -> dict[str, list[str]]:
+    """The generated lane -> Bazel label table, read out of Starlark.
+
+    `tools/bazel/feature_lanes.bzl` is generated, and its `FEATURE_LANES`
+    literal is a dict of string lists -- valid Python as well as valid
+    Starlark -- so it is read rather than re-derived.
+    """
+    source = (root / "tools" / "bazel" / "feature_lanes.bzl").read_text(encoding="utf-8")
+    marker = "FEATURE_LANES = "
+    start = source.index(marker) + len(marker)
+    return ast.literal_eval(source[start:].strip())
+
+
 def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
     packages = workspace_packages(root)
     plan = load_toml(root / "scripts" / "feature-coverage.toml")
@@ -1141,28 +1155,25 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
             failures.append(f"proxy witness misses test context: {current_feature}")
 
     workflow = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    feature_job = workflow_job_block(workflow, "package-feature-checks")
-    workflow_lanes = set(re.findall(r"^\s*- lane: ([A-Za-z0-9_.-]+)\s*$", workflow, re.MULTILINE))
+    feature_job = workflow_job_block(workflow, "feature-lanes")
+    # The lanes compile on the pool now, one Bazel target per resolved unit.
+    # `ci.yml` no longer carries a leg per lane, so the coverage contract's
+    # question changes from "does the matrix name this lane" to "does the lane
+    # graph compile it": a lane with no Bazel label would be a lane that CI
+    # silently stopped proving.
+    bazel_lanes = bazel_feature_lanes(root)
     for name in lane_names:
-        if name not in workflow_lanes:
-            failures.append(f"coverage lane missing from ci.yml: {name}")
-        invocation = f"python3 scripts/check_feature_coverage.py run {name}"
-        if invocation not in feature_job:
-            failures.append(f"coverage lane has no ci.yml runner command: {name}")
-
-    runner_step = re.compile(
-        r"^      - name: Run exact package feature graph\n"
-        r"        run: \$\{\{ matrix\.command \}\}\s*$",
-        re.MULTILINE,
-    )
-    if runner_step.search(feature_job) is None:
-        failures.append("package-feature-checks does not execute matrix.command")
-    if "github.event_name == 'merge_group'" not in feature_job:
-        failures.append("package-feature-checks is not required on merge_group")
+        if not bazel_lanes.get(name):
+            failures.append(f"coverage lane has no Bazel targets: {name}")
+    for aggregate in ("//:feature_lanes", "//:feature_lane_tests"):
+        if aggregate not in feature_job:
+            failures.append(f"feature-lanes does not build {aggregate}")
+    if "needs.plan.outputs.bazel_trusted == 'true'" not in feature_job:
+        failures.append("feature-lanes does not require a trusted shared cache")
 
     conclusion = workflow_job_block(workflow, "ci-conclusion")
-    if re.search(r"^      - package-feature-checks\s*$", conclusion, re.MULTILINE) is None:
-        failures.append("ci-conclusion does not require package-feature-checks")
+    if re.search(r"^      - feature-lanes\s*$", conclusion, re.MULTILINE) is None:
+        failures.append("ci-conclusion does not require feature-lanes")
     if re.search(r"^      - check\s*$", conclusion, re.MULTILINE) is None:
         failures.append("ci-conclusion does not require the baseline check job")
 
@@ -1175,6 +1186,9 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
     for invocation in (
         "python3 scripts/test_check_feature_coverage.py",
         "python3 scripts/check_feature_coverage.py check",
+        # The independent half of the reconciliation: Cargo's own resolver,
+        # through `cargo tree`, against the generator's reimplementation.
+        "python3 tools/bazel/generate_build_files.py --verify-resolution",
     ):
         if invocation not in repo_gates:
             failures.append(f"repo-gates does not execute {invocation}")

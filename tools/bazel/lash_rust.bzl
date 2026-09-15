@@ -304,3 +304,211 @@ def lash_rust_integration_test(
         version = version,
         **_sharding(shard_count)
     )
+
+# -- feature-lane variants ---------------------------------------------------
+#
+# `scripts/feature-coverage.toml` declares Cargo commands that resolve one
+# package's closure differently from the workspace graph -- `-p X
+# --no-default-features --features Y` gives every first-party dependency only
+# what X's request implies. `tools/bazel/generate_build_files.py` reproduces
+# that resolution (`tools/bazel/feature_variants.py`) and emits one variant
+# target per distinct `(package, resolved features, Cargo target kind)`.
+#
+# A variant differs from the ordinary target in exactly two ways: its
+# `crate_features` is the command's resolution rather than the workspace's, and
+# each first-party dependency label is swapped for that dependency's variant at
+# its own resolved feature set. `variant_deps` carries that swap, and the alias
+# the ordinary label carried moves with it -- the crate name a source writes
+# (`lash_core_ids`) is a property of the dependency edge, not of the label.
+#
+# Third-party crates are NOT re-resolved: `crate.from_cargo` pins `@crates`
+# from one `//:Cargo.toml` + `//:Cargo.lock` resolution, so every variant links
+# the same third-party feature union the workspace build uses. That union is a
+# superset of what Cargo would resolve for the command, so a variant compiles
+# against at least the API Cargo offers it; the Cargo lane, which is the one
+# that can observe a narrowed third-party API, is retained on untrusted events.
+# `docs/agents/hermetic-build.md` records the limitation in full.
+
+def _variant_deps(
+        deps,
+        variant_deps,
+        extra_deps = {},
+        library = None,
+        library_crate_name = None):
+    """Swaps first-party dependency labels for their variants, aliases included.
+
+    `extra_deps` maps a third-party label to the extern name the sources write.
+    It carries the optional dependencies a variant's features activate that the
+    workspace resolution leaves off -- `opentelemetry` under `lash-trace/otel`,
+    say. `all_crate_deps` reports the workspace resolution's dependency list
+    and nothing else, so without this the variant would compile with the
+    feature on and the crate absent.
+    """
+    declared = aliases()
+    swapped = []
+    swapped_aliases = {}
+    for dep in deps:
+        replacement = variant_deps.get(dep, dep)
+        swapped.append(replacement)
+        if dep in declared:
+            swapped_aliases[replacement] = declared[dep]
+    for label, extern_name in extra_deps.items():
+        if label in swapped:
+            continue
+        swapped.append(label)
+        swapped_aliases[label] = extern_name
+    if library:
+        swapped.append(library)
+        swapped_aliases[library] = library_crate_name
+    return swapped, swapped_aliases
+
+def lash_rust_feature_library(
+        name,
+        crate_name,
+        crate_features,
+        declared_features,
+        manifest_dir,
+        package_name,
+        version,
+        build_script = None,
+        exec_properties = {},
+        extra_compile_data = [],
+        extra_deps = {},
+        tags = [],
+        variant_deps = {}):
+    deps, dep_aliases = _variant_deps(
+        all_crate_deps(normal = True),
+        variant_deps,
+        extra_deps,
+    )
+    if build_script:
+        deps = deps + [build_script]
+    rust_library(
+        name = name,
+        aliases = dep_aliases,
+        compile_data = _compile_data() + extra_compile_data,
+        crate_features = crate_features,
+        crate_name = crate_name,
+        crate_root = "src/lib.rs",
+        data = _all_package_files() + extra_compile_data,
+        deps = deps,
+        edition = "2024",
+        exec_properties = exec_properties,
+        lint_config = lint_config(),
+        rustc_env = _cargo_env(package_name, manifest_dir, version),
+        rustc_flags = _cargo_check_cfg(declared_features),
+        srcs = native.glob(
+            ["src/**/*.rs", "shared/**/*.rs"],
+            allow_empty = True,
+        ),
+        tags = tags,
+        version = version,
+        visibility = ["//visibility:public"],
+    )
+
+def lash_rust_feature_binary(
+        name,
+        crate_name,
+        crate_root,
+        crate_features,
+        declared_features,
+        manifest_dir,
+        package_name,
+        version,
+        exec_properties = {},
+        extra_deps = {},
+        include_dev_deps = False,
+        library = None,
+        library_crate_name = None,
+        extra_compile_data = [],
+        rustc_env = {},
+        tags = [],
+        variant_deps = {}):
+    deps, dep_aliases = _variant_deps(
+        all_crate_deps(normal = True, normal_dev = include_dev_deps),
+        variant_deps,
+        extra_deps,
+        library,
+        library_crate_name,
+    )
+    rust_binary(
+        name = name,
+        aliases = dep_aliases,
+        compile_data = _compile_data() + extra_compile_data,
+        crate_features = crate_features,
+        crate_name = crate_name,
+        crate_root = crate_root,
+        data = _all_package_files() + extra_compile_data,
+        deps = deps,
+        edition = "2024",
+        exec_properties = exec_properties,
+        lint_config = lint_config(),
+        rustc_env = _cargo_env(package_name, manifest_dir, version, rustc_env),
+        rustc_flags = _cargo_check_cfg(declared_features),
+        srcs = _crate_srcs(
+            crate_root,
+            [
+                "src/**/*.rs",
+                "examples/**/*.rs",
+                "benches/**/*.rs",
+                "shared/**/*.rs",
+            ],
+        ),
+        tags = tags,
+        version = version,
+        visibility = ["//visibility:public"],
+    )
+
+def lash_rust_feature_test(
+        name,
+        crate_name,
+        crate_root,
+        crate_features,
+        declared_features,
+        manifest_dir,
+        package_name,
+        version,
+        args = [],
+        build_script = None,
+        exec_properties = {},
+        extra_compile_data = [],
+        extra_data = [],
+        extra_deps = {},
+        library = None,
+        library_crate_name = None,
+        rustc_env = {},
+        srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"],
+        test_env = {},
+        tags = [],
+        timeout = None,
+        variant_deps = {}):
+    deps, dep_aliases = _variant_deps(
+        all_crate_deps(normal = True, normal_dev = True),
+        variant_deps,
+        extra_deps,
+        library,
+        library_crate_name,
+    )
+    if build_script:
+        deps = deps + [build_script]
+    rust_test(
+        name = name,
+        args = args,
+        aliases = dep_aliases,
+        compile_data = _compile_data() + extra_compile_data,
+        crate_features = crate_features,
+        crate_name = crate_name,
+        crate_root = crate_root,
+        data = _all_package_files() + extra_compile_data + extra_data,
+        deps = deps,
+        edition = "2024",
+        env = _test_env(test_env),
+        exec_properties = exec_properties,
+        lint_config = lint_config(),
+        rustc_env = _cargo_env(package_name, manifest_dir, version) | rustc_env,
+        rustc_flags = _cargo_check_cfg(declared_features),
+        srcs = _crate_srcs(crate_root, srcs_patterns),
+        tags = tags,
+        timeout = timeout,
+        version = version,
+    )

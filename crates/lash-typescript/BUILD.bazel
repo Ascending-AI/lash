@@ -79,3 +79,108 @@ filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUILD", "BUILD.bazel"]),
 )
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/bazel/feature_variants.py.
+load(
+    "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_library",
+)
+
+lash_rust_feature_library(
+    name = "lash-typescript__fv_5782a988",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_typescript",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_44735e5c", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_771e6f28", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_8a1e5681", "//crates/lashlang": "//crates/lashlang:lashlang__fv_fc72d7b3"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-typescript__fv_60b086b1",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_typescript",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_c80d5028", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_5cbb13d6", "//crates/lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_7e3d330e", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_e77e904a", "//crates/lash-perf": "//crates/lash-perf:lash-perf__fv_f7803063", "//crates/lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_1ba17842", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_dc889d4d", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d1122fd2", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_64cd73ae", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_2d388699", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_0e88a12d", "//crates/lash-subagents": "//crates/lash-subagents:lash-subagents__fv_ab33018e", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_99baf755"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-typescript__fv_8bf607ac",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_typescript",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_e2e5fb9e", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_ba25a930", "//crates/lashlang": "//crates/lashlang:lashlang__fv_7e1ea0c3"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-typescript__fv_e5c19e52",
+    build_script = None,
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_typescript",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_44735e5c", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930", "//crates/lashlang": "//crates/lashlang:lashlang__fv_fc72d7b3"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-typescript__fv_f7f2f8cc",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_typescript",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_c0c15c11", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_0e3914d0", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_ba25a930", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_130a2fa1", "//crates/lashlang": "//crates/lashlang:lashlang__fv_266676af"},
+    version = "0.0.0-dev",
+)
