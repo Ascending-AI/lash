@@ -180,7 +180,10 @@ field and press Save while capturing the request and response. Require:
 - `POST /workflow` returns 422 and the JSON error satisfies golden rule 3. The response
   names only the **first** offending node it encounters, so with more than one bad field in
   the draft the reported `nodeId` need not be the one just edited; break exactly one field
-  here so the error is attributable. The owning node and field are **nested**:
+  here so the error is attributable. Nothing the previous phases authored is an offending
+  node — a palette-inserted action carries a complete expression — so the reported `nodeId`
+  must be the Finish node whose expression was just malformed. The owning node and field
+  are **nested**:
   `error.code == "invalid_expression"`, with `error.details.nodeId`
   (an unsaved node reads `new:<n>`) and `error.details.field == "expression"`, plus
   `error.details.reason`. Do not look for `error.nodeId` at the top level;
