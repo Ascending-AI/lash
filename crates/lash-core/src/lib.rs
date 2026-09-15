@@ -1126,3 +1126,5 @@ mod tests {
         }
     }
 }
+
+// Critical-path measurement probe for PR 1583; reverted in the final commit.
