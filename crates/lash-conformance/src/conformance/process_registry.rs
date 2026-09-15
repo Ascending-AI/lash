@@ -13,6 +13,7 @@ pub use registration::{
     registration_and_observers_are_atomic, registration_reports_created_then_existing,
 };
 pub mod status_filters;
+mod turn_parent_end;
 
 use super::process_change_horizon::changes_after_full_relist_if_required;
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
@@ -810,6 +811,20 @@ pub async fn terminal_completion_atomically_retains_parent_end_plan(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     parent_end::terminal_completion_atomically_retains_parent_end_plan(registry).await;
+}
+
+/// A turn scope has no terminal row to ride, so its ledger row is recorded
+/// on its own: the write, its fence, its scoping and its settlement.
+pub async fn a_turn_scope_ends_through_its_recorded_ledger_row(registry: Arc<dyn ProcessRegistry>) {
+    turn_parent_end::a_turn_scope_ends_through_its_recorded_ledger_row(registry).await;
+}
+
+/// A turn that committed without its ledger row is a recovery candidate until
+/// the row exists, and no other shape of row ever is.
+pub async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_written(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    turn_parent_end::an_unrecorded_turn_parent_is_reported_until_its_row_is_written(registry).await;
 }
 
 /// Retention reclaims a settled parent-end ledger row once no live child
