@@ -22,9 +22,9 @@
 // The fixtures are written as standalone programs: each keeps a `fn main`
 // and imports the whole surface it is asserting on, and the surface probes
 // unwrap on values they construct themselves. Under trybuild they compiled
-// as their own crates with `-A dead_code`; as modules they inherit this
-// binary's lint scope, so the same allowances are spelled here. Every other
-// integration test in this directory carries the same pair.
+// as their own crates with `-A dead_code` and were never run through clippy;
+// as modules they inherit this binary's lint scope, so the allowances they
+// relied on are spelled here, scoped to this binary only.
 #![allow(dead_code, unused_imports)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
