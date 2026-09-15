@@ -1389,15 +1389,16 @@ impl fmt::Display for SchemaReport {
         if self.has_version_finding() {
             return write!(
                 formatter,
-                " The component schema is normally a reject-and-recreate boundary. Component 62 \
-                 refuses component 61 for the append-identity hard cutover, while every pre-61 \
-                 graph shape is refused before migration DDL because it carries the retired \
-                 sequence column. Refuse the mismatch with an inspect-and-recreate remedy. Drain \
-                 affected sessions and recreate the whole Lash trust \
-                 domain with this version: reset the tombstones, await-event revocation ledger, \
-                 effect journal, and Restate state together; see \
-                 docs/persistence.html#delete-sessions. This gate is unconditional and no \
-                 `SchemaCheck` relaxes it."
+                " The component schema is a reject-and-recreate boundary: a stamp that is not \
+                 this build's own component version is refused before any migration DDL runs, \
+                 whichever direction it differs in. Drain the affected sessions and recreate the \
+                 whole Lash trust domain with this build, resetting the session tombstones, the \
+                 await-event revocation ledger, the effect journal, and the Restate state \
+                 together — any one of them left behind still refers to sessions the recreated \
+                 database does not have. \
+                 docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md \
+                 records why this boundary refuses instead of migrating. This gate is \
+                 unconditional and no `SchemaCheck` relaxes it."
             );
         }
         write!(

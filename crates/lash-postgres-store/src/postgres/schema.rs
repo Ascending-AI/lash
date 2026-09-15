@@ -895,9 +895,9 @@ fn schema_migration_divergence_error(found: i32, artifacts: &[String]) -> StoreE
          {SCHEMA_VERSION}, but the live schema contains schema artifacts newer than the recorded \
          version or explicitly retired by the current hard cutover: {}. Lash will not guess \
          whether this is a partial migration, version-ledger rollback, old graph shape, or other \
-         corruption. Stop the deployment, inspect and recreate the whole Lash \
-         trust domain before retrying; see docs/persistence.html#delete-sessions.",
-        artifacts.join(", ")
+         corruption. Stop the deployment and inspect the database. {}",
+        artifacts.join(", "),
+        recreate_trust_domain_remedy()
     ))
 }
 
@@ -1064,34 +1064,102 @@ fn record_schema_migration_denial(
     );
 }
 
+/// Names, from the live catalog, what this build can migrate into its own
+/// component version, so a refusal never describes a cutover the catalog has
+/// already left behind (FIG-3172).
+fn forward_migration_sentence(found: i32) -> String {
+    let sources = SCHEMA_MIGRATIONS
+        .iter()
+        .filter(|migration| migration.to == SCHEMA_VERSION)
+        .map(|migration| migration.from)
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
+        format!(
+            "This build declares no forward migration into component {SCHEMA_VERSION}, so no \
+             recorded version upgrades into it."
+        )
+    } else if sources.contains(&found) {
+        format!(
+            "This build does declare a forward migration from component {found} into \
+             {SCHEMA_VERSION}, so this refusal means the migration was not applied for this open \
+             rather than that none exists: re-open with Lash-managed provisioning enabled."
+        )
+    } else {
+        format!(
+            "This build declares a forward migration into component {SCHEMA_VERSION} only from \
+             component {}, so component {found} has no upgrade path.",
+            sources
+                .iter()
+                .map(i32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+/// The recreate procedure, stated where the operator reads it rather than behind
+/// a link. Every SQL-store refusal that ends in reject-and-recreate shares this
+/// text so the four durable surfaces are always named together (FIG-3173).
+fn recreate_trust_domain_remedy() -> String {
+    "Drain the affected sessions and recreate the whole Lash trust domain with this build: \
+     provision the database from the DDL artifact this build ships \
+     (`PostgresStorage::schema_ddl()`, committed as crates/lash-postgres-store/schema.sql), then \
+     reset the session tombstones, the await-event revocation ledger, the effect journal, and the \
+     Restate state together — any one of them left behind still refers to sessions the recreated \
+     database does not have. \
+     docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md records why \
+     this boundary refuses instead of migrating."
+        .to_string()
+}
+
 /// Renders the remaining version-mismatch error, naming the remedy rather than
 /// only the numbers. The explicit floor migrations have already been handled
 /// by the Lash-managed `Enforce` preflight when it is applicable.
+///
+/// Every caller reaches this only for a stamp that is not `SCHEMA_VERSION`, so
+/// the explanation is derived here from the two live facts — the direction of
+/// the mismatch and the migration catalog — instead of a frozen paragraph about
+/// one historical cutover (FIG-3172).
+///
+/// Every arm keeps the phrase `has no applicable migration`: it is what the
+/// version-bump runbook companion classifies this refusal by, and it is the one
+/// claim that holds in all three directions. The sibling migration refusals must
+/// not acquire it.
 pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
-    let (found, expected) = match found {
+    let (stamp, explanation) = match found {
+        Some(version) if version < SCHEMA_VERSION => (
+            format!("has version {version}"),
+            format!(
+                "That database was provisioned by an older build: component {version} predates \
+                 this build's component {SCHEMA_VERSION} and has no applicable migration. The \
+                 component schema is normally a reject-and-recreate boundary. {}",
+                forward_migration_sentence(version)
+            ),
+        ),
+        // A caller only renders a mismatch, so the remaining stamped case is a
+        // database written by a newer build than this binary.
         Some(version) => (
             format!("has version {version}"),
-            format!("expected {SCHEMA_VERSION}"),
+            format!(
+                "That database was provisioned by a newer build: component {version} is ahead of \
+                 this build's component {SCHEMA_VERSION} and has no applicable migration, because \
+                 Lash never migrates a schema backwards. Deploy a build whose component version \
+                 is {version} against this database instead of downgrading it."
+            ),
         ),
         None => (
             "has no version stamp".to_string(),
-            format!("expected version {SCHEMA_VERSION}"),
+            format!(
+                "That database carries Lash relations but no `lash_schema_versions` row for this \
+                 component, so its generation cannot be established at all and it has no \
+                 applicable migration. This build requires component {SCHEMA_VERSION}."
+            ),
         ),
     };
     StoreError::Backend(format!(
-        "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
-         The component schema is normally a reject-and-recreate boundary. This build has \
-         legacy declarations from component-50 through component-61 plus the component-62 \
-         forward migration, but every \
-         published pre-61 graph shape carries the retired sequence column and is refused before \
-         migration DDL can run. Component 61 is a hard append-identity cutover with no applicable \
-         migration. This mismatch \
-         has no applicable migration. Drain affected sessions and recreate the whole Lash trust \
-         domain with this version: provision \
-         the database from this build's schema.sql artifact, and reset the tombstones, await-event \
-         revocation ledger, effect journal, and Restate state together; see \
-         docs/persistence.html#delete-sessions. This gate is unconditional; \
-         SchemaCheck::WarnOnly does not relax it."
+        "Postgres schema component `{SCHEMA_COMPONENT}` {stamp}, expected {SCHEMA_VERSION}. \
+         {explanation} {} This gate is unconditional; SchemaCheck::WarnOnly does not relax it.",
+        recreate_trust_domain_remedy()
     ))
 }
 

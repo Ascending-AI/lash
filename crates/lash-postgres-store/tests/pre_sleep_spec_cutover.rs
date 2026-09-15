@@ -160,11 +160,11 @@ async fn postgres_refuses_pre_sleep_spec_effect_journal_at_open() {
         Ok(_) => panic!("a pre-SleepSpec effect journal must be refused at open"),
         Err(error) => error.to_string(),
     };
+    let expected = PostgresStorage::schema_version();
     assert_eq!(
         message,
         format!(
-            "store backend error: Postgres schema component `lash-postgres-store` has version {PRE_SLEEP_SPEC_COMPONENT_VERSION}, expected {}. The component schema is normally a reject-and-recreate boundary. This build has legacy declarations from component-50 through component-61 plus the component-62 forward migration, but every published pre-61 graph shape carries the retired sequence column and is refused before migration DDL can run. Component 61 is a hard append-identity cutover with no applicable migration. This mismatch has no applicable migration. Drain affected sessions and recreate the whole Lash trust domain with this version: provision the database from this build's schema.sql artifact, and reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/persistence.html#delete-sessions. This gate is unconditional; SchemaCheck::WarnOnly does not relax it.",
-            PostgresStorage::schema_version()
+            "store backend error: Postgres schema component `lash-postgres-store` has version {PRE_SLEEP_SPEC_COMPONENT_VERSION}, expected {expected}. That database was provisioned by an older build: component {PRE_SLEEP_SPEC_COMPONENT_VERSION} predates this build's component {expected} and has no applicable migration. The component schema is normally a reject-and-recreate boundary. This build declares no forward migration into component {expected}, so no recorded version upgrades into it. Drain the affected sessions and recreate the whole Lash trust domain with this build: provision the database from the DDL artifact this build ships (`PostgresStorage::schema_ddl()`, committed as crates/lash-postgres-store/schema.sql), then reset the session tombstones, the await-event revocation ledger, the effect journal, and the Restate state together — any one of them left behind still refers to sessions the recreated database does not have. docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md records why this boundary refuses instead of migrating. This gate is unconditional; SchemaCheck::WarnOnly does not relax it."
         )
     );
 }
