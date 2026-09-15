@@ -1415,11 +1415,63 @@ pub(super) async fn spawn_restate_ingress_capture() -> (String, mpsc::UnboundedR
     (format!("http://{addr}"), rx)
 }
 
+/// A capture whose session-delete attach is held open until the test releases
+/// it, the way a real delete of a session holding hundreds of processes and
+/// live cron jobs holds the reset request open for tens of seconds.
+pub(super) async fn spawn_restate_ingress_capture_with_delete_gate() -> (
+    String,
+    mpsc::UnboundedReceiver<Value>,
+    Arc<tokio::sync::Notify>,
+) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock Restate ingress");
+    let addr = listener.local_addr().expect("mock Restate ingress addr");
+    let app = Router::new()
+        .route("/{*path}", post(capture_restate_send_gated))
+        .with_state((tx, Arc::clone(&gate)));
+    tokio::spawn(async move {
+        if let Err(err) = axum::serve(listener, app).await {
+            eprintln!("mock Restate ingress stopped: {err}");
+        }
+    });
+    (format!("http://{addr}"), rx, gate)
+}
+
+async fn capture_restate_send_gated(
+    AxumPath(path): AxumPath<String>,
+    State((tx, gate)): State<(mpsc::UnboundedSender<Value>, Arc<tokio::sync::Notify>)>,
+    body: axum::body::Bytes,
+) -> (StatusCode, Json<Value>) {
+    // Restate's own ingress accepts a bodiless call (cron cancel posts none),
+    // so a capture that insisted on a JSON body would refuse requests the
+    // workbench legitimately makes.
+    let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let _ = tx.send(json!({
+        "path": path,
+        "body": body,
+    }));
+    if path.starts_with("WorkbenchSessionDeleteWorkflow/") && !path.ends_with("/send") {
+        gate.notified().await;
+        return (StatusCode::OK, Json(Value::Null));
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "invocationId": format!("inv_{}", uuid::Uuid::new_v4()),
+            "status": "Accepted",
+        })),
+    )
+}
+
 async fn capture_restate_send(
     AxumPath(path): AxumPath<String>,
     State(tx): State<mpsc::UnboundedSender<Value>>,
-    Json(body): Json<Value>,
+    body: axum::body::Bytes,
 ) -> (StatusCode, Json<Value>) {
+    let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     let _ = tx.send(json!({
         "path": path,
         "body": body,

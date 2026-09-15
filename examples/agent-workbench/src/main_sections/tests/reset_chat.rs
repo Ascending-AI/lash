@@ -256,3 +256,237 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
     assert!(retired_error.message.contains("was used and deleted"));
     let _ = std::fs::remove_dir_all(data_dir);
 }
+
+// FIG-3136: reset on a busy session must always leave the page on a live
+// session. The roster rotation used to be a continuation of the browser's
+// request, so a request that went away — or whose Restate attach result was
+// lost — stopped between the durable delete and the rotation and left the
+// roster's current on a tombstone every surface refuses.
+
+use super::recoverable_chat_tests::recoverable_chat_test_state;
+use lash::process::{ProcessLifecycle, ProcessRegistrar};
+
+/// Enough terminal processes that the durable delete of this session is real
+/// work: the reproduction carried 460 of them and 1843 events.
+const BUSY_SESSION_PROCESS_COUNT: usize = 300;
+
+async fn register_terminal_processes(
+    data_dir: &std::path::Path,
+    session_id: &SessionId,
+    count: usize,
+) {
+    // The same SQLite registry file the workbench state opened, so these rows
+    // are the session's own work rather than a second registry's.
+    let registry = lash_sqlite_store::SqliteProcessRegistry::open(
+        &data_dir.join("processes.db"),
+        data_dir.join("lash-sessions"),
+    )
+    .await
+    .expect("open the workbench process registry");
+    for index in 0..count {
+        let process_id = format!("reset-load-{index}");
+        registry
+            .register_process(lash::process::ProcessRegistration::new(
+                process_id.clone(),
+                lash::process::ProcessInput::External {
+                    metadata: Value::Null,
+                },
+                lash::process::RecoveryContract::ExternallyOwned,
+                lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
+                    session_id.to_string(),
+                )),
+                lash::process::ProcessLifecyclePolicy::new(
+                    lash::process::ParentScope::Host,
+                    lash::process::OnParentEnd::Abandon,
+                ),
+            ))
+            .await
+            .expect("register process");
+        registry
+            .complete_process(
+                &ProcessId::from(process_id),
+                lash::process::ProcessAwaitOutput::from_tool_output(
+                    lash::tools::ToolCallOutput::success(json!("done")),
+                ),
+                lash::process::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete process");
+    }
+}
+
+fn live_cron_job_keys(state: &AppState, session_id: &SessionId) {
+    state.restate_cron_job_keys.lock_recover().insert(
+        session_id.clone(),
+        [
+            "workbench-cron-5s".to_string(),
+            "workbench-cron-30s".to_string(),
+        ]
+        .into_iter()
+        .collect(),
+    );
+}
+
+fn captured_restate_paths(requests: &mut mpsc::UnboundedReceiver<Value>) -> Vec<String> {
+    let mut paths = Vec::new();
+    while let Ok(request) = requests.try_recv() {
+        if let Some(path) = request.get("path").and_then(Value::as_str) {
+            paths.push(path.to_string());
+        }
+    }
+    paths
+}
+
+#[test]
+fn resetting_a_busy_session_hands_the_page_a_replacement_session() {
+    run_async_test_on_stack_budget("workbench-reset-busy-session", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+        state.restate_ingress_url = restate_ingress_url;
+        let old_session_id = state.current_session_id();
+        register_terminal_processes(data_dir.path(), &old_session_id, BUSY_SESSION_PROCESS_COUNT)
+            .await;
+        live_cron_job_keys(&state, &old_session_id);
+
+        let Json(snapshot) = Box::pin(reset_chat(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: Some(old_session_id.clone()),
+            }),
+        ))
+        .await
+        .expect("a busy session's reset must hand back a replacement session");
+
+        assert_ne!(snapshot.settings.session_id, old_session_id);
+        assert_eq!(state.sessions.current(), snapshot.settings.session_id);
+        assert_eq!(
+            state.active_turns.retirement(&old_session_id),
+            Some(SessionRetirement::Retired)
+        );
+        let paths = captured_restate_paths(&mut restate_requests);
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| path.starts_with("WorkbenchCronJob/") && path.ends_with("/cancel"))
+                .count(),
+            2,
+            "both live cron jobs must be cancelled before the delete: {paths:?}"
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.starts_with("WorkbenchSessionDeleteWorkflow/")),
+            "the durable delete must be submitted: {paths:?}"
+        );
+    });
+}
+
+#[test]
+fn a_reset_of_an_already_retired_session_hands_back_its_replacement() {
+    run_async_test_on_stack_budget("workbench-reset-already-retired", || async {
+        let data_dir = tempfile::tempdir().expect("tempdir");
+        let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+        let (restate_ingress_url, _restate_requests) = spawn_restate_ingress_capture().await;
+        state.restate_ingress_url = restate_ingress_url;
+        let old_session_id = state.current_session_id();
+        let query = || {
+            Query(SessionQuery {
+                session_id: Some(old_session_id.clone()),
+            })
+        };
+
+        let Json(first) = Box::pin(reset_chat(State(state.clone()), query()))
+            .await
+            .expect("the first reset retires the session");
+        assert_eq!(
+            state.active_turns.retirement(&old_session_id),
+            Some(SessionRetirement::Retired)
+        );
+
+        // The page never saw that answer — the response was lost — so it asks
+        // again with the only id it has. The fence refuses a retired id for
+        // every use including a delete, which made this the dead end: the
+        // repair for a tombstoned session was a reset, and reset was the one
+        // thing that could not run.
+        let Json(second) = Box::pin(reset_chat(State(state.clone()), query()))
+            .await
+            .expect("a reset of an already retired session must not dead-end");
+
+        assert_eq!(second.settings.session_id, first.settings.session_id);
+        assert_eq!(state.sessions.current(), first.settings.session_id);
+    });
+}
+
+#[test]
+fn a_reset_whose_request_goes_away_still_takes_the_roster_off_the_tombstone() {
+    run_async_test_on_stack_budget_multi_thread("workbench-reset-abandoned-request", 2, || {
+        a_reset_whose_request_goes_away_still_takes_the_roster_off_the_tombstone_inner()
+    });
+}
+
+async fn a_reset_whose_request_goes_away_still_takes_the_roster_off_the_tombstone_inner() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let (restate_ingress_url, mut restate_requests, delete_gate) =
+        spawn_restate_ingress_capture_with_delete_gate().await;
+    state.restate_ingress_url = restate_ingress_url;
+    let old_session_id = state.current_session_id();
+    live_cron_job_keys(&state, &old_session_id);
+
+    let reset = tokio::spawn({
+        let state = state.clone();
+        let old_session_id = old_session_id.clone();
+        async move {
+            Box::pin(reset_chat(
+                State(state),
+                Query(SessionQuery {
+                    session_id: Some(old_session_id),
+                }),
+            ))
+            .await
+            .map(|Json(snapshot)| snapshot.settings.session_id)
+        }
+    });
+
+    // Wait until the delete is attached, which is where the reproduction's
+    // request sat for twenty-one seconds.
+    let attached = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let request = restate_requests
+                .recv()
+                .await
+                .expect("mock Restate ingress request");
+            let path = request
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if path.starts_with("WorkbenchSessionDeleteWorkflow/") {
+                return path;
+            }
+        }
+    })
+    .await
+    .expect("the delete workflow is attached");
+    assert!(attached.ends_with("/run"), "unexpected attach: {attached}");
+
+    // The browser goes away: a reload, a closed tab, an abandoned fetch. The
+    // durable delete does not care, and neither may the rotation.
+    reset.abort();
+    delete_gate.notify_one();
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while state.sessions.current() == old_session_id {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("a delete that completed must take the roster off the tombstone");
+
+    assert_ne!(state.sessions.current(), old_session_id);
+    assert_eq!(
+        state.active_turns.retirement(&old_session_id),
+        Some(SessionRetirement::Retired)
+    );
+}

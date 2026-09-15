@@ -738,16 +738,83 @@ pub(crate) async fn inject_message(
     .await?;
     Ok(Json(CommandAccepted { accepted: true }))
 }
+/// Retire `old_session_id` and report the session that replaced it.
+///
+/// Two things changed here, and both are about what happens when the browser's
+/// request is not there to finish the job (FIG-3136).
+///
+/// The retirement runs on its own task. The durable delete of a busy session
+/// takes as long as it takes — twenty seconds for a few hundred processes and
+/// a couple of cron jobs — and everything that takes the page off the old
+/// session used to be a continuation of that request: a request that went away
+/// stopped the sequence between the delete and the rotation, leaving the
+/// roster's current on a tombstone that every surface refuses, with nothing
+/// printed and no trace written. A task outlives the request that spawned it,
+/// so the rotation happens whether or not anyone is still listening.
+///
+/// And a reset of an id whose delete already settled is answered with that
+/// replacement instead of a refusal. The fence refuses a `Retired` id for
+/// every use including a second delete, which is correct for the store and was
+/// a dead end for the operator: the page's only repair was a reset, and reset
+/// was the one thing the fence would not allow.
+async fn retire_for_reset(
+    state: &AppState,
+    old_session_id: &SessionId,
+) -> Result<(SessionId, bool), AppError> {
+    if state.active_turns.retirement(old_session_id) == Some(SessionRetirement::Retired) {
+        return Ok(state.sessions.replace_retired(old_session_id));
+    }
+    state
+        .admit_session_id_for_delete(old_session_id, "api.session.delete")
+        .await?;
+    let attach_ceiling = restate::ambient_attach_ceiling();
+    let rotation = tokio::spawn({
+        let state = state.clone();
+        let old_session_id = old_session_id.clone();
+        restate::carrying_attach_ceiling(attach_ceiling, async move {
+            let outcome = retire_session(&state, &old_session_id).await;
+            let settled_retired =
+                state.active_turns.retirement(&old_session_id) == Some(SessionRetirement::Retired);
+            match outcome {
+                Ok(()) => {}
+                // Every exit from a reset either names a replacement or says
+                // why there is none. The silent one was the defect.
+                Err(error) if !settled_retired => {
+                    eprintln!(
+                        "agent-workbench reset left session {:?} live: {error}",
+                        old_session_id.as_str()
+                    );
+                    return Err(error);
+                }
+                Err(error) => eprintln!(
+                    "agent-workbench reset is replacing session {:?} whose delete settled as retired despite a failed call: {error}",
+                    old_session_id.as_str()
+                ),
+            }
+            state.event_tx.remove(&old_session_id);
+            Ok(state.sessions.replace_retired(&old_session_id))
+        })
+    });
+    match rotation.await {
+        Ok(replacement) => replacement,
+        Err(join_error) => {
+            eprintln!(
+                "agent-workbench reset rotation task for session {:?} did not finish: {join_error}",
+                old_session_id.as_str()
+            );
+            Err(AppError::internal(format!(
+                "the reset of `{old_session_id}` did not complete: {join_error}"
+            )))
+        }
+    }
+}
+
 pub(crate) async fn reset_chat(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<StateSnapshot>, AppError> {
-    let old_session_id = state
-        .admit_session_for_delete(&query, "api.session.delete")
-        .await?;
-    retire_session(&state, &old_session_id).await?;
-    state.event_tx.remove(&old_session_id);
-    let (new_session_id, replaced_current) = state.sessions.replace(&old_session_id);
+    let old_session_id = query.resolve(&state)?;
+    let (new_session_id, replaced_current) = retire_for_reset(&state, &old_session_id).await?;
     state.trace_for_session(
         &old_session_id,
         "api.reset",

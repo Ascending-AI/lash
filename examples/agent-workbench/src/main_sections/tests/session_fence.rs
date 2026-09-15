@@ -139,13 +139,10 @@ fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
         assert_eq!(error.status, StatusCode::CONFLICT);
         assert_eq!(error.verdict, AppErrorVerdict::Terminal);
         assert_eq!(error.message, retiring_session_message(&session_id));
-        assert_eq!(
-            state
-                .admit_session_for_delete(&query, "api.session.delete")
-                .await
-                .expect("a retiring session admits the delete retry"),
-            session_id
-        );
+        state
+            .admit_session_id_for_delete(&session_id, "api.session.delete")
+            .await
+            .expect("a retiring session admits the delete retry");
 
         // An ambiguous outcome keeps the mark; a definitive failure follows the
         // durable fact, which says the session is live.
@@ -169,7 +166,7 @@ fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
         // other use.
         retire_workbench_session(&state, &session_id).await;
         let error = state
-            .admit_session_for_delete(&query, "api.session.delete")
+            .admit_session_id_for_delete(&session_id, "api.session.delete")
             .await
             .expect_err("a tombstoned session refuses the delete");
         assert_deleted_session_conflict(&error, &session_id);

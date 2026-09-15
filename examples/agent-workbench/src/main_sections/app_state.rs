@@ -127,6 +127,11 @@ impl AppState {
                     "store_context": context,
                 }),
             );
+            // The store's tombstone is the same fact the in-process mark
+            // carries, so the page reads one shape whichever authority
+            // refused it.
+            return AppError::session_open(error)
+                .with_retirement(session_id, SessionRetirement::Retired);
         }
         AppError::session_open(error)
     }
@@ -686,6 +691,11 @@ pub(crate) struct WorkbenchSessions {
     pub(crate) path: Option<Arc<PathBuf>>,
     pub(crate) roster: Arc<Mutex<BTreeMap<SessionId, WorkbenchSessionEntry>>>,
     pub(crate) roster_path: Option<Arc<PathBuf>>,
+    /// Which replacement each retired id was rotated onto, so the rotation is
+    /// a fact this process can be asked for again instead of an event only the
+    /// caller that performed it ever saw. Two callers race for it — the delete
+    /// settle and the reset route — and both must be handed the same answer.
+    replacements: Arc<Mutex<BTreeMap<SessionId, SessionId>>>,
 }
 
 impl WorkbenchSessions {
@@ -696,6 +706,7 @@ impl WorkbenchSessions {
             path: None,
             roster: Arc::new(Mutex::new(BTreeMap::new())),
             roster_path: None,
+            replacements: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -728,6 +739,7 @@ impl WorkbenchSessions {
             path: Some(Arc::new(path)),
             roster: Arc::new(Mutex::new(roster)),
             roster_path: Some(Arc::new(roster_path)),
+            replacements: Arc::new(Mutex::new(BTreeMap::new())),
         };
         ids.persist();
         Ok(ids)
@@ -772,6 +784,29 @@ impl WorkbenchSessions {
             self.persist();
         }
         (replacement_session_id, replaced_current)
+    }
+
+    /// Rotate a retired slot exactly once, whoever asks and however often.
+    ///
+    /// The rotation is what takes the page off a tombstoned id, and the reset
+    /// route is not the only path that reaches it: the delete's own settlement
+    /// rotates too, because a delete that completed durably must not leave the
+    /// roster pointing at the tombstone when the route's result is lost (a
+    /// dropped request, an ambiguous attach). Recording the replacement is
+    /// what keeps those two callers from stranding a second empty session:
+    /// whoever arrives later is handed the id the first one installed.
+    pub(crate) fn replace_retired(&self, retired_session_id: &SessionId) -> (SessionId, bool) {
+        // Replacements then roster then current is the lock order every
+        // rotation takes, so the recorded answer and the roster it describes
+        // cannot disagree across a race.
+        let mut replacements = self.replacements.lock_recover();
+        if let Some(replacement) = replacements.get(retired_session_id) {
+            let replaced_current = *self.current.lock_recover() == *replacement;
+            return (replacement.clone(), replaced_current);
+        }
+        let (replacement, replaced_current) = self.replace(retired_session_id);
+        replacements.insert(retired_session_id.clone(), replacement.clone());
+        (replacement, replaced_current)
     }
 
     #[cfg(test)]
@@ -1263,11 +1298,25 @@ pub(crate) enum AppErrorVerdict {
     Ambiguous,
 }
 
+/// Which session a refusal was about, and how far its retirement has settled.
+///
+/// A conflict that names a retirement is not the same answer as any other
+/// conflict: the id in it is gone or going, so the page's repair is to move to
+/// the session that replaced it rather than to retry this one. Carrying the
+/// two facts on the wire is what lets the page decide that without reading the
+/// prose of an error message.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SessionRetirementRefusal {
+    pub(crate) session_id: SessionId,
+    pub(crate) retirement: SessionRetirement,
+}
+
 #[derive(Debug)]
 pub(crate) struct AppError {
     pub(crate) status: StatusCode,
     pub(crate) message: String,
     pub(crate) verdict: AppErrorVerdict,
+    pub(crate) retirement: Option<SessionRetirementRefusal>,
 }
 
 impl AppError {
@@ -1276,6 +1325,7 @@ impl AppError {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
             verdict: AppErrorVerdict::Terminal,
+            retirement: None,
         }
     }
 
@@ -1284,7 +1334,22 @@ impl AppError {
             status: StatusCode::CONFLICT,
             message: message.into(),
             verdict: AppErrorVerdict::Terminal,
+            retirement: None,
         }
+    }
+
+    /// Name the retirement that refused this request, so the page can tell a
+    /// tombstoned id apart from a conflict it could retry.
+    pub(crate) fn with_retirement(
+        mut self,
+        session_id: &SessionId,
+        retirement: SessionRetirement,
+    ) -> Self {
+        self.retirement = Some(SessionRetirementRefusal {
+            session_id: session_id.clone(),
+            retirement,
+        });
+        self
     }
 
     pub(crate) fn session_delete_failed(
@@ -1304,6 +1369,7 @@ impl AppError {
             status: StatusCode::SERVICE_UNAVAILABLE,
             message: "internal server error".to_string(),
             verdict: AppErrorVerdict::Retryable,
+            retirement: None,
         }
     }
 
@@ -1320,6 +1386,7 @@ impl AppError {
             status: StatusCode::SERVICE_UNAVAILABLE,
             message,
             verdict: AppErrorVerdict::Ambiguous,
+            retirement: None,
         }
     }
 
@@ -1328,6 +1395,7 @@ impl AppError {
             status: StatusCode::NOT_FOUND,
             message: message.into(),
             verdict: AppErrorVerdict::Terminal,
+            retirement: None,
         }
     }
 
@@ -1337,6 +1405,7 @@ impl AppError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: "internal server error".to_string(),
             verdict: AppErrorVerdict::Ambiguous,
+            retirement: None,
         }
     }
 
@@ -1360,6 +1429,7 @@ impl AppError {
             status: StatusCode::FORBIDDEN,
             message: message.into(),
             verdict: AppErrorVerdict::Terminal,
+            retirement: None,
         }
     }
 
@@ -1368,6 +1438,7 @@ impl AppError {
             status: StatusCode::GATEWAY_TIMEOUT,
             message: message.into(),
             verdict: AppErrorVerdict::Ambiguous,
+            retirement: None,
         }
     }
 
@@ -1378,6 +1449,7 @@ impl AppError {
                 status: StatusCode::CONFLICT,
                 message,
                 verdict: AppErrorVerdict::ReplacementAbort,
+                retirement: None,
             };
         }
         let verdict = match (error.is_retryable(), error.is_terminal()) {
@@ -1392,6 +1464,10 @@ impl AppError {
                 status: StatusCode::CONFLICT,
                 message: deleted_session_message(&SessionId::from(session_id)),
                 verdict,
+                retirement: Some(SessionRetirementRefusal {
+                    session_id: SessionId::from(session_id),
+                    retirement: SessionRetirement::Retired,
+                }),
             };
         }
         // `SessionError::Store` is minted only by `load_persisted_state_admitted`,
@@ -1408,6 +1484,7 @@ impl AppError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             verdict,
             message: "internal server error".to_string(),
+            retirement: None,
         }
     }
 }
@@ -1484,13 +1561,15 @@ impl std::error::Error for AppError {}
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        (
-            self.status,
-            Json(json!({
-                "error": self.message,
-            })),
-        )
-            .into_response()
+        let mut body = serde_json::Map::new();
+        body.insert("error".to_string(), json!(self.message));
+        // Only a refusal that actually consulted a retirement carries these,
+        // so their presence is the signal and their absence is not a default.
+        if let Some(refusal) = &self.retirement {
+            body.insert("session_id".to_string(), json!(refusal.session_id));
+            body.insert("session_retirement".to_string(), json!(refusal.retirement));
+        }
+        (self.status, Json(Value::Object(body))).into_response()
     }
 }
 

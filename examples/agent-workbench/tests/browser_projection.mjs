@@ -1998,6 +1998,9 @@ function shellModule() {
        createShellAvailability,
        markShellChannel,
        markShellHydrated,
+       markShellTerminal,
+       markShellReplacing,
+       clearShellReplacing,
        shellPhase,
        shellStatusModel,
        snapshotApplication,
@@ -2156,6 +2159,11 @@ test("a terminal /api/state refusal renders its canonical error and stops retryi
      function renderError(message, options) { errors.push([message, options]); }
      function applyStateSnapshot() {}
      function restartEventStreams() {}
+     ${markedSource("WORKBENCH_SESSION_RETIREMENT", "WORKBENCH_SESSION_RETIREMENT")}
+     const sessionRetirement = createSessionRetirement();
+     const scopedSessionId = null;
+     let adoptions = 0;
+     async function adoptReplacementSession() { adoptions += 1; }
      ${markedSource("WORKBENCH_STATE_FETCH", "WORKBENCH_STATE_FETCH")}
      ${markedSource("WORKBENCH_STATE_RECOVERY", "WORKBENCH_STATE_RECOVERY")}
      ({
@@ -2183,6 +2191,93 @@ test("a terminal /api/state refusal renders its canonical error and stops retryi
   assert.equal(runtime.renderedModel().phase, "terminal");
   assert.equal(runtime.renderedModel().banner.text, canonical);
   assert.doesNotMatch(runtime.renderedModel().banner.text, /unreachable|retrying/);
+});
+
+test("a retirement refusal hands the page over instead of rendering a dead end", async () => {
+  const shell = shellModule();
+  const scoped = "workbench-0298b733";
+  const errors = [];
+  const context = {
+    Error,
+    Math,
+    Number,
+    String,
+    Boolean,
+    Set,
+    Array,
+    cleanErrorText(message) { return String(message); },
+    STATE_REQUEST_TIMEOUT_MS: 5000,
+    errors,
+  };
+  const runtime = vm.runInNewContext(
+    `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+     ${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
+     ${markedSource("WORKBENCH_SESSION_RETIREMENT", "WORKBENCH_SESSION_RETIREMENT")}
+     const projectionState = createWorkbenchProjectionState();
+     const shellAvailability = createShellAvailability();
+     const sessionRetirement = createSessionRetirement();
+     const scopedSessionId = ${JSON.stringify(scoped)};
+     let streamGeneration = 0;
+     let retirement = "retiring";
+     let adoptions = 0;
+     let retryTimers = 0;
+     let renderedModel = null;
+     function clearTimeout() {}
+     function setTimeout() {
+       retryTimers += 1;
+       return retryTimers;
+     }
+     const AbortSignal = { timeout() { return undefined; } };
+     function fetch() {
+       return Promise.resolve({
+         ok: false,
+         status: 409,
+         async json() {
+           return {
+             error: "session \`" + scopedSessionId + "\` is being deleted",
+             session_id: scopedSessionId,
+             session_retirement: retirement,
+           };
+         },
+       });
+     }
+     async function adoptReplacementSession() { adoptions += 1; }
+     function renderShellStatus() {
+       renderedModel = shellStatusModel(shellAvailability, {});
+     }
+     function renderError(message, options) { errors.push([message, options]); }
+     function applyStateSnapshot() {}
+     function restartEventStreams() {}
+     ${markedSource("WORKBENCH_STATE_FETCH", "WORKBENCH_STATE_FETCH")}
+     ${markedSource("WORKBENCH_STATE_RECOVERY", "WORKBENCH_STATE_RECOVERY")}
+     ({
+       runLoadState: loadState,
+       settle() { retirement = "retired"; },
+       adoptions: () => adoptions,
+       retryTimers: () => retryTimers,
+       renderedModel: () => renderedModel,
+       probeIsFutile: path => sessionScopedProbeIsFutile(sessionRetirement, path),
+     });`,
+    { ...context, shellStatusModel: shell.shellStatusModel },
+  );
+
+  // While the delete settles the page waits: no error row, no adoption, and
+  // every other rail stops asking a session that can only refuse them.
+  await runtime.runLoadState();
+  assert.deepEqual(errors, [], "a session being replaced is not an error to render");
+  assert.equal(runtime.adoptions(), 0, "a retiring session may still answer its own reset");
+  assert.equal(runtime.renderedModel().phase, "replacing");
+  assert.equal(runtime.renderedModel().banner.hidden, true);
+  assert.equal(runtime.probeIsFutile("/api/observations"), true);
+  assert.equal(runtime.probeIsFutile("/api/state"), false);
+  assert.ok(runtime.retryTimers() > 0, "the one probe that ends the wait keeps running");
+
+  // Once the delete has settled, this id will never answer again and a second
+  // reset is refused too: the page moves itself to a live session.
+  runtime.settle();
+  await runtime.runLoadState();
+  assert.equal(runtime.adoptions(), 1);
+  assert.deepEqual(errors, []);
 });
 
 test("a drop after hydration reconnects over the last known content", () => {
@@ -2390,6 +2485,7 @@ test("a snapshot overtaken by live observations is not an outage", async () => {
       const index = scheduledRetries.findIndex(timer => timer.id === timerId);
       if (index >= 0) scheduledRetries.splice(index, 1);
     },
+    handleSessionRetirementFailure() { return false; },
     handleTerminalStateFailure() { return false; },
     markShellTerminal() {},
     snapshotFailureReason() { return "the workbench stopped answering"; },
@@ -2490,6 +2586,7 @@ test("a 503 from a snapshot read retries quietly instead of claiming an outage",
       if (index >= 0) scheduledRetries.splice(index, 1);
     },
     renderError(message) { renderedErrors.push(message); },
+    handleSessionRetirementFailure() { return false; },
     handleTerminalStateFailure() { return false; },
     snapshotFailureReason() { return "the workbench stopped answering"; },
     markShellTerminal() {},
@@ -2543,6 +2640,188 @@ test("a 503 from a snapshot read retries quietly instead of claiming an outage",
   assert.equal(context.stateFailureDisposition(
     new context.StateSnapshotHttpError(404, "no such session"),
   ), "terminal");
+});
+
+/* FIG-3136: a reset retires the session the page is scoped to, and every
+   session-bound surface then refuses that id — while the delete settles, and
+   forever after. One reset collected 364 such refusals in 75 s and the page
+   learned nothing from any of them: it painted "refused", disabled the reset
+   button for good, and kept probing a tombstone. These run the production
+   classifier and probe gate. */
+function sessionRetirementModule() {
+  const context = { Object, Number, String, Boolean, Array };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_SESSION_RETIREMENT", "WORKBENCH_SESSION_RETIREMENT")}
+     this.exports = {
+       createSessionRetirement,
+       sessionRetirementRefusal,
+       noteSessionRetirement,
+       clearSessionRetirement,
+       sessionIsRetiring,
+       sessionScopedProbeIsFutile,
+       replacementSessionId
+     };`,
+    context,
+  );
+  return context.exports;
+}
+
+test("a refusal naming this session's retirement is a hand-off, not an outage", () => {
+  const retirement = sessionRetirementModule();
+  const scoped = "workbench-0298b733";
+
+  // The refusal the reproduction showed as a red error row, classified.
+  const refusal = retirement.sessionRetirementRefusal(
+    409,
+    {
+      error: "session `workbench-0298b733` is being deleted; session ids cannot be reused",
+      session_id: scoped,
+      session_retirement: "retiring",
+    },
+    scoped,
+  );
+  assert.equal(refusal.phase, "retiring");
+  assert.equal(refusal.sessionId, scoped);
+
+  // Another session's delete is not this tab's hand-off, and a conflict that
+  // names no retirement stays the conflict it was.
+  assert.equal(
+    retirement.sessionRetirementRefusal(
+      409,
+      { session_id: "workbench-other", session_retirement: "retired" },
+      scoped,
+    ),
+    null,
+    "a refusal about another session must not retire this page's session",
+  );
+  assert.equal(
+    retirement.sessionRetirementRefusal(409, { error: "a turn is already running" }, scoped),
+    null,
+    "a conflict with no retirement is not a hand-off",
+  );
+  assert.equal(
+    retirement.sessionRetirementRefusal(
+      503,
+      { session_id: scoped, session_retirement: "retiring" },
+      scoped,
+    ),
+    null,
+    "only a 409 retires a session",
+  );
+});
+
+test("a retiring session stops the probe storm and keeps the one probe that ends it", () => {
+  const retirement = sessionRetirementModule();
+  const scoped = "workbench-0298b733";
+  const state = retirement.createSessionRetirement();
+
+  // Before any refusal every rail runs.
+  assert.equal(retirement.sessionScopedProbeIsFutile(state, "/api/observations"), false);
+
+  retirement.noteSessionRetirement(state, {
+    phase: "retiring",
+    sessionId: scoped,
+  });
+  for (const rail of [
+    "/api/observations",
+    "/api/events?cursor=4",
+    "/api/queued_work",
+    "/api/triggers",
+    "/api/lashlang/graphs",
+    "/api/work",
+  ]) {
+    assert.equal(
+      retirement.sessionScopedProbeIsFutile(state, rail),
+      true,
+      `${rail} can only collect refusals against a retiring session`,
+    );
+  }
+  // The snapshot is what tells the page "retiring" has become "retired", and
+  // the roster is not session-scoped and is where the replacement is found.
+  assert.equal(retirement.sessionScopedProbeIsFutile(state, "/api/state"), false);
+  assert.equal(retirement.sessionScopedProbeIsFutile(state, "/api/sessions"), false);
+  assert.equal(retirement.sessionScopedProbeIsFutile(state, "/api/sessions/select"), false);
+
+  // retiring -> retired is the only direction: a late refusal answered before
+  // the delete settled must not walk the page back into waiting.
+  retirement.noteSessionRetirement(state, { phase: "retired", sessionId: scoped });
+  retirement.noteSessionRetirement(state, { phase: "retiring", sessionId: scoped });
+  assert.equal(state.phase, "retired");
+
+  retirement.clearSessionRetirement(state);
+  assert.equal(retirement.sessionIsRetiring(state), false);
+  assert.equal(retirement.sessionScopedProbeIsFutile(state, "/api/observations"), false);
+});
+
+test("the replacement for a retired session is the live one, never the tombstone", () => {
+  const retirement = sessionRetirementModule();
+  const retired = "workbench-0298b733";
+
+  // The delete's settlement rotates the roster onto the replacement, so the
+  // workbench's own current is the first answer.
+  assert.equal(
+    retirement.replacementSessionId(
+      {
+        current_session_id: "workbench-04cb2237",
+        sessions: [{ session_id: "workbench-04cb2237", last_active_ms: 2 }],
+      },
+      retired,
+    ),
+    "workbench-04cb2237",
+  );
+
+  // A roster whose current is still the tombstone hands back the newest live
+  // session instead — never the retired id.
+  assert.equal(
+    retirement.replacementSessionId(
+      {
+        current_session_id: retired,
+        sessions: [
+          { session_id: retired, last_active_ms: 9 },
+          { session_id: "workbench-older", last_active_ms: 1 },
+          { session_id: "workbench-newer", last_active_ms: 5 },
+        ],
+      },
+      retired,
+    ),
+    "workbench-newer",
+  );
+
+  // Nothing live left: the page has to create one.
+  assert.equal(
+    retirement.replacementSessionId(
+      { current_session_id: retired, sessions: [{ session_id: retired, last_active_ms: 9 }] },
+      retired,
+    ),
+    null,
+  );
+});
+
+test("a retired session is replaced on screen, not refused", () => {
+  const shell = shellModule();
+  const availability = shell.markShellHydrated(shell.createShellAvailability());
+
+  // Today's answer for this refusal: terminal. It names a fault the operator
+  // cannot act on and offers a retry that can never succeed.
+  shell.markShellTerminal(availability, "state", "session `workbench-0298b733` is being deleted");
+  assert.equal(shell.shellPhase(availability), "terminal");
+  assert.equal(shellRender(shell.shellStatusModel(availability)).pill, "refused");
+
+  shell.markShellReplacing(availability, "workbench-0298b733");
+  assert.equal(shell.shellPhase(availability), "replacing");
+  const render = shellRender(
+    shell.shellStatusModel(availability, { session: "workbench-0298b733" }),
+  );
+  assert.equal(render.pill, "replacing");
+  assert.equal(
+    render.bannerHidden,
+    true,
+    "a session being replaced is not a fault to banner: the page is already repairing it",
+  );
+
+  shell.clearShellReplacing(availability);
+  shell.markShellChannel(availability, "state", true);
+  assert.equal(shell.shellPhase(availability), "live");
 });
 
 test("an unattached stream is neither a live channel nor an outage", () => {

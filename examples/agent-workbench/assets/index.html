@@ -2675,7 +2675,28 @@
       url.searchParams.set("session_id", scopedSessionId);
       return url.pathname + url.search + url.hash;
     }
-    window.fetch = (input, init) => nativeFetch(scopedApiUrl(input), init);
+    const sessionRetirement = createSessionRetirement();
+
+    /* Answered here rather than by the workbench: the refusal is already known
+       and a round trip for it is the probe storm. Same shape as the server's,
+       so every caller's existing 409 handling reads it unchanged. */
+    function retiredSessionRefusal(retirement) {
+      return new Response(
+        JSON.stringify({
+          error: "session `" + retirement.sessionId + "` is being replaced",
+          session_id: retirement.sessionId,
+          session_retirement: retirement.phase
+        }),
+        { status: 409, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    window.fetch = (input, init) => {
+      if (sessionScopedProbeIsFutile(sessionRetirement, input)) {
+        return Promise.resolve(retiredSessionRefusal(sessionRetirement));
+      }
+      return nativeFetch(scopedApiUrl(input), init);
+    };
 
     const shell = document.querySelector(".shell");
     const mainPanel = document.getElementById("mainPanel");
@@ -3083,7 +3104,8 @@
         channels: { state: null, product: null, observation: null },
         established: { state: false, product: false, observation: false },
         reasons: { state: "", product: "", observation: "" },
-        terminal: null
+        terminal: null,
+        replacing: null
       };
     }
 
@@ -3094,6 +3116,22 @@
         availability.terminal = null;
       }
       availability.reasons[channel] = reachable ? "" : (reason || availability.reasons[channel]);
+      return availability;
+    }
+
+    /* A session the workbench has retired is not an outage and not a refusal
+       the operator can do anything about: the id is going or gone and the page
+       owes them the session that replaced it. Saying "refused" there was the
+       dead end — it named a fault, offered a retry that could never succeed,
+       and hid the hand-off that was already available (FIG-3136). */
+    function markShellReplacing(availability, sessionId) {
+      availability.replacing = { sessionId };
+      availability.terminal = null;
+      return availability;
+    }
+
+    function clearShellReplacing(availability) {
+      availability.replacing = null;
       return availability;
     }
 
@@ -3134,6 +3172,9 @@
     }
 
     function shellPhase(availability) {
+      /* outranks `terminal`: the retirement refusal that put the shell here is
+         itself a terminal 409, and the hand-off is the truer thing to say */
+      if (availability.replacing) return "replacing";
       if (availability.terminal) return "terminal";
       const down = shellChannelDown(availability);
       if (availability.hydrated) {
@@ -3152,6 +3193,9 @@
         return "reconnecting. this is the last state the workbench reported — it may have moved on since.";
       }
       if (phase === "terminal") return "the session is unavailable; see the error below.";
+      if (phase === "replacing") {
+        return "this session was reset. moving to the session that replaced it…";
+      }
       return "the workbench is not answering. this is a connection problem, not an empty session: whatever this session is doing is unknown, not absent.";
     }
 
@@ -3187,6 +3231,14 @@
         placeholderTone: phase === "live" ? "" : (phase === "connecting" ? "pending" : "degraded"),
         banner: { hidden: true, text: "", detail: shellReason(availability) }
       };
+      if (phase === "replacing") {
+        model.pillText = "replacing";
+        model.pillTone = "pending";
+        model.subtitle = "moving to the replacement session";
+        model.session = view.session || "—";
+        // Not a banner: nothing is broken and nothing is asked of the operator.
+        return model;
+      }
       if (phase === "connecting" && availability.hydrated) {
         model.pillText = busy ? "running" : "connecting";
         model.pillTone = busy ? "run" : "pending";
@@ -3237,6 +3289,85 @@
       return model;
     }
     // END WORKBENCH_SHELL_AVAILABILITY
+
+    // BEGIN WORKBENCH_SESSION_RETIREMENT
+    /* A workbench session can be retired out from under the page: that is what
+       reset does, and the delete behind it takes as long as the session is big
+       — twenty seconds for a few hundred processes and two cron jobs. While it
+       settles, and forever after, every session-bound surface refuses this id
+       with a 409. Probing it again is not recovery: one such reset collected
+       364 refusals in 75 s and learned nothing from any of them (FIG-3136).
+       The refusal carries which session it is about and how far its retirement
+       has settled, so the page can stop asking and go find the replacement. */
+    const SESSION_RETIREMENT_PROBE = "/api/state";
+
+    function createSessionRetirement() {
+      return { phase: "none", sessionId: null, recovering: false };
+    }
+
+    /* Only a refusal naming this page's own session retires it. The workbench
+       answers for every session it hosts, and another tab's delete is not this
+       tab's hand-off. */
+    function sessionRetirementRefusal(status, body, scopedId) {
+      if (status !== 409 || !body) return null;
+      const phase = body.session_retirement;
+      if (phase !== "retiring" && phase !== "retired") return null;
+      const sessionId = typeof body.session_id === "string" ? body.session_id : "";
+      if (!sessionId) return null;
+      if (scopedId && sessionId !== scopedId) return null;
+      return { phase, sessionId };
+    }
+
+    function noteSessionRetirement(retirement, refusal) {
+      if (!refusal) return false;
+      /* retiring → retired is the only direction this travels: a delete that
+         settled does not come back, and a late "retiring" refusal answered
+         from before it settled must not walk the page back into waiting */
+      if (retirement.phase === "retired" && refusal.phase === "retiring") return true;
+      retirement.phase = refusal.phase;
+      retirement.sessionId = refusal.sessionId;
+      return true;
+    }
+
+    function clearSessionRetirement(retirement) {
+      retirement.phase = "none";
+      retirement.sessionId = null;
+      retirement.recovering = false;
+      return retirement;
+    }
+
+    function sessionIsRetiring(retirement) {
+      return retirement.phase === "retiring" || retirement.phase === "retired";
+    }
+
+    /* While this session is retiring or retired the only request worth making
+       against it is the snapshot that tells us which of the two it is; the
+       rails and the streams can collect nothing but refusals. The roster is
+       not session-scoped and is how the replacement is found, so it passes. */
+    function sessionScopedProbeIsFutile(retirement, input) {
+      if (!sessionIsRetiring(retirement)) return false;
+      if (typeof input !== "string" || !input.startsWith("/api/")) return false;
+      const path = input.split("?")[0];
+      if (path === SESSION_RETIREMENT_PROBE) return false;
+      return !path.startsWith("/api/sessions");
+    }
+
+    /* Which live session the page should adopt in place of the retired one.
+       The workbench's own current is the first answer, because the delete's
+       settlement rotates the roster onto the replacement; otherwise the newest
+       session the operator still has. `null` means one has to be created. */
+    function replacementSessionId(listing, retiredSessionId) {
+      const current = listing && listing.current_session_id;
+      if (current && current !== retiredSessionId) return current;
+      const sessions = ((listing && listing.sessions) || []).filter(
+        session => session && session.session_id && session.session_id !== retiredSessionId
+      );
+      if (!sessions.length) return null;
+      return sessions.reduce((newest, session) =>
+        (session.last_active_ms || 0) > (newest.last_active_ms || 0) ? session : newest
+      ).session_id;
+    }
+    // END WORKBENCH_SESSION_RETIREMENT
 
     const shellAvailability = createShellAvailability();
     let knownSessionLabel = null;
@@ -4713,6 +4844,7 @@
           token.snapshotSequence
         );
       } catch (error) {
+        if (handleSessionRetirementFailure(error)) return;
         if (handleTerminalStateFailure(error)) {
           renderError(error.message, { retry: false });
           return;
@@ -4816,6 +4948,17 @@
     let resetArmed = false;
     let resetArmTimer = 0;
 
+    /* The reset button is released by whoever finishes the reset, and that is
+       not always the request that started it: a reset whose response never
+       arrives left the button disabled forever, on a session that could not be
+       reset again anyway (FIG-3136). */
+    function releaseResetButton() {
+      resetInFlight = false;
+      resetButton.disabled = false;
+      resetButton.classList.remove("loading");
+      resetButton.textContent = "reset";
+    }
+
     function disarmReset() {
       clearTimeout(resetArmTimer);
       resetArmTimer = 0;
@@ -4893,6 +5036,16 @@
         const response = await fetch("/api/reset", { method: "POST" });
         const state = await response.json().catch(() => null);
         if (!response.ok) {
+          /* a reset refused because this session is already retiring or
+             retired is the hand-off, not a failure: the replacement exists or
+             is about to, and the page's job is to move to it */
+          const refusal = sessionRetirementRefusal(response.status, state, scopedSessionId);
+          if (noteSessionRetirement(sessionRetirement, refusal)) {
+            markShellReplacing(shellAvailability, sessionRetirement.sessionId);
+            renderShellStatus();
+            adoptReplacementSession().catch(() => {});
+            return;
+          }
           throw new Error(
             typeof state?.error === "string"
               ? state.error
@@ -4932,10 +5085,7 @@
           error instanceof Error ? error.message : "the conversation could not be reset"
         );
       } finally {
-        resetInFlight = false;
-        resetButton.disabled = false;
-        resetButton.classList.remove("loading");
-        resetButton.textContent = "reset";
+        releaseResetButton();
         refreshBusyState();
         refreshWork();
       }
@@ -5764,11 +5914,14 @@
       const response = await fetch("/api/state", { signal: AbortSignal.timeout(timeoutMs) });
       if (!response.ok) {
         let message = "state request failed (" + response.status + ")";
+        let body = null;
         try {
-          const body = await response.json();
+          body = await response.json();
           if (typeof body?.error === "string" && body.error.trim()) message = body.error;
         } catch (_) { /* retain the status-bearing fallback */ }
-        throw new StateSnapshotHttpError(response.status, message);
+        const error = new StateSnapshotHttpError(response.status, message);
+        error.retirement = sessionRetirementRefusal(response.status, body, scopedSessionId);
+        throw error;
       }
       return await response.json();
     }
@@ -5875,6 +6028,7 @@
         renderUsage(state.usage);
         renderShellStatus();
       } catch (error) {
+        if (handleSessionRetirementFailure(error)) return;
         if (handleTerminalStateFailure(error)) {
           renderError(error.message, { retry: false });
           return;
@@ -5905,6 +6059,7 @@
         markShellChannel(shellAvailability, "state", true);
         renderShellStatus();
       } catch (error) {
+        if (handleSessionRetirementFailure(error)) return;
         if (handleTerminalStateFailure(error)) {
           renderError(error.message, { retry: false });
           return;
@@ -5921,6 +6076,26 @@
         return "the workbench did not answer within " + (STATE_REQUEST_TIMEOUT_MS / 1000) + "s";
       }
       return cleanErrorText(error?.message || "the workbench did not answer");
+    }
+
+    /* The hand-off, driven by the one probe the gate still lets through. A
+       "retiring" refusal only quiets the page; the delete is still running and
+       the reset request that started it may yet return the replacement. Once
+       the refusal says "retired" the delete has settled, this id will never
+       answer again, and a second reset cannot help either — the fence refuses
+       a delete of a retired session — so the page adopts a live session
+       itself. */
+    function handleSessionRetirementFailure(error) {
+      if (!noteSessionRetirement(sessionRetirement, error?.retirement)) return false;
+      markShellReplacing(shellAvailability, sessionRetirement.sessionId);
+      renderShellStatus();
+      if (sessionRetirement.phase === "retired") {
+        adoptReplacementSession().catch(() => {});
+      }
+      /* the ladder is the only probe left running against this id, and it is
+         what notices the delete settling */
+      scheduleStateRetry();
+      return true;
     }
 
     function handleTerminalStateFailure(error) {
@@ -6012,6 +6187,7 @@
         /* re-attach the streams at the snapshot's cursors */
         restartEventStreams();
       } catch (error) {
+        if (handleSessionRetirementFailure(error)) return;
         if (handleTerminalStateFailure(error)) {
           renderError(error.message, { retry: false });
           return;
@@ -6025,6 +6201,74 @@
     }
     // END WORKBENCH_STATE_RETRY
     // END WORKBENCH_STATE_RECOVERY
+
+    async function rosterListing() {
+      const response = await nativeFetch("/api/sessions");
+      if (!response.ok) return null;
+      return await response.json().catch(() => null);
+    }
+
+    async function createSessionForReplacement() {
+      const response = await nativeFetch("/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}"
+      });
+      if (!response.ok) return null;
+      const body = await response.json().catch(() => null);
+      return typeof body?.session_id === "string" ? body.session_id : null;
+    }
+
+    async function adoptReplacementSession() {
+      if (sessionRetirement.recovering) return;
+      sessionRetirement.recovering = true;
+      const retiredSessionId = sessionRetirement.sessionId;
+      try {
+        let replacement = replacementSessionId(await rosterListing(), retiredSessionId);
+        let created = false;
+        if (!replacement) {
+          replacement = await createSessionForReplacement();
+          created = true;
+        }
+        /* nothing to adopt yet: the retry ladder brings us back */
+        if (!replacement) return;
+        if (scopedSessionId) {
+          /* a tab pinned to an id follows the replacement without touching
+             the workbench's current, which other tabs are reading */
+          scopedSessionId = replacement;
+          const replacementUrl = new URL(window.location.href);
+          replacementUrl.searchParams.set("session_id", replacement);
+          window.history.replaceState(
+            null,
+            "",
+            replacementUrl.pathname + replacementUrl.search + replacementUrl.hash
+          );
+        } else if (created) {
+          /* an unscoped page reads whatever the workbench resolves a
+             query-less call to, so the new session has to become that */
+          await nativeFetch("/api/sessions/select", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ session_id: replacement })
+          });
+        }
+        clearSessionRetirement(sessionRetirement);
+        clearShellReplacing(shellAvailability);
+        clearTranscript();
+        clearExecutionState();
+        clearAttachment();
+        lastRequest = null;
+        releaseResetButton();
+        cancelStateRetry();
+        markShellChannel(shellAvailability, "state", true);
+        renderShellStatus();
+        restartEventStreams(true);
+        loadState().catch(() => {});
+        loadSessions().catch(() => {});
+      } finally {
+        sessionRetirement.recovering = false;
+      }
+    }
 
     function formatTime(ms) {
       if (!ms) return "";
