@@ -80,6 +80,19 @@ fn scenario_declarations(scenario: Scenario) -> Vec<Declaration> {
 }
 
 /// The top-level expressions of each scenario, in execution order.
+// rustfmt cannot format the corpus below and says so by leaving it byte for
+// byte as it is: every scenario is one `b::` constructor expression per
+// statement, nested past the point where any line fits `max_width`, so the
+// layout search exhausts every arm and falls back to the original text. The
+// fallback is silent, and it is not free -- 66 of the 68 seconds
+// `scripts/check_included_file_formatting.py` spent in CI were this one
+// function's failed search, against 0.05 s for the three sibling sections.
+// The attribute states the outcome rustfmt already reaches and skips the
+// search: `rustfmt --edition 2024` over this file was verified to emit it
+// unchanged with and without the attribute, so the scan still checks exactly
+// the bytes it checked before, in 0.07 s. Whatever replaces the corpus with
+// formattable code should drop the attribute with it.
+#[rustfmt::skip]
 pub fn benchmark_main(scenario: Scenario) -> Vec<Expr> {
     match scenario {
 Scenario::Baseline => vec![
