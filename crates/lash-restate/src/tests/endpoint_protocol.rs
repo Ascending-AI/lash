@@ -243,6 +243,13 @@ pub(super) fn restate_recorded_commands(output: &[u8]) -> Option<Vec<RecordedCom
                     Some(u32::try_from(protobuf_varint_field(frame.get(8..)?, 10)?).ok()?),
                     None,
                 ),
+                // FIG-3149: the journaled wake verdict peeks the process
+                // cancellation promise, and its notification answers on the
+                // command's own result completion id.
+                0x040A => (
+                    Some(u32::try_from(protobuf_varint_field(frame.get(8..)?, 11)?).ok()?),
+                    None,
+                ),
                 _ => (None, None),
             };
             commands.push(RecordedCommand {
@@ -332,6 +339,22 @@ pub(super) fn encode_recorded_commands_with_invocations_replay<T: serde::Seriali
                 let value = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
                 body.extend_from_slice(&encode_call_completion(completion_id, &value));
             }
+            // FIG-3149: `Null` answers the peek with the void an unresolved
+            // promise reads as; any other value resolves it.
+            0x040A => {
+                let Some(value) = complete(command) else {
+                    continue;
+                };
+                if value.is_null() {
+                    body.extend_from_slice(&encode_peek_promise_completion(completion_id, None));
+                } else {
+                    let value = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
+                    body.extend_from_slice(&encode_peek_promise_completion(
+                        completion_id,
+                        Some(&value),
+                    ));
+                }
+            }
             _ => {}
         }
     }
@@ -378,6 +401,23 @@ fn encode_call_completion(completion_id: u32, value: &[u8]) -> Bytes {
     put_varint_field(&mut notification, 1, u64::from(completion_id));
     put_len_field(&mut notification, 5, &nested_value);
     encode_restate_message(0x800D, notification.to_vec())
+}
+
+/// FIG-3149: `PeekPromiseCompletionNotification` (0x800A). `None` is the void
+/// result an unresolved promise reads as; `Some(value)` carries the resolved
+/// payload.
+fn encode_peek_promise_completion(completion_id: u32, value: Option<&[u8]>) -> Bytes {
+    let mut notification = BytesMut::new();
+    put_varint_field(&mut notification, 1, u64::from(completion_id));
+    match value {
+        Some(value) => {
+            let mut nested_value = BytesMut::new();
+            put_len_field(&mut nested_value, 1, value);
+            put_len_field(&mut notification, 5, &nested_value);
+        }
+        None => put_len_field(&mut notification, 4, &[]),
+    }
+    encode_restate_message(0x800A, notification.to_vec())
 }
 
 fn encode_invocation_id_completion(completion_id: u32, invocation_id: &str) -> Bytes {
@@ -1642,6 +1682,21 @@ async fn invoke_endpoint_body_with_json_call_responses_unbounded(
                     }
                 } else {
                     drop(input_sender.take());
+                }
+            }
+            if message_type == 0x040A {
+                // FIG-3149: the runtime answers a promise peek straight away.
+                // An unresolved process cancellation promise reads as void.
+                let completion_id = protobuf_varint_field(&output[decoded + 8..frame_end], 11)
+                    .and_then(|id| u32::try_from(id).ok())
+                    .ok_or_else(|| TerminalError::new("invalid peek promise command frame"))?;
+                if let Some(sender) = input_sender.as_mut() {
+                    sender
+                        .send_data(encode_peek_promise_completion(completion_id, None))
+                        .await
+                        .map_err(|err| {
+                            TerminalError::new(format!("peek completion input failed: {err}"))
+                        })?;
                 }
             }
             if matches!(message_type, 0x0001..=0x0003) {

@@ -644,6 +644,24 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run;
 
+    /// The journaled wake verdict for a durable process sleep (FIG-3149).
+    ///
+    /// Peeks the running process workflow's own cancellation promise through a
+    /// durable command, so every redrive of this wake observes exactly the
+    /// verdict the live wake committed instead of re-reading live registry
+    /// state that can answer differently on replay.
+    ///
+    /// Contexts without a workflow promise surface carry no process
+    /// cancellation and answer `false`.
+    fn peek_process_cancel_requested<'run>(
+        &'run self,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async { Ok(false) })
+    }
+
     fn peek_event<'run>(
         &'run self,
         address: RestateDurableWaitAddress,
@@ -901,8 +919,24 @@ where
         deadline: Some(deadline),
     })
 }
+macro_rules! impl_process_cancel_peek {
+    (promises, $ctx:expr) => {
+        Box::pin(async move {
+            let payload = restate_sdk::context::ContextPromises::peek_promise::<String>(
+                $ctx,
+                crate::process::PROCESS_CANCEL_PROMISE_KEY,
+            )
+            .await?;
+            Ok(crate::process::process_cancel_promise_verdict(payload))
+        })
+    };
+    (no_promises, $ctx:expr) => {
+        Box::pin(async move { Ok(false) })
+    };
+}
+
 macro_rules! impl_restate_controller_context {
-    ($($context:ident),+ $(,)?) => {
+    ($($context:ident : $promises:ident),+ $(,)?) => {
         $(
             impl<'ctx> RestateControllerContext<'ctx> for $context<'ctx> {
                 fn sleep_send<'run>(
@@ -1584,15 +1618,24 @@ macro_rules! impl_restate_controller_context {
                         .await
                     })
                 }
+
+                fn peek_process_cancel_requested<'run>(
+                    &'run self,
+                ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    impl_process_cancel_peek!($promises, self)
+                }
             }
         )+
     };
 }
 
 impl_restate_controller_context!(
-    RestateContext,
-    SharedObjectContext,
-    ObjectContext,
-    SharedWorkflowContext,
-    WorkflowContext,
+    RestateContext: no_promises,
+    SharedObjectContext: no_promises,
+    ObjectContext: no_promises,
+    SharedWorkflowContext: promises,
+    WorkflowContext: promises,
 );

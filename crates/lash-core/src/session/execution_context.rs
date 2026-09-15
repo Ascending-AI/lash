@@ -1148,51 +1148,28 @@ impl<'run> RuntimeExecutionContext<'run> {
                     std::sync::Arc::clone(&self.dispatch.clock),
                 ),
             )
-            .await?;
+            .await;
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                // A retryable sleep failure is the host asking for redelivery,
+                // not a guest-visible sleep result. Raise it at the handler
+                // boundary so the guest cannot swallow it into a terminal
+                // process failure (FIG-3149).
+                if error.code.is_retryable() {
+                    self.record_nested_effect_error(error.clone());
+                }
+                return Err(error);
+            }
+        };
         match outcome {
             crate::RuntimeEffectOutcome::Sleep => {
-                // Process sleeps remain uninterruptible. The registry read is the
-                // wake boundary: durable cancellation may be committed before
-                // its live signal reaches this worker, but it must still win
-                // before guest code resumes after the timer.
-                if let Some(process) = self.process_execution.as_ref() {
-                    let event_context = process
-                        .event_context
-                        .as_ref()
-                        .ok_or_else(missing_process_execution_error)?;
-                    let record = match event_context
-                        .process_work
-                        .registry()
-                        .get_process(&process.process_id)
-                        .await
-                        .and_then(|record| {
-                            record.ok_or_else(|| {
-                                crate::runtime::registry_transitions::unknown_process(
-                                    &process.process_id,
-                                )
-                            })
-                        }) {
-                        Ok(record) => record,
-                        Err(error) => {
-                            let error = match error {
-                                crate::PluginError::Runtime(error) => {
-                                    crate::RuntimeEffectControllerError::from(error)
-                                }
-                                error => crate::RuntimeEffectControllerError::from(error),
-                            };
-                            self.record_nested_effect_error(error.clone());
-                            return Err(error);
-                        }
-                    };
-                    let cancel_requested = record.cancel_request.is_some();
-                    if cancel_requested {
-                        cancellation.cancel();
-                        return Err(crate::RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::RuntimeEffectSleepCancelled,
-                            "runtime effect sleep observed process cancellation at wake",
-                        ));
-                    }
-                }
+                // Process sleeps remain uninterruptible, and the wake is where a
+                // committed cancellation takes ownership of settlement. The
+                // verdict itself is the effect host's to record: a live read at
+                // this boundary can answer differently on redrive, so the
+                // durable host journals the wake verdict and reports it as
+                // `RuntimeEffectSleepCancelled` instead (FIG-3149).
                 Ok(())
             }
             other => Err(crate::RuntimeEffectControllerError::new(
