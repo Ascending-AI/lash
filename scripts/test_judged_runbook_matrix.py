@@ -194,6 +194,65 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         config["no_rlm_session_only"]["request-abandon"]["tier"] = "platinum"
         self.assertNotEqual(MATRIX.tier_violations(config), [])
 
+    def test_every_non_emitting_row_names_something_that_exists(self) -> None:
+        # `deterministic_only` and `scripted_live_model` rows are excluded from
+        # discovery and never emitted, so no other assertion reads them. The
+        # shipped matrix resolves today; this pins that it keeps resolving.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        self.assertEqual(MATRIX.referent_violations(config), [])
+
+    def test_a_dangling_non_emitting_row_is_rejected(self) -> None:
+        # The mutation the checker exists to catch, in both shapes: a
+        # deterministic harness whose runbook is gone, and a scripted case
+        # directory that was renamed out from under its row.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        config["deterministic_only"]["runbook-that-was-deleted"] = {
+            "tier": "deterministic",
+            "model": "scripted-provider",
+        }
+        self.assertNotEqual(MATRIX.referent_violations(config), [])
+
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        config["scripted_live_model"]["rlm-smoke-case-that-was-renamed"] = {
+            "tier": "economy",
+            "model": "deepseek/deepseek-v4-flash",
+            "runner": "just rlm-smoke-e2e",
+        }
+        self.assertNotEqual(MATRIX.referent_violations(config), [])
+
+    def test_a_paid_row_may_not_be_served_entirely_by_the_dev_provider(self) -> None:
+        # `tier_violations` reads only the matrix, so it cannot see a row whose
+        # every phase is scripted but whose tier buys a real model. The slug is
+        # then never requested and the row's evidence names a driver that
+        # produced none of it.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        self.assertEqual(MATRIX.deterministic_provider_violations(config), [])
+
+    def test_a_dev_provider_row_funded_at_a_paid_tier_is_rejected(self) -> None:
+        # The red side, and the precondition that makes the green side mean
+        # something: `workbench-session-resume` drives `replay-route-change`
+        # through every phase, so funding it at a paid tier must be refused,
+        # and declaring which phases are scripted must clear it.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        entry = config["scenarios"]["workbench-session-resume"]
+        self.assertEqual(entry["tier"], "deterministic")
+        self.assertIn(
+            "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO",
+            (
+                MATRIX.ROOT / "runbooks" / "workbench-session-resume" / "runbook.md"
+            ).read_text(),
+        )
+        entry["tier"] = "economy"
+        entry["model"] = config["tiers"]["economy"][0]
+        self.assertNotEqual(MATRIX.deterministic_provider_violations(config), [])
+        entry["deterministic_phases"] = "every phase"
+        self.assertEqual(MATRIX.deterministic_provider_violations(config), [])
+
     def test_no_deterministic_scenario_names_a_paid_model(self) -> None:
         # The tier's whole claim is that the row makes no provider network
         # call. A deterministic row pointing at a real slug would spend money

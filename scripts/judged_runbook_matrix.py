@@ -99,6 +99,83 @@ def tier_violations(config: dict[str, object]) -> list[str]:
     return problems
 
 
+def referent_violations(config: dict[str, object]) -> list[str]:
+    """Every non-emitting row, checked against the thing it names.
+
+    The emitted groups get their referent checked in `main` because a missing
+    `runbook.md` breaks the shard. The non-emitting groups get nothing: they are
+    excluded from discovery *and* never emitted, so `deterministic_only` and
+    `scripted_live_model` keys are the one part of the matrix no assertion
+    reads. Listing a harness "keeps discovery honest" only while the listing
+    still points at something, and a renamed case directory would leave the row
+    dangling on green CI.
+
+    A `deterministic_only` key names `runbooks/<key>/runbook.md`, the same
+    referent the emitted groups use. A `scripted_live_model` key names a case of
+    a scripted harness, spelled `<harness>-<case>` for
+    `runbooks/<harness>/cases/<case>` -- the shape RULES.md documents for
+    `rlm-smoke`. Both are resolved here rather than special-cased by name so a
+    second harness needs no change.
+    """
+    problems = []
+    for scenario in config["deterministic_only"]:
+        if not (ROOT / "runbooks" / scenario / "runbook.md").is_file():
+            problems.append(
+                f"`{scenario}` is listed in `deterministic_only` but "
+                f"runbooks/{scenario}/runbook.md does not exist"
+            )
+    for scenario in config["scripted_live_model"]:
+        for split in range(len(scenario) - 1, 0, -1):
+            if scenario[split] != "-":
+                continue
+            harness, case = scenario[:split], scenario[split + 1 :]
+            if (ROOT / "runbooks" / harness / "cases" / case).is_dir():
+                break
+        else:
+            problems.append(
+                f"`{scenario}` is listed in `scripted_live_model` but names no "
+                f"`runbooks/<harness>/cases/<case>` directory"
+            )
+    return problems
+
+
+def deterministic_provider_violations(config: dict[str, object]) -> list[str]:
+    """Rows funded at a paid tier whose runbook drives the dev provider.
+
+    `tier_violations` reads only the matrix, so it cannot see the mismatch that
+    actually costs money: a runbook whose every phase is served by the in-process
+    dev provider, funded at `economy` or `frontier`. The slug is then never
+    requested, and the row's evidence claims a driver that produced none of it --
+    the mislabeled evidence RULES.md's tier rules exist to prevent, in the
+    direction the model-slug check cannot catch.
+
+    The selector `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO` is the public, grep-able
+    switch RULES.md requires a deterministic row to name. Naming it is not by
+    itself a violation: a row may be genuinely mixed, with scripted surfaces
+    beside real provider phases. That row declares `deterministic_phases`, which
+    is exactly the claim being made. So the rule is: name the selector, then
+    either be `deterministic` or say which phases are.
+    """
+    problems = []
+    for group in ("scenarios", "typescript_only", "no_rlm_session_only"):
+        for scenario, entry in config[group].items():
+            if entry.get("tier") == "deterministic":
+                continue
+            runbook = ROOT / "runbooks" / scenario / "runbook.md"
+            if not runbook.is_file():
+                continue
+            if "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO" not in runbook.read_text():
+                continue
+            if entry.get("deterministic_phases") is not None:
+                continue
+            problems.append(
+                f"`{scenario}` is tier `{entry.get('tier')}` funded at "
+                f"`{entry.get('model')}`, but its runbook drives the dev provider "
+                f"and declares no `deterministic_phases`"
+            )
+    return problems
+
+
 def select_shard(
     all_rows: list[dict[str, str]], index: int, count: int
 ) -> list[dict[str, str]]:
@@ -121,6 +198,14 @@ def main() -> int:
     violations = tier_violations(config)
     if violations:
         print(f"tier violations: {'; '.join(violations)}", file=sys.stderr)
+        return 2
+    violations = deterministic_provider_violations(config)
+    if violations:
+        print(f"tier violations: {'; '.join(violations)}", file=sys.stderr)
+        return 2
+    violations = referent_violations(config)
+    if violations:
+        print(f"dangling matrix rows: {'; '.join(violations)}", file=sys.stderr)
         return 2
     all_rows = rows(config)
     missing = [item["runbook"] for item in all_rows if not (ROOT / item["runbook"]).is_file()]
