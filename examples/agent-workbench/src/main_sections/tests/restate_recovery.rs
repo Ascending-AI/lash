@@ -1786,7 +1786,9 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         .iter()
         .filter_map(|row| match row {
             TranscriptRow::Message { message } => Some(message.text.clone()),
-            TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
+            TranscriptRow::Reasoning { .. }
+            | TranscriptRow::CodeBlock { .. }
+            | TranscriptRow::Note { .. } => None,
         })
         .collect::<Vec<_>>();
     assert!(

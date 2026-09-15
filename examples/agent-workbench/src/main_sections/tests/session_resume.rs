@@ -265,6 +265,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
         mail_world: mail::MailWorld::new(),
         active_turns: ActiveTurns::default(),
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };

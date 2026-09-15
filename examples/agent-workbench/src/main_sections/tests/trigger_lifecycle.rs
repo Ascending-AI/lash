@@ -207,6 +207,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .observer()
         .expect("process observer configured");
     let state = AppState {
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),

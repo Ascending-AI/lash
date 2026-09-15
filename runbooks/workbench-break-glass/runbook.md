@@ -127,13 +127,11 @@ Screenshot `02-killed-route-still-visible.png`.
 
 ## Phase 3 — Use Stop to prune the dangling route honestly
 
-Press **abort** (`#abort`) and capture `POST /api/turn/cancel`. The unknown-terminal note is
-a plain `div.note` appended by `renderNote`, not part of the state projection, so the next
-re-render of the timeline from `/api/state` deletes it — measured at about one second on
-screen, and the appearance itself lags the click by several seconds. Do **not** wait fifteen
-seconds and then look: arm a DOM-mutation observer on the timeline before the click and
-record the note's text and its insert/remove timestamps, or screenshot within about a second
-of its appearance. Waiting for the re-render destroys the artifact the gate asks for.
+Press **abort** (`#abort`) and capture `POST /api/turn/cancel`. The unknown-terminal
+disclosure is durable: the host records it against the pruned turn, `/api/state` carries it
+on `unknown_turn_terminals` and as a `note` transcript row, and the timeline renders that row
+like every other row, so a re-render redraws it instead of deleting it. Read it after the
+fact from the state snapshot; no DOM-mutation observer and no timing window are needed.
 Require exactly one cancellation receipt for the Phase 1 address with:
 
 - HTTP 202 and `accepted: true`, with a gate outcome of `requested` or `already_requested`;
@@ -143,10 +141,16 @@ Require exactly one cancellation receipt for the Phase 1 address with:
 - no cancellation evidence anywhere in a terminal, because no terminal exists.
 
 Require the page to render `turn route cleared · terminal outcome unknown`, return idle,
-and hide Stop. `/api/state.active_turns` and `active-turns.json` must both be empty. The
-page must still not say `Cancelled` or `turn stopped · request`. Save the receipt and
-state as `03-pruned-receipt.json` and `03-pruned-state.json`; screenshot
-`03-route-pruned-unknown.png`.
+and hide Stop. Then require the disclosure to survive at least one further `/api/state`
+re-render: after a subsequent snapshot the text must still be on the page, and
+`/api/state` must carry an `unknown_turn_terminals` entry for the Phase 1 turn id whose
+`note` is that same string, plus a transcript row of type `note` carrying it. Require the
+host's trace to contain one `agent_workbench.turn.terminal_unknown` record for that turn id,
+so the condition is readable without the UI at all. `/api/state.active_turns` and
+`active-turns.json` must both be empty. The page must still not say `Cancelled` or
+`turn stopped · request`. Save the receipt and state as `03-pruned-receipt.json` and
+`03-pruned-state.json`; screenshot `03-route-pruned-unknown.png` after the re-render, not
+before it.
 
 ## Phase 4 — Prove same-session recovery
 
@@ -170,7 +174,7 @@ Restate container are gone.
 | Exact invocation | Restate row key equals active turn id | | `01-restate-invocation.json` |
 | Admin KILL | exact invocation becomes non-active | | `02-killed-invocation.json` |
 | No fabricated cancellation | UI/API/trace never report Cancelled or evidence | | `02-*`, `03-*` |
-| Honest route pruning | `cancellation_recorded_terminal_pending` with no terminal and no terminal_error; unknown-terminal note; route clears | | `03-pruned-*` |
+| Honest route pruning | `cancellation_recorded_terminal_pending` with no terminal and no terminal_error; unknown-terminal disclosure survives a re-render on the projection and in the trace; route clears | | `03-pruned-*` |
 | Session recovery | same session commits exact second-call response | | `04-same-session-recovered-*` |
 | Store-side negative | companion harness reports `break-glass-negative` passed | | harness log |
 | Teardown | Workbench and derived Restate container gone | | command log |

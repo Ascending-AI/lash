@@ -619,6 +619,8 @@
       color: var(--error);
     }
     .field-hint[hidden] { display: none; }
+    .field-hint.pending { color: var(--sodium); }
+    .field input.pending { border-color: var(--line-strong); }
 
     .status-stack {
       align-self: end;
@@ -2483,6 +2485,7 @@
                  title="Provider model slug, e.g. z-ai/glm-5.3-flash. Applies to chat sends and button trigger occurrences." />
           <datalist id="modelList"></datalist>
           <small id="modelHint" class="field-hint" hidden></small>
+          <small id="modelPending" class="field-hint pending" hidden>edited · sends with the next turn</small>
         </label>
         <label class="field">
           <span>thinking</span>
@@ -4085,13 +4088,6 @@
       return assistantDraft;
     }
 
-    function selectedModelPayload() {
-      return {
-        model: modelInput.value.trim(),
-        model_variant: variantSelect.value
-      };
-    }
-
     function syncCommandAvailability() {
       const unavailable = busy || modelEmpty() || attachmentUploadInFlight;
       sendButton.disabled = unavailable;
@@ -5097,6 +5093,13 @@
         if (row.type === "message") renderMessage(row.message);
         if (row.type === "reasoning") appendReasoning(row.text, row.id, null);
         if (row.type === "code_block") appendCodeBlock(row, row.tools || []);
+        /* FIG-3163: the unknown-terminal disclosure rides the projection, so a
+           re-render redraws it instead of deleting it. It dedupes on the same
+           set the message rows use, so an appending poll does not stack it. */
+        if (row.type === "note" && !renderedMessages.has(row.id)) {
+          renderedMessages.add(row.id);
+          renderNote(row.text);
+        }
       }
       for (const pending of state.pending_turn_inputs || []) {
         const admission = pending.input;
@@ -5931,7 +5934,67 @@
 
     const knownModels = new Set();
     const modelHint = document.getElementById("modelHint");
+    const modelPending = document.getElementById("modelPending");
     let modelListenersBound = false;
+
+    // BEGIN WORKBENCH_MODEL_SELECTION
+    /* The model control is not a persisted setting: it is read at send time and
+       nothing submits the form. So a projection snapshot that lands between a
+       keystroke and the send used to overwrite what the operator typed, and the
+       turn went out on the old model with nothing on screen saying so
+       (FIG-3164). The typed value is now held here and survives projection
+       until the server's own model agrees with it — which is what a successful
+       send produces, because POST /api/turn adopts the model it carries, so a
+       refused or failed send leaves the edit standing instead of silently
+       discarding it. */
+    function createModelSelection() {
+      return { projected: "", typed: "", dirty: false };
+    }
+
+    function noteTypedModel(selection, value) {
+      selection.typed = value;
+      selection.dirty = value.trim() !== selection.projected.trim();
+      return selection.dirty;
+    }
+
+    function projectSelectedModel(selection, projected) {
+      selection.projected = projected || "";
+      if (selection.dirty && selection.typed.trim() !== selection.projected.trim()) {
+        return { value: selection.typed, dirty: true };
+      }
+      selection.typed = selection.projected;
+      selection.dirty = false;
+      return { value: selection.projected, dirty: false };
+    }
+
+    function renderModelPending(dirty) {
+      modelPending.hidden = !dirty;
+      modelInput.classList.toggle("pending", !!dirty);
+    }
+
+    function onModelInput() {
+      renderModelPending(noteTypedModel(modelSelection, modelInput.value));
+      validateModel();
+    }
+
+    /* The one place a projection snapshot is allowed to touch the control. */
+    function applyProjectedModel(projected) {
+      const projection = projectSelectedModel(modelSelection, projected || "");
+      modelInput.value = projection.value;
+      renderModelPending(projection.dirty);
+      return projection;
+    }
+
+    /* What the turn actually sends, read at send time from the control. */
+    function selectedModelPayload() {
+      return {
+        model: modelInput.value.trim(),
+        model_variant: variantSelect.value
+      };
+    }
+    // END WORKBENCH_MODEL_SELECTION
+
+    const modelSelection = createModelSelection();
 
     function validateModel() {
       const value = modelInput.value.trim();
@@ -5982,7 +6045,7 @@
         transcriptApplication === SNAPSHOT_TRANSCRIPT_PRESERVE_TRANSIENT;
       if (replaceTranscript && !preserveTransientTranscript) clearTranscript();
       applyProjectionSnapshot(projectionState, state, authoritative);
-      modelInput.value = state.settings.model || "";
+      applyProjectedModel(state.settings.model);
       const modelList = document.getElementById("modelList");
       modelList.innerHTML = "";
       knownModels.clear();
@@ -6004,7 +6067,7 @@
       }
       validateModel();
       if (!modelListenersBound) {
-        modelInput.addEventListener("input", validateModel);
+        modelInput.addEventListener("input", onModelInput);
         variantSelect.addEventListener("change", validateModel);
         modelListenersBound = true;
       }

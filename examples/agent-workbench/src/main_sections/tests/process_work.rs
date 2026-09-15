@@ -96,6 +96,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
         mail_world: mail::MailWorld::new(),
         active_turns: ActiveTurns::default(),
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
@@ -302,6 +303,7 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
         mail_world: mail::MailWorld::new(),
         active_turns: ActiveTurns::default(),
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
@@ -1115,6 +1117,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
         mail_world: mail::MailWorld::new(),
         active_turns: ActiveTurns::default(),
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
@@ -1424,6 +1427,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
         mail_world: mail::MailWorld::new(),
         active_turns: ActiveTurns::default(),
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };

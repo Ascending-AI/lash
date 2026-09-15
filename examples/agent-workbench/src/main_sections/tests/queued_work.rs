@@ -981,7 +981,8 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                 }
                 TranscriptRow::Message { .. }
                 | TranscriptRow::Reasoning { .. }
-                | TranscriptRow::CodeBlock { .. } => None,
+                | TranscriptRow::CodeBlock { .. }
+                | TranscriptRow::Note { .. } => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -1012,7 +1013,8 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                 }
                 TranscriptRow::Message { .. }
                 | TranscriptRow::Reasoning { .. }
-                | TranscriptRow::CodeBlock { .. } => None,
+                | TranscriptRow::CodeBlock { .. }
+                | TranscriptRow::Note { .. } => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(

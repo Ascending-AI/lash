@@ -197,12 +197,15 @@ provider-owned signature starts with `FIG1374-OPAQUE-REPLAY-` to
 provider `workbench-dev-failure`, endpoint `workbench-dev-failure`, and model
 `dev/replay-route-a`. Record the current end offset or record count of `trace.jsonl`.
 
-Set `#modelInput` to `dev/replay-route-b` **and submit the turn without an intervening
-projection snapshot**, leaving the provider kind and endpoint unchanged. The control is not a
-persisted setting: nothing submits `#modelConfig`, the value is read only at send time
-(`selectedModelPayload()`), and any `/api/state` snapshot that lands in between rewrites the
-input back from `state.settings.model`. A driver that types the model and then waits sends
-the *old* route and sees zero drops. The witness that the switch landed is the `POST
+Type `dev/replay-route-b` into `#modelInput`, pause at least two seconds so a projection
+snapshot lands on the typed value, and then submit the turn, leaving the provider kind and
+endpoint unchanged. The control is read at send time (`selectedModelPayload()`), and a typed
+value that has not been sent yet is held locally against the projection: while it differs
+from `state.settings.model` the page shows the pending marker `#modelPending`
+(`edited · sends with the next turn`) beside the control and no snapshot overwrites it.
+Require `#modelInput` to still read `dev/replay-route-b` after the pause and `#modelPending`
+to be visible before the submit; a reverted input or a hidden marker is a product defect →
+Abort. The witness that the switch landed is the `POST
 /api/turn` request body — capture it and require it to name `dev/replay-route-b`. Submit a
 fourth turn with marker `FIG425-RESUME-ROUTE-SWITCH-<run-id>` and poll until idle. Require the assistant result
 `FIG-1374 replay-route response 4` and eight committed user/assistant rows.

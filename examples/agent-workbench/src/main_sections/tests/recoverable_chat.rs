@@ -158,6 +158,7 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
         restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
         mail_world: mail::MailWorld::new(),
         active_turns: ActiveTurns::default(),
+        unknown_turn_terminals: UnknownTurnTerminals::default(),
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     }
@@ -1568,11 +1569,9 @@ async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
     assert!(settled.messages.iter().all(|message| {
         message.text != never_committed && !message.id.starts_with("workbench-user:")
     }));
-    assert!(settled.transcript.iter().all(|row| match row {
-        TranscriptRow::Message { message } => {
-            message.text != never_committed && !message.id.starts_with("workbench-user:")
-        }
-        TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => true,
+    assert!(settled.transcript.iter().all(|row| {
+        transcript_message(row)
+            .is_none_or(|m| m.text != never_committed && !m.id.starts_with("workbench-user:"))
     }));
     assert!(
         settled
@@ -1782,15 +1781,8 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         boundary
             .transcript
             .iter()
-            .filter_map(|row| match row {
-                TranscriptRow::Message { message } => {
-                    Some((
-                        message.id.clone(),
-                        message.role.clone(),
-                        message.text.clone(),
-                    ))
-                }
-                TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
+            .filter_map(|row| {
+                transcript_message(row).map(|m| (m.id.clone(), m.role.clone(), m.text.clone()))
             })
             .collect::<Vec<_>>(),
         expected_rows,
@@ -2083,17 +2075,24 @@ fn user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The chat message a transcript row carries, if it carries one.
+pub(crate) fn transcript_message(row: &TranscriptRow) -> Option<&ChatMessage> {
+    match row {
+        TranscriptRow::Message { message } => Some(message),
+        TranscriptRow::Reasoning { .. }
+        | TranscriptRow::CodeBlock { .. }
+        | TranscriptRow::Note { .. } => None,
+    }
+}
+
 pub(crate) fn transcript_user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
     snapshot
         .transcript
         .iter()
-        .filter_map(|row| match row {
-            TranscriptRow::Message { message } if message.role == "user" => {
-                Some((message.id.clone(), message.text.clone()))
-            }
-            TranscriptRow::Message { .. }
-            | TranscriptRow::Reasoning { .. }
-            | TranscriptRow::CodeBlock { .. } => None,
+        .filter_map(|row| {
+            transcript_message(row)
+                .filter(|m| m.role == "user")
+                .map(|m| (m.id.clone(), m.text.clone()))
         })
         .collect()
 }
@@ -2293,12 +2292,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         settled
             .transcript
             .iter()
-            .filter_map(|row| match row {
-                TranscriptRow::Message { message } => {
-                    Some((message.role.as_str(), message.text.as_str()))
-                }
-                TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
-            })
+            .filter_map(|row| transcript_message(row).map(|m| (m.role.as_str(), m.text.as_str())))
             .collect::<Vec<_>>(),
         vec![("user", turn_text), ("assistant", "settled answer")],
         "the browser transcript projection must contain the committed message set once"

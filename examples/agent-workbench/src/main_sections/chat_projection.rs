@@ -372,6 +372,45 @@ pub(crate) fn transcript_rows_from_committed(
         .collect()
 }
 
+/// Place each unknown-terminal disclosure beside the turn it speaks for.
+///
+/// The note belongs where the turn's own rows are, not at the end of the
+/// transcript: a session that ran another turn after the break-glass abort
+/// would otherwise show the disclosure under the wrong conversation. A turn
+/// whose rows are all gone keeps its note at the end, because a disclosure with
+/// nowhere to sit still has to be readable.
+pub(crate) fn splice_unknown_turn_terminal_notes(
+    transcript: &mut Vec<TranscriptRow>,
+    unknown_turn_terminals: &[UnknownTurnTerminal],
+) {
+    for record in unknown_turn_terminals {
+        let note = TranscriptRow::Note {
+            id: format!("workbench-unknown-terminal:{}", record.turn_id),
+            turn_id: record.turn_id.clone(),
+            text: record.note.to_string(),
+        };
+        match transcript
+            .iter()
+            .rposition(|row| transcript_row_speaks_for_turn(row, &record.turn_id))
+        {
+            Some(index) => transcript.insert(index + 1, note),
+            None => transcript.push(note),
+        }
+    }
+}
+
+fn transcript_row_speaks_for_turn(row: &TranscriptRow, turn_id: &TurnId) -> bool {
+    let TranscriptRow::Message { message } = row else {
+        return false;
+    };
+    message.id == workbench_turn_user_message_id(turn_id)
+        || message.id == workbench_turn_assistant_message_id(turn_id)
+        || matches!(
+            message.provenance.as_ref(),
+            Some(ChatMessageProvenance::TurnOutput { turn_id: owner }) if owner == turn_id
+        )
+}
+
 pub(crate) struct ChatProjection {
     pub(crate) messages: Vec<ChatMessage>,
     pub(crate) transcript: Vec<TranscriptRow>,
