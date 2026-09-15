@@ -1059,20 +1059,23 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // FIG-2997, which moved the constant to v13 for the process-literal
         // lift. Re-pinned again by FIG-2999, which moved the constant to v14
         // after the process special forms left the dialect and the ability set
-        // they were gated by left `host_requirements`. What the pair asserts is
+        // they were gated by left `host_requirements`. Re-pinned again by FIG-3120,
+        // which moved the constant to v15 after `canonical_program_ir` started
+        // alpha-normalizing local binder names so equal module refs carry equal
+        // bytes. What the pair asserts is
         // unchanged: the two
         // sides are still equal, which is the trace-sink independence this
         // test exists for; only the constant both sides derive from moved.
         assert_eq!(
             without_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:8a0d159365ac64bd3ce1bf79:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:e5d8677e32201f4992b63760:1"
             )
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
             Some(
-                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:8a0d159365ac64bd3ce1bf79:1"
+                "lashlang:effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"test-session\",\"execution_id\":\"turn-7\"}:\"exec-code:3\":resource:tool:continue_as:resource_operation:e5d8677e32201f4992b63760:1"
             )
         );
 
@@ -1086,11 +1089,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/1e5c4328e577816e15f65024f09da1d9c53400eda3d734127f6f187b928f6bc5"
+            "frame-key/v2/e15640eeeac942a4b88f6f4fc320a5ff600035883d66e6af4fa623cd6dc1ca4e"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/1e5c4328e577816e15f65024f09da1d9c53400eda3d734127f6f187b928f6bc5"
+            "frame-key/v2/e15640eeeac942a4b88f6f4fc320a5ff600035883d66e6af4fa623cd6dc1ca4e"
         );
     });
 }

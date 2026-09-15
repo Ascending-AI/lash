@@ -5,9 +5,10 @@ use super::*;
 /// TypeScript is the only RLM dialect (ADR 0096), so this never varies. It is
 /// still written, and written unconditionally, to keep the hash input's shape
 /// stable rather than to hold module refs still: `LASHLANG_SEMANTIC_HASH_VERSION`
-/// is the first atom of the same hash, and this change moves it from v8 to v9,
-/// so every published module ref moves with it regardless. Dropping the atom
-/// would only make the input harder to read against the artifacts it names.
+/// is the first atom of the same hash, and every identity-affecting change
+/// moves it, so every published module ref moves with it regardless. Dropping
+/// the atom would only make the input harder to read against the artifacts it
+/// names.
 const LANGUAGE_ATOM: &str = "typescript";
 
 pub(super) fn module_ref(
