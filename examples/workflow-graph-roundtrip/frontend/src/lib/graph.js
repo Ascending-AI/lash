@@ -1,5 +1,5 @@
 import { layoutDocument } from './layout.js';
-import { defaultSource, fieldDefaultValue } from './operations.js';
+import { defaultSource, fieldDefaultValue, synthCallExpression } from './operations.js';
 
 // Build SvelteFlow nodes + edges from a draft WorkflowDocument.
 //
@@ -170,41 +170,18 @@ function seedFields(fields) {
   return out;
 }
 
-// One `name: value` record argument for a synthesized receiver call.
-function recordArg(field) {
-  const value = field.default;
-  switch (field.type) {
-    case 'number':
-      return `${field.name}: ${Number(value ?? 0) || 0}`;
-    case 'boolean':
-      return `${field.name}: ${value ? 'true' : 'false'}`;
-    case 'string':
-      return `${field.name}: ${JSON.stringify(String(value ?? ''))}`;
-    default:
-      return `${field.name}: ${defaultSource(value)}`; // expression / identifier — raw
-  }
-}
-
-// A call node's expression is the awaited receiver call the lens projects back
-// out of source. The `await` is load-bearing, not cosmetic: an unawaited tool
-// call lowers to a pending-tool value rather than a receiver call, so the
-// backend cannot resolve its operation and refuses the save with
-// `invalid_expression` (FIG-3177). This is the string the backend also
-// synthesizes for itself when a call node arrives with no expression.
-function synthCallExpression(op) {
-  const args = (op.fields ?? []).map(recordArg).join(', ');
-  // The receiver comes from the catalog entry, not from the operation name:
-  // `list_recent` belongs to `gmail`, and synthesizing `display.list_recent`
-  // gives the lowerer a receiver that has no such operation (FIG-3178).
-  return `await ${op.receiver ?? 'display'}.${op.operation}({ ${args} })`;
-}
-
+// An effect node's seeded expression, in the same canonical TypeScript the lens
+// projects back out of source: `await sleep(..)` / `await waitSignal(..)`, not
+// the dialect's `sleep for ..` surface. A palette insertion is posted before
+// any field is edited, so a seeded expression the fragment validator cannot
+// parse made `effect.sleep` and `effect.wait_signal` unsaveable straight out
+// of the palette (FIG-3179).
 function synthEffectExpression(op, byName) {
-  if (op.effect === 'sleep') return `sleep for ${slotText(byName.duration) || '"1s"'}`;
+  if (op.effect === 'sleep') return `await sleep(${slotText(byName.duration) || '"1s"'})`;
   if (op.effect === 'wait_signal') {
-    return `wait_signal(${JSON.stringify(String(byName.signal?.default ?? 'continue'))})`;
+    return `await waitSignal(${JSON.stringify(String(byName.signal?.default ?? 'continue'))})`;
   }
-  return slotText(byName.expression) || 'sleep for "1s"';
+  return slotText(byName.expression) || 'await sleep("1s")';
 }
 
 function nodeDataFromOperation(op) {

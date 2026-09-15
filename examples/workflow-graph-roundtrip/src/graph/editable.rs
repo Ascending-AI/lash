@@ -49,26 +49,31 @@ pub(super) fn editable_call_expression(
     graph_scope: &GraphScope,
 ) -> Result<(String, Expr), RenderErrorResponse> {
     let scope = FragmentScope::of_data(data, graph_scope);
-    let has_authored_expression = data.expression.is_some();
+    let mut has_authored_expression = data.expression.is_some();
     let mut expression = match &data.expression {
         Some(source) => parse_fragment(source, &scope).map_err(|error| {
             RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
         })?,
         None => {
             let operation = required_text(id, data.operation.as_ref(), "operation")?;
-            // The receiver rides on the node because the operation name alone
-            // does not name it: `list_recent` belongs to `gmail`, not to
-            // `display`. A node from a client that predates the catalog field
-            // still means the display catalog it could reach (FIG-3178).
-            let receiver = data.receiver.as_deref().unwrap_or(crate::display::RECEIVER);
-            // The receiver stays undeclared so the fragment lowers it as the
-            // host receiver it is; declaring it would make TypeScript treat the
-            // call as a runtime method and reject the host operation.
-            parse_fragment(&format!("await {receiver}.{operation}({{}})"), &scope).map_err(
-                |error| RenderErrorResponse::invalid_expression(id, "operation", error.to_string()),
-            )?
+            synthesize_receiver_call(id, data, &operation, &scope)?
         }
     };
+    // Switching a node to an operation of another receiver is not a method
+    // rename: the authored text still names the receiver the node came from,
+    // so renaming the method alone leaves `display.list_recent`. When the node
+    // names a receiver its expression does not, the call is re-synthesized
+    // from the node's own receiver and operation (FIG-3179).
+    // A node whose expression is not a receiver call at all is left alone, so
+    // the authored-expression guard below still refuses it rather than having
+    // it quietly replaced by a synthesized call (FIG-3177).
+    if let Some(receiver) = data.receiver.as_deref()
+        && receiver_call_receiver(&expression).is_some_and(|current| current != receiver)
+    {
+        let operation = required_text(id, data.operation.as_ref(), "operation")?;
+        expression = synthesize_receiver_call(id, data, &operation, &scope)?;
+        has_authored_expression = false;
+    }
     if let Some(operation) = &data.operation {
         *receiver_operation_mut(&mut expression).ok_or_else(|| {
             RenderErrorResponse::invalid_expression(
@@ -320,6 +325,38 @@ pub(super) fn workflow_node_id(id: &str) -> WorkflowNodeId {
         serde_json::from_value(serde_json::Value::String(placeholder))
             .expect("generated workflow node ids are valid")
     })
+}
+
+/// The awaited receiver call the editor seeds for a catalog entry, parsed in
+/// the node's own scope.
+///
+/// The receiver stays undeclared so the fragment lowers it as the host receiver
+/// it is; declaring it would make TypeScript treat the call as a runtime method
+/// and reject the host operation. The receiver rides on the node because the
+/// operation name alone does not name it: `list_recent` belongs to `gmail`, not
+/// to `display`. A node from a client that predates the catalog field still
+/// means the display catalog it could reach (FIG-3178).
+pub(super) fn synthesize_receiver_call(
+    id: &str,
+    data: &NodeData,
+    operation: &str,
+    scope: &FragmentScope,
+) -> Result<Expr, RenderErrorResponse> {
+    let receiver = data.receiver.as_deref().unwrap_or(crate::display::RECEIVER);
+    parse_fragment(&format!("await {receiver}.{operation}({{}})"), scope).map_err(|error| {
+        RenderErrorResponse::invalid_expression(id, "operation", error.to_string())
+    })
+}
+
+/// The receiver a call expression names, as source (`display`, `gmail`, ...),
+/// so a node's declared receiver can be compared against the one its expression
+/// actually calls.
+pub(super) fn receiver_call_receiver(expression: &Expr) -> Option<String> {
+    match expression {
+        Expr::ReceiverCall { receiver, .. } => typescript_expression_source(receiver).ok(),
+        Expr::Await(inner) | Expr::ResultUnwrap(inner) => receiver_call_receiver(inner),
+        _ => None,
+    }
 }
 
 pub(super) fn first_receiver_operation(expression: &Expr) -> Option<&str> {

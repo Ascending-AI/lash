@@ -1033,6 +1033,16 @@ fn apply_editable_data(
             *binding = data.binding.clone();
             let mut parsed = parse_stored_expression(&node_id, expression, &scope)?;
             let edited_operation = required_text(&node_id, data.operation.as_ref(), "operation")?;
+            // Switching an existing call to an operation of another receiver
+            // rewrites more than the method name: the stored expression still
+            // calls the receiver the node came from. Re-synthesize the call
+            // from the node's own receiver when the two disagree, so the saved
+            // source names the receiver the editor switched to (FIG-3179).
+            if let Some(receiver) = data.receiver.as_deref()
+                && receiver_call_receiver(&parsed).is_some_and(|current| current != receiver)
+            {
+                parsed = synthesize_receiver_call(&node_id, data, &edited_operation, &scope)?;
+            }
             *receiver_operation_mut(&mut parsed).ok_or_else(|| {
                 RenderErrorResponse::invalid_node_payload(
                     &node_id,

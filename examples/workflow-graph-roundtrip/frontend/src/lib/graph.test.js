@@ -31,6 +31,22 @@ const LLM_QUERY = {
   ],
 };
 
+const SLEEP = {
+  id: 'effect.sleep',
+  label: 'Sleep',
+  nodeKind: 'effect',
+  effect: 'sleep',
+  fields: [{ name: 'duration', type: 'expression', default: '"1s"' }],
+};
+
+const WAIT_SIGNAL = {
+  id: 'effect.wait_signal',
+  label: 'Wait for signal',
+  nodeKind: 'effect',
+  effect: 'wait_signal',
+  fields: [{ name: 'signal', type: 'string', default: 'continue' }],
+};
+
 const IF = {
   id: 'control.if',
   label: 'If / branch',
@@ -89,6 +105,20 @@ describe('synthesized call expressions', () => {
     const id = addNodeToDoc(doc, { main: true }, LLM_QUERY);
     expect(dataOf(doc, id).receiver).toBe('llm');
     expect(dataOf(doc, id).fields.inputs).toEqual({ $expr: '{}' });
+  });
+
+  // FIG-3179: a palette insertion is posted before any field is edited, so its
+  // seeded expression has to be source the backend's fragment validator
+  // accepts. `sleep for "1s"` and `wait_signal("continue")` are the dialect's
+  // surface, not TypeScript, so both entries were unsaveable out of the
+  // palette; the lens projects these effects as `await sleep(..)` /
+  // `await waitSignal(..)`.
+  it('seeds effects as the canonical TypeScript the lens projects', () => {
+    const doc = blankDoc();
+    const sleepId = addNodeToDoc(doc, { main: true }, SLEEP);
+    expect(dataOf(doc, sleepId).expression).toBe('await sleep("1s")');
+    const waitId = addNodeToDoc(doc, { main: true }, WAIT_SIGNAL);
+    expect(dataOf(doc, waitId).expression).toBe('await waitSignal("continue")');
   });
 
   it('awaits the built-in seed used when the catalog carries no action', () => {

@@ -85,13 +85,20 @@
 
   // Switch an existing call/effect to a different operation: point the node at
   // the chosen operation and reset the arg form to that operation's typed
-  // defaults. The backend swaps the receiver (calls) / rebuilds from effect +
-  // fields (effects), so this round-trips without delete + re-add.
+  // defaults. A call also takes the new entry's receiver and a freshly
+  // synthesized receiver call, since the operation may belong to another
+  // receiver entirely (FIG-3179); effects are rebuilt from `data.effect` +
+  // fields by the lens. Either way this round-trips without delete + re-add.
   function switchOperation(event) {
     const op = (ops?.entries ?? []).find((o) => o.id === event.currentTarget.value);
     if (!op) return;
     const patch = operationSwitchPatch(kind, op);
     if (patch.operation !== undefined) node.data.operation = patch.operation;
+    if (patch.receiver !== undefined) {
+      if (patch.receiver === null) delete node.data.receiver;
+      else node.data.receiver = patch.receiver;
+    }
+    if (patch.expression !== undefined) node.data.expression = patch.expression;
     if (patch.effect !== undefined) node.data.effect = patch.effect;
     if (patch.clearExpression) delete node.data.expression;
     node.data.fields = patch.fields;
