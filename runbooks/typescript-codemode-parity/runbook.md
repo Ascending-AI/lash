@@ -55,7 +55,13 @@ judging the wrong contract. Pass the handle itself to `processes.signal`,
    deleted form is recorded verbatim in `fluency-hits.json` and fails that row;
    do not extend the dialect or the catalogue during the judged run.
 4. Restart with the repository helper and the exact original run/data
-   directories. The pre-restart process id, execution-state engine id, and
+   directories: `bash scripts/agent-workbench-dev.sh restart --port <port>` with
+   `AGENT_WORKBENCH_DATA_DIR`, `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_OPEN=0` and
+   `RESTATE_AUTHORITY_ID` exported (`up` and `down` are the boot and teardown forms; the
+   `just agent-workbench …` recipes do not carry this row's environment). The helper prints
+   `replaced process; the Restate deployment, its journals and the application data … were
+   retained` — that line is the readiness evidence Phase 4 asks for. The pre-restart process
+   id, execution-state engine id, and
    post-restart process id must agree.
 
 ## Phase 0 — Boot and language gate
@@ -82,9 +88,16 @@ deliberately invalid arguments in one `Promise.all`, catch the aggregate
 failure, and finish with the fixed marker `aggregate-rejected`. Both are real
 host authorities and validate their arguments before making a network request.
 Require one aggregate execution, two completed tool attempts, two structured
-`invalid_tool_args` failures, and the fixed marker. Do not assert a wall-clock
+`invalid_tool_args` failures, and the fixed marker. The failures are **not** visible as a
+top-level `outcome`/`error` field on `tool_call_completed`; the marker appears only inside
+the record body, so the practical gate is
+`grep -c invalid_tool_args trace.jsonl` == 2 over the phase's trace slice. Do not assert a wall-clock
 winner or an A/B marker. Save `01-promise-{dom,state,trace}.json` and
-`01-promise.png`.
+`01-promise.png`. Each extract holds the surface named in its suffix, scoped to this phase:
+`-dom` the rendered assistant row plus its code-block/tool child elements with their badges;
+`-state` the `/api/state` transcript entries for the turn; `-trace` the phase's `trace.jsonl`
+slice including both `tool_call_completed` records. An artifact whose contents are left to
+the driver's guess is a screenshot of prose, not reproducible evidence.
 
 ## Phase 2 — `for...of` agent loop
 
@@ -109,7 +122,12 @@ Require, from the executed cell and the trace:
   spelling an id;
 * `waitSignal` is the wait and there is no `signals:` block anywhere in the
   cell;
-* the process artifact's compilation dialect is `typescript`;
+* the cell that created the process artifact is TypeScript: read
+  `/api/state.transcript[].language`, which is the **only** observable language evidence.
+  There is no dialect or language field on the process artifact itself — the `/api/work`
+  process record carries `input.kind = "lashlang"` (the engine kind) and a `process_name`
+  lift hash, and no `trace.jsonl` record carries a `dialect`/`language` field — so the
+  artifact inherits the cell's language and is judged through it;
 * a running handle and a visible waiting state.
 
 Any reach for `defineProcess`, a bare `start(...)`, `wake(...)` or
@@ -129,6 +147,10 @@ the returned payload. Require that the delivery went through
 `processes.signal` carrying the handle (recovered through `processes.list`, not
 rebuilt from a spelled id), one durable run (not a replacement), terminal
 success, the pre-restart process id, and a TypeScript cell in the resumed turn.
+"One durable run, not a replacement" is read off the **process count and id in
+`/api/work`** — one process row, same id across the restart — not off the number of cell
+executions: a wake legitimately re-drives the turn and runs another cell without creating
+another process.
 Save `04-resumed-{dom,state,store,trace,judge}.json` and `04-resumed.png`.
 
 ## Phase 5 — Teardown and score

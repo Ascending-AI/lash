@@ -63,7 +63,7 @@ workbench-reconnect-resilience = { tier = "economy", model = "deepseek/deepseek-
 workbench-session-id-retirement = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-session-isolation = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-session-resume = { tier = "deterministic", model = "scripted-provider" }
-workbench-shared-session-multi-tab = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
+workbench-shared-session-multi-tab = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-trigger-lifecycle = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-turn-ingress = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 workbench-usage-ledger = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the shared `just agent-workbench-attachment-usage-gate` companion; only Phase 1 calls a provider" }

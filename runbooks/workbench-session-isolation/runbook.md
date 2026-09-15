@@ -20,8 +20,11 @@ markers and structural API state, never exact assistant prose.
 2. **Scope every session API read.** Query `/api/state`, `/api/triggers`, and `/api/work`
    with that tab's `?session_id=...`. An unscoped `/api/work` response is runtime-wide
    and is not isolation evidence.
-3. **Use confusable fixtures.** Both registrations must have the same derived display
+3. **Use confusable fixtures, from one pinned cell.** Both registrations must have the same
+   derived display
    name, `subscription_key`, button color, source type/configuration, and process label.
+   Drive both tabs with the same literal cell rather than the same prose request: these
+   values are content-addressed over the cell that was written, so prose cannot pin them.
    Only `subscription_id`, process ids, and session ownership distinguish them.
 4. **Prove non-membership.** Presence in the expected session is only half a gate. Every
    marker, registration `subscription_id`, and process id must also be absent from the
@@ -36,9 +39,11 @@ markers and structural API state, never exact assistant prose.
 - Require `OPENROUTER_API_KEY`. The web tool is the **keyless** Parallel Search MCP the
   workbench registers itself (`WORKBENCH_SEARCH_MCP_SERVER` in `bootstrap.rs`); no search
   provider key is needed or read. Boot one empty, port-isolated stack:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> bash scripts/agent-workbench-dev.sh up --port <port>`.
   Gate `GET /healthz` → 200. Teardown on success or Abort:
-  `just agent-workbench-down <port>`.
+  `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env. (The
+  `just agent-workbench` / `just agent-workbench-down` recipes name the same operations but
+  do not carry this row's environment.)
 - UI affordances: **new session tab**, rendered session id, chat composer/transcript,
   running/idle pill, Red/Blue trigger buttons, registrations rail, and work rail.
 - Scoped backend truth for session `<S>`:
@@ -59,8 +64,12 @@ filenames only as aliases; record the full generated session ids in `00-sessions
 ## Phase 0 — Boot two isolated tabs
 
 Boot and gate `/healthz`. From the landing tab, activate **new session tab** twice and
-capture the two opened pages as Tab A and Tab B. Record each URL `session_id`, rendered
-session id, and `/api/state.settings.session_id`; require all three to agree within each
+capture the two opened pages as Tab A and Tab B. **new session tab** opens a popup: a
+headless driver must capture the new page (`context.expect_page()` or equivalent). Clicking
+and then reading the same page silently leaves the operator on the landing session, and
+golden rule 5 voids the run if both tabs collapse onto one session. Record each URL
+`session_id`, the rendered session id — the text of `#sessionId` — and
+`/api/state.settings.session_id`; require all three to agree within each
 tab and require A ≠ B. Both tabs must report the same server origin. Save
 `00-sessions.json`; screenshot `00-tab-a.png` and `00-tab-b.png`.
 
@@ -69,10 +78,23 @@ request must target A or B explicitly.
 
 ## Phase 1 — Register confusable triggers independently
 
-In each tab, ask for the same outcome: register a trigger named `shared-blue-watch` for
-the Blue host button that starts a durable process labeled `mirror_job` and records the
-button occurrence (process identifiers cannot contain hyphens, so the rendered
-process label is `mirror_job`). Submit the two registration turns concurrently.
+In each tab, submit **the same literal cell**, not a prose request. Golden rule 3 requires
+identical derived display name, `subscription_key`, source configuration and process label
+across the two tabs; derived keys are content-addressed over the cell that was actually
+written, so asking two models for the same outcome cannot satisfy it — two runs of one prompt
+have produced different keys and different targets. Hand both tabs one pinned cell that
+registers a trigger named `shared-blue-watch` for the Blue host button, starts the durable
+process, and records the button occurrence. Pin the `subscription_key` literally in that
+cell. Submit the two registration turns concurrently.
+
+Pin the process label too, or expect the lift name. A trigger target defined inline is a
+**lifted** process and is named by content hash — `LIFTED_PROCESS_NAME_PREFIX = "__process_"`
+(`crates/lashlang/src/ast.rs:554`) — so the rail renders
+`__process_<hash> ← ui.button.pressed`, not `mirror_job`. (Process identifiers cannot contain
+hyphens, which is why the name has no hyphen, but that does not mean the identifier survives
+the lift.) To gate on the literal label `mirror_job`, the pinned cell must call
+`processes.start({ label: "mirror_job" })` explicitly; otherwise gate on both tabs rendering
+**the same** lift name.
 
 Poll each tab to idle **independently** — the two registration turns run concurrently, so a
 single shared wait reads one session's trigger list before its turn commits and sees an empty
@@ -82,8 +104,14 @@ per session. Require identical derived display names, `subscription_key` values,
 types, and source configurations, but distinct `subscription_id` values. Same-name,
 same-key registrations across the two tabs are correct: the owner scope participates in
 `subscription_id`, so neither equality is evidence of a leak. Require each registrations
-rail to render the common target and trigger source (the rail renders `mirror_job ← ui.button.pressed`),
-the common trigger key, the registration alias, and only its own truncated id. Screenshot
+rail to render the common target and trigger source (`<label> ← ui.button.pressed`, where
+`<label>` is `mirror_job` when the pinned cell set it explicitly and the shared
+`__process_<hash>` lift name otherwise),
+the common trigger key, and only its own truncated id. Do **not** require the registrations
+rail to render the registration alias: it renders target label, source type, truncated id,
+trigger key, scope and incarnation, and `shared-blue-watch` appears nowhere on it — the alias
+is visible only in the transcript. (That the alias has no rail affordance is a UI gap worth
+filing, not a gate this row can hold.) Screenshot
 `01-trigger-a.png` and `01-trigger-b.png`.
 
 Perform the first leak hunt now: A's `subscription_id` must be absent from B's API/DOM,
@@ -125,7 +153,8 @@ the scoped work responses and require:
 - A contains A's process id and not B's;
 - B contains B's process id and not A's;
 - each rail renders the same sole new process as its scoped API;
-- both process labels are `mirror_job`; and
+- both process labels are the same, and are `mirror_job` only if the Phase 1 cell pinned it
+  explicitly (otherwise both are the same `__process_<hash>` lift name); and
 - both trigger registrations remain present and owned by their original session.
 
 The same source/configuration and same label are deliberate: matching by either must not
@@ -148,7 +177,7 @@ matrix inputs as `04-state-*.json`, `04-triggers-*.json`, and `04-work-*.json`.
 
 ## Phase 5 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the one workbench process and its
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the one workbench process and its
 port-derived Restate container are gone.
 
 | Item | Objective gate | Verdict | Evidence |

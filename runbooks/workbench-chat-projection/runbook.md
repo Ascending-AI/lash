@@ -173,8 +173,9 @@ histogram.
 For every phase use a fresh data directory, session id, port, and artifact subdirectory. Boot
 with `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=<scenario> AGENT_WORKBENCH_DATA_DIR=<fresh>
 AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`, require the startup warning to name the
-exact scenario and the page to render model `dev/failure-paths`, then install the dispatch hook
-before navigation. Teardown with `just agent-workbench-down <port>` before the next phase.
+exact scenario and `/api/state.settings.model` to report `dev/failure-paths`, then install the
+dispatch hook before navigation. Read the model from that API field: the string is not rendered
+anywhere greppable in the page body, so a body-text search for it is a false negative. Teardown with `just agent-workbench-down <port>` before the next phase.
 
 At every named checkpoint save four machine-readable extracts beside the screenshot:
 
@@ -209,10 +210,12 @@ one `.tool.pending` child under the one running `.code-block`, zero top-level `.
 and capture `20-tool-start-live.png`. The deterministic terminal tool remains pending long enough
 for this objective poll; never replace the poll with a sleep.
 
-Poll to settled/idle. The terminal-tool stream tears down without dispatching `tool_call_completed`,
-`code_block_completed`, or `tool_value` to the in-page hook, so gate the completion on the DOM and
-durable state below rather than on those hook names; record the un-dispatched events as an
-observation, and do not weaken the settled requirements to compensate.
+Poll to settled/idle. All three of `tool_call_completed`, `code_block_completed` and
+`tool_value` now reach the in-page hook, so require them there as a positive gate, in addition
+to the DOM and durable state below. (A historical carve-out said the terminal-tool stream tore
+down without dispatching them and told the driver to gate elsewhere; that is no longer true and
+a driver must not weaken these gates on its strength. If a dispatch is genuinely missing, that
+is a finding to record, not a carve-out to apply.)
 Require the same nested element count to remain one, its badge to be `completed`, the code summary
 to report one tool, and the assistant row to contain `FIG-1350 deterministic tool value`. Record
 that `tool_value` and `final_value` are DOM-indistinguishable by the answer key: both render their
@@ -239,8 +242,13 @@ page (even though it has `lastRequest`) or a never-sent observer.
 Separately prove the client row without calling a provider: after a successful page hydration,
 abort or refuse a composer `POST /api/turn` in browser routing so `postCommand` has a
 `lastRequest`. Arm a `MutationObserver` on `#timeline` **before** the send and read its samples:
-the row survives only until the next snapshot repaint (~1.9 s), so a post-send DOM query is a false
-negative, not a missing row. Require one transient `message error` with a `retry turn` button in the
+the row survives only until the next snapshot repaint — measured at ~1.9 s **whenever a later
+snapshot repaint occurs** — so a post-send DOM query is a false
+negative, not a missing row. The repaint is not guaranteed: when the refused send is the
+session's first turn there is no turn in flight, no repaint follows, and the row has been
+observed still in the DOM six seconds later. The `MutationObserver` is the correct instrument
+either way; do not infer a missing row from a persisting one, or a persisting row from the
+stated timing. Require one transient `message error` with a `retry turn` button in the
 observer samples, capture `32-client-error-retry-live.png` and the sample log
 `32-client-error-timeline-samples.json`, then remove the route fault and reload. Require that transient
 row to be absent and the durable transcript unchanged. This is the reachable client/network
@@ -362,8 +370,10 @@ the settle gate. Require **exactly**:
 
 - the user-row count **unchanged** at 2 (golden rule 4);
 - 3 rendered `.message.assistant` rows — one new row, not two;
-- 3 `assistant` messages in `/api/state.messages` and 3 `Assistant` conversation messages in
-  the session graph;
+- 3 `assistant` messages in `/api/state.messages` and 3 committed **reply** copies in the
+  session graph — count committed replies, not raw `Assistant` rows: raw `Assistant` rows
+  legitimately exceed the projected count (5 raw rows for 3 replies has been observed), exactly
+  as the Working material warns;
 - 3 `turn_completed` records — one wake, not two.
 
 The wake's single committed copy belongs to the **runtime** or to the **RLM protocol** — see

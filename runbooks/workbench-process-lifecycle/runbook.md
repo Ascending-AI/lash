@@ -36,7 +36,9 @@ on surrounding model prose.
 ## Working material
 
 - Boot with a fresh durable directory:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> just agent-workbench <port>`.
+  `RESTATE_AUTHORITY_ID` is required and must stay stable for one Restate state; without it
+  the workbench refuses to start.
   Gate `GET /healthz` → 200. The entire Restate stack is port-isolated by default: the
   helper derives its endpoint, ingress, admin port, node port, and container name from
   `<port>`, so concurrent runs on distinct workbench ports do not need manual Restate
@@ -125,8 +127,13 @@ trace, and database extracts as `02-after-delete-*.json`.
 
 ## Phase 3 — Cancel one orphan through the work rail
 
-Press **cancel** on `FIG425_cancellable_<runid>` and capture the response as
-`03-cancel-receipt.json`; require `accepted: true` and the exact process id. Poll
+Cancel `FIG425_cancellable_<runid>` and capture the receipt as
+`03-cancel-receipt.json`; require `accepted: true` and the exact process id. The receipt
+surface is `POST /api/work/<process_id>/cancel`, which returns
+`{accepted, operation_id, process_id}` (`routes.rs:1059-1102`); call it directly rather
+than trying to read the rail button's own `fetch` response, which is not reliably
+observable from a driver. Pressing the rail **cancel** button is equivalent and may be used
+for the screenshot, but the route response is the evidence. Poll
 `/api/work` until that card is terminal/cancelled and its event tail includes
 `process.cancel_requested`. Require the same ordered evidence in `process_events` and
 require that the forbidden terminal marker is absent. Screenshot
@@ -150,16 +157,23 @@ Do:
    count; an empty baseline is not evidence that cleanup worked.
 2. In the current session, ask the agent to start a **subagent** that keeps working for
    several minutes (a long-running research/loop prompt), and let it reach a non-terminal
-   card in the work rail. Capture its process id **and its child session id** as
+   card in the work rail. Pin the shape in the prompt the way Phase 1 pins its wait shape:
+   the request must produce a `spawn_agent` subagent — a process whose `/api/work` row
+   carries a `child_session_id` — not a plain Lashlang process. Prose alone does not pin
+   it: an economy run asked in prose produced `identity_kind = lashlang` with no
+   `child_session_id`, completing in 0.6 s, and the gate could not be read from that turn.
+   If the first attempt yields a Lashlang process, re-prompt once naming the subagent
+   explicitly, then stop; a bounded single retry, not repeated re-prompting. Capture its process id **and its child session id** as
    `03b-subagent-running.json` — the child session id is the subagent's
    `child_session_id` in `/api/work` (equivalently the `session_id` on the subagent's
    process row in `processes.db`); record it verbatim, the disk gate names it. Screenshot
    `03b-subagent-running.png`.
-3. Press **cancel** on that subagent card. Require `accepted: true` for that exact
+3. Cancel that subagent card through `POST /api/work/<process_id>/cancel`, as in Phase 3.
+   Require `accepted: true` for that exact
    process id and poll until the card is terminal/cancelled with `process.cancel_requested`
    in its event tail (`03b-subagent-cancel-receipt.json`).
 4. Without resetting the session, send a normal follow-up turn in the same session and
-   start a **second** subagent.
+   start a **second** subagent — same pinned shape and same bounded single retry as step 2.
 5. **Record the durable-catalog delta.** After the cancelled child has settled, query the
    same tables for the same child id and save the normalized result as
    `03b-sessions-after.json`; save the before/after row-count diff as
@@ -198,8 +212,11 @@ card as `03b-session-still-usable.png`.
 
 Without opening or recreating the deleted session, poll until `FIG425_survivor_<runid>`
 is terminal/completed in `/api/work` and in the rendered rail. Require its terminal
-success event and literal terminal marker in `processes.db`; re-query after one more work
-refresh to prove the terminal is retained rather than transient. Screenshot
+success event and literal terminal marker in `processes.db`. Prove retention from
+`processes.db` — the `processes.status` row plus the `process.completed` /
+`process.cancelled` event — and not by re-querying `/api/work`: that surface deliberately
+retires terminal rows about ten seconds after they settle, so a second `/api/work` read is
+expected to come back empty and proves nothing either way. Screenshot
 `04-survivor-completed.png`; save `04-terminal-work.json` and
 `04-terminal-store.json`.
 

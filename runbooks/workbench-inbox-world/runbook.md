@@ -40,16 +40,29 @@ prose and the exact TypeScript it writes are its own; gate on structural outcome
 
 ## Working material
 
-- **Boot**: `just agent-workbench <port>` from the repo root — it starts Dockerized
+- **Boot**: `bash scripts/agent-workbench-dev.sh up --port <port>` from the repo root — it
+  starts Dockerized
   Restate, the workbench, registers the deployment, and exits after printing the URL.
   For an isolated run set `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp>` (golden rule 1 depends
-  on an empty world) and `AGENT_WORKBENCH_OPEN=0` (headless boot — no browser open).
-  Readiness: `GET /healthz` → 200. **Teardown owns Docker**: `just agent-workbench-down
-  <port>` at the end, success or Abort.
-- **UI affordances**: the center pane **chat / accounts** tab switch; the chat input and
+  on an empty world), a fresh `AGENT_WORKBENCH_RUN_DIR`, `AGENT_WORKBENCH_OPEN=0`
+  (headless boot — no browser open) and `RESTATE_AUTHORITY_ID=<stable-id>`.
+  Readiness: `GET /healthz` → 200. **Teardown owns Docker**:
+  `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env at the end,
+  success or Abort. (`just agent-workbench <port>` / `just agent-workbench-down <port>` name
+  the same operations but do not carry this row's environment.)
+- **UI affordances**: the center pane **chat / accounts** tab switch
+  (`button.view-tab[data-view="chat"]` / `button.view-tab[data-view="accounts"]`); the chat
+  input and
   send control; the transcript stream; the right rail process registry; the accounts tab's
-  account-name field + **add account** button, per-account inbox cards each with a compose
-  (title/text) form and per-message delete.
+  account-name field (`#accountNameInput`) inside `#accountAddForm`, per-account inbox cards
+  each with a compose
+  (title/text) form (`form.account-compose`) and per-message delete.
+- Two `.view-tabs` containers exist in the DOM and one of them is zero-sized, so
+  `button.view-tab[data-view=…]` resolves to **two** elements; a naive click times out on the
+  invisible one. Select the visible one explicitly.
+- The **add account** submit button cannot be clicked: the name input overlays it and
+  intercepts pointer events. Press **Enter** in `#accountNameInput` — that is the only
+  working submit. A driver following the prose alone stalls here.
 - **Backend truth**: `GET /api/state` (settings + transcript snapshot),
   `GET /api/accounts`, `GET /api/accounts/{slug}/inbox`, `GET /api/work`,
   `GET /api/lashlang-graphs`. `GET /api/work/{process_id}/await` blocks until a
@@ -85,7 +98,10 @@ rendered tool activity) shows a web-search call for this turn — the model-faci
 starts with `mcp__parallel__web_search_`, and the call path a cell addresses it by is
 `parallel.web_search_<digest>`, so grep for `mcp__parallel__web_search_`. The answer's
 correctness is judged, lightly — the gate is the tool call happening and a grounded reply
-arriving. Screenshot `02-web-search.png`.
+arriving. "Grounded reply" means **prose that names at least one source URL**: a cell that
+calls `finish(rawToolResult)` and dumps the raw search JSON into the answer has done the
+grounding but skipped the reply, and does not satisfy this gate. Screenshot
+`02-web-search.png`.
 
 ## Phase 3 — Build the inbox world
 
@@ -165,12 +181,15 @@ gains `agent-workbench process event:` lines from the best-effort
 none, absence alone is not a finding, and completion never arrives through it —
 that is what gate 4 is for.
 
-Screenshot `06-forwarded.png` showing **both** inbox cards (original + copy) and
-`07-process-rail.png` for the registry.
+Screenshot `06-forwarded.png` showing **both** inbox cards (original + copy). The process
+registry is the right rail of the same view, not a tab of its own, so capture it in that
+same shot rather than as a separate `07-process-rail.png`; a screenshot taken while
+"switching to the process rail" is just the chat view again.
 
 ## Phase 7 — Teardown and score
 
-`just agent-workbench-down <port>`; confirm the workbench and the Restate container are
+`bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env; confirm the
+workbench and the Restate container are
 gone. Then fill:
 
 | Item | Objective gate | Verdict | Evidence |
@@ -181,7 +200,7 @@ gone. Then fill:
 | Accounts world | `/api/accounts` lists `work`, `personal` | | `03-accounts.png` |
 | Agent-sent mail | chosen title in `/api/accounts/work/inbox` | | `04-agent-mail.png` |
 | Trigger registration | assistant confirms; fires in Phase 6 | | `05-registered.png` |
-| Forwarding (the chain) | copy in `/api/accounts/personal/inbox`, **no chat turn involved** | | `06-forwarded.png` |
+| Forwarding (the chain) | copy in `/api/accounts/personal/inbox`, **no chat turn involved**: count `role: "user"` and `role: "assistant"` rows in `/api/state.messages` across the delivery and require no increase. A delivery does add two rows, but they carry `role: "event"`, and `event` rows do not count as turns. | | `06-forwarded.png` |
 | Durable process visibility | concierge in `/api/work` + graphs API | | `07-process-rail.png` |
 | Work-item await seam | `/api/work/{id}/await` returns `success` outcome + reconciled events | | API output |
 | UI/API agreement throughout | cards match inbox API at every gate | | screenshots + API output |

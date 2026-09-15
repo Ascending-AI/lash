@@ -143,16 +143,23 @@ order.
 ## Working material
 
 - Require `OPENROUTER_API_KEY`. Boot one empty, port-isolated stack with
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench
-  <port>` (or `bash scripts/agent-workbench-dev.sh up --port <port>` with the same
-  environment). Gate `GET /healthz` → 200. Teardown on success or Abort is `just
-  agent-workbench-down <port>`.
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_RUN_DIR=<fresh-tmp-run> AGENT_WORKBENCH_OPEN=0 RESTATE_AUTHORITY_ID=<stable-id> bash scripts/agent-workbench-dev.sh up --port <port>`.
+  Gate `GET /healthz` → 200. Teardown on success or Abort is
+  `bash scripts/agent-workbench-dev.sh down --port <port>` with the same environment. (The
+  `just agent-workbench <port>` / `just agent-workbench-down <port>` recipes name the same
+  operations but do not carry this row's environment.)
 - Pick one run session id `<S>` = `runbook-multitab-<run-id>`. Open **two browser
   contexts**, A and B, both at `/?session_id=<S>`.
-- UI affordances per tab: the chat composer and its **send** control, the transcript
-  timeline, the running/idle **pill** *and its subtitle*, the **inject now** / **queue
-  next** controls, the left-sidebar **RED** trigger button, the registrations rail, and
-  the **work** rail.
+- UI affordances per tab, named the way the busy phases already name `#idleActions` /
+  `#runningActions`: the chat composer is the `<form>` `#composer` and the text is typed into
+  the textarea `#prompt` — filling `#composer` itself fills nothing — with **send** as
+  `#send`; the transcript
+  timeline; the running/idle **pill** *and its subtitle*; the **inject now** (`#injectNow`) /
+  **queue next** (`#queueNext`) controls; the left-sidebar **RED** trigger button; the
+  registrations rail; and
+  the **work** rail. `#queueNext` carries `disabled` **and** sits inside a `hidden`
+  `#runningActions`, so an enabled-check must test both: hidden-but-not-disabled and
+  visible-but-disabled are different states.
 - **Layer 1 — rendered DOM, per tab:** `#timeline .message.user` / `.message.assistant`
   counts and body texts; the pill text and subtitle; the rails' rows.
 - **Layer 2 — durable state** (one session, so one copy shared by both tabs): the session
@@ -164,9 +171,12 @@ order.
   `Conversation` event too — `m_rlm_<turn>_<n>_assistant_content|prose` rows the projection
   does not surface — and the projection relabels some committed user rows
   `workbench-user:<turn-id>` while their durable node keeps `m_ingress_ti:<hash>`. An id-set
-  comparison therefore reports phantom absences in both directions; the committed user rows
-  are the `m_ingress_ti` nodes, and the assistant count the page renders is a subset of the
-  graph's assistant `Conversation` nodes. **The store runs in WAL mode** — snapshot `durable-core.db` together with its
+  comparison therefore reports phantom absences in both directions. Operationally: the
+  committed user rows are the `Conversation` nodes whose `event.Conversation.id` starts
+  `m_ingress_ti:`; the `node_id` column is a content hash and is **not** the message id, so
+  never join on it; and the graph's assistant count is a superset of the rendered one,
+  because each turn contributes both `m_rlm_<turn>_<n>_assistant_content` and
+  `workbench-assistant:<turn>`. Stated that way each phase gate is a two-line query. **The store runs in WAL mode** — snapshot `durable-core.db` together with its
   `-wal` and `-shm` siblings, or read the live file with `mode=ro`. Copying the main file
   alone reads as an empty graph and manufactures a phantom three-layer mismatch in every
   phase.
@@ -228,12 +238,20 @@ Screenshot `01-one-pair-{a,b,both}.png`; save `01-rows-a.json`, `01-rows-b.json`
 
 **2a — register the watcher from A.** Send `Let me know when I press a button` from A and
 let the agent register the button watcher. Gate a second `turn_completed`, idle, and the
-settle gate on both tabs; require cumulatively 2+2 rows per tab against 2+2 API, 2+2
-graph, 2 `turn_completed`, and A/B multisets still equal. A duplicate here is already a
+settle gate on both tabs; per golden rule 9, advance the tracker by **+1 user/assistant pair
+and +1 `turn_completed`**, then assert each tab's rendered counts, the API counts, the graph
+counts and the `turn_completed` count against the tracker — do not carry the absolute
+constant, which rule 9 forbids and which a retried phase invalidates. Require A/B multisets
+still equal. A duplicate here is already a
 failure — do not press RED to "get to the real test".
 
 Require the registration in **both** rails: the rail is a 1.4 s scoped `/api/triggers`
-poll, so a registration created by A's turn must appear in B without B acting. Screenshot
+poll, so a registration created by A's turn must appear in B without B acting. Expect the
+**lifted process hash**, not the friendly name: a trigger target defined inline is a lifted
+process named by content hash (`LIFTED_PROCESS_NAME_PREFIX = "__process_"`,
+`crates/lashlang/src/ast.rs:554`), so the rail renders `__process_<hash> ← ui.button.pressed`
+by design. Gate on the same registration appearing in both rails, not on the name the prompt
+asked for; a driver hunting for that name will report a false defect. Screenshot
 `02a-registered-{a,b,both}.png`; save `02a-triggers.json`.
 
 **2b — press RED from B, exactly once.** The acting tab is now the one that did *not*
@@ -415,7 +433,7 @@ Those are companion coverage, not judged browser gates.
 
 ## Phase 7 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the one workbench process and its
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's env and confirm the one workbench process and its
 port-derived Restate container are gone.
 
 | Item | Objective gate | Verdict | Evidence |

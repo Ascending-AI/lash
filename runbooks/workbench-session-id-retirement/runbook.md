@@ -114,15 +114,26 @@ Perform all four operations, polling each to a settled state before starting the
    timeline and `/api/state`, and require the **assistant** row in both surfaces to
    contain the exact marker.
 2. Ask the agent to register a trigger named `retirement-watch` for the Blue host button
-   that starts a durable process labelled `retirement_job`. Poll to idle and require
+   that starts a durable process labelled `retirement_job`. **Pin the `subscription_key`
+   and the host-facing process label literally in the prompt.** Whether a cell uses an
+   explicit key or lets one be derived is the model's choice, and two runs of the same
+   prose produced `retirement-watch` and `derived/v3/<hash>`; Phase 4 compares this key
+   across the retired and rotated scopes, so an unpinned key makes that comparison a gate
+   on model behaviour. Poll to idle and require
    exactly one enabled registration in `/api/triggers?session_id=<retired-id>` and the
    registrations rail. Record the complete registration as registration A.
 3. Activate Blue. Poll `GET /api/work?session_id=<retired-id>` until exactly one new
    `retirement_job` process appears; record its id and await
    `/api/work/{process_id}/await` until terminal.
-4. Start one more turn long enough to observe running, then press **stop turn**. Require
-   rendered `turn stopped · request <id>` and a cancel receipt whose committed terminal
-   is cancelled and whose request id matches.
+4. Start one more turn long enough to observe running, then press **stop turn**. One click
+   produces **two** receipts: the after-step Stop first, which answers
+   `cancellation_recorded_terminal_pending`, and then — `STOP_ESCALATION_MS` later — the
+   escalated Abort, which is the receipt that actually attaches the committed terminal and
+   whose request id is the one rendered. Capture both. Require the rendered
+   `turn stopped · request <id>` to match the **escalated Abort's** request id and that
+   receipt's committed terminal to be cancelled. A driver that captures only the first
+   receipt sees a request id that does not match the rendered line and would wrongly score
+   a FAIL.
 
 Save `01-retired-state.json`, `01-retired-triggers.json`,
 `01-retired-work.json`, and `01-retired-cancel.json`. Scroll the timeline and work rail
@@ -153,25 +164,30 @@ scoped to the rotated id.
 Reload a browser page at `/?session_id=<retired-id>`. Require its initial
 `GET /api/state?session_id=<retired-id>` to return HTTP 409 with JSON
 `error` containing `<retired-id>` and the full single-use explanation from golden rule
-2. Require the page to render that explanatory refusal in an error row; a blank
+2. Require the page to render that explanatory refusal in its `.session-error` element; a
+blank or absent `.session-error`, a blank
 timeline, the ordinary empty-state literal, or only `internal server error` fails this
-gate.
+gate. Gate on that element rather than on a body-text search, so the gate is mechanically
+checkable.
 
 Issue one second `GET /api/state?session_id=<retired-id>` and require the same status and
 message so the refusal is stable rather than a transient race. Then gate every accepting
 or observing surface changed by the retirement fence:
 
-1. Record `GET /api/work?session_id=<retired-id>`. The work read is scoped but
-   deliberately not behind the retirement fence: it returns HTTP 200 with a JSON list,
-   never 409. Because Phase 1 awaited the `retirement_job` to terminal and session
-   deletion prunes terminal process state (the delete response's `process_retention`
-   counters record the pruning), the expected set here is empty — do not require it to
-   equal the saved Phase-1 retired work set. Submit
+1. Record `GET /api/work?session_id=<retired-id>`. The **scoped** work read is behind the
+   retirement fence and must return HTTP 409 with the same canonical `error`:
+   `list_work` calls `state.admit_session(&query, "api.work.list")` for the
+   explicit-session form (`examples/agent-workbench/src/main_sections/routes.rs:862`).
+   Only the **default (unscoped)** work query is unfenced. Put the before/after set
+   comparison on that unscoped runtime-wide read, not on the scoped one. Submit
    `POST /api/turn?session_id=<retired-id>` with a non-empty marker prompt. Require HTTP
-   409 and the exact same canonical `error`; then read scoped work again and require the
-   complete process-id set to remain identical to the pre-turn read. Any accepted
-   response, new work row, or changed existing row means work escaped the fence →
-   Abort/RCA.
+   409 and the exact same canonical `error`; then read the unscoped work list again and
+   require the complete process-id set to remain identical to the pre-turn read. Any
+   accepted response, new work row, or changed existing row means work escaped the fence →
+   Abort/RCA. Note also that Phase 1 awaited the `retirement_job` to terminal and session
+   deletion prunes terminal process state (the delete response's `process_retention`
+   counters record the pruning), so none of the retired session's processes are expected to
+   survive into either read.
 2. Call `GET /api/observations?session_id=<retired-id>` without a cursor. Require HTTP
    409 JSON with the exact canonical `error`, not an NDJSON stream, empty snapshot, or
    generic failure.
@@ -205,7 +221,8 @@ Then prove the rotated id is alive:
 1. Submit a turn containing `FIG754-ROTATED-<run-id>` and require the ordered pair in the
    page and `/api/state`. The **assistant** row in both surfaces must contain the exact
    marker, and the turn must settle.
-2. Register `retirement-watch` for the same Blue source and `retirement_job` target.
+2. Register `retirement-watch` for the same Blue source and `retirement_job` target, with
+   the **same pinned `subscription_key` and process label** used in Phase 1.
    Require exactly one enabled registration whose registrant is scoped to
    `<rotated-id>`. Its derived display name and `subscription_key` must equal
    registration A's, while its `subscription_id` must differ. Same-name, same-key
@@ -214,8 +231,10 @@ Then prove the rotated id is alive:
 3. Activate Blue. Require exactly one new `retirement_job` process from
    `GET /api/work?session_id=<rotated-id>`, require its id to differ from the retired
    session's process id, and await it to terminal.
-4. Start another long turn and press **stop turn**. Require rendered
-   `turn stopped · request <id>` and a matching committed cancellation receipt.
+4. Start another long turn and press **stop turn**. As in Phase 1.4, capture both receipts
+   and require rendered
+   `turn stopped · request <id>` to match the escalated Abort's request id, with that
+   receipt carrying the committed cancellation.
 
 Save `04-rotated-live-state.json`, `04-rotated-live-triggers.json`,
 `04-rotated-live-work.json`, and `04-rotated-live-cancel.json`. Scroll to the settled
@@ -228,10 +247,13 @@ Abort/RCA rule, tear down, and mark every Phase-5 score item
 **not run because Phase 4 aborted**. Do not restart merely to produce a second verdict
 from an invalid prerequisite.
 
-**Blocked by FIG-1164.** The historical command was
-`AGENT_WORKBENCH_DATA_DIR=<same-data-dir> just agent-workbench-restart <port>`. Do not execute it
-until a verified immutable same-configuration host restart exists. After that mechanism runs,
-poll `/healthz`. Require:
+Replace the Workbench process with the verified non-destructive same-configuration restart
+this runbook's header names (FIG-1164, FIG-3035):
+`AGENT_WORKBENCH_DATA_DIR=<same-data-dir> just agent-workbench-restart <port>` (equivalently
+`bash scripts/agent-workbench-dev.sh restart --port <port>`). It keeps the Restate deployment,
+its journals and the application data, and reports that it did; `workbench-engine-restart`
+drives the same command in its FIG-1117 companion. Never substitute the destructive reset.
+After the restart, poll `/healthz`. Require:
 
 - a new Workbench PID;
 - `<data-dir>/session-id`, the default `/api/state` response, and a browser page at
