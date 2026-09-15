@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lashlang::{
     AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, ProcessDecl,
-    ProcessParam, ProcessSignalDecl, ProcessStartExpr, ResourceRefExpr, TryExpr, TypeExpr,
+    ProcessParam, ProcessStartExpr, ResourceRefExpr, TryExpr, TypeExpr,
 };
 
 use crate::adapter::{

@@ -101,6 +101,10 @@ impl lash_core_store::turn_control_binding::StoreTurnCancellationAuthority
 ///
 /// `TurnCancellationAuthority` is the sole implementor, and only this crate
 /// constructs one, so a handle that is anything else is a programming error.
+#[expect(
+    clippy::expect_used,
+    reason = "this crate is the sole implementor and the sole constructor of the trait object, so another concrete type is a programming error, per the message"
+)]
 pub fn concrete_turn_cancellation_authority(
     handle: &Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority>,
 ) -> TurnCancellationAuthority {

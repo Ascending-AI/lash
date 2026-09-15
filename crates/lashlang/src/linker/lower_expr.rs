@@ -1002,10 +1002,11 @@ impl<'module> Linker<'module> {
                 Ok(())
             }
             Some(existing) => {
-                if existing == payload {
-                    Ok(())
-                } else if self.is_type_assignable(&existing, &payload)
-                    && self.is_type_assignable(&payload, &existing)
+                // Equality is the fast path of mutual assignability, so the
+                // two agree-cases share one arm.
+                if existing == payload
+                    || (self.is_type_assignable(&existing, &payload)
+                        && self.is_type_assignable(&payload, &existing))
                 {
                     Ok(())
                 } else {

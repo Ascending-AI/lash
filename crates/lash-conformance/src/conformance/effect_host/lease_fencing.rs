@@ -1,4 +1,8 @@
 use super::*;
+// Only the `#[test]` below uses it, and it is what disambiguates the
+// glob's `assert_eq` from the std prelude's, so it is cfg-gated rather
+// than dropped.
+#[cfg(test)]
 use pretty_assertions::assert_eq;
 
 /// One controller bound to a shared durable effect-replay store, paired with a
