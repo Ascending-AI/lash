@@ -44,6 +44,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/after_turn_cannot_abort.rs");
     t.compile_fail("tests/ui/frame_key_is_not_a_frame_node_id.rs");
     t.pass("tests/ui/facade_boundary_types_are_public.rs");
+    t.pass("tests/ui/process_surface_types_are_public.rs");
     t.pass("tests/ui/prompt_types_are_public.rs");
     t.pass("tests/ui/remote_protocol_types_are_public.rs");
     if cfg!(feature = "rlm") {
