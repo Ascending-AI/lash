@@ -67,10 +67,15 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 5. **Break-glass is not success.** Never use Restate Admin cancel/kill to pass a gate. If
    cleanup requires it after an Abort, record that separately; it must not be reported as
    a Lash `Cancelled` terminal.
-6. **Revocation is not Stop.** `DELETE /api/session` revokes the old turn's cancellation
-   registration because the session no longer exists. It must not emit
-   `process.cancel_requested`; the independent process remains visible in `/api/work`
-   until its own terminal.
+6. **Revocation is not Stop, and it is not survival either.** `DELETE /api/session`
+   aborts the session's own foreground turn — a committed `Cancelled` terminal carrying the
+   delete evidence, reason `workbench Abort control` — and prunes the processes in the
+   deleted session's retention scope, recorded in the delete trace
+   `agent_workbench.reset.restate.session_deleted` under `process_retention.pruned_processes`.
+   Processes owned by *other* sessions are untouched: they receive no
+   `process.cancel_requested`, stay visible in `/api/work`, and reach their own terminal.
+   Revocation therefore unwinds the deleted session's own work and nothing else; a judge
+   proves the split across two sessions, never inside one.
 7. **Distinguish shallow vs deep durable-sleep cancellation (FIG-1445).** The shallow arm
    issues Stop immediately after the process starts (~0.3s in). The deep-dwell arm
    mandates that the process is genuinely parked in durable sleep for ≥120s before Stop
@@ -239,24 +244,34 @@ latency:
 
 Save `06b-deep-dwell-cancelled.json` and screenshot `06b-deep-dwell-cancelled.png`.
 
-## Phase 5 — Process survives session revocation
+## Phase 5 — Revocation unwinds the deleted session's work and nothing else
 
-Start another process-await whose process can complete soon enough to observe, but leave
-the foreground turn suspended. Record the old session id and process id, then call
-`DELETE /api/session?session_id=<old-session-id>` instead of Stop. Gate the semantic
-split:
+This phase needs **two** sessions, because the property is a boundary, not a survival
+claim (golden rule 6).
 
-- the old Restate turn completes with the typed deleted-session refusal, not a successful
-  or `Cancelled` turn terminal;
-- the process remains non-terminal immediately after deletion and stays globally visible
-  in `/api/work`;
-- its events contain no `process.cancel_requested`;
-- it later reaches its own successful terminal with the expected value.
+1. In a second session, start a process-await whose process completes soon enough to
+   observe, and record that session id and process id. This is the bystander.
+2. In the first session, start its own process-await and leave the foreground turn
+   suspended. Record that session id, its turn id, and its process id.
+3. Call `DELETE /api/session?session_id=<first-session-id>` instead of Stop.
 
-Save the work snapshots as `07-revoked-process-running.json` and
-`08-revoked-process-survived.json`, and retain the trace lines containing the
-deleted-session refusal. A cancelled process, a missing process, or a stranded old turn
-is Abort/RCA.
+Gate the split:
+
+- the first session's turn commits a `Cancelled` terminal carrying the delete evidence
+  with reason `workbench Abort control` — not a success, and not a stranded turn;
+- the first session's process is pruned: it is absent from `/api/work`, and the delete
+  trace record `agent_workbench.reset.restate.session_deleted` reports it under
+  `process_retention.pruned_processes` with a matching count;
+- no `process.cancel_requested` is emitted for the bystander's process;
+- the bystander's process stays visible in `/api/work` across the delete and reaches its
+  own terminal with the expected value.
+
+Save the work snapshots as `07-revoked-process-running.json` (both processes running,
+before the delete) and `08-revoked-process-survived.json` (after the delete: the deleted
+session's process gone, the bystander's process present and then terminal), and retain the
+delete response plus the `session_deleted` trace record. A cancelled or missing bystander
+process, a `process.cancel_requested` on the bystander, a deleted-session process that
+outlives the delete, or a stranded first turn is Abort/RCA.
 
 ## Phase 6 — Teardown and score
 
@@ -273,8 +288,8 @@ Restate container are gone.
 | Post-restart Stop | committed Cancelled terminal + evidence for original address | | `03-restored-cancelled.png`, `03-cancel-receipt.json` |
 | Shallow-stop latency (process await) | pre-Stop dwell < 5s (press Stop as soon as the await is running); turn and awaited process both commit Cancelled within 10s of the request that owns the terminal, and before the original deadline | | `04-process-await-running.json`, `05-process-await-cancelled.json`, `05-process-await-cancelled.png` |
 | Deep-stop latency (FIG-1445 durable sleep ≥120s) | Stop issued while process is ≥120s parked in durable sleep; turn and process commit Cancelled within 10s of Stop request; durable dwell ≥120s recorded in work events/trace | | `06a-deep-dwell-running.json`, `06b-deep-dwell-cancelled.json`, `06b-deep-dwell-cancelled.png` |
-| Revoked turn settlement | old turn completes with typed `SessionDeleted` refusal | | reset response + trace |
-| Process survives revocation | process stays globally visible, has no cancel event, and reaches its own terminal | | `07-revoked-process-running.json`, `08-revoked-process-survived.json` |
+| Revoked turn settlement | the deleted session's turn commits `Cancelled` with the delete evidence, reason `workbench Abort control` | | delete response + terminal evidence + trace |
+| Retention scope is the boundary | the deleted session's process is pruned (absent from `/api/work`, counted in `process_retention.pruned_processes`) while a second session's process gets no `process.cancel_requested`, stays visible, and reaches its own terminal | | `07-revoked-process-running.json`, `08-revoked-process-survived.json`, `session_deleted` trace record |
 | UI/API agreement | rendered request ids equal terminal evidence ids; active addresses clear | | screenshots + receipts + `/api/state` |
 | No break-glass substitution | no Admin cancel/kill used as a passing action | | command log |
 
@@ -282,7 +297,8 @@ Restate container are gone.
 normally, after reconstructing the entire web process, under shallow process await, and
 deep inside durable sleep (refereeing FIG-1445); did a repeated request preserve the
 first accepted policy and report a conflict instead of silently substituting it; and did
-session revocation unwind only the dead turn while the independent process survived?
+session revocation unwind exactly the deleted session's own turn and processes while
+another session's process was left untouched?
 
 ---
 
