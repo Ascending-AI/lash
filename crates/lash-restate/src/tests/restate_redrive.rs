@@ -537,13 +537,15 @@ pub(super) async fn park_process_on_its_timer(
 }
 
 /// Completions for a replayed process journal: the scope index answers its
-/// effect-recording calls, every other call answers `null`, and the timer is
-/// fired or left pending.
+/// effect-recording calls, every other call answers `null`, the journaled
+/// wake verdict reads an unresolved cancellation promise (FIG-3149), and the
+/// timer is fired or left pending.
 pub(super) fn process_journal_completion(
     fire_timer: bool,
 ) -> impl Fn(&endpoint_protocol::RecordedCommand) -> Option<serde_json::Value> {
     move |command| match command.message_type {
         RESTATE_SLEEP_COMMAND_MESSAGE_TYPE => fire_timer.then_some(serde_json::Value::Null),
+        RESTATE_PEEK_PROMISE_COMMAND_MESSAGE_TYPE => Some(serde_json::Value::Null),
         RESTATE_CALL_COMMAND_MESSAGE_TYPE => command.call.as_ref().map(|(service, handler)| {
             durable_wait_index_call_response(service, handler).unwrap_or(serde_json::Value::Null)
         }),
@@ -1026,8 +1028,27 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         process_journal_completion(true),
     )
     .expect("splice completed effect prefix");
-    let effect_cleared =
+    let wake_verdict =
         invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", completed_effect)
+            .await
+            .expect("the woken effect should journal its cancellation verdict");
+    assert_eq!(
+        restate_message_types(&wake_verdict).expect("decode wake-verdict frames"),
+        vec![
+            RESTATE_PEEK_PROMISE_COMMAND_MESSAGE_TYPE,
+            RESTATE_SUSPENSION_MESSAGE_TYPE
+        ],
+        "the wake reads its cancellation verdict from the journal before the effect is cleared"
+    );
+    let verdict_replay = encode_recorded_commands_replay(
+        process_id,
+        &input,
+        &[&effect_suspension, &wake_verdict],
+        process_journal_completion(true),
+    )
+    .expect("splice the journaled wake verdict");
+    let effect_cleared =
+        invoke_endpoint_body(&endpoint, "LashProcessWorkflow", "run", verdict_replay)
             .await
             .expect("effect completion should clear the effect from the scope's index");
     assert_eq!(
@@ -1049,7 +1070,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
     let cleared_replay = encode_recorded_commands_replay(
         process_id,
         &input,
-        &[&effect_suspension, &effect_cleared],
+        &[&effect_suspension, &wake_verdict, &effect_cleared],
         process_journal_completion(true),
     )
     .expect("splice the cleared effect prefix");
@@ -1072,6 +1093,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         &input,
         &[
             &effect_suspension,
+            &wake_verdict,
             &effect_cleared,
             &terminal_delivery_suspension,
         ],

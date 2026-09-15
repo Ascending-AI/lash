@@ -1103,6 +1103,44 @@ where
                         ));
                     }
                 }
+                if matches!(
+                    invocation.execution_scope(),
+                    lash_sansio::ExecutionScope::Process { .. }
+                ) {
+                    // FIG-3149: process sleeps stay uninterruptible, and the
+                    // wake is where a committed cancellation takes ownership of
+                    // settlement. Read that verdict through a journaled peek of
+                    // the process workflow's own cancel promise: a live read
+                    // here can answer differently on redrive, and the guest
+                    // suffix it selects then diverges from the recorded
+                    // journal.
+                    let cancel_requested = self
+                        .context
+                        .peek_process_cancel_requested()
+                        .await
+                        .map_err(|err| {
+                            // Reading the verdict is the cancellation read this
+                            // class already names: a transient failure asks for
+                            // redelivery instead of terminalizing the process.
+                            RuntimeEffectControllerError::new(
+                                RuntimeErrorCode::RestateProcessCancel,
+                                err.to_string(),
+                            )
+                        })?;
+                    if cancel_requested {
+                        self.emit_trace(Some(&invocation), || {
+                            lash_trace::TraceEvent::DurableTimerResolved {
+                                duration_ms,
+                                status: lash_trace::TraceDurableTimerStatus::Cancelled,
+                            }
+                        });
+                        cancellation.cancel();
+                        return Err(RuntimeEffectControllerError::new(
+                            RuntimeErrorCode::RuntimeEffectSleepCancelled,
+                            "runtime effect sleep observed process cancellation at wake",
+                        ));
+                    }
+                }
                 self.emit_trace(Some(&invocation), || {
                     lash_trace::TraceEvent::DurableTimerResolved {
                         duration_ms,

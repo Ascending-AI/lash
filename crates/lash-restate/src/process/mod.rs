@@ -36,7 +36,7 @@ pub use workflow::{
     ServeLashProcessWorkflow,
 };
 
-const PROCESS_CANCEL_PROMISE_KEY: &str = "process_cancel_requested";
+pub(crate) const PROCESS_CANCEL_PROMISE_KEY: &str = "process_cancel_requested";
 const PROCESS_CANCEL_CONFIRM_RETRIES: usize = 5;
 const PROCESS_CANCEL_CONFIRM_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// Wall-clock epoch milliseconds for terminal evidence written at the Restate
@@ -216,6 +216,17 @@ where
         .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
     context.resolve_promise(&key.promise_key(), payload);
     Ok(())
+}
+
+/// Decodes one process cancellation promise payload into the wake verdict a
+/// journaled peek records (FIG-3149).
+///
+/// An unresolved promise and a retired segment observer both read as "not
+/// cancelled"; only an accepted cancel request settles the sleep.
+pub(crate) fn process_cancel_promise_verdict(payload: Option<String>) -> bool {
+    payload
+        .and_then(|payload| serde_json::from_str::<RestateProcessCancelSignal>(&payload).ok())
+        .is_some_and(|signal| signal == RestateProcessCancelSignal::CancelRequested)
 }
 
 fn resolve_process_cancel_signal<'ctx, C>(

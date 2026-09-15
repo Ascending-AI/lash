@@ -785,6 +785,12 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) append_missing_on_replay: AtomicBool,
     pub(super) peek_records: Mutex<Vec<Option<Resolution>>>,
     pub(super) peek_cursor: AtomicUsize,
+    /// Live process cancellation state, standing in for the resolved
+    /// `process_cancel_requested` workflow promise (FIG-3149).
+    pub(super) process_cancel_committed: AtomicBool,
+    pub(super) process_cancel_peek_records: Mutex<Vec<bool>>,
+    pub(super) process_cancel_peek_cursor: AtomicUsize,
+    pub(super) process_cancel_peek_failures: AtomicUsize,
     pub(super) events: Arc<RecordingContext>,
     pub(super) process_worker: Mutex<Option<DurableProcessWorker>>,
     pub(super) defer_process_workflows: AtomicBool,
@@ -1541,12 +1547,40 @@ impl ReplayableRecordingContext {
         self.replaying.store(true, Ordering::SeqCst);
         self.append_missing_on_replay.store(false, Ordering::SeqCst);
         self.peek_cursor.store(0, Ordering::SeqCst);
+        self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
     }
 
     pub(super) fn start_replay_allowing_journal_extension(&self) {
         self.replaying.store(true, Ordering::SeqCst);
         self.append_missing_on_replay.store(true, Ordering::SeqCst);
         self.peek_cursor.store(0, Ordering::SeqCst);
+        self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
+    }
+
+    /// Resolves the stand-in process cancellation promise.
+    pub(super) fn commit_process_cancel(&self) {
+        self.process_cancel_committed.store(true, Ordering::SeqCst);
+    }
+
+    /// Clears live cancellation so a replayed wake can only answer from the
+    /// journal.
+    pub(super) fn clear_process_cancel(&self) {
+        self.process_cancel_committed.store(false, Ordering::SeqCst);
+    }
+
+    pub(super) fn fail_next_process_cancel_peeks(&self, count: usize) {
+        self.process_cancel_peek_failures
+            .store(count, Ordering::SeqCst);
+    }
+
+    pub(super) fn process_cancel_wake_verdicts(&self) -> Vec<bool> {
+        self.process_cancel_peek_records.lock_recover().clone()
+    }
+
+    /// Models a journal deployed before the wake verdict command existed.
+    pub(super) fn forget_process_cancel_wake_verdicts(&self) {
+        self.process_cancel_peek_records.lock_recover().clear();
+        self.process_cancel_peek_cursor.store(0, Ordering::SeqCst);
     }
 
     pub(super) fn runs(&self) -> Vec<String> {
@@ -1869,6 +1903,54 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
 }
 
 impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
+    /// Journaled wake verdict (FIG-3149). A live wake records the verdict it
+    /// observed; a replayed wake answers from that record, never from live
+    /// state, and a journal written before the command existed extends only
+    /// when the fixture allows it.
+    fn peek_process_cancel_requested<'run>(
+        &'run self,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        let context = Arc::clone(self);
+        Box::pin(async move {
+            let failures = context.process_cancel_peek_failures.load(Ordering::SeqCst);
+            if failures > 0 {
+                context
+                    .process_cancel_peek_failures
+                    .store(failures - 1, Ordering::SeqCst);
+                return Err(TerminalError::new(
+                    "simulated transient wake-verdict peek failure",
+                ));
+            }
+            if context.replaying.load(Ordering::SeqCst) {
+                let cursor = context
+                    .process_cancel_peek_cursor
+                    .fetch_add(1, Ordering::SeqCst);
+                let recorded = context
+                    .process_cancel_peek_records
+                    .lock_recover()
+                    .get(cursor)
+                    .copied();
+                if let Some(recorded) = recorded {
+                    return Ok(recorded);
+                }
+                if !context.append_missing_on_replay.load(Ordering::SeqCst) {
+                    return Err(TerminalError::new(
+                        "missing recorded process cancellation wake verdict",
+                    ));
+                }
+            }
+            let verdict = context.process_cancel_committed.load(Ordering::SeqCst);
+            context
+                .process_cancel_peek_records
+                .lock_recover()
+                .push(verdict);
+            Ok(verdict)
+        })
+    }
+
     fn attach_process_terminal<'run>(
         &'run self,
         request: crate::process_attach::RestateProcessAttachRequest,
