@@ -2298,7 +2298,12 @@ test("a retirement refusal hands the page over instead of rendering a dead end",
      ${markedSource("WORKBENCH_SESSION_RETIREMENT", "WORKBENCH_SESSION_RETIREMENT")}
      const projectionState = createWorkbenchProjectionState();
      const shellAvailability = createShellAvailability();
+     /* this page was working in the session when the reset retired it: the
+        workbench has answered for this id, which is what makes the refusal a
+        hand-off rather than the FIG-3154 refusal of an id never held */
+     markShellChannel(shellAvailability, "state", true);
      const sessionRetirement = createSessionRetirement();
+     const scopedSessionRefusal = createScopedSessionRefusal();
      const scopedSessionId = ${JSON.stringify(scoped)};
      let streamGeneration = 0;
      let retirement = "retiring";
@@ -2331,6 +2336,8 @@ test("a retirement refusal hands the page over instead of rendering a dead end",
      function renderError(message, options) { errors.push([message, options]); }
      function applyStateSnapshot() {}
      function restartEventStreams() {}
+     function stopEventStreams() {}
+     function showSessionError() {}
      ${markedSource("WORKBENCH_STATE_FETCH", "WORKBENCH_STATE_FETCH")}
      ${markedSource("WORKBENCH_STATE_RECOVERY", "WORKBENCH_STATE_RECOVERY")}
      ({
@@ -2361,6 +2368,169 @@ test("a retirement refusal hands the page over instead of rendering a dead end",
   await runtime.runLoadState();
   assert.equal(runtime.adoptions(), 1);
   assert.deepEqual(errors, []);
+});
+
+/* FIG-3154: opening `/?session_id=<retired-id>` got one 409 carrying the
+   store's canonical single-use refusal and the page then retargeted every
+   session-scoped call onto the rotated replacement, rendered the replacement's
+   id, and painted its transcript, rails and usage — with `.session-error`
+   empty and the refusal nowhere in the document. FIG-3136's adoption is a
+   hand-off from a session this page was working in; an id it never held has no
+   replacement to follow. */
+test("a retired id named in the URL is refused on screen, never swapped for a live session", async () => {
+  const shell = shellModule();
+  const retired = "fig754-retired-0915a";
+  const canonical =
+    "session store operation failed: session `" + retired +
+    "` was used and deleted; session ids cannot be reused in this store";
+  const errors = [];
+  const context = {
+    Error,
+    Math,
+    Number,
+    String,
+    Boolean,
+    Set,
+    Array,
+    cleanErrorText(message) { return String(message); },
+    STATE_REQUEST_TIMEOUT_MS: 5000,
+    errors,
+  };
+  const runtime = vm.runInNewContext(
+    `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+     ${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
+     ${markedSource("WORKBENCH_SESSION_RETIREMENT", "WORKBENCH_SESSION_RETIREMENT")}
+     const projectionState = createWorkbenchProjectionState();
+     const shellAvailability = createShellAvailability();
+     const sessionRetirement = createSessionRetirement();
+     const scopedSessionRefusal = createScopedSessionRefusal();
+     /* the page has never been answered for this id: it is the one the URL
+        named and the first snapshot is the refusal */
+     const scopedSessionId = ${JSON.stringify(retired)};
+     let streamGeneration = 0;
+     let adoptions = 0;
+     let retryTimers = 0;
+     let streamsStopped = 0;
+     let shortCircuited = 0;
+     let sessionErrorText = "";
+     let renderedModel = null;
+     const requested = [];
+     function clearTimeout() {}
+     function setTimeout() {
+       retryTimers += 1;
+       return retryTimers;
+     }
+     const AbortSignal = { timeout() { return undefined; } };
+     function refusal() {
+       return {
+         ok: false,
+         status: 409,
+         async json() {
+           return {
+             error: ${JSON.stringify(canonical)},
+             session_id: scopedSessionId,
+             session_retirement: "retired",
+           };
+         },
+       };
+     }
+     /* the production gate: a refused id is answered in the page, so the
+        workbench is never asked again */
+     function fetch(input) {
+       if (refusedScopedProbeIsFutile(scopedSessionRefusal, input)) {
+         shortCircuited += 1;
+         return Promise.resolve(refusal());
+       }
+       requested.push(input);
+       return Promise.resolve(refusal());
+     }
+     async function adoptReplacementSession() { adoptions += 1; }
+     function stopEventStreams() { streamsStopped += 1; }
+     function showSessionError(message) { sessionErrorText = message; }
+     function renderShellStatus() {
+       renderedModel = shellStatusModel(shellAvailability, {});
+     }
+     function renderError(message, options) { errors.push([message, options]); }
+     function applyStateSnapshot() {}
+     function restartEventStreams() {}
+     ${markedSource("WORKBENCH_STATE_FETCH", "WORKBENCH_STATE_FETCH")}
+     ${markedSource("WORKBENCH_STATE_RECOVERY", "WORKBENCH_STATE_RECOVERY")}
+     ({
+       runLoadState: loadState,
+       adoptions: () => adoptions,
+       retryTimers: () => retryTimers,
+       streamsStopped: () => streamsStopped,
+       sessionErrorText: () => sessionErrorText,
+       renderedModel: () => renderedModel,
+       requested: () => requested.join(" "),
+       shortCircuited: () => shortCircuited,
+       probeIsFutile: path => refusedScopedProbeIsFutile(scopedSessionRefusal, path),
+       retirementPhase: () => sessionRetirement.phase,
+     });`,
+    { ...context, shellStatusModel: shell.shellStatusModel },
+  );
+
+  await runtime.runLoadState();
+
+  // The refusal is the answer to what was asked, rendered where the runbook
+  // looks for it, and it is not an outage to retry either.
+  assert.equal(runtime.sessionErrorText(), canonical);
+  assert.equal(runtime.adoptions(), 0, "an id this page never held has no replacement to follow");
+  assert.equal(runtime.retirementPhase(), "none", "a refused id is not this page's retirement");
+  assert.equal(runtime.renderedModel().phase, "terminal");
+  assert.equal(runtime.renderedModel().banner.text, canonical);
+  assert.equal(runtime.retryTimers(), 0, "the retired id will never answer; retrying is the storm");
+  assert.equal(runtime.streamsStopped(), 1, "the streams are scoped to the refused id too");
+  assert.equal(runtime.requested(), "/api/state", "one refusal, then nothing");
+
+  // Everything session-scoped stops; the roster is how the operator leaves.
+  assert.equal(runtime.probeIsFutile("/api/state"), true);
+  assert.equal(runtime.probeIsFutile("/api/events?cursor=0"), true);
+  assert.equal(runtime.probeIsFutile("/api/work"), true);
+  assert.equal(runtime.probeIsFutile("/api/sessions"), false);
+
+  // A second pass changes nothing and asks nothing: the fetch above throws if
+  // a refused id is requested again.
+  await runtime.runLoadState();
+  assert.equal(runtime.adoptions(), 0);
+  assert.equal(runtime.sessionErrorText(), canonical);
+  assert.equal(runtime.requested(), "/api/state", "the workbench is asked once, not again");
+  assert.equal(runtime.shortCircuited(), 1, "the refusal is answered in the page");
+  assert.equal(runtime.retryTimers(), 0);
+});
+
+test("adoption is a hand-off from a session the workbench answered for", () => {
+  const retirement = sessionRetirementModule();
+
+  // An unscoped page reads whatever the workbench resolves a query-less call
+  // to, so the roster's rotation is its hand-off and always applies.
+  assert.equal(retirement.retirementIsHandOff(null, false), true);
+  // A tab pinned to an id follows the replacement only once that id has
+  // actually answered it.
+  assert.equal(retirement.retirementIsHandOff("workbench-0298b733", true), true);
+  assert.equal(
+    retirement.retirementIsHandOff("workbench-0298b733", false),
+    false,
+    "an id refused on first contact was never this page's session to hand off",
+  );
+
+  const refused = retirement.createScopedSessionRefusal();
+  assert.equal(retirement.scopedSessionIsRefused(refused), false);
+  assert.equal(retirement.refusedScopedProbeIsFutile(refused, "/api/state"), false);
+  retirement.noteScopedSessionRefusal(
+    refused,
+    { sessionId: "fig754-retired-0915a", phase: "retired" },
+    "was used and deleted",
+  );
+  assert.equal(retirement.scopedSessionIsRefused(refused), true);
+  assert.equal(retirement.refusedScopedProbeIsFutile(refused, "/api/state"), true);
+  assert.equal(retirement.refusedScopedProbeIsFutile(refused, "/api/observations?cursor=1"), true);
+  assert.equal(
+    retirement.refusedScopedProbeIsFutile(refused, "/api/sessions/select"),
+    false,
+    "the roster is not session-scoped and is how the operator leaves",
+  );
+  assert.equal(retirement.refusedScopedProbeIsFutile(refused, "/static/app.css"), false);
 });
 
 test("a drop after hydration reconnects over the last known content", () => {
@@ -2742,7 +2912,12 @@ function sessionRetirementModule() {
        clearSessionRetirement,
        sessionIsRetiring,
        sessionScopedProbeIsFutile,
-       replacementSessionId
+       replacementSessionId,
+       retirementIsHandOff,
+       createScopedSessionRefusal,
+       noteScopedSessionRefusal,
+       scopedSessionIsRefused,
+       refusedScopedProbeIsFutile
      };`,
     context,
   );

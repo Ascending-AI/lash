@@ -2676,6 +2676,7 @@
       return url.pathname + url.search + url.hash;
     }
     const sessionRetirement = createSessionRetirement();
+    const scopedSessionRefusal = createScopedSessionRefusal();
 
     /* Answered here rather than by the workbench: the refusal is already known
        and a round trip for it is the probe storm. Same shape as the server's,
@@ -2691,7 +2692,24 @@
       );
     }
 
+    /* The id this page was opened with is refused and will never answer. Same
+       reasoning as above, and the same shape, carrying the workbench's own
+       words so a caller that renders the body renders the refusal. */
+    function refusedSessionResponse(refused) {
+      return new Response(
+        JSON.stringify({
+          error: refused.message,
+          session_id: refused.sessionId,
+          session_retirement: refused.phase
+        }),
+        { status: 409, headers: { "content-type": "application/json" } }
+      );
+    }
+
     window.fetch = (input, init) => {
+      if (refusedScopedProbeIsFutile(scopedSessionRefusal, input)) {
+        return Promise.resolve(refusedSessionResponse(scopedSessionRefusal));
+      }
       if (sessionScopedProbeIsFutile(sessionRetirement, input)) {
         return Promise.resolve(retiredSessionRefusal(sessionRetirement));
       }
@@ -3356,6 +3374,47 @@
        The workbench's own current is the first answer, because the delete's
        settlement rotates the roster onto the replacement; otherwise the newest
        session the operator still has. `null` means one has to be created. */
+    /* Adoption is a hand-off, and a hand-off needs something to hand off from.
+       FIG-3136's flow exists for the session this page was working in when it
+       was retired out from under it: a reset, or another tab's delete. A
+       caller who opens `/?session_id=<id>` and is refused on first contact
+       never had that session. The refusal is the answer to what they asked,
+       and moving the page onto a live replacement paints a different
+       conversation under the id they named with the refusal nowhere on screen
+       (FIG-3154). `established` is whether the workbench has ever answered for
+       this page's session. */
+    function retirementIsHandOff(scopedId, established) {
+      return !scopedId || Boolean(established);
+    }
+
+    /* The refusal of an id the page never held: terminal, and the only thing
+       the page can honestly do with it is say so. */
+    function createScopedSessionRefusal() {
+      return { sessionId: null, phase: "none", message: "" };
+    }
+
+    function noteScopedSessionRefusal(refused, refusal, message) {
+      refused.sessionId = refusal.sessionId;
+      refused.phase = refusal.phase;
+      refused.message = message;
+      return refused;
+    }
+
+    function scopedSessionIsRefused(refused) {
+      return Boolean(refused.sessionId);
+    }
+
+    /* Nothing session-scoped is worth asking once the id is refused — not even
+       the snapshot the retirement flow keeps alive, because no settlement will
+       make this id answer. The roster is not session-scoped and is how the
+       operator leaves for a session that does answer, so it passes. */
+    function refusedScopedProbeIsFutile(refused, input) {
+      if (!scopedSessionIsRefused(refused)) return false;
+      if (typeof input !== "string" || !input.startsWith("/api/")) return false;
+      const path = input.split("?")[0];
+      return !path.startsWith("/api/sessions");
+    }
+
     function replacementSessionId(listing, retiredSessionId) {
       const current = listing && listing.current_session_id;
       if (current && current !== retiredSessionId) return current;
@@ -4629,7 +4688,20 @@
     }
     // END WORKBENCH_POST_COMMAND
 
+    /* Ends both streams without starting new ones: the only caller is the page
+       giving up on a session id for good. */
+    function stopEventStreams() {
+      streamGeneration += 1;
+      if (productStreamController) productStreamController.abort();
+      if (observationStreamController) observationStreamController.abort();
+      productStreamController = null;
+      observationStreamController = null;
+    }
+
     function restartEventStreams(resetCursors = false) {
+      /* a refused id has no stream to reconnect to, and the boot path asks for
+         one after the snapshot has already been refused */
+      if (scopedSessionIsRefused(scopedSessionRefusal)) return;
       if (resetCursors) {
         projectionState.productCursor = 0;
         projectionState.observationCursor = null;
@@ -5040,6 +5112,13 @@
              retired is the hand-off, not a failure: the replacement exists or
              is about to, and the page's job is to move to it */
           const refusal = sessionRetirementRefusal(response.status, state, scopedSessionId);
+          if (scopedSessionRefusalIsFinal(refusal)) {
+            refuseScopedSession(
+              refusal,
+              typeof state?.error === "string" ? state.error : "this session is unavailable"
+            );
+            return;
+          }
           if (noteSessionRetirement(sessionRetirement, refusal)) {
             markShellReplacing(shellAvailability, sessionRetirement.sessionId);
             renderShellStatus();
@@ -6085,7 +6164,28 @@
        answer again, and a second reset cannot help either — the fence refuses
        a delete of a retired session — so the page adopts a live session
        itself. */
+    /* A refusal this page cannot hand off from: the id it was opened with was
+       already retired, so there is no replacement to follow and nothing left
+       to ask. Say what the workbench said, and stop. */
+    function scopedSessionRefusalIsFinal(refusal) {
+      if (!refusal) return false;
+      return !retirementIsHandOff(scopedSessionId, shellAvailability.established.state);
+    }
+
+    function refuseScopedSession(refusal, message) {
+      noteScopedSessionRefusal(scopedSessionRefusal, refusal, message);
+      cancelStateRetry();
+      stopEventStreams();
+      showSessionError(message);
+      markShellTerminal(shellAvailability, "state", message);
+      renderShellStatus();
+    }
+
     function handleSessionRetirementFailure(error) {
+      if (scopedSessionRefusalIsFinal(error?.retirement)) {
+        refuseScopedSession(error.retirement, error.message);
+        return true;
+      }
       if (!noteSessionRetirement(sessionRetirement, error?.retirement)) return false;
       markShellReplacing(shellAvailability, sessionRetirement.sessionId);
       renderShellStatus();
