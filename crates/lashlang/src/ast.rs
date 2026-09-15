@@ -116,9 +116,14 @@ fn check_program_process_types(program: &Program) -> Result<(), InvalidAst> {
                 for signal in &process.signals {
                     check_process_type(&signal.ty)?;
                 }
-                if let Some(return_ty) = &process.return_ty {
-                    check_process_type(return_ty)?;
-                }
+                // A process's output is not an authored signature position: the
+                // linker infers it from the `finish` types the body reaches, and
+                // since ADR 0095 `processes.start` answers the one process type
+                // of unknown signature (`{"x-lash":{"kind":"process_unknown"}}`).
+                // A start handle may be bound, awaited and finished like any
+                // other value, so an unknown signature is legal wherever such a
+                // value flows. The refusal stays on what an author *declares*:
+                // params, signals, type declarations and type literals.
                 check_expr_process_types(&process.body)?;
             }
             Declaration::Function(function) => {

@@ -278,6 +278,18 @@ impl<'module> Linker<'module> {
                 },
                 Binding::Value(process_ty.clone()),
             )
+        } else if let Some((lifted, process_ty)) =
+            self.lifted_process_aliases.borrow().get(name.as_str())
+        {
+            // The name is a cell local bound to a process literal, read from
+            // inside another literal's body. The literal lifted to a module
+            // declaration, so the read resolves to that declaration.
+            (
+                Expr::ProcessRef {
+                    process: lifted.as_str().into(),
+                },
+                Binding::Value(process_ty.clone()),
+            )
         } else {
             return Err(LinkError::UnknownName {
                 name: name.to_string(),
@@ -435,14 +447,33 @@ impl<'module> Linker<'module> {
         // process slot the same way a `Process`-typed argument is. Re-binding
         // through a path step is not a slot, so only the plain-root form
         // counts.
+        //
+        // `Any` counts as no prior type here. `pass_setup` seeds every carried
+        // session global into the root scope as `any`, so from the second turn
+        // on the very name this cell binds is already in scope untyped — an
+        // inferred `any` is not a declaration, and it must not un-make the
+        // slot, or a cell that binds a process literal would link on turn 1 and
+        // be refused on every turn after (FIG-3120 diagnosis). A path step
+        // still does.
         let target_expected = match (&target_expected, expr) {
-            (None, Expr::ProcessLiteral(_)) if lowered_target.steps.is_empty() => {
+            (None | Some(TypeExpr::Any), Expr::ProcessLiteral(_))
+                if lowered_target.steps.is_empty() =>
+            {
                 Some(process_unknown_type())
             }
             (expected, _) => expected.clone(),
         };
         let (lowered, binding) = self.lower_expr_expected(expr, scope, target_expected.as_ref())?;
         if lowered_target.steps.is_empty() {
+            // A name bound straight to a process literal names the declaration
+            // that literal lifted to, so a later literal's body can resolve it
+            // statically instead of capturing it (see `lifted_process_aliases`).
+            if let (Expr::ProcessLiteral(_), Expr::ProcessRef { process }) = (expr, &lowered) {
+                self.lifted_process_aliases.borrow_mut().insert(
+                    target.root.to_string(),
+                    (process.to_string(), binding_type(&binding)),
+                );
+            }
             scope.bind(target.root.as_str(), binding.clone());
         } else {
             let value_ty = binding_type(&binding);
@@ -1128,7 +1159,27 @@ impl<'module> Linker<'module> {
         function: &crate::ast::FunctionExpr,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        for capture in &function.captures {
+        // A capture naming a cell local that was bound to a process literal is
+        // not a capture at all: that literal lifted to a module-level
+        // declaration, and a read of the name resolves statically to its
+        // `ProcessRef` (`lower_variable`). Inside a *lifted* body the cell's
+        // locals are gone, so the name is out of scope here — dropping it from
+        // the closure's capture list is what lets one process literal name
+        // another (FIG-2998). Where the name is still in scope — the cell's own
+        // closures — nothing changes.
+        let captures = function
+            .captures
+            .iter()
+            .filter(|capture| {
+                scope.get(capture).is_some()
+                    || !self
+                        .lifted_process_aliases
+                        .borrow()
+                        .contains_key(capture.as_str())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for capture in &captures {
             if scope.get(capture).is_none() {
                 return Err(LinkError::UnknownName {
                     name: capture.to_string(),
@@ -1137,7 +1188,7 @@ impl<'module> Linker<'module> {
             }
         }
         let mut function_scope = Scope::new(scope.process_body, scope.span);
-        for capture in &function.captures {
+        for capture in &captures {
             // A closure body sees its captures as `Any`: the value can be
             // reassigned between the closure's construction and its call, so
             // the type it had at construction proves nothing. A process value
@@ -1161,7 +1212,7 @@ impl<'module> Linker<'module> {
             Expr::Function(Box::new(crate::ast::FunctionExpr {
                 name: function.name.clone(),
                 params: function.params.clone(),
-                captures: function.captures.clone(),
+                captures,
                 body: Box::new(body),
             })),
             any_binding(),

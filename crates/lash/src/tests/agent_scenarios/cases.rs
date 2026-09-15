@@ -482,17 +482,20 @@ finish(result);"#,
         root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="typescript"
-        root         exec      cell.ok                 calls=1
+        root         tool      tool.start              name="start_process" call=call-001
+        root         tool      tool.intent             call=call-001 kind="start_process" status="executed"
+        root         tool      tool.result             name="start_process" outcome=success call=call-001
+        root         exec      cell.ok                 calls=2
         root         outcome   turn.final_value        value={"parent":"done"}
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=227B
         root                     tool_state            stored logical=<opaque>
-        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
+        root                     plugin_state          stored {"lash.triggers":{"generation":0,"values":{}},"processes":{"generation":0,"values":{}},"rlm_protocol":{"generation":0,"values":{}},"tool_output_budget":{"generation":0,"values":{}}}
         root                     execution_state       stored logical=unknown
-        process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
-        process-002  outcome   process.completed       label="grandchild" kind="lashlang" terminal=true
-        process-003  outcome   process.completed       label="parent" kind="lashlang" terminal=true
+        process-001  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
+        process-002  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
+        process-003  outcome   process.completed       label="__process_<hash>" kind="lashlang" terminal=true
         "#);
         assert_lashlang_process_ids_unique_for_labels(
             &run.final_process_list,

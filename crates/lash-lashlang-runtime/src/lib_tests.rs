@@ -76,6 +76,69 @@ fn labeled_workflow_program() -> lashlang::Program {
     ])
 }
 
+/// The shipped `processes.start` contract, as a linkable catalogue.
+///
+/// Transcribed rather than imported: `lash-plugin-process-controls`
+/// dev-depends on this crate, so depending on it back would be a package
+/// cycle. The shape is the declaration's own — a `Process` definition slot, an
+/// `args` object, and the one process type as the answer (ADR 0095).
+fn process_start_catalog() -> lashlang::LashlangHostCatalog {
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation_contract(
+            ["processes"],
+            "Processes",
+            "start",
+            "tool:start_process",
+            &lashlang::OperationContract::new(
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "definition": { "x-lash": { "kind": "process_unknown" } },
+                        "args": { "type": "object" },
+                    },
+                    "required": ["definition"],
+                    "additionalProperties": false
+                }),
+                serde_json::json!({ "x-lash": { "kind": "process_unknown" } }),
+            ),
+        )
+        .expect("link the process start operation");
+    catalog
+}
+
+/// `process worker(root: str) -> str { finish root }`
+/// `process scan(root: str) -> str {
+///    handle = await processes.start({ definition: worker, args: { root: root } })
+///    finish root
+///  }`
+///
+/// The admission fixture's module: post-ADR-0095 a process surface is
+/// catalogue presence, so a module only *requires* it by authoring a real
+/// `processes.start`.
+fn scan_module_requiring_the_process_surface() -> lashlang::Program {
+    b::module(
+        vec![
+            b::process_returning(
+                "worker",
+                vec![b::param("root", lashlang::TypeExpr::Str)],
+                lashlang::TypeExpr::Str,
+                b::finish(b::var("root")),
+            ),
+            b::process_returning(
+                "scan",
+                vec![b::param("root", lashlang::TypeExpr::Str)],
+                lashlang::TypeExpr::Str,
+                b::block(vec![
+                    b::assign("handle", b::start("worker", vec![("root", b::var("root"))])),
+                    b::finish(b::var("root")),
+                ]),
+            ),
+        ],
+        Vec::new(),
+    )
+}
+
 /// `process scan(root: str) -> str { finish root }`
 fn scan_module() -> lashlang::Program {
     process_module(
@@ -887,13 +950,15 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
 #[tokio::test(flavor = "current_thread")]
 async fn process_admission_four_shape_table_preserves_codes_and_prepare_omission() {
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
-    let required_environment = LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default(),
-    );
+    let required_environment =
+        LashlangHostEnvironment::new(process_start_catalog(), LashlangAbilities::default());
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: r#"process scan(root: str) -> str { finish root }"#,
-        program: scan_module(),
+        source: r#"process worker(root: str) -> str { finish root }
+process scan(root: str) -> str {
+  handle = await processes.start({ definition: worker, args: { root: root } })
+  finish root
+}"#,
+        program: scan_module_requiring_the_process_surface(),
         environment: &required_environment,
     })
     .expect("module compiles");

@@ -94,6 +94,43 @@ fn unknown_process_type_is_refused_in_program_ir() {
 }
 
 #[test]
+fn a_started_handle_may_be_the_inferred_output_of_a_process() {
+    // Since ADR 0095 `processes.start` answers the one process type of unknown
+    // signature, so a bound start handle can be finished and the linker infers
+    // it as the declaration's output. The refusal stays on authored signature
+    // positions: the same type as a parameter is still refused.
+    let unknown = TypeExpr::Process(ProcessType::unknown());
+    let mut finishes_a_handle = Program::block(Vec::new());
+    finishes_a_handle.declarations = vec![Declaration::Process(ProcessDecl {
+        name: "main".into(),
+        params: Vec::new(),
+        signals: Vec::new(),
+        return_ty: Some(TypeExpr::Object(vec![TypeField {
+            name: "joined".into(),
+            ty: unknown.clone(),
+            optional: false,
+        }])),
+        label: None,
+        body: Expr::Null,
+    })];
+    assert!(validate_ast(&finishes_a_handle).is_ok());
+
+    let mut declares_a_handle_param = Program::block(Vec::new());
+    declares_a_handle_param.declarations = vec![Declaration::Process(ProcessDecl {
+        name: "main".into(),
+        params: vec![param("handle", unknown)],
+        signals: Vec::new(),
+        return_ty: None,
+        label: None,
+        body: Expr::Null,
+    })];
+    assert!(matches!(
+        validate_ast(&declares_a_handle_param),
+        Err(InvalidAst::UnknownProcessSignature)
+    ));
+}
+
+#[test]
 fn type_expr_formatting_covers_nested_shapes() {
     let ty = TypeExpr::Object(vec![
         TypeField {

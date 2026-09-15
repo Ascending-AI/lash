@@ -476,8 +476,23 @@ impl ProcessCapability {
         // same edge for the recorded-intent route. FIG-653: the edge is the
         // subscription relationship, not authorization. An explicit observer set
         // on the request still wins.
+        //
+        // The edge belongs to the session that *owns* the child, which is the
+        // child's own originator — the declaring session for an in-session
+        // start, and the chain's session for a child a running process
+        // declared. Seeding the calling session instead would put the ephemeral
+        // process execution scope on a record, which no route may do, and would
+        // hide a process's children from the session that started the chain. A
+        // host-originated chain mints no edge at all, exactly as the in-session
+        // path's `child_process_observers` does.
         let observers = if request.observers.is_empty() {
-            vec![session_id.clone()]
+            match &request.originator {
+                crate::ProcessOriginator::Host { .. } => Vec::new(),
+                crate::ProcessOriginator::Session {
+                    session_id: originator_session_id,
+                    ..
+                } => vec![originator_session_id.clone()],
+            }
         } else {
             request.observers.clone()
         };

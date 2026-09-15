@@ -417,6 +417,10 @@ fn process_test_core(
     ))
     .trigger_store(trigger_store)
     .process_registry(registry)
+    // ADR 0095: `processes` is catalogue presence, so the fixtures need this.
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+    ))
     .without_queued_work()
     .advanced()
     .runtime_host_config(process_runtime_host_config(process_env_store, provider))

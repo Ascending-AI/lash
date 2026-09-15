@@ -207,6 +207,35 @@ fn a_const_bound_literal_lifts_the_same_way() {
 }
 
 #[test]
+fn a_const_bound_literal_lifts_when_the_session_already_carries_the_name() {
+    // The second turn of a session that bound a process literal on the first:
+    // the name is carried as a session global, which `pass_setup` seeds into
+    // the root scope as `any`. That inferred type is not a declaration, so the
+    // binding is still the process slot and the same literal still lifts —
+    // otherwise a cell would link on turn 1 and be refused on every turn after
+    // (FIG-3120: /workspace/notes/lash/perf-guard-0915/runtime-diagnosis.md).
+    let program = builders::module(
+        vec![],
+        vec![
+            builders::assign(
+                "handler",
+                builders::process_literal(
+                    vec![builders::param("tick", TypeExpr::Any)],
+                    builders::finish(builders::string("done")),
+                ),
+            ),
+            builders::finish(builders::string("ok")),
+        ],
+    );
+
+    let carried = full_host_environment().with_globals(["handler"]);
+    let linked = LinkedModule::link(program, carried)
+        .expect("a re-bound session global is still the process slot");
+    let names = process_names(linked.program());
+    assert_eq!(names.len(), 1, "{names:?}");
+}
+
+#[test]
 fn a_literal_through_a_path_step_or_shape_mismatch_stays_refused() {
     // A slot that does not carry `Process` refuses, even when the shape is
     // a record containing a process — the membership test is per slot.

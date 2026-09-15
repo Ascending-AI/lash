@@ -162,6 +162,10 @@ pub struct AttemptContext<'run> {
     /// `None` where the attempt runs with no runtime execution context to read
     /// it from, which is the same case that leaves the bound unset today.
     engine_child_max_attempts: Option<std::num::NonZeroU32>,
+    /// The provenance a child this body declares inherits when the attempt is
+    /// running inside a durable process. `None` where the attempt is not
+    /// running inside one, and the child takes the declaring session's own.
+    process_spawn_provenance: Option<crate::ProcessSpawnProvenance>,
     replay_key: Option<String>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     completion_key: Option<crate::AwaitEventKey>,
@@ -267,6 +271,10 @@ impl<'run> AttemptContext<'run> {
                 .runtime_execution_context
                 .as_ref()
                 .map(crate::RuntimeExecutionContext::engine_child_max_attempts),
+            process_spawn_provenance: context
+                .runtime_execution_context
+                .as_ref()
+                .and_then(|runtime| runtime.process_spawn_provenance()),
             replay_key: context.replay_key.clone(),
             execution_env_spec: context.execution_env_spec.clone(),
             completion_key,
@@ -386,6 +394,20 @@ impl<'run> AttemptContext<'run> {
     /// engine-paced exactly as it did before.
     pub fn engine_child_max_attempts(&self) -> Option<std::num::NonZeroU32> {
         self.engine_child_max_attempts
+    }
+    /// The provenance a child declared by this body inherits.
+    ///
+    /// A process's children belong to the chain that started the process, not
+    /// to the ephemeral session its run executes in: they carry the chain's
+    /// originator and its wake target, and the execution scope appears on no
+    /// record. The in-attempt start path has always read this off the runtime
+    /// execution context (`ProcessStartOptions::spawn_provenance`); a leaf
+    /// start declares its child before realization, so it reads the same fact
+    /// here and stamps it on the declaration. `None` means the attempt is not
+    /// running inside a process and the child takes the declaring session's
+    /// own originator.
+    pub fn process_spawn_provenance(&self) -> Option<&crate::ProcessSpawnProvenance> {
+        self.process_spawn_provenance.as_ref()
     }
     /// Integrator class 3 durable attempt replay key when supplied by the host.
     pub fn replay_key(&self) -> Option<&str> {

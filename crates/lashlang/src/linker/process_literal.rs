@@ -79,6 +79,20 @@ impl<'module> Linker<'module> {
         // is a `Process` out here, and stays one inside the body.
         let mut hidden_args = Vec::with_capacity(literal.hidden_args.len());
         for hidden in &literal.hidden_args {
+            // A read of another literal's binding is not a capture: that
+            // literal lifted to a module-level declaration, and the body
+            // resolves the name to its `Expr::ProcessRef` (`lower_variable`).
+            // Making it a start argument instead would not compose — the
+            // enclosing start would have to carry every definition every
+            // nested start needs, transitively — so the name never becomes a
+            // parameter here.
+            if self
+                .lifted_process_aliases
+                .borrow()
+                .contains_key(hidden.name.as_str())
+            {
+                continue;
+            }
             if !seen.insert(hidden.name.to_string()) {
                 return Err(LinkError::DuplicateProcessParam {
                     name: hidden.name.to_string(),
