@@ -832,13 +832,21 @@ impl SessionEventRegistry {
         let before = history.events.len();
         history.events.retain(|event| match &event.item {
             StreamItem::Message { message } => {
-                if let Some(turn_id) = workbench_turn_id_from_user_message_id(&message.id) {
-                    // Submitted user rows become session-scoped host state
-                    // once the turn commits anywhere in the session graph.
-                    // Until then they remain optimistic and retire with a turn
-                    // that is no longer active (FIG-1000, FIG-1062).
-                    active_turn_ids.contains(turn_id)
-                        || history.committed_user_turn_ids.contains(turn_id)
+                if workbench_turn_id_from_user_message_id(&message.id).is_some() {
+                    // A submitted user row is session-scoped host state and
+                    // survives this rebuild unconditionally. Retiring it here
+                    // for looking uncommitted raced the durable commit of the
+                    // runtime's own copy: whichever poll landed in the window
+                    // between the turn leaving `active_turn_ids` and that copy
+                    // becoming readable deleted the operator's own words, for
+                    // good. The loss stayed invisible while the committed copy
+                    // was in the current frame and rendered in the row's place,
+                    // and surfaced at the first `continue_as`, where that copy
+                    // leaves the frame and nothing is left underneath
+                    // (FIG-3143). A turn that truly produced nothing retires
+                    // through the ordered failure path, `publish_turn_failed`,
+                    // which is what FIG-1000 actually specified.
+                    true
                 } else if let Some(turn_id) =
                     workbench_turn_id_from_assistant_message_id(&message.id)
                 {
