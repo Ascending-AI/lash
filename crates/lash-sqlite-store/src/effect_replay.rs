@@ -603,11 +603,16 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     /// Writes the terminal and, for a grouped child, allocates its settlement
     /// rank — in the normative order (N1).
     ///
-    /// The fenced `UPDATE` runs first and the counter is bumped only on rowcount
-    /// 1, so a driver whose lease was taken over allocates nothing. Everything
-    /// runs inside one `BEGIN IMMEDIATE` write transaction, which is also why
-    /// this backend needs no `RETURNING`: SQLite admits one writer, so the bump
-    /// and the read-back of the bumped value cannot interleave with a sibling's.
+    /// The fenced `UPDATE` runs first and `RETURNING group_key` is what makes
+    /// "bump only on rowcount 1" structural rather than remembered: no row
+    /// returned is no bump, and the group bumped is the one the child's own row
+    /// records rather than one read back by a second query. The group bump
+    /// returns the allocated rank the same way, so the terminal write and the
+    /// rank allocation cost one statement each instead of two. This is the shape
+    /// the PostgreSQL backend already finalizes with; it is now the same on both.
+    ///
+    /// Everything still runs inside one `BEGIN IMMEDIATE` write transaction, so
+    /// the allocation cannot interleave with a sibling's regardless.
     async fn finalize(
         &self,
         fence: &EffectLeaseFence,
@@ -621,8 +626,9 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         self.conn
             .write(move |tx| {
                 let now = clock.timestamp_ms();
-                let changed = tx.execute(
-                    "UPDATE runtime_effect_replay
+                let claimed: Option<Option<String>> = tx
+                    .query_row(
+                        "UPDATE runtime_effect_replay
                      SET status = ?6,
                          outcome_json = ?7,
                          error_json = ?8,
@@ -636,52 +642,46 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                        AND lease_owner_id = ?4
                        AND lease_token = ?5
                        AND status = 'in_progress'
-                       AND lease_expires_at_ms > ?10",
-                    params![
-                        fence.scope_id.as_str(),
-                        fence.replay_key.as_str(),
-                        fence.envelope_hash.as_str(),
-                        fence.owner_id.as_str(),
-                        fence.lease_token.as_str(),
-                        status,
-                        outcome_json,
-                        error_json,
-                        now as i64,
-                        now as i64,
-                    ],
-                )?;
-                if changed != 1 {
+                       AND lease_expires_at_ms > ?10
+                     RETURNING group_key",
+                        params![
+                            fence.scope_id.as_str(),
+                            fence.replay_key.as_str(),
+                            fence.envelope_hash.as_str(),
+                            fence.owner_id.as_str(),
+                            fence.lease_token.as_str(),
+                            status,
+                            outcome_json,
+                            error_json,
+                            now as i64,
+                            now as i64,
+                        ],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(group_key) = claimed else {
                     // No counter bump: the fence moved, so this driver owns
                     // neither the child nor a rank in its group. Committing an
                     // observation is the port's documented shape; burning a
                     // number here would advance a group this driver has lost.
                     return Ok(EffectFinalizeOutcome::FenceMoved);
-                }
-                let group_key: Option<String> = tx.query_row(
-                    "SELECT group_key FROM runtime_effect_replay
-                     WHERE scope_id = ?1 AND replay_key = ?2",
-                    params![fence.scope_id.as_str(), fence.replay_key.as_str()],
-                    |row| row.get(0),
-                )?;
+                };
                 let Some(group_key) = group_key else {
                     return Ok(EffectFinalizeOutcome::Written {
                         settlement_seq: None,
                     });
                 };
-                let bumped = tx.execute(
-                    "UPDATE runtime_effect_group
-                     SET next_seq = next_seq + 1
-                     WHERE group_key = ?1",
-                    params![group_key.as_str()],
-                )?;
-                if bumped != 1 {
-                    return Err(missing_group_row(&group_key));
-                }
-                let settlement_seq: i64 = tx.query_row(
-                    "SELECT next_seq FROM runtime_effect_group WHERE group_key = ?1",
-                    params![group_key.as_str()],
-                    |row| row.get(0),
-                )?;
+                let settlement_seq: i64 = tx
+                    .query_row(
+                        "UPDATE runtime_effect_group
+                         SET next_seq = next_seq + 1
+                         WHERE group_key = ?1
+                         RETURNING next_seq",
+                        params![group_key.as_str()],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| missing_group_row(&group_key))?;
                 tx.execute(
                     "UPDATE runtime_effect_replay
                      SET settlement_seq = ?3
