@@ -25,16 +25,29 @@ impl ToolAttemptInvariantRecorder {
             .push(tool_name.to_string());
     }
 
-    fn assert_every_provider_invocation_has_tool_attempt_envelope(&self) {
+    /// `provider_tools` names the tools this recorder's `ToolProvider` owns.
+    /// Plugin tools -- `start_process` and friends, which the process surface
+    /// installs -- cross the same effect boundary but execute inside the
+    /// runtime, so they carry a ToolAttempt envelope with no provider body.
+    /// Scoping the comparison to the provider's own tools keeps the invariant
+    /// exact in both directions for every tool it can actually speak for.
+    fn assert_every_provider_invocation_has_tool_attempt_envelope(&self, provider_tools: &[&str]) {
         let counts = |values: &Mutex<Vec<String>>| {
             let mut counts = HashMap::new();
             for value in values.lock_recover().iter() {
+                if !provider_tools.contains(&value.as_str()) {
+                    continue;
+                }
                 *counts.entry(value.clone()).or_insert(0usize) += 1;
             }
             counts
         };
         let provider_body_invocations = counts(&self.provider_body_invocations);
         let tool_attempt_envelopes = counts(&self.tool_attempt_envelopes);
+        assert!(
+            !provider_body_invocations.is_empty(),
+            "the probe must invoke at least one provider tool body, or the invariant is vacuous"
+        );
         assert_eq!(
             tool_attempt_envelopes, provider_body_invocations,
             "every provider-body invocation must have a corresponding ToolAttempt envelope; \
@@ -221,7 +234,7 @@ async fn scalar_lashlang_pending_provider_invocation_crosses_tool_attempt_effect
     .await
     .expect("existing scalar Lashlang Pending contract");
 
-    recorder.assert_every_provider_invocation_has_tool_attempt_envelope();
+    recorder.assert_every_provider_invocation_has_tool_attempt_envelope(&["mock_input_request"]);
 }
 
 #[tokio::test]
@@ -265,5 +278,5 @@ finish(await handle);
         result.is_success(),
         "batch envelope contract failed: {result:?}"
     );
-    recorder.assert_every_provider_invocation_has_tool_attempt_envelope();
+    recorder.assert_every_provider_invocation_has_tool_attempt_envelope(&["envelope_probe"]);
 }

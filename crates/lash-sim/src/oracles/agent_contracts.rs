@@ -39,7 +39,7 @@ fn agent_contract_execution_fact_from_proof_event(
         }
         "agent.started_process_tool_call_graph" => {
             require_agent_final_value(result, &json!({ "ok": true }), contract)?;
-            require_agent_completed_process_entry(result, "lookup", contract)?;
+            require_agent_lifted_process_entries(result, 1, contract)?;
             require_agent_completed_labeled_resource(
                 result,
                 "Lookup app state in process",
@@ -47,7 +47,7 @@ fn agent_contract_execution_fact_from_proof_event(
             )?;
             json!({
                 "final_value": { "ok": true },
-                "completed_process": "lookup",
+                "completed_lifted_processes": 1,
                 "labeled_resource": "Lookup app state in process",
             })
         }
@@ -73,7 +73,7 @@ fn agent_contract_execution_fact_from_proof_event(
                 true,
                 contract,
             )?;
-            require_agent_completed_process_entry(result, "request_answer", contract)?;
+            require_agent_lifted_process_entries(result, 1, contract)?;
             require_agent_process_event(
                 result,
                 "process.yield",
@@ -86,13 +86,14 @@ fn agent_contract_execution_fact_from_proof_event(
                 "final_value": "approved",
                 "await_tool_call_id_present": true,
                 "suspended_before_resolution": true,
-                "completed_process": "request_answer",
+                "completed_lifted_processes": 1,
                 "process_event": "work.input_request.opened",
             })
         }
         "agent.started_process_subagent_spawn" => {
             require_agent_final_value(result, &json!({ "len": 2 }), contract)?;
-            require_agent_completed_process_entry(result, "spawn_child", contract)?;
+            require_agent_lifted_process_entries(result, 1, contract)?;
+            require_agent_completed_process_entry(result, "spawn", contract)?;
             require_agent_completed_labeled_resource(
                 result,
                 "Spawn subagent with web search",
@@ -106,7 +107,8 @@ fn agent_contract_execution_fact_from_proof_event(
             )?;
             json!({
                 "final_value": { "len": 2 },
-                "completed_process": "spawn_child",
+                "completed_lifted_processes": 1,
+                "completed_process": "spawn",
                 "labeled_resource": "Spawn subagent with web search",
                 "child_session_exec_completed_count": result.pointer("/graph_facts/child_session_exec_completed_count").cloned().unwrap_or(Value::Null),
             })
@@ -120,8 +122,7 @@ fn agent_contract_execution_fact_from_proof_event(
         }
         "agent.nested_process_start_await" => {
             require_agent_final_value(result, &json!({ "parent": "done" }), contract)?;
-            require_agent_completed_process_entry(result, "parent", contract)?;
-            require_agent_completed_process_entry(result, "child", contract)?;
+            require_agent_lifted_process_entries(result, 2, contract)?;
             require_agent_completed_labeled_node(result, "Start nested child process", contract)?;
             require_agent_min_u64(result, "/process_facts/process_count", 2, contract)?;
             require_agent_min_u64(
@@ -132,7 +133,7 @@ fn agent_contract_execution_fact_from_proof_event(
             )?;
             json!({
                 "final_value": { "parent": "done" },
-                "completed_processes": ["child", "parent"],
+                "completed_lifted_processes": 2,
                 "labeled_node": "Start nested child process",
             })
         }
@@ -409,6 +410,35 @@ pub(super) fn require_agent_completed_process_entry(
         entry_name,
         contract,
     )
+}
+
+/// A process lifted out of a cell carries no author-chosen name: the runtime
+/// labels it `__process_<digest>` from the definition it lifted (the mirrored
+/// facade scenarios snapshot exactly that label). The identifying evidence for
+/// such a process is its `@label` node/resource title plus how many completed,
+/// so that is what a contract asserts rather than a binding name the executed
+/// graph never carries.
+pub(super) fn require_agent_lifted_process_entries(
+    result: &Value,
+    expected: usize,
+    contract: &str,
+) -> Result<(), String> {
+    let entries = result
+        .pointer("/process_facts/completed_entries")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{contract} missing /process_facts/completed_entries"))?;
+    let lifted = entries
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|entry| entry.starts_with("__process_"))
+        .count();
+    if lifted == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{contract} expected {expected} completed lifted process entries, observed {lifted} in {entries:?}"
+        ))
+    }
 }
 
 /// The scenario's cell named this resource operation with an `@label` doc
