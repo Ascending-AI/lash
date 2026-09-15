@@ -760,6 +760,175 @@ finish("gap source");
 }
 
 #[test]
+fn state_snapshot_cursor_attaches_to_the_live_incarnation_without_a_gap() {
+    run_async_test_on_stack_budget("workbench-snapshot-cursor-test", || {
+        state_snapshot_cursor_attaches_to_the_live_incarnation_without_a_gap_inner()
+    });
+}
+
+/// A healthy shell must produce zero `replay_gap` between reconnects.
+///
+/// `/api/state` hands the page a cursor to attach at. When that cursor named
+/// no replay incarnation the attach was fenced into `replay_gap(unavailable)`,
+/// the page recovered from state, and the fresh snapshot handed it another
+/// unservable cursor — a re-snapshot loop per open tab with no outage anywhere
+/// (FIG-3162). This pins both halves: the snapshot cursor attaches clean, and
+/// a cursor from a genuinely different incarnation — what a replaced process
+/// leaves behind — still gaps exactly once and converges on the recovery
+/// cursor it hands back.
+async fn state_snapshot_cursor_attaches_to_the_live_incarnation_without_a_gap_inner() {
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-snapshot-cursor-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+    let process_registry = Arc::new(
+        lash_sqlite_store::SqliteProcessRegistry::open(
+            &data_dir.join("processes.db"),
+            data_dir.join("lash-sessions"),
+        )
+        .await
+        .expect("open registry"),
+    ) as Arc<dyn lash::process::ProcessRegistry>;
+    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
+    );
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-snapshot-cursor-test")
+        .complete(|_request| async {
+            Ok(text_response(
+                r#"<typescript>
+finish("snapshot cursor");
+</typescript>"#,
+            ))
+        })
+        .build()
+        .into_handle();
+    let core = explicit_durable_test_facets(&data_dir)
+        .provider(provider)
+        .model(test_model())
+        .store_factory(Arc::clone(&core_store_factory))
+        .process_registry(Arc::clone(&process_registry))
+        .build(crate::test_core_owner())
+        .expect("build core");
+    let process_observer = core
+        .processes()
+        .observer()
+        .expect("process observer configured");
+    let state = AppState {
+        core,
+        attachment_store: test_attachment_store(),
+        session_store_factory: Arc::clone(&core_store_factory),
+        trigger_store: in_memory_trigger_store(),
+        process_observer,
+        sessions: WorkbenchSessions::fresh(),
+        messages: Arc::new(Mutex::new(Vec::new())),
+        selected_model: Arc::new(Mutex::new(ModelSelection {
+            model: "test-model".to_string(),
+            model_variant: Default::default(),
+        })),
+        trace_sink: None,
+        lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
+        event_tx: SessionEventRegistry::new(16),
+        queued_work_driver: inert_queued_work(),
+        restate_ingress_url: "http://127.0.0.1:8080".to_string(),
+        restate_admin_url: "http://127.0.0.1:9070".to_string(),
+        restate_http: reqwest::Client::new(),
+        restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
+        mail_world: mail::MailWorld::new(),
+        active_turns: ActiveTurns::default(),
+        authorization: WorkbenchAuthorization::allow_all(),
+        approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
+    };
+    let session_id = SessionId::from("workbench-snapshot-cursor");
+    let session = state
+        .core
+        .session(session_id.to_string())
+        .open()
+        .await
+        .expect("open session");
+    session
+        .turn(lash::TurnInput::text("fill the live replay buffer"))
+        .require_finish()
+        .expect("require finish")
+        .run()
+        .await
+        .expect("turn");
+
+    // The snapshot a healthy tab reads, and the attach it performs next.
+    let snapshot = read_state_projection(&state, &session_id)
+        .await
+        .expect("read state projection");
+    assert!(
+        matches!(
+            session
+                .observe()
+                .subscribe_from_cursor(&snapshot.cursor)
+                .expect("attach at the snapshot cursor"),
+            lash::observe::SessionObservationSubscription::Subscribed(_)
+        ),
+        "a snapshot cursor from a healthy shell must attach without a replay gap"
+    );
+
+    // Re-snapshotting and re-attaching stays clean: the loop this fixes needed
+    // only one unservable cursor to run forever, so one clean round is the pin.
+    let resnapshot = read_state_projection(&state, &session_id)
+        .await
+        .expect("re-read state projection");
+    assert!(
+        matches!(
+            session
+                .observe()
+                .subscribe_from_cursor(&resnapshot.cursor)
+                .expect("re-attach at the snapshot cursor"),
+            lash::observe::SessionObservationSubscription::Subscribed(_)
+        ),
+        "a second snapshot must attach without a replay gap either"
+    );
+
+    // A real outage: the cursor the page holds was minted by a process that no
+    // longer exists, so its replay incarnation is gone. That must still gap,
+    // exactly once, and the recovery cursor it hands back must attach clean.
+    let dead_incarnation = lash::observe::InMemoryLiveReplayStore::default();
+    let stale_cursor = lash::observe::LiveReplayStore::current_cursor(
+        &dead_incarnation,
+        &session_id,
+        lash::observe::SessionRevision(0),
+    );
+    let recovery_cursor = match session
+        .observe()
+        .subscribe_from_cursor(&stale_cursor)
+        .expect("attach at the dead incarnation's cursor")
+    {
+        lash::observe::SessionObservationSubscription::Gap { observation, gap } => {
+            assert_eq!(
+                gap.reason,
+                lash::observe::LiveReplayGapReason::Unavailable,
+                "a cursor from a replaced process is unavailable, not trimmed"
+            );
+            observation.cursor
+        }
+        lash::observe::SessionObservationSubscription::Subscribed(_) => {
+            panic!("a cursor from a replaced process must gap")
+        }
+    };
+    assert!(
+        matches!(
+            session
+                .observe()
+                .subscribe_from_cursor(&recovery_cursor)
+                .expect("attach at the recovery cursor"),
+            lash::observe::SessionObservationSubscription::Subscribed(_)
+        ),
+        "the recovery cursor must converge, so one real outage costs exactly one gap"
+    );
+
+    drop(session);
+    drop(state);
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
 fn turn_cancel_route_requests_first_party_turn_cancellation() {
     run_async_test_on_stack_budget("workbench-turn-cancel-test", || {
         turn_cancel_route_requests_first_party_turn_cancellation_inner()
