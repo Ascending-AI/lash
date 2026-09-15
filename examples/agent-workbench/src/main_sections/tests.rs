@@ -70,6 +70,9 @@ pub(crate) use recoverable_chat_tests::{
 #[path = "tests/chat_projection_boundaries.rs"]
 mod chat_projection_boundaries_tests;
 #[cfg(test)]
+#[path = "tests/lease_free_probes.rs"]
+mod lease_free_probes_tests;
+#[cfg(test)]
 #[path = "tests/recoverable_chat_bare_prose.rs"]
 mod recoverable_chat_bare_prose_tests;
 #[cfg(test)]

@@ -25,37 +25,20 @@ pub(crate) fn state_store_request(
     }
 }
 
+/// Reads everything `/api/state` projects, without ever taking the session's
+/// execution lease.
+///
+/// This is a probe: the page polls it about twice a second and writes nothing.
+/// Opening the session to read it claimed the execution lease, so the poll
+/// raced the running turn for the one thing a turn must hold — 242 contended
+/// claims and 37 `retry_exhausted` refusals over nine turns in the judged
+/// `workbench-continue-as` run, each exhaustion surfacing to the operator as a
+/// 503 red banner. The durable store read below answers the same question from
+/// the same records and contends with nothing (FIG-3144).
 pub(crate) async fn read_state_projection(
     state: &AppState,
     session_id: &SessionId,
-    active_turn: bool,
 ) -> Result<StateProjectionReads, AppError> {
-    if !active_turn {
-        let session = state
-            .open_session_for_observation(session_id)
-            .await
-            .map_err(|error| state.session_admission_error(session_id, "api.state", error))?;
-        let snapshot = session.observe().recoverable_chat_snapshot();
-        let pending_turn_inputs = session
-            .pending_turn_inputs()
-            .await
-            .map_err(AppError::internal)?;
-        let queued_work = session.queued_work().await.map_err(AppError::internal)?;
-        let turn_input_applications = session
-            .remote_turn_input_applications()
-            .await
-            .map_err(AppError::internal)?;
-        let usage = session.usage_report();
-        return Ok(StateProjectionReads {
-            read_view: snapshot.read_view,
-            cursor: snapshot.cursor,
-            pending_turn_inputs,
-            queued_work,
-            turn_input_applications,
-            usage,
-        });
-    }
-
     let request = state_store_request(state, session_id);
     let store = state
         .session_store_factory
