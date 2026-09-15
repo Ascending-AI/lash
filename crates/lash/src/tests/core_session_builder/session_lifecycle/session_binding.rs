@@ -416,3 +416,115 @@ async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> R
     assert_eq!(after.parent_session_id(), Some("relation-parent"));
     Ok(())
 }
+
+/// ADR 0088's resume clause reaches past the store: a parked session keeps the
+/// *owner services* it was opened with, not the ones belonging to the core that
+/// resumes it.
+///
+/// `BoundSession::apply_owner` (`crates/lash/src/session_binding.rs`) is where
+/// that happens — it overwrites the receiving environment's effect host, trigger
+/// store, process definitions, child-store factory, attachment store, process-env
+/// store and work ports with the parked binding's. The sibling test above proves
+/// the store and effect-host halves through cancellation. This one proves a
+/// service the store cannot stand in for: the process registry reached through
+/// the resumed session's own admin surface. A resume that took the receiving
+/// core's registry would read an empty deployment while the source's rows stayed
+/// live and unaddressable, and every assertion that goes through the store would
+/// still pass.
+#[tokio::test]
+async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> Result<()> {
+    let owner = crate::testing::runtime_lease_owner();
+    let session_id = "owner-services-preserved";
+    let process_id = lash_core::ProcessId::from("owner-services-process");
+
+    let source_registry = Arc::new(crate::testing::TestLocalProcessRegistry::default());
+    let receiving_registry = Arc::new(crate::testing::TestLocalProcessRegistry::default());
+
+    let source =
+        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+            .provider(text_provider(
+                "owner-services-provider",
+                "owner-services-model",
+                "source-provider",
+            ))
+            .model(model_spec("owner-services-model", None, 200_000))
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
+            .process_registry(source_registry.clone())
+            .build(owner.clone())?;
+    let receiving =
+        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+            .provider(text_provider(
+                "owner-services-provider",
+                "owner-services-model",
+                "receiving-provider",
+            ))
+            .model(model_spec("owner-services-model", None, 200_000))
+            .store_factory(Arc::new(
+                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+            ))
+            .process_registry(receiving_registry.clone())
+            .build(owner)?;
+
+    let session = source.session(session_id).open().await?;
+    source_registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                &process_id,
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::session(session.observe().process_scope()),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            ),
+            &[lash_core::SessionId::from(session_id)],
+        )
+        .await?;
+    assert_eq!(
+        session
+            .admin()
+            .processes()
+            .list_all()
+            .await?
+            .into_iter()
+            .map(|process| process.process_id)
+            .collect::<Vec<_>>(),
+        vec![process_id.clone()],
+        "the opened session addresses the registry its own core supplied"
+    );
+
+    let parked = Box::pin(session.park()).await?;
+    let resumed = receiving.resume(parked).await?;
+
+    assert_eq!(
+        resumed
+            .admin()
+            .processes()
+            .list_all()
+            .await?
+            .into_iter()
+            .map(|process| process.process_id)
+            .collect::<Vec<_>>(),
+        vec![process_id.clone()],
+        "resume carries the parked binding's registry forward rather than \
+         substituting the receiving core's"
+    );
+    let receiving_registry: Arc<dyn lash_core::ProcessRegistry> = receiving_registry;
+    assert!(
+        receiving_registry
+            .list_processes(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..lash_core::ProcessListFilter::default()
+            })
+            .await?
+            .is_empty(),
+        "the row was read where it lives: resume copies nothing into the \
+         receiving core's registry"
+    );
+    Ok(())
+}
