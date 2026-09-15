@@ -7,8 +7,8 @@
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
 > same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. A step below still marked blocked stays blocked until its
-> own row is re-authored. See the
+> journals and the application data. It is verified: the phases below execute it, and no step
+> of this row is blocked any more. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 

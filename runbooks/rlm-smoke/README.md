@@ -5,6 +5,18 @@ These three live-model scenarios belong to the scripted deterministic layer gove
 then the checked-in shell oracle alone decides pass or fail. They are not browser journeys
 and receive no agent judgement.
 
+They are three separate rows, one per scenario, and `parity-matrix.toml`'s
+`rlm-smoke-file-edit-bugfix`, `rlm-smoke-missing-helper-file` and
+`rlm-smoke-config-contract-edit` are the inventory a shard counts. Read the single
+`rlm-smoke` line in `RULES.md`'s coverage matrix as a description of the gate, never as a
+row count.
+
+`cases/*/prompt.md` tells the model to stop only after the test passes, but nothing re-runs
+the oracle before the model's terminal finish: a model that claims success without a final
+`sh test.sh` still reaches `turn_succeeded: true`, and only the post-hoc `check.sh` catches
+it. So `turn_succeeded` is not the verdict — score the row on the oracle's exit alone, and
+do not read a succeeded turn as a passing row.
+
 Run the three-row gate with:
 
 ```sh

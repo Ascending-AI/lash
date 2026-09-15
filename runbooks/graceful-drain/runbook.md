@@ -24,22 +24,25 @@ The companion owns one PostgreSQL 16 container named
 (`LASH_GRACEFUL_DRAIN_POSTGRES_PORT` overrides it). It acquires the worktree gate, labels
 the container with the worktree identity, and removes the container on success or failure.
 It emits `graceful-drain e2e passed: scenarios=1` only after the contract test, live
-scenario, and artifact assertions pass.
+scenario, and artifact assertions pass. Budget for its build: the operator binary is launched
+with `cargo run --locked --release` on plain Cargo rather than kiln, so on a fresh fork this
+phase pays a cold release compile that the "one container, no tokens" framing does not imply.
 
 **No real tokens.** The in-flight turn uses a deterministic provider that parks inside one
-real LLM effect until the host releases it, then returns a fixed terminal cell in the row's
-own dialect (`LASH_RUNBOOK_DIALECT`, as RULES.md requires). Do not configure a live
-provider.
+real LLM effect until the host releases it, then returns a fixed TypeScript terminal cell. Do
+not configure a live provider, and do not export `LASH_RUNBOOK_DIALECT`: RULES.md records it
+as inert and nothing here reads it.
 
-**Two layers, and the dialect belongs to both.** The scripted layer is the companion's
-terminal cell: it is not judged for language quality, but it must be a cell the session can
-*execute*, because a foreign cell never commits and the turn then never reaches a terminal
-state — the row hangs rather than failing. The judged layer is everything above it: the
-drain procedure, the persisted dispositions, and the observed-behavior judgment, none of
-which differ by dialect. So the two dialect rows of this scenario differ in exactly one observable, the
-language of the committed cell, and agree on every drain claim. Confirm the served dialect
-from the row's own evidence (the committed cell's tag), never from the environment
-variable you set.
+**Two layers.** The scripted layer is the companion's terminal cell: it is not judged for
+language quality, but it must be a cell the session can *execute*, because a foreign cell
+never commits and the turn then never reaches a terminal state — the row hangs rather than
+failing. The judged layer is everything above it: the drain procedure, the persisted
+dispositions, and the observed-behavior judgment. [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)
+left one dialect, so there is no comparison row and nothing here varies by language. **Do not
+try to confirm a served dialect from this bundle**: no cell tag is emitted anywhere in it, and
+the `"dialect"` field is a hardcoded `"typescript"` rather than a reading, so the check is
+unsatisfiable as an independent fact. Cleanup tickets are named in RULES.md: FIG-3055,
+FIG-3022.
 
 **Fixture honesty.** The controller-owned journal in this scenario is an in-process ledger
 of active replay keys, not a claim that `NativeEffectHost` has a durable workflow journal.
@@ -101,7 +104,8 @@ Read `seeded_drain_deployment` in `03-observed.jsonl`. Use its emitted
 Require exactly one provider call parked in flight, a non-empty `journal_active`, ingress
 still accepting, and five non-terminal process rows:
 
-- this worker's started `OwnerBound` row;
+- this worker's started `OwnerBound` row (the artifact sorts the five rows alphabetically, so
+  this one is third in the file — the list here is a set, not an order);
 - this worker's started `Rerunnable` row;
 - another worker's started `OwnerBound` row;
 - a never-started `OwnerBound` row; and
@@ -120,12 +124,18 @@ journal entries; call `drain_owner_bound_work`; close the provider; flush the tr
 Read `graceful_drain_observed` and require:
 
 - `ingress_accepting` and `new_turn_admitted` are both false;
-- `in_flight_effect_completed` is true with terminal value `drained`;
+- `in_flight_effect_completed` is true with terminal value `drained` — note that
+  `in_flight_effect_completed`, `provider_closed` and `trace_flushed` are emitted as hardcoded
+  `true`, not as readings, so score them from the companion's own assertions rather than
+  crediting the field (the same shape as `request-abandon`'s `lease_cleared`);
 - `journal_active` is empty and `journal_completed` is non-empty;
 - the parked session id equals the seeded session;
 - provider close and trace flush completed; and
 - `drain_report_abandoned` contains only `drain-owner-bound-mine`; and
-- `drain_report_deferred` is empty (including no peer-settled or backend-error row); and
+- `drain_report_deferred` is empty. Deferred entries are emitted as objects
+  `{process_id, disposition}`, not bare ids, so a non-empty list will not look like the id
+  lists above it; require the array's length to be zero and, if it is not, read the
+  disposition of each entry (a peer-settled or backend-error row is still a failure here); and
 - `drain_worker_faults` is zero — the companion wires a `ProcessEventSink` and records every
   `ProcessWorkerFault` the worker reports, so a fault stranded after admission cannot hide
   behind a clean-looking drain.

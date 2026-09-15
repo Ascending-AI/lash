@@ -44,27 +44,38 @@ scripted evidence. This runbook covers only the operator and browser story.
 ## Working material
 
 - Choose `<port>` and `<fresh-data-dir>`, then boot:
-  `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=exec-blocked AGENT_WORKBENCH_DATA_DIR=<fresh-data-dir> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=exec-blocked AGENT_WORKBENCH_DATA_DIR=<fresh-data-dir> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
+  (the `just agent-workbench <port>` recipe is the same command, but it does not export
+  `CARGO_TARGET_DIR`, so source the fork's `env.sh` first).
 - The helper derives `offset=(<port>-3030)*10` — note the factor of ten — then Restate
   ingress port `8080+offset` and Restate admin port `19070+offset`. For port 3507 that is
   ingress 12850 and admin 23840, not 8557/19547. Read the ports back from the host's own
   `agent_workbench.startup` trace record (`restate_ingress_url`,
-  `restate_endpoint_addr`) rather than trusting any arithmetic, and record
-  `ADMIN=http://127.0.0.1:<derived-admin-port>`.
+  `restate_endpoint_addr`) rather than trusting any arithmetic. That record carries **no**
+  admin field, so the admin port does come from the `19070+offset` arithmetic; record
+  `ADMIN=http://127.0.0.1:<derived-admin-port>` and then *verify* it with a probe before
+  relying on it — `POST $ADMIN/query` with
+  `{"query":"SELECT count(*) as n FROM sys_invocation"}` must answer with a row.
 - UI: session id, composer, running/idle pill, the two cancel controls (**stop after step**
   `#stop`, **abort** `#abort`), transcript/code execution.
   Backend: `GET /api/state`, `POST /api/turn`, `POST /api/turn/cancel`. Disk:
-  `<fresh-data-dir>/active-turns.json` and `trace.jsonl`.
+  `<fresh-data-dir>/active-turns.json`, the durable store, and `trace.jsonl`.
+  `<fresh-data-dir>/sessions.json` is **not** disk truth for the session id: it lists the
+  launcher's own boot-created session and never the scoped session that runs the row.
 - Restate Admin SQL is `POST $ADMIN/query` with JSON `{ "query": "..." }`. Send
   `accept: application/json`; without it the endpoint answers in Arrow IPC and a JSON
   decode fails on the first byte. KILL is
   `PATCH $ADMIN/invocations/<invocation-id>/kill` with an empty body.
-- Teardown: `just agent-workbench-down <port>`.
+- Teardown: `bash scripts/agent-workbench-dev.sh down --port <port>` with the same environment.
 
 ## Phase 0 — Boot and identify the session
 
 Poll `/healthz`, open the page, and require the host's own evidence that the scenario is
-armed: the process log's `development provider scenario enabled: exec-blocked` line and the
+armed. **Phase 1 is single-shot in a process**: the dev scenario's call counter is process
+global (`examples/agent-workbench/src/failure_provider.rs`) and only call index 0 wedges, so
+a mis-fired or unobserved Phase 1 is not retryable in place — replace the process with
+`bash scripts/agent-workbench-dev.sh restart --port <port>`, which resets the counter and
+keeps the data directory, and start the phase again. Require: the process log's `development provider scenario enabled: exec-blocked` line and the
 `agent_workbench.startup` trace record, whose `dev_provider_scenario` is `exec-blocked` and
 whose `model.model` is `dev/failure-paths`. The page itself renders the model selector as
 "provider default" and never prints the model id, so do not gate on the rendered id. Record the rendered, API, and disk session
@@ -116,8 +127,13 @@ Screenshot `02-killed-route-still-visible.png`.
 
 ## Phase 3 — Use Stop to prune the dangling route honestly
 
-Press **abort** (`#abort`) and capture `POST /api/turn/cancel`. Keep the browser
-open for at least 15 seconds after the click so the page's own re-render is captured.
+Press **abort** (`#abort`) and capture `POST /api/turn/cancel`. The unknown-terminal note is
+a plain `div.note` appended by `renderNote`, not part of the state projection, so the next
+re-render of the timeline from `/api/state` deletes it — measured at about one second on
+screen, and the appearance itself lags the click by several seconds. Do **not** wait fifteen
+seconds and then look: arm a DOM-mutation observer on the timeline before the click and
+record the note's text and its insert/remove timestamps, or screenshot within about a second
+of its appearance. Waiting for the re-render destroys the artifact the gate asks for.
 Require exactly one cancellation receipt for the Phase 1 address with:
 
 - HTTP 202 and `accepted: true`, with a gate outcome of `requested` or `already_requested`;
@@ -145,7 +161,7 @@ Screenshot `04-same-session-recovered.png`; save state and trace rows as
 
 ## Phase 5 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the Workbench and its port-derived
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` and confirm the Workbench and its port-derived
 Restate container are gone.
 
 | Item | Objective gate | Verdict | Evidence |

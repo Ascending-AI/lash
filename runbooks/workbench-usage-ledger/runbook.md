@@ -7,8 +7,8 @@
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
 > same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. A step below still marked blocked stays blocked until its
-> own row is re-authored. See the
+> journals and the application data. It is verified: the phases below execute it, and the
+> block that once stood in front of them is lifted. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
@@ -34,10 +34,9 @@ provider-reported counters, canonical arithmetic, and equality between surfaces.
 4. **Totals dominate rows/calls.** API session totals must equal the sum of
    `by_source_model` rows and be greater than or equal to this turn's completed-call sum.
    Input and output must be non-zero when the trace reports calls.
-5. **Restart equality is exact.** The `agent-workbench-restart` phase is blocked by FIG-1164.
-   Once a verified immutable same-configuration host restart exists, require the full
-   `/api/state.usage` JSON object and rendered total/input/output strings to equal the
-   pre-restart values. Monotonic-but-different is a failure when no new call ran.
+5. **Restart equality is exact.** After the non-destructive same-configuration replacement,
+   require the full `/api/state.usage` JSON object and rendered total/input/output strings to
+   equal the pre-restart values. Monotonic-but-different is a failure when no new call ran.
 6. **A saturated report is an operator signal.** `/api/state.usage.saturated == true`
    means display aggregation clamped at least one counter. Preserve the raw report and
    durable rows for RCA; do not treat the displayed maximum as an exact billable total.
@@ -50,10 +49,10 @@ overflowing, unconfirmed row remains in the resident session's process-local
 retry the turn in place and do not edit the durable token ledger.
 
 Operator remediation is to replace the resident Lash session/runtime and reconstruct it
-from the last committed `RuntimePersistence` state. For Workbench, the historical
-`just agent-workbench-restart <port>` command with the same data directory and store is blocked
-by FIG-1164; do not execute it until a verified immutable same-configuration host restart exists.
-Cold reconstruction clears only the non-durable `shared_token_ledger`; the committed
+from the last committed `RuntimePersistence` state. For Workbench, that is
+`bash scripts/agent-workbench-dev.sh restart --port <port>` with the same data directory and
+store — the verified non-destructive same-configuration replacement, which is the remedy this
+section offers and is not blocked. Cold reconstruction clears only the non-durable `shared_token_ledger`; the committed
 `RuntimeSessionState.token_ledger`, graph, checkpoint, and session identity remain the
 store-authoritative state. If cold reconstruction itself reports an overflow, the bad
 rows are already durable: stop, retain the database evidence, and escalate for data
@@ -61,7 +60,9 @@ repair rather than looping restarts.
 
 ## Working material
 
-- First run `just agent-workbench-attachment-usage-gate <port>`. Its deterministic
+- First run `just agent-workbench-attachment-usage-gate <gate-port>` on **its own port**,
+  never the browser stack's: the gate derives its managed Postgres port and its container
+  names from the port it is given and holds the worktree gate while it runs. Its deterministic
   provider reports fixed non-zero usage, the gate reconciles one `llm_call_completed`
   record, reconstructs the core, and executes against both SQLite and Postgres
   session-store backends on a managed database inside the worktree block. Its
@@ -69,18 +70,29 @@ repair rather than looping restarts.
   `scripts/worktree-gate-env.sh`, selected by the last decimal digit of `<port>`
   (`3042` selects `LASH_E2E_PORT_BASE + 2`).
 - Boot with a fresh directory:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
+  (the `just agent-workbench <port>` recipe is the same command, but it does not export
+  `CARGO_TARGET_DIR`, so source the fork's `env.sh` first).
   Require `OPENROUTER_API_KEY`; missing credentials are a harness gap → Abort. Teardown is
-  `just agent-workbench-down <port>`.
+  `bash scripts/agent-workbench-dev.sh down --port <port>` with the same environment.
 - UI truth: left-rail **usage** total and **tokens** input/output rows, transcript,
   running/idle pill.
 - API truth: `GET /api/state`, especially `usage.usage`, `usage.by_source_model`, and
   `usage.entry_count`.
-- Disk truth: `<data-dir>/trace.jsonl` and the selected SQLite/Postgres session store.
+- Disk truth: `<data-dir>/trace.jsonl` and the selected SQLite/Postgres session store — for
+  SQLite that is `<data-dir>/lash-sessions/durable-core.db`. `<data-dir>/sessions.json` is
+  **not** disk truth for this row: it lists the launcher's own boot-created session and never
+  the URL-supplied session that owned the turn, so a driver that reads it fails Phase 0 on a
+  correct system.
 
 ## Phase 0 — Boot and capture the baseline
 
-Poll `/healthz`, open the browser, and require the rendered/API/disk session ids to agree.
+Poll `/healthz`, open the browser, and require the rendered session id to agree with the
+durable store's. `/api/state` carries no session field — its keys are `active_turns`,
+`messages`, `observation`, `pending_approvals`, `pending_turn_inputs`, `product_events`,
+`queued_work`, `settings`, `transcript`, `turn_failure_settlements`,
+`turn_input_applications`, `usage` — so read the id from `settings.session_id` and from the
+durable store, not from a top-level API field.
 Save `/api/state` as `00-baseline-state.json`, record the current trace boundary, and
 require the rendered **usage** and **tokens** values to equal the baseline report (normally
 zero in a fresh directory). Screenshot `00-baseline.png`.
@@ -102,7 +114,9 @@ expected rendered values.
 
 From trace records after the Phase 0 boundary, select every `llm_call_completed` record for
 the marker's turn and save them as `02-llm-calls.json`. Require at least one completed call
-and a positive canonical call sum. Then gate:
+and a positive canonical call sum. `llm_call_completed.response.usage` carries the six
+counters but **no** `total_tokens` — compute the canonical sum from them (golden rule 2),
+and do not read a null field. Then gate:
 
 - `/api/state.usage.entry_count == usage.by_source_model.length`;
 - the canonical session total equals the sum of every `by_source_model[].usage.total_tokens`;
@@ -110,6 +124,11 @@ and a positive canonical call sum. Then gate:
 - the session total is at least the sum of the selected trace call usage;
 - report input total (uncached + cache read + cache write) and output are non-zero wherever
   the selected calls report non-zero values;
+- `/api/state.usage.usage.total_tokens` equals the canonical sum of that same object's
+  input, output, cache-read and cache-write counters. This is a separate gate from the one
+  below on purpose: `renderUsageCounters` computes `#usageTotal` from the four parts and
+  never reads `total_tokens`, so comparing the render to the server's total would agree even
+  if the server's own total had drifted from its own parts;
 - rendered **usage** is the locale-formatted API `total_tokens` plus `total`;
 - rendered **tokens** is the locale-formatted API input total plus `in ·`, followed by API
   `output_tokens` plus `out`.
@@ -119,9 +138,8 @@ disagreement is a contract violation → Abort/RCA.
 
 ## Phase 3 — Replace the process and prove persistence
 
-**Blocked by FIG-1164.** Retain `just agent-workbench-restart <port>` as the historical
-process-replacement command, but do not execute it until a verified immutable
-same-configuration host restart exists. After that mechanism runs, poll `/healthz`. Require the
+Run `bash scripts/agent-workbench-dev.sh restart --port <port>`, the verified
+non-destructive same-configuration replacement, then poll `/healthz`. Require the
 PID to change while session identity remains fixed. Reload the browser without submitting a turn.
 Save
 the new state as `03-restarted-state.json` and require its complete `usage` object to equal
@@ -133,8 +151,8 @@ solely because of restart/state loading.
 
 ## Phase 4 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the workbench and its managed services
-are gone.
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's environment and
+confirm the workbench and its managed services are gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

@@ -7,8 +7,8 @@
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
 > same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. A step below still marked blocked stays blocked until its
-> own row is re-authored. See the
+> journals and the application data. It is verified: the phases below execute it, and the
+> block that once stood in front of them is lifted. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
@@ -57,30 +57,39 @@ cross-surface identity, not the quality of the model's image description.
    inline-source fields and are intentionally absent after this normalization.
 3. **Compare bytes, not availability.** Save the source and both retrievals; SHA-256 and
    byte length must match exactly before and after restart.
-4. **Replace the web process (blocked by FIG-1164).** The historical command was
-   `just agent-workbench-restart <port>`. Do not execute it until a verified immutable
-   same-configuration host restart exists; then require the PID to change while the data
-   directory and session id remain unchanged.
+4. **Replace the web process.** Run `bash scripts/agent-workbench-dev.sh restart --port
+   <port>` (equivalently `just agent-workbench-restart <port>`, after sourcing the fork's
+   `env.sh`), the verified non-destructive same-configuration replacement named in this
+   runbook's header. Require the PID to change while the data directory and session id
+   remain unchanged.
 5. **The attachment facet is the same in both session modes.** The workbench always wires
    `FileAttachmentStore`; SQLite/Postgres changes the session ledger, not attachment blob
    storage. The deterministic companion gate reopens that file store and separately runs
    the usage restart assertion against both session-store backends.
 6. **The transcript image is the attachment contract.** The matching user row must contain
-   exactly one linked image whose `data-attachment-id`, `src`, and link target agree with
-   the upload response. A filename pill or successful provider call does not substitute for
-   a rendered image.
+   exactly one `a.message-attachment[data-attachment-id]` wrapping exactly one `<img>` whose
+   `src` equals the link's `href`; the id on the link and the URL on both must agree with the
+   upload response. The id lives on the link, not on the image —
+   `renderMessageAttachments` (`examples/agent-workbench/assets/index.html`) sets
+   `link.dataset.attachmentId` and gives the `<img>` only `src` and `alt`. A filename pill or
+   successful provider call does not substitute for a rendered image.
 
 ## Working material
 
-- First run `just agent-workbench-attachment-usage-gate <port>`. It is model-free and
+- First run `just agent-workbench-attachment-usage-gate <gate-port>` on **its own port**,
+  not the browser stack's: the gate derives its managed Postgres port and its container
+  names from the port it is given and holds the worktree gate while it runs, so sharing one
+  number serialises the row and invites a container-name collision. It is model-free and
   asserts upload → reference → persist → retrieve, non-zero internally consistent usage,
   JSONL `llm_call_completed` agreement, and exact usage after reconstruction. Its managed
   Postgres stays inside the worktree block at offset `+0..+9`, selected by the last decimal
   digit of `<port>` (`3042` selects `+2`); its container name also derives from `<port>`.
 - Boot the browser scenario with a fresh directory:
-  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
+  (the `just agent-workbench <port>` recipe is the same command, but it does not export
+  `CARGO_TARGET_DIR`, so source the fork's `env.sh` first).
   Require `OPENROUTER_API_KEY`; missing credentials are a harness gap → Abort. Teardown is
-  `just agent-workbench-down <port>`.
+  `bash scripts/agent-workbench-dev.sh down --port <port>` with the same environment.
 - Prepare a valid PNG no larger than 1 MiB and record its filename, byte length, and
   SHA-256 in the artifact directory.
 - UI truth: **attach png**, its attached filename state, transcript, running/idle pill.
@@ -101,8 +110,12 @@ Poll `/healthz`, open the browser, and require the rendered session id to equal
 
 Choose **attach png** and select the prepared file while capturing the
 `POST /api/attachments` response. Poll until the control renders
-`attached · <filename>`. Require HTTP 200, MIME `image/png`, exact source byte length, a
-non-empty content-addressed `attachment.id`, and a `retrieve_url` containing that id.
+`attached · <filename>`. Require HTTP 200, `attachment.media_type` `image/png`,
+`attachment.byte_len` equal to the source byte length, a non-empty content-addressed
+`attachment.id`, and a `retrieve_url` containing that id. Note the envelope: `retrieve_url`
+is a **sibling** of `attachment`, not a field inside it, the filename is `attachment.label`,
+and `attachment.type_metadata` carries `{type, width, height}`. A driver reading `mime` or
+`bytes_len`, or reading `retrieve_url` inside `attachment`, gets `None`.
 
 Save the response as `01-upload.json` and screenshot `01-attached.png`. GET the returned
 URL, require `content-type: image/png` and the matching `x-lash-attachment-id`, save the
@@ -137,10 +150,17 @@ Complete the three-layer attachment cross-check before continuing:
 From the matching trace turn, save the `llm_call_started` record as
 `02-provider-request.json`. Require one request attachment with `source: stored` and MIME
 `image/png`, and require the request's rendered attachment descriptor to contain the upload
-id as its `reference`. Save the matching `agent_workbench.api.attachment.uploaded` record as
-`02-upload-trace.json` and require its id, MIME, and byte length to match the source. Save
-the `provider_request` record with the same `llm_call_id` as `02-provider-wire.json`; require
-a non-empty serialized body with a SHA-256 digest. These correlated records prove the exact
+id as its `reference`. Save the matching upload record as `02-upload-trace.json` — it is a
+`type: "custom"` record with `name: "agent_workbench.api.attachment.uploaded"`, and its
+payload fields are `attachment_id` / `byte_len` / `mime` / `name` — and require its id, MIME,
+and byte length to match the source. The host's `attachment_acceptance` snapshot this runbook
+spends four paragraphs on is observable on the sibling `custom` record
+`agent_workbench.api.turn.request`; save it too if the acceptance contract is in question.
+Save the `provider_request` record with the same `llm_call_id` as `02-provider-wire.json`;
+its fields are nested under `event` (`body_len`, `body_sha256`,
+`body_json_omitted_reason`). On a real attachment turn the body itself is **expected to be
+absent** with `body_json_omitted_reason: "size_limit"`, so require a positive `body_len` and
+a non-empty `body_sha256` rather than a serialized body. These correlated records prove the exact
 stored source reached a real provider request while the upload/retrieval/blob checks prove
 its content facts. A plausible visual answer without this trace chain is not a pass. Save
 `/api/state` as `02-state.json` and screenshot the settled scrolled transcript as
@@ -148,9 +168,8 @@ its content facts. A plausible visual answer without this trace chain is not a p
 
 ## Phase 3 — Replace the process and retrieve again
 
-**Blocked by FIG-1164.** Retain the historical `just agent-workbench-restart <port>` step as
-the required process-replacement geometry, but do not execute it until a verified immutable
-same-configuration host restart exists. Then poll `/healthz`, require a changed PID and
+Run `bash scripts/agent-workbench-dev.sh restart --port <port>`, the verified
+non-destructive same-configuration replacement. Then poll `/healthz`, require a changed PID and
 unchanged rendered/API/disk session id, reload the page, GET the original `retrieve_url`,
 and save the body as `03-after-restart.png`. Require its id header, byte length, and
 SHA-256 to match both the source and `01-before-restart.png`; the content-addressed image
@@ -168,8 +187,8 @@ violation → Abort/RCA.
 
 ## Phase 4 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the workbench and its managed services
-are gone.
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` with the row's environment and
+confirm the workbench and its managed services are gone.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

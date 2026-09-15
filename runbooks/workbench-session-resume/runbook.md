@@ -7,8 +7,8 @@
 
 > **Workbench process replacement (FIG-1164, FIG-3035).** The non-destructive
 > same-configuration restart is `just agent-workbench-restart <port>`, which keeps the Restate
-> journals and the application data. A step below still marked blocked stays blocked until its
-> own row is re-authored. See the
+> journals and the application data. It is verified: the phases below execute it, and the
+> block that once stood in front of them is lifted. See the
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
@@ -21,18 +21,20 @@ different from active-turn recovery: every pre-restart turn must settle before r
 `replay-route-change` development LLM Provider and initial model
 `dev/replay-route-a`. It returns numbered terminal values and mints one opaque reasoning
 replay carrier per call, so the continuity and route-filter gates cannot pass by
-coincidence. The run is still browser-driven and must be judged by `gpt-5.6-sol`; retain
-its prompt and verdict with the run artifacts.
+coincidence. The run is browser-driven but deterministic — every response is a fixture
+string and nothing in the scenario depends on model behaviour — so it is funded at the
+`deterministic` / `scripted-provider` rung `parity-matrix.toml` gives it, and any judge may
+drive it. Retain the driving prompt and verdict with the run artifacts.
 
 ## Scenario-specific golden rules
 
 1. **Restart only committed history.** Wait for the idle pill and an empty
    `/api/state.active_turns` after each pre-restart turn. Uncommitted streamed prose is not
    evidence for this scenario.
-2. **The replacement process starts cold (blocked by FIG-1164).** The historical command was
-   `just agent-workbench-restart <port>`; do not execute it until a verified immutable
-   same-configuration host restart exists. Reloading only the page, restarting Restate, or
-   replacing the data directory does not satisfy this gate.
+2. **The replacement process starts cold.** Run `bash scripts/agent-workbench-dev.sh restart
+   --port <port>`, the verified non-destructive same-configuration replacement named in this
+   runbook's header. Reloading only the page, restarting Restate, or replacing the data
+   directory does not satisfy this gate.
 3. **The store is authoritative.** Before and after restart, the active `graph_nodes`
    path must contain every committed user and assistant nonce: use
    `<data-dir>/lash-sessions/durable-core.db` in SQLite mode or `lash_graph_nodes` in the managed
@@ -46,8 +48,13 @@ its prompt and verdict with the run artifacts.
    the rendered session id and `<data-dir>/session-id` remain unchanged.
 6. **Composition re-emits after cold reconstruction.** Save the final pre-restart
    `composition_changed` snapshot. The first post-restart model request must emit another
-   `composition_changed`; its exact `rendered_system_prompt` and ordered `tool_schemas`
-   must match the saved snapshot when the host changed neither input.
+   `composition_changed`; its `rendered_system_prompt` must match the saved snapshot when the
+   host changed neither input — **excluding the plugin's `prepared N message(s) from M
+   committed` counter line**, which is a function of the resident history and therefore
+   cannot be equal across a cold reconstruction. Exact equality including that line is
+   unsatisfiable by construction. `tool_schemas` is `[]` on every `composition_changed`
+   record this scenario emits, so comparing it proves nothing; check it only as a
+   both-empty assertion and do not report it as an independent witness.
 7. **Replay routing stays observable.** Provider-owned response-text, reasoning, and tool
    replay state may be served only by the exact LLM Provider replay route that minted it:
    provider kind, normalized configured endpoint, and model. The runtime preserves neutral text
@@ -62,17 +69,19 @@ its prompt and verdict with the run artifacts.
 ## Working material
 
 - Boot with a fresh durable directory:
-  `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=replay-route-change OPENROUTER_MODEL=dev/replay-route-a AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=replay-route-change OPENROUTER_MODEL=dev/replay-route-a AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`
+  (the `just agent-workbench <port>` recipe is the same command, but it does not export
+  `CARGO_TARGET_DIR`, so source the fork's `env.sh` first).
   Gate `GET /healthz` → 200. The entire Restate stack is port-isolated by default: the
   helper derives its endpoint, ingress, admin port, node port, and container name from
   `<port>`, so concurrent runs on distinct workbench ports do not need manual Restate
   overrides. Teardown:
-  `just agent-workbench-down <port>`.
+  `bash scripts/agent-workbench-dev.sh down --port <port>` with the same environment.
 - Postgres boot variant:
-  `AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
+  `AGENT_WORKBENCH_POSTGRES=1 AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 bash scripts/agent-workbench-dev.sh up --port <port>`.
   Gate the startup trace's `store_backend: "postgres"`. The helper owns a port-isolated
   Postgres 16 container and marker file. The acceptance contract preserves it across the
-  currently blocked `agent-workbench-restart` phase and removes it on
+  `agent-workbench-restart` phase and removes it on
   `agent-workbench-down`. For store evidence,
   query `lash_graph_nodes` through the managed database coordinates recorded as
   `postgres_host`/`postgres_port` in the run metadata (managed credentials are
@@ -108,7 +117,9 @@ its prompt and verdict with the run artifacts.
 ## Phase 0 — Boot and identify the durable session
 
 Boot with the exact deterministic-provider environment above, poll `/healthz`, and open the
-browser. Require the model control to render `dev/replay-route-a` and retain the startup log row
+browser. The model control is the text input `#modelInput` (there is no `#model` element and
+the page never renders the model id anywhere else). Require `#modelInput` to render
+`dev/replay-route-a` and retain the startup log row
 that names `replay-route-change`; any other provider/model is a harness gap → Abort. Record the
 workbench PID, rendered session id,
 `/api/state.settings.session_id`, and `<data-dir>/session-id`; require all three ids to
@@ -131,9 +142,8 @@ Save the final pre-restart `composition_changed` record as
 
 ## Phase 2 — Replace the web process and reconstruct the transcript
 
-**Blocked by FIG-1164.** Retain `just agent-workbench-restart <port>` as the historical
-process-replacement command, but do not execute it until a verified immutable
-same-configuration host restart exists. After that mechanism runs, poll `/healthz` until ready.
+Run `bash scripts/agent-workbench-dev.sh restart --port <port>`, the verified
+non-destructive same-configuration replacement, then poll `/healthz` until ready.
 Require a new PID, the unchanged rendered/API/disk session id, and the same idle state. Reload the
 browser and gate all of the following before sending another turn:
 
@@ -160,9 +170,11 @@ serialized request messages to contain:
 - the third user marker.
 
 Extract the first post-restart `composition_changed` record to
-`03-composition-reopen.json`. Require exact equality of its
-`rendered_system_prompt` and ordered `tool_schemas` with
-`01-final-composition.json`; compare those fields directly, not only the fingerprint.
+`03-composition-reopen.json`. Require its `rendered_system_prompt` to equal
+`01-final-composition.json`'s with the plugin's `prepared N message(s) from M committed`
+counter line excluded from both sides (golden rule 6); compare the field directly, not only
+the fingerprint. `tool_schemas` is `[]` on both records — assert that and move on; it is not
+an independent witness.
 
 Also extract any `provider_replay_dropped` records after the boundary to
 `03-provider-replay-drops.json` and require the array to be empty: all replay state in this
@@ -185,9 +197,14 @@ provider-owned signature starts with `FIG1374-OPAQUE-REPLAY-` to
 provider `workbench-dev-failure`, endpoint `workbench-dev-failure`, and model
 `dev/replay-route-a`. Record the current end offset or record count of `trace.jsonl`.
 
-In the browser's model control, replace `dev/replay-route-a` with
-`dev/replay-route-b`; leave the provider kind and endpoint unchanged. Submit a fourth turn with
-marker `FIG425-RESUME-ROUTE-SWITCH-<run-id>` and poll until idle. Require the assistant result
+Set `#modelInput` to `dev/replay-route-b` **and submit the turn without an intervening
+projection snapshot**, leaving the provider kind and endpoint unchanged. The control is not a
+persisted setting: nothing submits `#modelConfig`, the value is read only at send time
+(`selectedModelPayload()`), and any `/api/state` snapshot that lands in between rewrites the
+input back from `state.settings.model`. A driver that types the model and then waits sends
+the *old* route and sees zero drops. The witness that the switch landed is the `POST
+/api/turn` request body — capture it and require it to name `dev/replay-route-b`. Submit a
+fourth turn with marker `FIG425-RESUME-ROUTE-SWITCH-<run-id>` and poll until idle. Require the assistant result
 `FIG-1374 replay-route response 4` and eight committed user/assistant rows.
 
 From trace rows after the Phase 4 boundary:
@@ -201,9 +218,12 @@ From trace rows after the Phase 4 boundary:
 - save `provider_replay_dropped` rows as `04-provider-replay-drops.json` and require at least
   one `reasoning` / `foreign_route` row whose minting route model is
   `dev/replay-route-a` and serving route model is `dev/replay-route-b`;
-- save the model-call record exposed by the workbench product-event/operator surface as
+- save the model-call record exposed by the workbench product-event surface as
   `04-model-call-record.json` and require its `replay_drops` contains the same foreign-route
-  evidence.
+  evidence. It lives at `/api/state.product_events.events[]` filtered to
+  `type == "model_call_recorded"` — `product_events` is an object with `cursor` and `events`,
+  not a top-level list — and the rendered `#executionScorecard` does **not** show replay
+  drops, so do not look for them there.
 
 Any missing minted carrier, missing pre-filter candidate, absent trace drop, absent operator-surface
 drop, or route mismatch is a contract violation → Abort/RCA. Screenshot the model control,
@@ -211,7 +231,7 @@ terminal response, and execution scorecard as `04-route-filtered.png`.
 
 ## Phase 5 — Teardown and score
 
-Run `just agent-workbench-down <port>` and confirm the workbench and its Restate
+Run `bash scripts/agent-workbench-dev.sh down --port <port>` and confirm the workbench and its Restate
 container are gone.
 
 | Item | Objective gate | Verdict | Evidence |
