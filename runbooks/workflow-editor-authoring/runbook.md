@@ -77,7 +77,11 @@ changes when the lens's printer changes, not with this arc.
 - Browser affordances: workflow selector; **Steps** / **Canvas** tabs; rail **+** menus;
   Canvas **+ Add node · main** palette; editable value chips; `</>` raw-expression
   toggle; node `⤴` scope menu; `▲` / `▼` order controls; **Save**; **Play**; canonical
-  source; Display panel and node status badges. Discover stable selectors yourself.
+  source; Display panel and node status badges. Discover stable selectors yourself: the
+  frontend carries no `data-testid` anywhere, so every selector is structural or textual
+  and must be derived from the served DOM. Two affordances this runbook gates are unnamed
+  in the markup and need a text- or class-derived selector in particular: the Display
+  panel's "no run yet" state (Phase 1) and its done indicator (Phase 6).
 - Backend truth: `GET /workflows`, `GET /operations`, `POST /project`, `GET /workflow`,
   `POST /workflow/select`, `POST /workflow`, and the `POST /run` SSE stream.
 - Browser sidecar truth: localStorage key `lash.wfgraph.positions.v1`. Positions never
@@ -100,9 +104,12 @@ After readiness, gate these API facts before opening the editor:
   const probe = async () => { return 0; };
   ```
 
-  through `POST /project` returns 200 with the canonical source, one process and one terminal
-  **inside a `document` envelope** — the response is `{"document": {…}}`, not the document at
-  top level — without changing `GET /workflow`'s version. A lashlang probe returns 422
+  through `POST /project` returns 200 with the canonical source and, inside a `document`
+  envelope, one process, one terminal and one `computation` node binding `probe` — the
+  `const` declaration is itself a node, so "one process and one terminal" is the shape of
+  the body, not the whole node list. The envelope matters too: the response is
+  `{"document": {…}}`, not the document at top level. None of this changes
+  `GET /workflow`'s version. A lashlang probe returns 422
   `invalid_source`; that refusal is the current contract, not a gap.
 
 Open the browser, gate the workflow selector, Steps view, Save/Play controls, canonical
@@ -110,12 +117,23 @@ source pane, and Display panel. Screenshot `00-ready.png`.
 
 ## Phase 1 — Establish the Blank baseline
 
-Select **Blank workflow** through the browser and capture `POST /workflow/select`. Poll
-until all three surfaces agree:
+Select **Blank workflow** through the browser and capture `POST /workflow/select`.
+
+**Select exactly once for the whole run.** `POST /workflow/select` bumps the stored version
+by one on every call, whether or not the selected workflow changes (observed 5 → 6 → 7 on
+three consecutive selects). Phase 5's "version is exactly baseline + 1" is true only of a
+run that selects once, and every save carries the version it read, so a second select
+between the baseline read and the save makes that save stale. Record the version this
+select returns as the baseline and do not re-select to recover from anything.
+
+Poll until all three surfaces agree:
 
 - the selector renders **Blank workflow**. Steps does **not** show "only the Finish card":
   it renders the `blank` process under a **BACKGROUND TASKS** rail (Finish nested inside it)
-  and a `Save as blank` data card in the **STEPS** rail. Gate that shape, not a bare Finish;
+  and, in the **STEPS** rail, one card whose chips read `Save` | `as` |
+  `async () => { return 0; }` — the card that binds the process to the name `blank`. Its
+  node kind is `computation`; the rail label is assembled from the chips, so do not gate on
+  a literal string `Save as blank`. Gate that shape, not a bare Finish;
 - the select response and fresh `GET /workflow` have identical version/source/nodes, with the
   canonical source the TypeScript process-arrow form above (whitespace-insensitive) and
   node types exactly `{computation, process, terminal}`;
@@ -125,8 +143,12 @@ Record the baseline version and ids in `01-blank.json`. Screenshot `01-blank.png
 
 ## Phase 2 — Author a value-typed action in Steps
 
-In Steps, open **Add a step at the start**, choose **Show message**, open its settings,
-and set `text` to the literal `Built from blank`. Leave the card before Finish. Gate:
+In Steps, add the card **inside the `blank` process**, before Finish. Use the
+**BACKGROUND TASKS** rail's "Add a step here" insertion dot at rail slot 0 or 1 — not the
+**STEPS** rail's **Add a step at the start**, which exists only on the main rail and lands
+the card in top-level `main`, where Phase 5's "all in `process blank`" can never hold.
+Choose **Show message**, open its settings, and set `text` to the literal
+`Built from blank`. Gate:
 
 - the Steps card visibly renders Show message and the configured literal;
 - the browser draft has a new temporary node id and the Save control is enabled;
@@ -155,8 +177,11 @@ Switch briefly to Steps and require the same order and values, then return to Ca
 On Finish, use the raw-expression toggle and replace `0` with malformed `1 +`. Commit the
 field and press Save while capturing the request and response. Require:
 
-- `POST /workflow` returns 422 and the JSON error satisfies golden rule 3. The owning node
-  and field are **nested**: `error.code == "invalid_expression"`, with `error.details.nodeId`
+- `POST /workflow` returns 422 and the JSON error satisfies golden rule 3. The response
+  names only the **first** offending node it encounters, so with more than one bad field in
+  the draft the reported `nodeId` need not be the one just edited; break exactly one field
+  here so the error is attributable. The owning node and field are **nested**:
+  `error.code == "invalid_expression"`, with `error.details.nodeId`
   (an unsaved node reads `new:<n>`) and `error.details.field == "expression"`, plus
   `error.details.reason`. Do not look for `error.nodeId` at the top level;
 - the UI renders `invalid edit · invalid_expression`, names the message and node, and
@@ -170,8 +195,14 @@ literal `"done"`. Do not Save yet.
 ## Phase 5 — Save and reconcile ids, position, and selection
 
 Select Show message and drag it horizontally far enough to create a distinct stored
-position without changing its vertical order. Record its old id, selected state,
-bounding box, viewport transform, and localStorage position. Capture the outgoing Save
+position without changing its vertical order. "Far enough" is small: a node inside `blank`
+is clamped by Svelte Flow's parent extent, so a node boxed at `[244, 631, 345, 209]` inside
+a parent whose right edge is 614 has roughly 31px of travel. A ~30px drag (244 → 275)
+is a distinct position and is all the extent allows; a longer drag is clamped to the same
+place, not refused, so do not read a short delta as a failed drag.
+
+Record its old id, selected state, bounding box, viewport transform, and localStorage
+position. Capture the outgoing Save
 document, press Save, and require a 200 `SaveWorkflowResponse`.
 
 Gate all of the following before judging the UI:
@@ -180,7 +211,11 @@ Gate all of the following before judging the UI:
   exists in the returned document;
 - the returned source has Set progress before Show message before `finish "done"`, all in
   `process blank`, and its version is exactly baseline + 1 (the rejected save did not
-  create a version);
+  create a version, and Phase 1 selected exactly once). A save posted against a version the
+  server has moved past returns 409 `version_conflict` instead; that is the correct refusal,
+  not a defect, and it means the run took an extra `POST /workflow/select` somewhere. Re-read
+  `GET /workflow`, restart the row from Phase 1 with a fresh baseline, and do not retry the
+  save with the new version — the draft was authored against the old one;
 - fresh `GET /workflow` equals the returned document, and re-projecting the returned
   source through `POST /project` has the same canonical source and graph shape;
 - the source pane renders the new version/source and the UI reports `saved as v<N>`;
