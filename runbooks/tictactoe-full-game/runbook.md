@@ -46,9 +46,25 @@ The model plays O however it likes — do not gate on which cell it picks or its
   200.
 - **UI affordances** (discover selectors yourself; ids current at time of writing):
   `#newChat`, the chat list `#chats`, the 3×3 board `#board` of `button.cell` elements
-  with `aria-label="cell 0"`…`"cell 8"` (index map: 0 top-left … 4 center … 8
-  bottom-right), the status line `#gameStatus` (`X to move` / `O to move` / terminal),
-  the transcript `#messages`, the composer `#text` + `#send`, `#resetBoard`.
+  with `aria-label="cell 0"`…`"cell 8"`, the status line `#gameStatus` (`X to move` /
+  `O to move` / terminal), the hint line `#gameHint` directly under it, the transcript
+  `#messages`, the composer `#text` + `#send`, `#resetBoard`.
+- **`#gameHint` is a gateable affordance, not decoration.** It is the element that explains
+  the current state in a full sentence, and it has exactly three forms: the terminal
+  sentence plus `Reset the board to start another round.`, `Agent is thinking and may call
+  board tools.` while a turn is in flight, and `Your turn: click any empty square.` /
+  `Agent turn: waiting for O to play.` otherwise. It is the most legible witness for both
+  the mid-turn lock of Phase 2 step 3 and the terminal of Phase 3.
+- **`#resetBoard` is enabled on a terminal board** — it is gated on `busy || !activeChat`,
+  not on the game being live — so "everything is disabled at the end" is true of the nine
+  cells and not of the page. Do not gate on it being disabled, and do not click it: it
+  discards the game whose terminal state is this row's evidence.
+- **Three cell vocabularies exist and they do not match.** The transcript row Phase 2 gates
+  on is built from the UI's own space-separated names — `top left`, `top middle`, `center`,
+  `bottom right`. The `/board` endpoint's `index_map` and the `board.play` tool contract
+  both use a hyphenated form — `0 top-left`, `1 top-middle`, `8 bottom-right`. Gate the
+  transcript against the space-separated form or compare semantically; a literal
+  `I played X in the top-right.` built from `index_map` never matches a correct render.
 - **Backend truth**: `GET /api/chats`, `GET /api/chats/{id}/messages`,
   `GET /api/chats/{id}/board` → `{cells, turn, legal_moves, status, winner}`.
 - **Disk** (under the data dir): `app.db` (chats/messages/boards),
@@ -106,6 +122,10 @@ Gates:
   win the three winning cells get the `win` highlight. The UI label is a **human
   re-phrasing** of the endpoint's status (`You won` / `Agent won` / `Draw` vs `X won` /
   `O won` / `draw`) — map them semantically, they never string-match.
+- `#gameHint` carries the fuller phrasing of the same outcome and is the easier witness to
+  read: `You won this round.` / `Agent won this round.` / `The round ended in a draw.`,
+  each followed by ` Reset the board to start another round.` Gate it alongside
+  `#gameStatus`; the two must name the same outcome.
 - The endpoint agrees: `status` ∈ {`X won`, `O won`, `draw`}, `winner` matches, and on a
   win `legal_moves` is `[]`. Ignore `turn` once terminal — a game-ending X click leaves a
   residual `"turn": "O"` that no one will ever play.
@@ -135,7 +155,20 @@ ply screenshot — expected, keep both names for the scorecard).
 ## Phase 5 — Teardown and score
 
 Stop the app with Ctrl-C or SIGTERM. The example stops accepting connections, lets
-in-flight requests finish, then closes its provider and flushes its trace sink. Then fill:
+in-flight requests finish, then closes its provider and flushes its trace sink.
+
+**Signal the binary, not the wrapper.** The boot command is `cargo run`, so the process
+that holds the listener and installs the drain handler is the `agent-service` binary cargo
+spawned as a child, not cargo itself; the drain is armed on the child's own Ctrl-C and
+SIGTERM. Ctrl-C in the launching terminal reaches the whole foreground process group and is
+fine. A `kill` aimed at the pid you backgrounded is not: it stops the wrapper and leaves the
+real listener serving the port, so the next row's port check finds it bound and the drain
+never ran. Take the exact PID from the socket itself — `ss -ltnp` on this row's port — and
+confirm it is `agent-service` before signalling. Then require the port free and
+`GET /api/settings` refused before scoring teardown. Never `pkill`, and never match on a
+name.
+
+Then fill:
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|

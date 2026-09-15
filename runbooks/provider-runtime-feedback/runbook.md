@@ -46,6 +46,15 @@ it does not substitute for the judged browser row.
    `composition_changed.rendered_system_prompt` carries the dialect the prompt was rendered
    for, and the two must agree. Save `00-ready.png` and
    `/api/state` as `00-state.json`.
+
+   **Always read `/api/state?session_id=<id>`.** The parameter is optional and a bare
+   `/api/state` is not an error: it resolves to the host's own *current* session pointer,
+   a process-local value the page moves whenever it selects a session. A row whose browser
+   opened or selected a different session therefore gets a small, well-formed, entirely
+   empty document back — `messages: []` — from a host that is working perfectly. Read the
+   session id off the page (or off the state document saved here) and pass it on every
+   later read, or step 4's settlement poll reads "no messages" as "not settled yet", and
+   then as a missing-turn defect.
 2. Workbench enables `TraceLevel::Extended` at bootstrap, so its trace carries
    the outgoing provider request. **Gate it on what that record can actually
    show you.** Exact request JSON is retained only up to
@@ -128,7 +137,13 @@ it does not substitute for the judged browser row.
    reply to scroll to. Poll the UI and `/api/state` for settlement and save `04-settled.png`,
    `04-state.json`, and the matching turn/trace identities. Expect one submitted user turn,
    the same terminal outcome in UI and API, and provider-attempt evidence explaining the
-   retry. If the row instead wants a settled answer on screen, raise the cap **after** the
+   retry. Know what that terminal looks like on screen before scoring it: the UI renders
+   the host's public failure text, **`turn could not be completed`**, and nothing more. It
+   does not surface `max_turns`, the cap, the attempt count, or the word `failed` — those
+   live in the API outcome and the trace. "UI and API agree" here means the screen shows
+   that one sentence for the same turn the API reports `failed` / `max_turns`; a judge
+   hunting the API's strings on the page will mis-score a correct run.
+   If the row instead wants a settled answer on screen, raise the cap **after** the
    retry evidence of step 2 is captured; a run that never reaches the cap has not exercised
    the fault at all.
 
@@ -145,6 +160,16 @@ it does not substitute for the judged browser row.
 | Product agreement | Rendered outcome, API state, and trace identities agree | | |
 | Ownership | Only this row's Workbench and containers stopped | | |
 
-Use `just agent-workbench-down <port>` for this row. Never stop another host or
+Use `just agent-workbench-down <port>` for this row, **with the same
+`AGENT_WORKBENCH_RUN_DIR` exported that Phase 0 booted with**. Teardown resolves the stack
+metadata from that variable exactly as startup did, so a row that set a fresh run dir for
+`up` and then tears down in a plain shell sends `down` looking in the repo default, finds
+nothing there, and refuses: `refusing service teardown: stack metadata is missing at
+<path>`. That refusal reads like a safety guard, and the natural response — leaving the
+stack alone — leaves this row's host serving and its Restate container up, which is the
+ownership gate failing quietly. Re-run the teardown with the variable exported and it
+completes. A host started by hand rather than through the launcher has no stack metadata to
+find at all: stop it by exact PID with SIGTERM, having confirmed that PID is the workbench
+binary first, and remove this row's own containers by name. Never stop another host or
 mutate its state. An unexecuted row remains unjudged; deterministic companion
 passes alone do not fill the browser scorecard.
