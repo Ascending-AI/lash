@@ -312,3 +312,78 @@ fn a_declared_guard_does_not_travel_to_another_table() {
     };
     assert!(!migration().matches_source_shape(&report(findings)));
 }
+
+/// The refusal text is derived, not frozen: it must name the direction of the
+/// mismatch and the live migration catalog, and must never carry the retired
+/// doc-site pointer or a hard-coded historical cutover paragraph (FIG-3172,
+/// FIG-3173).
+#[test]
+fn version_mismatch_refusal_derives_direction_and_catalog() {
+    let older = version_mismatch_error(Some(SCHEMA_VERSION - 1)).to_string();
+    let newer = version_mismatch_error(Some(SCHEMA_VERSION + 1)).to_string();
+    let unstamped = version_mismatch_error(None).to_string();
+
+    assert!(
+        older.contains("provisioned by an older build"),
+        "an older stamp must be named as such: {older}"
+    );
+    assert!(
+        older.contains(&forward_migration_sentence(SCHEMA_VERSION - 1)),
+        "an older stamp must carry the live catalog's own verdict: {older}"
+    );
+    assert!(
+        newer.contains("provisioned by a newer build")
+            && newer.contains("never migrates a schema backwards"),
+        "a newer stamp must be refused as a downgrade, not as a missing migration: {newer}"
+    );
+    assert!(
+        !newer.contains("upgrade path") && !newer.contains("forward migration"),
+        "the newer-store direction must not borrow the older-store explanation: {newer}"
+    );
+    assert!(
+        unstamped.contains("no version stamp") && unstamped.contains("lash_schema_versions"),
+        "an unstamped database must be told which row is missing: {unstamped}"
+    );
+
+    for message in [&older, &newer, &unstamped] {
+        assert!(
+            message.contains("has no applicable migration"),
+            "the version-bump companion classifies this refusal by that phrase: {message}"
+        );
+        assert!(
+            !message.contains("persistence.html"),
+            "the retired doc site must not be offered as a remedy: {message}"
+        );
+        assert!(
+            !message.contains("component-50") && !message.contains("append-identity"),
+            "the remedy must not restate a cutover the live catalog left behind: {message}"
+        );
+        assert!(
+            message.contains("crates/lash-postgres-store/schema.sql")
+                && message.contains("await-event revocation ledger")
+                && message.contains("0081-destructive-schema-changes"),
+            "the remedy must state the recreate procedure inline: {message}"
+        );
+    }
+}
+
+/// The version-bump companion classifies a refusal by a marker only one error
+/// carries, and counts anything but exactly one match as a failure. The shared
+/// recreate remedy must therefore not carry the version-mismatch marker into the
+/// migration refusals (FIG-3172).
+#[test]
+fn only_the_version_mismatch_refusal_claims_no_applicable_migration() {
+    let divergence = schema_migration_divergence_error(
+        SCHEMA_VERSION - 1,
+        &["public.lash_sessions".to_string()],
+    )
+    .to_string();
+    assert!(
+        !divergence.contains("has no applicable migration"),
+        "the divergence refusal must stay distinguishable from the version refusal: {divergence}"
+    );
+    assert!(
+        divergence.contains("schema artifacts newer than the recorded version"),
+        "the divergence refusal must keep its own marker: {divergence}"
+    );
+}
