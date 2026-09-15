@@ -183,7 +183,61 @@ fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
                 .expect("workbench tutorial tool binding");
         }
     }
+    add_process_control_operations(&mut resources);
     lashlang::LashlangHostEnvironment::new(resources, workbench_lashlang_abilities())
+}
+
+/// The `processes` module the workbench's process-controls plugin binds.
+///
+/// The module is catalogue presence, not an ability bit (ADR 0095): a session
+/// sees it only because `bootstrap` installs
+/// `SessionProcessAdminPluginFactory`, so this fixture declares exactly the
+/// operations that plugin binds, each carrying the shipped tool's own contract.
+fn add_process_control_operations(resources: &mut lashlang::LashlangHostCatalog) {
+    for (operation, definition) in [
+        (
+            "start",
+            lash_plugin_process_controls::process_start_tool_definition(),
+        ),
+        (
+            "signal",
+            lash_plugin_process_controls::process_signal_tool_definition(),
+        ),
+        (
+            "emit",
+            lash_plugin_process_controls::process_emit_tool_definition(),
+        ),
+        (
+            "register",
+            lash_plugin_process_controls::process_register_tool_definition(),
+        ),
+        (
+            "list",
+            lash_plugin_process_controls::process_list_tool_definition(),
+        ),
+        (
+            "await",
+            lash_plugin_process_controls::process_await_tool_definition(),
+        ),
+        (
+            "cancel",
+            lash_plugin_process_controls::process_cancel_tool_definition(),
+        ),
+    ] {
+        let contract = definition.contract();
+        resources
+            .add_module_operation_contract(
+                ["processes"],
+                "Processes",
+                operation,
+                definition.manifest().id.to_string(),
+                &lashlang::OperationContract::new(
+                    contract.input_schema.canonical().clone(),
+                    contract.output_schema.canonical().clone(),
+                ),
+            )
+            .expect("link process control operation");
+    }
 }
 
 /// Prompt copy that teaches code the language refuses is worse than no copy.

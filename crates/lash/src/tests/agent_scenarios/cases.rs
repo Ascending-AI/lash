@@ -731,10 +731,12 @@ fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
         if process.kind != lash_lashlang_runtime::LASHLANG_ENGINE_KIND {
             continue;
         }
+        // A leaf `processes.start` derives the child's id from the declaring
+        // intent's identity (FIG-2994, ADR 0095), so the deterministic id a
+        // redrive reproduces is the tool-intent one, not the retired
+        // `process:lashlang:` start-site spelling.
         assert!(
-            process
-                .process_id
-                .starts_with("process:lashlang:v2:blake3:"),
+            process.process_id.starts_with("tool-intent:v2:blake3:"),
             "lashlang process `{}` did not use a deterministic process id",
             process.process_id
         );
@@ -745,8 +747,20 @@ fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
         );
         labels.push(process.label.as_deref().unwrap_or("<missing>"));
     }
+    // #1529 retired the source-level process name: a lifted literal's label is
+    // its lift digest. One digest per distinct definition still holds, so the
+    // scenario pins how many distinct definitions ran, and how many runs.
     labels.sort_unstable();
-    let mut expected = expected_labels;
-    expected.sort_unstable();
-    assert_eq!(labels, expected);
+    assert_eq!(
+        labels.len(),
+        expected_labels.len(),
+        "expected {} lashlang runs, got {labels:?}",
+        expected_labels.len()
+    );
+    let distinct_labels = labels.iter().collect::<BTreeSet<_>>().len();
+    let distinct_expected = expected_labels.iter().collect::<BTreeSet<_>>().len();
+    assert_eq!(
+        distinct_labels, distinct_expected,
+        "expected {distinct_expected} distinct lifted definitions, got {labels:?}"
+    );
 }

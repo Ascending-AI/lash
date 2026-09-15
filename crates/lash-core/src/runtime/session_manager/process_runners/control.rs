@@ -466,14 +466,16 @@ impl ProcessCapability {
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
         let env_spec = request.env_spec.clone();
-        // A leaf start declares no observer edge: the declaring attempt cannot
-        // know the session the row must be visible from until realization runs
-        // here. The in-session start path has always seeded the declaring
-        // session (`ExecutionContext::child_process_observers`), and without the
-        // same edge `await handle` in the very cell that started the child is
-        // refused as `ProcessNotVisible` (ADR 0095 / FIG-653: the edge is the
-        // subscription relationship, not authorization). An explicit observer
-        // set on the request still wins.
+        // A leaf start declares no observer edge (#1534 gives the *run* its own
+        // possession, which is what makes `await handle` reachable). Observation
+        // is the other half: without an edge the declaring session cannot see
+        // the child it started, so `processes.list` from the very cell that
+        // started it — and `session.admin().processes().list()` — come back
+        // empty. The in-session start path has always seeded the declaring
+        // session (`ExecutionContext::child_process_observers`); this seeds the
+        // same edge for the recorded-intent route. FIG-653: the edge is the
+        // subscription relationship, not authorization. An explicit observer set
+        // on the request still wins.
         let observers = if request.observers.is_empty() {
             vec![session_id.clone()]
         } else {
