@@ -112,7 +112,7 @@ concrete `model` slug per scenario, and the emitted shard carries both on every 
   `continue_as` lever, first-shot codemode fluency, and the pinned-program-shape rows whose
   documented failure mode is an Abort rather than a retry.
 
-Three rules keep the tiers honest:
+Four rules keep the tiers honest:
 
 1. **The tier is not a licence to weaken a gate.** If a gate only passes at `frontier`, the
    row is `frontier`; do not retune the answer key downward to fit a cheaper driver.
@@ -123,6 +123,13 @@ Three rules keep the tiers honest:
 3. **A tier change is a matrix change.** Running a row at a model the matrix does not name for
    it produces mislabeled evidence in the same way a carried-over data directory does. Move
    the scenario's tier in `parity-matrix.toml` first, in its own commit, with the reason.
+4. **A row served by the dev provider is `deterministic`, or says which phases are not.** The
+   model-slug check reads only the matrix, so it cannot see a row whose every phase is
+   answered in-process while its tier buys a real driver: the slug is never requested, and the
+   scorecard then names a model that produced none of the evidence. A runbook naming
+   `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO` is therefore either tier `deterministic` or carries
+   `deterministic_phases` saying which phases call a provider. `judged_runbook_matrix.py`
+   refuses the rest.
 
 Where a runbook is half mechanics and half behaviour, the mechanical half runs deterministic
 and only the residue is funded: `parity-matrix.toml` records that split per scenario in

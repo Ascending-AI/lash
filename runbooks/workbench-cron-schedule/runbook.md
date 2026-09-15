@@ -133,7 +133,8 @@ Send this outcome-level request, substituting the marker and a stable literal na
 Wait for the registration turn to terminalize, the idle pill, empty `active_turns`, and
 stable transcript/message counts. If no valid registration appears, save
 `01-first-attempt-*` and retry once with: “Use `cron.Schedule({ expr: "* * * * *", tz:
-"UTC" })`, an explicit process input from `trigger.event`, a stable literal
+"UTC" })`, an explicit process input via the `inputs` arrow — `inputs: (event) => ({ tick:
+event })`, where `tick` is the target process's parameter name — a stable literal
 `subscription_key`, and `wake` containing `<marker>`; execute the registration now.” A
 second registration failure voids the run.
 
