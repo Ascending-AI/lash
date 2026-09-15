@@ -623,11 +623,18 @@ fn project_recorded_intent_outcomes(
         return;
     }
 
-    let projected = projected_intent_fields(outcomes);
-    if projected.is_empty() {
+    let answers = projected_intent_answers(outcomes);
+    if answers.is_empty() {
         return;
     }
     let crate::ToolCallOutcome::Success(value) = &mut output.outcome else {
+        return;
+    };
+    // Only the attempt's own optimistic answer is rewritten. An attempt that
+    // answered something else keeps what it answered (FIG-3119).
+    let Some(projected) =
+        matching_answer(&value.to_json_value(), &answers).map(|answer| answer.fields.clone())
+    else {
         return;
     };
     match value {
@@ -672,8 +679,8 @@ fn project_recorded_intent_outcomes(
     }
 }
 
-/// The fields a realized intent contributes back to its declaring attempt's
-/// optimistic output.
+/// The realized answer one intent contributes back to its declaring attempt's
+/// optimistic output, and the process that answer is about.
 ///
 /// An attempt seals its output before its intents run, so anything only the
 /// realization knows has to travel back through here. Two facts do. A signal's
@@ -684,31 +691,82 @@ fn project_recorded_intent_outcomes(
 /// else is copied — `incarnation`, `status` and the rest of the realized view
 /// are facts a holder reads through the process tools, and spelling the
 /// incarnation beside the id is exactly what ADR 0095 forbids.
-fn projected_intent_fields(
+///
+/// `process_id` is what makes this a replacement rather than a merge. A
+/// realized answer belongs to the output that already named the same process:
+/// `start_process` answers the unrealized handle for exactly this id
+/// (`unrealized_start_handle`), `signal_process` answers `{process_id, signal}`.
+/// Any other output — a tool that returns its own data and happens to declare a
+/// start alongside it — is not answering a handle, and merging one into it put
+/// `__handle__`, `id` and `process_id` into the model-facing text of every such
+/// tool result, and made the last of several starts overwrite the others
+/// (FIG-3119).
+struct ProjectedIntentAnswer {
+    process_id: String,
+    /// Set when the answer replaces a handle, so the output has to be one.
+    replaces_handle: bool,
+    fields: Vec<(String, serde_json::Value)>,
+}
+
+/// Picks the one realized answer this output is the optimistic form of.
+fn matching_answer<'a>(
+    current: &serde_json::Value,
+    answers: &'a [ProjectedIntentAnswer],
+) -> Option<&'a ProjectedIntentAnswer> {
+    let object = current.as_object()?;
+    let named = object
+        .get("process_id")
+        .and_then(serde_json::Value::as_str)?;
+    answers.iter().find(|answer| {
+        answer.process_id == named
+            && (!answer.replaces_handle || object.contains_key(lash_sansio::handle::HANDLE_FIELD))
+    })
+}
+
+fn projected_intent_answers(
     outcomes: &[crate::ToolIntentExecutionOutcome],
-) -> Vec<(String, serde_json::Value)> {
-    let mut projected = Vec::new();
+) -> Vec<ProjectedIntentAnswer> {
+    let mut answers = Vec::new();
     for outcome in outcomes {
         let crate::ToolIntentExecutionOutcome::Executed { kind, result, .. } = outcome else {
+            continue;
+        };
+        let Some(process_id) = result
+            .get("process_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+        else {
             continue;
         };
         match kind {
             crate::ToolIntentKind::SignalProcess => {
                 if let Some(sequence) = result.get("sequence").and_then(serde_json::Value::as_u64) {
-                    projected.push(("sequence".to_string(), serde_json::json!(sequence)));
+                    answers.push(ProjectedIntentAnswer {
+                        process_id,
+                        replaces_handle: false,
+                        fields: vec![("sequence".to_string(), serde_json::json!(sequence))],
+                    });
                 }
             }
             crate::ToolIntentKind::StartProcess => {
+                let mut fields = Vec::new();
                 for name in [lash_sansio::handle::HANDLE_FIELD, "id", "process_id"] {
                     if let Some(field) = result.get(name) {
-                        projected.push((name.to_string(), field.clone()));
+                        fields.push((name.to_string(), field.clone()));
                     }
+                }
+                if !fields.is_empty() {
+                    answers.push(ProjectedIntentAnswer {
+                        process_id,
+                        replaces_handle: true,
+                        fields,
+                    });
                 }
             }
             _ => {}
         }
     }
-    projected
+    answers
 }
 
 fn runtime_failure_outcome(
@@ -783,7 +841,10 @@ mod projection_tests {
         }
     }
 
-    fn signal_outcome(sequence: u64) -> crate::ToolIntentExecutionOutcome {
+    fn executed(
+        kind: crate::ToolIntentKind,
+        result: serde_json::Value,
+    ) -> crate::ToolIntentExecutionOutcome {
         crate::ToolIntentExecutionOutcome::Executed {
             identity: crate::ToolIntentIdentity {
                 session_id: SessionId::from("session"),
@@ -793,9 +854,40 @@ mod projection_tests {
                 replay_key: "replay".to_string(),
                 minting_emission_replay_key: None,
             },
-            kind: crate::ToolIntentKind::SignalProcess,
-            result: serde_json::json!({ "sequence": sequence }),
+            kind,
+            result,
         }
+    }
+
+    fn signal_outcome(process_id: &str, sequence: u64) -> crate::ToolIntentExecutionOutcome {
+        executed(
+            crate::ToolIntentKind::SignalProcess,
+            serde_json::json!({ "process_id": process_id, "sequence": sequence }),
+        )
+    }
+
+    /// The handle a start answers before its declaration is realized, as
+    /// `lash_plugin_process_controls::declarations` writes it.
+    fn unrealized_handle(process_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "__handle__": "lash",
+            "id": format!("p.0.{process_id}"),
+            "process_id": process_id,
+        })
+    }
+
+    fn start_outcome(process_id: &str, incarnation: u64) -> crate::ToolIntentExecutionOutcome {
+        executed(
+            crate::ToolIntentKind::StartProcess,
+            serde_json::json!({
+                "__handle__": "lash",
+                "id": format!("p.{incarnation}.{process_id}"),
+                "process_id": process_id,
+                "incarnation": incarnation,
+                "kind": "lashlang",
+                "status": "running",
+            }),
+        )
     }
 
     #[test]
@@ -838,17 +930,114 @@ mod projection_tests {
     #[test]
     fn signal_projection_rejects_a_malformed_tagged_tool_value() {
         let mut output = crate::ToolCallOutput::success_tool_value(crate::ToolValue::Object(
-            std::collections::BTreeMap::from([(
-                "$lash_tool_value".to_string(),
-                crate::ToolValue::String("attachment".to_string()),
-            )]),
+            std::collections::BTreeMap::from([
+                (
+                    "$lash_tool_value".to_string(),
+                    crate::ToolValue::String("attachment".to_string()),
+                ),
+                (
+                    "process_id".to_string(),
+                    crate::ToolValue::String("p-signalled".to_string()),
+                ),
+            ]),
         ));
 
-        project_recorded_intent_outcomes(&mut output, &[signal_outcome(7)]);
+        project_recorded_intent_outcomes(&mut output, &[signal_outcome("p-signalled", 7)]);
 
         let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
             panic!("a malformed projected tag must become a typed decode failure");
         };
         assert_eq!(failure.code, "tool_value_decode_failed");
+    }
+
+    #[test]
+    fn a_realized_start_replaces_the_unrealized_handle_its_attempt_answered() {
+        let mut output = crate::ToolCallOutput::success(unrealized_handle("p-child"));
+
+        project_recorded_intent_outcomes(&mut output, &[start_outcome("p-child", 2)]);
+
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::json!({
+                "__handle__": "lash",
+                "id": "p.2.p-child",
+                "process_id": "p-child",
+            }),
+            "the realized handle replaces the unrealized one, and nothing else is copied"
+        );
+    }
+
+    #[test]
+    fn a_realized_start_leaves_an_output_that_is_not_its_handle_alone() {
+        // A tool that answers its own data and declares a start alongside it.
+        // Merging the realized handle into that answer put `__handle__`, `id`
+        // and `process_id` into the model-facing text of the tool result
+        // (FIG-3119).
+        let mut output = crate::ToolCallOutput::success(serde_json::json!({ "ok": true }));
+
+        project_recorded_intent_outcomes(&mut output, &[start_outcome("p-child", 2)]);
+
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::json!({ "ok": true })
+        );
+    }
+
+    #[test]
+    fn an_output_naming_a_process_without_being_a_handle_keeps_its_own_shape() {
+        // Same id, but no handle to replace: a start's answer is a handle, so
+        // an output that is not one is not the optimistic form of it.
+        let mut output = crate::ToolCallOutput::success(
+            serde_json::json!({ "process_id": "p-child", "ok": true }),
+        );
+
+        project_recorded_intent_outcomes(&mut output, &[start_outcome("p-child", 2)]);
+
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::json!({ "process_id": "p-child", "ok": true })
+        );
+    }
+
+    #[test]
+    fn several_starts_project_the_one_the_output_names() {
+        // Field-by-field merging let the last declared start overwrite the
+        // handle of the one the attempt actually answered with (FIG-3119).
+        let mut output = crate::ToolCallOutput::success(unrealized_handle("p-first"));
+
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[start_outcome("p-first", 1), start_outcome("p-second", 4)],
+        );
+
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::json!({
+                "__handle__": "lash",
+                "id": "p.1.p-first",
+                "process_id": "p-first",
+            })
+        );
+    }
+
+    #[test]
+    fn a_realized_signal_projects_its_sequence_onto_the_process_it_signalled() {
+        let mut output = crate::ToolCallOutput::success(
+            serde_json::json!({ "process_id": "p-target", "signal": "resume" }),
+        );
+
+        project_recorded_intent_outcomes(
+            &mut output,
+            &[signal_outcome("p-other", 3), signal_outcome("p-target", 11)],
+        );
+
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::json!({
+                "process_id": "p-target",
+                "signal": "resume",
+                "sequence": 11,
+            })
+        );
     }
 }
