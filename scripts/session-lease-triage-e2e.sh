@@ -39,24 +39,46 @@ trap on_exit EXIT
 # the phases run under is unchanged.
 symlink_prefix="$artifact_dir/bazel-"
 if command -v kiln >/dev/null 2>&1; then
-  build_command=(kiln build)
-  test_command=(kiln test)
+  # A kiln fork: build and test through the shared executor.
+  kiln build "--symlink_prefix=$symlink_prefix" \
+    //runbooks/restate-postgres-workers:lash-e2e-session-lease-triage__bin \
+    2>&1 | tee "$artifact_dir/build.log"
+  harness_bin="${symlink_prefix}bin/runbooks/restate-postgres-workers/lash-e2e-session-lease-triage__bin"
+  [ -x "$harness_bin" ] || {
+    echo "session-lease-triage harness binary is missing at $harness_bin" >&2
+    exit 1
+  }
+  harness() {
+    "$harness_bin" "$1"
+  }
+  trace_event_tests() {
+    kiln test "--symlink_prefix=$symlink_prefix" --test_output=all \
+      --test_arg=session_lease_observability \
+      //crates/lash-core:runtime_observability__test
+  }
+  facade_read_tests() {
+    kiln test "--symlink_prefix=$symlink_prefix" --test_output=all \
+      --test_arg=lease_triage \
+      //examples/agent-service:agent-service__unit_test
+  }
 else
-  build_command=("$repo/scripts/hermetic-build.sh" build)
-  test_command=("$repo/scripts/hermetic-build.sh" test)
+  # No kiln on this host (the GitHub runner has neither kiln nor a shared
+  # executor): the same targets through cargo, the geometry the CI leg has
+  # always run under.
+  cargo build --locked --quiet -p lash-restate-postgres-workers-e2e \
+    --bin lash-e2e-session-lease-triage 2>&1 | tee "$artifact_dir/build.log"
+  harness() {
+    cargo run --locked --quiet -p lash-restate-postgres-workers-e2e \
+      --bin lash-e2e-session-lease-triage -- "$1"
+  }
+  trace_event_tests() {
+    cargo test --locked --quiet -p lash-internal-core --test runtime_observability \
+      session_lease_observability
+  }
+  facade_read_tests() {
+    cargo test --locked --quiet -p agent-service lease_triage
+  }
 fi
-"${build_command[@]}" "--symlink_prefix=$symlink_prefix" \
-  //runbooks/restate-postgres-workers:lash-e2e-session-lease-triage__bin \
-  2>&1 | tee "$artifact_dir/build.log"
-harness_bin="${symlink_prefix}bin/runbooks/restate-postgres-workers/lash-e2e-session-lease-triage__bin"
-[ -x "$harness_bin" ] || {
-  echo "session-lease-triage harness binary is missing at $harness_bin" >&2
-  exit 1
-}
-
-harness() {
-  "$harness_bin" "$1"
-}
 
 backends="sqlite"
 if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
@@ -68,15 +90,11 @@ echo "session-lease-triage backends: $backends" | tee "$test_output"
 # companion rather than something the judged run takes on trust. Both legs print
 # each test name: a companion whose own unit gates report only a count cannot be
 # read for which transitions were actually covered.
-"${test_command[@]}" "--symlink_prefix=$symlink_prefix" --test_output=all \
-  --test_arg=session_lease_observability \
-  //crates/lash-core:runtime_observability__test \
+trace_event_tests \
   2>&1 | tee "$artifact_dir/00-trace-event-tests.log" | tee -a "$test_output"
 # The facade read and its host-side classification, exercised through the example
 # that owns the operator endpoint.
-"${test_command[@]}" "--symlink_prefix=$symlink_prefix" --test_output=all \
-  --test_arg=lease_triage \
-  //examples/agent-service:agent-service__unit_test \
+facade_read_tests \
   2>&1 | tee "$artifact_dir/01-facade-read-tests.log" | tee -a "$test_output"
 
 harness hang 2>&1 | tee "$artifact_dir/02-provider-hang.jsonl" | tee -a "$test_output"
