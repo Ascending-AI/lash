@@ -161,7 +161,13 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         .expect("list handles");
     assert_eq!(handles.len(), 3);
     assert!(handles.iter().all(|handle| handle.kind() == "lashlang"));
-    assert!(handles.iter().all(|handle| handle.label() == "remember"));
+    // #1529 retired the source-level process name: a lifted process literal's
+    // label is its lift digest (`__process_<hash>`). All three runs come from
+    // the one registered definition, so the label is still pinned — as the one
+    // digest they must share, rather than as the name the surface dropped.
+    let first_label = handles[0].label().to_string();
+    assert!(first_label.starts_with("__process_"), "{first_label}");
+    assert!(handles.iter().all(|handle| handle.label() == first_label));
     session.close().await.expect("close session");
 
     let reopened = core

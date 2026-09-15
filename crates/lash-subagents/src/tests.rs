@@ -1057,6 +1057,10 @@ async fn run_seed_probe_inner(
         Arc::new(SubagentsPluginFactory::new(Arc::new(
             CapabilityRegistry::new().with(capability),
         ))),
+        // The `processes` module is catalogue presence, not an ability bit
+        // (ADR 0095): the seeded programs author `processes.start`, so the
+        // surface only exists if this factory is in the session's factories.
+        Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
     ];
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let host_plugins = PluginHost::new(factories.clone());

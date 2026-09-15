@@ -51,3 +51,27 @@ pub(super) fn child_join_process(finish: lashlang::Expr) -> lashlang::Program {
         Vec::new(),
     )
 }
+
+/// The `processes` catalogue every end-state fixture links against.
+///
+/// Starting a child is a catalogue tool, not a special form (ADR 0095): with no
+/// `processes` module in the catalogue the link is refused with
+/// `UnknownResource { path: "processes" }`, so the fixtures bind to the shipped
+/// `processes.start` tool and carry that tool's own contract.
+pub(super) fn process_control_catalog() -> lashlang::LashlangHostCatalog {
+    let contract = lash_plugin_process_controls::process_start_tool_definition().contract();
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation_contract(
+            ["processes"],
+            "Processes",
+            "start",
+            "tool:start_process",
+            &lashlang::OperationContract::new(
+                contract.input_schema.canonical().clone(),
+                contract.output_schema.canonical().clone(),
+            ),
+        )
+        .expect("link process start operation");
+    catalog
+}

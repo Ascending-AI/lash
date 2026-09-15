@@ -34,6 +34,7 @@ lash-tool-support = { workspace = true }
 lash-protocol-rlm = { workspace = true, optional = true }
 lash-protocol-standard = { workspace = true }
 lash-plugin-tool-output-budget = { workspace = true }
+lash-plugin-process-controls = { workspace = true, optional = true, features = ["lashlang"] }
 lash-rlm-types = { workspace = true, optional = true }
 lash-trace = { workspace = true }
 uuid = { workspace = true }
@@ -49,6 +50,7 @@ tracing = { workspace = true }
 default = []
 rlm = [
     "dep:lash-lashlang-runtime",
+    "dep:lash-plugin-process-controls",
     "dep:lash-protocol-rlm",
     "dep:lash-rlm-types",
     "dep:lashlang",
@@ -67,7 +69,6 @@ insta = "1"
 lash-core = { workspace = true, features = ["testing"] }
 lashlang = { workspace = true, features = ["testing"] }
 lash-llm-tools = { workspace = true }
-lash-plugin-process-controls = { workspace = true }
 lash-plugin-rolling-history = { workspace = true }
 lash-subagents = { workspace = true }
 lash-sqlite-store = { workspace = true }

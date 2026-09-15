@@ -385,7 +385,29 @@ impl Session {
     /// authority and plugin contributions then filter the model-facing names.
     /// The returned handle owns both the catalog and the registry dispatch will
     /// use for calls from that request.
+    // `ToolCatalogHandle` is only `pub` under the `testing` feature, so this
+    // accessor's visibility tracks it exactly (`private_interfaces`).
+    #[cfg(feature = "testing")]
     pub fn pin_tool_surface(
+        &self,
+        session_id: &SessionId,
+        tool_access: &crate::SessionToolAccess,
+        subagent: Option<&crate::SubagentSessionContext>,
+    ) -> Result<ToolCatalogHandle, crate::PluginError> {
+        self.pin_tool_surface_inner(session_id, tool_access, subagent)
+    }
+
+    #[cfg(not(feature = "testing"))]
+    pub(crate) fn pin_tool_surface(
+        &self,
+        session_id: &SessionId,
+        tool_access: &crate::SessionToolAccess,
+        subagent: Option<&crate::SubagentSessionContext>,
+    ) -> Result<ToolCatalogHandle, crate::PluginError> {
+        self.pin_tool_surface_inner(session_id, tool_access, subagent)
+    }
+
+    fn pin_tool_surface_inner(
         &self,
         session_id: &SessionId,
         tool_access: &crate::SessionToolAccess,

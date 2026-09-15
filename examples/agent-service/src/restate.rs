@@ -896,6 +896,11 @@ finish("done via Restate E2E");
             .process_env_store(process_env_store)
             .trigger_store(trigger_store)
             .effect_host(turn_deployment.effect_host())
+            // The `processes` module is catalogue presence, not an ability bit
+            // (ADR 0095): the scripted cell below authors `processes.start`.
+            .plugin(Arc::new(
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            ))
             .process_work(process_deployment.process_work())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "agent-service-test",

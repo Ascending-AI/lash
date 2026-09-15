@@ -608,6 +608,11 @@ finish(value);"#,
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    // ADR 0095: the `processes` module is catalogue presence, so a cell that
+    // authors `processes.start` needs this factory installed.
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+    ))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-control-tool").open().await?;
     let turn_session = session.clone();
@@ -626,12 +631,16 @@ finish(value);"#,
         .expect("tool provider entered");
 
     let processes = session.admin().processes().list().await?;
-    let running_app_lookup = processes.iter().any(|process| {
-        process.kind() == "lashlang" && process.label() == "lookup" && !process.terminal()
-    });
-    assert!(
-        running_app_lookup,
-        "expected running lookup lashlang process, got {processes:?}"
+    // #1529 retired the `defineProcess` name: a lifted process literal's label
+    // is the lift digest (`__process_<hash>`), so the running run is pinned by
+    // kind and liveness, not by a source-level name the surface no longer has.
+    let running_app_lookup = processes
+        .iter()
+        .filter(|process| process.kind() == "lashlang" && !process.terminal())
+        .count();
+    assert_eq!(
+        running_app_lookup, 1,
+        "expected exactly one running lashlang process, got {processes:?}"
     );
 
     release_tx.send(()).expect("release tool provider");
@@ -683,6 +692,11 @@ finish(value);"#,
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
     .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+    // ADR 0095: the `processes` module is catalogue presence, so a cell that
+    // authors `processes.start` needs this factory installed.
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+    ))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-lashlang-graph-store").open().await?;
     let turn_session = session.clone();
@@ -701,16 +715,19 @@ finish(value);"#,
         .expect("tool provider entered");
 
     let processes = session.admin().processes().list().await?;
+    // The lifted literal's label is the lift digest (#1529), so the run is
+    // found by kind and liveness and the graph's entry name is compared against
+    // the label the registry actually recorded.
     let running = processes
         .iter()
-        .find(|process| process.label() == "lookup")
-        .expect("running lookup process");
+        .find(|process| process.kind() == "lashlang" && !process.terminal())
+        .expect("running lashlang process");
     let graph = graph_store
         .graph(&format!("process:{}", running.process_id))
         .expect("Lashlang graph snapshot");
     assert_eq!(graph.graph_key, format!("process:{}", running.process_id));
     assert_eq!(graph.entry_kind, "process");
-    assert_eq!(graph.entry_name, "lookup");
+    assert_eq!(graph.entry_name, running.label());
     assert_eq!(
         graph.status,
         lash_lashlang_runtime::TraceLanguageExecutionStatus::Running
@@ -720,7 +737,7 @@ finish(value);"#,
         graph_store
             .graphs()
             .iter()
-            .any(|graph| graph.entry_name == "lookup")
+            .any(|graph| graph.entry_name == running.label())
     );
 
     release_tx.send(()).expect("release tool provider");

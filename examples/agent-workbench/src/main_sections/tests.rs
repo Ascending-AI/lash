@@ -143,6 +143,13 @@ pub(super) fn explicit_durable_test_facets(data_dir: &std::path::Path) -> lash::
                     .expect("open trigger store")
             }
         })))
+        // The `processes` module is catalogue presence, not an ability bit
+        // (ADR 0095): the workbench's scripted sources author `processes.*`,
+        // so the surface exists only where this factory is installed. Every
+        // durable test core gets it here, as `bootstrap` gives the real app.
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        ))
 }
 
 const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
@@ -1283,6 +1290,10 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(model)
         .store_factory(Arc::clone(&core_store_factory))
+        // The `processes` module is catalogue presence, not an ability bit (ADR
+        // 0095): the workbench's scripted sources author `processes.*`, so the
+        // surface only exists when this factory is installed, as bootstrap does.
+        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .process_registry(Arc::clone(&process_registry))
         .trigger_store(trigger_store)
@@ -1774,6 +1785,10 @@ async fn live_workbench_restate_state_with_provider_and_database(
         .trigger_store(Arc::clone(&trigger_store))
         .trace_sink(Arc::clone(&trace_sink))
         .trace_level(TraceLevel::Extended)
+        // The `processes` module is catalogue presence, not an ability bit (ADR
+        // 0095): the workbench's scripted sources author `processes.*`, so the
+        // surface only exists when this factory is installed, as bootstrap does.
+        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
         .effect_host(turn_deployment.effect_host())
@@ -2092,6 +2107,10 @@ fn test_workbench_core(
         .session_spec(lash::SessionSpec::new().turn_budget(lash::TurnBudget::Unbounded))
         .model(model)
         .store_factory(session_store_factory)
+        // The `processes` module is catalogue presence, not an ability bit (ADR
+        // 0095): the workbench's scripted sources author `processes.*`, so the
+        // surface only exists when this factory is installed, as bootstrap does.
+        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .process_registry(process_registry)
         .trigger_store(trigger_store)

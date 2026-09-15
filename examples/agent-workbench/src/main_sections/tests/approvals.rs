@@ -47,6 +47,10 @@ async fn approval_test_core(
         .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             data_dir.join("lash-sessions"),
         )))
+        // The `processes` module is catalogue presence, not an ability bit (ADR
+        // 0095): the workbench's scripted sources author `processes.*`, so the
+        // surface only exists when this factory is installed, as bootstrap does.
+        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_approvals(approvals),
         ))

@@ -172,7 +172,7 @@ impl LinkedTestProcess {
         let linked = lashlang::LinkedModule::link(
             program,
             lashlang::LashlangHostEnvironment::new(
-                lashlang::LashlangHostCatalog::new(),
+                programs::process_control_catalog(),
                 lashlang::LashlangAbilities::default().with_sleep(),
             ),
         )

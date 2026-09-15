@@ -1412,6 +1412,11 @@ finish(result);"#,
     )]))
     .model(mock_model_spec())
     .tools(Arc::new(PendingAppTools::new(key_tx)))
+    // ADR 0095: `processes` is catalogue presence, so a scripted cell that
+    // authors `processes.start` needs this factory installed.
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+    ))
     .store_factory(Arc::new(
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
@@ -1438,12 +1443,14 @@ finish(result);"#,
             .is_err(),
         "process-backed turn completed before external completion resolved"
     );
+    // `processes.start` is a leaf tool on the shipped surface (ADR 0095), so the
+    // launch itself completes like any other call. What must not complete while
+    // the external key is open is the *pending* app tool the child parked on.
     assert!(
-        !events
-            .snapshot()
-            .await
-            .iter()
-            .any(|activity| matches!(&activity.event, TurnEvent::ToolCallCompleted { .. })),
+        !events.snapshot().await.iter().any(|activity| matches!(
+            &activity.event,
+            TurnEvent::ToolCallCompleted { name, .. } if name != "start_process"
+        )),
         "pending process tool launch must not emit a completed tool result"
     );
 

@@ -341,6 +341,12 @@ finish("registered");
                 .provider(rebuild_provider())
                 .model(rebuild_model())
                 .plugin(Arc::new(TriggerResourcePluginFactory))
+                // The `processes` module is catalogue presence, not an ability
+                // bit (ADR 0095): the rebuild sources author `processes.emit`,
+                // so the surface only exists if this factory is installed.
+                .plugin(Arc::new(
+                    lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+                ))
                 .tools(Arc::new(EchoToolProvider))
                 .process_registry(registry)
         }

@@ -525,6 +525,12 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         // and cannot legally execute their effects.
         .without_queued_work()
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
+        // The `processes` module is catalogue presence, not an ability bit
+        // (ADR 0095): the scripted programs this harness serves author
+        // `processes.start`, `processes.await` and `processes.emit`.
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        ))
         .plugin(Arc::new(E2ePluginFactory {
             pool: config.storage.pool().clone(),
             worker_id: config.worker_id.clone(),

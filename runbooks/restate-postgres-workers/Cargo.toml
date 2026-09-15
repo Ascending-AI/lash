@@ -60,6 +60,7 @@ lash-core = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
 lash-llm-tools = { workspace = true }
 lash-plugin-rolling-history = { workspace = true }
+lash-plugin-process-controls = { workspace = true, features = ["lashlang"] }
 lash-postgres-store = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-provider-openai = { workspace = true }

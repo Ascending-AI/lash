@@ -466,7 +466,21 @@ impl ProcessCapability {
             .as_ref()
             .and_then(crate::RuntimeInvocation::causal_ref);
         let env_spec = request.env_spec.clone();
-        let observers = request.observers.clone();
+        // A leaf start declares no observer edge (#1534 gives the *run* its own
+        // possession, which is what makes `await handle` reachable). Observation
+        // is the other half: without an edge the declaring session cannot see
+        // the child it started, so `processes.list` from the very cell that
+        // started it — and `session.admin().processes().list()` — come back
+        // empty. The in-session start path has always seeded the declaring
+        // session (`ExecutionContext::child_process_observers`); this seeds the
+        // same edge for the recorded-intent route. FIG-653: the edge is the
+        // subscription relationship, not authorization. An explicit observer set
+        // on the request still wins.
+        let observers = if request.observers.is_empty() {
+            vec![session_id.clone()]
+        } else {
+            request.observers.clone()
+        };
         let originator = request.originator.clone();
         let registration = request.into_registration(None).with_process_provenance(
             crate::ProcessProvenance::new(originator).with_caused_by(caused_by),

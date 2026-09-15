@@ -1247,11 +1247,23 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         let process_type = identity
             .resolve_process_type(&artifact)
             .map_err(|error| unresolvable(error.to_string()))?;
-        let signals = artifact
-            .canonical_ir
-            .process(&identity.process_name)
-            .map(lashlang_process_signal_event_types)
-            .unwrap_or_default();
+        // The engine's own lifecycle events ride with the declaration's signals.
+        // A leaf `processes.start` (ADR 0095) reaches the registry only through
+        // admission, so this resolution is the sole place the child's row can
+        // learn them; the in-engine start and trigger-registration paths chain
+        // the same two sets (`prepare_lashlang_process_start`,
+        // `trigger_commands`). Without the base set a started child's first
+        // `process.yield` is refused as an undeclared event type.
+        let signals = lashlang_process_event_types()
+            .into_iter()
+            .chain(
+                artifact
+                    .canonical_ir
+                    .process(&identity.process_name)
+                    .map(lashlang_process_signal_event_types)
+                    .unwrap_or_default(),
+            )
+            .collect::<Vec<_>>();
         Ok(lash_core::ProcessDefinitionResolution::new(
             lash_core::ProcessSignature::known(lashlang_type_expr_schema(&process_type)),
             signals,
