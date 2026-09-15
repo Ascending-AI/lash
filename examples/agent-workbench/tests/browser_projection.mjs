@@ -3167,17 +3167,67 @@ test("trigger registration rows separate display name, identity, and trigger key
   assert.equal(rowContext.rows[1].name, rowContext.rows[0].name);
   assert.equal(
     rowContext.rows[0].detail,
-    `id ${expectedSubscriptionIdDetail(subscriptionIdA)} · trigger key v2/content-ad… · scope session:session-a · incarnation incarnation-…`,
+    `alias shared-blue-watch · id ${expectedSubscriptionIdDetail(subscriptionIdA)} · trigger key v2/content-ad… · scope session:session-a · incarnation incarnation-…`,
   );
   assert.equal(
     rowContext.rows[0].title,
     `id ${subscriptionIdA} · trigger key derived/v2/content-address · scope session:session-a · alias shared-blue-watch · incarnation incarnation-a`,
   );
   assert.doesNotMatch(rowContext.rows[0].name, /shared-blue-watch/);
+  const detailId = (detail) => {
+    const id = detail.match(/(?:^|· )id ([^·]+)/)?.[1];
+    assert.ok(id, `the collapsed row must carry an id column: ${detail}`);
+    return id;
+  };
   assert.notEqual(
-    rowContext.rows[0].detail.match(/^id ([^·]+)/)?.[1],
-    rowContext.rows[1].detail.match(/^id ([^·]+)/)?.[1],
+    detailId(rowContext.rows[0].detail),
+    detailId(rowContext.rows[1].detail),
     "same-name, same-key registrations must render visibly distinct ids",
+  );
+});
+
+test("the registration alias is on the collapsed rail row, not only in the title", () => {
+  const context = {};
+  vm.runInNewContext(
+    `${markedSource(
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+      "WORKBENCH_TRIGGER_REGISTRATION_PROJECTION",
+    )}
+     const base = {
+       source_type: "cron.Schedule",
+       source: {
+         $lash_host_descriptor_type: "cron.Schedule",
+         $lash_host_descriptor_value: { expr: "*/2 * * * * *", tz: "UTC" }
+       },
+       target: { label: "mirror_job" },
+       subscription_id: "trigger-subscription:v2:blake3:${"a".repeat(64)}",
+       subscription_key: "derived/v2/content-address",
+       incarnation: "incarnation-a"
+     };
+     this.named = triggerRegistrationRowModel({ ...base, name: "blue-watch" });
+     this.anonymous = triggerRegistrationRowModel({ ...base });
+     this.long = triggerRegistrationRowModel({
+       ...base,
+       name: "a-very-long-registration-alias-that-overflows"
+     });`,
+    context,
+  );
+
+  // The alias is the only human-memorable handle a registration has, and the
+  // row's display name is built from the target and the source, never from it.
+  assert.doesNotMatch(context.named.name, /blue-watch/);
+  assert.match(context.named.detail, /^alias blue-watch · id /);
+  assert.match(context.named.title, /· alias blue-watch ·/);
+  // An unnamed registration must not grow an "alias unknown" column.
+  assert.doesNotMatch(context.anonymous.detail, /alias/);
+  assert.match(context.anonymous.detail, /^id /);
+  // A long alias truncates like every other rail value rather than pushing the
+  // identities off the row.
+  assert.match(context.long.detail, /^alias a-very-long-registration… · id /);
+  // The expanded panel still carries the untruncated alias.
+  assert.equal(
+    context.long.full.find(([label]) => label === "alias")?.[1],
+    "a-very-long-registration-alias-that-overflows",
   );
 });
 
