@@ -31,7 +31,7 @@ The rule, per `<crate>/<kind>`:
 * `memory_kb` = peak RSS x 1.5, rounded up to a multiple of 512 MiB, never
   below 1 GiB, and never below the repository default (a table entry may only
   raise a request; lowering one would OOM-kill the action it describes).
-* `cpu_count` = ceil(cpu-seconds / wall-seconds), at least 1, capped at 4.
+* `cpu_count` = ceil(cpu-seconds / wall-seconds), at least 1, capped at 8.
 * Both are taken over the loudest sample of that key, not the mean: the
   request has to hold the worst invocation the key ever produced.
 
@@ -60,9 +60,12 @@ MEMORY_MARGIN = 1.5
 # fragment the pool's budget.
 MEMORY_GRANULARITY_KB = 512 * 1024
 MEMORY_FLOOR_KB = 1024 * 1024
-# The pool's smallest worker advertises 8 CPUs; above four cores per action a
-# single rustc starves every other action on that worker.
-MAX_CPU_COUNT = 4
+# The pool caps a single action's request at 8 cores (kiln
+# `executor/tools/action-sizes`, CPU_CAP = 8, under a per-box ceiling of half a
+# box). The cap is repeated here so this seeded table and the one the pool
+# regenerates from its own per-box logs agree row for row instead of the seed
+# quietly asking for less.
+MAX_CPU_COUNT = 8
 
 KINDS = ("lib", "bin", "test", "build-script")
 

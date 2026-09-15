@@ -43,7 +43,9 @@ class TableTest(unittest.TestCase):
         self.assertEqual(table_from_fixture()["serial_bin/bin"]["cpu_count"], 4)
 
     def test_cpu_request_is_capped(self) -> None:
-        self.assertEqual(table_from_fixture()["wide_test/test"]["cpu_count"], 4)
+        # 300 + 60 over 20 s is eighteen busy cores; the pool's cap is eight.
+        self.assertEqual(table_from_fixture()["wide_test/test"]["cpu_count"], 8)
+        self.assertEqual(sizes.MAX_CPU_COUNT, 8)
 
     def test_entries_at_or_below_the_defaults_are_dropped(self) -> None:
         self.assertNotIn("tiny_helper/lib", table_from_fixture())
