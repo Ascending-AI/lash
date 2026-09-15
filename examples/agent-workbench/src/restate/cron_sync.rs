@@ -319,13 +319,17 @@ pub(super) async fn emit_cron_occurrence_with_effect_controller(
                 json!({"fired_at": fired_at}),
                 cron_occurrence_key(job_key, &fired_at),
             )
-            .with_source(json!({"expr": request.expr, "tz": request.tz})),
+            .with_source(cron_occurrence_source(&request.expr, request.tz.as_ref())),
             scoped_effect_controller,
         )
         .await
         .map_err(classified_embed_handler_error)?;
     Ok(Json(CronEmitReport {
         started_process_ids: report.started_process_ids(),
+        deliveries: match trigger_delivery_trace(&report) {
+            serde_json::Value::Array(deliveries) => deliveries,
+            _ => Vec::new(),
+        },
     }))
 }
 

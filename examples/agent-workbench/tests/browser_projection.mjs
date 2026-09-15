@@ -2391,6 +2391,7 @@ test("a snapshot overtaken by live observations is not an outage", async () => {
       if (index >= 0) scheduledRetries.splice(index, 1);
     },
     handleTerminalStateFailure() { return false; },
+    markShellTerminal() {},
     snapshotFailureReason() { return "the workbench stopped answering"; },
     renderError() {},
     applyStateSnapshot() {
@@ -2451,6 +2452,97 @@ test("a snapshot overtaken by live observations is not an outage", async () => {
   assert.equal(context.shellAvailability.channels.state, false);
   const outage = shell.shellStatusModel(context.shellAvailability, { session: "workbench-a" });
   assert.equal(shellRender(outage).bannerHidden, false);
+});
+
+/* The second flash Sam saw: `/api/state` opens the session, and the running turn
+   leaves that open contended, so the workbench answers 503 "session is
+   temporarily busy; retry the request" (verdict Retryable). A server that
+   answered with a retry instruction is not an outage. */
+test("a 503 from a snapshot read retries quietly instead of claiming an outage", async () => {
+  let nextFailure = null;
+  const scheduledRetries = [];
+  const retryDelays = [];
+  let nextRetryTimerId = 0;
+  const renderedErrors = [];
+  const context = {
+    Map,
+    Set,
+    Math,
+    Number,
+    String,
+    Boolean,
+    Object,
+    Promise,
+    Error,
+    async fetchStateSnapshot() {
+      if (nextFailure) throw nextFailure;
+      throw new Error("the test drives only failures");
+    },
+    renderShellStatus() {},
+    setTimeout(callback, delay) {
+      const timer = { id: ++nextRetryTimerId, callback };
+      scheduledRetries.push(timer);
+      retryDelays.push(delay);
+      return timer.id;
+    },
+    clearTimeout(timerId) {
+      const index = scheduledRetries.findIndex(timer => timer.id === timerId);
+      if (index >= 0) scheduledRetries.splice(index, 1);
+    },
+    renderError(message) { renderedErrors.push(message); },
+    handleTerminalStateFailure() { return false; },
+    snapshotFailureReason() { return "the workbench stopped answering"; },
+    markShellTerminal() {},
+    applyStateSnapshot() {},
+    restartEventStreams() {},
+    streamGeneration: 1,
+  };
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+     ${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
+     ${markedSource("WORKBENCH_STATE_RETRY", "WORKBENCH_STATE_RETRY")}
+     this.projectionState = createWorkbenchProjectionState();
+     this.shellAvailability = createShellAvailability();
+     this.StateSnapshotHttpError = StateSnapshotHttpError;
+     this.stateFailureDisposition = stateFailureDisposition;
+     this.loadState = loadState;`,
+    context,
+  );
+  const shell = shellModule();
+  shell.markShellChannel(context.shellAvailability, "state", true);
+  shell.markShellHydrated(context.shellAvailability);
+
+  // 503 is its own disposition: neither a dead backend nor a refusal to answer.
+  const contended = new context.StateSnapshotHttpError(
+    503,
+    "session is temporarily busy; retry the request",
+  );
+  assert.equal(context.stateFailureDisposition(contended), "retryable");
+  assert.equal(contended.terminal, false, "a retry instruction is not a terminal refusal");
+
+  nextFailure = contended;
+  await context.loadState();
+  assert.equal(
+    context.shellAvailability.channels.state,
+    true,
+    "a 503 must not mark the snapshot channel unreachable",
+  );
+  assert.equal(
+    shellRender(shell.shellStatusModel(context.shellAvailability, { session: "workbench-a" }))
+      .bannerHidden,
+    true,
+    "a mid-turn 503 must not paint the outage banner",
+  );
+  assert.deepEqual(retryDelays, [900], "the bounded retry ladder still runs");
+  assert.deepEqual(renderedErrors, [], "a quiet retry says nothing in the transcript");
+
+  // A 500 is still an outage, and a 4xx is still terminal: only 503 is quiet.
+  nextFailure = new context.StateSnapshotHttpError(500, "internal server error");
+  await assert.rejects(context.loadState(), /state unavailable/);
+  assert.equal(context.shellAvailability.channels.state, false);
+  assert.equal(context.stateFailureDisposition(
+    new context.StateSnapshotHttpError(404, "no such session"),
+  ), "terminal");
 });
 
 test("an unattached stream is neither a live channel nor an outage", () => {

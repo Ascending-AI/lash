@@ -193,3 +193,112 @@ fn only_the_running_turns_own_candidate_is_withheld() {
         "a stale active-turn entry that survived a restart hides nothing"
     );
 }
+
+/// Sam's screenshot: the button and mail EVENT rows sat at the bottom of the
+/// chat, below turns that happened long after them and away from the queued-turn
+/// replies they caused. The committed graph had those replies in the right
+/// place; the projection appended every product-log row after all of them, so
+/// each `/api/state` rebuild re-sank the event rows under the newest chat.
+#[tokio::test]
+async fn a_host_event_row_renders_where_it_happened_not_under_the_newest_turn() {
+    let data_dir = tempfile::tempdir().expect("event ordering tempdir");
+    let state = recoverable_chat_test_state(data_dir.path(), 16).await;
+    let session_id = state.current_session_id();
+    let first_turn = TurnId::from("workbench-turn-before-the-event");
+    let later_turn = TurnId::from("workbench-turn-after-the-event");
+
+    // A committed turn, with the workbench's own user row for it in the product
+    // log — the row that survives reconciliation and anchors what follows.
+    let session = state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open event-ordering session");
+    for (turn, prompt, reply) in [
+        (&first_turn, "watch the buttons", "watching the buttons"),
+        (&later_turn, "anything else?", "nothing else"),
+    ] {
+        session
+            .admin()
+            .state()
+            .append_messages(vec![
+                lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, prompt)
+                    .with_id(workbench_turn_user_message_id(turn))
+                    .with_origin(lash::messages::MessageOrigin::TurnInput {
+                        turn_id: turn.clone(),
+                        input_id: None,
+                    }),
+                lash::plugins::PluginMessage::text(lash::messages::MessageRole::Assistant, reply)
+                    .with_id(workbench_turn_assistant_message_id(turn)),
+            ])
+            .await
+            .expect("append committed turn");
+    }
+    session.close().await.expect("close event-ordering session");
+
+    state.push_message_with_id_for_session(
+        &session_id,
+        workbench_turn_user_message_id(&first_turn),
+        "user",
+        "mirrored prompt",
+    );
+
+    // The occurrence the operator caused between the two turns. The product log
+    // is pushed in arrival order, and that order is the only record of where it
+    // belongs: after the first turn, before the second was ever sent.
+    state.push_message_with_id_for_session(
+        &session_id,
+        "red-button-occurrence",
+        "event",
+        "red button trigger occurrence",
+    );
+
+    state.push_message_with_id_for_session(
+        &session_id,
+        workbench_turn_user_message_id(&later_turn),
+        "user",
+        "mirrored prompt",
+    );
+
+    let Json(snapshot) = Box::pin(app_state(State(state), Query(SessionQuery::default())))
+        .await
+        .expect("materialize the event-ordering snapshot");
+    let ids = snapshot
+        .messages
+        .iter()
+        .map(|message| message.id.as_str())
+        .collect::<Vec<_>>();
+    let event_at = ids
+        .iter()
+        .position(|id| *id == "red-button-occurrence")
+        .expect("the event row must render");
+    let later_user_at = ids
+        .iter()
+        .position(|id| *id == workbench_turn_user_message_id(&later_turn))
+        .expect("the later turn must render");
+    let first_reply_at = ids
+        .iter()
+        .position(|id| *id == workbench_turn_assistant_message_id(&first_turn))
+        .expect("the first reply must render");
+    assert!(
+        first_reply_at < event_at,
+        "the event happened after the first turn settled: {ids:?}"
+    );
+    assert!(
+        event_at < later_user_at,
+        "a reload must not re-sink the event row under a turn that happened later: {ids:?}"
+    );
+    assert_eq!(
+        snapshot
+            .transcript
+            .iter()
+            .filter_map(|row| match row {
+                TranscriptRow::Message { message } => Some(message.id.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        ids,
+        "the transcript must render the same order as the message list"
+    );
+}

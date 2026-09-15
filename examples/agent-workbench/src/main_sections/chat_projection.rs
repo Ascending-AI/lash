@@ -486,12 +486,30 @@ pub(crate) fn project_chat(
         &rlm_reply_ids,
     ));
 
+    let committed_turn_output_ids = committed_turn_output_message_ids(&messages);
     let mut message_ids = messages
         .iter()
         .map(|message| message.id.clone())
         .collect::<BTreeSet<_>>();
+
+    // The product log is an arrival-ordered record, so the rows it holds that
+    // the graph never committed — button and mail trigger occurrences, mock
+    // account connections — happened between two committed rows, and the log
+    // says which. Anchor each one to the newest committed row pushed before it
+    // and re-insert it there. Appending them instead put every event row under
+    // the newest chat, so each `/api/state` rebuild re-sank the rows away from
+    // the queued-turn replies they caused, even though the committed graph had
+    // those replies in the right place.
+    let mut unanchored_rows: Vec<ChatMessage> = Vec::new();
+    let mut anchored_rows: BTreeMap<String, Vec<ChatMessage>> = BTreeMap::new();
+    let mut anchor: Option<String> = None;
     for message in product_messages.into_iter().chain(replayed_active_rows) {
         if is_committed_turn_output_copy(&message, &committed_turn_output_turn_ids) {
+            if let Some(ChatMessageProvenance::TurnOutput { turn_id }) = message.provenance.as_ref()
+                && let Some(committed_id) = committed_turn_output_ids.get(turn_id)
+            {
+                anchor = Some(committed_id.clone());
+            }
             continue;
         }
         // A replaced committed message stays replaced however it reached this
@@ -499,18 +517,151 @@ pub(crate) fn project_chat(
         // product log, and that mirror is the same runtime copy for which the
         // UI-owned row already speaks.
         if replaced_committed_ids.contains(&message.id) {
+            anchor = Some(message.id.clone());
             continue;
         }
-        if message_ids.insert(message.id.clone()) {
-            transcript.push(TranscriptRow::Message {
-                message: message.clone(),
-            });
-            messages.push(message);
+        if !message_ids.insert(message.id.clone()) {
+            // Already placed: this product row is a mirror of a committed row,
+            // which makes it the newest committed row the log has seen.
+            anchor = Some(message.id.clone());
+            continue;
+        }
+        match anchor.as_ref() {
+            Some(anchor_id) => anchored_rows
+                .entry(anchor_id.clone())
+                .or_default()
+                .push(message),
+            // Nothing committed had been pushed when this row arrived, so the
+            // log places it nowhere: it keeps the old position at the end.
+            None => unanchored_rows.push(message),
         }
     }
+
+    splice_anchored_product_rows(
+        &mut messages,
+        &mut transcript,
+        unanchored_rows,
+        anchored_rows,
+    );
 
     ChatProjection {
         messages,
         transcript,
     }
+}
+
+/// The committed message id that carries each turn's output, so a product-log
+/// mirror of that output can name the committed row it duplicates.
+fn committed_turn_output_message_ids(committed: &[ChatMessage]) -> BTreeMap<TurnId, String> {
+    committed
+        .iter()
+        .filter(|message| message.role == "assistant")
+        .filter_map(|message| {
+            message
+                .provenance
+                .as_ref()
+                .map(|ChatMessageProvenance::TurnOutput { turn_id }| {
+                    (turn_id.clone(), message.id.clone())
+                })
+        })
+        .collect()
+}
+
+/// The turn a projected chat row belongs to, as far as its id or provenance says.
+fn chat_message_turn_id(message: &ChatMessage) -> Option<TurnId> {
+    workbench_turn_id_from_user_message_id(&message.id)
+        .or_else(|| workbench_turn_id_from_assistant_message_id(&message.id))
+        .map(TurnId::from)
+        .or_else(|| {
+            message
+                .provenance
+                .as_ref()
+                .map(|ChatMessageProvenance::TurnOutput { turn_id }| turn_id.clone())
+        })
+}
+
+/// Where an anchored product row belongs: after the last row of the anchor's
+/// turn, so an occurrence that happened after a turn's reply renders after that
+/// reply rather than between the prompt and the answer.
+fn anchor_insertion_index(messages: &[ChatMessage], anchor_id: &str) -> Option<usize> {
+    let anchor_at = messages
+        .iter()
+        .rposition(|message| message.id == anchor_id)?;
+    let anchor_turn = chat_message_turn_id(&messages[anchor_at]);
+    let mut index = anchor_at + 1;
+    if let Some(anchor_turn) = anchor_turn {
+        while let Some(next) = messages.get(index) {
+            if chat_message_turn_id(next).as_ref() == Some(&anchor_turn) {
+                index += 1;
+            } else {
+                break;
+            }
+        }
+    }
+    Some(index)
+}
+
+/// Insert each product-log row at the point in the committed transcript it was
+/// pushed at, leaving every other row where the committed projection put it.
+/// Rows with no anchor were pushed before any committed row and lead the
+/// transcript; rows whose anchor this projection no longer renders keep the old
+/// position at the end, which is still the newest position the snapshot can
+/// honestly claim for them.
+fn splice_anchored_product_rows(
+    messages: &mut Vec<ChatMessage>,
+    transcript: &mut Vec<TranscriptRow>,
+    unanchored_rows: Vec<ChatMessage>,
+    anchored_rows: BTreeMap<String, Vec<ChatMessage>>,
+) {
+    let mut insertions: Vec<(usize, Vec<ChatMessage>)> = Vec::new();
+    let mut trailing: Vec<ChatMessage> = unanchored_rows;
+    for (anchor_id, rows) in anchored_rows {
+        match anchor_insertion_index(messages, &anchor_id) {
+            Some(index) => insertions.push((index, rows)),
+            None => trailing.extend(rows),
+        }
+    }
+    messages.extend(trailing);
+    insertions.sort_by_key(|insertion| std::cmp::Reverse(insertion.0));
+    for (index, rows) in &insertions {
+        messages.splice(index..index, rows.iter().cloned());
+    }
+
+    // The transcript carries reasoning and code rows between its message rows,
+    // so it is re-ordered onto the message order just settled rather than
+    // spliced by index.
+    let mut placed: BTreeMap<String, Vec<TranscriptRow>> = BTreeMap::new();
+    let mut message_rows: BTreeMap<String, TranscriptRow> = BTreeMap::new();
+    let mut leading_extras: Vec<TranscriptRow> = Vec::new();
+    let mut previous: Option<String> = None;
+    for row in transcript.drain(..) {
+        match row {
+            TranscriptRow::Message { message } => {
+                let id = message.id.clone();
+                message_rows.insert(id.clone(), TranscriptRow::Message { message });
+                previous = Some(id);
+            }
+            extra => match previous.as_ref() {
+                Some(id) => placed.entry(id.clone()).or_default().push(extra),
+                None => leading_extras.push(extra),
+            },
+        }
+    }
+    let mut ordered = leading_extras;
+    for message in messages.iter() {
+        ordered.push(
+            message_rows
+                .remove(&message.id)
+                .unwrap_or_else(|| TranscriptRow::Message {
+                    message: message.clone(),
+                }),
+        );
+        if let Some(extras) = placed.remove(&message.id) {
+            ordered.extend(extras);
+        }
+    }
+    for (_, extras) in placed {
+        ordered.extend(extras);
+    }
+    *transcript = ordered;
 }
