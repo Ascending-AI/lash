@@ -185,7 +185,7 @@ async fn overflow_and_recovery(
 
     Ok(json!({
         "checkpoint": checkpoint,
-        "dialect": "typescript",
+        "dialect": SERVED_DIALECT,
         "session_id": session_id.as_str(),
         "oversized_tool_result_bytes": tool_bytes,
         "provider_calls": harness.provider_calls(),
@@ -257,7 +257,7 @@ async fn provider_error_control(run_id: &str) -> Result<Value> {
 
     Ok(json!({
         "checkpoint": "provider_error_control",
-        "dialect": "typescript",
+        "dialect": SERVED_DIALECT,
         "session_id": session_id.as_str(),
         "control_stop": stop,
         "control_outcome": outcome,
@@ -380,9 +380,17 @@ impl Harness {
     }
 }
 
-/// One cell. TypeScript is the only RLM language (ADR 0096).
+/// The RLM language this harness serves, and the single source every layer
+/// reads it from: the cell delimiters below, the `dialect` field on every
+/// checkpoint, and — through that field — the artifact directory the companion
+/// script names for the row. TypeScript is the only RLM language (ADR 0096);
+/// when that stops being true this constant is what a second row changes,
+/// and nothing downstream repeats the literal (FIG-3169).
+pub(crate) const SERVED_DIALECT: &str = "typescript";
+
+/// One cell, in the served dialect.
 fn cell(body: &str) -> String {
-    format!("<typescript>\n{body}\n</typescript>")
+    format!("<{SERVED_DIALECT}>\n{body}\n</{SERVED_DIALECT}>")
 }
 
 /// The cell that pulls the oversized tool result into this turn's context and
