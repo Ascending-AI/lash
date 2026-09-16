@@ -34,9 +34,11 @@ mod event_sequence_floors;
 use event_sequence_floors::EventSequenceStep;
 mod generated_prefix;
 mod generator;
+mod model_agreement;
 mod run_shape;
 use generator::generated_case;
 pub use generator::sample_store_contract_operations;
+use model_agreement::{assert_model_agreement, terminal_outcome_under_standing_cancel};
 /// Fresh process-registry and runtime-persistence handles for one generated case.
 pub struct StoreContractHandles {
     pub registry: Arc<dyn ProcessRegistry>,
@@ -826,10 +828,14 @@ async fn apply_operation(
                     if let Some(expected) = model.process_mut(&id).expected_record.as_mut() {
                         event_sequences.advance(expected);
                         expected.wait = None;
-                        expected.status = output
+                        let settled = terminal_outcome_under_standing_cancel(
+                            output,
+                            expected.cancel_request.as_deref(),
+                        );
+                        expected.status = settled
                             .terminal_status()
                             .expect("generated output is terminal");
-                        expected.outcome = Some(output);
+                        expected.outcome = Some(settled);
                     }
                 }
             }
@@ -1208,15 +1214,6 @@ async fn process_lease_snapshot(
         .map_err(|error| error.to_string())
 }
 
-fn normalize_record(mut record: ProcessRecord) -> ProcessRecord {
-    // Backend clocks are intentionally not synchronized. The independent model
-    // pins every semantic record field; the fold law separately pins timestamps
-    // by reconstructing them from the persisted event log.
-    record.created_at_ms = 0;
-    record.updated_at_ms = 0;
-    record
-}
-
 fn terminal_output(index: u8) -> ProcessAwaitOutput {
     match index % 4 {
         0 => ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
@@ -1403,99 +1400,6 @@ async fn assert_fold_law(
                 "stored record for `{id}` differs from fold_process_record(events_after(0))"
             ));
         }
-    }
-    Ok(())
-}
-
-async fn assert_model_agreement(
-    handles: &StoreContractHandles,
-    model: &ReferenceModel,
-) -> Result<(), String> {
-    for (id, expected) in &model.processes {
-        if expected.tombstoned {
-            if matches!(handles.registry.get_process(id).await, Ok(Some(_))) {
-                return Err(format!(
-                    "tombstoned process `{id}` unexpectedly became live"
-                ));
-            }
-            continue;
-        }
-        let Some(expected_record) = expected.expected_record.clone() else {
-            continue;
-        };
-        let actual_record = handles
-            .registry
-            .get_process(id)
-            .await
-            .map_err(|error| format!("modeled live process `{id}` lookup failed: {error}"))?
-            .ok_or_else(|| format!("modeled live process `{id}` was absent"))?;
-        if normalize_record(expected_record) != normalize_record(actual_record) {
-            return Err(format!(
-                "process record for `{id}` differs from the independently-derived reference model"
-            ));
-        }
-        let actual = handles
-            .registry
-            .observers_for_process(id)
-            .await
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        if actual != expected.observers {
-            return Err(format!(
-                "observer set for `{id}` differs from reference model"
-            ));
-        }
-    }
-    let mut actual_deliveries = handles
-        .registry
-        .list_wake_deliveries(None)
-        .await
-        .map_err(|error| error.to_string())?;
-    actual_deliveries.sort_by(|left, right| left.delivery_id.cmp(&right.delivery_id));
-    let expected_deliveries = model.wake_deliveries.values().cloned().collect::<Vec<_>>();
-    if actual_deliveries != expected_deliveries {
-        return Err(format!(
-            "wake delivery states differ from reference model: actual={actual_deliveries:?}, expected={expected_deliveries:?}"
-        ));
-    }
-    let queued = handles
-        .runtime
-        .list_queued_work(&SessionId::from("prop-runtime-session"))
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut actual_live =
-        BTreeMap::<(SessionId, ProcessId), BTreeMap<u64, ExpectedQueuedWake>>::new();
-    for batch in queued {
-        for item in batch.items {
-            if let QueuedWorkPayload::ProcessWake { wake } = item.payload {
-                actual_live
-                    .entry((batch.session_id.clone(), wake.process_id.clone()))
-                    .or_default()
-                    .insert(
-                        wake.sequence,
-                        ExpectedQueuedWake {
-                            wake: *wake,
-                            delivery_policy: batch.delivery_policy,
-                            kind: batch.kind,
-                            authority: batch.authority.clone(),
-                            merge_key: batch.merge_key.clone(),
-                            available_at_ms: batch.available_at_ms,
-                        },
-                    );
-            }
-        }
-    }
-    let expected_live = model
-        .live_wakes
-        .iter()
-        .filter(|(_, wakes)| !wakes.is_empty())
-        .map(|(key, wakes)| (key.clone(), wakes.clone()))
-        .collect::<BTreeMap<_, _>>();
-    if actual_live != expected_live {
-        return Err(format!(
-            "Enqueued-wake high-water safety: live wake payload/batch state differs; actual={actual_live:?}, expected={expected_live:?}"
-        ));
     }
     Ok(())
 }
