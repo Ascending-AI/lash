@@ -590,7 +590,6 @@ async fn run_once_inner(
             let warm = variant == "warm";
             runtime.arm_tool_catalog_observation(
                 variant,
-                phase_probe.clone(),
                 Arc::new(move || composition_probe.catalog_observation_stage(warm)),
             );
         }

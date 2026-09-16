@@ -1019,10 +1019,6 @@
               "budget_ms": 3.274,
               "required": false
             },
-            "tool_catalog.cold.session_catalog_composition": {
-              "budget_ms": 0.3,
-              "required": true
-            },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false

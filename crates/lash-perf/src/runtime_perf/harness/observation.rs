@@ -56,7 +56,6 @@ impl BenchmarkRuntime {
     pub(crate) fn arm_tool_catalog_observation(
         &self,
         variant: &'static str,
-        phase_probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,
         observation_stage: Arc<dyn Fn() -> u8 + Send + Sync>,
     ) {
         let session_id = self
@@ -67,7 +66,7 @@ impl BenchmarkRuntime {
         self.tool_catalog_observer
             .as_ref()
             .expect("tool-catalog observer")
-            .arm(variant, session_id, phase_probe, observation_stage);
+            .arm(variant, session_id, observation_stage);
     }
 
     #[expect(
