@@ -709,6 +709,13 @@ impl RuntimePerfScenario {
         self.metadata().durability.is_durable()
     }
 
+    // The dispatch in `measurement/phase_probe.rs` used to reach the
+    // checkpoint-curve harness through this predicate, which made the harness
+    // partition a second, unchecked copy of the one the dispatch match already
+    // expressed. The dispatch now names its own variants and the compiler owns
+    // exhaustiveness, so the phase contract is what it says it is -- the phase
+    // vocabulary a harness emits -- and only the phase-contract tests read it.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn phase_contract(self) -> ScenarioPhaseContract {
         self.metadata().phase_contract
     }
@@ -750,6 +757,7 @@ impl RuntimePerfScenario {
         )
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn is_checkpoint_curve(self) -> bool {
         self.phase_contract() == ScenarioPhaseContract::CheckpointCurve
     }
