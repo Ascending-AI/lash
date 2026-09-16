@@ -385,7 +385,7 @@ impl ActiveTurns {
         let holds_turn = ledger
             .turns
             .get(session_id)
-            .is_some_and(|slot| &slot.turn_id == turn_id);
+            .is_some_and(|slot| slot.turn_id == *turn_id);
         if !holds_turn {
             return;
         }
@@ -398,7 +398,7 @@ impl ActiveTurns {
             .lock_recover()
             .turns
             .get(session_id)
-            .is_some_and(|slot| &slot.turn_id == turn_id)
+            .is_some_and(|slot| slot.turn_id == *turn_id)
     }
 
     /// The session's claimed turn, with the workflow that owns it and the
