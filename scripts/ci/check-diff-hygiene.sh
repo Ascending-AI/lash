@@ -47,6 +47,8 @@ fi
 
 footer_reason=""
 declare -a empty_footer_commits=()
+declare -a malformed_mode_commits=()
+declare -a mode_ack_paths=()
 if ! git rev-list "${range}" > "${tmp_dir}/commits"; then
   echo "Diff hygiene could not enumerate commits in range '${range}'." >&2
   exit 1
@@ -57,6 +59,23 @@ while IFS= read -r commit; do
     exit 1
   fi
   while IFS= read -r trailer; do
+    # `Mode-Change: <path> <reason>` acknowledges one Check F mode change. It is
+    # deliberately per-path and reason-bearing: a permission bit is never worth
+    # silencing every other check with a blanket bypass.
+    if [[ "${trailer}" == Mode-Change:* ]]; then
+      ack_value="${trailer#*:}"
+      ack_value="${ack_value#"${ack_value%%[![:space:]]*}"}"
+      ack_value="${ack_value%"${ack_value##*[![:space:]]}"}"
+      ack_path="${ack_value%%[[:space:]]*}"
+      ack_reason="${ack_value#"${ack_path}"}"
+      ack_reason="${ack_reason#"${ack_reason%%[![:space:]]*}"}"
+      if [[ -z "${ack_path}" || -z "${ack_reason}" ]]; then
+        malformed_mode_commits+=("$(git rev-parse --short "${commit}")")
+      else
+        mode_ack_paths+=("${ack_path}")
+      fi
+      continue
+    fi
     [[ "${trailer}" == Bypass-Diff-Hygiene:* ]] || continue
     reason="${trailer#*:}"
     reason="${reason#"${reason%%[![:space:]]*}"}"
@@ -73,6 +92,13 @@ if ((${#empty_footer_commits[@]})); then
   printf -v empty_commits '%s, ' "${empty_footer_commits[@]}"
   empty_commits="${empty_commits%, }"
   echo "Override-footer validation failed for commit(s) ${empty_commits}: Bypass-Diff-Hygiene has an empty reason; supply a non-empty reason or use DIFF_HYGIENE_BYPASS=1." >&2
+  exit 1
+fi
+
+if ((${#malformed_mode_commits[@]})); then
+  printf -v malformed_commits '%s, ' "${malformed_mode_commits[@]}"
+  malformed_commits="${malformed_commits%, }"
+  echo "Override-footer validation failed for commit(s) ${malformed_commits}: Mode-Change needs '<path> <reason>' with a non-empty reason." >&2
   exit 1
 fi
 
@@ -246,9 +272,61 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
   esac
 done < "${tmp_dir}/added-lines"
 
+# Check F (file mode change). Nothing else in CI has a mode vocabulary: a script
+# silently losing its executable bit, or a data file silently gaining one,
+# reaches main with every gate green (FIG-2851). The mode pair sits in the same
+# raw header Check D already reads.
+is_mode_acknowledged() {
+  local path="$1"
+  local ack
+  for ack in ${mode_ack_paths[@]+"${mode_ack_paths[@]}"}; do
+    if [[ "${ack}" == "${path}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+declare -a mode_change_paths=()
+if ! git diff --raw -z "${diff_range}" > "${tmp_dir}/raw-changes"; then
+  echo "Diff hygiene could not enumerate changed Git entries in range '${diff_range}'." >&2
+  exit 1
+fi
+while IFS= read -r -d '' raw_header; do
+  IFS= read -r -d '' path || true
+  read -r src_mode dst_mode _src_blob _dst_blob change_status <<< "${raw_header#:}"
+  # Rename and copy entries carry the destination path in a second field.
+  if [[ "${change_status}" == R* || "${change_status}" == C* ]]; then
+    IFS= read -r -d '' destination_path || true
+    path="${destination_path}"
+  fi
+  # An addition or a deletion has one real mode; only a surviving path can
+  # change modes.
+  [[ "${src_mode}" != "000000" && "${dst_mode}" != "000000" ]] || continue
+  [[ "${src_mode}" != "${dst_mode}" ]] || continue
+  mode_change_paths+=("${path}")
+  if is_mode_acknowledged "${path}"; then
+    continue
+  fi
+  failures+=("Check F (file mode change) failed for '${path}' (${src_mode} -> ${dst_mode}); restore the mode, acknowledge it with a 'Mode-Change: ${path} <reason>' commit footer, or use Bypass-Diff-Hygiene: <reason> / DIFF_HYGIENE_BYPASS=1.")
+done < "${tmp_dir}/raw-changes"
+
+for ack_path in ${mode_ack_paths[@]+"${mode_ack_paths[@]}"}; do
+  matched=0
+  for path in ${mode_change_paths[@]+"${mode_change_paths[@]}"}; do
+    if [[ "${path}" == "${ack_path}" ]]; then
+      matched=1
+      break
+    fi
+  done
+  if ((matched == 0)); then
+    failures+=("Mode-change acknowledgement rot: 'Mode-Change: ${ack_path}' matches no mode change against ${base_description}; remove the footer.")
+  fi
+done
+
 if ((${#failures[@]})); then
   printf '%s\n' "${failures[@]}" >&2
   exit 1
 fi
 
-echo "Diff hygiene passed: ${#added_paths[@]} added file(s) checked against ${base_description}."
+echo "Diff hygiene passed: ${#added_paths[@]} added file(s) and ${#mode_change_paths[@]} mode change(s) checked against ${base_description}."
