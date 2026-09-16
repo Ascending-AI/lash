@@ -64,6 +64,96 @@ def _first_party_dependency_dir(
     return PurePosixPath(os.path.normpath(f"{manifest_dir}/{path}")).as_posix()
 
 
+def _optional_dependency_names(manifest: Mapping, include_dev: bool) -> set[str]:
+    """The names of dependency entries Cargo compiles only when a feature asks."""
+
+    names: set[str] = set()
+    for table in _dependency_tables(manifest, include_dev):
+        for name, spec in table.items():
+            if isinstance(spec, Mapping) and spec.get("optional") is True:
+                names.add(name)
+    return names
+
+
+def _resolve_features(
+    manifest: Mapping, requested: set[str], include_dev: bool
+) -> tuple[set[str], dict[str, set[str]]]:
+    """Expand a feature request through one package's `[features]` table.
+
+    Returns the optional dependency entries the request turns on, and the
+    features it asks of each dependency. `dep:x` enables `x`; `x/feat` enables
+    `x` and asks it for `feat`; `x?/feat` asks for `feat` only if something
+    else enables `x`. An optional dependency no feature names with a `dep:`
+    form keeps Cargo's implicit same-named feature.
+    """
+
+    table = manifest.get("features", {})
+    if not isinstance(table, Mapping):
+        table = {}
+    named_explicitly = {
+        entry[len("dep:") :]
+        for entries in table.values()
+        if isinstance(entries, list)
+        for entry in entries
+        if isinstance(entry, str) and entry.startswith("dep:")
+    }
+    implicit = _optional_dependency_names(manifest, include_dev) - named_explicitly
+
+    enabled: set[str] = set()
+    dependency_features: dict[str, set[str]] = {}
+    seen: set[str] = set()
+    pending = list(requested)
+    while pending:
+        feature = pending.pop()
+        if feature in seen:
+            continue
+        seen.add(feature)
+        if feature in implicit:
+            enabled.add(feature)
+        entries = table.get(feature)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, str):
+                continue
+            if entry.startswith("dep:"):
+                enabled.add(entry[len("dep:") :])
+            elif "/" in entry:
+                name, _, wanted = entry.partition("/")
+                weak = name.endswith("?")
+                name = name[:-1] if weak else name
+                dependency_features.setdefault(name, set()).add(wanted)
+                if not weak:
+                    enabled.add(name)
+            else:
+                pending.append(entry)
+    return enabled, dependency_features
+
+
+def _requested_features(
+    name: str, spec: Mapping, workspace_dependencies: Mapping
+) -> set[str]:
+    """The features one dependency entry asks of the package it points at."""
+
+    features: set[str] = set()
+    default = True
+    entries = []
+    if spec.get("workspace") is True:
+        inherited = workspace_dependencies.get(name)
+        if isinstance(inherited, Mapping):
+            entries.append(inherited)
+    entries.append(spec)
+    for entry in entries:
+        listed = entry.get("features")
+        if isinstance(listed, list):
+            features.update(item for item in listed if isinstance(item, str))
+        if "default-features" in entry:
+            default = entry["default-features"] is not False
+    if default:
+        features.add("default")
+    return features
+
+
 @lru_cache(maxsize=None)
 def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
     """The first-party manifest directories the workbench partition compiles.
@@ -74,6 +164,14 @@ def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
     would execute. The closure is read out of the workspace manifests rather
     than kept as a hand list: `scripts/test_ci_plan.py` cross-checks it against
     `cargo metadata` so the two can never drift apart.
+
+    The walk is feature-aware, because Cargo's is: an optional dependency is
+    compiled only when the feature set the workbench actually requests enables
+    it. `lash-runtime` offers an optional module per host-wired extension
+    (ADR 0079), and a crate behind a feature the workbench never turns on is
+    not in the binary and cannot change what the job executes. Features
+    accumulate per package and the walk re-expands on new ones, matching the
+    way Cargo unifies features within one build.
     """
 
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
@@ -86,23 +184,36 @@ def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
         workspace_manifest = tomllib.load(handle)
     workspace_dependencies = workspace_manifest.get("workspace", {}).get("dependencies", {})
 
-    closure: set[str] = set()
     # The workbench's own dev-dependencies compile for its tests; a transitive
     # dependency's dev-dependencies do not, exactly as `cargo test -p` resolves.
-    pending = [(WORKBENCH_MANIFEST_DIR, True)]
+    requested: dict[str, set[str]] = {}
+    visited: set[str] = set()
+    pending = [(WORKBENCH_MANIFEST_DIR, frozenset({"default"}), True)]
     while pending:
-        directory, include_dev = pending.pop()
-        if directory in closure:
+        directory, features, include_dev = pending.pop()
+        known = requested.setdefault(directory, set())
+        if directory in visited and features <= known:
             continue
-        closure.add(directory)
-        for table in _dependency_tables(manifest(directory), include_dev):
+        known |= features
+        visited.add(directory)
+        package = manifest(directory)
+        enabled, dependency_features = _resolve_features(package, known, include_dev)
+        for table in _dependency_tables(package, include_dev):
             for name, spec in table.items():
+                if not isinstance(spec, Mapping):
+                    continue
+                if spec.get("optional") is True and name not in enabled:
+                    continue
                 dependency = _first_party_dependency_dir(
                     name, spec, directory, workspace_dependencies
                 )
-                if dependency is not None and dependency not in closure:
-                    pending.append((dependency, False))
-    return frozenset(closure)
+                if dependency is None:
+                    continue
+                wanted = _requested_features(
+                    name, spec, workspace_dependencies
+                ) | dependency_features.get(name, set())
+                pending.append((dependency, frozenset(wanted), False))
+    return frozenset(requested)
 
 GATED_JOBS = {
     "lashlang-git-consumer": "rust",

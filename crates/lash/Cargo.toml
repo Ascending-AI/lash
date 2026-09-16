@@ -31,6 +31,17 @@ lash-core = { workspace = true }
 lash-lashlang-runtime = { workspace = true, optional = true }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-tool-support = { workspace = true }
+lash-provider-anthropic = { workspace = true, optional = true }
+lash-provider-google = { workspace = true, optional = true }
+lash-provider-openai = { workspace = true, optional = true }
+lash-plugin-mcp = { workspace = true, optional = true }
+lash-postgres-store = { workspace = true, optional = true }
+lash-restate = { workspace = true, optional = true }
+lash-s3-store = { workspace = true, optional = true }
+lash-sqlite-store = { workspace = true, optional = true }
+lash-subagents = { workspace = true, optional = true }
+lash-typescript = { workspace = true, optional = true }
+lash-http-transport = { workspace = true, optional = true }
 lash-protocol-rlm = { workspace = true, optional = true }
 lash-protocol-standard = { workspace = true }
 lash-plugin-tool-output-budget = { workspace = true }
@@ -55,11 +66,24 @@ rlm = [
     "dep:lash-rlm-types",
     "dep:lashlang",
     "lash-protocol-standard/lashlang",
-    "lash-sqlite-store/lashlang",
-    "lash-postgres-store/lashlang",
 ]
+
+# Host-wired extension features (ADR 0079 section 1). Each gates one
+# `lash::<name>` module that re-exports the matching internal crate's
+# host-facing surface; none is enabled by default.
+sqlite = ["dep:lash-sqlite-store"]
+postgres = ["dep:lash-postgres-store"]
+s3 = ["dep:lash-s3-store"]
+restate = ["dep:lash-restate"]
+openai = ["dep:lash-provider-openai"]
+anthropic = ["dep:lash-provider-anthropic"]
+google = ["dep:lash-provider-google"]
+mcp = ["dep:lash-plugin-mcp"]
+subagents = ["dep:lash-subagents"]
+typescript = ["dep:lash-typescript"]
+http-transport = ["dep:lash-http-transport"]
 # Exposes `lash::testing` (e.g. `TestProvider`) for embedder integration tests.
-testing = ["lash-core/testing", "lash-protocol-rlm?/testing"]
+testing = ["lash-core/testing", "lash-protocol-rlm?/testing", "lashlang?/testing"]
 # Exposes the OpenTelemetry trace sink (`lash::tracing::OtelTraceSink`).
 otel-trace = ["lash-core/otel-trace"]
 

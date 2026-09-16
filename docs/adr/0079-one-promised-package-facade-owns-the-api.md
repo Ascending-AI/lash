@@ -46,11 +46,25 @@ MCP, subagents, TypeScript, and HTTP transport. A host selects those backends
 and extensions through `lash-runtime`; it does not assemble a supported Lash
 family from companion packages.
 
+Amendment (FIG-3189): the extension set is realized as the eleven features
+`sqlite`, `postgres`, `s3`, `restate`, `openai`, `anthropic`, `google`, `mcp`,
+`subagents`, `typescript`, and `http-transport`, each gating one
+`lash::<name>` module that re-exports the matching internal crate's root. With
+the three features the facade already carried — `rlm`, `testing`, `otel-trace`
+— the set is fourteen, inside the range this section names. No promised
+extension lacked a crate to wire, and none was added or renamed.
+
 All other twenty-eight publishable Lash packages are renamed to
 `lash-internal-*`. Cargo dependency aliases preserve their current crate names
 and source paths, so the package classification does not require source-level
-crate renames. The facade's dev-dependency-only edges to `lash-restate`,
-`lash-postgres-store`, and `lash-provider-openai` do not form dependency cycles.
+crate renames.
+
+Amendment (FIG-3189): the edges to `lash-restate`, `lash-postgres-store`, and
+`lash-provider-openai` are optional normal dependencies now, not
+dev-dependency-only edges, because the `restate`, `postgres`, and `openai`
+features gate re-export modules in the library. They still form no publish
+cycle: the four internal crates that depend back on the facade do so through
+version-less path dev-dependencies, which the publish ordering excludes.
 
 `lash-remote-protocol` remains internal. Its implementation may continue to use
 internal packages where the facade's dependency direction requires it; hosts
