@@ -740,11 +740,15 @@ impl QueuedWorkStore for Store {
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
+        #[cfg(feature = "testing")]
+        let hydration_pause = self.conn.fault_injector();
+        // One snapshot for the batch rows and their item rows: see
+        // `SqliteConnection::read`.
         self.conn
-            .call(move |conn| {
+            .read(move |tx| {
                 let outcome: Result<Vec<QueuedWorkBatch>, StoreError> = (|| {
                     let rows = {
-                        let mut stmt = conn
+                        let mut stmt = tx
                             .prepare(&format!(
                                 "SELECT {QUEUED_WORK_COLUMNS}
                                  FROM queued_work_batches
@@ -758,8 +762,14 @@ impl QueuedWorkStore for Store {
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };
+                    // Test seam: the window this snapshot closes is between the
+                    // batch rows above and their item rows below.
+                    #[cfg(feature = "testing")]
+                    if let Some(injector) = hydration_pause.as_ref() {
+                        injector.reach_queued_work_hydration();
+                    }
                     rows.into_iter()
-                        .map(|row| queued_work_batch_from_conn(conn, row))
+                        .map(|row| queued_work_batch_from_conn(tx, row))
                         .collect()
                 })();
                 Ok(outcome)
@@ -868,11 +878,15 @@ impl QueuedWorkStore for Store {
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let now = self.clock.timestamp_ms();
+        #[cfg(feature = "testing")]
+        let hydration_pause = self.conn.fault_injector();
+        // One snapshot for the batch rows and their item rows: see
+        // `SqliteConnection::read`.
         self.conn
-            .call(move |conn| {
+            .read(move |tx| {
                 let outcome: Result<Vec<QueuedWorkBatch>, StoreError> = (|| {
                     let rows = {
-                        let mut stmt = conn
+                        let mut stmt = tx
                             .prepare(&format!(
                                 "SELECT {QUEUED_WORK_COLUMNS}
                                  FROM queued_work_batches
@@ -897,8 +911,14 @@ impl QueuedWorkStore for Store {
                             .map_err(sqlite_error)?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                     };
+                    // Test seam: the window this snapshot closes is between the
+                    // batch rows above and their item rows below.
+                    #[cfg(feature = "testing")]
+                    if let Some(injector) = hydration_pause.as_ref() {
+                        injector.reach_queued_work_hydration();
+                    }
                     rows.into_iter()
-                        .map(|row| queued_work_batch_from_conn(conn, row))
+                        .map(|row| queued_work_batch_from_conn(tx, row))
                         .collect()
                 })();
                 Ok(outcome)

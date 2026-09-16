@@ -215,6 +215,12 @@ pub(crate) struct SqliteConnection {
 }
 
 impl SqliteConnection {
+    /// This connection's fault controller, when one was installed at open.
+    #[cfg(feature = "testing")]
+    pub(crate) fn fault_injector(&self) -> Option<crate::testing::SqliteFaultInjector> {
+        self.fault_injector.clone()
+    }
+
     #[cfg(test)]
     pub(crate) async fn close_for_testing(&self) {
         self.inner
@@ -348,6 +354,33 @@ impl SqliteConnection {
         F: FnOnce(&mut Connection) -> rusqlite::Result<T> + Send + 'static,
     {
         flatten(self.inner.call(move |c| Ok(f(c))).await)
+    }
+
+    /// Run `f` inside a `BEGIN DEFERRED` read transaction, ending it with a
+    /// rollback because nothing is written.
+    ///
+    /// Statements run through [`call`](Self::call) are in autocommit, so each
+    /// one takes its own snapshot and another connection's commit can land
+    /// between two of them. Any read that follows a row into a child table must
+    /// use this instead: one snapshot for the whole read is what makes "a
+    /// parent row is visible only together with its children" true for the
+    /// reader as well as for the writer. Single-statement reads may stay on
+    /// `call`.
+    pub(crate) async fn read<T, F>(&self, f: F) -> rusqlite::Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Transaction<'_>) -> rusqlite::Result<T> + Send + 'static,
+    {
+        flatten(
+            self.inner
+                .call(move |c| {
+                    let tx = c.transaction_with_behavior(TransactionBehavior::Deferred)?;
+                    let value = f(&tx)?;
+                    tx.rollback()?;
+                    Ok(Ok(value))
+                })
+                .await,
+        )
     }
 
     /// Run `f` inside a `BEGIN IMMEDIATE` transaction on the connection thread,
