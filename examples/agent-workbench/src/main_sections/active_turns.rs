@@ -484,7 +484,7 @@ impl ActiveTurns {
             .lock_recover()
             .turns
             .get(session_id)
-            .filter(|slot| &slot.turn_id == turn_id)
+            .filter(|slot| slot.turn_id == *turn_id)
             .and_then(|slot| slot.prompt.clone())
     }
 
