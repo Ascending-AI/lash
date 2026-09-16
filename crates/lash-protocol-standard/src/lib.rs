@@ -701,6 +701,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         actions
     }
 
+    // Equivalent mutant: cargo-mutants' `vec![]` replacement is the same value
+    // as this body's `Vec::new()`, so no test can tell them apart.
+    #[cfg_attr(test, mutants::skip)]
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
@@ -1292,7 +1295,11 @@ mod tests {
                 .context_window_tokens(200_000)
                 .build()
                 .expect("valid model"),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            // Bounded, not unbounded: these fixtures drive a live runtime loop
+            // against a stub provider, so a driver that mistakes a tool-call-free
+            // response for a tool-calling one spins here forever instead of
+            // failing. The budget is well above the iterations the scenario needs.
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
         };
         let scoped_controller = lash_core::ScopedEffectController::shared(
             Arc::new(CountingEffectController::default()),
@@ -1418,7 +1425,11 @@ mod tests {
                 .context_window_tokens(200_000)
                 .build()
                 .expect("valid model"),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            // Bounded, not unbounded: these fixtures drive a live runtime loop
+            // against a stub provider, so a driver that mistakes a tool-call-free
+            // response for a tool-calling one spins here forever instead of
+            // failing. The budget is well above the iterations the scenario needs.
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
         };
         let controller = CountingEffectController::default();
         let scoped_controller = lash_core::ScopedEffectController::shared(
@@ -1535,6 +1546,9 @@ mod tests {
 
 #[cfg(test)]
 mod discovery_tests;
+
+#[cfg(test)]
+mod driver_contract_tests;
 
 #[cfg(test)]
 mod provider_part_persistence_tests;

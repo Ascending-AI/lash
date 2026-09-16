@@ -129,7 +129,11 @@ async fn persisted_provider_response(
             .context_window_tokens(200_000)
             .build()
             .expect("valid model"),
-        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        // Bounded, not unbounded: these fixtures drive a live runtime loop
+        // against a stub provider, so a driver that mistakes a tool-call-free
+        // response for a tool-calling one spins here forever instead of
+        // failing. The budget is well above the iterations the scenario needs.
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
     };
     let scoped_controller = lash_core::ScopedEffectController::shared(
         Arc::new(CountingEffectController::default()),
