@@ -296,6 +296,37 @@ fn durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence() {
     }
 }
 
+/// The Confidence `coverage` and `mutation-packages` stages export
+/// `LASH_CONFIDENCE_STAGE`, and `scripts/confidence-gate.sh` sources
+/// `scripts/ci/confidence-stage.sh` whenever it is set; that file exits 2 for
+/// any selector but `full`. This probe runs `fast:<shard>`, so an inherited
+/// stage selector turned all six routing tests into
+/// "Confidence stages require the unscoped full selector" in exactly the two
+/// stages that run them, and no Confidence run has completed since the stage
+/// split. The gate variables must not reach the child, and scrubbing them must
+/// not change what the probe observes.
+#[test]
+fn durable_fault_matrix_gate_probe_ignores_inherited_confidence_stage_routing() {
+    let clean = run_fast_gate_with_fake_cargo("fault-matrix");
+    assert!(
+        !clean.is_empty(),
+        "the fault-matrix shard must record cargo commands"
+    );
+
+    let under_a_stage = run_fast_gate_with_fake_cargo_inheriting(
+        "fault-matrix",
+        &[
+            ("LASH_CONFIDENCE_STAGE", "coverage"),
+            ("LASH_CONFIDENCE_PACKAGE", "lash-internal-core"),
+            ("LASH_SIM_SHARD", "1/9"),
+        ],
+    );
+    assert_eq!(
+        under_a_stage, clean,
+        "a Confidence stage environment must not change fast:fault-matrix routing"
+    );
+}
+
 const REAL_CARGO_FILTER_CHUNKS: usize = 5;
 // Raising the chunk count must add a matching test and bump this pin.
 const _: () = assert!(REAL_CARGO_FILTER_CHUNKS == 5);
@@ -394,6 +425,18 @@ fn command_executes_evidence(command: &[String], evidence: CargoTestEvidence) ->
 }
 
 fn run_fast_gate_with_fake_cargo(shard: &str) -> Vec<Vec<String>> {
+    run_fast_gate_with_fake_cargo_inheriting(shard, &[])
+}
+
+/// `inherited` is applied to the child environment before the gate variables
+/// are scrubbed from it. A variable set here and a variable inherited from the
+/// parent process land in the same child environment map, so a run that still
+/// observes one proves the scrub, and `env_remove` after `env` is what removes
+/// it in both cases.
+fn run_fast_gate_with_fake_cargo_inheriting(
+    shard: &str,
+    inherited: &[(&str, &str)],
+) -> Vec<Vec<String>> {
     use std::os::unix::fs::PermissionsExt;
 
     let repo_root = repository_root();
@@ -428,12 +471,25 @@ fn run_fast_gate_with_fake_cargo(shard: &str) -> Vec<Vec<String>> {
         None => cargo_dir.clone().into_os_string(),
     };
 
-    let output = std::process::Command::new("bash")
+    let mut command = std::process::Command::new("bash");
+    command
         .arg(repo_root.join("scripts/confidence-gate.sh"))
         .arg(format!("fast:{shard}"))
         .current_dir(repo_root)
-        .env("HOME", temp.path())
+        .env("HOME", temp.path());
+    for (name, value) in inherited {
+        command.env(name, value);
+    }
+    // The probe drives the gate with a `fast:<shard>` selector. Every
+    // Confidence stage exports these, and the gate routes on them: a stage
+    // selector makes it source `scripts/ci/confidence-stage.sh`, which refuses
+    // anything but the unscoped `full` lane, and the sim variables re-shard a
+    // generated lane the probe is not asking for. None of them describe the
+    // routing under test, so the child never sees them.
+    let output = command
         .env_remove("LASH_CONFIDENCE_STAGE")
+        .env_remove("LASH_CONFIDENCE_PACKAGE")
+        .env_remove("LASH_SIM_SHARD")
         .env("PATH", path)
         .env("LASH_FAKE_CARGO_LOG", &log_path)
         .env("LASH_CONFIDENCE_OUT_DIR", &out_dir)
