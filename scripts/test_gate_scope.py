@@ -22,6 +22,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gate_scope  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "gate_scope.py"
+PUSH_GATE = Path(__file__).resolve().parent / "push-gate.sh"
+
+
+def push_gate_function(name: str) -> str:
+    """One shell function out of push-gate.sh, so the test drives the real one."""
+    script = PUSH_GATE.read_text(encoding="utf-8")
+    match = re.search(
+        rf"^{re.escape(name)}\(\) \{{\n.*?^\}}\n", script, re.MULTILINE | re.DOTALL
+    )
+    assert match, f"missing shell function {name}"
+    return match.group(0)
 
 
 def scope_of(*paths: str) -> gate_scope.Scope:
@@ -60,7 +71,7 @@ class DocOnlyTests(unittest.TestCase):
         # `include_str!` can pull it into a doc test, so it compiles.
         scope = scope_of("crates/lash/README.md")
         self.assertEqual(scope.classification, "rust-only")
-        self.assertTrue(scope.runs("rust-compile"))
+        self.assertTrue(scope.runs(gate_scope.Family.RUST_COMPILE))
 
 
 class ScriptOnlyTests(unittest.TestCase):
@@ -74,14 +85,14 @@ class RustSourceTests(unittest.TestCase):
     def test_a_crate_change_runs_compile_but_not_workflows(self) -> None:
         scope = scope_of("crates/lash-core/src/runtime/turn_loop.rs")
         self.assertEqual(scope.classification, "rust-only")
-        self.assertTrue(scope.runs("rust-compile"))
-        self.assertFalse(scope.runs("workflows"))
-        self.assertFalse(scope.runs("scripts"))
+        self.assertTrue(scope.runs(gate_scope.Family.RUST_COMPILE))
+        self.assertFalse(scope.runs(gate_scope.Family.WORKFLOWS))
+        self.assertFalse(scope.runs(gate_scope.Family.SCRIPTS))
 
     def test_an_example_rust_file_is_a_rust_source(self) -> None:
         scope = scope_of("examples/slack-clone/src/main.rs")
         self.assertEqual(scope.classification, "rust-only")
-        self.assertTrue(scope.runs("rust-compile"))
+        self.assertTrue(scope.runs(gate_scope.Family.RUST_COMPILE))
 
     def test_a_non_rust_example_asset_is_unknown(self) -> None:
         scope = scope_of("examples/slack-clone/ui/index.html")
@@ -93,8 +104,8 @@ class MixedTests(unittest.TestCase):
     def test_docs_plus_crates_is_mixed_and_compiles(self) -> None:
         scope = scope_of("docs/guide.md", "crates/lash/src/lib.rs")
         self.assertEqual(scope.classification, "mixed")
-        self.assertTrue(scope.runs("rust-compile"))
-        self.assertFalse(scope.runs("workflows"))
+        self.assertTrue(scope.runs(gate_scope.Family.RUST_COMPILE))
+        self.assertFalse(scope.runs(gate_scope.Family.WORKFLOWS))
 
     def test_docs_plus_a_shared_input_runs_everything(self) -> None:
         scope = scope_of("docs/guide.md", "Cargo.lock")
@@ -122,7 +133,7 @@ class ConservativeFallbackTests(unittest.TestCase):
     def test_a_workflow_change_runs_everything(self) -> None:
         scope = scope_of(".github/workflows/ci.yml")
         self.assertEqual(scope.families, gate_scope.ALL_FAMILIES)
-        self.assertTrue(scope.runs("workflows"))
+        self.assertTrue(scope.runs(gate_scope.Family.WORKFLOWS))
 
     def test_an_unknown_extension_runs_everything(self) -> None:
         scope = scope_of("fixtures/transcripts/turn.json")
@@ -314,7 +325,7 @@ class RustRuntimeDocInputTests(unittest.TestCase):
         offenders = {
             path: sorted(set(sources))
             for path, sources in self.referenced_paths().items()
-            if not scope_of(path).runs("rust-compile")
+            if not scope_of(path).runs(gate_scope.Family.RUST_COMPILE)
         }
         self.assertEqual(
             offenders,
@@ -342,13 +353,94 @@ class RustRuntimeDocInputTests(unittest.TestCase):
 
     def test_a_pinned_doc_input_runs_the_rust_battery(self) -> None:
         scope = scope_of("docs/adr/0008-confidence-gate.md")
-        self.assertTrue(scope.runs("rust-compile"))
+        self.assertTrue(scope.runs(gate_scope.Family.RUST_COMPILE))
         self.assertEqual(scope.classification, "rust-input-docs")
 
     def test_unrelated_prose_still_skips_the_rust_battery(self) -> None:
         scope = scope_of("docs/adr/0001-store-shape.md", "README.md")
-        self.assertFalse(scope.runs("rust-compile"))
+        self.assertFalse(scope.runs(gate_scope.Family.RUST_COMPILE))
         self.assertEqual(scope.classification, "docs-only")
+
+
+class FamilyProtocolTests(unittest.TestCase):
+    """The family set has one owner, and the shell refuses a name outside it."""
+
+    def test_the_family_set_is_closed_and_ordered(self) -> None:
+        self.assertEqual(tuple(gate_scope.Family), gate_scope.FAMILIES)
+        self.assertEqual(frozenset(gate_scope.Family), gate_scope.ALL_FAMILIES)
+        self.assertEqual(
+            ["rust-compile", "scripts", "workflows"],
+            [str(family) for family in gate_scope.FAMILIES],
+        )
+        self.assertEqual(
+            ["GATE_RUN_RUST_COMPILE", "GATE_RUN_SCRIPTS", "GATE_RUN_WORKFLOWS"],
+            [family.env_variable for family in gate_scope.FAMILIES],
+        )
+
+    def test_env_output_publishes_the_closed_set(self) -> None:
+        env = gate_scope.render_env(scope_of("docs/x.md"))
+        self.assertIn("GATE_SCOPE_FAMILIES='RUST_COMPILE SCRIPTS WORKFLOWS'", env)
+        for family in gate_scope.Family:
+            self.assertIn(f"{family.env_variable}=", env)
+
+    def test_the_push_gate_sets_exactly_the_known_families(self) -> None:
+        """A fallback variable naming a family that does not exist is dead.
+
+        `GATE_RUN_REGISTRY` was set here and read nowhere from the commit that
+        introduced the feature; it is the proof that the second copy drifts.
+        """
+        script = PUSH_GATE.read_text(encoding="utf-8")
+        fallback = push_gate_function("gate_scope_apply")
+        assigned = set(re.findall(r"^  (GATE_RUN_[A-Z_]+)=", fallback, re.MULTILINE))
+        self.assertEqual(
+            {family.env_variable for family in gate_scope.Family}, assigned
+        )
+        self.assertNotIn("GATE_RUN_REGISTRY", script)
+
+        # Every `scoped` call site names a family the classifier knows.
+        used = set(re.findall(r"^scoped ([A-Z_]+) ", script, re.MULTILINE))
+        self.assertTrue(used)
+        self.assertLessEqual(used, {family.name for family in gate_scope.Family})
+
+    def _gate_family_runs(self, known: str, family: str) -> subprocess.CompletedProcess:
+        harness = "\n".join(
+            (
+                "set -euo pipefail",
+                f"GATE_SCOPE_FAMILIES={known!r}",
+                "GATE_RUN_RUST_COMPILE=1",
+                "GATE_RUN_SCRIPTS=0",
+                "GATE_RUN_WORKFLOWS=1",
+                push_gate_function("gate_family_runs"),
+                push_gate_function("scoped"),
+                'ran() { printf "RAN\\n"; }',
+                f'scoped {family} "label" ran',
+            )
+        )
+        return subprocess.run(
+            ["bash", "-c", harness], capture_output=True, text=True, check=False
+        )
+
+    def test_an_unknown_family_is_refused_once_the_set_is_known(self) -> None:
+        result = self._gate_family_runs("RUST_COMPILE SCRIPTS WORKFLOWS", "NOT_A_FAMILY")
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertIn("unknown gate family 'NOT_A_FAMILY'", result.stderr)
+        self.assertNotIn("RAN", result.stdout)
+
+    def test_an_unknown_family_still_runs_when_classification_failed(self) -> None:
+        """Fail-open survives: an unset set means every family runs."""
+        result = self._gate_family_runs("", "NOT_A_FAMILY")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("RAN", result.stdout)
+
+    def test_a_known_family_still_skips_and_runs_as_classified(self) -> None:
+        known = "RUST_COMPILE SCRIPTS WORKFLOWS"
+        ran = self._gate_family_runs(known, "RUST_COMPILE")
+        self.assertEqual(0, ran.returncode, ran.stderr)
+        self.assertIn("RAN", ran.stdout)
+        skipped = self._gate_family_runs(known, "SCRIPTS")
+        self.assertEqual(0, skipped.returncode, skipped.stderr)
+        self.assertNotIn("RAN", skipped.stdout)
+        self.assertIn("skipped: label", skipped.stdout)
 
 
 if __name__ == "__main__":
