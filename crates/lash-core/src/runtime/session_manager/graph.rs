@@ -257,8 +257,8 @@ mod error_mapping_tests {
             source: crate::StoreError::AppendReceiptRequestedNodeCountCorrupt {
                 session_id: SessionId::from("root"),
                 operation_key: "append-operation".to_string(),
-                stored: Some(1),
-                attempted: Some(2),
+                stored: 1,
+                attempted: 2,
             },
         });
         assert!(matches!(
@@ -266,8 +266,8 @@ mod error_mapping_tests {
             crate::PluginError::AppendReceiptRequestedNodeCountCorrupt {
                 ref session_id,
                 ref operation_key,
-                stored: Some(1),
-                attempted: Some(2),
+                stored: 1,
+                attempted: 2,
             } if session_id == "root" && operation_key == "append-operation"
         ));
     }

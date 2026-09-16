@@ -455,8 +455,8 @@ pub async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn Ru
     assert!(matches!(
         error,
         StoreError::AppendReceiptRequestedNodeCountCorrupt {
-            stored: Some(1),
-            attempted: Some(2),
+            stored: 1,
+            attempted: 2,
             ..
         }
     ));
