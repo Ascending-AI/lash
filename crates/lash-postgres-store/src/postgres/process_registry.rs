@@ -440,22 +440,24 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         .map_err(plugin_sqlx_error)?;
         // Registration is idempotent by fingerprint, and on this tier alone the
         // read that decides that and the insert that acts on it are two
-        // statements on two connections under `READ COMMITTED`. SQLite
-        // serializes every writer through one write flow and the in-memory
-        // registry through one transaction mutex, so only PostgreSQL can have
-        // two callers derive one content-addressed process id — a redelivered
-        // trigger occurrence is exactly that, since FIG-806 makes the
-        // deterministic process id the dedupe point — read "no row" apiece and
-        // both insert. The change clock above orders the pair: the first
-        // holds that row lock from its bump until it commits, so by the time
-        // the second reaches this insert the winner's row is committed and
-        // `ON CONFLICT DO NOTHING` reports zero rows instead of raising
-        // `lash_processes_pkey`. Re-read it under this statement's own
-        // snapshot and abandon the attempt: the rollback takes the clock bump,
-        // the fence lift and the observer rows with it, so the loser adds no
-        // event and no `change_seq` of its own (ADR 0046), and the caller gets
-        // the sequential answer — the exact repeat is the existing row, a
-        // differing fingerprint the typed refusal (FIG-3190).
+        // statements in one `READ COMMITTED` transaction, so each takes its own
+        // snapshot: the read's can predate the winner's commit while this
+        // insert's — taken after the change-clock row lock above has been
+        // waited out — already sees it. SQLite serializes every writer through
+        // one write flow and the in-memory registry through one transaction
+        // mutex, so only PostgreSQL can have two callers derive one
+        // content-addressed process id — a redelivered trigger occurrence is
+        // exactly that, since FIG-806 makes the deterministic process id the
+        // dedupe point — read "no row" apiece and both insert. The change clock
+        // above orders the pair: the first holds that row lock from its bump
+        // until it commits, so by the time the second reaches this insert the
+        // winner's row is committed and `ON CONFLICT DO NOTHING` reports zero
+        // rows instead of raising `lash_processes_pkey`. Re-read it under this
+        // statement's own snapshot and abandon the attempt: the rollback takes
+        // the clock bump, the fence lift and the observer rows with it, so the
+        // loser adds no event and no `change_seq` of its own (ADR 0046), and
+        // the caller gets the sequential answer — the exact repeat is the
+        // existing row, a differing fingerprint the typed refusal (FIG-3190).
         if result.rows_affected() == 0 {
             let winner = load_process_tx(&mut tx, &record.id).await?;
             tx.rollback().await.map_err(plugin_sqlx_error)?;
