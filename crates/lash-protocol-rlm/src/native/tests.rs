@@ -940,6 +940,219 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
     }
 }
 
+/// FIG-2777: a provider tool call on the cell channel — whose request declares
+/// no tools — is malformed provider output, repaired like a reply with no
+/// usable cell, not a terminal runtime error. The chunk is glm-5.3-flash's
+/// captured shape: the tool name is a stray `lashlang</arg_value>` and the
+/// arguments hold the lashlang source.
+#[test]
+fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() {
+    let stray_tool_call = || {
+        vec![call(
+            "call_stray",
+            "lashlang</arg_value>",
+            r#"{"p":"await retail.customer(...)?"}"#,
+        )]
+    };
+    let mut machine = TurnMachine::new(
+        config(false, RlmTermination::Natural),
+        Vec::new(),
+        Arc::new(Vec::new()),
+        0,
+    );
+    let mut effects = drain(&mut machine);
+    let request = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LlmCall { request, .. } => Some(request),
+            _ => None,
+        })
+        .expect("initial provider request");
+    assert!(
+        request.tools.is_empty(),
+        "the cell channel declares no tools: {request:?}"
+    );
+
+    // Attempts 1 and 2 repair; attempt 3 exhausts the stall budget.
+    for attempt in 1..=3 {
+        effects = reply(&mut machine, &effects, stray_tool_call());
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::ExecCode { .. })),
+            "a stray tool call must never reach execution"
+        );
+        let outcome = effects.iter().find_map(|effect| match effect {
+            Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome { outcome }) => {
+                Some(outcome)
+            }
+            _ => None,
+        });
+        if attempt < 3 {
+            assert!(
+                outcome.is_none(),
+                "attempt {attempt}: a repairable extraction failure must not finish the turn"
+            );
+        } else {
+            assert!(
+                matches!(
+                    outcome,
+                    Some(lash_core::facade_support::TurnOutcome::Stopped(
+                        lash_core::facade_support::TurnStop::MaxTurns
+                    ))
+                ),
+                "the typed failure lands only when the repair budget is exhausted: {outcome:?}"
+            );
+        }
+        if attempt == 3 {
+            assert!(
+                effects
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::Done { .. }))
+            );
+            break;
+        }
+        let id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Checkpoint { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("a repair round checkpoints before the next request");
+        let saved =
+            serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
+        machine =
+            TurnMachine::restore_from_checkpoint(config(false, RlmTermination::Natural), saved)
+                .expect("supported checkpoint");
+        drain(&mut machine);
+        machine.handle_response(Response::Checkpoint {
+            id,
+            delivery: Default::default(),
+        });
+        effects = drain(&mut machine);
+        let request = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LlmCall { request, .. } => Some(request),
+                _ => None,
+            })
+            .expect("a repair round issues another provider request");
+        let repair_text = request
+            .messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                lash_core::llm::types::LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            repair_text.contains("lashlang</arg_value>"),
+            "the repair copy names the stray call: {repair_text}"
+        );
+        assert!(
+            repair_text.contains("paired `<typescript>...</typescript>` block"),
+            "the standard paired-block diagnostic rides the repair: {repair_text}"
+        );
+    }
+
+    let decisions = machine
+        .events()
+        .iter()
+        .filter_map(|record| match record {
+            lash_core::SessionHistoryRecord::Protocol(event) => {
+                match crate::projection::decode_rlm_protocol_event(event) {
+                    Some(RlmProtocolEvent::RlmDiagnostic(d)) if d.phase == "llm_extraction" => {
+                        Some(d.payload["decision"].clone())
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        decisions,
+        vec![serde_json::json!("retry_native_tool_call"); 3]
+    );
+}
+
+/// The same stray call repaired once lets the turn finish normally when the
+/// model's next reply carries a real cell.
+#[test]
+fn cell_channel_tool_call_repair_lets_the_next_cell_finish() {
+    let mut machine = TurnMachine::new(
+        typescript_cell_config(RlmTermination::Natural),
+        Vec::new(),
+        Arc::new(Vec::new()),
+        0,
+    );
+    let initial = drain(&mut machine);
+    let mut effects = reply(
+        &mut machine,
+        &initial,
+        vec![call(
+            "call_stray",
+            "native_lookup",
+            r#"{"query":"forbidden"}"#,
+        )],
+    );
+    let id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Checkpoint { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("a repair round checkpoints before the next request");
+    machine.handle_response(Response::Checkpoint {
+        id,
+        delivery: Default::default(),
+    });
+    effects = drain(&mut machine);
+    effects = reply(
+        &mut machine,
+        &effects,
+        vec![text("<typescript>\nfinish(1);\n</typescript>")],
+    );
+    let id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ExecCode { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("the repaired turn executes the next cell");
+    machine.handle_response(Response::ExecResult {
+        id,
+        result: Ok(response(Some(serde_json::json!(1)))),
+    });
+    effects = drain(&mut machine);
+    for _ in 0..4 {
+        let Some(id) = effects.iter().find_map(|effect| match effect {
+            Effect::Checkpoint { id, .. } => Some(*id),
+            _ => None,
+        }) else {
+            break;
+        };
+        machine.handle_response(Response::Checkpoint {
+            id,
+            delivery: Default::default(),
+        });
+        effects = drain(&mut machine);
+    }
+    assert!(
+        effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
+                outcome: lash_core::facade_support::TurnOutcome::Finished(
+                    lash_core::facade_support::TurnFinish::FinalValue { .. }
+                )
+            })
+        )),
+        "a repaired stray call lets the next cell settle the turn: {effects:?}"
+    );
+}
+
 #[test]
 fn configured_prompt_is_instructions_on_both_channels() {
     for native in [false, true] {

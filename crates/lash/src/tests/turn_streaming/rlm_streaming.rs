@@ -1220,9 +1220,13 @@ finish("done");"#,
     Ok(())
 }
 
+/// FIG-2777: a provider tool call on the cell channel — whose request declares
+/// no tools — is malformed provider output, so it takes the extraction-failure
+/// repair round like a reply with no usable cell. The turn stops typed only if
+/// the repair budget dies with it.
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue() -> Result<()> {
+pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes() -> Result<()> {
     run_async_test_on_stack_budget("rlm-native-tool-contract-test", || async {
         let trace_path = std::env::temp_dir().join(format!(
             "lash-rlm-native-tool-contract-{}-{}.jsonl",
@@ -1232,11 +1236,43 @@ pub(super) fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue
                 .expect("clock")
                 .as_nanos()
         ));
+        let repair_request = Arc::new(std::sync::Mutex::new(None));
+        let responses = Arc::new(TokioMutex::new(VecDeque::from([
+            LlmResponse {
+                parts: vec![LlmOutputPart::ToolCall {
+                    call_id: "native-call-1".to_string(),
+                    tool_name: "native_lookup".to_string(),
+                    input_json: r#"{"query":"forbidden"}"#.to_string(),
+                    replay: None,
+                }],
+                terminal_reason: lash_core::LlmTerminalReason::ToolUse,
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            },
+            text_response(&typescript_block("finish(1);")),
+        ])));
+        let provider = crate::testing::TestProvider::builder()
+            .kind("native-tool-call-under-rlm")
+            .complete({
+                let repair_request = Arc::clone(&repair_request);
+                move |request| {
+                    let responses = Arc::clone(&responses);
+                    let repair_request = Arc::clone(&repair_request);
+                    async move {
+                        if responses.lock().await.len() == 1 {
+                            *repair_request.lock().unwrap() = Some(format!("{request:?}"));
+                        }
+                        Ok(responses.lock().await.pop_front().expect("queued response"))
+                    }
+                }
+            })
+            .build()
+            .into_handle();
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(
             lash_core::TurnBudget::Unbounded,
             rlm_factory(),
         ))
-        .provider(native_tool_call_provider())
+        .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
@@ -1253,20 +1289,32 @@ pub(super) fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue
 
         assert_eq!(
             turn.result.outcome,
-            TurnOutcome::Stopped(lash_core::facade_support::TurnStop::RuntimeError)
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
+                value: serde_json::json!(1)
+            }),
+            "the stray call is repaired and the next cell settles the turn"
         );
-        let issue = turn
-            .result
-            .errors
-            .iter()
-            .find(|issue| {
-                issue.code == Some(crate::turn::TurnFailureCode::NativeToolCallNotAllowed)
-            })
-            .expect("typed RLM native-tool-call issue");
-        assert_eq!(issue.kind, crate::turn::TurnFailureKind::RlmProtocol);
-        assert_eq!(issue.retryable, Some(false));
-        assert!(issue.message.contains("native_lookup"));
-        assert!(issue.message.contains("must flow through the cell program"));
+        assert!(
+            !turn
+                .result
+                .errors
+                .iter()
+                .any(|issue| issue.code
+                    == Some(crate::turn::TurnFailureCode::NativeToolCallNotAllowed)),
+            "a repaired stray call records no terminal protocol issue: {:?}",
+            turn.result.errors
+        );
+        let repair = repair_request
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("a repair round issues a second provider request")
+            .clone();
+        assert!(repair.contains("native_lookup"), "{repair}");
+        assert!(
+            repair.contains("paired `<typescript>...</typescript>` block"),
+            "{repair}"
+        );
 
         core.flush_trace_sink()?;
         let logged = std::fs::read_to_string(&trace_path).expect("read trace");
@@ -1274,7 +1322,7 @@ pub(super) fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue
             .lines()
             .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace JSON"))
             .collect::<Vec<_>>();
-        let diagnostic = entries
+        entries
             .iter()
             .find(|entry| {
                 entry.get("type").and_then(|value| value.as_str()) == Some("protocol_step")
@@ -1283,21 +1331,13 @@ pub(super) fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue
                     && entry
                         .pointer("/payload/RlmDiagnostic/phase")
                         .and_then(|value| value.as_str())
-                        == Some("protocol_contract_violation")
+                        == Some("llm_extraction")
+                    && entry
+                        .pointer("/payload/RlmDiagnostic/payload/decision")
+                        .and_then(|value| value.as_str())
+                        == Some("retry_native_tool_call")
             })
-            .expect("RLM protocol-contract trace record");
-        assert_eq!(
-            diagnostic
-                .pointer("/payload/RlmDiagnostic/payload/code")
-                .and_then(|value| value.as_str()),
-            Some("native_tool_call_not_allowed")
-        );
-        assert_eq!(
-            diagnostic
-                .pointer("/payload/RlmDiagnostic/payload/tool_name")
-                .and_then(|value| value.as_str()),
-            Some("native_lookup")
-        );
+            .expect("the stray call is classified as an extraction failure");
 
         let _ = std::fs::remove_file(&trace_path);
         Ok(())
