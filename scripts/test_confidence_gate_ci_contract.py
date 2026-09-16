@@ -143,6 +143,19 @@ def shell_function_definition(script: str, function_name: str) -> str:
     return match.group(0)
 
 
+def shell_assoc_array(script: str, name: str) -> dict[str, str]:
+    """Parses `declare -A <name>=( [key]="value" ... )` out of a shell script."""
+    marker = f"declare -A {name}=(\n"
+    if marker not in script:
+        raise AssertionError(f"missing shell associative array {name}")
+    body = script.split(marker, 1)[1].split("\n)\n", 1)[0]
+    entries = re.findall(r'^\s*\[([^\]]+)\]="([^"]*)"$', body, re.MULTILINE)
+    parsed = dict(entries)
+    if len(parsed) != len(entries):
+        raise AssertionError(f"{name} declares a key twice")
+    return parsed
+
+
 def shell_logical_commands(script: str) -> list[str]:
     commands: list[str] = []
     current = ""
@@ -354,36 +367,29 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     (selector, area),
                 )
 
-        artifact_paths = {
-            "sim_summary": "sim/summary.json",
-            "sim_search_run": "sim/search.json",
-            "provider_transport_exclusions": "sim/provider-transport-exclusions.json",
-            "env_gated_lanes": "sim/env-gated-lanes.json",
-            "full_lane_prerequisites": "sim/full-lane-prerequisites.json",
-            "postgres_effect_history_status": "sim/postgres-effect-history-status.json",
-            "restate_postgres_workers_e2e": "sim/restate-postgres-workers-e2e.json",
-            "failing_minimizer_fixtures": "sim/failing-minimizer-fixtures.json",
-            "sqlite_substrate_faults": "sim/sqlite-substrate-faults/sqlite-faults.json",
-            "focused_sqlite_seed_tail_repro": "sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json",
-            "backend_contention": "sim/backend-contention/backend-contention.json",
-            "postgres_current_trace_replay": "sim/postgres-current/status.json",
-            "postgres_current_trace_replay_report": "sim/postgres-replay/postgres-replay.json",
-            "generated_postgres_dynamic_replay": "sim/postgres-generated-rerun/summary.json",
-            "model_replay_evidence": "sim/model-replay/summary.json",
-            "coverage_summary": "coverage/summary.json",
-            "mutation_evidence": "mutation-evidence.json",
-        }
+        # The key -> path map is the gate's, not a second copy: a row names a
+        # key and nothing else, so two rows cannot disagree about a path.
+        artifact_paths = shell_assoc_array(gate, "confidence_artifact_paths")
+        self.assertEqual(17, len(artifact_paths), artifact_paths)
+        for key, path in artifact_paths.items():
+            self.assertRegex(key, r"^[a-z0-9_]+$")
+            self.assertRegex(path, r"^[a-z0-9./-]+\.json$")
+        # The keys the gate actually resolves at runtime. With the paths gone
+        # from the writers, a key is only reachable through one of the three
+        # schedule accessors or the fast matrix summary's shard-owned list.
         declaration_keys = set(
             re.findall(
-                r'^\s+"([a-z0-9_]+)": .*?(?:sim/|coverage/|mutation-evidence)',
+                r"(?:scheduled_existing_artifact_path|scheduled_artifact_path|"
+                r'schedule_has_artifact|artifact_path) "?([a-z0-9_]+)"?',
                 gate,
-                re.MULTILINE,
             )
-        )
+        ) | set(re.findall(r'^\s+"([a-z0-9_]+):[a-z-]+"$', gate, re.MULTILINE))
+        declaration_keys -= {"key"}
+        self.assertLessEqual(declaration_keys, set(artifact_paths), declaration_keys)
         scheduled_keys = {
-            declaration.split("=", 1)[0]
+            key
             for row in rows
-            for declaration in filter(None, row.split("|", 4)[4].split(","))
+            for key in filter(None, row.split("|", 4)[4].split(","))
         }
         writer_text = "\n".join(
             shell_function_body(gate, function)
@@ -403,12 +409,17 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertTrue(area, raw_row)
             self.assertTrue(suite, raw_row)
             self.assertTrue(description, raw_row)
-            for declaration in filter(None, raw_artifacts.split(",")):
-                key, path = declaration.split("=", 1)
+            for key in filter(None, raw_artifacts.split(",")):
+                # A row carries keys only. The path is not representable here,
+                # so the 146 declarations cannot disagree about 17 paths.
+                self.assertNotIn("=", key, raw_row)
                 self.assertIn(key, artifact_paths, raw_row)
-                self.assertEqual(artifact_paths[key], path, raw_row)
                 self.assertIn(key, declaration_keys, key)
-                self.assertIn(path, gate, path)
+
+        # Every declared path is reachable only through the map: no summary
+        # writer or schedule row may spell one out again.
+        for key, path in artifact_paths.items():
+            self.assertEqual(1, gate.count(f'"{path}"'), path)
 
     def test_area_scoping_filters_execution_predicates_like_the_plan(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
@@ -1178,6 +1189,79 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
         self.assertGreaterEqual(mutation_sim_cap, 23 + 49 * 2.03)
 
+    def test_lane_composition_is_declared_once_per_path(self) -> None:
+        """Four hand-written copies of the same composition is three too many.
+
+        The fast shard dispatch reads its steps from the same table the
+        schedule declares, and the two compositions the non-sharded paths used
+        to repeat are functions with more than one caller.
+        """
+        gate = GATE.read_text(encoding="utf-8")
+
+        steps = shell_assoc_array(gate, "confidence_fast_shard_steps")
+        self.assertEqual({*FAST_SHARDS, "summary"}, set(steps))
+
+        # The shards the composition table knows are exactly the shard
+        # selectors the schedule table declares, and each shard's suite name is
+        # its own -- a shard cannot compose a suite it does not schedule.
+        table_body = gate.split("confidence_schedule_table=(\n", 1)[1].split("\n)\n", 1)[0]
+        rows = [
+            ast.literal_eval(line.strip())
+            for line in table_body.splitlines()
+            if line.strip().startswith('"')
+        ]
+        scheduled_suites: dict[str, set[str]] = {}
+        for row in rows:
+            selector, _, suite = row.split("|", 3)[:3]
+            if selector.startswith("fast:") and selector != "fast:all":
+                scheduled_suites.setdefault(selector.removeprefix("fast:"), set()).add(suite)
+        self.assertEqual(set(steps), set(scheduled_suites))
+        for shard, suites in scheduled_suites.items():
+            self.assertEqual({shard}, suites, shard)
+
+        # Every step is a function this script defines, so a typo is a missing
+        # function at parse time rather than a silently skipped suite.
+        defined = set(re.findall(r"^([a-zA-Z_][a-zA-Z0-9_]*)\(\) \{$", gate, re.MULTILINE))
+        for shard, step_list in steps.items():
+            self.assertTrue(step_list.strip(), shard)
+            for step in step_list.split():
+                self.assertIn(step, defined, (shard, step))
+
+        # run_fast_shard composes; it does not carry its own arm per shard.
+        dispatch = shell_function_definition(gate, "run_fast_shard")
+        self.assertIn('steps="${confidence_fast_shard_steps[$fast_shard]:-}"', dispatch)
+        self.assertIn("unknown fast shard", dispatch)
+        for shard in FAST_SHARDS:
+            self.assertNotIn(shard, dispatch, shard)
+
+        # The two compositions the fast area-scoped path and the non-fast lane
+        # used to spell out are shared, not copied. `run_core_suites` is called
+        # by both of those paths; `write_sim_lane_evidence` by the non-fast
+        # lane and by the sim-generated shard through the table above.
+        self.assertEqual(
+            2, len(re.findall(r"^\s*run_core_suites$", gate, re.MULTILINE))
+        )
+        self.assertEqual(
+            1, len(re.findall(r"^\s*write_sim_lane_evidence$", gate, re.MULTILINE))
+        )
+        self.assertIn("write_sim_lane_evidence", steps["sim-generated"])
+
+        # Neither composition may grow a second copy of the other's body.
+        core = shell_function_definition(gate, "run_core_suites")
+        evidence = shell_function_definition(gate, "write_sim_lane_evidence")
+        for writer in (
+            "write_sim_lane_declarations",
+            "write_full_lane_prerequisites",
+            "write_postgres_effect_history_status",
+            "write_restate_postgres_workers_e2e_lane_status",
+        ):
+            self.assertIn(writer, evidence, writer)
+            self.assertEqual(
+                1, len(re.findall(rf"^\s*{writer}$", gate, re.MULTILINE)), writer
+            )
+        for suite in ("run_scenario_harnesses", "run_state_machine_and_fault_matrix"):
+            self.assertIn(suite, core, suite)
+
     def test_fast_gate_has_first_class_shards_and_parallel_minimizers(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
 
@@ -1637,7 +1721,7 @@ finalize_mutation_gate
 
     def test_mutation_failure_is_aggregated_after_full_lane_evidence(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
-        main = gate[gate.rindex("\nrun_scenario_harnesses\n") :]
+        main = gate[gate.rindex("\nrun_core_suites\n") :]
 
         smoke = main.index("run_mutation_smoke")
         broad_postgres = main.index("run_broad_postgres_evidence")
