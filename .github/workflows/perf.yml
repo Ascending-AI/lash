@@ -85,18 +85,73 @@ jobs:
         with:
           tool: protoc
 
+      # Duration history for the advisory trend signal (FIG-1532, wired here by
+      # FIG-1551). Runtime wall-clock ceilings are advisory (FIG-1385), which
+      # leaves a regression that allocates nothing -- added blocking I/O, lock
+      # contention, a stray sleep -- with no gate at all. The remedy is trend,
+      # not threshold: each run appends its per-scenario medians to this series
+      # and the harness warns when a scenario has sat above its own trailing
+      # median for several consecutive runs. The release profile is where that
+      # is worth reading: five runs of twelve turns against the quick profile's
+      # two of three, so the series is the steadiest wall clock this repository
+      # measures.
+      #
+      # The store is this cache and nothing else: no new service, no secret and
+      # no write to a tracked branch. `full` in the key is not decoration -- the
+      # records carry their profile and durations are only comparable within
+      # one run shape, so a quick series and this one can never be read as one
+      # series. The key is unique per run *attempt* (`gh run rerun` reuses
+      # `run_id`, so keying on it alone would make a rerun collide with the
+      # entry its own first attempt wrote) and the prefix restore-key picks the
+      # newest previous entry.
+      #
+      # Every dispatch restores, so a run on a release branch is compared
+      # against main's trailing median instead of against nothing; only main
+      # saves, so nothing but trunk extends the durable series. The history
+      # directory is deliberately not `.benchmarks/perf-guard`: that directory
+      # holds a ~70 MB report per run and has no business in a cache entry
+      # every run rewrites.
+      #
+      # Both cache steps are `continue-on-error` because neither is allowed to
+      # gate: a cache-service outage or a key collision must cost the advisory
+      # signal for one run, never the guard. That is the rule the trend code
+      # itself follows (FIG-1385: this signal reports, it does not gate) -- an
+      # unreadable history prints "insufficient data", never a failure. Reset
+      # the series wholesale -- after a scenario is redefined, say -- with
+      # `gh cache delete` on the `perf-duration-history-full-` keys.
+      - name: Restore runtime perf duration history
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .benchmarks/perf-history
+          key: perf-duration-history-full-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            perf-duration-history-full-
+
       # Two steps, not two commands in one step: a failure in the runtime
       # profile used to abort before the lashlang profile ran at all, so its
       # rows never reached the log and a single dispatch could only ever
       # report one of the two guards.
       - name: Run full runtime performance checks
         run: |
-          python3 scripts/profile_runtime.py --profile full --release --scenario all --enforce-budgets --out .benchmarks/perf-guard/runtime.json
+          python3 scripts/profile_runtime.py --profile full --release --scenario all --enforce-budgets --out .benchmarks/perf-guard/runtime.json \
+            --duration-history .benchmarks/perf-history/runtime-full.jsonl
 
       - name: Run full lashlang performance checks
         if: '!cancelled()'
         run: |
           python3 scripts/profile_lashlang.py --iterations 2500 --profile-iterations 2500 --enforce-budgets --out .benchmarks/perf-guard/lashlang.json
+
+      # Only trunk extends the durable series. It runs before the summary and
+      # upload steps rather than after them so a later step's failure cannot
+      # cost the observation this run already measured.
+      - name: Save runtime perf duration history
+        if: "!cancelled() && github.ref == 'refs/heads/main'"
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .benchmarks/perf-history
+          key: perf-duration-history-full-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Publish performance summaries
         if: '!cancelled()'
@@ -115,5 +170,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: perf-guard-full-attempt-${{ github.run_attempt }}
-          path: .benchmarks/perf-guard/*
+          path: |
+            .benchmarks/perf-guard/*
+            .benchmarks/perf-history/*
           if-no-files-found: warn
