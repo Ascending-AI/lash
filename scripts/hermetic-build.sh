@@ -78,7 +78,7 @@ case "$operation" in
     ;;
   test)
     if (($# == 0)); then
-      set -- //:workspace_tests
+      set -- //:dev_tests
     fi
     python3 tools/bazel/generate_build_files.py --check
     "$bazel" test "--config=$config" "$@"

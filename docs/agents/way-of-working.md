@@ -105,7 +105,7 @@ When an opt-in battery is warranted, it may consult `python3 scripts/gate_scope.
 
 ### Iterating: change-scoped fast tests
 
-`scripts/dev-test.sh` is the implementer-loop default. It classifies the diff with `scripts/ci_plan.py` the same way CI does, then runs only the matching local families (docs-only skips compile; workbench-only runs the workbench nextest filter; rust runs `kiln test`). It refuses live Postgres/S3 URLs: those jobs belong to CI and fight over ports (`KILN_GATE_ID`) on this box.
+`scripts/dev-test.sh` is the implementer-loop default, run before calling a change done; while editing, prefer `kiln test <label> --test_arg=<name>` on the binary that owns the behavior. The script runs `//:dev_tests` — `//:workspace_tests` minus the two dev-deferred binaries — narrowed to the changed package directories (each becomes a `:all` label, which excludes the `manual` service gates). A shared input (manifest, lockfile, toolchain, `tools/`, `scripts/`, `.github/`) widens to the whole suite; a docs-only diff runs nothing. It refuses live Postgres/S3 URLs: those jobs belong to CI and fight over ports (`KILN_GATE_ID`) on this box. CI owns `//:workspace_tests`, the services, E2E, the deferred Unicode suite, and the workbench browser test.
 
 `scripts/fast-test.sh` is an optional broader iteration aid. It runs the workspace suite narrowed to the crates your diff touches plus everything that depends on them (nextest `rdeps()` filtersets over the merge-base diff, crate granularity), with live store URLs unset. Use it when reverse-dependency coverage adds value beyond the focused regression, including when re-proving the blast radius of a review finding.
 

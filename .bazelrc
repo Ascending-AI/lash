@@ -14,6 +14,10 @@
 try-import %workspace%/.kiln.bazelrc
 
 startup --host_jvm_args=-Xmx4g
+# Each fork is its own output base and therefore its own Bazel server; 22
+# idle servers held ~51 GiB on this box. The default idle timeout is 10800;
+# a restart after eviction costs seconds, so half an hour is plenty.
+startup --max_idle_secs=1800
 common --enable_platform_specific_config
 common --lockfile_mode=error
 
@@ -83,6 +87,14 @@ build:shared --remote_local_fallback=false
 # client listener refuses the write anyway, so a local machine cannot seed a
 # result that CI would trust.
 build:shared --remote_upload_local_results=false
+# A compile or clippy verdict needs no rlib on this disk, and a test verdict
+# needs only its own outputs: CI already runs `minimal` in
+# `.github/workflows/ci.yml` and `toplevel` in
+# `.github/actions/bazel-shared-cache`. `minimal` keeps every fork from
+# downloading hundreds of megabytes of dependency artifacts it never opens;
+# tests stay `toplevel` so logs and xml materialise next to the run.
+build:shared --remote_download_outputs=minimal
+test:shared --remote_download_outputs=toplevel
 test:shared --test_output=errors
 test --cache_test_results=yes
 

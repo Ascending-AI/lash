@@ -253,6 +253,13 @@ def cargo_test_policy(
             "proves nothing without a live PostgreSQL or MinIO; the service jobs"
             " execute this label uncached against a real service"
         )
+    if package_name == "lash-sim" and kind == "unit-test":
+        tags.append("dev-deferred")
+        reasons.append(
+            "the generated-profile, minimizer and replay-artifact cases run"
+            " 109--213 s; too slow for the developer loop, still in the PR"
+            " Bazel partition"
+        )
     if package_name == "lash-internal-typescript" and kind == "test":
         # Partition-owned, but not remotely executable: the no-abort guarantee
         # forks a dozen children that each parse deliberately deep sources
@@ -262,7 +269,11 @@ def cargo_test_policy(
         # and `fuzzed_sources_survive_without_the_preflight` still die of
         # `signal: 9 (SIGKILL)`. The same label passes locally in 43 s. Pin the
         # placement rather than soften what the test proves.
-        tags.append("no-remote-exec")
+        tags.extend(["no-remote-exec", "dev-deferred"])
+        reasons.append(
+            "the no-abort stress binary runs 43 s; too slow for the developer"
+            " loop, still in the PR Bazel partition"
+        )
     if package_name == "lash-regress" and target_name == "unicodesets":
         tags.append("pr-deferred")
         reasons.append(
@@ -890,6 +901,13 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             target["label"]
             for target in executable_tests
             if "manual" not in target["tags"] and "pr-deferred" not in target["tags"]
+        ),
+        "WORKSPACE_DEV_TEST_TARGETS": sorted(
+            target["label"]
+            for target in executable_tests
+            if "manual" not in target["tags"]
+            and "pr-deferred" not in target["tags"]
+            and "dev-deferred" not in target["tags"]
         ),
         "WORKSPACE_DEFERRED_TEST_TARGETS": sorted(
             target["label"]

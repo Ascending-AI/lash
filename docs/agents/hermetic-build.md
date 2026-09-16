@@ -17,16 +17,17 @@ source `env.sh` before **any** Cargo command. Never write under `golden-*` or
 remove a fork with `rm -rf`. After its change merges, remove it with `kiln rm
 lash <name>`.
 
-Use `kiln build` for the warm shared-cache compilation path and `kiln test` for
-the generated cacheable test partition. Implementer loops do not run Postgres,
+The implementer loop is `kiln test <label> --test_arg=<name>` while editing
+and `scripts/dev-test.sh` before calling a change done. Bare `kiln test` runs
+`//:dev_tests`, the developer suite; `kiln test //:workspace_tests` runs the
+PR partition CI runs. Implementer loops do not run Postgres,
 S3, or E2E (`scripts/ci/with-service.sh`, store recipes, Restate workers): CI
 owns those, and local live gates fight over ports (`KILN_GATE_ID`) and the
 single-box database.
 
 ```sh
 . ./env.sh
-kiln build
-kiln test
+scripts/dev-test.sh
 ```
 
 The lower-level entry script remains available for graph analysis, sync, local
@@ -35,8 +36,9 @@ executor reproduction, and focused Bazel labels.
 `analyze` validates generated files and performs Bazel loading and analysis with
 `--nobuild`; it does not run rustc and is not a substitute for `cargo check`.
 `build` compiles and links the requested Bazel labels. `test` without labels
-builds and executes the generated deterministic/default-feature workspace
-suite; explicit labels remain available for a focused edit loop.
+builds and executes `//:dev_tests`, the generated developer suite
+(`//:workspace_tests` minus the two dev-deferred binaries); explicit labels
+remain available for a focused edit loop.
 
 ```sh
 # Analyze the generated graph and reject metadata or module-lock drift.
@@ -45,12 +47,13 @@ scripts/hermetic-build.sh analyze
 # Compile the complete Cargo --workspace --all-targets shape.
 kiln build
 
-# Run the generated cacheable test suite (PR Bazel partition).
+# Run the generated developer suite (the PR partition minus two dev-deferred
+# binaries); `kiln test //:workspace_tests` runs the full PR partition.
 kiln test
 
-# Path-plan like CI. Docs-only skips compile; workbench-only still runs the
-# Bazel partition (it owns the workbench unit suite) but skips the store,
-# functional-E2E and worker-E2E breadth. Never starts Postgres, S3, or E2E.
+# Narrow //:dev_tests to the changed package directories. A shared input
+# (manifest, lockfile, toolchain, tools/, scripts/) runs the whole suite.
+# Never starts Postgres, S3, or E2E.
 scripts/dev-test.sh
 
 # Lint the `--workspace --all-targets` shape (170 clippy actions).
@@ -132,8 +135,10 @@ alongside it. Kiln invokes this cleanup before
 deleting a fork.
 
 The generated graph follows Cargo's resolved default workspace feature graph.
-Of its 109 executable test binaries, `//:workspace_tests` owns 93 deterministic
-binaries. The remaining 16 labels carry `manual`, a reason tag, and a durable
+Of its 114 executable test binaries, `//:workspace_tests` owns 97 deterministic
+binaries; `//:dev_tests` drops the two dev-deferred ones to 95 for the
+developer loop. The other 17 labels are deferred or Cargo-owned: 16 carry
+`manual`, a reason tag, and a durable
 `cargo_only` explanation in `tools/bazel/target-inventory.json`; this keeps both
 the aggregate and `bazel test //...` from treating an unconfigured service,
 trybuild fixture cache, or frontend asset workflow as proof. The partition is generated from

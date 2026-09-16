@@ -15,6 +15,11 @@ if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ] || [ -n "${LASH_REQUIRE_POSTGRES:-}"
   exit 2
 fi
 
+if ! command -v kiln >/dev/null 2>&1 || [ ! -f .kiln.bazelrc ]; then
+  echo "dev-test: run inside a kiln fork (kiln fork lash <name>)" >&2
+  exit 2
+fi
+
 base_rev=""
 dry_run=0
 while [ $# -gt 0 ]; do
@@ -32,16 +37,12 @@ while [ $# -gt 0 ]; do
       cat <<'EOF'
 usage: scripts/dev-test.sh [--base <rev>] [--dry-run]
 
-Classify merge-base..HEAD (plus a dirty tree) with scripts/ci_plan.py and run
-only the matching local families:
-
-  docs-only     nothing to compile
-  workbench     cargo nextest with the workbench filter
-  rust          kiln test (cacheable Bazel partition) when kiln is available,
-                otherwise cargo nextest with the cargo-owned PR filter
-  regress       bazel test //:deferred_tests or cargo -p lash-regress unicodesets
-
-Never runs Postgres, S3, or E2E.
+Runs the developer suite //:dev_tests narrowed to the changed package
+directories: each crates/, examples/, or runbooks/ path selects its
+package's `:all` (which excludes manual service gates); a shared input
+(manifest, lockfile, toolchain, tools/, scripts/, .github/) widens to the
+whole suite. CI owns //:workspace_tests, the services, E2E, the deferred
+Unicode suite, and the workbench browser test.
 EOF
       exit 0
       ;;
@@ -56,26 +57,35 @@ if [ -z "$base_rev" ]; then
   base_rev="$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || echo HEAD)"
 fi
 
-paths_file="$(mktemp)"
-trap 'rm -f "$paths_file"' EXIT
-{
-  git diff --name-status --no-renames -z "$base_rev" HEAD
-  git diff --name-status --no-renames -z HEAD
-} >"$paths_file"
+declare -A packages=()
+broad=0
+while IFS= read -r -d '' path; do
+  case "$path" in
+    *.md|docs/*|LICENSE*|.gitignore)
+      ;;
+    crates/*/*|examples/*/*|runbooks/*/*)
+      dir="$(dirname "$path")"
+      while [[ "$dir" =~ ^(crates|examples|runbooks)/[^/]+/.+ ]]; do
+        dir="$(dirname "$dir")"
+      done
+      packages["//${dir}"]=1
+      ;;
+    *)
+      broad=1
+      ;;
+  esac
+done < <(
+  {
+    git diff --name-only --no-renames -z "$base_rev" HEAD
+    git diff --name-only --no-renames -z HEAD
+    git ls-files --others --exclude-standard -z
+  } | sort -zu
+)
 
-if [ ! -s "$paths_file" ]; then
-  echo "dev-test: empty diff against $base_rev; nothing to run"
+if [ "$broad" -eq 0 ] && [ "${#packages[@]}" -eq 0 ]; then
+  echo "dev-test: nothing to test"
   exit 0
 fi
-
-plan="$(python3 scripts/ci_plan.py classify --paths-file "$paths_file")"
-docs_only="$(printf '%s\n' "$plan" | awk -F= '/^docs_only=/{print $2}')"
-rust="$(printf '%s\n' "$plan" | awk -F= '/^rust=/{print $2}')"
-workbench="$(printf '%s\n' "$plan" | awk -F= '/^workbench=/{print $2}')"
-regress="$(printf '%s\n' "$plan" | awk -F= '/^regress=/{print $2}')"
-reason="$(printf '%s\n' "$plan" | awk -F= '/^reason=/{print substr($0,8)}')"
-
-echo "dev-test: $reason (rust=$rust workbench=$workbench regress=$regress)"
 
 run() {
   echo "+ $*"
@@ -84,31 +94,11 @@ run() {
   fi
 }
 
-if [ "$docs_only" = "true" ]; then
-  echo "dev-test: docs-only; skipping compile/test"
-  exit 0
-fi
-
-if [ "$rust" = "true" ]; then
-  if command -v kiln >/dev/null 2>&1 && [ -x scripts/hermetic-build.sh ]; then
-    run kiln test
-  else
-    run cargo nextest run --profile ci --workspace --locked \
-      -E "$(<tools/bazel/cargo_owned_nextest_filter.txt)"
-  fi
-fi
-
-# The rest of the workbench unit binary rides `kiln test` above; this is the
-# Node-gated remainder, and it needs only its own package built.
-if [ "$workbench" = "true" ]; then
-  run cargo nextest run --profile ci --package agent-workbench --locked \
-    -E "$(<tools/bazel/workbench_nextest_filter.txt)"
-fi
-
-if [ "$regress" = "true" ]; then
-  if command -v bazel >/dev/null 2>&1; then
-    run bazel test //:deferred_tests
-  else
-    run cargo test -p lash-regress --test unicodesets --locked
-  fi
+if [ "$broad" -eq 1 ]; then
+  echo "dev-test: shared input changed; running //:dev_tests"
+  run kiln test
+else
+  mapfile -t labels < <(printf '%s:all\n' "${!packages[@]}" | sort)
+  echo "dev-test: narrowed to ${#packages[@]} package(s)"
+  run kiln test "${labels[@]}"
 fi

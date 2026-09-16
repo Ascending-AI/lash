@@ -37,7 +37,9 @@ lash_rust_unit_test(
     manifest_dir = "crates/lash-sim",
     package_name = "lash-sim",
     shard_count = 8,
-    tags = [],
+    tags = [
+        "dev-deferred",
+    ],
     timeout = "long",
     version = "0.0.0-dev",
 )

@@ -34,15 +34,16 @@ creates a warm copy-on-write checkout and prints a path ending in `/merged`:
 fork="$(kiln fork lash my-change)"
 cd "$fork"
 . ./env.sh
-kiln build
-kiln test
-scripts/dev-test.sh   # path-plan like CI; never starts Postgres/S3/E2E
+kiln test //crates/lash-core:lash-core__unit_test --test_arg=<name>   # while editing
+scripts/dev-test.sh   # before calling it done; never starts Postgres/S3/E2E
 ```
 
 Source the fork's `env.sh` before **any** Cargo command. It selects the fork's
 private target directory and applies the shared machine's build and test
-budgets. `kiln build` and `kiln test` use the warm shared Bazel cache; `kiln
-test` intentionally runs only the cacheable partition described below. When
+budgets. `kiln test` with no labels runs `//:dev_tests` — the 95-label
+developer suite, which is the 97-label `//:workspace_tests` PR partition minus
+the two slowest binaries — and `kiln test //:workspace_tests` runs that PR
+partition exactly as CI does. When
 the change has merged, remove the fork with `kiln rm lash <name>`. Never write
 under a `golden-*` directory, remove a fork with `rm -rf`, or set `CARGO_*`
 variables by hand.
@@ -55,9 +56,9 @@ portable default-feature run.
 
 | Command | Coverage |
 | --- | --- |
-| `kiln test` | Deterministic, default-feature binaries in the cacheable Bazel partition. |
+| `kiln test` | `//:dev_tests`: the deterministic developer suite (95 labels); `//:workspace_tests` adds the two dev-deferred binaries for the PR partition. |
 | `scripts/ci/with-service.sh <pg14\|pg16\|pg18\|s3\|all> -- bash scripts/ci/store-tests.sh <suite>` | One PostgreSQL or MinIO suite, against a container this command starts and removes. |
-| `scripts/dev-test.sh` | Classifies the diff like CI and runs only those local families. Refuses live store URLs. |
+| `scripts/dev-test.sh` | `//:dev_tests` narrowed to the changed package directories (`:all` each); a shared input widens to the whole suite. Refuses live store URLs. |
 | Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
 
 `scripts/ci/with-service.sh` is the same wrapper the `Test Postgres store` and
@@ -84,10 +85,11 @@ Keep local validation proportional to the change:
 
 - Run cheap formatting and static checks relevant to the files you changed.
 - For behavior changes, run the narrowest regression that proves the changed
-  behavior. `scripts/dev-test.sh` path-plans like CI. `scripts/fast-test.sh` is
-  an optional broader iteration aid when reverse-dependency coverage is useful;
-  high-fan-out crates can still select a large part of the workspace. Neither
-  starts Postgres, S3, or E2E.
+  behavior. `scripts/dev-test.sh` runs the developer suite narrowed to the
+  changed package directories. `scripts/fast-test.sh` is an optional broader
+  iteration aid when reverse-dependency coverage is useful; high-fan-out
+  crates can still select a large part of the workspace. Neither starts
+  Postgres, S3, or E2E.
 - Add a targeted live recipe only for a named durability or behavior risk that
   the current CI plan does not exercise. Merely touching `lash-core` or
   `lash-restate` does not require running both durable geometries locally. Implementer loops never run those live gates.
