@@ -42,10 +42,16 @@ TEST_SIZE_KINDS = ("test",)
 # defaults for that action, so a row measured at one or two cores does not
 # "stay as measured" on CI: it LOWERS the cap below what an unsized target
 # already gets, and five targets plus the lash-core rlib were doing exactly
-# that. Every request this generator emits therefore floors at the CI default.
-# Targets with no row are untouched and keep inheriting whichever default the
-# invocation supplies, so the small-action default that keeps a 200 ms genrule
-# out of a lash-core-sized slot still holds.
+# that. Every request this generator emits therefore floors at the CI default
+# --- on BOTH axes. The memory half used to floor only for a key named in
+# `CPU_FLOORS`, so every target sized through `TEST_CPU_FLOOR` or through a
+# measured row below 4 GiB shipped CI a 2 GiB cgroup while asking for four
+# cores: a floor that widened the cap and halved the memory of the very
+# actions it was widening, which is the failure this comment already forbade
+# for the declared floors (FIG-3310). Targets with no row at all are still
+# untouched and keep inheriting whichever default the invocation supplies, so
+# the small-action default that keeps a 200 ms genrule out of a
+# lash-core-sized slot still holds.
 CI_DEFAULT_CPU_COUNT = 4
 CI_DEFAULT_MEMORY_KB = 4194304
 # A measured average can never exceed the cap the sample ran under, so a
@@ -114,20 +120,18 @@ def exec_properties(crate_name: str, kind: str) -> dict[str, str]:
     if kind in TEST_SIZE_KINDS:
         cpu_count = max(cpu_count, TEST_CPU_FLOOR)
     cpu_count = max(cpu_count, CPU_FLOORS.get(key, 0))
-    # A declared floor may have no measured row at all --- `lash/lib` is one ---
-    # and the emitted pair replaces the CI default on both axes. The memory half
-    # of such a request is therefore the CI default rather than this
-    # repository's smaller one: a floor must not shrink the action's cgroup
-    # while it widens the action's cap.
-    unmeasured_memory_kb = (
-        CI_DEFAULT_MEMORY_KB if key in CPU_FLOORS else DEFAULT_MEMORY_KB
-    )
-    memory_kb = entry.get("memory_kb", unmeasured_memory_kb)
+    memory_kb = entry.get("memory_kb", DEFAULT_MEMORY_KB)
+    # Whether to emit at all is decided on the measured request: a target that
+    # wants no more than this repository's own defaults states nothing and
+    # inherits whatever the invocation supplies.
     if cpu_count <= DEFAULT_CPU_COUNT and memory_kb <= DEFAULT_MEMORY_KB:
         return {}
+    # What to emit is floored at CI's defaults on both axes, because the pair
+    # replaces both of them. A measured value above a floor is kept; a measured
+    # value below one would be a cap, not a size.
     return {
         "cpu_count": str(max(cpu_count, CI_DEFAULT_CPU_COUNT)),
-        "memory_kb": str(memory_kb),
+        "memory_kb": str(max(memory_kb, CI_DEFAULT_MEMORY_KB)),
     }
 
 

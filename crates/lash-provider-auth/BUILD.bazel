@@ -29,7 +29,7 @@ lash_rust_unit_test(
     crate_name = "lash_provider_auth",
     crate_root = "src/lib.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-provider-auth",
     package_name = "lash-internal-provider-auth",
