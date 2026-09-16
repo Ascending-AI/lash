@@ -11,6 +11,13 @@
 //!
 //! Imports bind to `_` on purpose: this file proves that the paths resolve,
 //! and binding no names keeps it free of ordering and shadowing accidents.
+//!
+//! `as _` silences `unused_imports` only for a trait, whose methods enter
+//! scope through the anonymous binding. Most rows here name a struct, an
+//! enum or a function, so the binding is genuinely unused and the lint
+//! fires: without the crate-level allow below, `//:workspace_clippy`
+//! (`-Dwarnings`) reports 152 errors. The allow covers `unused_imports`
+//! alone; a path that stops resolving is still E0432, a hard error.
 
 #![allow(unused_imports)]
 
