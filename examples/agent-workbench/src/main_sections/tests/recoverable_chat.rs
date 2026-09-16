@@ -544,7 +544,7 @@ fn retired_session_admission_precedes_attachment_reads_and_submission() {
             "retired session refusal must not submit a Restate workflow"
         );
         assert!(state.messages_snapshot().is_empty());
-        assert!(state.active_turns.for_session(&session_id).is_empty());
+        assert!(state.active_turns.for_session(&session_id).is_none());
     });
 }
 

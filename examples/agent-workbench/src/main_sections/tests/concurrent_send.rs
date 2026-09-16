@@ -1212,6 +1212,7 @@ fn active_turn_idle_claim_is_atomic_per_session() {
                     .try_insert_for_idle_session(
                         &SessionId::from("race-session"),
                         &TurnId::from("left"),
+                        WorkbenchTurnKind::User,
                     )
                     .is_claimed()
             }
@@ -1225,6 +1226,7 @@ fn active_turn_idle_claim_is_atomic_per_session() {
                     .try_insert_for_idle_session(
                         &SessionId::from("race-session"),
                         &TurnId::from("right"),
+                        WorkbenchTurnKind::User,
                     )
                     .is_claimed()
             }
@@ -1236,11 +1238,12 @@ fn active_turn_idle_claim_is_atomic_per_session() {
         ]
     });
     assert_eq!(claims.into_iter().filter(|claimed| *claimed).count(), 1);
-    assert_eq!(
+    // One winner, and the slot is a lookup rather than a scan: the ledger is
+    // keyed by session, so a second claim cannot land beside the first.
+    assert!(
         active_turns
             .for_session(&SessionId::from("race-session"))
-            .len(),
-        1
+            .is_some()
     );
 }
 
@@ -1285,7 +1288,11 @@ async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
     assert!(
         state
             .active_turns
-            .try_insert_for_idle_session(&session_id, &TurnId::from("queued-race-owner"))
+            .try_insert_for_idle_session(
+                &session_id,
+                &TurnId::from("queued-race-owner"),
+                WorkbenchTurnKind::Queued,
+            )
             .is_claimed()
     );
     let (released, condition) = &*release;
@@ -1297,7 +1304,7 @@ async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
         .expect("send task")
         .expect("the losing send is queued");
     assert!(accepted.queued);
-    assert_eq!(state.active_turns.for_session(&session_id).len(), 1);
+    assert!(state.active_turns.for_session(&session_id).is_some());
     assert!(product_user_rows(&state, &session_id).is_empty());
     assert_eq!(product_ingress_receipts(&state, &session_id).len(), 1);
     assert!(matches!(
@@ -1346,7 +1353,7 @@ async fn failed_manual_queued_submission_releases_claim_and_can_retry() {
     )
     .await
     .expect_err("the first manual submission fails");
-    assert!(state.active_turns.for_session(&session_id).is_empty());
+    assert!(state.active_turns.for_session(&session_id).is_none());
 
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     state.restate_ingress_url = restate_ingress_url;
@@ -1409,7 +1416,7 @@ async fn failed_automatic_queued_submission_releases_claim_and_can_retry() {
     )
     .await
     .expect_err("the first automatic submission fails");
-    assert!(state.active_turns.for_session(&session_id).is_empty());
+    assert!(state.active_turns.for_session(&session_id).is_none());
 
     let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
     let retry = WorkbenchQueuedWorkSubmitter {
@@ -1507,7 +1514,7 @@ async fn a_panicked_turn_submission_cleans_up_and_publishes_failure() {
     .expect_err("the panicked admission is an API failure");
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
     assert!(
-        state.active_turns.for_session(&session_id).is_empty(),
+        state.active_turns.for_session(&session_id).is_none(),
         "the panic guard must release the active turn"
     );
     assert!(
@@ -1569,7 +1576,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     entered_rx
         .recv_timeout(Duration::from_secs(5))
         .expect("the send reaches its committed admission boundary");
-    assert_eq!(state.active_turns.for_session(&session_id).len(), 1);
+    assert!(state.active_turns.for_session(&session_id).is_some());
     request.abort();
     let (released, condition) = &*release;
     *released.lock().unwrap_or_else(|error| error.into_inner()) = true;
@@ -1609,7 +1616,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     .await
     .expect("the detached submission completes normally");
     assert!(
-        state.active_turns.for_session(&session_id).is_empty(),
+        state.active_turns.for_session(&session_id).is_none(),
         "terminalization must retire the detached turn"
     );
 
@@ -1751,7 +1758,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         "a queued send must not submit a second concurrent turn workflow"
     );
     assert_eq!(
-        state.active_turns.for_session(&session_id).len(),
+        state.active_turns.for_session(&session_id).iter().len(),
         1,
         "a queued send must not register a second active turn"
     );
@@ -2035,7 +2042,7 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
         "the admitted holder's committed user row remains visible"
     );
     assert!(
-        state.active_turns.for_session(&session_id).is_empty(),
+        state.active_turns.for_session(&session_id).is_none(),
         "the completed holder must not stay active"
     );
 

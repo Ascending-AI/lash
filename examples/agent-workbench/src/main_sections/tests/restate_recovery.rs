@@ -239,7 +239,7 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
         .open()
         .await
         .expect("open suspended turn session for durable address");
-    let address = session.turn_address(&routed_address.turn_id);
+    let address = session.turn_address(&routed_address.address.turn_id);
     drop(session);
     let mut events = harness.state.event_tx.subscribe(&session_id);
     let started = tokio::time::Instant::now();
@@ -386,7 +386,7 @@ finish(await handle);
         .open()
         .await
         .expect("open suspended turn session for durable address");
-    let address = session.turn_address(&routed_address.turn_id);
+    let address = session.turn_address(&routed_address.address.turn_id);
     drop(session);
     let mut events = harness.state.event_tx.subscribe(&session_id);
     let started = tokio::time::Instant::now();
@@ -565,7 +565,7 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
             .state
             .active_turns
             .for_session(&failed_address.session_id)
-            .is_empty(),
+            .is_none(),
         "failed turn left a dangling active route"
     );
 
@@ -961,7 +961,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     harness
         .state
         .active_turns
-        .insert(&session_id, "held-delete-turn");
+        .insert(&session_id, "held-delete-turn", WorkbenchTurnKind::User);
 
     // Submit the durable delete workflow directly -- the redrive path a
     // delete whose submitting process died leaves behind. The route would
@@ -1220,7 +1220,7 @@ finish(await handle);
             .state
             .active_turns
             .for_session(&deleted_session_id)
-            .is_empty(),
+            .is_none(),
         "deleted-session settlement left a routed foreground turn"
     );
     println!(
@@ -1619,8 +1619,9 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         .state
         .active_turns
         .for_session(&session_id)
-        .into_iter()
-        .find(|address| address.turn_id.starts_with("workbench-queued-"))
+        // The claim carries the workflow that owns it, so this no longer has
+        // to read the fact back out of the turn id.
+        .filter(|active_turn| active_turn.kind == WorkbenchTurnKind::Queued)
         .expect("queued-work driver must publish the queued turn address");
     wait_for_restate_invocation_success(
         &harness.state,
@@ -1656,7 +1657,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     wait_for_restate_workflow_success(
         &harness.state,
         "WorkbenchQueuedTurnWorkflow",
-        &queued_turn.turn_id,
+        &queued_turn.address.turn_id,
         Duration::from_secs(30),
     )
     .await;
@@ -1901,7 +1902,7 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         .expect("write recovery E2E session id");
     let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))
         .expect("open recovery E2E active-turn routing");
-    active_turns.insert(&session_id, &turn_id);
+    active_turns.insert(&session_id, &turn_id, WorkbenchTurnKind::User);
 
     let mut first = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
     let first_pid = first.id();
@@ -1977,8 +1978,10 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     let recovered_active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))
         .expect("reopen recovered active-turn routing");
     assert_eq!(
-        recovered_active_turns.for_session(&session_id),
-        vec![lash::TurnAddress::new(&session_id, &turn_id)],
+        recovered_active_turns
+            .for_session(&session_id)
+            .map(|active_turn| active_turn.address),
+        Some(lash::TurnAddress::new(&session_id, &turn_id)),
         "retryable resume failures must not permanently clear the durable turn address"
     );
 
@@ -2255,7 +2258,7 @@ async fn wait_for_workbench_restate_invocation_suspended(
 async fn wait_for_active_turns_empty(state: &AppState, session_id: &SessionId, timeout: Duration) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        if state.active_turns.for_session(session_id).is_empty() {
+        if state.active_turns.for_session(session_id).is_none() {
             return;
         }
         assert!(

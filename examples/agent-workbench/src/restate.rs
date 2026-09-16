@@ -1034,13 +1034,19 @@ async fn run_session_delete_attempt(
     // command sequence before retrying the non-journaled cleanup.
     let snapshot_state = state.clone();
     let snapshot_session_id = request.session_id.clone();
+    // The journaled payload stays a list of addresses. The registry holds at
+    // most one turn per session now, but this step's shape is durable: a
+    // journal written by an earlier build replays through this decode.
     let Json(active_turns) = controller
         .context()
         .run(move || async move {
             Ok::<_, HandlerError>(Json(
                 snapshot_state
                     .active_turns
-                    .for_session(&snapshot_session_id),
+                    .for_session(&snapshot_session_id)
+                    .map(|active_turn| active_turn.address)
+                    .into_iter()
+                    .collect::<Vec<lash::TurnAddress>>(),
             ))
         })
         .name("workbench.session-delete.active-turns")
@@ -1054,10 +1060,13 @@ async fn run_session_delete_attempt(
     if !active_turns.is_empty() {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
         loop {
-            let still_active = state.active_turns.for_session(&request.session_id);
+            let still_active = state
+                .active_turns
+                .for_session(&request.session_id)
+                .map(|active_turn| active_turn.address);
             if active_turns
                 .iter()
-                .all(|address| !still_active.contains(address))
+                .all(|address| still_active.as_ref() != Some(address))
             {
                 break;
             }
