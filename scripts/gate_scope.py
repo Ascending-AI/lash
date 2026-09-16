@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import enum
 from pathlib import Path
 import re
 import shlex
@@ -60,8 +61,32 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 
-FAMILIES = ("rust-compile", "scripts", "workflows")
-ALL_FAMILIES = frozenset(FAMILIES)
+class Family(enum.Enum):
+    """The gate families a diff can affect.
+
+    Closed on purpose. `scoped` in `scripts/push-gate.sh` names one of these
+    and nothing else, and the family set used to be stated three times -- here,
+    in that script's fail-open fallback, and at twelve bare-string call sites.
+    Two of the three were unchecked against this one, which is how
+    `GATE_RUN_REGISTRY` survived for the whole life of the feature: written
+    once, read nowhere, naming a family that never existed.
+    """
+
+    RUST_COMPILE = "rust-compile"
+    SCRIPTS = "scripts"
+    WORKFLOWS = "workflows"
+
+    @property
+    def env_variable(self) -> str:
+        """The shell variable `gate_family_runs` reads for this family."""
+        return f"GATE_RUN_{self.name}"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+FAMILIES = tuple(Family)
+ALL_FAMILIES = frozenset(Family)
 
 # Shared inputs: paths that can move the result of *any* gate, either because
 # they feed the build graph (manifests, lockfile, toolchain, cargo config,
@@ -101,7 +126,7 @@ class Rule:
 
     name: str
     patterns: tuple[str, ...]
-    families: frozenset[str]
+    families: frozenset[Family]
 
 
 # Ordered, first match wins: the narrowest classes come first so a specific
@@ -115,7 +140,7 @@ RULES: tuple[Rule, ...] = (
     Rule(
         name="rust-sources",
         patterns=("crates/**", "examples/**/*.rs"),
-        families=frozenset({"rust-compile"}),
+        families=frozenset({Family.RUST_COMPILE}),
     ),
     # Prose the Rust suite reads. `rust-sources` already routes crate-local
     # markdown to `rust-compile` because `include_str!` can pull it in; the
@@ -133,7 +158,7 @@ RULES: tuple[Rule, ...] = (
     Rule(
         name="rust-runtime-doc-inputs",
         patterns=RUST_RUNTIME_DOC_INPUTS,
-        families=frozenset({"rust-compile"}),
+        families=frozenset({Family.RUST_COMPILE}),
     ),
     # Prose: `docs/**` and repository-root markdown (README, CONTRIBUTING,
     # CONTEXT, PRODUCT, ...). Markdown nested under a crate is matched by
@@ -204,9 +229,9 @@ class Scope:
 
     classification: str
     reason: str
-    families: frozenset[str]
+    families: frozenset[Family]
 
-    def runs(self, family: str) -> bool:
+    def runs(self, family: Family) -> bool:
         return family in self.families
 
 
@@ -254,7 +279,7 @@ def classify(paths: list[str]) -> Scope:
             families=ALL_FAMILIES,
         )
 
-    families: set[str] = set()
+    families: set[Family] = set()
     for name in buckets:
         families |= _rule_by_name(name).families
 
@@ -341,10 +366,15 @@ def render_text(scope: Scope) -> str:
 
 def render_env(scope: Scope) -> str:
     lines = [
-        f"GATE_RUN_{family.upper().replace('-', '_')}="
-        f"{1 if scope.runs(family) else 0}"
+        f"{family.env_variable}={1 if scope.runs(family) else 0}"
         for family in FAMILIES
     ]
+    # The closed family set, so the consuming shell can refuse a name that is
+    # not in it instead of reading an unset variable and running everything.
+    lines.append(
+        "GATE_SCOPE_FAMILIES="
+        + shlex.quote(" ".join(family.name for family in FAMILIES))
+    )
     lines.append(f"GATE_SCOPE_CLASSIFICATION={shlex.quote(scope.classification)}")
     lines.append(f"GATE_SCOPE_REASON={shlex.quote(scope.reason)}")
     return "\n".join(lines)

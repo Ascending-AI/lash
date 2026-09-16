@@ -108,8 +108,9 @@ gate_scope_apply() {
   step "Gate scope"
   GATE_RUN_RUST_COMPILE=1
   GATE_RUN_SCRIPTS=1
-  GATE_RUN_REGISTRY=1
   GATE_RUN_WORKFLOWS=1
+  # Empty until the classifier hands us its closed set; see gate_family_runs.
+  GATE_SCOPE_FAMILIES=""
   GATE_SCOPE_CLASSIFICATION="run-everything"
 
   local base_ref env_output
@@ -130,8 +131,18 @@ gate_scope_apply() {
   eval "$env_output"
 }
 
+# A family name this script does not share with scripts/gate_scope.py used to
+# read an unset variable and fall back to "run" -- safe, but silent, so a family
+# that should skip never skipped and nobody learned. Refuse the name once the
+# classifier has told us the closed set. While it has not (base ref unresolved,
+# classification failed) the set is empty and every family runs anyway, so the
+# fail-open contract is unchanged.
 gate_family_runs() {
-  local variable="GATE_RUN_$1"
+  local family="$1" variable="GATE_RUN_$1" known="${GATE_SCOPE_FAMILIES:-}"
+  if [ -n "$known" ] && [[ " ${known} " != *" ${family} "* ]]; then
+    echo "push gate: unknown gate family '${family}'; known: ${known}" >&2
+    exit 2
+  fi
   [ "${!variable:-1}" = "1" ]
 }
 
