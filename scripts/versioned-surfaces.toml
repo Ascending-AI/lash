@@ -97,6 +97,7 @@ must_cover = [
   "TraceJournaledEffectStatus",
   "TraceDurableWaitResolution",
   "TraceDurableTimerStatus",
+  "TraceAttemptUsageDisposition",
 ]
 
 # Every SQLite catalog is created with `CREATE INDEX IF NOT EXISTS` and open runs
