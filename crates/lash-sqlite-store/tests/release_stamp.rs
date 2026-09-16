@@ -98,7 +98,7 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
     );
     assert!(
         error.contains("supports schema version")
-            && error.contains("docs/adr/0049-session-ids-are-used-once.md"),
+            && error.contains("see docs/adr/0049-session-ids-are-used-once.md."),
         "the pinned refusal sentences must survive verbatim: {error}"
     );
 }
