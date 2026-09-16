@@ -1216,10 +1216,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         release_cache = workflow_job_block(release_cache_workflow, "linux-release-cache")
 
         self.assertIn("workflow_dispatch:", perf)
-        # FIG-3064: the full profile also runs nightly (03:41 UTC) so a
-        # release-only guard cannot drift unmeasured; it still never runs on
-        # push or pull_request.
-        self.assertIn('cron: "41 3 * * *"', perf)
+        # The full profile is dispatched manually before release work; it
+        # never runs on a schedule, push or pull_request.
+        self.assertNotIn("schedule:", perf)
         self.assertNotIn("pull_request:", perf)
         self.assertNotIn("push:", perf)
         self.assertIn("runs-on: ubuntu-24.04", perf)
