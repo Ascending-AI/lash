@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
+import functools
 import json
 import os
 import pathlib
@@ -66,19 +67,57 @@ VALIDATE_QUARANTINE_MANIFEST = runpy.run_path(str(QUARANTINE_CHECK))[
 
 
 
+@functools.lru_cache(maxsize=None)
+def _store_tests_stub_bin() -> str:
+    """A PATH entry whose `bazel` and `cargo` echo their argv instead of running."""
+    directory = pathlib.Path(tempfile.mkdtemp(prefix="store-tests-stub-"))
+    for tool in ("bazel", "cargo"):
+        stub = directory / tool
+        stub.write_text(
+            f'#!/usr/bin/env bash\nprintf "%s\\n" "{tool} $*"\n', encoding="utf-8"
+        )
+        stub.chmod(0o755)
+    return str(directory)
+
+
+@functools.lru_cache(maxsize=None)
 def store_suite_branches(suite: str) -> tuple[str, str]:
-    """Returns the (Bazel, Cargo) halves of one `store-tests.sh` suite.
+    """Returns the (Bazel, Cargo) commands one `store-tests.sh` suite renders.
 
     The service jobs dispatch to that script rather than inlining a command, so
     a pin on a command or a test name has to follow the name into the branch
     that actually runs it -- and has to hold on BOTH branches, because an
     untrusted event (fork or Dependabot PR) gets no cache credentials and takes
     the Cargo half.
+
+    This runs the script with `bazel` and `cargo` stubbed to echo their argv,
+    rather than splitting the arm's text on `else`. Six of the suites are now
+    rendered from one table instead of written twice, so there is no `else` to
+    split on -- and reading what the script actually invokes is the stronger
+    check for the three shaped arms too: `pg-store` and `s3-store` expand a
+    generated label file that text-splitting could only see as `labels minio`.
     """
-    script = STORE_TESTS.read_text(encoding="utf-8")
-    body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
-    bazel, cargo = body.split("\n    else\n", 1)
-    return bazel, cargo
+    rendered = []
+    for trusted in ("true", "false"):
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key != "GITHUB_ACTIONS"
+        }
+        environment["PATH"] = (
+            f"{_store_tests_stub_bin()}{os.pathsep}{environment['PATH']}"
+        )
+        environment["BAZEL_TRUSTED"] = trusted
+        result = subprocess.run(
+            ["bash", str(STORE_TESTS), suite],
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        rendered.append(result.stdout)
+    return rendered[0], rendered[1]
 
 
 def store_suite_for_step(step: str) -> str:
@@ -1940,6 +1979,97 @@ derive_mutation_jobs() {{
             ),
         )
 
+    def test_store_suites_state_one_selection_in_both_dialects(self) -> None:
+        """Each suite's test selection is written once, rendered twice.
+
+        Nine `case` arms used to encode the selection twice, with the flag
+        translation (`--run-ignored all` is `--include-ignored`, `-j1` is
+        `--test-threads=1`) written as a comment. Parity was hand-asserted for
+        three arms and "both halves non-empty" for the rest.
+
+        The counts the audit quoted -- nine suites, six uniform -- counted the
+        `case`'s own `*)` arm. The tree has eight suites: five uniform, and
+        three that keep explicit arms because their shape varies
+        (`pg-catalog-compatibility` runs two invocations; `pg-store` and
+        `s3-store` take a generated label file rather than one label).
+        """
+        script = STORE_TESTS.read_text(encoding="utf-8")
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+
+        table_body = script.split("declare -A uniform_store_suites=(\n", 1)[1]
+        table_body = table_body.split("\n)\n", 1)[0]
+        uniform = dict(
+            re.findall(r'^\s*\[([^\]]+)\]="([^"]*)"$', table_body, re.MULTILINE)
+        )
+        shaped = set(re.findall(r"^  ([a-z0-9-]+)\)$", script, re.MULTILINE))
+        suites = set(uniform) | shaped
+        dispatched = set(
+            re.findall(r"bash scripts/ci/store-tests\.sh ([a-z0-9-]+)", workflow)
+        )
+
+        self.assertEqual(5, len(uniform), sorted(uniform))
+        self.assertEqual(
+            {"pg-catalog-compatibility", "pg-store", "s3-store"}, shaped
+        )
+        self.assertEqual(suites, dispatched)
+        self.assertEqual(8, len(suites), sorted(suites))
+        # A suite cannot be in both halves, or the table would be shadowed.
+        self.assertEqual(set(), set(uniform) & shaped)
+
+        flag_dialects = {
+            "include-ignored": ("--test_arg=--include-ignored", ("--run-ignored all", "--include-ignored")),
+            "single-threaded": ("--test_arg=--test-threads=1", ("-j1", "--test-threads=1")),
+            "nocapture": ("--test_arg=--nocapture", ("--no-capture", "--nocapture")),
+        }
+
+        # Parity for every suite, uniform or shaped: both halves render a real
+        # command. The stubs make this the command the script would have run.
+        for suite in sorted(suites):
+            with self.subTest(suite=suite):
+                bazel, cargo = store_suite_branches(suite)
+                self.assertTrue(bazel.startswith("bazel test "), bazel)
+                self.assertIn("cargo ", cargo)
+
+        for suite, row in sorted(uniform.items()):
+            with self.subTest(suite=suite):
+                label, test_filter, package, target, runner, flags = row.split("|")
+                bazel, cargo = store_suite_branches(suite)
+                self.assertIn(label, bazel)
+                self.assertIn(f"-p {package}", cargo)
+                if target:
+                    self.assertIn(target, cargo)
+                self.assertIn(
+                    {
+                        "nextest": "cargo nextest run -p",
+                        "nextest-ci": "cargo nextest run --profile ci -p",
+                        "cargo-test": "cargo test -p",
+                    }[runner],
+                    cargo,
+                )
+                if test_filter:
+                    # The one selection reaches both dialects. A libtest filter
+                    # that matches nothing exits 0, so a name present on one
+                    # side only is a silently retired leg.
+                    self.assertIn(f"--test_arg={test_filter}", bazel)
+                    self.assertIn(test_filter, cargo)
+                for flag in filter(None, flags.split(",")):
+                    bazel_spelling, cargo_spellings = flag_dialects[flag]
+                    self.assertIn(bazel_spelling, bazel, flag)
+                    self.assertTrue(
+                        any(spelling in cargo for spelling in cargo_spellings),
+                        (flag, cargo),
+                    )
+                # And a flag the row does not ask for is in neither half.
+                for flag, (bazel_spelling, _) in flag_dialects.items():
+                    if flag not in flags.split(","):
+                        self.assertNotIn(bazel_spelling, bazel, (suite, flag))
+
+        # The rendered arms are gone from the `case`, so there is no second
+        # place a selection could be written.
+        case_body = script.split("\ncase \"${suite}\" in\n", 1)[1]
+        for suite in uniform:
+            self.assertNotIn(f"\n  {suite})\n", case_body, suite)
+
     def test_minio_ci_lane_requires_storage_configuration(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         s3_store_job = workflow_job_block(workflow, "s3-store")
@@ -1982,12 +2112,14 @@ derive_mutation_jobs() {{
         self.assertIn("cargo test -p lash-internal-s3-store --locked", conformance_cargo)
         # The Bazel half runs the generated label set, so a new MinIO-gated
         # binary joins this job without a hand edit. The generated file is what
-        # has to name the crate.
-        self.assertIn("labels minio", conformance_bazel)
+        # has to name the crate, and the rendered command is what has to carry
+        # every label in it.
         minio_labels = (ROOT / "tools" / "bazel" / "minio_test_labels.txt").read_text(
             encoding="utf-8"
         )
         self.assertIn("//crates/lash-s3-store:", minio_labels)
+        for label in minio_labels.split():
+            self.assertIn(label, conformance_bazel, label)
 
         differential_bazel, differential_cargo = store_suite_branches(
             store_suite_for_step(

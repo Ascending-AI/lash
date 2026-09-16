@@ -94,6 +94,100 @@ labels() {
   tr '\n' ' ' <"tools/bazel/$1_test_labels.txt"
 }
 
+
+# One test selection per uniform suite, rendered into both dialects below.
+# Fields are
+#
+#   bazel label|test filter|cargo package|cargo target|cargo runner|flags
+#
+# `flags` is a comma list of intents -- include-ignored, single-threaded,
+# nocapture -- that each renderer spells in its own dialect, so the translation
+# table that used to be a comment above `pg-cross-backend` is code. `runner` is
+# the Cargo side's test driver, kept per suite because `--profile ci` and
+# nextest-vs-libtest are execution settings, not test selection.
+#
+# Three suites are deliberately absent and stay explicit arms below:
+# `pg-catalog-compatibility` runs two invocations, and `pg-store` and
+# `s3-store` take a generated label file rather than one label. Forcing a shape
+# variation into the table for those buys nothing.
+declare -A uniform_store_suites=(
+  [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|pool_wait|lash-perf||nextest|"
+  [pg-agent-scenario]="//crates/lash-postgres-store:integration__test|public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres|lash-internal-postgres-store|--test integration|nextest-ci|"
+  [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|"
+  [pg-cross-backend]="//crates/lash-sim:cross_backend_store_differential__test||lash-sim|--test cross_backend_store_differential|nextest-ci|include-ignored,single-threaded,nocapture"
+  [s3-attachment-differential]="//crates/lash-sim:cross_backend_store_differential__test|attachment_blob_store_differential_agrees|lash-sim|--test cross_backend_store_differential|cargo-test|include-ignored,nocapture"
+)
+
+suite_has_flag() {
+  case ",$1," in
+    *",$2,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The Bazel half: a libtest name filter and the libtest switches, each passed
+# through `--test_arg`, plus the output switch `--nocapture` needs to be
+# visible in the log.
+render_bazel_suite() {
+  local label="$1" filter="$2" flags="$3"
+  local args=()
+  [ -n "$filter" ] && args+=("--test_arg=${filter}")
+  suite_has_flag "$flags" include-ignored && args+=(--test_arg=--include-ignored)
+  suite_has_flag "$flags" single-threaded && args+=(--test_arg=--test-threads=1)
+  suite_has_flag "$flags" nocapture && args+=(--test_arg=--nocapture --test_output=all)
+  bazel_test "${args[@]}" "$label"
+}
+
+# The Cargo half: the same selection in nextest's or libtest's spelling.
+render_cargo_suite() {
+  local filter="$1" package="$2" target="$3" runner="$4" flags="$5"
+  local cmd=()
+  case "$runner" in
+    nextest) cmd=(cargo nextest run) ;;
+    nextest-ci) cmd=(cargo nextest run --profile ci) ;;
+    cargo-test) cmd=(cargo test) ;;
+    *)
+      echo "unknown cargo runner: ${runner}" >&2
+      exit 1
+      ;;
+  esac
+  cmd+=(-p "$package")
+  # Deliberate word splitting: the target selection is this table's own data.
+  # shellcheck disable=SC2206
+  [ -n "$target" ] && cmd+=($target)
+  cmd+=(--locked)
+  if [ "$runner" = cargo-test ]; then
+    [ -n "$filter" ] && cmd+=("$filter")
+    local libtest=()
+    suite_has_flag "$flags" nocapture && libtest+=(--nocapture)
+    suite_has_flag "$flags" include-ignored && libtest+=(--include-ignored)
+    suite_has_flag "$flags" single-threaded && libtest+=(--test-threads=1)
+    [ "${#libtest[@]}" -gt 0 ] && cmd+=(-- "${libtest[@]}")
+  else
+    suite_has_flag "$flags" single-threaded && cmd+=(-j1)
+    suite_has_flag "$flags" nocapture && cmd+=(--no-capture)
+    suite_has_flag "$flags" include-ignored && cmd+=(--run-ignored all)
+    [ -n "$filter" ] && cmd+=(-E "test(${filter})")
+  fi
+  "${cmd[@]}"
+}
+
+run_uniform_store_suite() {
+  local label filter package target runner flags
+  IFS='|' read -r label filter package target runner flags \
+    <<<"${uniform_store_suites[$1]}"
+  if [ "${trusted}" = true ]; then
+    render_bazel_suite "$label" "$filter" "$flags"
+  else
+    render_cargo_suite "$filter" "$package" "$target" "$runner" "$flags"
+  fi
+}
+
+if [ -n "${uniform_store_suites[$suite]+set}" ]; then
+  run_uniform_store_suite "$suite"
+  exit 0
+fi
+
 case "${suite}" in
   # The compatibility lanes provision the published DDL and compare its live
   # catalog rendering byte-for-byte with schema-shape.txt. The second test is a
@@ -127,66 +221,6 @@ case "${suite}" in
     fi
     ;;
 
-  pg-pool-wait)
-    if [ "${trusted}" = true ]; then
-      bazel_test --test_arg=pool_wait //crates/lash-perf:lash-perf__unit_test
-    else
-      cargo nextest run -p lash-perf -E 'test(pool_wait)' --locked
-    fi
-    ;;
-
-  # The per-PR PostgreSQL agent-scenario slot. It used to name the facade
-  # Agent Scenario that drove a Lashlang process graph through a ParentEnd
-  # fault; the parent-end ledger replaced that scenario, and the property now
-  # lives in the store's own crash-recovery test. Keep this leg stable and
-  # focused on one named test: a libtest filter that matches nothing exits 0,
-  # so the name must always be a test that exists.
-  pg-agent-scenario)
-    if [ "${trusted}" = true ]; then
-      bazel_test \
-        --test_arg=public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres \
-        //crates/lash-postgres-store:integration__test
-    else
-      cargo nextest run --profile ci -p lash-internal-postgres-store \
-        --test integration --locked -E \
-        'test(public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres)'
-    fi
-    ;;
-
-  # The simulator's backend-fault plan against a real PostgreSQL: the same
-  # commit-boundary scenarios the SQLite lane runs, driven through
-  # `lash_postgres_store::testing::PostgresFaultInjector`. The test skips itself
-  # without a database URL, and LASH_REQUIRE_POSTGRES=1 turns a missing URL into
-  # a panic, so a missing CI variable cannot silently pass this lane.
-  pg-sim-backend-faults)
-    if [ "${trusted}" = true ]; then
-      bazel_test --test_arg=postgres_backend_fault \
-        //crates/lash-sim:lash-sim__unit_test
-    else
-      cargo nextest run --profile ci -p lash-sim --lib --locked \
-        -E 'test(postgres_backend_fault)'
-    fi
-    ;;
-
-  # The full differential compares backend semantics, not catalog rendering, so
-  # it runs once on the primary major instead of three times. `--run-ignored
-  # all` is libtest's `--include-ignored`; `-j1` is `--test-threads=1`;
-  # `--no-capture` is `--nocapture`.
-  pg-cross-backend)
-    if [ "${trusted}" = true ]; then
-      bazel_test \
-        --test_arg=--include-ignored \
-        --test_arg=--test-threads=1 \
-        --test_arg=--nocapture \
-        --test_output=all \
-        //crates/lash-sim:cross_backend_store_differential__test
-    else
-      cargo nextest run --profile ci -p lash-sim \
-        --test cross_backend_store_differential \
-        --locked -j1 --no-capture --run-ignored all
-    fi
-    ;;
-
   s3-store)
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046
@@ -195,22 +229,6 @@ case "${suite}" in
       cargo test -p lash-internal-s3-store --locked
     fi
     ;;
-
-  s3-attachment-differential)
-    if [ "${trusted}" = true ]; then
-      bazel_test \
-        --test_arg=attachment_blob_store_differential_agrees \
-        --test_arg=--include-ignored \
-        --test_arg=--nocapture \
-        --test_output=all \
-        //crates/lash-sim:cross_backend_store_differential__test
-    else
-      cargo test -p lash-sim \
-        --test cross_backend_store_differential \
-        --locked attachment_blob_store_differential_agrees -- --nocapture --include-ignored
-    fi
-    ;;
-
   *)
     echo "unknown store suite: ${suite}" >&2
     exit 1

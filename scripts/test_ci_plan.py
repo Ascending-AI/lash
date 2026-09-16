@@ -9,6 +9,8 @@ import subprocess
 import unittest
 from unittest import mock
 
+import re
+
 import yaml
 
 import ci_plan
@@ -605,9 +607,19 @@ class PostgresMatrixTests(unittest.TestCase):
             run = steps[step_name]["run"]
             self.assertIn("scripts/ci/store-tests.sh", run)
             suite = run.split()[-1]
-            body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
-            bazel, cargo = body.split("\n    else\n", 1)
-            return bazel, cargo
+            if f"\n  {suite})\n" in script:
+                # A shaped suite writes both halves itself.
+                body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
+                bazel, cargo = body.split("\n    else\n", 1)
+                return bazel, cargo
+            # A uniform suite states its selection once and renders it into
+            # both dialects, so the row *is* both halves: a name present here
+            # reaches the Bazel and the Cargo command by construction.
+            row = re.search(
+                rf'^\s*\[{re.escape(suite)}\]="([^"]*)"$', script, re.MULTILINE
+            )
+            self.assertIsNotNone(row, f"no store suite {suite}")
+            return row.group(1), row.group(1)
 
         for oracle, step_name in (
             (

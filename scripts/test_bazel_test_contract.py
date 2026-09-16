@@ -899,12 +899,27 @@ class BazelTestContractTests(unittest.TestCase):
         # Every suite the workflow names must dispatch on both trust decisions,
         # and no suite may exist that the workflow never runs.
         script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
-        declared = set(re.findall(r"^  ([a-z0-9-]+)\)$", script, flags=re.MULTILINE))
-        self.assertEqual(set(suites), declared)
-        for suite in suites:
+        shaped = set(re.findall(r"^  ([a-z0-9-]+)\)$", script, flags=re.MULTILINE))
+        table = script.split("declare -A uniform_store_suites=(\n", 1)[1]
+        table = table.split("\n)\n", 1)[0]
+        uniform = set(re.findall(r"^\s*\[([^\]]+)\]=", table, flags=re.MULTILINE))
+        self.assertEqual(set(suites), shaped | uniform)
+        self.assertEqual(set(), shaped & uniform)
+
+        # A suite whose shape varies keeps writing both halves itself.
+        for suite in shaped:
             body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
             self.assertIn('if [ "${trusted}" = true ]; then', body)
             self.assertIn("cargo ", body)
+
+        # A uniform suite states its selection once; the dispatcher renders it
+        # into whichever dialect the trust decision calls for.
+        dispatcher = script.split("run_uniform_store_suite() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('if [ "${trusted}" = true ]; then', dispatcher)
+        self.assertIn("render_bazel_suite", dispatcher)
+        self.assertIn("render_cargo_suite", dispatcher)
+        for suite in uniform:
+            self.assertIn(f"[{suite}]=", table)
 
     def test_ci_policy_accepts_bazel_skip_only_for_untrusted_events(self) -> None:
         needs = {
