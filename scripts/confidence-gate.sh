@@ -235,6 +235,42 @@ finish_current_step() {
   fi
 }
 
+# The cold-process conformance suites spawn dev-only example binaries out of
+# `target/<profile>/examples` (`lash_conformance::helper_executable`). No
+# `cargo test --test conformance` invocation builds them, and both examples
+# carry `required-features = ["testing"]`, so a build that does not name them
+# only yields them while some other workspace member happens to turn that
+# feature on. Every conformance run in this gate builds them through here
+# first, so the spawn cannot fail with ENOENT.
+build_conformance_helpers() {
+  cargo build -p lash-internal-sqlite-store --locked --features testing \
+    --example sqlite-await-event-helper
+  cargo build -p lash-internal-postgres-store --locked --features testing \
+    --example postgres-await-event-helper
+}
+
+gate_postgres_image="postgres:16-alpine"
+
+# Every Postgres this gate starts is the CI image started the CI way. The
+# statement-count tests read pg_stat_statements, which exists only when the
+# extension is preloaded at server start, so the flag belongs to the container
+# rather than to a call site -- scripts/ci/with-service.sh and
+# scripts/push-gate.sh already start the same image with it. One function, so a
+# later container cannot omit it.
+start_gate_postgres() {
+  local container="$1"
+  local host_port="$2"
+  bash scripts/docker-pull-with-retry.sh "$gate_postgres_image"
+  docker run -d --name "$container" \
+    --label "$LASH_GATE_LABEL" \
+    --network "$LASH_E2E_NETWORK" \
+    -e POSTGRES_USER=lash \
+    -e POSTGRES_PASSWORD=lash \
+    -e POSTGRES_DB=lash \
+    -p "127.0.0.1:${host_port}:5432" \
+    "$gate_postgres_image" -c shared_preload_libraries=pg_stat_statements >/dev/null
+}
+
 assert_no_panics_in_artifacts() {
   if [ -d "$out_dir" ] && grep -RFn --include='*.log' 'panicked at' "$out_dir" >&2; then
     echo "panic gate: FAILED (a Rust panic marker found in confidence artifacts)" >&2
@@ -691,15 +727,8 @@ start_mutation_postgres() {
 
   cleanup_mutation_postgres
   mutation_postgres_container="lash-confidence-mutation-postgres-${LASH_GATE_WORKTREE_SLUG}-$(basename "$artifact")-$$"
-  bash scripts/docker-pull-with-retry.sh postgres:16-alpine
-  docker run -d --name "$mutation_postgres_container" \
-    --label "$LASH_GATE_LABEL" \
-    --network "$LASH_E2E_NETWORK" \
-    -e POSTGRES_USER=lash \
-    -e POSTGRES_PASSWORD=lash \
-    -e POSTGRES_DB=lash \
-    -p "127.0.0.1:${LASH_CONFIDENCE_MUTATION_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 12))}:5432" \
-    postgres:16-alpine -c shared_preload_libraries=pg_stat_statements >/dev/null
+  start_gate_postgres "$mutation_postgres_container" \
+    "${LASH_CONFIDENCE_MUTATION_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 12))}"
 
   port="$(
     docker inspect \
@@ -824,6 +853,7 @@ run_scenario_harnesses() {
   local session_graph_cases="${LASH_SESSION_GRAPH_PROPTEST_CASES:-$default_session_graph_cases}"
 
   if area_selected store; then
+    build_conformance_helpers
     step "Golden durable-store semantic read-back"
     run_cargo_tests -p lash-internal-sqlite-store --locked --test durable_read_fixture \
       sqlite_durable_fixture_reads_with_identical_semantics
@@ -853,6 +883,7 @@ run_scenario_harnesses() {
   fi
 
   if area_selected process; then
+    build_conformance_helpers
     step "Runtime-persistence state-machine properties"
     LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
       run_cargo_tests -p lash-internal-conformance --locked \
@@ -941,10 +972,7 @@ run_state_machine_and_fault_matrix() {
 
   if area_selected store; then
     step "SQLite backend fault-matrix conformance"
-    # The cold-process conformance tests spawn this example beside the test
-    # profile; `cargo test --test conformance` alone does not build it.
-    cargo build -p lash-internal-sqlite-store --locked --features testing \
-      --example sqlite-await-event-helper
+    build_conformance_helpers
     cargo test -p lash-internal-sqlite-store --locked --test conformance conformance
   fi
 }
@@ -1500,6 +1528,7 @@ EOF
 
 run_local_backend_conformance() {
   step "Sqlite backend conformance"
+  build_conformance_helpers
   cargo test -p lash-internal-sqlite-store --locked --test conformance
 }
 
@@ -1583,6 +1612,7 @@ run_postgres_schema_gate() {
 
 run_postgres_conformance() {
   step "Postgres backend conformance"
+  build_conformance_helpers
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
     run_postgres_schema_gate "$LASH_POSTGRES_DATABASE_URL"
@@ -1617,15 +1647,7 @@ EOF
   }
   trap cleanup_postgres RETURN
 
-  bash scripts/docker-pull-with-retry.sh postgres:16-alpine
-  docker run -d --name "$container" \
-    --label "$LASH_GATE_LABEL" \
-    --network "$LASH_E2E_NETWORK" \
-    -e POSTGRES_USER=lash \
-    -e POSTGRES_PASSWORD=lash \
-    -e POSTGRES_DB=lash \
-    -p "127.0.0.1:${port}:5432" \
-    postgres:16-alpine >/dev/null
+  start_gate_postgres "$container" "$port"
 
   local deadline=$((SECONDS + 60))
   until docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1; do
@@ -1730,6 +1752,7 @@ run_broad_postgres_evidence() {
     return
   fi
   step "Broad Postgres/static replay evidence"
+  build_conformance_helpers
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
     LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
     run_generated_postgres_dynamic_replay "$LASH_POSTGRES_DATABASE_URL" "env"
@@ -1774,15 +1797,7 @@ EOF
   }
   trap cleanup_postgres_broad RETURN
 
-  bash scripts/docker-pull-with-retry.sh postgres:16-alpine
-  docker run -d --name "$container" \
-    --label "$LASH_GATE_LABEL" \
-    --network "$LASH_E2E_NETWORK" \
-    -e POSTGRES_USER=lash \
-    -e POSTGRES_PASSWORD=lash \
-    -e POSTGRES_DB=lash \
-    -p "127.0.0.1:${port}:5432" \
-    postgres:16-alpine >/dev/null
+  start_gate_postgres "$container" "$port"
 
   local deadline=$((SECONDS + 60))
   until docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1; do
@@ -1856,15 +1871,7 @@ EOF
   }
   trap cleanup_postgres_current RETURN
 
-  bash scripts/docker-pull-with-retry.sh postgres:16-alpine
-  docker run -d --name "$container" \
-    --label "$LASH_GATE_LABEL" \
-    --network "$LASH_E2E_NETWORK" \
-    -e POSTGRES_USER=lash \
-    -e POSTGRES_PASSWORD=lash \
-    -e POSTGRES_DB=lash \
-    -p "127.0.0.1:${port}:5432" \
-    postgres:16-alpine >/dev/null
+  start_gate_postgres "$container" "$port"
 
   local deadline=$((SECONDS + 60))
   until docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1; do
