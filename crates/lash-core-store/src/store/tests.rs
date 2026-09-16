@@ -908,3 +908,84 @@ fn lease_owner_identity_requires_same_incarnation() {
     assert!(first.same_incarnation(&same));
     assert!(!first.same_incarnation(&next));
 }
+
+#[test]
+// Architecture lint: lexical drift guard over the decorator's operation list,
+// not a behavior proof.
+fn decorator_surface_covers_every_component_trait_method() {
+    fn declared_methods(source: &str, trait_name: &str) -> std::collections::BTreeSet<String> {
+        let start = source
+            .find(&format!("pub trait {trait_name}"))
+            .unwrap_or_else(|| panic!("`pub trait {trait_name}` is present in the scanned source"));
+        let body = &source[start..];
+        let end = body
+            .find("\n}\n")
+            .unwrap_or_else(|| panic!("the `{trait_name}` body closes at column zero"));
+        body[..end]
+            .lines()
+            .filter_map(|line| {
+                let rest = line.strip_prefix("    ")?;
+                if rest.starts_with(' ') {
+                    return None;
+                }
+                let rest = rest.strip_prefix("async ").unwrap_or(rest);
+                let rest = rest.strip_prefix("fn ")?;
+                Some(rest.split('(').next()?.to_string())
+            })
+            .collect()
+    }
+
+    fn forwarded_operations(decorator_source: &str) -> std::collections::BTreeSet<String> {
+        let start = decorator_source
+            .find("$emit! {")
+            .expect("the operation list opens the `persistence_operations!` expansion");
+        let end = decorator_source
+            .find("macro_rules! emit_decorator_trait")
+            .expect("the operation list ends before the first emitter");
+        decorator_source[start..end]
+            .lines()
+            .filter_map(|line| {
+                let rest = line.strip_prefix("                ")?;
+                if rest.starts_with(' ') {
+                    return None;
+                }
+                let rest = rest.strip_prefix("sync ").unwrap_or(rest);
+                let rest = rest.strip_prefix("fn ")?;
+                Some(rest.split('(').next()?.to_string())
+            })
+            .collect()
+    }
+
+    let store_mod = include_str!("mod.rs");
+    let attachment_manifest = include_str!("attachment_manifest.rs");
+    let decorator = include_str!("runtime_persistence_decorator.rs");
+
+    let mut declared = declared_methods(attachment_manifest, "AttachmentManifest");
+    for trait_name in [
+        "SessionCommitStore",
+        "TurnInputStore",
+        "SessionExecutionLeaseStore",
+        "QueuedWorkStore",
+        "StoreMaintenance",
+    ] {
+        declared.extend(declared_methods(store_mod, trait_name));
+    }
+    assert!(
+        declared.contains("commit_runtime_state") && declared.contains("vacuum"),
+        "the component-trait scan must cover every segment: {declared:?}"
+    );
+
+    let forwarded = forwarded_operations(decorator);
+    let missing: Vec<_> = declared.difference(&forwarded).cloned().collect();
+    let extra: Vec<_> = forwarded.difference(&declared).cloned().collect();
+
+    assert!(
+        missing.is_empty(),
+        "component-trait methods a decorator would silently resolve to the trait's own default \
+         instead of forwarding to `inner()`; add them to `persistence_operations!`: {missing:?}"
+    );
+    assert!(
+        extra.is_empty(),
+        "`persistence_operations!` forwards operations no component trait declares: {extra:?}"
+    );
+}
