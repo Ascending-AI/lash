@@ -12,9 +12,9 @@ use lash_core::{
     facade_support::TraceRecord, facade_support::TraceRuntimeSubject, facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
-    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionPayload, lashlang_value_to_json, process_sleep,
-    protocol_tool_output_to_lashlang_value, resolve_lashlang_module_operation,
+    ExecutionCancellation, TraceLanguageChildExecution, TraceLanguageExecution,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, lashlang_value_to_json,
+    process_sleep, protocol_tool_output_to_lashlang_value, resolve_lashlang_module_operation,
 };
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ProjectedFuture,
@@ -40,6 +40,10 @@ pub(super) struct HostBridge<'run> {
     /// this execution actually starts a child: an execution that never starts
     /// one pins nothing and leaves the durable snapshot root alone.
     child_max_attempts: Mutex<Option<std::num::NonZeroU32>>,
+    /// This cell's own cancellation scope, beside the turn's. A cancelled tool
+    /// call ends the cell here, so `is_cancelled` refuses its next effect
+    /// instead of the guest catching the cancellation as a rejected call.
+    cancellation: ExecutionCancellation,
 }
 
 pub(super) struct HostBridgeConfig<'run> {
@@ -71,6 +75,7 @@ impl<'run> HostBridge<'run> {
             deferred_execution_grants: config.deferred_execution_grants,
             artifact_store: config.artifact_store,
             child_max_attempts: Mutex::new(config.child_max_attempts),
+            cancellation: ExecutionCancellation::new(),
         }
     }
 
@@ -93,7 +98,7 @@ impl<'run> HostBridge<'run> {
         Result<FlowValue, ExecutionHostError>,
         Option<lash_core::ToolCallRecord>,
     ) {
-        let result = protocol_tool_output_to_lashlang_value(&reply.output);
+        let result = protocol_tool_output_to_lashlang_value(&reply.output, &self.cancellation);
         (result, reply.record)
     }
 
@@ -684,7 +689,7 @@ impl ExecutionHost for HostBridge<'_> {
     }
 
     fn is_cancelled(&self) -> bool {
-        self.ctx.is_cancelled()
+        self.ctx.is_cancelled() || self.cancellation.is_cancelled()
     }
 
     fn observe_lashlang_execution(&self, observation: lashlang::LashlangExecutionObservation) {
