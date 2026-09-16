@@ -68,6 +68,30 @@ fn the_published_ddl_is_creation_only_and_unqualified() {
 #[test]
 fn the_published_ddl_seeds_every_required_row() {
     let ddl = crate::PostgresStorage::schema_ddl();
+    let header_version: i32 = ddl
+        .lines()
+        .next()
+        .expect("the DDL artifact must have a header line")
+        .strip_prefix("-- lash-postgres-store schema, component version ")
+        .expect("the DDL header must declare the component version")
+        .strip_suffix(".")
+        .expect("the DDL header version must end with a period")
+        .parse()
+        .expect("the DDL header version must be an integer");
+    let seed_version: i32 = ddl
+        .lines()
+        .find(|line| line.starts_with(&format!("VALUES ('{SCHEMA_COMPONENT}', ")))
+        .expect("the DDL artifact must seed the component version row")
+        .trim_start_matches(&format!("VALUES ('{SCHEMA_COMPONENT}', "))
+        .strip_suffix(")")
+        .expect("the component version seed row must end with a closing paren")
+        .parse()
+        .expect("the seeded component version must be an integer");
+    assert_eq!(
+        [header_version, seed_version, SCHEMA_VERSION],
+        [SCHEMA_VERSION; 3],
+        "the published DDL header, seed row, and compiled schema version must agree"
+    );
     for (table, _) in SEED_ROWS {
         assert!(
             ddl.contains(&format!("INSERT INTO {table} ")),
