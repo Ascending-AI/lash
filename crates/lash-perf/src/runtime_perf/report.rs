@@ -20,6 +20,7 @@ use super::scenarios::{RuntimePerfScenario, ScenarioHarnessKind};
 
 mod budgets;
 mod guards;
+pub use guards::BudgetEnforcement;
 use guards::{
     RuntimePerfBudgetResult, enforcement_failures, evaluate_budgets, report_advisory_exceedances,
 };
@@ -57,34 +58,74 @@ pub(crate) fn default_output_path() -> PathBuf {
     paths::default_report_path("runtime-perf")
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run_cli(
-    out: Option<PathBuf>,
-    enable_dhat: bool,
-    dhat_out: Option<PathBuf>,
-    dhat_frames: Option<usize>,
-    worker_stack_bytes: usize,
-    runs: usize,
-    warmups: usize,
-    scenario_filters: Vec<String>,
-    chat_turns: usize,
-    contention_workers: usize,
-    checkpoint_transcript_bytes: usize,
-    checkpoint_messages: usize,
-    checkpoint_graph_rows: usize,
-    checkpoint_components: usize,
-    high_traffic_population: usize,
-    high_traffic_arrival_rate: u64,
-    high_traffic_mix: String,
-    high_traffic_knee_populations: String,
-    high_traffic_knee_threshold: f64,
-    enforce_budgets: bool,
-    enforce_inventory: bool,
-    smoke: bool,
-    duration_history: Option<PathBuf>,
-    duration_profile: String,
-    version: &str,
-) -> anyhow::Result<()> {
+/// One runtime-perf run, named rather than positional.
+///
+/// `run_cli` used to take these as 25 positional parameters, eleven of them
+/// `usize` and seven of those consecutive, every one already a field of the
+/// clap struct that was destructured only to be re-associated by position. A
+/// transposition of `checkpoint_messages` and `checkpoint_graph_rows` at the
+/// call site type-checked and measured a different shape than the flags said,
+/// caught only by `CheckpointCurveConfig::new`'s `graph_rows <= message_count`
+/// bail -- and only for that one pair.
+///
+/// The fields are the CLI's own vocabulary, so `main.rs` builds this by field
+/// name straight off `Args`. The library cannot name clap's `Args` -- it lives
+/// in the binary crate -- so this is where "pass the struct" lands.
+#[derive(Debug, Clone)]
+pub struct RuntimePerfRun {
+    pub out: Option<PathBuf>,
+    pub enable_dhat: bool,
+    pub dhat_out: Option<PathBuf>,
+    pub dhat_frames: Option<usize>,
+    pub worker_stack_bytes: usize,
+    pub runs: usize,
+    pub warmups: usize,
+    pub scenario_filters: Vec<String>,
+    pub chat_turns: usize,
+    pub contention_workers: usize,
+    pub checkpoint_transcript_bytes: usize,
+    pub checkpoint_messages: usize,
+    pub checkpoint_graph_rows: usize,
+    pub checkpoint_components: usize,
+    pub high_traffic_population: usize,
+    pub high_traffic_arrival_rate: u64,
+    pub high_traffic_mix: String,
+    pub high_traffic_knee_populations: String,
+    pub high_traffic_knee_threshold: f64,
+    pub enforcement: BudgetEnforcement,
+    pub smoke: bool,
+    pub duration_history: Option<PathBuf>,
+    pub duration_profile: String,
+    pub version: String,
+}
+
+pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
+    let RuntimePerfRun {
+        out,
+        enable_dhat,
+        dhat_out,
+        dhat_frames,
+        worker_stack_bytes,
+        runs,
+        warmups,
+        scenario_filters,
+        chat_turns,
+        contention_workers,
+        checkpoint_transcript_bytes,
+        checkpoint_messages,
+        checkpoint_graph_rows,
+        checkpoint_components,
+        high_traffic_population,
+        high_traffic_arrival_rate,
+        high_traffic_mix,
+        high_traffic_knee_populations,
+        high_traffic_knee_threshold,
+        enforcement,
+        smoke,
+        duration_history,
+        duration_profile,
+        version,
+    } = run;
     if dhat_out.is_some() && !enable_dhat {
         anyhow::bail!("--runtime-perf-dhat-out requires --runtime-perf-dhat");
     }
@@ -179,7 +220,7 @@ pub async fn run_cli(
     let report = RuntimePerfReport {
         kind: "runtime-perf",
         created_at: Utc::now().to_rfc3339(),
-        version: version.to_string(),
+        version,
         warmups,
         runs,
         chat_turns,
@@ -216,17 +257,9 @@ pub async fn run_cli(
             &report.summary,
         );
     }
-    if enforce_budgets || enforce_inventory {
-        let inventory_only = enforce_inventory && !enforce_budgets;
-        let failures = enforcement_failures(&report.budget_results, inventory_only);
-        if !failures.is_empty() {
-            let label = if inventory_only {
-                "Runtime perf inventory check failed"
-            } else {
-                "Runtime perf budget exceeded"
-            };
-            anyhow::bail!("{label}:\n{}", failures.join("\n"));
-        }
+    let failures = enforcement_failures(&report.budget_results, enforcement);
+    if !failures.is_empty() {
+        anyhow::bail!("{}:\n{}", enforcement.failure_label(), failures.join("\n"));
     }
     Ok(())
 }

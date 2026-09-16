@@ -120,7 +120,9 @@ struct Args {
     /// required phases, emitted phases without a checked-in budget). Duration
     /// and allocation ceilings are calibrated on the release profile and are
     /// enforced by --runtime-perf-enforce-budgets at release time.
-    #[arg(long)]
+    /// The two enforcement flags name three modes, not four: passing both is
+    /// refused rather than resolving to the wider one.
+    #[arg(long, conflicts_with = "runtime_perf_enforce_budgets")]
     runtime_perf_enforce_inventory: bool,
 
     /// Check scenario completion and delivery witnesses without benchmark deadlines.
@@ -176,31 +178,38 @@ fn main() -> anyhow::Result<()> {
     let mut runtime = tokio::runtime::Builder::new_multi_thread();
     runtime.enable_all();
     runtime.thread_stack_size(worker_stack_bytes);
-    runtime.build()?.block_on(lash_perf::runtime_perf::run_cli(
-        args.runtime_perf_out,
-        args.runtime_perf_dhat,
-        args.runtime_perf_dhat_out,
-        args.runtime_perf_dhat_frames,
+    // Every argument is named at this one call site: the parameters used to be
+    // positional, and seven consecutive `usize` type-check in any permutation.
+    let run = lash_perf::runtime_perf::RuntimePerfRun {
+        out: args.runtime_perf_out,
+        enable_dhat: args.runtime_perf_dhat,
+        dhat_out: args.runtime_perf_dhat_out,
+        dhat_frames: args.runtime_perf_dhat_frames,
         worker_stack_bytes,
-        args.runtime_perf_runs,
-        args.runtime_perf_warmups,
-        args.runtime_perf_scenario,
-        args.runtime_perf_turns,
-        args.runtime_perf_contention_workers,
-        args.runtime_perf_checkpoint_transcript_bytes,
-        args.runtime_perf_checkpoint_messages,
-        args.runtime_perf_checkpoint_graph_rows,
-        args.runtime_perf_checkpoint_components,
-        args.runtime_perf_load_population,
-        args.runtime_perf_load_arrival_rate,
-        args.runtime_perf_load_mix,
-        args.runtime_perf_knee_populations,
-        args.runtime_perf_knee_threshold,
-        args.runtime_perf_enforce_budgets,
-        args.runtime_perf_enforce_inventory,
-        args.runtime_perf_smoke,
-        args.runtime_perf_duration_history,
-        args.runtime_perf_duration_profile,
-        APP_VERSION,
-    ))
+        runs: args.runtime_perf_runs,
+        warmups: args.runtime_perf_warmups,
+        scenario_filters: args.runtime_perf_scenario,
+        chat_turns: args.runtime_perf_turns,
+        contention_workers: args.runtime_perf_contention_workers,
+        checkpoint_transcript_bytes: args.runtime_perf_checkpoint_transcript_bytes,
+        checkpoint_messages: args.runtime_perf_checkpoint_messages,
+        checkpoint_graph_rows: args.runtime_perf_checkpoint_graph_rows,
+        checkpoint_components: args.runtime_perf_checkpoint_components,
+        high_traffic_population: args.runtime_perf_load_population,
+        high_traffic_arrival_rate: args.runtime_perf_load_arrival_rate,
+        high_traffic_mix: args.runtime_perf_load_mix,
+        high_traffic_knee_populations: args.runtime_perf_knee_populations,
+        high_traffic_knee_threshold: args.runtime_perf_knee_threshold,
+        enforcement: lash_perf::runtime_perf::BudgetEnforcement::from_flags(
+            args.runtime_perf_enforce_budgets,
+            args.runtime_perf_enforce_inventory,
+        )?,
+        smoke: args.runtime_perf_smoke,
+        duration_history: args.runtime_perf_duration_history,
+        duration_profile: args.runtime_perf_duration_profile,
+        version: APP_VERSION.to_string(),
+    };
+    runtime
+        .build()?
+        .block_on(lash_perf::runtime_perf::run_cli(run))
 }
