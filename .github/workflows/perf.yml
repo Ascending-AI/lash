@@ -7,12 +7,9 @@ name: Performance
 # never failing the run.
 
 on:
+  # Manual only: a full 2500-iteration profile costs ~2 runner hours, so it is
+  # dispatched deliberately before release work rather than on a schedule.
   workflow_dispatch:
-  # Nightly at 03:41 UTC: the guard is otherwise release-only, and a
-  # release-only profile can drift unmeasured for weeks. A full 2500-iteration
-  # profile costs ~2 runner hours, so it stays off the per-merge path.
-  schedule:
-    - cron: "41 3 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
