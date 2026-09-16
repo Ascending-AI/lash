@@ -241,7 +241,7 @@ pub mod tools {
     pub use lash_lashlang_runtime::{
         DeferredResolutionLinkKey, DeferredResolutionRecord, DeferredToolResolver,
         RecordedGrantInstallError, Resolution as DeferredToolResolution,
-        SharedDeferredToolResolver, ToolGrant as DeferredToolGrant,
+        SharedDeferredToolResolver, ToolGrant as DeferredToolGrant, link_with_deferred_resolution,
     };
     /// Author a fixed-tool provider without hand-rolling `tool_manifests` /
     /// `resolve_contract`: supply the [`ToolDefinition`]s once and an
@@ -550,7 +550,8 @@ pub mod remote {
             RemoteReasoningDisableEncoding, RemoteReasoningEncoding,
             RemoteReasoningRetentionCapability, RemoteReasoningRetentionPolicy,
             RemoteReasoningRetentionSelection, RemoteReasoningSelection, RemoteResponseTextMeta,
-            RemoteRetryDecision, RemoteSchemaProjectionOverride,
+            RemoteRetryDecision, RemoteSchemaContract, RemoteSchemaProjectionOverride,
+            RemoteSchemaProjectionPolicy,
         };
     }
 
@@ -781,6 +782,10 @@ pub mod runtime {
     pub use lash_core::RuntimeErrorCause;
     /// Assistant-output state exposed by assembled runtime turns.
     pub use lash_core::facade_support::OutputState;
+    /// Wall-clock milliseconds since the Unix epoch, as the runtime stamps its
+    /// own process records. A host that mints a record the runtime will compare
+    /// against uses the same reading rather than its own.
+    pub use lash_core::runtime::current_epoch_ms;
     /// Runtime host configuration, control, observation, and effect contracts.
     pub use lash_core::runtime::{
         ApplyConfigPatch, AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver,
@@ -853,13 +858,91 @@ pub mod tracing {
         TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
         TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
     };
-    pub use lash_trace::{StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink};
+    pub use lash_trace::{
+        StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,
+        TraceToolCallOutput,
+    };
 }
 
 /// Test helpers for embedders. Enable with `lash = { ..., features = ["testing"] }`
 /// to script model responses in integration tests without a live provider.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+
+/// JSON-schema contracts, projection policies, and provider dialect
+/// projection. This is the vocabulary a tool schema and a provider request
+/// share: [`SchemaContract`] declares what a schema promises, and
+/// [`project_for_dialect`] renders it for one provider dialect.
+pub mod schema {
+    pub use lash_sansio::schema_contract::*;
+}
+
+/// SQLite durable store backend. Enable with `features = ["sqlite"]`.
+#[cfg(feature = "sqlite")]
+pub mod sqlite {
+    pub use lash_sqlite_store::*;
+}
+
+/// PostgreSQL durable store backend. Enable with `features = ["postgres"]`.
+#[cfg(feature = "postgres")]
+pub mod postgres {
+    pub use lash_postgres_store::*;
+}
+
+/// S3 attachment store backend. Enable with `features = ["s3"]`.
+#[cfg(feature = "s3")]
+pub mod s3 {
+    pub use lash_s3_store::*;
+}
+
+/// Restate durable-execution substrate. Enable with `features = ["restate"]`.
+#[cfg(feature = "restate")]
+pub mod restate {
+    pub use lash_restate::*;
+}
+
+/// OpenAI model provider. Enable with `features = ["openai"]`.
+#[cfg(feature = "openai")]
+pub mod openai {
+    pub use lash_provider_openai::*;
+}
+
+/// Anthropic model provider. Enable with `features = ["anthropic"]`.
+#[cfg(feature = "anthropic")]
+pub mod anthropic {
+    pub use lash_provider_anthropic::*;
+}
+
+/// Google model provider. Enable with `features = ["google"]`.
+#[cfg(feature = "google")]
+pub mod google {
+    pub use lash_provider_google::*;
+}
+
+/// Model Context Protocol tool plugin. Enable with `features = ["mcp"]`.
+#[cfg(feature = "mcp")]
+pub mod mcp {
+    pub use lash_plugin_mcp::*;
+}
+
+/// Subagent spawning plugin. Enable with `features = ["subagents"]`.
+#[cfg(feature = "subagents")]
+pub mod subagents {
+    pub use lash_subagents::*;
+}
+
+/// TypeScript process dialect. Enable with `features = ["typescript"]`.
+#[cfg(feature = "typescript")]
+pub mod typescript {
+    pub use lash_typescript::*;
+}
+
+/// HTTP transport for provider and ingress traffic. Enable with
+/// `features = ["http-transport"]`.
+#[cfg(feature = "http-transport")]
+pub mod http_transport {
+    pub use lash_http_transport::*;
+}
 
 /// Model-provider configuration and request types.
 pub mod provider {

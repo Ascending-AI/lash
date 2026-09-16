@@ -225,6 +225,17 @@ pub use lash_protocol_rlm::{
     LashlangModuleCompileRequest, ModuleCompileOutput,
 };
 
+/// The Lashlang language surface: the AST, values, compile/link requests,
+/// introspection, trigger vocabulary, resource operations and artifact-store
+/// traits a host needs to author, compile and inspect Lashlang programs.
+///
+/// This is `lashlang`'s own root namespace, re-exported whole rather than
+/// item-by-item: the language vocabulary is the internal crate's root and
+/// splitting it here would give the same name two homes.
+pub mod lang {
+    pub use lashlang::*;
+}
+
 #[cfg(feature = "rlm")]
 fn rlm_termination(
     mut builder: TurnBuilder,

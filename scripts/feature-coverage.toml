@@ -1,8 +1,8 @@
 schema = 1
-non_normal_forwards = [
-  "lash-runtime/rlm->lash-sqlite-store/lashlang",
-  "lash-runtime/rlm->lash-postgres-store/lashlang",
-]
+# The store backends lash-runtime wires are optional `[dependencies]` entries
+# now (ADR 0079 extension features), so no feature forward leaves the normal
+# dependency graph.
+non_normal_forwards = []
 
 # Explicit `default` declarations are exercised by the ordinary workspace
 # all-targets graph. Packages with no `[features].default` entry do not acquire
@@ -203,6 +203,28 @@ features = [
   "lash-runtime/rlm:off",
   "lash-runtime/testing:on",
   "lash-runtime/testing:off",
+  "lash-runtime/sqlite:on",
+  "lash-runtime/sqlite:off",
+  "lash-runtime/postgres:on",
+  "lash-runtime/postgres:off",
+  "lash-runtime/s3:on",
+  "lash-runtime/s3:off",
+  "lash-runtime/restate:on",
+  "lash-runtime/restate:off",
+  "lash-runtime/openai:on",
+  "lash-runtime/openai:off",
+  "lash-runtime/anthropic:on",
+  "lash-runtime/anthropic:off",
+  "lash-runtime/google:on",
+  "lash-runtime/google:off",
+  "lash-runtime/mcp:on",
+  "lash-runtime/mcp:off",
+  "lash-runtime/subagents:on",
+  "lash-runtime/subagents:off",
+  "lash-runtime/typescript:on",
+  "lash-runtime/typescript:off",
+  "lash-runtime/http-transport:on",
+  "lash-runtime/http-transport:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
@@ -216,6 +238,23 @@ commands = [
   # with them. This was the `default-off-tests` leg of the retired
   # `Runtime feature boundary` matrix.
   ["cargo", "test", "-p", "lash-runtime", "--no-default-features", "--locked"],
+  # ADR 0079 host-wired extension features. Each gates one `lash::<name>`
+  # module in the library and one `#[cfg]` block in
+  # `tests/facade_inventory.rs`, so the ON witness has to compile both
+  # contexts: `--all-targets` is the single command that does. The two
+  # `--no-default-features` commands above are the shared OFF witness for
+  # both contexts.
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "sqlite", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "postgres", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "s3", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "restate", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "openai", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "anthropic", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "google", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "mcp", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "subagents", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "http-transport", "--locked"],
 ]
 
 [[lane]]
