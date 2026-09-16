@@ -33,6 +33,7 @@ pub mod queued_work_vocabulary;
 pub mod runtime_error;
 #[cfg(test)]
 mod runtime_error_tests;
+pub mod session_catalog;
 pub mod session_execution_lease;
 pub mod session_graph;
 pub(crate) mod session_graph_integrity;
@@ -41,6 +42,7 @@ pub mod session_policy;
 mod session_policy_serde;
 pub mod session_read_view;
 pub mod session_state;
+pub mod session_store_factory_types;
 pub mod store;
 pub mod tool_state;
 pub mod turn_control_binding;

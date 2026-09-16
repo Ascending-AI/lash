@@ -55,7 +55,7 @@ pub use process_worker::release_process_execution_permit_while;
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
-mod session_catalog;
+use lash_core_store::session_catalog;
 pub use session_administration::{
     SessionAdministration, SessionDeleteContext, SessionDeleteExecution,
 };
@@ -78,7 +78,7 @@ pub use session_manager::{
     record_token_usage_shared, record_unreported_attempts_shared, stage_token_ledger_shared,
 };
 mod session_ops;
-mod session_store_factory_types;
+use lash_core_store::session_store_factory_types;
 pub use session_store_factory_types::{
     ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionStoreCreateRequest,
 };

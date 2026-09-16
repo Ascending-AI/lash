@@ -1,8 +1,9 @@
 pub use lash_core_store::session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
-    OpenAgentFrameRequest, OpenAgentFrameResult, SessionLineage, SessionObserverIntent,
-    SessionObserverIntentAttribution, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+    OpenAgentFrameRequest, OpenAgentFrameResult, SessionLineage, SessionObservedProcessOutcome,
+    SessionObservedProcessReceipt, SessionObserverIntent, SessionObserverIntentAttribution,
+    SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess, SessionToolAccessError,
+    SubagentSessionContext,
 };
 
 use crate::SessionId;
@@ -22,32 +23,6 @@ pub struct SessionHandle {
     /// Per-id outcome for observer edges requested at session creation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observed_processes: Vec<SessionObservedProcessReceipt>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionObservedProcessReceipt {
-    pub process_id: crate::ProcessId,
-    pub attribution: SessionObserverIntentAttribution,
-    pub outcome: SessionObservedProcessOutcome,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SessionObservedProcessOutcome {
-    Observed {
-        incarnation: crate::ProcessIncarnation,
-    },
-    IncarnationSuperseded {
-        requested_incarnation: crate::ProcessIncarnation,
-        current_incarnation: crate::ProcessIncarnation,
-    },
-    NotFound,
-    NoLongerRetained {
-        terminal_label: String,
-        pruned_at_ms: u64,
-    },
-    Unavailable {
-        message: String,
-    },
 }
 
 #[derive(Clone, Debug)]

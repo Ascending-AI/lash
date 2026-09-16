@@ -1,6 +1,7 @@
+use crate::session_identity::SessionRelation;
+pub use crate::session_identity::SessionStoreCreateRequest;
+use crate::session_policy::SessionPolicy;
 use crate::{NodeId, SessionId};
-use crate::{SessionPolicy, SessionRelation};
-pub use lash_core_store::session_identity::SessionStoreCreateRequest;
 
 /// A durable turn boundary whose continuation checkpoint is currently retained.
 ///
@@ -38,5 +39,5 @@ pub struct ForkSessionReceipt {
     /// provenance, not a required source-session argument to the fork.
     pub source_session_id: SessionId,
     /// Uniform settlement receipts for every fork-inherited observer intent.
-    pub observed_processes: Vec<crate::plugin::SessionObservedProcessReceipt>,
+    pub observed_processes: Vec<crate::session_identity::SessionObservedProcessReceipt>,
 }

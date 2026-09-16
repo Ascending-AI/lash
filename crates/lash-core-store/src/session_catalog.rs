@@ -1,5 +1,5 @@
 use crate::SessionId;
-use crate::plugin::SessionRelation;
+use crate::session_identity::SessionRelation;
 
 /// Coarse durable relation carried by a host-facing session summary.
 ///
@@ -26,7 +26,7 @@ pub enum SessionRelationKind {
 }
 
 impl SessionRelationKind {
-    pub(crate) fn from_relation(relation: &SessionRelation) -> Self {
+    pub fn from_relation(relation: &SessionRelation) -> Self {
         match relation {
             SessionRelation::Root => Self::Root,
             SessionRelation::Child { .. } => Self::Child,
@@ -75,7 +75,7 @@ pub struct SessionListFilter {
 }
 
 impl SessionListFilter {
-    pub(crate) fn matches(&self, summary: &SessionSummary) -> bool {
+    pub fn matches(&self, summary: &SessionSummary) -> bool {
         self.relation
             .is_none_or(|relation| relation == summary.relation)
             && self

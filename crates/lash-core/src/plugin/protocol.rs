@@ -192,19 +192,19 @@ pub enum ProtocolLlmCallAction {
 /// (termination contract, etc.) so plugins don't reach into unrelated
 /// runtime internals.
 pub struct ProtocolRuntimeContext<'a> {
-    runtime: &'a mut crate::runtime::LashRuntime,
+    options: &'a mut crate::ProtocolTurnOptions,
 }
 
 impl<'a> ProtocolRuntimeContext<'a> {
-    pub(crate) fn new(runtime: &'a mut crate::runtime::LashRuntime) -> Self {
-        Self { runtime }
+    pub(crate) fn new(options: &'a mut crate::ProtocolTurnOptions) -> Self {
+        Self { options }
     }
 
     /// The durable protocol turn options currently recorded on the session.
     /// Protocol plugins read these to preserve fields (e.g. termination) they
     /// are not overwriting.
     pub fn protocol_turn_options(&self) -> &crate::ProtocolTurnOptions {
-        self.runtime.protocol_turn_options()
+        self.options
     }
 
     /// Record the durable protocol turn options this materialization resolved,
@@ -215,16 +215,14 @@ impl<'a> ProtocolRuntimeContext<'a> {
     /// commit before any queued command work. Mid-run changes go through the
     /// commanded `LashRuntime::set_protocol_turn_options` write instead.
     pub fn set_protocol_turn_options(&mut self, options: crate::ProtocolTurnOptions) {
-        self.runtime
-            .record_materialized_protocol_turn_options(options);
+        *self.options = options;
     }
 
     /// Record the durable protocol turn options this materialization resolved,
     /// mirrored to **every** agent frame. Apply-at-open semantics: the last
     /// applied value is recorded on the session and all frames.
     pub fn set_protocol_turn_options_all_frames(&mut self, options: crate::ProtocolTurnOptions) {
-        self.runtime
-            .record_materialized_protocol_turn_options(options);
+        *self.options = options;
     }
 }
 
@@ -351,4 +349,34 @@ pub trait ProtocolDriverPlugin: Send + Sync {
     /// Build the `TurnDriverPreamble` (driver handle + prompt text + tool
     /// surface metadata) for a turn.
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProtocolRuntimeContext;
+
+    #[test]
+    fn materialization_context_borrows_only_protocol_options() {
+        let mut options = crate::ProtocolTurnOptions::from_payload(
+            serde_json::json!({ "termination": "initial" }),
+        );
+        {
+            let mut context = ProtocolRuntimeContext::new(&mut options);
+            assert_eq!(
+                context.protocol_turn_options().payload,
+                serde_json::json!({ "termination": "initial" })
+            );
+            context.set_protocol_turn_options(crate::ProtocolTurnOptions::from_payload(
+                serde_json::json!({ "termination": "current" }),
+            ));
+            assert_eq!(
+                context.protocol_turn_options().payload,
+                serde_json::json!({ "termination": "current" })
+            );
+            context.set_protocol_turn_options_all_frames(crate::ProtocolTurnOptions::from_payload(
+                serde_json::json!({ "termination": "all" }),
+            ));
+        }
+        assert_eq!(options.payload, serde_json::json!({ "termination": "all" }));
+    }
 }
