@@ -122,6 +122,16 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# The accepted duration level shifts `lash-perf` reads with `include_str!`.
+# Its own filegroup rather than a second source in `perf_guard_budgets`: the
+# budgets are per-run ceilings and these are acknowledgements of an intended
+# step, and only `lash-perf` compiles the acknowledgements in.
+filegroup(
+    name = "perf_duration_level_shifts",
+    srcs = ["scripts/perf_duration_level_shifts.json"],
+    visibility = ["//visibility:public"],
+)
+
 # Build these labels to compile the complete Cargo --workspace --all-targets
 # shape without executing service-backed or otherwise Cargo-owned test gates.
 filegroup(

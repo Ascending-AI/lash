@@ -307,6 +307,7 @@ def library_compile_data(package_name: str) -> list[str]:
         data.append("//examples:shared_rust_sources")
     if package_name == "lash-perf":
         data.append("//:perf_guard_budgets")
+        data.append("//:perf_duration_level_shifts")
     return data
 
 
@@ -321,6 +322,7 @@ def unit_test_compile_data(package_name: str) -> list[str]:
         data.append("//:workspace_test_scripts")
     if package_name == "lash-perf":
         data.append("//:perf_guard_budgets")
+        data.append("//:perf_duration_level_shifts")
     if package_name in ("lash-runtime", "lash-internal-sqlite-store"):
         data.append("//crates/lashlang:old_module_fixture")
     return data

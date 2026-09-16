@@ -35,9 +35,33 @@
 //! holds ten pre-step and ten post-step runs, so the median is `(B + E) / 2`
 //! and the run is elevated iff `E > 1.5 * (B + E) / 2`, i.e. `E > 3B`. Six or
 //! seven main runs of loud output is the whole visibility budget; a regression
-//! nobody looks at in that window becomes the new normal silently. Persisting a
-//! level-shift marker so the signal survives its own baseline is a possible
-//! follow-up, deliberately not built here.
+//! nobody looks at in that window becomes the new normal silently.
+//!
+//! # Accepted level shifts
+//!
+//! The other half of that transition is the *intended* step: a change that
+//! makes a scenario legitimately slower, or a runner generation swap. The
+//! signal reads it as drift and says so for six main runs, and those six runs
+//! of expected red are what teaches an operator to stop reading the section --
+//! which costs the next real regression its only audience.
+//!
+//! [`LevelShift`] is the acknowledgement. A marker in
+//! `scripts/perf_duration_level_shifts.json` names the commit that shifted the
+//! level, the instant from which observations are comparable again, and why it
+//! is accepted; every observation recorded before that instant leaves the
+//! series' comparison window. The series then behaves exactly like a fresh
+//! one: no verdict until [`MIN_BASELINE_RUNS`] observations have accumulated
+//! past the marker, so the accepted step stops warning on the very next run,
+//! and a *further* shift on top of it trips the signal again once it has built
+//! its own streak.
+//!
+//! The marker is checked in rather than written into the history because the
+//! history is a CI cache entry: it can be evicted, it is not reviewed, and
+//! nothing in it can be pointed at afterwards. A file in the tree is reviewed
+//! in the pull request that causes the shift, carries a mandatory reason, and
+//! survives a `gh cache delete`. Anchoring is by timestamp, not by commit,
+//! because a perf run does not exist for most commits -- a commit-anchored
+//! marker whose commit never reached the series would be a silent no-op.
 //!
 //! The quick-profile main-push smoke supplies its cache-backed history path.
 //! Full and release profiles write a sibling ledger next to their uploaded
@@ -49,9 +73,10 @@ use std::fmt;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use anyhow::Context;
-use chrono::Utc;
+use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::perf_support::git;
@@ -129,6 +154,151 @@ pub(crate) const RETAINED_RUNS_PER_SERIES: usize = 50;
 /// newer records on any revert or rerun of a pre-bump commit, and it is not
 /// entitled to destroy them.
 pub(crate) const HISTORY_RECORD_VERSION: u32 = 3;
+
+/// The checked-in accepted level shifts. See the module documentation: this
+/// file, not the history, is where an acknowledgement lives, because the
+/// history is a CI cache entry nobody reviews and anything can evict.
+const PERF_DURATION_LEVEL_SHIFTS_JSON: &str =
+    include_str!("../../../../scripts/perf_duration_level_shifts.json");
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LevelShiftFile {
+    level_shifts: Vec<LevelShift>,
+}
+
+/// One accepted level shift: the instant after which a series' older
+/// observations stop being comparable, and the reason they stopped.
+///
+/// The three selectors narrow what the acceptance covers, and an absent
+/// selector means "every one of these". A single scenario's rework names its
+/// scenario; a runner generation swap names none of them. `commit` and
+/// `reason` are both required and both non-empty: a marker nobody can explain
+/// is a mute switch on the only wall-clock signal this repository has.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LevelShift {
+    #[serde(default)]
+    profile: Option<String>,
+    #[serde(default)]
+    scenario: Option<String>,
+    #[serde(default)]
+    metric: Option<String>,
+    /// The commit that moved the level. Audit trail, not the anchor.
+    commit: String,
+    /// RFC 3339. Observations recorded before this instant leave the window.
+    ///
+    /// An instant rather than `commit` because most commits never get a perf
+    /// run: a commit-anchored marker whose commit never reached the series
+    /// would be a silent no-op, which is the one failure mode an
+    /// acknowledgement must not have.
+    effective_from: String,
+    reason: String,
+}
+
+impl LevelShift {
+    fn matches(&self, profile: &str, scenario: &str, metric: &str) -> bool {
+        selector_matches(self.profile.as_deref(), profile)
+            && selector_matches(self.scenario.as_deref(), scenario)
+            && selector_matches(self.metric.as_deref(), metric)
+    }
+
+    fn effective_from(&self) -> Option<DateTime<FixedOffset>> {
+        DateTime::parse_from_rfc3339(&self.effective_from).ok()
+    }
+
+    /// Enough of the commit to recognise it in a table, taken by character so
+    /// a hand-edited file cannot split a multi-byte boundary.
+    fn short_commit(&self) -> String {
+        self.commit.chars().take(9).collect()
+    }
+}
+
+/// An absent selector covers every value; a present one must match exactly.
+/// Deliberately not a pattern or a prefix: a marker is an acknowledgement of a
+/// specific measurement, and a glob is how one quietly grows to cover a
+/// regression nobody accepted.
+fn selector_matches(selector: Option<&str>, value: &str) -> bool {
+    selector.is_none_or(|selector| selector == value)
+}
+
+/// Parse and validate a marker file.
+///
+/// Validation is part of parsing rather than a separate gate because an
+/// invalid marker is indistinguishable from an absent one at read time, and an
+/// acknowledgement that silently did not apply is worse than no file at all.
+fn parse_level_shifts(json: &str) -> anyhow::Result<Vec<LevelShift>> {
+    let file: LevelShiftFile =
+        serde_json::from_str(json).context("parsing the accepted level shifts")?;
+    for shift in &file.level_shifts {
+        if shift.commit.trim().is_empty() {
+            anyhow::bail!("an accepted level shift must name the commit that moved the level");
+        }
+        if shift.reason.trim().is_empty() {
+            anyhow::bail!(
+                "the accepted level shift at {} must say why it is accepted",
+                shift.commit
+            );
+        }
+        if shift.effective_from().is_none() {
+            anyhow::bail!(
+                "the accepted level shift at {} has an effective_from that is not RFC 3339: {}",
+                shift.commit,
+                shift.effective_from
+            );
+        }
+        for (label, selector) in [
+            ("profile", shift.profile.as_deref()),
+            ("scenario", shift.scenario.as_deref()),
+            ("metric", shift.metric.as_deref()),
+        ] {
+            if selector.is_some_and(|selector| selector.trim().is_empty()) {
+                anyhow::bail!(
+                    "the accepted level shift at {} has an empty {label}; omit the key to cover every {label}",
+                    shift.commit
+                );
+            }
+        }
+    }
+    Ok(file.level_shifts)
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "the marker file is checked into the repository at the repository root and parsed once at first use, per the message"
+)]
+fn checked_in_level_shifts() -> &'static [LevelShift] {
+    static SHIFTS: OnceLock<Vec<LevelShift>> = OnceLock::new();
+    SHIFTS.get_or_init(|| {
+        parse_level_shifts(PERF_DURATION_LEVEL_SHIFTS_JSON)
+            .expect("scripts/perf_duration_level_shifts.json must contain valid level shifts")
+    })
+}
+
+/// The marker that governs one series: the newest applicable one.
+///
+/// Newest rather than first so a series can be accepted twice — a scenario
+/// reworked again after an earlier acceptance — without the older marker
+/// holding a stale window open.
+fn applicable_level_shift<'a>(
+    shifts: &'a [LevelShift],
+    profile: &str,
+    scenario: &str,
+    metric: &str,
+) -> Option<&'a LevelShift> {
+    shifts
+        .iter()
+        .filter(|shift| shift.matches(profile, scenario, metric))
+        .max_by_key(|shift| shift.effective_from())
+}
+
+/// The acknowledgement that trimmed a series' comparison window, rendered for
+/// an operator reading the table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BaselineReset {
+    pub(crate) commit: String,
+    pub(crate) reason: String,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
@@ -280,6 +450,11 @@ pub(crate) struct DurationTrendRow {
     pub(crate) baseline_median_ms: Option<f64>,
     pub(crate) delta_pct: Option<f64>,
     pub(crate) verdict: DriftVerdict,
+    /// The accepted level shift that trimmed this series' comparison window,
+    /// when one applies. Carried onto the row rather than looked up again by
+    /// the renderer so the table and the verdict can never disagree about
+    /// which window was used.
+    pub(crate) baseline_reset: Option<BaselineReset>,
 }
 
 /// The per-scenario records this run contributes to the history.
@@ -501,13 +676,30 @@ fn rewrite_temp_path(path: &Path) -> std::path::PathBuf {
 }
 
 /// One trend row per `(profile, scenario, duration metric, geometry)` series
-/// present in the history, ordered for stable output.
+/// present in the history, ordered for stable output, judged against the
+/// checked-in accepted level shifts.
 pub(crate) fn trend_rows(
     history: &[DurationHistoryRecord],
     profile_filter: Option<&str>,
 ) -> Vec<DurationTrendRow> {
-    let mut series =
-        BTreeMap::<(String, String, String, DurationTrendGeometry), Vec<(f64, Option<f64>)>>::new();
+    trend_rows_against(history, profile_filter, checked_in_level_shifts())
+}
+
+/// [`trend_rows`] against an explicit marker set.
+///
+/// Separated so the acceptance behaviour is testable without a file on disk:
+/// the checked-in set is empty most of the time, and a signal whose only
+/// escape hatch is exercised solely by whatever happens to be committed is a
+/// signal nobody has actually tested.
+fn trend_rows_against(
+    history: &[DurationHistoryRecord],
+    profile_filter: Option<&str>,
+    shifts: &[LevelShift],
+) -> Vec<DurationTrendRow> {
+    let mut series = BTreeMap::<
+        (String, String, String, DurationTrendGeometry),
+        Vec<(String, f64, Option<f64>)>,
+    >::new();
     for record in history {
         if profile_filter.is_some_and(|profile| profile != record.profile) {
             continue;
@@ -525,7 +717,11 @@ pub(crate) fn trend_rows(
                 },
             ))
             .or_default()
-            .push((record.total_ms, record.total_p95_ms));
+            .push((
+                record.recorded_at.clone(),
+                record.total_ms,
+                record.total_p95_ms,
+            ));
         for (metric, value) in &record.duration_metrics_ms {
             series
                 .entry((
@@ -540,16 +736,19 @@ pub(crate) fn trend_rows(
                     },
                 ))
                 .or_default()
-                .push((value.median_ms, Some(value.p95_ms)));
+                .push((
+                    record.recorded_at.clone(),
+                    value.median_ms,
+                    Some(value.p95_ms),
+                ));
         }
     }
     series
         .into_iter()
-        .filter_map(|((profile, scenario, metric, geometry), records)| {
-            let values = records
-                .iter()
-                .map(|(median, _)| *median)
-                .collect::<Vec<_>>();
+        .filter_map(|((profile, scenario, metric, geometry), observations)| {
+            let (_, newest_ms, newest_p95_ms) = observations.last()?.clone();
+            let shift = applicable_level_shift(shifts, &profile, &scenario, &metric);
+            let values = comparison_window(&observations, shift, newest_ms);
             let current_ms = *values.last()?;
             let baseline_median_ms = baseline_median(&values, values.len() - 1);
             Some(DurationTrendRow {
@@ -558,15 +757,53 @@ pub(crate) fn trend_rows(
                 metric,
                 geometry,
                 current_ms: round3(current_ms),
-                current_p95_ms: records.last().and_then(|(_, p95)| *p95).map(round3),
+                current_p95_ms: newest_p95_ms.map(round3),
                 baseline_median_ms: baseline_median_ms.map(round3),
                 delta_pct: baseline_median_ms
                     .filter(|median| *median > 0.0)
                     .map(|median| round3((current_ms - median) / median * 100.0)),
                 verdict: verdict(&values),
+                baseline_reset: shift.map(|shift| BaselineReset {
+                    commit: shift.short_commit(),
+                    reason: shift.reason.clone(),
+                }),
             })
         })
         .collect()
+}
+
+/// The observations a verdict may read: everything, or everything from the
+/// accepted shift onwards.
+///
+/// The newest observation is never trimmed. A marker moves the window a run is
+/// judged against; it cannot delete the run itself, so a marker dated ahead of
+/// every observation leaves one point and "insufficient data" rather than
+/// making the series vanish from the table.
+///
+/// An observation whose timestamp will not parse is excluded, and only when a
+/// marker applies: it cannot be placed on either side of the reset, and
+/// keeping it would let unplaceable data hold up a baseline the operator just
+/// declared stale.
+fn comparison_window(
+    observations: &[(String, f64, Option<f64>)],
+    shift: Option<&LevelShift>,
+    newest_ms: f64,
+) -> Vec<f64> {
+    let Some(effective_from) = shift.and_then(LevelShift::effective_from) else {
+        return observations.iter().map(|(_, median, _)| *median).collect();
+    };
+    let window = observations
+        .iter()
+        .filter(|(recorded_at, _, _)| {
+            DateTime::parse_from_rfc3339(recorded_at).is_ok_and(|at| at >= effective_from)
+        })
+        .map(|(_, median, _)| *median)
+        .collect::<Vec<_>>();
+    if window.is_empty() {
+        vec![newest_ms]
+    } else {
+        window
+    }
 }
 
 /// The verdict for the newest observation of one chronological series.
@@ -642,7 +879,8 @@ fn geometry_label(geometry: DurationTrendGeometry) -> String {
 pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
     let mut out = format!(
         "runtime perf duration trend (advisory; baseline = median of the last {TREND_WINDOW_RUNS} runs, \
-         drift = >{DRIFT_THRESHOLD_PCT:.0}% for {DRIFT_CONSECUTIVE_RUNS} consecutive runs)\n"
+         drift = >{DRIFT_THRESHOLD_PCT:.0}% for {DRIFT_CONSECUTIVE_RUNS} consecutive runs; \
+         reset_at = accepted level shift, scripts/perf_duration_level_shifts.json)\n"
     );
     if rows.is_empty() {
         out.push_str("  (no history records)\n");
@@ -672,9 +910,16 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
         .max()
         .unwrap_or(8)
         .max("geometry".len());
+    let reset_width = rows
+        .iter()
+        .filter_map(|row| row.baseline_reset.as_ref())
+        .map(|reset| reset.commit.len())
+        .max()
+        .unwrap_or(1)
+        .max("reset_at".len());
     out.push_str(&format!(
-        "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:geometry_width$}  {:>12}  {:>12}  {:>12}  {:>9}  {}\n",
-        "scenario", "profile", "metric", "geometry", "current_ms", "p95_ms", "median_ms", "delta", "verdict"
+        "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:geometry_width$}  {:>12}  {:>12}  {:>12}  {:>9}  {:reset_width$}  {}\n",
+        "scenario", "profile", "metric", "geometry", "current_ms", "p95_ms", "median_ms", "delta", "reset_at", "verdict"
     ));
     for row in rows {
         let p95 = row
@@ -690,9 +935,40 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
             .map(|value| format!("{value:+.1}%"))
             .unwrap_or_else(|| "-".to_string());
         let geometry = geometry_label(row.geometry);
+        let reset = row
+            .baseline_reset
+            .as_ref()
+            .map(|reset| reset.commit.clone())
+            .unwrap_or_else(|| "-".to_string());
         out.push_str(&format!(
-            "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:geometry_width$}  {:>12.3}  {:>12}  {:>12}  {:>9}  {}\n",
-            row.scenario, row.profile, row.metric, geometry, row.current_ms, p95, median, delta, row.verdict
+            "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:geometry_width$}  {:>12.3}  {:>12}  {:>12}  {:>9}  {:reset_width$}  {}\n",
+            row.scenario, row.profile, row.metric, geometry, row.current_ms, p95, median, delta, reset, row.verdict
+        ));
+    }
+    out.push_str(&render_accepted_level_shifts(rows));
+    out
+}
+
+/// The acceptances that trimmed a window in this table, one line each.
+///
+/// The `reset_at` column says a window moved; this says who accepted it and
+/// why. Without it a short baseline is indistinguishable from an evicted
+/// cache, and an operator has to go read a JSON file to tell the two apart.
+fn render_accepted_level_shifts(rows: &[DurationTrendRow]) -> String {
+    let mut reasons = BTreeMap::<&str, (&str, usize)>::new();
+    for reset in rows.iter().filter_map(|row| row.baseline_reset.as_ref()) {
+        let entry = reasons
+            .entry(reset.commit.as_str())
+            .or_insert((reset.reason.as_str(), 0));
+        entry.1 += 1;
+    }
+    if reasons.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("  accepted level shifts in effect:\n");
+    for (commit, (reason, series)) in reasons {
+        out.push_str(&format!(
+            "    {commit}: {reason} ({series} series measured against a window that starts there)\n"
         ));
     }
     out
@@ -852,559 +1128,5 @@ fn non_empty_env(key: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A flat series at `value`, long enough to establish a baseline.
-    fn flat(value: f64, runs: usize) -> Vec<f64> {
-        vec![value; runs]
-    }
-
-    #[test]
-    fn short_history_never_yields_a_verdict() {
-        for runs in 0..=MIN_BASELINE_RUNS {
-            let series = flat(10.0, runs);
-            assert_eq!(
-                verdict(&series),
-                DriftVerdict::InsufficientData { runs },
-                "{runs} run(s) must not produce a verdict"
-            );
-        }
-        // One more run than the baseline minimum is the first judgeable point.
-        assert_eq!(
-            verdict(&flat(10.0, MIN_BASELINE_RUNS + 1)),
-            DriftVerdict::Stable
-        );
-    }
-
-    #[test]
-    fn a_single_spike_does_not_trip_the_signal() {
-        let mut series = flat(10.0, TREND_WINDOW_RUNS);
-        series.push(100.0);
-
-        assert_eq!(verdict(&series), DriftVerdict::Elevated { streak: 1 });
-        assert!(!verdict(&series).is_drifting());
-    }
-
-    #[test]
-    fn a_spike_that_recovers_leaves_no_streak_behind() {
-        let mut series = flat(10.0, TREND_WINDOW_RUNS);
-        series.push(100.0);
-        series.push(10.0);
-
-        assert_eq!(verdict(&series), DriftVerdict::Stable);
-    }
-
-    #[test]
-    fn drift_shorter_than_the_streak_requirement_stays_advisory_only() {
-        let mut series = flat(10.0, TREND_WINDOW_RUNS);
-        series.extend(flat(20.0, DRIFT_CONSECUTIVE_RUNS - 1));
-
-        assert_eq!(
-            verdict(&series),
-            DriftVerdict::Elevated {
-                streak: DRIFT_CONSECUTIVE_RUNS - 1
-            }
-        );
-    }
-
-    #[test]
-    fn sustained_drift_over_the_streak_requirement_trips_the_signal() {
-        let mut series = flat(10.0, TREND_WINDOW_RUNS);
-        series.extend(flat(20.0, DRIFT_CONSECUTIVE_RUNS));
-
-        let result = verdict(&series);
-        assert_eq!(
-            result,
-            DriftVerdict::Drifting {
-                streak: DRIFT_CONSECUTIVE_RUNS
-            }
-        );
-        assert!(result.is_drifting());
-    }
-
-    #[test]
-    fn a_run_exactly_at_the_threshold_is_not_elevated() {
-        let mut series = flat(10.0, TREND_WINDOW_RUNS);
-        series.push(10.0 * (1.0 + DRIFT_THRESHOLD_PCT / 100.0));
-
-        assert_eq!(verdict(&series), DriftVerdict::Stable);
-    }
-
-    #[test]
-    fn everyday_jitter_under_the_threshold_never_accumulates_a_streak() {
-        let mut series = flat(10.0, TREND_WINDOW_RUNS);
-        // Alternating ±40%: far noisier than a real runner, still under 50%.
-        for index in 0..(DRIFT_CONSECUTIVE_RUNS * 4) {
-            series.push(if index.is_multiple_of(2) { 14.0 } else { 6.0 });
-        }
-
-        assert_eq!(verdict(&series), DriftVerdict::Stable);
-    }
-
-    /// The streak is per-run-against-its-own-window, and this is the series
-    /// that proves it: replacing every window with one shared baseline taken
-    /// from the newest run turns a `Drifting` verdict into `Elevated`, because
-    /// the shared baseline is dragged up by the very drifted runs it judges.
-    /// Every other test in this module passes under that mutation.
-    #[test]
-    fn a_swinging_series_distinguishes_per_run_windows_from_one_shared_baseline() {
-        let series = [
-            9.53, 16.73, 23.65, 10.37, 9.86, 10.65, 22.57, 15.93, 25.57, 24.04, 10.52, 17.43, 9.21,
-            10.0, 98.53, 103.81, 10.1, 10.53, 9.64, 10.11, 104.8, 98.89, 23.32, 22.7, 100.35,
-            106.62,
-        ];
-
-        // Per-run windows: the last six runs each cleared their own trailing
-        // median, including the two ~23 ms runs whose own windows sat near
-        // 13 ms. A single shared baseline of 20.0 (the newest run's window)
-        // would score only the last two and report Elevated.
-        assert_eq!(verdict(&series), DriftVerdict::Drifting { streak: 6 });
-
-        let shared_baseline = baseline_median(&series, series.len() - 1).expect("baseline");
-        let shared_streak = series
-            .iter()
-            .rev()
-            .take_while(|value| exceeds_threshold(**value, shared_baseline))
-            .count();
-        assert_eq!(
-            shared_streak, 2,
-            "the shared-baseline reading must genuinely differ, or this test proves nothing"
-        );
-        assert!(shared_streak < DRIFT_CONSECUTIVE_RUNS);
-    }
-
-    /// The closing edge the module documentation promises, pinned as
-    /// behaviour rather than left as prose: a regression is loud for a
-    /// bounded number of main runs and then becomes the new normal.
-    #[test]
-    fn a_step_change_is_loud_for_a_bounded_window_then_ages_into_the_baseline() {
-        let stepped = |multiplier: f64, post_step_runs: usize| {
-            let mut series = flat(10.0, TREND_WINDOW_RUNS * 2);
-            series.extend(flat(10.0 * multiplier, post_step_runs));
-            verdict(&series)
-        };
-
-        // A doubling: Elevated 1-4, DRIFTING 5-10, Stable from 11.
-        for post_step_runs in 1..DRIFT_CONSECUTIVE_RUNS {
-            assert_eq!(
-                stepped(2.0, post_step_runs),
-                DriftVerdict::Elevated {
-                    streak: post_step_runs
-                },
-                "post-step run {post_step_runs}"
-            );
-        }
-        for post_step_runs in DRIFT_CONSECUTIVE_RUNS..=10 {
-            assert_eq!(
-                stepped(2.0, post_step_runs),
-                DriftVerdict::Drifting {
-                    streak: post_step_runs
-                },
-                "post-step run {post_step_runs}"
-            );
-        }
-        for post_step_runs in 11..=14 {
-            assert_eq!(
-                stepped(2.0, post_step_runs),
-                DriftVerdict::Stable,
-                "post-step run {post_step_runs}"
-            );
-        }
-
-        // Magnitude buys exactly one extra run and no more, and the boundary
-        // is not a tuning choice: at run 11 the window holds ten pre-step and
-        // ten post-step runs, so the median is (B + E) / 2 and the run is
-        // elevated iff E > 1.5 * (B + E) / 2, i.e. iff E > 3B. Pinned either
-        // side of exactly 3x.
-        assert_eq!(
-            stepped(3.0, 11),
-            DriftVerdict::Stable,
-            "exactly 3x does not clear the straddling median"
-        );
-        assert_eq!(
-            stepped(3.01, 11),
-            DriftVerdict::Drifting { streak: 11 },
-            "just past 3x does"
-        );
-        // The extra run is all it buys, at any magnitude.
-        assert_eq!(stepped(3.01, 12), DriftVerdict::Stable);
-        assert_eq!(stepped(10.0, 11), DriftVerdict::Drifting { streak: 11 });
-        assert_eq!(stepped(10.0, 12), DriftVerdict::Stable);
-        assert_eq!(stepped(100.0, 12), DriftVerdict::Stable);
-    }
-
-    #[test]
-    fn the_baseline_window_is_bounded_to_the_trailing_runs() {
-        // A very old, very slow era must not hold the baseline up forever.
-        let mut series = flat(1_000.0, TREND_WINDOW_RUNS * 2);
-        series.extend(flat(10.0, TREND_WINDOW_RUNS));
-        series.extend(flat(20.0, DRIFT_CONSECUTIVE_RUNS));
-
-        assert_eq!(
-            verdict(&series),
-            DriftVerdict::Drifting {
-                streak: DRIFT_CONSECUTIVE_RUNS
-            }
-        );
-    }
-
-    #[test]
-    fn series_are_keyed_by_profile_and_scenario_together() {
-        let mut history = Vec::new();
-        for index in 0..(TREND_WINDOW_RUNS + DRIFT_CONSECUTIVE_RUNS) {
-            let drifted = index >= TREND_WINDOW_RUNS;
-            history.push(record("standard", "quick", index, 10.0));
-            history.push(record(
-                "standard",
-                "full",
-                index,
-                if drifted { 200.0 } else { 100.0 },
-            ));
-        }
-
-        let rows = trend_rows(&history, None);
-        assert_eq!(rows.len(), 2);
-        let full = rows.iter().find(|row| row.profile == "full").unwrap();
-        let quick = rows.iter().find(|row| row.profile == "quick").unwrap();
-        assert!(full.verdict.is_drifting(), "{:?}", full.verdict);
-        assert_eq!(quick.verdict, DriftVerdict::Stable);
-        assert_eq!(full.baseline_median_ms, Some(100.0));
-        assert_eq!(full.delta_pct, Some(100.0));
-
-        let filtered = trend_rows(&history, Some("quick"));
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].profile, "quick");
-    }
-
-    #[test]
-    fn history_round_trips_through_the_file_and_sorts_by_observation_time() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("nested").join("history.jsonl");
-
-        assert!(
-            load_history(&path)
-                .expect("missing history is empty")
-                .is_empty()
-        );
-
-        append_records(&path, &[record("standard", "quick", 2, 30.0)]).expect("append late");
-        append_records(&path, &[record("standard", "quick", 1, 20.0)]).expect("append early");
-
-        let loaded = load_history(&path).expect("history loads");
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded[0].total_ms, 20.0);
-        assert_eq!(loaded[1].total_ms, 30.0);
-        assert_eq!(loaded[0].total_p95_ms, Some(25.0));
-    }
-
-    #[test]
-    fn a_record_missing_geometry_is_rejected_without_a_migration_arm() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("history.jsonl");
-        std::fs::write(
-            &path,
-            "{\"scenario\":\"standard\",\"profile\":\"quick\",\"commit\":\"abc\",\
-             \"run_id\":\"1\",\"recorded_at\":\"2026-01-01T00:00:00Z\",\"total_ms\":10.0}\n",
-        )
-        .expect("write");
-
-        assert!(load_history(&path).is_err());
-        let loaded = load_history_lenient(&path).expect("history scan completes");
-        assert!(loaded.records.is_empty());
-        assert_eq!(loaded.skipped.len(), 1);
-        assert!(loaded.preserved.is_empty());
-    }
-
-    #[test]
-    fn a_record_from_a_newer_schema_is_excluded_from_verdicts_but_not_dropped() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("history.jsonl");
-        let mut future = record("standard", "quick", 1, 10.0);
-        future.version = HISTORY_RECORD_VERSION + 1;
-        append_records(&path, &[future, record("standard", "quick", 2, 11.0)]).expect("append");
-
-        let loaded = load_history_lenient(&path).expect("history loads");
-        assert_eq!(loaded.records.len(), 1);
-        assert!(loaded.skipped.is_empty(), "{:?}", loaded.skipped);
-        // Unreadable is not the same as unwanted: it is held, not counted.
-        assert_eq!(loaded.preserved.len(), 1);
-        assert!(
-            loaded.preserved[0].contains(&format!("\"version\":{}", HISTORY_RECORD_VERSION + 1))
-        );
-    }
-
-    /// An older build restored onto a newer history — a revert push, or a
-    /// rerun of a pre-bump commit — must not be the thing that destroys the
-    /// newer records, because `main` would save that loss on the very next
-    /// run. The rewrite carries them byte-for-byte.
-    #[test]
-    fn an_older_build_carries_newer_records_through_the_rewrite_verbatim() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("history.jsonl");
-
-        let mut future = record("standard", "quick", 1, 10.0);
-        future.version = HISTORY_RECORD_VERSION + 1;
-        let future_line = serde_json::to_string(&future).expect("serialize");
-        // A readable record, an unreadable-schema record, and a corrupt line:
-        // the rewrite must keep the first, keep the second untouched, and drop
-        // only the third.
-        std::fs::write(
-            &path,
-            format!(
-                "{}\n{future_line}\nnot json\n",
-                serde_json::to_string(&record("standard", "quick", 2, 11.0)).expect("serialize")
-            ),
-        )
-        .expect("write");
-
-        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
-
-        let rewritten = std::fs::read_to_string(&path).expect("read back");
-        let lines = rewritten.lines().collect::<Vec<_>>();
-        assert!(
-            lines.contains(&future_line.as_str()),
-            "newer record must survive byte-identical, got:\n{rewritten}"
-        );
-        assert!(!rewritten.contains("not json"), "{rewritten}");
-        assert_eq!(lines.len(), 2, "{rewritten}");
-
-        // And it is still not readable as a verdict input by this build.
-        let loaded = load_history_lenient(&path).expect("history loads");
-        assert_eq!(loaded.records.len(), 1);
-        assert_eq!(loaded.preserved.len(), 1);
-    }
-
-    #[test]
-    fn a_scratch_file_left_by_a_killed_rewrite_is_swept_on_the_next_run() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("history.jsonl");
-        // A clean, short history: this run needs no compaction at all, so the
-        // rewrite will not incidentally consume the orphan. Only the explicit
-        // sweep can remove it, which is the whole point.
-        append_records(&path, &[record("standard", "quick", 1, 10.0)]).expect("append");
-        std::fs::write(rewrite_temp_path(&path), "stale\n").expect("write orphan");
-
-        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
-
-        assert!(
-            !rewrite_temp_path(&path).exists(),
-            "the scratch file is inside the directory CI caches; nothing else sweeps it"
-        );
-        // The history itself is untouched by the sweep.
-        assert_eq!(load_history(&path).expect("history loads").len(), 1);
-    }
-
-    #[test]
-    fn the_strict_read_refuses_a_history_the_lenient_read_salvages() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("history.jsonl");
-        append_records(&path, &[record("standard", "quick", 1, 10.0)]).expect("append");
-        std::fs::write(
-            &path,
-            format!(
-                "{}truncated{{\n",
-                std::fs::read_to_string(&path).expect("read")
-            ),
-        )
-        .expect("write");
-
-        let error = load_history(&path).expect_err("strict read must fail loudly");
-        assert!(format!("{error:#}").contains("line 2"), "{error:#}");
-
-        let loaded = load_history_lenient(&path).expect("lenient read salvages");
-        assert_eq!(loaded.records.len(), 1);
-        assert_eq!(loaded.skipped.len(), 1);
-    }
-
-    #[test]
-    fn a_poisoned_history_is_healed_instead_of_carried_forward() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("history.jsonl");
-        append_records(&path, &[record("standard", "quick", 1, 10.0)]).expect("append");
-        std::fs::write(
-            &path,
-            format!(
-                "{}not json\n",
-                std::fs::read_to_string(&path).expect("read")
-            ),
-        )
-        .expect("write");
-
-        // The run path must return normally *and* leave a clean file behind,
-        // or the bad line rides into every future cache entry.
-        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
-
-        let healed = load_history(&path).expect("history is parseable again");
-        assert_eq!(healed.len(), 1);
-        assert_eq!(healed[0].total_ms, 10.0);
-    }
-
-    #[test]
-    fn an_unwritable_history_disables_the_signal_without_failing_the_run() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        // A directory where the file should be: every write fails, and the run
-        // must still return normally.
-        let path = dir.path().join("history.jsonl");
-        std::fs::create_dir(&path).expect("occupy the path");
-
-        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
-
-        assert!(run_duration_trend_cli(&path, Some("quick")).is_err());
-    }
-
-    #[test]
-    fn rewriting_bounds_each_series_without_touching_a_verdict() {
-        let readable = TREND_WINDOW_RUNS + DRIFT_CONSECUTIVE_RUNS;
-        assert!(
-            RETAINED_RUNS_PER_SERIES > readable,
-            "retention must exceed what a verdict reads, or truncation changes verdicts"
-        );
-        assert!(
-            RETAINED_RUNS_PER_SERIES <= 4 * readable,
-            "retention must stay a small multiple of what a verdict reads: the history \
-             lives in a cache entry every main run touches, so nothing evicts it but this"
-        );
-
-        let mut history = Vec::new();
-        for index in 0..(RETAINED_RUNS_PER_SERIES * 2) {
-            // Two series, so retention is proven to be per-series and not global.
-            history.push(record("standard", "quick", index, 10.0));
-            history.push(record("rlm", "quick", index, 20.0));
-        }
-        // The tail that any verdict can see, before and after truncation.
-        history.extend(
-            (0..DRIFT_CONSECUTIVE_RUNS)
-                .map(|index| record("standard", "quick", 10_000 + index, 40.0)),
-        );
-
-        let before = verdict(
-            &history
-                .iter()
-                .filter(|record| record.scenario == "standard")
-                .map(|record| record.total_ms)
-                .collect::<Vec<_>>(),
-        );
-        let retained = retained_records(&history);
-        let after = verdict(
-            &retained
-                .iter()
-                .filter(|record| record.scenario == "standard")
-                .map(|record| record.total_ms)
-                .collect::<Vec<_>>(),
-        );
-
-        assert_eq!(retained.len(), RETAINED_RUNS_PER_SERIES * 2);
-        assert_eq!(
-            retained
-                .iter()
-                .filter(|record| record.scenario == "standard")
-                .count(),
-            RETAINED_RUNS_PER_SERIES
-        );
-        assert_eq!(before, after);
-        assert!(before.is_drifting(), "{before:?}");
-    }
-
-    #[test]
-    fn a_long_history_is_truncated_on_disk_by_the_run_path() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("history.jsonl");
-        let overlong = (0..(RETAINED_RUNS_PER_SERIES + 20))
-            .map(|index| record("standard", "quick", index, 10.0))
-            .collect::<Vec<_>>();
-        append_records(&path, &overlong).expect("append");
-
-        record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
-
-        let healed = load_history(&path).expect("history loads");
-        assert_eq!(healed.len(), RETAINED_RUNS_PER_SERIES);
-    }
-
-    #[test]
-    fn the_committed_fixture_demonstrates_every_verdict() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("fixtures")
-            .join("duration-trend-history.jsonl");
-        let history = load_history(&path).expect("fixture loads");
-        let rows = trend_rows(&history, Some("quick"));
-
-        let by_scenario = rows
-            .iter()
-            .map(|row| (row.scenario.as_str(), row.verdict))
-            .collect::<BTreeMap<_, _>>();
-        assert_eq!(by_scenario["standard"], DriftVerdict::Stable);
-        assert_eq!(by_scenario["rlm"], DriftVerdict::Elevated { streak: 1 });
-        assert_eq!(
-            by_scenario["deep_turn_composition"],
-            DriftVerdict::Drifting {
-                streak: DRIFT_CONSECUTIVE_RUNS
-            }
-        );
-        assert!(matches!(
-            by_scenario["store_reopen"],
-            DriftVerdict::InsufficientData { .. }
-        ));
-
-        let table = render_trend_table(&rows);
-        assert!(table.contains("deep_turn_composition"), "{table}");
-        assert!(table.contains("DRIFTING"), "{table}");
-        assert!(table.contains("insufficient data"), "{table}");
-    }
-
-    #[test]
-    fn an_empty_history_renders_a_table_rather_than_a_verdict() {
-        let table = render_trend_table(&[]);
-        assert!(table.contains("no history records"), "{table}");
-    }
-
-    #[test]
-    fn same_labels_with_different_geometry_are_distinct_series() {
-        let mut debug = record("standard", "quick", 1, 10.0);
-        debug.runs = 2;
-        debug.warmups = 0;
-        debug.turns = 3;
-        debug.build_mode = BuildMode::Debug;
-
-        let mut release = record("standard", "quick", 2, 20.0);
-        release.runs = 5;
-        release.warmups = 1;
-        release.turns = 12;
-        release.build_mode = BuildMode::Release;
-
-        let rows = trend_rows(&[debug, release], Some("quick"));
-        assert_eq!(rows.len(), 2);
-        assert!(rows.iter().any(|row| row.geometry
-            == DurationTrendGeometry {
-                runs: 2,
-                warmups: 0,
-                turns: 3,
-                build_mode: BuildMode::Debug,
-            }));
-        assert!(rows.iter().any(|row| row.geometry
-            == DurationTrendGeometry {
-                runs: 5,
-                warmups: 1,
-                turns: 12,
-                build_mode: BuildMode::Release,
-            }));
-    }
-
-    fn record(scenario: &str, profile: &str, index: usize, total_ms: f64) -> DurationHistoryRecord {
-        DurationHistoryRecord {
-            version: HISTORY_RECORD_VERSION,
-            scenario: scenario.to_string(),
-            profile: profile.to_string(),
-            runs: 2,
-            warmups: 0,
-            turns: 3,
-            build_mode: BuildMode::current(),
-            commit: format!("commit{index:04}"),
-            run_id: format!("{index}"),
-            recorded_at: format!("2026-01-01T{:02}:{:02}:00Z", index / 60, index % 60),
-            total_ms,
-            total_p95_ms: Some(total_ms + 5.0),
-            duration_metrics_ms: BTreeMap::new(),
-        }
-    }
-}
+#[path = "duration_trend_tests.rs"]
+mod tests;
