@@ -380,10 +380,21 @@ impl ProcessRuntimeHost {
     }
 }
 
-/// A runtime's exhaustive work wiring.
+/// A runtime's exhaustive work wiring, and the single owner of whether this
+/// runtime has a process registry.
+///
+/// `RegistryOnly` is the named state a host is in while it holds a watched
+/// registry but has not resolved its native process port yet (the facade's lazy
+/// native composition). It is a state of the wiring rather than a field beside
+/// it, so "does this runtime have a process registry" has exactly one answer no
+/// matter which layer asks.
 #[derive(Clone)]
 pub enum RuntimeWork {
     SessionsOnly {
+        queued: Arc<dyn QueuedWorkSubstrate>,
+    },
+    RegistryOnly {
+        registry: Arc<dyn ProcessRegistry>,
         queued: Arc<dyn QueuedWorkSubstrate>,
     },
     Processes {
@@ -397,6 +408,13 @@ impl RuntimeWork {
         Self::SessionsOnly { queued }
     }
 
+    pub(crate) fn registry_only(
+        registry: Arc<dyn ProcessRegistry>,
+        queued: Arc<dyn QueuedWorkSubstrate>,
+    ) -> Self {
+        Self::RegistryOnly { registry, queued }
+    }
+
     pub(crate) fn processes(
         wiring: ProcessWorkWiring,
         queued: Arc<dyn QueuedWorkSubstrate>,
@@ -406,13 +424,25 @@ impl RuntimeWork {
 
     pub(crate) fn queued_arc(&self) -> &Arc<dyn QueuedWorkSubstrate> {
         match self {
-            Self::SessionsOnly { queued } | Self::Processes { queued, .. } => queued,
+            Self::SessionsOnly { queued }
+            | Self::RegistryOnly { queued, .. }
+            | Self::Processes { queued, .. } => queued,
+        }
+    }
+
+    /// The process registry this runtime carries, in either the registry-only
+    /// or the fully wired state.
+    pub fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
+        match self {
+            Self::SessionsOnly { .. } => None,
+            Self::RegistryOnly { registry, .. } => Some(registry),
+            Self::Processes { wiring, .. } => Some(wiring.registry()),
         }
     }
 
     pub(crate) fn process_wiring(&self) -> Option<&ProcessWorkWiring> {
         match self {
-            Self::SessionsOnly { .. } => None,
+            Self::SessionsOnly { .. } | Self::RegistryOnly { .. } => None,
             Self::Processes { wiring, .. } => Some(wiring),
         }
     }
@@ -420,13 +450,39 @@ impl RuntimeWork {
     pub(crate) fn with_queued(self, queued: Arc<dyn QueuedWorkSubstrate>) -> Self {
         match self {
             Self::SessionsOnly { .. } => Self::SessionsOnly { queued },
+            Self::RegistryOnly { registry, .. } => Self::RegistryOnly { registry, queued },
             Self::Processes { wiring, .. } => Self::Processes { wiring, queued },
         }
     }
 
+    /// Wire full process work, replacing whatever registry state was there.
+    /// Setting both is a last-write-wins transition, not an error: the wiring
+    /// carries its own registry.
     pub(crate) fn with_process_wiring(self, wiring: ProcessWorkWiring) -> Self {
         let queued = Arc::clone(self.queued_arc());
         Self::Processes { wiring, queued }
+    }
+
+    /// Enter the registry-only state, replacing whatever work state was there.
+    pub(crate) fn with_process_registry(self, registry: Arc<dyn ProcessRegistry>) -> Self {
+        let queued = Arc::clone(self.queued_arc());
+        Self::RegistryOnly { registry, queued }
+    }
+
+    /// Rebind the work ports. Dropping a process wiring keeps the registry it
+    /// carried: losing the port is not losing the registry.
+    pub(crate) fn with_work_ports(
+        self,
+        process: Option<ProcessWorkWiring>,
+        queued: Arc<dyn QueuedWorkSubstrate>,
+    ) -> Self {
+        match process {
+            Some(wiring) => Self::Processes { wiring, queued },
+            None => match self.process_registry().cloned() {
+                Some(registry) => Self::RegistryOnly { registry, queued },
+                None => Self::SessionsOnly { queued },
+            },
+        }
     }
 }
 
@@ -454,7 +510,7 @@ impl RuntimeHost {
     }
 
     pub fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
-        self.work.process_wiring().map(ProcessWorkWiring::registry)
+        self.work.process_registry()
     }
 
     pub(crate) fn process_work(&self) -> Option<&Arc<dyn ProcessWorkSubstrate>> {

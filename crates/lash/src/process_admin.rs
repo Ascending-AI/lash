@@ -230,16 +230,11 @@ pub struct Processes {
 
 impl Processes {
     fn registry(&self) -> Result<Arc<dyn lash_core::ProcessRegistry>> {
-        self.core
-            .env
-            .process_registry
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| {
-                EmbedError::Plugin(lash_core::PluginError::Session(
-                    "process registry is unavailable in this runtime".to_string(),
-                ))
-            })
+        self.core.env.process_registry().cloned().ok_or_else(|| {
+            EmbedError::Plugin(lash_core::PluginError::Session(
+                "process registry is unavailable in this runtime".to_string(),
+            ))
+        })
     }
 
     fn make_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {

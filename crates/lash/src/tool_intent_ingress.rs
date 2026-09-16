@@ -1294,16 +1294,11 @@ impl ToolIntentIngress {
     }
 
     fn process_registry(&self) -> crate::Result<std::sync::Arc<dyn lash_core::ProcessRegistry>> {
-        self.core
-            .env
-            .process_registry
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                    "process registry is unavailable in this runtime".to_string(),
-                ))
-            })
+        self.core.env.process_registry().cloned().ok_or_else(|| {
+            crate::EmbedError::Plugin(lash_core::PluginError::Session(
+                "process registry is unavailable in this runtime".to_string(),
+            ))
+        })
     }
 
     async fn run_command(

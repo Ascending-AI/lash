@@ -805,7 +805,7 @@ impl LashCore {
 
     /// Returns the configured process registry, if present.
     pub fn process_registry(&self) -> Option<Arc<dyn ProcessRegistry>> {
-        self.env.process_registry.as_ref().cloned()
+        self.env.process_registry().cloned()
     }
 
     /// Builds the durable process-worker configuration for this core.
@@ -1392,7 +1392,7 @@ impl LashCoreBuilder {
             ))
         });
         let env = env_builder.build();
-        let process_registry = env.process_registry.as_ref().cloned();
+        let process_registry = env.process_registry().cloned();
         // Registration owns the scope fence (ADR 0049): the registry lifts the
         // effect host's fence for a re-registered process id inside its own
         // registration write, on every registration path.
