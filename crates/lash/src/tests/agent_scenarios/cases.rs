@@ -555,7 +555,7 @@ finish(result);"#,
         root         exec      cell.start              lang="typescript"
         root         tool      tool.start              name="spawn_agent" call=call-001
         root         tool      tool.result             name="spawn_agent" outcome=failure call=call-001
-        root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: background session turn failed --…"
+        root         exec      cell.failed             calls=1 failure="program" error="`?` unwrapped failed module operation: child boom --> line 2, column 22 …"
         root         commit    checkpoint.commit       rev=0->1
         root                     usage                 entries=1 input=0 output=0 cache_read=0 cache_write=0 reasoning=0 total=0
         root                     turn_state            stored logical=227B
@@ -593,11 +593,9 @@ finish(result);"#,
             .expect("the failed spawn keeps its typed tool projection");
         assert_eq!(spawn_failure.class, lash_core::ToolFailureClass::Execution);
         assert_eq!(spawn_failure.code, "tool_error");
-        assert!(
-            spawn_failure
-                .message
-                .contains("background session turn failed")
-        );
+        // FIG-2975: the child's own reason is what the parent reads. Before the
+        // runner carried it, every stopped child collapsed onto one sentence.
+        assert_eq!(spawn_failure.message, "child boom");
         assert_eq!(spawn_failure.source, lash_core::ToolFailureSource::Tool);
         assert_eq!(spawn_failure.retry, lash_core::ToolRetryStatus::Never);
         assert!(

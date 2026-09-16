@@ -243,14 +243,28 @@ fn submit_error_output_schema() -> Value {
     })
 }
 
+/// End the child's task as a terminal failure.
+///
+/// The human reason is the failure's `message`, so the parent's spawn result
+/// and the child's process record read the child's own words. The original
+/// arguments ride the failure's `raw` channel, which keeps the encoded call
+/// available for diagnosis without spending the one field a model reads.
 pub(crate) fn submit_error_tool_result(args: &Value) -> ToolOutcome {
-    ToolOutcome::ok(args.clone()).with_control(lash_core::ToolControl::Fail {
-        failure: lash_core::ToolFailure::tool(
-            lash_core::ToolFailureClass::Execution,
-            "subagent_submit_error",
-            args.to_string(),
+    let reason = args
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty());
+    let mut failure = lash_core::ToolFailure::tool(
+        lash_core::ToolFailureClass::Execution,
+        "subagent_submit_error",
+        reason.map_or_else(
+            || "subagent ended its task with submit_error and no reason".to_string(),
+            ToOwned::to_owned,
         ),
-    })
+    );
+    failure.raw = Some(lash_core::ToolValue::untrusted_json(args.clone()));
+    ToolOutcome::ok(args.clone()).with_control(lash_core::ToolControl::Fail { failure })
 }
 
 /// Render the spawned subagent's tool authority as a prompt note. Under the
