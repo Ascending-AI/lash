@@ -1085,7 +1085,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             '"schema": "lash.confidence.sim-search-run.v1"',
             'search_seeds="${LASH_SIM_DEFAULT_SEEDS:-256}"',
             'search_max_boundaries="${LASH_SIM_DEFAULT_MAX_BOUNDARIES:-500}"',
-            'search_seeds="${LASH_SIM_FULL_SEEDS:-5000}"',
+            # Re-pinned from 5000 (FIG-3222): every shard of run 35091816279 was
+            # cancelled at the 100-minute job cap without writing a search
+            # summary, so 5000 was a number the lane never reached. The gate
+            # carries the sizing arithmetic.
+            'search_seeds="${LASH_SIM_FULL_SEEDS:-$SIM_SEARCH_FULL_SEEDS}"',
             'search_max_boundaries="${LASH_SIM_FULL_MAX_BOUNDARIES:-2000}"',
             'local search_shard="${LASH_SIM_SHARD:-1/1}"',
             "--mode search",
@@ -1118,6 +1122,61 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn("sim-search", workflow)
         self.assertNotIn("LASH_SIM_SHARD", workflow)
         self.assertNotIn("LASH_SIM_FULL_SEEDS", workflow)
+
+    def test_sim_search_and_mutation_sim_fit_their_job_caps(self) -> None:
+        """Both lanes were cancelled at 100 minutes in run 35091816279.
+
+        A job cancelled at its cap produces no evidence at all, so the seed
+        budget and the mutant budget each have to be stated against the cap
+        with the shared-build download counted as the fixed cost it is.
+        """
+        gate = GATE.read_text(encoding="utf-8")
+        confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
+
+        # The full lane is sized, not left at a number no shard has reached.
+        full_seeds = shell_int_constant(gate, "SIM_SEARCH_FULL_SEEDS")
+        min_seeds = shell_int_constant(gate, "SIM_SEARCH_MIN_SEEDS")
+        shards = 9
+        per_shard = full_seeds // shards
+        # A shard runs two search passes (the search lane and the named
+        # regression corpus). Measured end to end through the gate at 2000 max
+        # boundaries, the pair costs about 105 s of setup plus 112 s per seed,
+        # and that has to fit the cap once 23 minutes of shared-build download
+        # and restore plus two minutes of checkout are taken off it.
+        sim_search_cap = int(
+            re.search(
+                r"^    timeout-minutes: (\d+)$",
+                workflow_job_block(confidence_workflow, "sim-search"),
+                re.MULTILINE,
+            ).group(1)
+        )
+        lane_budget_seconds = (sim_search_cap - 25) * 60
+        self.assertLessEqual(
+            105 + per_shard * 112,
+            lane_budget_seconds,
+            f"{per_shard} seeds per shard do not fit the {sim_search_cap}-minute cap",
+        )
+        self.assertEqual(full_seeds % shards, 0, "seeds must divide over the shards")
+        self.assertGreater(per_shard, min_seeds)
+
+        # The shard records what it actually cost, so the estimate above is
+        # re-pinned from a measurement rather than re-guessed.
+        self.assertIn('local search_seconds=$((SECONDS - search_started_at))', gate)
+        self.assertIn('"search_seconds": int(search_seconds),', gate)
+        self.assertIn('artifact["corpus_seconds"] = int(corpus_seconds)', gate)
+        self.assertIn('artifact["shard_seconds"]', gate)
+
+        # mutation-sim is a mutant count, not a seed budget: 49 mutants at the
+        # 2.03 min/mutant the cancelled run measured, plus the same 23 minutes
+        # of fixed cost, with margin for the 180 s per-test cap.
+        mutation_sim_cap = int(
+            re.search(
+                r"^    timeout-minutes: (\d+)$",
+                workflow_job_block(confidence_workflow, "confidence-mutation-sim"),
+                re.MULTILINE,
+            ).group(1)
+        )
+        self.assertGreaterEqual(mutation_sim_cap, 23 + 49 * 2.03)
 
     def test_fast_gate_has_first_class_shards_and_parallel_minimizers(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
