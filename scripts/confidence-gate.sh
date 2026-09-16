@@ -699,7 +699,7 @@ start_mutation_postgres() {
     -e POSTGRES_PASSWORD=lash \
     -e POSTGRES_DB=lash \
     -p "127.0.0.1:${LASH_CONFIDENCE_MUTATION_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 12))}:5432" \
-    postgres:16-alpine >/dev/null
+    postgres:16-alpine -c shared_preload_libraries=pg_stat_statements >/dev/null
 
   port="$(
     docker inspect \
