@@ -50,6 +50,89 @@ impl BoundaryKind {
     }
 }
 
+/// The `input_state` a queued active-turn input lands in.
+///
+/// A deliberate vocabulary restatement of the production state name (ADR 0044:
+/// the model never derives its expectation by calling the implementation).
+/// Declared once so readers compare for equality instead of prefix-matching
+/// `"pending"`, which would also accept any future state that merely starts
+/// with it.
+pub const ACTIVE_TURN_INPUT_STATE: &str = "pending_active";
+
+/// The `input_state` a queued next-turn input lands in. Same restatement rule
+/// as [`ACTIVE_TURN_INPUT_STATE`].
+pub const NEXT_TURN_INPUT_STATE: &str = "deferred_next_turn";
+
+/// How a queued-ingress boundary asks the runtime to admit its input.
+///
+/// The wire spelling is the serde derive, so the plan layer, the payload, and
+/// every consumer share one vocabulary. Adding a variant makes every `match`
+/// below fail to compile rather than silently classifying the new mode as
+/// next-turn.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueuedIngressMode {
+    ActiveTurn,
+    NextTurn,
+}
+
+impl QueuedIngressMode {
+    /// The single place the payload key is spelled.
+    pub const PAYLOAD_KEY: &'static str = "ingress_mode";
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ActiveTurn => "active_turn",
+            Self::NextTurn => "next_turn",
+        }
+    }
+
+    /// Decode the mode out of a queued-ingress payload or observation.
+    ///
+    /// This is the only reader of [`Self::PAYLOAD_KEY`] and the only place the
+    /// absent-key policy is written. Absent is an error, not a default: the
+    /// generator is the sole producer and always writes the key, so a payload
+    /// without it is a malformed or mutated fixture, and every earlier caller
+    /// silently invented a different answer for it.
+    pub fn from_payload(payload: &Value) -> Result<Self, QueuedIngressModeError> {
+        match payload.get(Self::PAYLOAD_KEY) {
+            None | Some(Value::Null) => Err(QueuedIngressModeError::Missing),
+            Some(Value::String(mode)) => match mode.as_str() {
+                "active_turn" => Ok(Self::ActiveTurn),
+                "next_turn" => Ok(Self::NextTurn),
+                _ => Err(QueuedIngressModeError::Unknown(mode.clone())),
+            },
+            Some(other) => Err(QueuedIngressModeError::Unknown(other.to_string())),
+        }
+    }
+}
+
+/// Why a queued-ingress payload could not be read as a [`QueuedIngressMode`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QueuedIngressModeError {
+    Missing,
+    Unknown(String),
+}
+
+impl std::fmt::Display for QueuedIngressModeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing => write!(
+                f,
+                "queued-ingress payload has no `{}` key",
+                QueuedIngressMode::PAYLOAD_KEY
+            ),
+            Self::Unknown(mode) => write!(
+                f,
+                "queued-ingress `{}` is not a known mode: {mode}",
+                QueuedIngressMode::PAYLOAD_KEY
+            ),
+        }
+    }
+}
+
+impl std::error::Error for QueuedIngressModeError {}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BoundaryEvent {
     pub boundary_id: String,
@@ -78,6 +161,14 @@ impl BoundaryEvent {
             label: label.into(),
             payload,
         }
+    }
+
+    /// The queued-ingress mode this boundary declares.
+    ///
+    /// Only meaningful for [`BoundaryKind::QueuedIngress`]; every other kind
+    /// reports [`QueuedIngressModeError::Missing`].
+    pub fn queued_ingress_mode(&self) -> Result<QueuedIngressMode, QueuedIngressModeError> {
+        QueuedIngressMode::from_payload(&self.payload)
     }
 }
 

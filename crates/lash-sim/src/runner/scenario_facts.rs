@@ -1,4 +1,5 @@
 use super::*;
+use crate::scheduler::QueuedIngressMode;
 
 pub(super) fn scenario_transition_facts(
     contract: &ScenarioContractSpec,
@@ -133,12 +134,8 @@ fn queued_active_turn_fact(
         .iter()
         .filter(|line| {
             line.event.kind == BoundaryKind::QueuedIngress
-                && line
-                    .event
-                    .observed
-                    .get("ingress_mode")
-                    .and_then(Value::as_str)
-                    == Some("active_turn")
+                && QueuedIngressMode::from_payload(&line.event.observed)
+                    == Ok(QueuedIngressMode::ActiveTurn)
                 && line
                     .event
                     .observed

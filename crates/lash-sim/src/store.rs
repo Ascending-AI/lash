@@ -8,7 +8,9 @@ use serde_json::{Value, json};
 
 use crate::runtime_boundaries::EFFECT_SCOPE_ID;
 use crate::runtime_contracts::{RuntimeTurnObservation, RuntimeUsageTotals, runtime_turn_contract};
-use crate::scheduler::{BoundaryEvent, BoundaryKind};
+use crate::scheduler::{
+    ACTIVE_TURN_INPUT_STATE, BoundaryEvent, BoundaryKind, NEXT_TURN_INPUT_STATE, QueuedIngressMode,
+};
 use crate::trace::{
     AbstractWorldSummary, DurableEffectAbstractSummary, ProviderTurnSummary,
     SessionAbstractSummary, WorkerAbstractSummary, value_digest,
@@ -162,7 +164,7 @@ enum ModelPendingInputState {
 #[derive(Clone, Debug)]
 struct ModelPendingInput {
     session: String,
-    next_turn: bool,
+    mode: QueuedIngressMode,
     state: ModelPendingInputState,
 }
 
@@ -189,7 +191,7 @@ impl ModelStore {
             .iter()
             .filter(|(_, input)| {
                 input.session == session
-                    && input.next_turn
+                    && input.mode == QueuedIngressMode::NextTurn
                     && matches!(input.state, ModelPendingInputState::Queued)
             })
             .map(|(boundary, _)| boundary.clone())
@@ -211,7 +213,7 @@ impl ModelStore {
                 .expect("admission provider");
             for input in self.queued_input_boundaries.values_mut() {
                 if input.session == session
-                    && input.next_turn
+                    && input.mode == QueuedIngressMode::NextTurn
                     && matches!(input.state, ModelPendingInputState::Queued)
                 {
                     input.state = ModelPendingInputState::Claimed(provider.to_string());
@@ -264,8 +266,9 @@ impl ModelStore {
                     event.boundary_id.clone(),
                     ModelPendingInput {
                         session: event.actor_alias.clone(),
-                        next_turn: event.payload.get("ingress_mode").and_then(Value::as_str)
-                            == Some("next_turn"),
+                        mode: event.queued_ingress_mode().unwrap_or_else(|err| {
+                            panic!("queued-ingress boundary `{}`: {err}", event.boundary_id)
+                        }),
                         state: ModelPendingInputState::Queued,
                     },
                 );
@@ -552,16 +555,13 @@ impl ModelStore {
                     .entry(event.actor_alias.clone())
                     .or_default();
                 *next_seq = next_seq.saturating_add(1);
-                let ingress_mode = event
-                    .payload
-                    .get("ingress_mode")
-                    .and_then(Value::as_str)
-                    .unwrap_or("next_turn");
+                let ingress_mode = event.queued_ingress_mode().unwrap_or_else(|err| {
+                    panic!("queued-ingress boundary `{}`: {err}", event.boundary_id)
+                });
                 // Deliberate vocabulary restatement: keep this drift-pin for prelude item 21.
-                let input_state = if ingress_mode == "active_turn" {
-                    "pending_active"
-                } else {
-                    "deferred_next_turn"
+                let input_state = match ingress_mode {
+                    QueuedIngressMode::ActiveTurn => ACTIVE_TURN_INPUT_STATE,
+                    QueuedIngressMode::NextTurn => NEXT_TURN_INPUT_STATE,
                 };
                 json!({
                     "session": event.actor_alias,
@@ -569,7 +569,7 @@ impl ModelStore {
                     "source_key": event.payload.get("source_key").cloned().unwrap_or(Value::Null),
                     "input_id": format!("recording-ti-{}", *next_seq),
                     "input_state": input_state,
-                    "ingress_mode": ingress_mode,
+                    "ingress_mode": ingress_mode.as_str(),
                     "active_turn_id": event.payload.get("active_turn_id").cloned().unwrap_or(Value::Null),
                 })
             }
