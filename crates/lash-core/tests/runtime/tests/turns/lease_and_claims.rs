@@ -701,8 +701,8 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
     );
     let issue = assembled.errors.first().expect("typed provider issue");
     assert_eq!(
-        issue.code.as_deref(),
-        Some("unsafe_retry_after_output_started")
+        issue.code,
+        Some(lash_core::TurnFailureCode::UnsafeRetryAfterOutputStarted)
     );
     assert_eq!(issue.retryable, Some(false));
     assert!(

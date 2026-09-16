@@ -18,6 +18,9 @@ use lash_core::facade_support::{
 };
 
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
+/// Typed turn-failure vocabulary carried on [`TurnIssue`] and on session error
+/// envelopes. A host branches on these instead of matching the display string.
+pub use lash_core::{TurnFailureCode, TurnFailureKind};
 
 pub(crate) mod queued_drain;
 mod selected_drain;

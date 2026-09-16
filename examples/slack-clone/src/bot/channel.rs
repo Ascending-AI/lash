@@ -1189,7 +1189,7 @@ fn provider_failure(report: &lash::TurnReport) -> Option<ProviderFailure> {
     })?;
     Some(ProviderFailure {
         kind: issue.provider_failure_kind.unwrap_or_default(),
-        code: issue.code.clone(),
+        code: issue.code.as_ref().map(|code| code.as_str().to_string()),
         message: issue.message.clone(),
         retryable: issue.retryable.unwrap_or(false),
     })

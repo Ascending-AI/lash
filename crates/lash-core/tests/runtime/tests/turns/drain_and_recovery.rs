@@ -1831,9 +1831,12 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
     let issue = turn
         .errors
         .iter()
-        .find(|issue| issue.kind == "llm_provider")
+        .find(|issue| issue.kind == lash_core::TurnFailureKind::LlmProvider)
         .expect("llm_provider issue");
-    assert_eq!(issue.code.as_deref(), Some("unsupported_effort"));
+    assert_eq!(
+        issue.code,
+        Some(lash_core::TurnFailureCode::UnsupportedEffort)
+    );
     assert!(issue.message.contains("Unsupported effort `turbo`"));
 }
 

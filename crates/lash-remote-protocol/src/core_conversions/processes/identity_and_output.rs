@@ -249,6 +249,30 @@ impl From<RemoteToolFailureClass> for lash_core::ToolFailureClass {
     }
 }
 
+impl From<lash_core::ObservedProcessFailure> for RemoteObservedProcessFailure {
+    fn from(value: lash_core::ObservedProcessFailure) -> Self {
+        match value {
+            lash_core::ObservedProcessFailure::Failed { class, code } => Self::Failed {
+                class: class.into(),
+                code,
+            },
+            lash_core::ObservedProcessFailure::Cancelled { origin } => Self::Cancelled { origin },
+        }
+    }
+}
+
+impl From<RemoteObservedProcessFailure> for lash_core::ObservedProcessFailure {
+    fn from(value: RemoteObservedProcessFailure) -> Self {
+        match value {
+            RemoteObservedProcessFailure::Failed { class, code } => Self::Failed {
+                class: class.into(),
+                code,
+            },
+            RemoteObservedProcessFailure::Cancelled { origin } => Self::Cancelled { origin },
+        }
+    }
+}
+
 impl TryFrom<lash_core::ProcessAwaitOutput> for RemoteProcessAwaitOutput {
     type Error = RemoteProtocolError;
 

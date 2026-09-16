@@ -137,13 +137,13 @@ fn trace_outcome(outcome: &TurnOutcome) -> lash_trace::TraceTurnOutcome {
 }
 
 pub(super) fn post_commit_delivery_issue(
-    code: impl Into<String>,
+    code: crate::TurnFailureCode,
     message: impl Into<String>,
 ) -> TurnIssue {
     TurnIssue {
         severity: crate::runtime::TurnIssueSeverity::Blocking,
-        kind: "runtime".to_string(),
-        code: Some(code.into()),
+        kind: crate::TurnFailureKind::Runtime,
+        code: Some(code),
         terminal_reason: None,
         message: message.into(),
         raw: None,
@@ -420,11 +420,11 @@ enum TerminalDiagnosticKind {
 }
 
 impl TerminalDiagnosticKind {
-    fn as_envelope_kind(self) -> &'static str {
+    fn as_envelope_kind(self) -> crate::TurnFailureKind {
         match self {
-            Self::Runtime => "runtime",
-            Self::InputValidation => "input_validation",
-            Self::Plugin => "plugin",
+            Self::Runtime => crate::TurnFailureKind::Runtime,
+            Self::InputValidation => crate::TurnFailureKind::InputValidation,
+            Self::Plugin => crate::TurnFailureKind::Plugin,
         }
     }
 }
@@ -443,7 +443,7 @@ enum TerminalActivityTarget<'a> {
 /// Typed diagnostic emitted immediately ahead of a terminal `TurnOutcome`.
 struct TerminalDiagnostic<'a> {
     kind: TerminalDiagnosticKind,
-    code: Option<String>,
+    code: Option<crate::TurnFailureCode>,
     message: String,
     retryable: Option<bool>,
     activity: TerminalActivityTarget<'a>,
@@ -466,7 +466,7 @@ async fn emit_terminal_sequence(
         let error_event = SessionStreamEvent::Error {
             message: diagnostic.message.clone(),
             envelope: Some(crate::session_model::ErrorEnvelope {
-                kind: diagnostic.kind.as_envelope_kind().to_string(),
+                kind: diagnostic.kind.as_envelope_kind(),
                 code: diagnostic.code,
                 terminal_reason: None,
                 user_message: diagnostic.message.clone(),

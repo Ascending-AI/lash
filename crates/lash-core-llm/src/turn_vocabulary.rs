@@ -118,9 +118,12 @@ pub enum TurnIssueSeverity {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TurnIssue {
     pub severity: TurnIssueSeverity,
-    pub kind: String,
+    /// Typed origin of the failure, carrying the same wire spelling the field
+    /// held as a bare `String`.
+    pub kind: crate::TurnFailureKind,
+    /// Typed failure code within `kind`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
+    pub code: Option<crate::TurnFailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<crate::LlmTerminalReason>,
     pub message: String,

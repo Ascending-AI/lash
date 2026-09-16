@@ -257,7 +257,8 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         TurnOutcome::AgentFrameSwitch { .. }
     ));
     assert!(committed.errors.iter().any(|issue| {
-        issue.code.as_deref() == Some("protocol_restore_session") && issue.retryable == Some(false)
+        issue.code == Some(lash_core::TurnFailureCode::ProtocolRestoreSession)
+            && issue.retryable == Some(false)
     }));
     assert!(matches!(
         runtime.resident_session.validity(),
@@ -1122,7 +1123,10 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         TurnOutcome::AgentFrameSwitch { .. }
     ));
     assert!(committed.errors.iter().any(|issue| {
-        issue.code.as_deref() == Some("execution_state_capture_failed")
+        issue.code
+            == Some(lash_core::TurnFailureCode::Other(
+                "execution_state_capture_failed".to_string(),
+            ))
             && issue.retryable == Some(false)
     }));
     let durable = lash_core::store::SessionCommitStore::load_session(store.as_ref())

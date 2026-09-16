@@ -32,6 +32,7 @@ pub(crate) use lash_sansio::llm::types::{
     GenerationOptions, GenerationReceipt, LlmCallRecord, LlmTerminalReason, NonNegativeFiniteF64,
     ProviderFailureKind, ProviderReplayDrop,
 };
+pub(crate) use lash_sansio::session_model::{TurnFailureCode, TurnFailureKind};
 pub(crate) use session_model::ChargeSafetyPolicy;
 
 // Names the moved modules reach for only from their own test suites.

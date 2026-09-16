@@ -175,12 +175,12 @@ impl AttachmentMetaCoreSupport for AttachmentMeta {
 }
 
 pub trait ModelEffortValidationCategoryCoreSupport {
-    fn code(&self) -> &'static str;
+    fn failure_code(&self) -> crate::session_model::TurnFailureCode;
 }
 
 impl ModelEffortValidationCategoryCoreSupport for ModelEffortValidationCategory {
-    fn code(&self) -> &'static str {
-        ModelEffortValidationCategory::code(self)
+    fn failure_code(&self) -> crate::session_model::TurnFailureCode {
+        ModelEffortValidationCategory::failure_code(self)
     }
 }
 

@@ -8,7 +8,8 @@ use lash_core::sansio::{
     WaitingLlmState,
 };
 use lash_core::session_model::{
-    ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, make_error_event,
+    ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, TurnFailureCode,
+    TurnFailureKind, make_error_event,
 };
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmResponse, OmittedToolCalls,
@@ -117,8 +118,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         let action = super::tool::normalize(&parts);
         if matches!(action, super::tool::NativeAction::ProseOnly) && prose.trim().is_empty() {
             actions.push(DriverAction::Emit(make_error_event(
-                "llm_provider",
-                Some("empty_response"),
+                TurnFailureKind::LlmProvider,
+                Some(TurnFailureCode::EmptyResponse),
                 "Model returned no assistant text.",
                 None,
             )));

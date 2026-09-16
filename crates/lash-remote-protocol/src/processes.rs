@@ -21,9 +21,9 @@ pub use lifecycle::{RemoteOnParentEnd, RemoteParentScope, RemoteProcessLifecycle
 
 mod outcomes;
 pub use outcomes::{
-    RemoteProcessAwaitOutput, RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
-    RemoteProcessToolCancellation, RemoteProcessToolFailure, RemoteProcessToolFailureSource,
-    RemoteProcessToolRetryStatus, RemoteToolFailureClass,
+    RemoteObservedProcessFailure, RemoteProcessAwaitOutput, RemoteProcessToolCallOutcome,
+    RemoteProcessToolCallOutput, RemoteProcessToolCancellation, RemoteProcessToolFailure,
+    RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus, RemoteToolFailureClass,
 };
 
 mod operations;
@@ -764,8 +764,13 @@ pub struct RemoteObservedProcess {
     /// `lifecycle` status fold above.
     pub policy: RemoteProcessLifecyclePolicy,
     pub disposition: RemoteRecoveryContract,
+    /// Human-readable summary of the terminal failure, for display only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Typed classification of the same terminal failure, present exactly when
+    /// `error` is. A peer that predates this field writes neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<RemoteObservedProcessFailure>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]

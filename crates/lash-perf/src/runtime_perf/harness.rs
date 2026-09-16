@@ -676,7 +676,10 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
     if !turn.errors.is_empty() {
         let _ = writeln!(out, "turn_errors:");
         for issue in &turn.errors {
-            let code = issue.code.as_deref().unwrap_or("none");
+            let code = issue
+                .code
+                .as_ref()
+                .map_or("none", lash::turn::TurnFailureCode::as_str);
             let _ = writeln!(
                 out,
                 "- kind={} code={} message={}",

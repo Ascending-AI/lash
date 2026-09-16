@@ -35,7 +35,7 @@ use lash::plugins::{
 use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
 use lash::runtime::AdvancedLashCoreBuilder;
 use lash::tools::{ToolActivation, ToolCallRecord, ToolOutputContract};
-use lash::turn::{AssistantOutput, TurnIssue};
+use lash::turn::{AssistantOutput, TurnFailureCode, TurnFailureKind, TurnIssue};
 use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::{ModelLimits, ModelSpec, QueuedWorkClaimRefusal};
 
@@ -544,6 +544,10 @@ fn message_role_type_is_nameable(role: MessageRole) -> &'static str {
 
 fn turn_result_detail_types_are_nameable(output: AssistantOutput, issue: TurnIssue) {
     let _ = (output, issue);
+}
+
+fn turn_failure_vocabulary_is_nameable(kind: TurnFailureKind, code: TurnFailureCode) {
+    let _ = (kind, code);
 }
 
 fn provider_reliability_types_are_nameable(

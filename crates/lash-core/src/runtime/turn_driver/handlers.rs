@@ -91,8 +91,8 @@ impl RuntimeTurnDriver<'_> {
                     ));
                 }
                 machine.fail_turn(make_error_event(
-                    "protocol_before_llm_call",
-                    Some("before_llm_call_failed"),
+                    crate::TurnFailureKind::ProtocolBeforeLlmCall,
+                    Some(crate::TurnFailureCode::BeforeLlmCallFailed),
                     err_string.clone(),
                     Some(err_string),
                 ));

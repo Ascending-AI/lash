@@ -767,7 +767,7 @@ impl TurnAssembler {
                 } else {
                     TurnIssue {
                         severity: crate::runtime::TurnIssueSeverity::Blocking,
-                        kind: "runtime".to_string(),
+                        kind: crate::TurnFailureKind::Runtime,
                         code: None,
                         terminal_reason: None,
                         message: message.clone(),
@@ -823,8 +823,8 @@ impl TurnAssembler {
                 Err(error) => {
                     issues.push(TurnIssue {
                         severity: crate::runtime::TurnIssueSeverity::Blocking,
-                        kind: "runtime".to_string(),
-                        code: Some("session_graph_scope".to_string()),
+                        kind: crate::TurnFailureKind::Runtime,
+                        code: Some(crate::TurnFailureCode::SessionGraphScope),
                         terminal_reason: None,
                         message: error.to_string(),
                         raw: None,
@@ -837,8 +837,8 @@ impl TurnAssembler {
             if !recovered.is_empty() {
                 issues.push(TurnIssue {
                     severity: crate::runtime::TurnIssueSeverity::Advisory,
-                    kind: "runtime".to_string(),
-                    code: Some(ASSISTANT_OUTPUT_RECOVERED_FROM_STATE_CODE.to_string()),
+                    kind: crate::TurnFailureKind::Runtime,
+                    code: Some(crate::TurnFailureCode::AssistantOutputRecoveredFromState),
                     terminal_reason: None,
                     message: "assistant output was recovered from persisted messages because no explicit assistant output was assembled".to_string(),
                     raw: None,
@@ -864,8 +864,8 @@ impl TurnAssembler {
         } else if !self.saw_done && termination.treat_missing_done_as_failure {
             issues.push(TurnIssue {
                 severity: crate::runtime::TurnIssueSeverity::Blocking,
-                kind: "runtime".to_string(),
-                code: Some("missing_done".to_string()),
+                kind: crate::TurnFailureKind::Runtime,
+                code: Some(crate::TurnFailureCode::MissingDone),
                 terminal_reason: None,
                 message: "turn stream ended without a Done event".to_string(),
                 raw: None,
@@ -1044,8 +1044,6 @@ pub fn classify_output_state(raw_text: &str, safe_text: &str, issues: &[TurnIssu
     }
     OutputState::Usable
 }
-
-const ASSISTANT_OUTPUT_RECOVERED_FROM_STATE_CODE: &str = "assistant_output_recovered_from_state";
 
 fn contains_traceback_only(raw_text: &str) -> bool {
     if raw_text.is_empty() {

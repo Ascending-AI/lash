@@ -7,8 +7,8 @@ use lash_core::sansio::{
     WaitingLlmState,
 };
 use lash_core::session_model::{
-    ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, make_error_envelope,
-    make_error_event,
+    ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, TurnFailureCode,
+    TurnFailureKind, make_error_envelope, make_error_event,
 };
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmOutputPart, LlmResponse,
@@ -151,8 +151,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             && reasoning.iter().all(|part| part.text.trim().is_empty())
         {
             actions.push(DriverAction::Emit(make_error_event(
-                "llm_provider",
-                Some("empty_response"),
+                TurnFailureKind::LlmProvider,
+                Some(TurnFailureCode::EmptyResponse),
                 "Model returned no assistant text.",
                 None,
             )));
@@ -695,8 +695,8 @@ fn native_tool_call_failure_actions(
         tool_call.tool_name
     );
     let mut envelope = make_error_envelope(
-        "rlm_protocol",
-        Some("native_tool_call_not_allowed"),
+        TurnFailureKind::RlmProtocol,
+        Some(TurnFailureCode::NativeToolCallNotAllowed),
         None,
         message.clone(),
         Some(format!(

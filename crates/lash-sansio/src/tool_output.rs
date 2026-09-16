@@ -802,6 +802,32 @@ pub enum ToolFailureClass {
     Internal,
 }
 
+/// Typed classification of the terminal outcome an observed process's display
+/// error string summarizes.
+///
+/// A polling host reads this instead of matching the prose in
+/// `ObservedProcess::error`: the variant separates a failure from a
+/// cancellation, `class` is the failure's typed class, and `origin` is the
+/// typed cancellation origin when the settling side recorded one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ObservedProcessFailure {
+    /// The process settled with a tool failure.
+    Failed {
+        /// Typed failure class, closed and matchable.
+        class: ToolFailureClass,
+        /// The producer-authored failure code. An open vocabulary this
+        /// workspace does not own, carried verbatim beside the typed `class`.
+        code: String,
+    },
+    /// The process settled cancelled.
+    Cancelled {
+        /// Typed cancellation origin, when the settling side recorded one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<CancelOrigin>,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolFailureSource {

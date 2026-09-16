@@ -438,6 +438,11 @@ pub enum RemoteToolCallOutcome {
     Cancelled(serde_json::Value),
 }
 
+/// Typed turn-failure code, as carried to a host.
+pub use lash_sansio::TurnFailureCode as RemoteTurnFailureCode;
+/// Typed origin of a turn failure, as carried to a host.
+pub use lash_sansio::TurnFailureKind as RemoteTurnFailureKind;
+
 /// Producer-selected effect of an issue on turn completion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -449,9 +454,16 @@ pub enum RemoteTurnIssueSeverity {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnIssue {
     pub severity: RemoteTurnIssueSeverity,
-    pub kind: String,
+    /// Typed origin of the failure. Serializes as the same snake_case string
+    /// the field carried before it was typed; an unrecognized spelling decodes
+    /// into `RemoteTurnFailureKind::Unknown` rather than failing.
+    pub kind: RemoteTurnFailureKind,
+    /// Typed failure code. Serializes as the same string the field carried
+    /// before it was typed; a vocabulary this build does not own (a provider
+    /// error code, a plugin abort code, a `RuntimeErrorCode` spelling) decodes
+    /// into `RemoteTurnFailureCode::Other` with the spelling retained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
+    pub code: Option<RemoteTurnFailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<RemoteLlmTerminalReason>,
     pub message: String,

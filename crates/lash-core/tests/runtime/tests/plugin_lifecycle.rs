@@ -89,8 +89,8 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
         .expect("turn remains committed despite an observer-hook failure");
 
     assert!(turn.errors.iter().any(|issue| {
-        issue.kind == "plugin"
-            && issue.code.as_deref() == Some("lifecycle_hook_failed")
+        issue.kind == lash_core::TurnFailureKind::Plugin
+            && issue.code == Some(lash_core::TurnFailureCode::LifecycleHookFailed)
             && issue.retryable == Some(false)
             && issue.message.contains("explicit replay keys")
     }));
