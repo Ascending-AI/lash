@@ -37,9 +37,9 @@ pub enum RuntimeCommitReceiptDecision {
     /// Matching receipt evidence carries contradictory requested-node counts.
     CorruptRequestedNodeCount {
         /// Requested-node count stored with the first-attempt receipt.
-        stored: Option<u64>,
+        stored: u64,
         /// Requested-node count supplied by the attempted append stamp.
-        attempted: Option<u64>,
+        attempted: u64,
     },
 }
 
@@ -90,8 +90,8 @@ pub fn decide_runtime_commit_receipt(
             && stored_count != attempted_count
         {
             return RuntimeCommitReceiptDecision::CorruptRequestedNodeCount {
-                stored: Some(*stored_count),
-                attempted: Some(*attempted_count),
+                stored: *stored_count,
+                attempted: *attempted_count,
             };
         } else if let (
             AppendRequestIdentity::SemanticBoundary {
@@ -135,8 +135,8 @@ pub fn decide_runtime_commit_receipt(
         }
         if stored_count != attempted_count {
             return RuntimeCommitReceiptDecision::CorruptRequestedNodeCount {
-                stored: Some(*stored_count),
-                attempted: Some(*attempted_count),
+                stored: *stored_count,
+                attempted: *attempted_count,
             };
         }
         return RuntimeCommitReceiptDecision::Replay;
@@ -897,8 +897,8 @@ mod append_request_identity_tests {
         assert_eq!(
             decide("same", "same", &identity(1, "id", 1), &identity(1, "id", 2),),
             CorruptRequestedNodeCount {
-                stored: Some(1),
-                attempted: Some(2),
+                stored: 1,
+                attempted: 2,
             }
         );
         assert_eq!(

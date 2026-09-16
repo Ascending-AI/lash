@@ -140,17 +140,17 @@ pub enum PluginError {
     /// Durable append receipt metadata contradicts the retry's requested-node
     /// count. This is store corruption, not a caller-recoverable conflict.
     #[error(
-        "append receipt `{operation_key}` for session `{session_id}` has contradictory requested-node counts (stored {stored:?}, attempted {attempted:?})"
+        "append receipt `{operation_key}` for session `{session_id}` has contradictory requested-node counts (stored {stored}, attempted {attempted})"
     )]
     AppendReceiptRequestedNodeCountCorrupt {
         /// Session whose append receipt is corrupt.
         session_id: SessionId,
         /// Canonical durable operation key of the corrupt receipt.
         operation_key: String,
-        /// Count stored with the first attempt, when present.
-        stored: Option<u64>,
-        /// Count carried by the retry, when present.
-        attempted: Option<u64>,
+        /// Count stored with the first attempt.
+        stored: u64,
+        /// Count carried by the retry.
+        attempted: u64,
     },
     /// A durable plugin-owned record contained a value outside its declared
     /// representation. Retrying cannot repair the stored bytes.

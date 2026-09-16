@@ -268,17 +268,17 @@ pub enum StoreError {
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
     /// treat this as durable receipt corruption and must never replay it.
     #[error(
-        "append receipt `{operation_key}` for session `{session_id}` has contradictory requested-node counts (stored {stored:?}, attempted {attempted:?})"
+        "append receipt `{operation_key}` for session `{session_id}` has contradictory requested-node counts (stored {stored}, attempted {attempted})"
     )]
     AppendReceiptRequestedNodeCountCorrupt {
         /// Session whose receipt failed its contracted count cross-check.
         session_id: SessionId,
         /// Canonical operation storage key of the corrupt receipt.
         operation_key: String,
-        /// Count stored with the first attempt, or `None` when corruptly absent.
-        stored: Option<u64>,
-        /// Count carried by the retry, or `None` when corruptly absent.
-        attempted: Option<u64>,
+        /// Count stored with the first attempt.
+        stored: u64,
+        /// Count carried by the retry.
+        attempted: u64,
     },
     /// Token usage counters overflowed while durable usage rows were
     /// accumulated for staging, commit, or load.
