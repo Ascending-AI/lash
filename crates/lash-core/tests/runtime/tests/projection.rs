@@ -80,12 +80,17 @@ impl lash_core::plugin::ProtocolSessionPlugin for AppendRollbackProtocolSession 
         self.protocol_dirty.store(true, Ordering::SeqCst);
         if self.advance_store_head {
             self.store
-                .save_session_head_meta(lash_core::store::SessionHeadMeta::assemble(
-                    lash_core::testing::runtime_internals::SessionHeadPayload::default(),
-                    1,
-                    None,
-                    None,
-                ))
+                .save_session_head_meta(
+                    lash_core::store::SessionHeadMeta::assemble(
+                        &lash_core::testing::runtime_internals::SessionHeadPayload::default()
+                            .session_id,
+                        lash_core::testing::runtime_internals::SessionHeadPayload::default(),
+                        1,
+                        None,
+                        None,
+                    )
+                    .expect("the default head payload is keyed on its own session"),
+                )
                 .await;
         }
         Ok(())
@@ -382,15 +387,19 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
 async fn park_returns_error_when_final_commit_fails() {
     let store = Arc::new(RecordingStore::default());
     store
-        .save_session_head_meta(lash_core::store::SessionHeadMeta::assemble(
-            lash_core::testing::runtime_internals::SessionHeadPayload {
-                session_id: SessionId::from("other-session"),
-                ..lash_core::testing::runtime_internals::SessionHeadPayload::default()
-            },
-            0,
-            None,
-            None,
-        ))
+        .save_session_head_meta(
+            lash_core::store::SessionHeadMeta::assemble(
+                &SessionId::from("other-session"),
+                lash_core::testing::runtime_internals::SessionHeadPayload {
+                    session_id: SessionId::from("other-session"),
+                    ..lash_core::testing::runtime_internals::SessionHeadPayload::default()
+                },
+                0,
+                None,
+                None,
+            )
+            .expect("the foreign head row is keyed on the foreign session"),
+        )
         .await;
     let plugins = plugin_session_with_tools(&SessionId::from("park-session"), Arc::new(EmptyTools));
     let runtime = LashRuntime::from_persistent_embedded_state(

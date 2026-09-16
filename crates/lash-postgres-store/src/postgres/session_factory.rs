@@ -494,6 +494,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let fork_plan = lash_core::store::ForkPlan::derive(&request.session_id, edge_path)?;
         let config = lash_core::PersistedSessionConfig::from(&request.policy);
         let head = lash_core::store::SessionHeadMeta::assemble(
+            &request.session_id,
             lash_core::store::SessionHeadPayload {
                 schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
                 session_id: request.session_id.clone(),
@@ -512,7 +513,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             0,
             Some(checkpoint_ref.clone().into()),
             Some(request.node_id.clone()),
-        );
+        )?;
         sqlx::query(
             "INSERT INTO lash_sessions
              (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)

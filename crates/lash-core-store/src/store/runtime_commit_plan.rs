@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use super::{
     AppendRequestIdentity, BlobRef, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeCommitReceiptDecision, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHeadMeta,
-    SessionHeadPayload, StoreError, decide_runtime_commit_receipt,
+    StoreError, decide_runtime_commit_receipt,
 };
 
 /// Durable receipt fields read by a backend before attempting a commit.
@@ -483,20 +483,18 @@ impl<'a> RuntimeCommitPlan<'a> {
         reason = "`FrameNodeId::new` rejects only the empty string, and a derived frame node id is never empty"
     )]
     pub fn head_meta(&self, checkpoint_ref: BlobRef) -> SessionHeadMeta {
-        SessionHeadMeta::assemble(
-            SessionHeadPayload {
-                schema_version: super::SESSION_HEAD_META_SCHEMA_VERSION,
-                session_id: self.commit.session_id.clone(),
-                config: self.commit.config.clone(),
-                current_frame_node_id: self.derived_frame_node_id.clone().map(|frame_node_id| {
-                    crate::FrameNodeId::new(frame_node_id)
-                        .expect("derived graph node identities are non-empty")
-                }),
-            },
-            self.next_head_revision,
-            Some(checkpoint_ref),
-            self.commit.graph.leaf_node_id.clone(),
-        )
+        SessionHeadMeta {
+            schema_version: super::SESSION_HEAD_META_SCHEMA_VERSION,
+            session_id: self.commit.session_id.clone(),
+            head_revision: self.next_head_revision,
+            config: self.commit.config.clone(),
+            current_frame_node_id: self.derived_frame_node_id.clone().map(|frame_node_id| {
+                crate::FrameNodeId::new(frame_node_id)
+                    .expect("derived graph node identities are non-empty")
+            }),
+            checkpoint_ref: Some(checkpoint_ref),
+            leaf_node_id: self.commit.graph.leaf_node_id.clone(),
+        }
     }
 
     /// Construct the canonical result after backend writes and enqueues finish.

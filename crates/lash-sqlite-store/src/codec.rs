@@ -111,6 +111,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     )
     .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
     Ok(Some(SessionHeadMeta::assemble(
+        session_id,
         payload,
         u64::try_from(head_revision).map_err(|_| {
             stored_data_corrupt(
@@ -120,7 +121,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
         })?,
         checkpoint_ref.map(Into::into),
         leaf_node_id.map(lash_core::NodeId::from),
-    )))
+    )?))
 }
 
 pub(crate) fn decode_checkpoint(bytes: &[u8]) -> Result<SessionCheckpoint, StoreError> {

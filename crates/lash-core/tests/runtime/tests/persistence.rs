@@ -966,6 +966,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         ) -> Result<Option<lash_core::store::SessionHeadMeta>, lash_core::StoreError> {
             if let Some(read) = self.read.lock_recover().as_ref() {
                 return Ok(Some(lash_core::store::SessionHeadMeta::assemble(
+                    &read.session_id,
                     lash_core::store::SessionHeadPayload {
                         schema_version: lash_core::CURRENT_SESSION_STATE_VERSION,
                         session_id: read.session_id.clone(),
@@ -975,7 +976,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
                     read.head_revision,
                     read.checkpoint_ref.clone(),
                     read.graph.leaf_node_id.clone(),
-                )));
+                )?));
             }
             lash_core::SessionCommitStore::load_session_head_meta(self.inner.as_ref()).await
         }

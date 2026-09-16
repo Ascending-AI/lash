@@ -66,15 +66,19 @@ async fn unbound_handle_refuses_fresh_bind_against_foreign_head_row() {
     let store = InMemorySessionStore::new();
     // Install durable head identity without binding the handle, the way a
     // store hydrated with another session's data presents itself.
-    *store.session_head_meta.lock_recover() = Some(crate::SessionHeadMeta::assemble(
-        crate::SessionHeadPayload {
-            session_id: SessionId::from("head-session"),
-            ..crate::SessionHeadPayload::default()
-        },
-        0,
-        None,
-        None,
-    ));
+    *store.session_head_meta.lock_recover() = Some(
+        crate::SessionHeadMeta::assemble(
+            &SessionId::from("head-session"),
+            crate::SessionHeadPayload {
+                session_id: SessionId::from("head-session"),
+                ..crate::SessionHeadPayload::default()
+            },
+            0,
+            None,
+            None,
+        )
+        .expect("the foreign head row is keyed on the foreign session"),
+    );
     let error = store
         .commit_runtime_state(commit_for(&SessionId::from("other")))
         .await
