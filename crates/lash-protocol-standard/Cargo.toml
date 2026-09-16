@@ -33,6 +33,10 @@ lashlang = ["lash-tool-support/lashlang"]
 
 [dev-dependencies]
 insta = "1"
+# Zero-dependency attribute crate providing `#[mutants::skip]`. Used only under
+# `cfg(test)`, to exempt one provably equivalent mutant from the Confidence
+# mutation gate (see `handle_exec_result` in src/lib.rs).
+mutants = "0.0.4"
 lash-core = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
