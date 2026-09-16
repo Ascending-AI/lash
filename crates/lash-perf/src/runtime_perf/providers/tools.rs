@@ -46,7 +46,6 @@ pub(crate) struct BenchmarkToolCatalogObserver {
 struct ActiveToolCatalogObservation {
     variant: &'static str,
     session_id: SessionId,
-    phase_probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,
     observation_stage: Arc<dyn Fn() -> u8 + Send + Sync>,
     setup_recomposition_count: u64,
     recomposition_count: u64,
@@ -80,7 +79,6 @@ impl BenchmarkToolCatalogObserver {
         &self,
         variant: &'static str,
         session_id: SessionId,
-        phase_probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,
         observation_stage: Arc<dyn Fn() -> u8 + Send + Sync>,
     ) {
         let mut state = self.state.lock_recover();
@@ -88,13 +86,23 @@ impl BenchmarkToolCatalogObserver {
         *state = Some(ActiveToolCatalogObservation {
             variant,
             session_id,
-            phase_probe,
             observation_stage,
             setup_recomposition_count: 0,
             recomposition_count: 0,
         });
     }
 
+    /// Count one session-catalog composition for the armed variant.
+    ///
+    /// Counting only. This used to also open and immediately close a
+    /// `tool_catalog.<variant>.session_catalog_composition` phase span, which
+    /// budgeted the profiler rather than the catalog: no catalog work happens
+    /// between a `begin_named` and the `end_named` on the next line, so the
+    /// span's whole duration was `RuntimePerfPhaseProbe`'s own bookkeeping —
+    /// two `/proc/self/status` reads, two allocator snapshots, two mutex
+    /// acquisitions and two `String` allocations per sample. The count the
+    /// span existed to witness is reported as the
+    /// `tool_catalog.<variant>.recomposition_count` counter and is unchanged.
     pub(crate) fn observe_session_catalog_composition(
         &self,
         session_id: &SessionId,
@@ -102,33 +110,22 @@ impl BenchmarkToolCatalogObserver {
         if self.suppress_composition_counting.load(Ordering::SeqCst) {
             return Ok(());
         }
-        let (probe, phase) = {
-            let mut state = self.state.lock_recover();
-            let Some(active) = state.as_mut() else {
-                return Ok(());
-            };
-            if active.session_id != session_id {
-                return Ok(());
-            }
-            match (active.observation_stage)() {
-                0 => {
-                    active.setup_recomposition_count += 1;
-                    return Ok(());
-                }
-                1 => {}
-                _ => return Ok(()),
-            }
-            active.recomposition_count += 1;
-            (
-                Arc::clone(&active.phase_probe),
-                format!(
-                    "tool_catalog.{}.session_catalog_composition",
-                    active.variant
-                ),
-            )
+        let mut state = self.state.lock_recover();
+        let Some(active) = state.as_mut() else {
+            return Ok(());
         };
-        probe.begin_named(&phase);
-        probe.end_named(&phase);
+        if active.session_id != session_id {
+            return Ok(());
+        }
+        match (active.observation_stage)() {
+            0 => {
+                active.setup_recomposition_count += 1;
+                return Ok(());
+            }
+            1 => {}
+            _ => return Ok(()),
+        }
+        active.recomposition_count += 1;
         Ok(())
     }
 
