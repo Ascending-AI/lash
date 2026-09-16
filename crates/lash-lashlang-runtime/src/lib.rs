@@ -449,11 +449,17 @@ pub fn lashlang_host_environment_from_tool_catalog(
     let mut resources = lashlang_resources_from_tool_catalog(catalog)?;
     resources.try_extend(host_resources)?;
     for (operation, host_operation) in [
-        ("now", "typescript.runtime.now"),
-        ("random", "typescript.runtime.random"),
+        (
+            lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+            "typescript.runtime.now",
+        ),
+        (
+            lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION,
+            "typescript.runtime.random",
+        ),
     ] {
         resources.add_module_operation_contract(
-            ["__typescript_runtime"],
+            [lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH],
             typescript_runtime::TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
             operation,
             host_operation,

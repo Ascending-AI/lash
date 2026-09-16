@@ -649,7 +649,7 @@ impl Lowerer {
             && !self.has_binding("Date")
         {
             return Ok(LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
-                "now",
+                crate::TYPESCRIPT_RUNTIME_NOW_OPERATION,
             ))));
         }
         if matches!(object, Expr::Ident(name, _) if name == "Math")
@@ -658,7 +658,7 @@ impl Lowerer {
             && !self.has_binding("Math")
         {
             return Ok(LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
-                "random",
+                crate::TYPESCRIPT_RUNTIME_RANDOM_OPERATION,
             ))));
         }
         let module_root = module_path(object).and_then(|path| path.first().cloned());

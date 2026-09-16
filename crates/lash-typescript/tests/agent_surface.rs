@@ -1202,12 +1202,19 @@ impl ExecutionHost for RuntimeValueHost {
                         "runtime receiver is not a resource",
                     ));
                 };
-                assert_eq!(receiver.resource_type.as_str(), "typescript.Runtime");
+                assert_eq!(
+                    receiver.resource_type.as_str(),
+                    lash_typescript::TYPESCRIPT_RUNTIME_RESOURCE_TYPE
+                );
                 assert_eq!(receiver.alias.as_str(), "builtin");
                 assert!(operation.args.is_empty());
                 match operation.operation.as_str() {
-                    "now" => Ok(AbilityResult::Value(Value::Number(1_723_456.0))),
-                    "random" => Ok(AbilityResult::Value(Value::Number(0.25))),
+                    lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION => {
+                        Ok(AbilityResult::Value(Value::Number(1_723_456.0)))
+                    }
+                    lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION => {
+                        Ok(AbilityResult::Value(Value::Number(0.25)))
+                    }
                     other => Err(ExecutionHostError::new(format!(
                         "unexpected runtime operation {other}"
                     ))),
@@ -2268,7 +2275,10 @@ fn math_random_draws_replay_from_the_journal_in_order() {
         async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
             match op {
                 AbilityOp::ResourceOperation(operation) => {
-                    assert_eq!(operation.operation.as_str(), "random");
+                    assert_eq!(
+                        operation.operation.as_str(),
+                        lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION
+                    );
                     let mut cursor = self.served.lock().expect("journal cursor");
                     let value = *self
                         .recorded

@@ -1381,7 +1381,9 @@ impl Lowerer {
                 name: "__typescript_heap_new".into(),
                 args: vec![
                     LashExpr::String("Date".into()),
-                    LashExpr::ResultUnwrap(Box::new(journaled_runtime_call("now"))),
+                    LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
+                        crate::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+                    ))),
                 ],
             });
         }
