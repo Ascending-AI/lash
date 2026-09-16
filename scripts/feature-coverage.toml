@@ -211,6 +211,11 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "rlm", "--locked"],
+  # Executed, not just compiled: the default build's own test suite is the
+  # evidence that the feature-gated arms did not take the default behaviour
+  # with them. This was the `default-off-tests` leg of the retired
+  # `Runtime feature boundary` matrix.
+  ["cargo", "test", "-p", "lash-runtime", "--no-default-features", "--locked"],
 ]
 
 [[lane]]

@@ -57,3 +57,51 @@ filegroup(
     name = "package_files",
     srcs = glob(["**"], exclude = ["BUILD", "BUILD.bazel"]),
 )
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/bazel/feature_variants.py.
+load(
+    "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_library",
+)
+
+lash_rust_feature_library(
+    name = "lash-s3-store__fv_734ce415",
+    build_script = None,
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_s3_store",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-s3-store",
+    package_name = "lash-internal-s3-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_44735e5c", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-s3-store__fv_8c08faee",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_s3_store",
+    declared_features = [
+        "testing",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-s3-store",
+    package_name = "lash-internal-s3-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_44735e5c", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930"},
+    version = "0.0.0-dev",
+)

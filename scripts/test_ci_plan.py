@@ -776,7 +776,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
 
 
 class QueueRequiredCompileLaneTests(unittest.TestCase):
-    """The three dedicated compile lanes must witness every queued head.
+    """The dedicated compile lane must witness every queued head.
 
     FIG-2854. The job IDs, the workflow condition and the docs-only
     expectation are spelled out by hand here rather than derived from
@@ -784,7 +784,11 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
     out of the set under test still passes after someone empties the set.
     """
 
-    JOBS = ("lashlang-git-consumer", "package-feature-checks", "runtime-feature-boundary")
+    # `package-feature-checks` and `runtime-feature-boundary` were two more of
+    # these. Their lanes are now compiled by `feature-lanes`, which runs on
+    # pull requests as well, so it is gated like the rest of the Rust family
+    # rather than pinned to the queue.
+    JOBS = ("lashlang-git-consumer",)
     CONDITION = (
         "(github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true'))"
         " || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')"

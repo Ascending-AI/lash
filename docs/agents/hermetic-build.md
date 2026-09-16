@@ -237,21 +237,44 @@ binary, the two `lash-sim` cross-backend binaries, the `lash-runtime` trybuild
 binary, and three workflow-graph frontend binaries. Use the existing Cargo
 recipes for these correctness contracts:
 
-- `scripts/check_feature_coverage.py` and the explicit no-default-feature
-  commands own feature-combination coverage. Cargo-required targets omitted
-  from the resolved default graph are recorded with `cargo-feature-gate` in
-  `tools/bazel/target-inventory.json`. Neither moves to the pool. `crate.from_cargo`
-  in `MODULE.bazel` pins `@crates` from one `//:Cargo.toml` + `//:Cargo.lock`
-  resolution, so a second generated universe could set `crate_features` on
-  first-party targets but not re-resolve third-party feature flags; the
-  `Runtime feature boundary` lanes would compile a graph Cargo never builds and
-  the `>= 130` test-count assertion would be measured against it. The
-  `Package feature check` lanes are worse still: their proof is the
-  `compiler-artifact` feature set parsed out of `cargo --message-format=json`
-  plus `cargo tree` resolver witnesses, which has no Bazel equivalent that is
-  not a rewrite of the coverage semantics. `dependency-boundary` (21 s of
-  `cargo tree`) is the cheap lane and already the one that enforces the
-  RLM/Lashlang boundary.
+- `scripts/check_feature_coverage.py` still owns feature-combination coverage,
+  but its lane *commands* no longer run as Cargo legs on a runner. This
+  paragraph used to rule the opposite way, and the ruling was wrong. It rested
+  on the claim that Bazel cannot express a per-command feature resolution; it
+  can. `all_crate_deps()` returns first-party labels, `aliases()` maps them to
+  extern crate names, and a variant target may substitute both, so
+  `tools/bazel/generate_build_files.py` emits one target per distinct
+  `(package, resolved feature set, Cargo target kind)` unit of every lane
+  command, with first-party variants depending on first-party variants.
+  `tools/bazel/feature_variants.py` reimplements Cargo's resolver v2 over
+  `cargo metadata --locked` to compute those sets. Two reconciliations keep it
+  honest: `generate_build_files.py --check` compares the unit SET against
+  Cargo's own target tables, and `--verify-resolution` re-derives every
+  distinct lane request with `cargo tree` and diffs the feature sets
+  (`cargo check --unit-graph` would answer both at once, but it is nightly-only
+  and this repo builds on stable). `scripts/check_feature_coverage.py check`
+  additionally refuses a lane with no Bazel target, so the coverage plan and
+  the lane graph cannot drift apart.
+
+  The limitation that survives is third-party: `crate.from_cargo` in
+  `MODULE.bazel` pins `@crates` from one `//:Cargo.toml` + `//:Cargo.lock`
+  resolution, so a variant sets `crate_features` on first-party targets but
+  links third-party crates at the workspace feature union. The union is a
+  superset, so a variant compiles against at least the third-party API Cargo
+  would offer it; what a variant cannot catch is first-party code that only
+  compiles because a third-party feature the workspace enables elsewhere is on.
+  Optional third-party crates a variant's features turn on and the workspace
+  never enables are named outright from `Cargo.lock` (`extra_deps`), because
+  `all_crate_deps()` reports only the workspace resolution. Untrusted pull
+  requests keep the Cargo matrix exactly as it was, which is where a real
+  third-party feature divergence would still surface.
+
+  Cargo-required targets omitted from the resolved default graph are still
+  recorded with `cargo-feature-gate` in `tools/bazel/target-inventory.json`.
+  The `dependency-boundary` check (21 s of `cargo tree`, no compilation) moved
+  to `repo-gates`; the `>= 130` default-off test-count floor is
+  `FEATURE_LANE_TEST_FLOORS`, held by `scripts/ci/check_feature_lane_test_floors.py`
+  against the pool-built test binary.
 - The `lash-runtime` `ui` target owns trybuild compile-fail fixtures and their
   nested Cargo target cache.
 - nextest profiles own workspace filtering, retries, and scheduling; the

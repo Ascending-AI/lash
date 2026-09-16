@@ -128,6 +128,7 @@ class FeatureCoverageContractTests(unittest.TestCase):
                 (str(fixture_bin), self.fixture_env.get("PATH", ""))
             )
         self.write_plan()
+        self.write_lane_table()
         (self.root / ".github" / "workflows" / "ci.yml").write_text(
             textwrap.dedent(
                 """
@@ -142,26 +143,25 @@ class FeatureCoverageContractTests(unittest.TestCase):
 
                   repo-gates:
                     steps:
+                      - name: Reconcile feature-lane resolution against Cargo
+                        run: python3 tools/bazel/generate_build_files.py --verify-resolution
                       - name: Test repository scripts
                         run: |
                           python3 scripts/test_check_feature_coverage.py
                           python3 scripts/check_feature_coverage.py check
 
-                  package-feature-checks:
-                    if: github.event_name == 'merge_group'
-                    strategy:
-                      matrix:
-                        include:
-                          - lane: member-testing
-                            command: python3 scripts/check_feature_coverage.py run member-testing
+                  feature-lanes:
+                    if: needs.plan.outputs.bazel_trusted == 'true'
                     steps:
-                      - name: Run exact package feature graph
-                        run: ${{ matrix.command }}
+                      - name: Compile every feature lane
+                        run: bazel build //:feature_lanes
+                      - name: Run the executable feature lanes
+                        run: bazel test //:feature_lane_tests
 
                   ci-conclusion:
                     needs:
                       - check
-                      - package-feature-checks
+                      - feature-lanes
                 """
             ),
             encoding="utf-8",
@@ -169,6 +169,16 @@ class FeatureCoverageContractTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
+
+    def write_lane_table(self, lanes: dict | None = None) -> None:
+        """The generated lane -> Bazel label table the contract reads."""
+        if lanes is None:
+            lanes = {"member-testing": ["//member:member__fv_00000000"]}
+        directory = self.root / "tools" / "bazel"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "feature_lanes.bzl").write_text(
+            "FEATURE_LANES = " + repr(lanes) + "\n", encoding="utf-8"
+        )
 
     def write_plan(self, *, commands: bool = True) -> None:
         command = (
@@ -379,17 +389,36 @@ class FeatureCoverageContractTests(unittest.TestCase):
         self.assertIn("command may not use --all-features", result.stdout)
         self.assertIn("lacks an exact OFF command for member/testing", result.stdout)
 
-    def test_ci_must_execute_the_matrix_command(self) -> None:
+    def test_ci_must_build_the_lane_aggregate(self) -> None:
         workflow = self.root / ".github" / "workflows" / "ci.yml"
         workflow.write_text(
             workflow.read_text(encoding="utf-8").replace(
-                "run: ${{ matrix.command }}", "run: true"
+                "bazel build //:feature_lanes", "true"
             ),
             encoding="utf-8",
         )
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not execute matrix.command", result.stdout)
+        self.assertIn("does not build //:feature_lanes", result.stdout)
+
+    def test_a_lane_without_bazel_targets_fails(self) -> None:
+        self.write_lane_table({"member-testing": []})
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "coverage lane has no Bazel targets: member-testing", result.stdout
+        )
+
+    def test_run_refuses_a_lane_without_bazel_targets(self) -> None:
+        # `run` validates the whole contract before it executes a command, so a
+        # lane the pool no longer compiles fails the Cargo lane too rather than
+        # reporting a pass for a gate that is only half there.
+        self.write_lane_table({"member-testing": []})
+        result = self.run_lane()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "coverage lane has no Bazel targets: member-testing", result.stdout
+        )
 
     def test_arbitrary_unresolved_feature_fails(self) -> None:
         manifest = self.root / "member" / "Cargo.toml"
