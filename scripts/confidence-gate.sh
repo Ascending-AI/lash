@@ -172,6 +172,31 @@ fast_shards=(
 )
 SIM_SEARCH_MIN_SEEDS=4
 SIM_SEARCH_MIN_MAX_BOUNDARIES=256
+# Full-lane sim-search seeds across the nine `sim-search-<i>` shards, sized to
+# fit the 100-minute job cap instead of left at a number no shard has ever
+# reached: every shard of run 35091816279 was cancelled at exactly 100 minutes
+# without writing a search summary at all.
+#
+#   job cap                                        100 min
+#   - download shared build                        -19.5 min   (measured)
+#   - restore shared build                          -3.5 min   (measured)
+#   - checkout, toolchain, protoc                     -2 min
+#   = lane budget                                    75 min = 4500 s
+#
+# A shard runs the search twice, once as the search lane and once as the named
+# regression corpus below it, and the pair was measured end to end through this
+# script at 2000 max boundaries: 4 seeds per shard cost 552 s (143 s search +
+# 409 s corpus). Taking ~105 s of that as per-invocation setup leaves about
+# 112 s per seed per shard. Per-seed cost is not uniform -- the same binary run
+# over the first four seeds of an unsharded space cost 36 s/seed -- so this is
+# the expensive end of the measurement, deliberately.
+#
+#   27 seeds/shard -> 105 + 27*112 = 3129 s = 52 min, 70% of the lane budget
+#
+# 9 * 27 = 243. Every shard now records `shard_seconds` in sim/search.json:
+# re-pin this from the first completed run's measurement rather than from the
+# estimate above.
+SIM_SEARCH_FULL_SEEDS=243
 case "$lane" in
   fast) default_mutation_scope="none" ;;
   default|mutation) default_mutation_scope="targeted" ;;
@@ -1151,7 +1176,7 @@ run_sim_search_lane() {
       ;;
     full)
       search_profile="${LASH_SIM_SEARCH_PROFILE:-full-random}"
-      search_seeds="${LASH_SIM_FULL_SEEDS:-5000}"
+      search_seeds="${LASH_SIM_FULL_SEEDS:-$SIM_SEARCH_FULL_SEEDS}"
       search_max_boundaries="${LASH_SIM_FULL_MAX_BOUNDARIES:-2000}"
       ;;
   esac
@@ -1163,6 +1188,7 @@ run_sim_search_lane() {
   if [ -n "$search_salt" ]; then
     salt_args+=(--salt "$search_salt")
   fi
+  local search_started_at="$SECONDS"
   cargo run -p lash-sim --locked -- run \
     --out "$search_dir" \
     --profile "$search_profile" \
@@ -1171,11 +1197,16 @@ run_sim_search_lane() {
     --shard "$search_shard" \
     --mode search \
     "${salt_args[@]}"
-  python3 - "${search_dir}/summary.json" "${out_dir}/sim/search.json" "$search_max_boundaries" "$SIM_SEARCH_MIN_SEEDS" "$SIM_SEARCH_MIN_MAX_BOUNDARIES" <<'PY'
+  local search_seconds=$((SECONDS - search_started_at))
+  # The shard budget is sized from an estimate; record what this shard actually
+  # cost so the next run re-pins SIM_SEARCH_FULL_SEEDS from a measurement.
+  python3 - "${search_dir}/summary.json" "${out_dir}/sim/search.json" "$search_max_boundaries" "$SIM_SEARCH_MIN_SEEDS" "$SIM_SEARCH_MIN_MAX_BOUNDARIES" "$search_seconds" <<'PY'
 import json
 import sys
 
-summary_path, output_path, max_boundaries, min_seeds, min_max_boundaries = sys.argv[1:6]
+summary_path, output_path, max_boundaries, min_seeds, min_max_boundaries, search_seconds = (
+    sys.argv[1:7]
+)
 with open(summary_path, "r", encoding="utf-8") as handle:
     summary = json.load(handle)
 counts = summary.get("counts") or {}
@@ -1191,6 +1222,7 @@ artifact = {
     "configured_max_boundaries": int(max_boundaries),
     "required_min_seeds": min_seeds,
     "required_min_max_boundaries": min_max_boundaries,
+    "search_seconds": int(search_seconds),
     "summary_path": summary_path,
     "counts": {
         "generated_seeds": counts.get("generated_seeds"),
@@ -1235,6 +1267,7 @@ PY
 
   local corpus_dir="${out_dir}/sim-regression-${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
   step "Named simulation regression corpus (${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}, ${search_seeds} seeds, shard ${search_shard})"
+  local corpus_started_at="$SECONDS"
   cargo run -p lash-sim --locked -- run \
     --out "$corpus_dir" \
     --profile "$search_profile" \
@@ -1243,6 +1276,22 @@ PY
     --shard "$search_shard" \
     --mode search \
     --corpus "${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
+  local corpus_seconds=$((SECONDS - corpus_started_at))
+  # Both passes run the same seeds, so a shard costs the pair. Fold the second
+  # half in, so one artifact carries the whole lane's wall clock.
+  python3 - "${out_dir}/sim/search.json" "$corpus_seconds" <<'CORPUS_TIMING'
+import json
+import sys
+
+path, corpus_seconds = sys.argv[1:3]
+with open(path, "r", encoding="utf-8") as handle:
+    artifact = json.load(handle)
+artifact["corpus_seconds"] = int(corpus_seconds)
+artifact["shard_seconds"] = artifact["search_seconds"] + int(corpus_seconds)
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(artifact, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+CORPUS_TIMING
 }
 
 run_focused_sqlite_seed_tail_repro() {

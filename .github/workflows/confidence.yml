@@ -514,7 +514,13 @@ jobs:
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    # 49 mutants (7 smoke + 42 full). Run 35091816279 recorded 38 of them in
+    # the 77 minutes this job has after the 23 minutes it spends downloading
+    # and restoring the shared build, and was cancelled at the 100-minute cap
+    # with 11 left: 2.03 min/mutant, so the full set needs 99 min of work plus
+    # 23 min of fixed cost = 123 min. Five mutants hit the 180 s per-test cap,
+    # and a mutant set that shifts toward timeouts costs more, so 30% margin.
+    timeout-minutes: 160
     steps:
       - name: Check out repository
         env:
@@ -639,6 +645,10 @@ jobs:
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
+    # The cap is unchanged; the lane is sized to fit inside it instead. A shard
+    # spends 23 minutes downloading and restoring the shared build, leaving
+    # about 75 minutes for the two search passes. See SIM_SEARCH_FULL_SEEDS in
+    # scripts/confidence-gate.sh for the seed arithmetic.
     timeout-minutes: 100
     strategy:
       fail-fast: false
