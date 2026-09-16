@@ -16,14 +16,32 @@ import ci_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
-AGGREGATOR_ALLOWLIST = {"plan", "ci-conclusion"}
+# `CI conclusion` is the only required check on `main`, and `evaluate_conclusion`
+# reasons over a static job map that has to agree with `ci-conclusion`'s
+# `needs:`. A job that is dropped from both -- while its definition stays in
+# `ci.yml` and keeps running -- is consistent to the aggregator and invisible to
+# it, so `test_every_ci_job_is_registered_or_allowlisted` below is the only
+# thing that catches that partial removal. An entry here silences that guard for
+# one job permanently, so it carries the reason the job legitimately sits
+# outside the aggregator, and `AggregatorAllowlistTests` pins the membership
+# against a hand-written literal: appending to it is a deliberate, reviewed edit
+# rather than a one-word append nothing else sees (FIG-2824).
+AGGREGATOR_ALLOWLIST = {
+    # Structural: a job cannot appear in its own `needs:`, so the aggregator can
+    # never register itself. Its own failure is the required check failing.
+    "ci-conclusion": "the aggregator itself; a job cannot list itself in needs",
+}
 
 
-def unregistered_ci_jobs(workflow_source: str) -> set[str]:
+def unregistered_ci_jobs(
+    workflow_source: str, allowlist: dict[str, str] | None = None
+) -> set[str]:
     workflow = yaml.safe_load(workflow_source)
     jobs = workflow["jobs"]
     aggregator_needs = jobs["ci-conclusion"]["needs"]
-    return set(jobs) - set(aggregator_needs) - AGGREGATOR_ALLOWLIST
+    if allowlist is None:
+        allowlist = AGGREGATOR_ALLOWLIST
+    return set(jobs) - set(aggregator_needs) - set(allowlist)
 
 
 class ConfidenceConclusionTests(unittest.TestCase):
@@ -884,10 +902,79 @@ class WorkflowRegistrationTests(unittest.TestCase):
         )
         self.assertIn('--event "${GITHUB_EVENT_NAME}"', classify["run"])
 
+    def test_partial_removal_is_invisible_to_the_runtime_aggregator(self) -> None:
+        """The shape `unregistered_ci_jobs` is the sole guard against.
+
+        `lint` is dropped from `ci-conclusion`'s `needs:` and from the
+        aggregator's static job map -- the two halves a partial removal
+        touches -- while the job itself stays defined in `ci.yml` and keeps
+        running. `evaluate_conclusion` then sees a consistent map and reports
+        nothing even though `lint` failed; only the workflow-derived guard
+        notices that the job is still there. FIG-2824.
+        """
+        needs = successful_needs()
+        needs["lint"]["result"] = "failure"
+        self.assertTrue(any("lint" in problem for problem in ci_plan.evaluate_conclusion(needs)))
+
+        del needs["lint"]
+        with mock.patch.object(ci_plan, "UNGATED_JOBS", ci_plan.UNGATED_JOBS - {"lint"}):
+            self.assertEqual([], ci_plan.evaluate_conclusion(needs))
+
+        workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+        workflow["jobs"]["ci-conclusion"]["needs"] = [
+            job for job in workflow["jobs"]["ci-conclusion"]["needs"] if job != "lint"
+        ]
+        dropped = yaml.safe_dump(workflow)
+        self.assertEqual({"lint"}, unregistered_ci_jobs(dropped))
+        # And an appended exemption silences it, with nothing behind it. That is
+        # why the membership below is pinned rather than merely commented.
+        self.assertEqual(
+            set(),
+            unregistered_ci_jobs(dropped, {**AGGREGATOR_ALLOWLIST, "lint": "silenced"}),
+        )
+
     def test_rogue_job_is_caught(self) -> None:
         workflow_copy = CI_WORKFLOW.read_text(encoding="utf-8").rstrip()
         workflow_copy += "\n\n  rogue-job:\n    runs-on: ubuntu-latest\n"
         self.assertEqual({"rogue-job"}, unregistered_ci_jobs(workflow_copy))
+
+
+class AggregatorAllowlistTests(unittest.TestCase):
+    """FIG-2824. The exemption list is the escape hatch on the guard that covers
+    the one partial-removal shape `CI conclusion` cannot see, so it is pinned
+    exactly and every entry is justified.
+
+    The expected membership is written out by hand rather than read from
+    ``AGGREGATOR_ALLOWLIST``: a test that derives its expectation from the set
+    under test still passes after someone appends to that set.
+    """
+
+    def test_the_allowlist_is_exactly_the_aggregator_job(self) -> None:
+        self.assertEqual({"ci-conclusion"}, set(AGGREGATOR_ALLOWLIST))
+        for job, reason in AGGREGATOR_ALLOWLIST.items():
+            with self.subTest(job=job):
+                self.assertTrue(reason.strip(), f"{job} needs a stated reason")
+
+    def test_no_entry_exempts_a_job_the_aggregator_already_needs(self) -> None:
+        """An exemption for a registered job is dead weight that hides the very
+        shape it is listed for: drop that job from `needs:` later and the guard
+        stays quiet. `plan` sat here in exactly that state until FIG-2824."""
+        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        registered = set(jobs["ci-conclusion"]["needs"])
+        self.assertIn("plan", registered)
+        for job in AGGREGATOR_ALLOWLIST:
+            with self.subTest(job=job):
+                self.assertIn(job, jobs, f"{job} is allowlisted but not defined in ci.yml")
+                self.assertNotIn(
+                    job,
+                    registered,
+                    f"{job} is in ci-conclusion's needs; delete its exemption",
+                )
+
+    def test_the_aggregator_cannot_register_itself(self) -> None:
+        """The single entry's stated reason, asserted rather than trusted."""
+        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        self.assertNotIn("ci-conclusion", jobs["ci-conclusion"]["needs"])
 
 
 class QueueRequiredCompileLaneTests(unittest.TestCase):
