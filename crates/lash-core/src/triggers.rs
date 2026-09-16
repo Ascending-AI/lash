@@ -10,6 +10,8 @@ use crate::plugin::PluginError;
 mod memory;
 mod mutation;
 mod router;
+#[cfg(test)]
+mod tests;
 
 pub use memory::InMemoryTriggerStore;
 #[cfg(any(test, feature = "testing"))]
@@ -826,6 +828,111 @@ impl TriggerOwnerScope {
     }
 }
 
+/// The durable lifecycle of one trigger subscription.
+///
+/// Three states, one carrier. The tombstone's deletion time lives in the only
+/// variant where it means anything, so a tombstone without a time — and a time
+/// without a tombstone — is unrepresentable in the type, in both backends'
+/// column pair, and in the wire tag simultaneously. Mirrors
+/// [`crate::process_registry::ProcessDefinitionLifecycle`], the sibling
+/// registry that already carries its lifecycle this way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "lifecycle",
+    content = "deleted_at_ms",
+    rename_all = "snake_case"
+)]
+pub enum TriggerSubscriptionLifecycle {
+    /// Live and routable: the router delivers matching occurrences.
+    Enabled,
+    /// Live but not routable: the subscription is retained and revisionable,
+    /// and an `Enable` returns it to service.
+    Disabled,
+    /// Fenced: the key stays unique on the owner scope, no consumer resolves
+    /// it, and only `Revive` brings it back under a new incarnation. The
+    /// payload is when the tombstone was taken, and it is carried flat as the
+    /// `deleted_at_ms` content so the JSON is isomorphic to the two backend
+    /// columns the paired-nullable CHECK policies.
+    Tombstoned(u64),
+}
+
+impl TriggerSubscriptionLifecycle {
+    /// Whether the router may deliver an occurrence to a record in this state.
+    pub fn routable(&self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+
+    /// Whether the key is fenced behind a tombstone.
+    pub fn is_tombstoned(&self) -> bool {
+        matches!(self, Self::Tombstoned { .. })
+    }
+
+    /// The host-facing enabled flag: `Enabled` alone, never a tombstone.
+    pub fn enabled(&self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+
+    /// When the tombstone was taken, for the tombstoned state only.
+    pub fn deleted_at_ms(&self) -> Option<u64> {
+        match self {
+            Self::Tombstoned(deleted_at_ms) => Some(*deleted_at_ms),
+            Self::Enabled | Self::Disabled => None,
+        }
+    }
+
+    /// The durable column vocabulary both backends store and `CHECK`.
+    pub fn as_column(&self) -> &'static str {
+        match self {
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+            Self::Tombstoned { .. } => "tombstoned",
+        }
+    }
+
+    /// Rebuilds a lifecycle from the backend column pair, refusing every
+    /// combination the `CHECK` constraints forbid.
+    pub fn from_columns(
+        lifecycle: &str,
+        deleted_at_ms: Option<u64>,
+    ) -> Result<Self, TriggerLifecycleColumnError> {
+        match (lifecycle, deleted_at_ms) {
+            ("enabled", None) => Ok(Self::Enabled),
+            ("disabled", None) => Ok(Self::Disabled),
+            ("tombstoned", Some(deleted_at_ms)) => Ok(Self::Tombstoned(deleted_at_ms)),
+            ("enabled" | "disabled" | "tombstoned", _) => {
+                Err(TriggerLifecycleColumnError::MispairedDeletedAt {
+                    lifecycle: lifecycle.to_string(),
+                    deleted_at_ms,
+                })
+            }
+            _ => Err(TriggerLifecycleColumnError::UnknownLifecycle {
+                lifecycle: lifecycle.to_string(),
+            }),
+        }
+    }
+}
+
+/// Why a stored trigger-subscription lifecycle column pair is not a lifecycle.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum TriggerLifecycleColumnError {
+    /// The column holds a word outside the stored vocabulary.
+    #[error("unknown trigger subscription lifecycle {lifecycle:?}")]
+    UnknownLifecycle {
+        /// The refused column value.
+        lifecycle: String,
+    },
+    /// The deletion timestamp disagrees with the lifecycle it is paired with.
+    #[error(
+        "trigger subscription lifecycle {lifecycle:?} cannot carry deleted_at_ms {deleted_at_ms:?}"
+    )]
+    MispairedDeletedAt {
+        /// The lifecycle column value.
+        lifecycle: String,
+        /// The deletion timestamp column value.
+        deleted_at_ms: Option<u64>,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerSubscriptionRecord {
     pub subscription_id: String,
@@ -856,17 +963,38 @@ pub struct TriggerSubscriptionRecord {
     pub input_template: BTreeMap<String, TriggerInputBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_label: Option<String>,
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
-    #[serde(default)]
-    pub tombstoned: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deleted_at_ms: Option<u64>,
+    /// The one lifecycle fact this row carries (FIG-1951). Replaces the
+    /// `enabled`/`tombstoned`/`deleted_at_ms` triple, whose eight
+    /// representable combinations spelled three legal states.
+    pub lifecycle: TriggerSubscriptionLifecycle,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
 }
 
 impl TriggerSubscriptionRecord {
+    /// Whether the router may deliver an occurrence to this subscription.
+    ///
+    /// The single liveness predicate: before FIG-1951 the same
+    /// `enabled && !tombstoned` conjunction was spelled once in the router and
+    /// once in each store's SQL.
+    pub fn routable(&self) -> bool {
+        self.lifecycle.routable()
+    }
+
+    /// Whether the subscription key is fenced and needs a revive to return.
+    pub fn is_tombstoned(&self) -> bool {
+        self.lifecycle.is_tombstoned()
+    }
+
+    /// Takes the tombstone at `now`.
+    ///
+    /// The single tombstone transition: before FIG-1951 four call sites wrote
+    /// the three fields by hand, and one of them set three fields on the
+    /// record while its SQL `UPDATE` set two.
+    pub fn tombstone(&mut self, now: u64) {
+        self.lifecycle = TriggerSubscriptionLifecycle::Tombstoned(now);
+    }
+
     /// Projects the canonical owner namespace for trigger-store implementors filtering records
     /// across session, host, and platform registrants.
     pub fn registrant_scope_id(&self) -> String {
@@ -897,7 +1025,7 @@ impl From<&TriggerSubscriptionRecord> for TriggerRegistration {
                 input: route.target.clone(),
                 inputs: route.input_template.clone(),
             },
-            enabled: route.enabled,
+            enabled: route.lifecycle.enabled(),
         }
     }
 }
@@ -967,8 +1095,10 @@ impl TriggerSubscriptionFilter {
                 .source_key
                 .as_deref()
                 .is_none_or(|source_key| record.source_key == source_key)
-            && self.enabled.is_none_or(|enabled| record.enabled == enabled)
-            && !record.tombstoned
+            && self
+                .enabled
+                .is_none_or(|enabled| record.lifecycle.enabled() == enabled)
+            && !record.is_tombstoned()
             && self.target.as_ref().is_none_or(|target| {
                 record
                     .target_identity
@@ -1013,7 +1143,7 @@ impl TriggerMutationReceipt {
             incarnation: record.incarnation.clone(),
             revision: record.revision,
             definition_fingerprint: record.definition_fingerprint.clone(),
-            enabled: record.enabled,
+            enabled: record.lifecycle.enabled(),
             disposition,
             record_snapshot: record,
         }
@@ -1340,7 +1470,7 @@ pub fn evaluate_trigger_prune(
     let mut receipts = Vec::new();
     for record in records {
         if record.owner_scope != owner_scope
-            || record.tombstoned
+            || record.is_tombstoned()
             || !requested.contains(&record.subscription_key)
         {
             continue;
@@ -1657,45 +1787,6 @@ impl crate::store::MaintenanceReport for TriggerOccurrenceReclamationReport {
             crate::store::MaintenanceSweep::NothingToDo
         }
     }
-}
-
-#[cfg(test)]
-#[test]
-fn raced_occurrence_delete_requires_reinspection_instead_of_claiming_emptiness() {
-    let report = TriggerOccurrenceReclamationReport {
-        inspected_occurrence_count: 1,
-        reinspection_deferred_count: 1,
-        ..TriggerOccurrenceReclamationReport::default()
-    };
-
-    assert_eq!(
-        crate::store::MaintenanceReport::sweep(&report),
-        crate::store::MaintenanceSweep::Incomplete
-    );
-    assert_eq!(
-        report.reclaimed_occurrence_count
-            + report.live_fan_out_count
-            + report.grace_deferred_count
-            + report.reinspection_deferred_count
-            + report.audit_retained_count,
-        report.inspected_occurrence_count
-    );
-}
-
-#[cfg(test)]
-#[test]
-fn retained_audit_rows_are_not_a_blocker_in_the_reclamation_sweep() {
-    let report = TriggerOccurrenceReclamationReport {
-        inspected_occurrence_count: 1,
-        audit_retained_count: 1,
-        ..TriggerOccurrenceReclamationReport::default()
-    };
-
-    assert_eq!(
-        crate::store::MaintenanceReport::sweep(&report),
-        crate::store::MaintenanceSweep::NothingToDo,
-        "durable audit history is not stuck fan-out and must not report an incomplete sweep"
-    );
 }
 
 /// A trigger-occurrence reclaim pass either completes with its counters or

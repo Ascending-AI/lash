@@ -118,3 +118,40 @@ reject-and-recreate cutover: the store schema versions, the remote protocol wind
 artifact host requirements, the durable-read fixture and the trigger definition fingerprint
 family all move together, and a pre-capture row is refused at decode rather than defaulted
 into a contract nobody ever admitted. There is no shim and no automatic store reset.
+
+## Amendment: a subscription's lifecycle is one enum, and its target label is presentation
+
+A subscription spelled its lifecycle as an `enabled` flag, a `tombstoned` flag and an
+optional `deleted_at_ms` — eight representable combinations for a three-state fact, with
+five of them meaningless and none of them checked. A routable tombstone was representable,
+so was a tombstone with no deletion time and a deletion time with no tombstone. The
+deletion timestamp had eleven writers and no readers, and lived only inside `record_json`,
+so neither backend could even see it. The routing decision — `enabled && !tombstoned` — was
+spelled once in the router and once in each backend's SQL, the tombstone transition was
+hand-written at four sites, and one of those four set three fields on the record while its
+`UPDATE` set two.
+
+The lifecycle is therefore one enum at every layer: `Enabled | Disabled | Tombstoned`, with
+the deletion time carried inside the only variant where it means anything. Both backends
+store it as one `lifecycle` column over that vocabulary plus a nullable `deleted_at_ms`,
+paired by a `CHECK` so a tombstone without a time and a live row with one are both
+unwritable; the source routing index is re-cut on `lifecycle`. The wire carries the same
+tagged enum, so a peer asserting one of the five invalid combinations is refused at decode
+rather than converted into a core record unchallenged. One `tombstone()` transition and one
+`routable()` predicate replace the four hand-written transitions and the three spellings of
+the conjunction.
+
+This reshapes existing durable data rather than adding new data, and no `deleted_at_ms`
+column existed to migrate from, so it lands as a reject-and-recreate cutover on the same
+terms as the capture above: both store schema versions, the remote protocol window and the
+durable-read fixture move together, and a pre-cutover row is refused at open rather than
+defaulted into a lifecycle nobody wrote.
+
+The same change retires a rule that had already been withdrawn one layer down. A
+subscription's `target_label` is host-facing presentation, not a second spelling of
+`target_identity.label`; core stopped enforcing agreement between them when the label became
+presentation-only, but the remote protocol kept refusing a record whose two labels differed.
+A host could therefore persist a subscription it could neither export to a peer nor import
+back, and the repository held two tests asserting opposite rules on the same input. The wire
+now follows its owner: the labels are independent, and the wire validator says nothing about
+their relationship.

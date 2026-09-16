@@ -673,13 +673,14 @@ pub use tool_result::{
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
     TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
-    TriggerEventCatalog, TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome,
-    TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceOutcome,
-    TriggerOccurrenceReclamationReport, TriggerOccurrenceReclamationResult,
-    TriggerOccurrenceRecord, TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope,
-    TriggerProviderRoute, TriggerRetentionReconciliationReport, TriggerRouteRefusal,
-    TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft,
-    TriggerSubscriptionFilter, TriggerSubscriptionRecord, admit_trigger_registration_target,
+    TriggerEventCatalog, TriggerIngressReceipt, TriggerInputBinding, TriggerLifecycleColumnError,
+    TriggerMutationOutcome, TriggerMutationReceipt, TriggerOccurrenceFilter,
+    TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
+    TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
+    TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
+    TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestorer,
+    TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
+    TriggerSubscriptionLifecycle, TriggerSubscriptionRecord, admit_trigger_registration_target,
 };
 
 pub(crate) mod facade_ops {}

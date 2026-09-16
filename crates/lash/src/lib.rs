@@ -165,11 +165,11 @@ pub mod triggers {
         TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
         TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestorer,
         TriggerSourceCapture, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-        TriggerSubscriptionRecord, facade_support::TriggerDeliveryEmitOutcome,
-        facade_support::TriggerDeliveryEmitReceipt, facade_support::TriggerEmitReport,
-        facade_support::TriggerEvent, facade_support::TriggerEventType,
-        facade_support::TriggerRegistration, facade_support::TriggerTarget,
-        facade_support::empty_trigger_source_key,
+        TriggerSubscriptionLifecycle, TriggerSubscriptionRecord,
+        facade_support::TriggerDeliveryEmitOutcome, facade_support::TriggerDeliveryEmitReceipt,
+        facade_support::TriggerEmitReport, facade_support::TriggerEvent,
+        facade_support::TriggerEventType, facade_support::TriggerRegistration,
+        facade_support::TriggerTarget, facade_support::empty_trigger_source_key,
     };
     /// The fenced, receipted verb vocabulary for subscription mutation,
     /// including [`TriggerCommand::Enable`] for re-enable, executed by
@@ -630,7 +630,8 @@ pub mod remote {
             RemoteTriggerProviderRoute, RemoteTriggerRegisterSubscriptionReceipt,
             RemoteTriggerRegisterSubscriptionRequest, RemoteTriggerRegistration,
             RemoteTriggerSourceCapture, RemoteTriggerSubscriptionDraft,
-            RemoteTriggerSubscriptionFilter, RemoteTriggerSubscriptionRecord, RemoteTriggerTarget,
+            RemoteTriggerSubscriptionFilter, RemoteTriggerSubscriptionLifecycle,
+            RemoteTriggerSubscriptionRecord, RemoteTriggerSubscriptionSpec, RemoteTriggerTarget,
         };
     }
 

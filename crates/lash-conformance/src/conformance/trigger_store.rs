@@ -347,7 +347,7 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
         revision_command(&SessionId::from(SESSION), KEY, created.revision, "delete"),
     )
     .await;
-    assert!(deleted.record_snapshot.tombstoned);
+    assert!(deleted.record_snapshot.is_tombstoned());
 
     let blocked = store
         .reconcile_trigger_retention(&[], &[SessionId::from(SESSION.to_string())])
@@ -883,7 +883,7 @@ async fn committed_mutation_receipt_survives_later_revision(store: Arc<dyn crate
         .await
         .unwrap();
     assert_eq!(current[0].revision, 3);
-    assert!(!current[0].enabled);
+    assert!(!current[0].lifecycle.enabled());
 }
 
 #[expect(
@@ -1345,7 +1345,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     };
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].revision, 2);
-    assert!(!records[0].enabled);
+    assert!(!records[0].lifecycle.enabled());
 
     let reenabled = mutate(
         &store,
@@ -1364,8 +1364,10 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
     );
     assert_eq!(reenabled.revision, 3);
     assert!(reenabled.enabled);
-    assert!(reenabled.record_snapshot.enabled);
-    assert!(!reenabled.record_snapshot.tombstoned);
+    assert_eq!(
+        reenabled.record_snapshot.lifecycle,
+        crate::TriggerSubscriptionLifecycle::Enabled
+    );
     assert_eq!(reenabled.subscription_id, registered.subscription_id);
     assert_eq!(reenabled.incarnation, registered.incarnation);
     assert_eq!(
@@ -1379,7 +1381,7 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
         .unwrap();
     assert_eq!(live.len(), 1);
     assert_eq!(live[0].revision, 3);
-    assert!(live[0].enabled);
+    assert!(live[0].lifecycle.enabled());
 
     // Delivery resumes for occurrences emitted after the re-enable.
     let delivered = store
@@ -1415,7 +1417,8 @@ async fn register_disable_reenable_roundtrip_is_fenced_and_receipted(
             .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))
             .await
             .unwrap()[0]
-            .enabled,
+            .lifecycle
+            .enabled(),
         "receipt replay must not re-apply the mutation"
     );
 }
@@ -1446,7 +1449,7 @@ async fn delete_tombstones_preserves_history_and_revive_changes_incarnation(
         revision_command(&SessionId::from("session-a"), key, 1, "delete"),
     )
     .await;
-    assert!(deleted.record_snapshot.tombstoned);
+    assert!(deleted.record_snapshot.is_tombstoned());
     assert!(
         store
             .list_subscriptions(crate::TriggerSubscriptionFilter::for_session("session-a"))

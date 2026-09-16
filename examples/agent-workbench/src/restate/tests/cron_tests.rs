@@ -287,9 +287,11 @@ fn fig1067_cron_registration(
         event_types: Vec::new(),
         input_template: std::collections::BTreeMap::new(),
         target_label: None,
-        enabled,
-        tombstoned: false,
-        deleted_at_ms: None,
+        lifecycle: if enabled {
+            lash::triggers::TriggerSubscriptionLifecycle::Enabled
+        } else {
+            lash::triggers::TriggerSubscriptionLifecycle::Disabled
+        },
         created_at_ms: 1,
         updated_at_ms: 1,
     };
@@ -859,7 +861,10 @@ async fn a_failed_disable_sync_still_traces_the_committed_mutation() {
     )
     .await
     .expect("read durable trigger");
-    assert!(!durable[0].enabled, "disable must remain committed");
+    assert!(
+        !durable[0].lifecycle.enabled(),
+        "disable must remain committed"
+    );
     assert!(
         std::fs::read_to_string(trace_path)
             .expect("read failed-disable trace")

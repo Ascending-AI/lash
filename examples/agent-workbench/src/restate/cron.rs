@@ -184,7 +184,7 @@ pub(super) async fn cron_registration_disposition(
         .map_err(classified_plugin_handler_error)?;
     if registrations
         .iter()
-        .any(|registration| registration.enabled)
+        .any(|registration| registration.lifecycle.enabled())
     {
         Ok(CronRegistrationDisposition::Enabled)
     } else if registrations.is_empty() {

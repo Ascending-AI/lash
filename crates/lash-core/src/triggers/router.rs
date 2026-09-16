@@ -380,8 +380,7 @@ pub(super) fn reserve_in_memory_for_occurrence(
         .subscriptions
         .values()
         .filter(|record| {
-            record.enabled
-                && !record.tombstoned
+            record.routable()
                 && record.source_type == occurrence.source_type
                 && record.source_key == occurrence.source_key
                 && occurrence

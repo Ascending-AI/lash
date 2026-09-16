@@ -1054,12 +1054,13 @@ CREATE TABLE IF NOT EXISTS trigger_subscriptions (
     definition_fingerprint      TEXT NOT NULL,
     source_type          TEXT NOT NULL,
     source_key           TEXT NOT NULL,
-    enabled              INTEGER NOT NULL,
-    tombstoned           INTEGER NOT NULL,
+    lifecycle            TEXT NOT NULL,
+    deleted_at_ms        INTEGER,
     created_at_ms        INTEGER NOT NULL,
     updated_at_ms        INTEGER NOT NULL,
     record_json          TEXT NOT NULL,
-    CONSTRAINT ck_trigger_subscriptions_live_enabled CHECK (NOT (enabled AND tombstoned)),
+    CONSTRAINT ck_trigger_subscriptions_lifecycle CHECK (lifecycle IN ('enabled', 'disabled', 'tombstoned')),
+    CONSTRAINT ck_trigger_subscriptions_lifecycle_deleted_at CHECK ((lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)),
     UNIQUE(owner_scope, subscription_key)
 );
 
@@ -1067,7 +1068,7 @@ CREATE INDEX IF NOT EXISTS idx_trigger_subscriptions_registrant
     ON trigger_subscriptions(owner_scope, subscription_key);
 
 CREATE INDEX IF NOT EXISTS idx_trigger_subscriptions_source
-    ON trigger_subscriptions(source_type, source_key, enabled);
+    ON trigger_subscriptions(source_type, source_key, lifecycle);
 
 CREATE TABLE IF NOT EXISTS trigger_occurrences (
     occurrence_id    TEXT PRIMARY KEY,
@@ -1120,8 +1121,12 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // Version 6 durably arms occurrence reclaim eligibility at fan-out terminality.
 // Version 7 switches durable trigger identities to domain-tagged BLAKE3.
 // Version 8 prevents a tombstoned trigger subscription from remaining enabled.
-// Existing trigger stores are rejected rather than migrated.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 8;
+// Version 9 (FIG-1951) replaces the `enabled`/`tombstoned` boolean pair with
+// one `lifecycle` column over `enabled`/`disabled`/`tombstoned` and a
+// `deleted_at_ms` column paired to it by CHECK, so the three legal states are
+// the only representable ones and the deletion time stops living solely inside
+// `record_json`. Existing trigger stores are rejected rather than migrated.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 9;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
@@ -1796,13 +1801,37 @@ mod check_constraint_tests {
             &triggers,
             "INSERT INTO trigger_subscriptions (
                  subscription_id, owner_scope, subscription_key, incarnation, revision,
-                 definition_fingerprint, source_type, source_key, enabled, tombstoned,
+                 definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
                  created_at_ms, updated_at_ms, record_json
              ) VALUES (
-                 'bad-pair', 'owner', 'key', 'incarnation', 1, 'fingerprint',
-                 'source', 'key', 1, 1, 0, 0, '{}'
+                 'bad-vocabulary', 'owner', 'key', 'incarnation', 1, 'fingerprint',
+                 'source', 'key', 'archived', NULL, 0, 0, '{}'
              )",
-            "ck_trigger_subscriptions_live_enabled",
+            "ck_trigger_subscriptions_lifecycle",
+        );
+        assert_check_rejects(
+            &triggers,
+            "INSERT INTO trigger_subscriptions (
+                 subscription_id, owner_scope, subscription_key, incarnation, revision,
+                 definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
+                 created_at_ms, updated_at_ms, record_json
+             ) VALUES (
+                 'tombstone-without-time', 'owner', 'key', 'incarnation', 1, 'fingerprint',
+                 'source', 'key', 'tombstoned', NULL, 0, 0, '{}'
+             )",
+            "ck_trigger_subscriptions_lifecycle_deleted_at",
+        );
+        assert_check_rejects(
+            &triggers,
+            "INSERT INTO trigger_subscriptions (
+                 subscription_id, owner_scope, subscription_key, incarnation, revision,
+                 definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
+                 created_at_ms, updated_at_ms, record_json
+             ) VALUES (
+                 'live-with-a-deletion-time', 'owner', 'key', 'incarnation', 1, 'fingerprint',
+                 'source', 'key', 'enabled', 7, 0, 0, '{}'
+             )",
+            "ck_trigger_subscriptions_lifecycle_deleted_at",
         );
 
         let effects = Connection::open_in_memory().expect("open effect constraint fixture");

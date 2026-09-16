@@ -364,7 +364,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // encoding -- so component 95 is rejected and recreated rather than migrated:
 // the resolved duration cannot be turned back into the deadline the guest
 // asked for.
-const SCHEMA_VERSION: i32 = 98;
+const SCHEMA_VERSION: i32 = 99;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
