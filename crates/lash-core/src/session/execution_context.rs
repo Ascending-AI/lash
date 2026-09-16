@@ -710,21 +710,43 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    pub(crate) async fn attach_captured_process_execution_env(
+    /// Resolves the execution environment a session-path process start hands
+    /// the journaled process-start command, publishing nothing.
+    ///
+    /// Publication belongs inside the replayable process effect (FIG-3050).
+    /// Publishing here would stage the artifact under
+    /// [`ArtifactOwner::process_start`](crate::ArtifactOwner::process_start)
+    /// *before* the start is journaled, and a replay of the same turn would
+    /// revisit that staging owner after the first attempt's start effect
+    /// transferred the artifact and permanently retired it — the divergence
+    /// FIG-3028 had to absorb with a retirement tolerance at this call site.
+    /// The spec instead rides
+    /// [`ProcessStartOptions::env_spec`](crate::ProcessStartOptions::env_spec)
+    /// into the command, and the executor publishes it under the journal.
+    ///
+    /// A start made *inside* a process execution inherits the reference its own
+    /// registration carries: those bytes are already published under a durable
+    /// owner, so that start stages nothing either and the executor protects the
+    /// recorded reference instead.
+    pub(crate) fn process_start_execution_env(
         &self,
         registration: crate::ProcessRegistration,
-    ) -> Result<crate::ProcessRegistration, crate::PluginError> {
+    ) -> (
+        crate::ProcessRegistration,
+        Option<crate::ProcessExecutionEnvSpec>,
+    ) {
         if registration.env_ref.is_some() {
-            return Ok(registration);
+            return (registration, None);
         }
         match registration.input.as_ref() {
             crate::ProcessInput::ToolCall { .. } | crate::ProcessInput::Engine { .. } => {
-                let owner = crate::ArtifactOwner::process_start(&registration.id);
-                let env_ref = self.staged_process_start_env_ref(&owner).await?;
-                Ok(registration.with_execution_env_ref(Some(env_ref)))
+                match self.inherited_process_execution_env_ref() {
+                    Some(env_ref) => (registration.with_execution_env_ref(Some(env_ref)), None),
+                    None => (registration, Some(self.execution_env_spec.clone())),
+                }
             }
             crate::ProcessInput::External { .. } | crate::ProcessInput::SessionTurn { .. } => {
-                Ok(registration)
+                (registration, None)
             }
         }
     }
@@ -732,10 +754,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// Exposes captured process execution env ref to protocol and process-engine implementors while
     /// executing code against the session runtime.
     ///
-    /// A retired owner fails here. Callers outside the process-start staging path publish under a
-    /// durable owner and then persist the reference (trigger registration keeps it in
-    /// `TriggerSubscriptionDraft::env_ref`), so a retirement must surface at publish time rather
-    /// than hand back a reference to bytes the fence already reclaimed.
+    /// A retired owner fails here. Every caller publishes under a durable owner and then persists
+    /// the reference (trigger registration keeps it in `TriggerSubscriptionDraft::env_ref`), so a
+    /// retirement must surface at publish time rather than hand back a reference to bytes the
+    /// fence already reclaimed. Process starts do not publish at all before their journal: they go
+    /// through [`Self::process_start_execution_env`].
     pub async fn captured_process_execution_env_ref(
         &self,
         owner: &crate::ArtifactOwner,
@@ -749,46 +772,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             &self.execution_env_spec,
         )
         .await
-    }
-
-    /// Stages the process execution environment for a process start under the start-scoped owner.
-    ///
-    /// The publish happens before the process-start effect is journaled, so a replay of the same
-    /// turn repeats it after the first attempt already retired that staging owner — the start
-    /// effect transfers the artifact to the process owner and then fences the staging owner, and
-    /// several cleanup paths retire it with no transfer at all. A retired staging owner is
-    /// therefore an expected replay outcome, and resolving it to the content-addressed reference
-    /// the publish would have produced keeps the process-start effect reachable and the journal on
-    /// the same command sequence.
-    ///
-    /// This does not hand a running process a reclaimed environment: both executors resolve the
-    /// reference through `get_process_execution_env` and fail closed when it dangles
-    /// (`crates/lash-restate/src/controller/process_command.rs` and
-    /// `crates/lash-core/src/runtime/effect/executor/process_local.rs`).
-    async fn staged_process_start_env_ref(
-        &self,
-        owner: &crate::ArtifactOwner,
-    ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
-        if let Some(env_ref) = self.inherited_process_execution_env_ref() {
-            return Ok(env_ref);
-        }
-        match crate::publish_process_execution_env(
-            self.process_env_store.as_ref(),
-            owner,
-            &self.execution_env_spec,
-        )
-        .await
-        {
-            Ok(env_ref) => Ok(env_ref),
-            Err(publish_error) if crate::artifact_owner_is_permanently_retired(&publish_error) => {
-                self.execution_env_spec.stable_ref().map_err(|error| {
-                    crate::PluginError::Session(format!(
-                        "failed to encode process execution environment: {error}"
-                    ))
-                })
-            }
-            Err(publish_error) => Err(publish_error),
-        }
     }
 
     fn inherited_process_execution_env_ref(&self) -> Option<crate::ProcessExecutionEnvRef> {
@@ -852,15 +835,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> crate::ToolInvocationReply {
         let _phase = self.named_phase("process.start_child");
         let registration = request.into_registration(None);
-        let registration = match self
-            .attach_captured_process_execution_env(registration)
-            .await
-        {
-            Ok(registration) => registration,
-            Err(err) => {
-                return crate::ToolInvocationReply::error(serde_json::json!(err.to_string()));
-            }
-        };
+        let (registration, env_spec) = self.process_start_execution_env(registration);
         let process_id = registration.id.clone();
         // The registry row, not the caller's pin, is the durable truth for a
         // child's attempt bound: a redrive that re-registers the same
@@ -880,7 +855,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             }
         };
         let mut options = crate::ProcessStartOptions::new()
-            .with_initial_observers(self.child_process_observers());
+            .with_initial_observers(self.child_process_observers())
+            .with_env_spec(env_spec);
         if let Some(spawn) = self.process_spawn_provenance() {
             options = options.with_spawn_provenance(spawn);
         }

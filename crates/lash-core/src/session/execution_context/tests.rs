@@ -179,19 +179,22 @@ fn test_execution_context_with_env_store(
     )
 }
 
-/// A process start is staged before the process-start effect is journaled, so a replayed turn
-/// repeats the staging publish after the first attempt already transferred the environment to
-/// the process owner and permanently retired the staging owner. The replay must still reach the
-/// journaled start command, so the retired staging owner resolves to the same content-addressed
-/// reference instead of failing the start.
+/// The session path publishes nothing before the process-start effect is journaled.
+///
+/// This is the FIG-3028 / #1390 regression, re-pointed at the journaled publish (FIG-3050).
+/// #1390 kept the pre-journal staging publish and taught it to tolerate the permanently retired
+/// staging owner a replay revisits; the spec now travels in the command instead, so there is no
+/// pre-journal artifact and no owner to revisit. The journaled publish keeps the tolerance, and
+/// `process_start_transfers_environment_and_replays_after_staging_retirement`
+/// (`runtime::effect::executor::process_local`) exercises it there.
 #[tokio::test]
-async fn process_start_staging_survives_a_retired_staging_owner_on_replay() {
+async fn a_session_path_process_start_publishes_no_environment_before_its_journal() {
     use crate::ProcessExecutionEnvStore;
 
     let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
     let context = test_execution_context_with_env_store(env_store.clone());
     let registration = crate::ProcessRegistration::new(
-        "replayed-process",
+        "journaled-process",
         crate::ProcessInput::Engine {
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"program": "probe"}),
@@ -200,36 +203,62 @@ async fn process_start_staging_survives_a_retired_staging_owner_on_replay() {
         crate::ProcessProvenance::host(),
         crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     );
-    let staging_owner = crate::ArtifactOwner::process_start(&registration.id);
 
-    let first = context
-        .attach_captured_process_execution_env(registration.clone())
-        .await
-        .expect("first attempt stages the execution environment");
-    let staged_ref = first.env_ref.clone().expect("staged env ref");
+    let (prepared, env_spec) = context.process_start_execution_env(registration);
+    assert_eq!(
+        prepared.env_ref, None,
+        "a session-path start must not carry a reference its journal has not produced"
+    );
+    let env_spec = env_spec.expect("the captured spec rides the process-start command");
+    let staged_ref = env_spec.stable_ref().expect("stable environment reference");
+    assert_eq!(
+        env_store
+            .get_process_execution_env(&staged_ref)
+            .await
+            .expect("read the environment store"),
+        None,
+        "nothing is published before the process-start effect runs"
+    );
+}
 
-    // The process-start effect transfers the staged artifact and fences the staging owner.
-    env_store
-        .transfer_process_execution_env(
-            &staging_owner,
-            &crate::ArtifactOwner::process(crate::ProcessRef::new(
-                registration.id.clone(),
-                crate::ProcessIncarnation::from_registration_sequence(1),
-            )),
-            &staged_ref,
-        )
-        .await
-        .expect("transfer to the process owner");
-    env_store
-        .retire_process_execution_env_owner(&staging_owner)
-        .await
-        .expect("retire the staging owner");
+/// A start made inside a process execution reuses the reference its own registration records.
+///
+/// Those bytes are already published under the parent's durable owner, so the child stages
+/// nothing and hands the executor the recorded reference rather than a fresh spec.
+#[tokio::test]
+async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
+    let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+    let inherited = crate::ProcessExecutionEnvRef::new("process-env:inherited");
+    let parent = crate::ProcessRegistration::new(
+        "parent-process",
+        crate::ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: serde_json::json!({"program": "parent"}),
+        },
+        crate::RecoveryContract::Rerunnable,
+        crate::ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+    )
+    .with_execution_env_ref(Some(inherited.clone()));
+    let context =
+        test_execution_context_with_env_store(env_store).with_process_execution(&parent, None);
 
-    let replayed = context
-        .attach_captured_process_execution_env(registration)
-        .await
-        .expect("replay still reaches the journaled process start");
-    assert_eq!(replayed.env_ref, Some(staged_ref));
+    let child = crate::ProcessRegistration::new(
+        "child-process",
+        crate::ProcessInput::Engine {
+            kind: "test-engine".to_string(),
+            payload: serde_json::json!({"program": "child"}),
+        },
+        crate::RecoveryContract::Rerunnable,
+        crate::ProcessProvenance::host(),
+        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+    );
+    let (prepared, env_spec) = context.process_start_execution_env(child);
+    assert_eq!(prepared.env_ref, Some(inherited));
+    assert!(
+        env_spec.is_none(),
+        "an inherited environment is already durable; the command carries no spec"
+    );
 }
 
 /// The replay tolerance is scoped to process-start staging. A durable owner (trigger

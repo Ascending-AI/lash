@@ -138,20 +138,16 @@ impl RuntimeExecutionContext<'_> {
             // recovery may re-execute them (ADR 0019).
             crate::RecoveryContract::Rerunnable,
         );
-        let registration = match self
-            .attach_captured_process_execution_env(registration)
-            .await
-        {
-            Ok(registration) => registration,
-            Err(err) => return ToolInvocationReply::error(json!(err.to_string())),
-        };
+        let (registration, env_spec) = self.process_start_execution_env(registration);
         let started = match self
             .dispatch
             .processes
             .start(
                 &self.session_id,
                 registration,
-                crate::ProcessStartOptions::new().with_initial_observer(self.session_id.clone()),
+                crate::ProcessStartOptions::new()
+                    .with_initial_observer(self.session_id.clone())
+                    .with_env_spec(env_spec),
                 self.process_scope(self.parent_invocation.clone()),
             )
             .await

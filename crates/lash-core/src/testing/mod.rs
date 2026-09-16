@@ -1267,6 +1267,7 @@ pub fn process_engine_run_context_for_validation(
 /// here too.
 struct EffectBackedProcessService {
     registry: Arc<dyn crate::ProcessRegistry>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
 }
 
 impl EffectBackedProcessService {
@@ -1331,6 +1332,7 @@ impl EffectBackedProcessService {
                 &self.registry,
             ))),
         )
+        .with_process_env_store(Arc::clone(&self.process_env_store))
         .with_process_effect_controller(
             proxy
                 .owned_controller()
@@ -1381,15 +1383,12 @@ impl crate::ProcessService for EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let observers = request.observers.clone();
-        let env_ref = request
-            .env_spec
-            .as_ref()
-            .map(|_| crate::ProcessExecutionEnvRef::new("process-env:atomic-tool-test"));
-        let registration = request.into_registration(env_ref);
+        let env_spec = request.env_spec.clone();
+        let registration = request.into_registration(None);
         let command = crate::ProcessCommand::Start {
             registration,
             observers: observers.into_iter().collect(),
-            env_spec: None,
+            env_spec,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
         match self.execute(scope, command).await? {
@@ -1431,7 +1430,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         let command = crate::ProcessCommand::Start {
             registration,
             observers: options.initial_observers.into_iter().collect(),
-            env_spec: None,
+            env_spec: options.env_spec,
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
         match self.execute(scope, command).await? {
@@ -1659,7 +1658,10 @@ impl crate::ProcessService for EffectBackedProcessService {
 pub fn effect_backed_process_service(
     registry: Arc<dyn crate::ProcessRegistry>,
 ) -> Arc<dyn crate::ProcessService> {
-    Arc::new(EffectBackedProcessService { registry })
+    Arc::new(EffectBackedProcessService {
+        registry,
+        process_env_store: Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+    })
 }
 
 /// Convenience helper for the common tool-test shape: build a
@@ -1901,15 +1903,14 @@ impl crate::ProcessService for MockSessionManager {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessHandleView, PluginError> {
         let observers = request.observers.clone();
-        let env_ref = request
-            .env_spec
-            .as_ref()
-            .map(|_| crate::ProcessExecutionEnvRef::new("process-env:mock-recorded-intent"));
+        let env_spec = request.env_spec.clone();
         let record = self
             .start(
                 session_id,
-                request.into_registration(env_ref),
-                crate::ProcessStartOptions::new().with_initial_observers(observers),
+                request.into_registration(None),
+                crate::ProcessStartOptions::new()
+                    .with_initial_observers(observers)
+                    .with_env_spec(env_spec),
                 scope,
             )
             .await?;
@@ -1924,6 +1925,19 @@ impl crate::ProcessService for MockSessionManager {
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
         let id = registration.id.clone();
+        // The mock stands in as the journaled start effect: a spec-carrying
+        // start is stamped with the content-addressed reference the executor's
+        // publish would produce, since registration validation requires it.
+        let registration = match (registration.env_ref.is_none(), options.env_spec.as_ref()) {
+            (true, Some(env_spec)) => registration.with_execution_env_ref(Some(
+                env_spec.stable_ref().map_err(|error| {
+                    PluginError::Session(format!(
+                        "failed to encode process execution environment: {error}"
+                    ))
+                })?,
+            )),
+            _ => registration,
+        };
         // This mock stands in as the executor, so it completes the row under the
         // authority its declared disposition permits: externally-owned rows close
         // via their external owner, lash-executed rows via the workflow-key path.
