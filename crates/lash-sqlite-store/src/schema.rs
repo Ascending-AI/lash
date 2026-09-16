@@ -497,6 +497,13 @@ CREATE INDEX IF NOT EXISTS idx_process_definitions_change
 
 CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
     ON artifact_owners(owner_kind, owner_id);
+
+CREATE TABLE IF NOT EXISTS release_stamp (
+    singleton           INTEGER PRIMARY KEY CHECK (singleton = 1),
+    release_version     TEXT NOT NULL,
+    schema_versions     TEXT NOT NULL,
+    written_at_epoch_ms INTEGER NOT NULL
+);
 ";
 
 /// Canonical schema version. There is no migration chain — older databases
@@ -692,7 +699,12 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
 /// pre-65 database holds no registry rows, so the whole catalog is recreated
 /// under the reject-and-recreate policy rather than migrated midwifing a
 /// registry into a database that never had one.
-pub(crate) const SCHEMA_VERSION: i32 = 65;
+/// Bumped to 66 for FIG-3092's release stamp: `release_stamp` records the lash
+/// release, the schema-version tuple and the instant that release first wrote
+/// this store, so a host can read which build produced the data before wiring
+/// a runtime. A pre-66 database has no such table and, under the
+/// reject-and-recreate policy, is refused at open rather than midwifed one.
+pub(crate) const SCHEMA_VERSION: i32 = 66;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -1351,11 +1363,13 @@ fn prepare_versioned_schema_at_version<'connection>(
     let user_version: i32 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if user_version == schema_version {
         tx.execute_batch(database.schema())?;
+        stamp_writing_release(&tx, database)?;
         return Ok(tx);
     }
     if user_version == 0 && !has_user_schema_objects(&tx)? {
         tx.execute_batch(database.schema())?;
         tx.pragma_update(None, "user_version", schema_version)?;
+        stamp_writing_release(&tx, database)?;
         return Ok(tx);
     }
     // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
@@ -1364,16 +1378,37 @@ fn prepare_versioned_schema_at_version<'connection>(
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
         tx.execute_batch(database.schema())?;
         tx.pragma_update(None, "user_version", schema_version)?;
+        stamp_writing_release(&tx, database)?;
         return Ok(tx);
     }
+    let writing_release = release_stamp_holder(database)
+        .then(|| crate::release_stamp::read_release(&tx))
+        .flatten();
     Err(rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISUSE),
         Some(unsupported_schema_message(
             database,
             schema_version,
             user_version,
+            writing_release.as_deref(),
         )),
     ))
+}
+
+/// Whether this database is the one that carries the deployment's release stamp.
+///
+/// The four SQLite databases share one trust domain and are opened together, so
+/// one stamp describes the deployment. The durable core carries it: it is the
+/// database every deployment has.
+pub(crate) fn release_stamp_holder(database: SqliteDatabase) -> bool {
+    database == SqliteDatabase::DurableCore
+}
+
+fn stamp_writing_release(tx: &Transaction<'_>, database: SqliteDatabase) -> rusqlite::Result<()> {
+    if release_stamp_holder(database) {
+        crate::release_stamp::write(tx)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<bool> {
@@ -1391,17 +1426,29 @@ pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<boo
 /// found `PRAGMA user_version` values are reported accurately. Every database
 /// kind belongs to the one trust domain described by ADR 0049, so a refusal
 /// must prescribe one coordinated reset rather than an independent wipe.
+///
+/// `writing_release` names the lash release that wrote the store when the
+/// release stamp could still be read. It rides as a trailing sentence: every
+/// substring other tests pin — the "supports schema version {n}" clause, the
+/// remedy, the ADR pointer — is produced byte-identically, and a store with no
+/// readable stamp produces the message unchanged rather than a hedge about an
+/// unknown release.
 pub(crate) fn unsupported_schema_message(
     database: SqliteDatabase,
     expected_version: i32,
     found_version: i32,
+    writing_release: Option<&str>,
 ) -> String {
+    let release_clause = match writing_release {
+        Some(release) => format!(" This store was last written by lash release {release}."),
+        None => String::new(),
+    };
     format!(
         "Unsupported lash {} schema: this binary supports schema version {expected_version}, but \
          the database reports version {found_version}. There is no \
          migration chain — drain affected sessions and recreate the whole Lash trust domain with \
          this version. Reset the tombstones, await-event revocation ledger, effect journal, and \
-         Restate state together; see docs/adr/0049-session-ids-are-used-once.md.",
+         Restate state together; see docs/adr/0049-session-ids-are-used-once.md.{release_clause}",
         database.name()
     )
 }
@@ -1539,7 +1586,7 @@ mod schema_metadata_tests {
         for (database, name) in cases {
             assert_eq!(database.name(), name);
             assert_eq!(
-                unsupported_schema_message(database, 123, 45),
+                unsupported_schema_message(database, 123, 45, None),
                 format!(
                     "Unsupported lash {name} schema: this binary supports schema version 123, but \
                      the database reports version 45. There is no migration chain — drain affected \

@@ -463,7 +463,11 @@ pub(crate) async fn ensure_schema(
                 }],
             };
             record_schema_gate_decision(&preflight, options, "denied_version_preflight");
-            return Err(version_mismatch_error(found_version));
+            let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
+            return Err(version_mismatch_error(
+                found_version,
+                writing_release.as_deref(),
+            ));
         }
         tx.execute(SCHEMA_DDL).await.map_err(store_sqlx_error)?;
         if let Some(search_path) = search_path_to_restore {
@@ -482,7 +486,11 @@ pub(crate) async fn ensure_schema(
     // another schema generation.
     if report.found_version != Some(SCHEMA_VERSION) {
         record_schema_gate_decision(&report, options, "denied_version");
-        return Err(version_mismatch_error(report.found_version));
+        let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
+        return Err(version_mismatch_error(
+            report.found_version,
+            writing_release.as_deref(),
+        ));
     }
     let admitted_as = match (report.is_conformant(), options.check) {
         (true, _) => "allowed",
@@ -535,6 +543,13 @@ pub(crate) async fn ensure_schema(
         }
     };
     record_schema_gate_decision(&report, options, admitted_as);
+    // Only an admitted open stamps. A refused open has not written this
+    // database and must not claim it did, and the write rides the admitting
+    // transaction so a rollback anywhere after this point takes the stamp with
+    // it.
+    crate::release_stamp::write(&mut tx)
+        .await
+        .map_err(store_sqlx_error)?;
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(signing_secret)
 }
@@ -1125,7 +1140,18 @@ fn recreate_trust_domain_remedy() -> String {
 /// version-bump runbook companion classifies this refusal by, and it is the one
 /// claim that holds in all three directions. The sibling migration refusals must
 /// not acquire it.
-pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
+///
+/// `writing_release` names the lash release that wrote the database when the
+/// release stamp could still be read. It rides as a trailing sentence: every
+/// substring the version-bump runbook companion and the store tests pin — the
+/// component clause, the `has no applicable migration` phrase, the remedy, the
+/// `SchemaCheck::WarnOnly` sentence — is produced byte-identically, and a
+/// database with no readable stamp produces the message unchanged rather than a
+/// hedge about an unknown release.
+pub(crate) fn version_mismatch_error(
+    found: Option<i32>,
+    writing_release: Option<&str>,
+) -> StoreError {
     let (stamp, explanation) = match found {
         Some(version) if version < SCHEMA_VERSION => (
             format!("has version {version}"),
@@ -1156,9 +1182,14 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
             ),
         ),
     };
+    let release_clause = match writing_release {
+        Some(release) => format!(" This database was last written by lash release {release}."),
+        None => String::new(),
+    };
     StoreError::Backend(format!(
         "Postgres schema component `{SCHEMA_COMPONENT}` {stamp}, expected {SCHEMA_VERSION}. \
-         {explanation} {} This gate is unconditional; SchemaCheck::WarnOnly does not relax it.",
+         {explanation} {} This gate is unconditional; SchemaCheck::WarnOnly does not relax \
+         it.{release_clause}",
         recreate_trust_domain_remedy()
     ))
 }

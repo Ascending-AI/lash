@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 78,
+  "source_commit": "a9506225c8c1",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-3092 schema-79 release stamp",
+  "artifacts": {
+    "postgres-expected.json": "cbf4488eb3f3658080f520c253223fa9f50190fbfa32c95fb131a056931400e2",
+    "sqlite-expected.json": "88a1f5b3dcecbb23874018539b46c8bad53f3aa55c34fc91c2d0e3e1e223cb16"
+  }
+}

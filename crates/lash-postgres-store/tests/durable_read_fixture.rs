@@ -23,6 +23,9 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
+const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
+];
 const NEWEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-77-e102f2b9f861/postgres-expected.json",
 ];
@@ -155,7 +158,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 97);
+    assert_eq!(PostgresStorage::schema_version(), 98);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -427,6 +430,19 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
         .expect("open the refreshed refusal fixture catalog");
+    // That open stamped the release with `clock_timestamp()`. Freeze it, or the
+    // committed catalog changes bytes on every refresh for a reason that has
+    // nothing to do with the refusal it witnesses.
+    let stamped = sqlx::query("UPDATE lash_release_stamp SET written_at_epoch_ms = $1")
+        .bind(fixture::FIXTURE_WRITE_MS as i64)
+        .execute(storage.pool())
+        .await
+        .expect("freeze the refusal fixture release stamp instant");
+    assert_eq!(
+        stamped.rows_affected(),
+        1,
+        "opening the refusal fixture must have stamped exactly one release row"
+    );
     storage.pool().close().await;
     std::fs::write(
         prior_component_fixture_dir().join("fixture.sql"),
@@ -742,6 +758,19 @@ async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) 
     .execute(storage.pool())
     .await
     .expect("normalize server-authoritative fixture effect timestamps");
+    // The release stamp records `clock_timestamp()` on the server, so it is
+    // server-authoritative in exactly the sense this function exists for:
+    // without the rewrite every regeneration would emit a different dump.
+    let stamped = sqlx::query("UPDATE lash_release_stamp SET written_at_epoch_ms = $1")
+        .bind(fixture::FIXTURE_WRITE_MS as i64)
+        .execute(storage.pool())
+        .await
+        .expect("normalize the server-authoritative fixture release stamp instant");
+    assert_eq!(
+        stamped.rows_affected(),
+        1,
+        "opening the fixture database must have stamped exactly one release row"
+    );
     pin_attachment_write_token(storage).await;
 }
 

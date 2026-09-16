@@ -319,9 +319,9 @@ fn a_declared_guard_does_not_travel_to_another_table() {
 /// FIG-3173).
 #[test]
 fn version_mismatch_refusal_derives_direction_and_catalog() {
-    let older = version_mismatch_error(Some(SCHEMA_VERSION - 1)).to_string();
-    let newer = version_mismatch_error(Some(SCHEMA_VERSION + 1)).to_string();
-    let unstamped = version_mismatch_error(None).to_string();
+    let older = version_mismatch_error(Some(SCHEMA_VERSION - 1), None).to_string();
+    let newer = version_mismatch_error(Some(SCHEMA_VERSION + 1), None).to_string();
+    let unstamped = version_mismatch_error(None, None).to_string();
 
     assert!(
         older.contains("provisioned by an older build"),

@@ -113,6 +113,48 @@ pub struct SchemaReport {
     pub outcome: &'static str,
     /// The databases, in the order the backend would open them.
     pub databases: Vec<SchemaDatabaseReport>,
+    /// Which lash release wrote this store, when the store records one.
+    pub release: ReleaseStampReport,
+}
+
+/// Which lash release wrote the store — or the explicit statement that it
+/// records none.
+///
+/// The three arms are kept apart on purpose. A store no stamping build has ever
+/// written records no release, and that is an absence rather than an observed
+/// value; a stamp this build cannot read is undecided rather than absent; and
+/// only the first arm is evidence about a release. Collapsing any pair would
+/// hand a supervisor a missing field it has to guess the meaning of.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+#[non_exhaustive]
+pub enum ReleaseStampReport {
+    /// The store names the release that wrote it.
+    Stamped {
+        /// The crate version string that build carried.
+        release: String,
+        /// The schema versions that release required, as it recorded them.
+        schema_versions: Vec<ReleaseStampComponent>,
+        /// When that release first wrote this store, in milliseconds since the
+        /// Unix epoch.
+        written_at_epoch_ms: i64,
+    },
+    /// Nothing has stamped this store. Not a release of "", not a zero.
+    Unstamped,
+    /// A stamp is present but this build could not read it.
+    Unreadable {
+        /// The backend's own words.
+        reason: String,
+    },
+}
+
+/// One component's schema version as the writing release recorded it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ReleaseStampComponent {
+    /// The component's operator-facing name.
+    pub component: String,
+    /// The version that component required at write time.
+    pub version: i64,
 }
 
 /// One found version and how many items carry it.
@@ -703,6 +745,7 @@ mod tests {
             schema: SchemaReport {
                 outcome: "ready",
                 databases: Vec::new(),
+                release: ReleaseStampReport::Unstamped,
             },
             components: vec![tally.into_row(
                 DurableFormat::LashlangSegmentHandover,

@@ -194,6 +194,7 @@ impl StorePreflight for PostgresStorePreflight {
             },
             Some(_) => StoreSchemaVerdict::Matches,
         };
+        let release = crate::release_stamp::read(&self.pool).await;
         Ok(StoreSchemaStatus {
             databases: vec![StoreSchemaDatabase {
                 name: COMPONENT_DATABASE_NAME.to_string(),
@@ -201,6 +202,7 @@ impl StorePreflight for PostgresStorePreflight {
                 expected,
                 verdict,
             }],
+            release,
         })
     }
 

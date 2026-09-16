@@ -22,6 +22,9 @@ const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const LATEST_GENERATION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-75-63f3438c/sqlite-expected.json",
 ];
+const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/sqlite-expected.json",
+];
 const NEWEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-77-e102f2b9f861/sqlite-expected.json",
 ];
@@ -171,7 +174,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 65"),
+        message.contains("supports schema version 66"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -196,7 +199,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 65"),
+        message.contains("supports schema version 66"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(
@@ -262,6 +265,30 @@ fn pin_attachment_write_token(core_path: &Path) {
     );
 }
 
+/// Replace the host-clock instant the release stamp recorded while priming with
+/// the fixture's frozen one.
+///
+/// The stamp is written by the schema-open path, which runs before any runtime
+/// and therefore before any injected clock exists, so its instant is the real
+/// wall clock and every regeneration would otherwise produce different bytes.
+/// Rewriting it here is the same move the await-event signing secret already
+/// gets: pin the one field the store mints from the environment, so the
+/// committed fixture is reproducible. The reopen below leaves the row alone —
+/// the update rule only advances the stamp for a strictly newer release.
+fn pin_release_stamp_instant(core_path: &Path, timestamp_ms: u64) {
+    let pinned = rusqlite::Connection::open(core_path)
+        .expect("open SQLite durable-core fixture for a deterministic release stamp")
+        .execute(
+            "UPDATE release_stamp SET written_at_epoch_ms = ?1 WHERE singleton = 1",
+            rusqlite::params![timestamp_ms as i64],
+        )
+        .expect("pin the SQLite durable-core release stamp instant");
+    assert_eq!(
+        pinned, 1,
+        "priming the durable core must have stamped exactly one release row; {pinned} were rewritten"
+    );
+}
+
 async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles {
     std::fs::create_dir_all(root).expect("create SQLite fixture root");
     let clock = Arc::new(lash_core::testing::TestClock::new(timestamp_ms));
@@ -281,6 +308,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
             rusqlite::params![fixture::FIXTURE_AWAIT_EVENT_SIGNING_SECRET.to_vec()],
         )
         .expect("install deterministic SQLite durable-core await-event signing secret");
+    pin_release_stamp_instant(&core_path, timestamp_ms);
     let runtime = Arc::new(
         Store::open_with_clock(&core_path, Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
             .await

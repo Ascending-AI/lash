@@ -22,8 +22,8 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use lash_core::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
-    StoreBackend, StoreError, StorePreflight, StoreSchemaDatabase, StoreSchemaStatus,
-    StoreSchemaVerdict,
+    StoreBackend, StoreError, StorePreflight, StoreReleaseState, StoreSchemaDatabase,
+    StoreSchemaStatus, StoreSchemaVerdict,
 };
 
 use super::*;
@@ -36,6 +36,7 @@ use crate::formats::{
 #[derive(Default)]
 struct FakeStore {
     databases: Vec<StoreSchemaDatabase>,
+    release: StoreReleaseState,
     surfaces: BTreeMap<DurableSurface, Vec<DurableItem>>,
     /// Surfaces described as the rows a backend *reads* rather than the items it
     /// emits.
@@ -51,6 +52,11 @@ struct FakeStore {
 }
 
 impl FakeStore {
+    fn with_release(mut self, release: StoreReleaseState) -> Self {
+        self.release = release;
+        self
+    }
+
     fn with_database(mut self, name: &str, expected: i64, verdict: StoreSchemaVerdict) -> Self {
         self.databases.push(StoreSchemaDatabase {
             name: name.to_string(),
@@ -105,6 +111,7 @@ impl StorePreflight for FakeStore {
     async fn schema_status(&self) -> Result<StoreSchemaStatus, StoreError> {
         Ok(StoreSchemaStatus {
             databases: self.databases.clone(),
+            release: self.release.clone(),
         })
     }
 
@@ -816,6 +823,7 @@ fn an_identity_only_refusal_says_how_many_items_another_build_wrote() {
         schema: SchemaReport {
             outcome: "ready",
             databases: Vec::new(),
+            release: ReleaseStampReport::Unstamped,
         },
         components: vec![ComponentReadability {
             format_key: DurableFormat::Bytecode,
@@ -1019,4 +1027,60 @@ async fn the_serialized_report_carries_every_field_a_gate_asserts_on() {
     assert_eq!(handover["probe"], "comparable");
     assert_eq!(handover["evidence"]["kind"], "direct");
     assert_eq!(handover["scanned"], 1);
+}
+
+#[tokio::test]
+async fn the_report_names_the_release_that_wrote_the_store() {
+    let store =
+        healthy_store().with_release(StoreReleaseState::Stamped(lash_core::StoreReleaseStamp {
+            release: "1.4.0".to_string(),
+            schema_versions: vec![lash_core::StoreComponentVersion {
+                component: "durable core".to_string(),
+                version: 66,
+            }],
+            written_at_epoch_ms: 1_700_000_000_000,
+        }));
+    let report = probe_store(&store, PreflightOptions::summary())
+        .await
+        .expect("the probe reads the store");
+    assert_eq!(
+        report.schema.release,
+        ReleaseStampReport::Stamped {
+            release: "1.4.0".to_string(),
+            schema_versions: vec![ReleaseStampComponent {
+                component: "durable core".to_string(),
+                version: 66,
+            }],
+            written_at_epoch_ms: 1_700_000_000_000,
+        },
+        "a host asking which release reopens this store reads the answer here"
+    );
+}
+
+#[tokio::test]
+async fn an_unstamped_store_reports_the_absence_rather_than_an_empty_release() {
+    // The store is readable and records no release. That is a finding, not a
+    // missing field and not a release of "": a supervisor that cannot tell
+    // "nothing stamped this" from "the stamp did not read" cannot decide
+    // whether to trust the schema integers beside it.
+    let report = probe_store(&healthy_store(), PreflightOptions::summary())
+        .await
+        .expect("the probe reads the store");
+    assert_eq!(report.schema.release, ReleaseStampReport::Unstamped);
+
+    let undecided = probe_store(
+        &healthy_store().with_release(StoreReleaseState::Unreadable {
+            reason: "no such table: release_stamp".to_string(),
+        }),
+        PreflightOptions::summary(),
+    )
+    .await
+    .expect("the probe reads the store");
+    assert_eq!(
+        undecided.schema.release,
+        ReleaseStampReport::Unreadable {
+            reason: "no such table: release_stamp".to_string(),
+        },
+        "an unread stamp stays undecided instead of collapsing into absence"
+    );
 }

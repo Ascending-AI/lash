@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 96.
+-- lash-postgres-store schema, component version 98.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -740,12 +740,26 @@ CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
     PRIMARY KEY (owner_kind, owner_id)
 );
 
+-- Which lash release wrote this database, recorded so a host running store
+-- preflight can answer "which release reopens this store" before wiring a
+-- runtime, and so a refusal at open can name a release beside the schema
+-- integers. Written on the first open of an unstamped database and advanced
+-- only by a strictly newer release; never downgraded. One row, like the other
+-- deployment-scoped singletons above.
+CREATE TABLE IF NOT EXISTS lash_release_stamp (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    release_version TEXT NOT NULL,
+    schema_versions TEXT NOT NULL,
+    written_at_epoch_ms BIGINT NOT NULL,
+    CHECK (singleton)
+);
+
 -- Seed rows. Every open mode requires all three: the component version stamp,
 -- the transactional process-change clock row, and the store-resident
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 97)
+VALUES ('lash-postgres-store', 98)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

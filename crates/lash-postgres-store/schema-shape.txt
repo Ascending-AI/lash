@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 97
+version 98
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -270,6 +270,12 @@ table lash_queued_work_items
   column payload_json text not-null
   primary-key (batch_id, item_index)
   foreign-key (batch_id) references lash_queued_work_batches (batch_id) on delete cascade
+table lash_release_stamp
+  column release_version text not-null
+  column schema_versions text not-null
+  column singleton boolean not-null default
+  column written_at_epoch_ms bigint not-null
+  primary-key (singleton)
 table lash_runtime_effect_group
   column children bigint not-null
   column created_at_ms bigint not-null
