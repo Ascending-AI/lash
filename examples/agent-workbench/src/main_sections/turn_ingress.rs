@@ -25,14 +25,13 @@ pub(crate) async fn enqueue_turn_input(
         })?;
     let ingress = match request.ingress {
         TurnInputIngressRequest::ActiveTurn => {
-            let active = state.active_turns.for_session(&session_id);
-            let [address] = active.as_slice() else {
+            let Some(active) = state.active_turns.for_session(&session_id) else {
                 return Err(AppError::conflict(
                     "inject now requires exactly one running turn",
                 ));
             };
             lash::persistence::TurnInputIngress::active_turn(
-                address.turn_id.clone(),
+                active.address.turn_id,
                 lash::persistence::TurnInputCheckpointBoundary::AfterWork,
             )
         }

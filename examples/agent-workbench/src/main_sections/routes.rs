@@ -28,7 +28,7 @@ pub(crate) async fn app_state(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
-    let active_turns = state.active_turns.for_session(&session_id);
+    let active_turn = state.active_turns.for_session(&session_id);
     let StateProjectionReads {
         read_view,
         cursor,
@@ -37,9 +37,9 @@ pub(crate) async fn app_state(
         turn_input_applications,
         usage,
     } = read_state_projection(&state, &session_id).await?;
-    let active_turn_ids = active_turns
+    let active_turn_ids = active_turn
         .iter()
-        .map(|address| address.turn_id.clone())
+        .map(|active_turn| active_turn.address.turn_id.clone())
         .collect::<BTreeSet<_>>();
     let committed_message_ids = read_view
         .messages()
@@ -77,9 +77,8 @@ pub(crate) async fn app_state(
         messages,
         mut transcript,
     } = project_chat(
-        &state,
         &read_view,
-        &active_turns,
+        active_turn.as_ref(),
         &current_frame_input_turn_ids,
         product_messages,
     );
@@ -98,7 +97,13 @@ pub(crate) async fn app_state(
             messages,
             observation,
             product_events,
-            active_turns,
+            // The page reads `active_turns` as a list and asks it for a
+            // length and a `turn_id`; the registry holding at most one is a
+            // fact about the registry, not a change to that contract.
+            active_turns: active_turn
+                .into_iter()
+                .map(|active_turn| active_turn.address)
+                .collect(),
             pending_turn_inputs,
             queued_work,
             turn_input_applications,
@@ -322,7 +327,7 @@ pub(crate) async fn send_turn(
     // The initial read selects the ordinary busy path without opening a runtime
     // session. The atomic reservation below rechecks after that open, closing
     // the race with another send or a queued-work runner.
-    if !state.active_turns.for_session(&session_id).is_empty() {
+    if state.active_turns.for_session(&session_id).is_some() {
         return admit_queued_send(
             &state,
             &session_id,
@@ -348,6 +353,7 @@ pub(crate) async fn send_turn(
     match state.active_turns.try_insert_with_prompt_for_idle_session(
         &session_id,
         &turn_id,
+        WorkbenchTurnKind::User,
         Some(text.clone()),
         attachment_id.clone(),
     ) {
@@ -1001,7 +1007,7 @@ pub(crate) async fn run_queued_work_batch(
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
             session_id: session_id.clone(),
         })?;
-    if !state.active_turns.for_session(&session_id).is_empty() {
+    if state.active_turns.for_session(&session_id).is_some() {
         return Err(AppError::conflict(
             "queued work cannot be run while this session has an active turn",
         ));
@@ -1024,7 +1030,7 @@ pub(crate) async fn run_queued_work_batch(
         )));
     }
 
-    let turn_id = TurnId::from(format!("workbench-queued-{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::from(format!("{QUEUED_TURN_ID_PREFIX}{}", uuid::Uuid::new_v4()));
     let request = restate::WorkbenchQueuedTurnWorkflowRequest {
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),
@@ -1034,10 +1040,11 @@ pub(crate) async fn run_queued_work_batch(
     };
     let cleanup =
         ActiveTurnSubmissionGuard::queued_turn(state.active_turns.clone(), &session_id, &turn_id);
-    match state
-        .active_turns
-        .try_insert_for_idle_session(&session_id, &turn_id)
-    {
+    match state.active_turns.try_insert_for_idle_session(
+        &session_id,
+        &turn_id,
+        WorkbenchTurnKind::Queued,
+    ) {
         ActiveTurnClaim::Claimed => {}
         ActiveTurnClaim::Busy => {
             cleanup.complete();

@@ -75,7 +75,11 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     assert!(!tool_names.iter().any(|name| name == &removed_tool_name));
 
     let active_turns = ActiveTurns::default();
-    active_turns.insert(&session_id, "mid-turn-trigger-contract");
+    active_turns.insert(
+        &session_id,
+        "mid-turn-trigger-contract",
+        WorkbenchTurnKind::User,
+    );
     let first_report = emit_test_button_trigger(&core, ButtonChoice::Red).await;
     let second_report = emit_test_button_trigger(&core, ButtonChoice::Red).await;
     assert_remote_trigger_emit_report_round_trip(&first_report);

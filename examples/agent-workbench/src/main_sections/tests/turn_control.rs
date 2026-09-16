@@ -464,7 +464,7 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
             ..
         }]
     ));
-    assert!(state.active_turns.for_session(&session_id).is_empty());
+    assert!(state.active_turns.for_session(&session_id).is_none());
     assert!(
         events.try_recv().is_err(),
         "pruning a route is not terminal evidence"
@@ -473,7 +473,7 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
     assert!(ui::INDEX_HTML.contains("turn route cleared · terminal outcome unknown"));
     let recovered =
         ActiveTurns::persistent(data_dir.join("active-turns.json")).expect("reopen active turns");
-    assert!(recovered.for_session(&session_id).is_empty());
+    assert!(recovered.for_session(&session_id).is_none());
 
     // FIG-3163: the disclosure outlives the DOM node that first showed it. It
     // has to be readable on the state projection, which the timeline re-renders
@@ -618,15 +618,20 @@ async fn live_restate_turn_timeout_retains_routing_as_pending_inner() {
     assert!(cancellation.get("terminal").is_none());
     assert!(cancellation.get("terminal_error").is_none());
     assert_eq!(
-        state.active_turns.for_session(&session_id),
-        vec![lash::TurnAddress::new(&session_id, "live-turn")],
+        state
+            .active_turns
+            .for_session(&session_id)
+            .map(|active_turn| active_turn.address),
+        Some(lash::TurnAddress::new(&session_id, "live-turn")),
         "an active Restate invocation remains routable while cancellation is pending"
     );
     let recovered =
         ActiveTurns::persistent(data_dir.join("active-turns.json")).expect("reopen active turns");
     assert_eq!(
-        recovered.for_session(&session_id),
-        vec![lash::TurnAddress::new(session_id, "live-turn")]
+        recovered
+            .for_session(&session_id)
+            .map(|active_turn| active_turn.address),
+        Some(lash::TurnAddress::new(session_id, "live-turn"))
     );
     assert!(
         events.try_recv().is_err(),
@@ -828,7 +833,7 @@ finish(await handle);
             if !output.is_success()
                 && output.value_for_projection()["source"] == "cancellation"
     ));
-    assert!(state.active_turns.for_session(&session_id).is_empty());
+    assert!(state.active_turns.for_session(&session_id).is_none());
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -1335,8 +1340,11 @@ async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner() {
     // The precondition this regression needs: the cancel legitimately kept the
     // route, so the delete is about to tombstone a session that still routes.
     assert_eq!(
-        state.active_turns.for_session(&session_id),
-        vec![lash::TurnAddress::new(&session_id, &turn_id)],
+        state
+            .active_turns
+            .for_session(&session_id)
+            .map(|active_turn| active_turn.address),
+        Some(lash::TurnAddress::new(&session_id, &turn_id)),
         "a pending terminal with a live invocation keeps its route"
     );
     assert!(
@@ -1354,7 +1362,7 @@ async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner() {
         Some(SessionRetirement::Retired)
     );
     assert!(
-        state.active_turns.for_session(&session_id).is_empty(),
+        state.active_turns.for_session(&session_id).is_none(),
         "a tombstoned session keeps no routes"
     );
     assert!(
@@ -1373,6 +1381,131 @@ async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner() {
         persisted.pointer("/turns").and_then(Value::as_array),
         Some(&Vec::new()),
         "the persisted snapshot drops the retired session's route: {persisted:#}"
+    );
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+/// A mock Restate admin that reports one named workflow as running and records
+/// every workflow the workbench asked about.
+async fn spawn_restate_admin_recording_probes(
+    running_workflow: &'static str,
+) -> (String, Arc<Mutex<Vec<String>>>) {
+    const WORKFLOWS: [&str; 2] = ["WorkbenchTurnWorkflow", "WorkbenchQueuedTurnWorkflow"];
+
+    #[derive(Clone)]
+    struct Probes {
+        running_workflow: &'static str,
+        seen: Arc<Mutex<Vec<String>>>,
+    }
+
+    async fn query_status(State(probes): State<Probes>, Json(query): Json<Value>) -> Json<Value> {
+        let sql = query
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let asked = WORKFLOWS
+            .into_iter()
+            .find(|workflow| sql.contains(&format!("target_service_name = '{workflow}'")));
+        if let Some(asked) = asked {
+            probes.seen.lock_recover().push(asked.to_string());
+        }
+        let rows = if asked == Some(probes.running_workflow) {
+            vec![json!({
+                "id": "inv_test_turn",
+                "target": format!("workflow/{}/test/run", probes.running_workflow),
+                "target_service_name": probes.running_workflow,
+                "target_service_key": "test",
+                "target_handler_name": "run",
+                "status": "running",
+            })]
+        } else {
+            Vec::new()
+        };
+        Json(json!({ "rows": rows }))
+    }
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind probe-recording Restate admin");
+    let addr = listener.local_addr().expect("probe-recording admin addr");
+    let app = Router::new().route(
+        "/query",
+        post(query_status).with_state(Probes {
+            running_workflow,
+            seen: Arc::clone(&seen),
+        }),
+    );
+    tokio::spawn(async move {
+        if let Err(err) = axum::serve(listener, app).await {
+            eprintln!("probe-recording Restate admin stopped: {err}");
+        }
+    });
+    (format!("http://{addr}"), seen)
+}
+
+#[test]
+fn a_queued_turns_cancel_probes_the_queued_workflow_whatever_its_id_looks_like() {
+    run_async_test_on_stack_budget("workbench-queued-turn-probe-kind", || {
+        a_queued_turns_cancel_probes_the_queued_workflow_whatever_its_id_looks_like_inner()
+    });
+}
+
+/// FIG-3292: the workflow that owns a turn used to be recovered by sniffing a
+/// `workbench-queued-` prefix off the turn id, with every other shape falling
+/// through to the user workflow.
+///
+/// That probe is what decides whether a cancel whose terminal is still pending
+/// keeps or drops the turn's routing claim, so asking about the wrong workflow
+/// answers "no such invocation" and drops a turn that is still running. The
+/// kind now travels with the claim, so the id is free to say anything.
+async fn a_queued_turns_cancel_probes_the_queued_workflow_whatever_its_id_looks_like_inner() {
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-queued-probe-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+    let (admin_url, probed) =
+        spawn_restate_admin_recording_probes("WorkbenchQueuedTurnWorkflow").await;
+    let state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let session_id = state.current_session_id();
+    // No `workbench-queued-` prefix. Only the claim knows what this is.
+    let turn_id = TurnId::from("plainly-named-queued-turn");
+    state.track_queued_turn(&session_id, &turn_id);
+
+    let (driver, acknowledge) = expiring_terminal_driver(&state);
+    let receipts = tokio::time::timeout(Duration::from_secs(5), async {
+        let cancel_session = session_id.clone();
+        tokio::join!(
+            state.cancel_turns_for_session_with_driver(
+                &cancel_session,
+                &driver,
+                WorkbenchTurnCancelMode::Abort
+            ),
+            acknowledge
+        )
+        .0
+    })
+    .await
+    .expect("the cancel must not hang")
+    .expect("cancel the queued turn");
+
+    assert!(
+        matches!(
+            receipts.as_slice(),
+            [TurnCancelReceipt::CancellationRecordedTerminalPending { .. }]
+        ),
+        "the seam must leave the terminal pending: {receipts:?}"
+    );
+    assert_eq!(
+        probed.lock_recover().as_slice(),
+        ["WorkbenchQueuedTurnWorkflow".to_string()],
+        "the liveness probe asks the workflow the claim names"
+    );
+    assert!(
+        state.active_turns.for_session(&session_id).is_some(),
+        "a turn the probe found running keeps its routing claim"
     );
     let _ = std::fs::remove_dir_all(&data_dir);
 }

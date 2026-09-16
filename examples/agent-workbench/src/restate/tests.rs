@@ -346,7 +346,7 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
         "replacement abort must redact envelope hashes at the conflict boundary: {rendered}"
     );
     assert!(
-        state.active_turns.for_session(&session_id).is_empty(),
+        state.active_turns.for_session(&session_id).is_none(),
         "replacement abort must retire the active turn before returning"
     );
     let session = state
