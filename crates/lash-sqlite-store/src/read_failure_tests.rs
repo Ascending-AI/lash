@@ -801,3 +801,113 @@ async fn queued_work_hydration_rejects_kind_payload_contradiction() {
         "QueuedWorkBatch",
     );
 }
+
+/// Hydrating a queued-work batch reads two tables: the batch row, then its
+/// item rows. Both reads must come from one snapshot.
+///
+/// FIG-3017: they used to run in autocommit, so each took its own snapshot and
+/// another connection's commit could land between them. A batch consumed in
+/// that window was returned as a header with no payloads, and the reader
+/// reported `StoredDataCorrupt { record_kind: "QueuedWorkBatch", message:
+/// "queued work requires at least one payload" }` — a live write reported as
+/// corruption. The window is one commit wide, so the seam, not load, is what
+/// drives it: `pause_queued_work_hydration` stops the read between the two
+/// statements and the delete commits from a second connection while it waits.
+#[derive(Clone, Copy)]
+enum QueuedWorkRead {
+    All,
+    Pending,
+}
+
+async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, read: QueuedWorkRead) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("queued-work-snapshot.db");
+    let injector = crate::testing::SqliteFaultInjector::default();
+    let store = Arc::new(
+        Store::open_with_options_clock_and_process_registry(
+            &path,
+            StoreOptions::default(),
+            Arc::new(lash_core::facade_support::SystemClock),
+            None,
+            None,
+            Some(injector.clone()),
+        )
+        .await
+        .expect("open store with a read seam"),
+    );
+    let session_id = SessionId::from(session_id);
+    let batch = store
+        .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+            session_id.as_str(),
+            lash_core::DeliveryPolicy::EarliestSafeBoundary,
+            lash_core::runtime::SessionCommand::RefreshToolCatalog {
+                reason: "snapshot test".into(),
+            },
+        ))
+        .await
+        .expect("enqueue queued work");
+
+    let pause = injector.pause_queued_work_hydration();
+    let reader = tokio::spawn({
+        let store = Arc::clone(&store);
+        let session_id = session_id.clone();
+        async move {
+            match read {
+                QueuedWorkRead::All => store.list_queued_work(&session_id).await,
+                QueuedWorkRead::Pending => store.list_pending_queued_work(&session_id).await,
+            }
+        }
+    });
+    pause.wait_until_reached().await;
+
+    // A second connection consumes the batch while the read is between its two
+    // statements. The cascade takes the item rows with the batch row, which is
+    // what the reader must not observe as a batch without payloads.
+    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
+    raw.busy_timeout(std::time::Duration::from_millis(15_000))
+        .expect("raw busy timeout");
+    raw.execute_batch("PRAGMA foreign_keys=ON;")
+        .expect("raw foreign keys");
+    let deleted = raw
+        .execute(
+            "DELETE FROM queued_work_batches WHERE batch_id = ?1",
+            params![batch.batch_id.as_str()],
+        )
+        .expect("consume the batch from a second connection");
+    assert_eq!(deleted, 1, "the competing commit must land in the window");
+    pause.release();
+
+    let batches = reader
+        .await
+        .expect("reader task")
+        .expect("a consumed batch is not corrupt data");
+    assert_eq!(batches.len(), 1, "the read holds its own snapshot");
+    assert_eq!(batches[0].batch_id.as_str(), batch.batch_id.as_str());
+    assert!(
+        !batches[0].items.is_empty(),
+        "a batch row and its item rows come from one snapshot"
+    );
+    // The consume really did commit: the next read no longer sees it.
+    assert!(
+        store
+            .list_queued_work(&session_id)
+            .await
+            .expect("read after the consume")
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_queued_work_survives_a_consume_mid_hydration() {
+    queued_work_read_survives_a_consume_mid_hydration("queued-snapshot-all", QueuedWorkRead::All)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_pending_queued_work_survives_a_consume_mid_hydration() {
+    queued_work_read_survives_a_consume_mid_hydration(
+        "queued-snapshot-pending",
+        QueuedWorkRead::Pending,
+    )
+    .await;
+}

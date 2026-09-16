@@ -131,11 +131,46 @@ impl SqliteTransactionPause {
     }
 }
 
+/// One-shot deterministic pause inside a read, between the statement that
+/// selects a parent row and the statement that hydrates its children.
+///
+/// This is not a fault point: nothing is refused and no transaction is
+/// abandoned. The read simply waits inside its own snapshot while the test
+/// commits a competing write in that window, which is the only way to drive
+/// the window without load.
+#[derive(Clone, Debug)]
+pub struct SqliteReadPause {
+    state: Arc<PauseState>,
+}
+
+impl SqliteReadPause {
+    /// Wait until the background SQLite thread reaches the armed read seam.
+    pub async fn wait_until_reached(&self) {
+        let state = Arc::clone(&self.state);
+        let waited = tokio::task::spawn_blocking(move || {
+            let mut progress = state.state.lock_recover();
+            while progress.reached_ordinal.is_none() {
+                progress = state.changed.wait(progress).recover();
+            }
+        })
+        .await;
+        assert!(waited.is_ok(), "SQLite read-pause waiter task");
+    }
+
+    /// Release the paused read so it finishes inside its snapshot.
+    pub fn release(&self) {
+        let mut progress = self.state.state.lock_recover();
+        progress.released = true;
+        self.state.changed.notify_all();
+    }
+}
+
 #[derive(Debug, Default)]
 struct InjectorState {
     armed: Vec<ArmedFault>,
     point_occurrences: [u64; 3],
     pause: Option<ArmedPause>,
+    read_pause: Option<Arc<PauseState>>,
     write_transaction_ordinal: u64,
     observations: Vec<SqliteFaultObservation>,
 }
@@ -207,6 +242,28 @@ impl SqliteFaultInjector {
             state: Arc::clone(&state),
         });
         SqliteTransactionPause { state }
+    }
+
+    /// Pause the next queued-work batch hydration between its header read and
+    /// its item read, until the returned handle is released.
+    pub fn pause_queued_work_hydration(&self) -> SqliteReadPause {
+        let state = Arc::new(PauseState::default());
+        self.lock_state().read_pause = Some(Arc::clone(&state));
+        SqliteReadPause { state }
+    }
+
+    /// Reach the queued-work hydration seam, blocking the connection thread
+    /// while a pause armed by `pause_queued_work_hydration` is outstanding.
+    pub(crate) fn reach_queued_work_hydration(&self) {
+        let Some(pause) = self.lock_state().read_pause.take() else {
+            return;
+        };
+        let mut progress = pause.state.lock_recover();
+        progress.reached_ordinal = Some(0);
+        pause.changed.notify_all();
+        while !progress.released {
+            progress = pause.changed.wait(progress).recover();
+        }
     }
 
     pub(crate) fn begin_write(&self) -> u64 {
