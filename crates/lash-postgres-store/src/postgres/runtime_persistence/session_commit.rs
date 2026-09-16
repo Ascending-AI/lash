@@ -1038,6 +1038,18 @@ impl SessionCommitStore for PostgresSessionStore {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &meta.session_id).await?;
+        // FIG-3045: the recorded lineage is write-once, so a metadata replace
+        // that moves it is refused here exactly as admission refuses a
+        // conflicting rebind.
+        if let Some(recorded) =
+            crate::session_meta::load_recorded_lineage_tx(&mut tx, &meta.session_id).await?
+        {
+            lash_core::store_backend_support::guard_session_meta_relation_rewrite(
+                &meta.session_id,
+                &recorded,
+                &meta.relation,
+            )?;
+        }
         crate::session_meta::write_session_meta_tx(
             &mut tx,
             &meta,

@@ -15,7 +15,7 @@ pub use process_lifecycle_sql::{
 };
 pub use session_meta::{
     CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredObserverIntent, StoredRelation,
-    guard_rebind_lineage,
+    guard_rebind_lineage, guard_session_meta_relation_rewrite,
 };
 
 /// Reserved runtime-receipt identity used as the durable completion marker

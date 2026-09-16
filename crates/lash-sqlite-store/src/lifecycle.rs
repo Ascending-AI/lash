@@ -373,6 +373,18 @@ impl Store {
             .write_flow(move |tx| {
                 let outcome: Result<(), StoreError> = (|| {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &meta.session_id)?;
+                    // FIG-3045: the recorded lineage is write-once, so a
+                    // metadata replace that moves it is refused here exactly
+                    // as admission refuses a conflicting rebind.
+                    if let Some(recorded) =
+                        crate::session_meta::load_recorded_lineage(tx, &meta.session_id)?
+                    {
+                        lash_core::store_backend_support::guard_session_meta_relation_rewrite(
+                            &meta.session_id,
+                            &recorded,
+                            &meta.relation,
+                        )?;
+                    }
                     crate::session_meta::write_session_meta(
                         tx,
                         &meta,

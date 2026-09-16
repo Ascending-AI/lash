@@ -6,18 +6,26 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+/// Metadata written through the store round-trips.
+///
+/// The fixture admitted this session as a root, and the recorded lineage is
+/// write-once (FIG-3045), so this law rewrites exactly what the production
+/// caller rewrites: the same relation with its pending observer intents
+/// settled. Child and fork relations round-trip through
+/// `session_store_factory_round_trips_every_relation_shape`, which declares the
+/// lineage at admission on the same three backends.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     let meta = SessionMeta {
-        pending_observer_intents: Vec::new(),
+        pending_observer_intents: vec![
+            crate::SessionObserverIntent::host_requested("observer-a"),
+            crate::SessionObserverIntent::fork_inherited("observer-b"),
+        ],
         session_id: SessionId::from("root"),
-        relation: SessionRelation::Child {
-            parent_session_id: SessionId::from("parent-session"),
-            caused_by: None,
-        },
+        relation: SessionRelation::Root,
     };
     store
         .save_session_meta(meta.clone())
@@ -29,6 +37,96 @@ pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
         .expect("load session meta")
         .expect("session meta present");
     assert_eq!(loaded, meta);
+}
+
+/// The recorded lineage of a session is a durable fact (FIG-1559), so the
+/// metadata writer may not quietly replace it.
+///
+/// `admit_and_bind_session` already refuses a rebind that declares a different
+/// lineage. `save_session_meta` replaces the same relation columns, and its one
+/// production caller round-trips the metadata it loaded, so a write that
+/// carries a different parent, a fork source, or a bare root over a recorded
+/// lineage is a rewrite and is refused with
+/// [`StoreError::SessionRelationMismatch`](crate::StoreError::SessionRelationMismatch)
+/// on every backend, leaving the row untouched. Admission may read
+/// [`SessionRelation::Root`] as "no claim"; a write may not, because the row it
+/// would record replaces the recorded lineage with that root.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimePersistence>) {
+    // The fixture admitted this session as a root; claiming a parent for it is
+    // the conflict `admit_and_bind_session` already refuses on a rebind.
+    let recorded = SessionMeta {
+        pending_observer_intents: Vec::new(),
+        session_id: SessionId::from("root"),
+        relation: SessionRelation::Root,
+    };
+    assert_eq!(
+        store
+            .load_session_meta()
+            .await
+            .expect("load the admitted session metadata")
+            .expect("the fixture admits this session before the law runs"),
+        recorded,
+        "this law needs the admitted root relation as its precondition"
+    );
+
+    // The round trip the production caller performs: the same relation, with
+    // its observer intents settled.
+    let settled = SessionMeta {
+        pending_observer_intents: vec![crate::SessionObserverIntent::host_requested("observer-a")],
+        ..recorded.clone()
+    };
+    store
+        .save_session_meta(settled.clone())
+        .await
+        .expect("a save that keeps the recorded lineage still writes");
+
+    for (label, relation) in [
+        (
+            "a parent",
+            SessionRelation::Child {
+                parent_session_id: SessionId::from("other-parent"),
+                caused_by: None,
+            },
+        ),
+        (
+            "a fork source",
+            SessionRelation::Fork {
+                source_session_id: SessionId::from("other-source"),
+                source_node_id: crate::NodeId::from("other-node"),
+                observer_inheritance: crate::ObserverInheritance::None,
+            },
+        ),
+    ] {
+        let error = store
+            .save_session_meta(SessionMeta {
+                relation,
+                ..settled.clone()
+            })
+            .await
+            .expect_err("a metadata write must not rewrite the recorded relation");
+        assert!(
+            matches!(
+                error,
+                crate::StoreError::SessionRelationMismatch { ref session_id, .. }
+                    if session_id.as_str() == "root"
+            ),
+            "rewriting the recorded relation to claim {label} must be refused as a relation mismatch, got: {error}"
+        );
+    }
+
+    assert_eq!(
+        store
+            .load_session_meta()
+            .await
+            .expect("load session meta")
+            .expect("session meta present"),
+        settled,
+        "a refused rewrite must leave the recorded metadata untouched"
+    );
 }
 
 /// Blob-backed backends must physically reclaim the checkpoint blob a superseding

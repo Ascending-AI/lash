@@ -159,6 +159,7 @@ macro_rules! runtime_persistence_tests {
             (session_prompt_layer_round_trips_through_the_committed_head, "session-prompt-layer"),
             (session_protocol_turn_options_round_trip_through_the_committed_head, "session-protocol-turn-options"),
             (session_metadata_round_trips, "root"),
+            (session_metadata_relation_is_write_once, "root"),
             (attachment_manifest_records_intent_and_commit_stamps, "root"),
             (attachment_manifest_keeps_same_content_ownership_per_session, "root"),
             (attachment_manifest_reference_tracking_and_gc_root_set, "root"),

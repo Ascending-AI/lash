@@ -1595,10 +1595,13 @@ async fn session_store_factory_round_trips_every_relation_shape(
 
     for (label, relation) in relations {
         let session_id = SessionId::from(format!("session-meta-roundtrip-{label}"));
+        // The relation is created with the store: `save_session_meta` may not
+        // move a recorded lineage (FIG-3045), so the round trip declares it at
+        // admission and then rewrites only the rest of the record.
         let request = session_store_request(
             &session_id,
             "session-meta-roundtrip-model",
-            crate::SessionRelation::Root,
+            relation.clone(),
         );
         let store = factory
             .create_store(&request)
@@ -1644,26 +1647,20 @@ async fn session_store_factory_round_trips_every_relation_shape(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::SessionStoreFactory>) {
+    // The relation is declared at creation: a later `save_session_meta` may
+    // not move a recorded lineage (FIG-3045).
     let initial = session_store_request(
         &SessionId::from("stable-session"),
         "initial-model",
-        crate::SessionRelation::Root,
+        crate::SessionRelation::Child {
+            parent_session_id: SessionId::from("custom-parent"),
+            caused_by: None,
+        },
     );
-    let created = factory
+    let _created = factory
         .create_store(&initial)
         .await
         .expect("create stable session");
-    created
-        .save_session_meta(SessionMeta {
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("stable-session"),
-            relation: crate::SessionRelation::Child {
-                parent_session_id: SessionId::from("custom-parent"),
-                caused_by: None,
-            },
-        })
-        .await
-        .expect("write custom meta");
 
     let changed = session_store_request(
         &SessionId::from("stable-session"),

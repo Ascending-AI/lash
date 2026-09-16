@@ -489,6 +489,33 @@ pub fn guard_rebind_lineage(
     Ok(())
 }
 
+/// Refuse a metadata write that would replace the recorded session lineage.
+///
+/// [`SessionCommitStore::save_session_meta`](crate::store::SessionCommitStore::save_session_meta)
+/// replaces every relation column of an existing row, so it is the second way
+/// a recorded lineage can move. Admission's rebind comparison reads
+/// [`SessionLineage::Root`] as "no claim" because a resume declares no
+/// lineage; a metadata write cannot, because the row it writes would record
+/// that root and drop the recorded parent. The lineage is therefore write-once
+/// here: it must match exactly, and only the rest of the record (the pending
+/// observer intents the sole production caller settles, and the causal
+/// provenance and observer inheritance that are not lineage) may move.
+pub fn guard_session_meta_relation_rewrite(
+    session_id: &SessionId,
+    recorded: &SessionLineage,
+    requested: &SessionRelation,
+) -> Result<(), StoreError> {
+    let requested = SessionLineage::of(requested);
+    if *recorded != requested {
+        return Err(StoreError::SessionRelationMismatch {
+            session_id: session_id.clone(),
+            recorded: Box::new(recorded.clone()),
+            requested: Box::new(requested),
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod identity_tests {
     use super::*;
