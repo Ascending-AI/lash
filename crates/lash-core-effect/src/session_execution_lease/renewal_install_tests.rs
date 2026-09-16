@@ -1,6 +1,6 @@
 use super::*;
-use crate::runtime::in_memory_store::InMemorySessionStore;
-use crate::runtime::tests::trace_capture::{CapturedFieldKind, capturing};
+use lash_core_ids::trace_capture::{CapturedFieldKind, capturing};
+use lash_core_memory::in_memory_store::InMemorySessionStore;
 
 const TEST_SESSION_ID: &str = "renewal-install-validation";
 
@@ -37,7 +37,7 @@ async fn assert_renewal_response_refused(
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "assert-renewal-response-refused-executor",
             timings,
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim lease")
@@ -260,7 +260,7 @@ async fn renewal_with_advanced_expiry_installs() {
         &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
         "renewal-with-advanced-expiry-installs-executor",
         timings,
-        Arc::new(crate::runtime::SystemClock),
+        Arc::new(lash_core_ids::clock::SystemClock),
     )
     .await
     .expect("claim lease")

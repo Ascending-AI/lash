@@ -315,7 +315,7 @@ impl QueuedLaneProbe for FakeQueuedLaneProbe {
 }
 
 fn queued_lane_holder(expires_at_epoch_ms: u64) -> QueuedLaneHolder {
-    QueuedLaneHolder(crate::store::SessionExecutionLease {
+    QueuedLaneHolder::new(crate::store::SessionExecutionLease {
         session_id: SessionId::from("queued-lane-test"),
         owner: crate::LeaseOwnerIdentity::opaque("holder", "holder:incarnation"),
         executor_id: "holder-executor".to_string(),
@@ -343,7 +343,7 @@ async fn queued_lane_guard() -> QueuedLaneGuard {
     .await
     .expect("queued-lane test claim")
     .expect("queued-lane test guard");
-    QueuedLaneGuard(guard)
+    QueuedLaneGuard::new(guard)
 }
 
 #[tokio::test]

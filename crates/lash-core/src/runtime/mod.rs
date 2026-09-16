@@ -55,15 +55,15 @@ pub use process_worker::release_process_execution_permit_while;
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
+#[cfg(feature = "testing")]
+pub use lash_core_effect::session_execution_lease;
+#[cfg(not(feature = "testing"))]
+pub(crate) use lash_core_effect::session_execution_lease;
 use lash_core_store::session_catalog;
 pub use session_administration::{
     SessionAdministration, SessionDeleteContext, SessionDeleteExecution,
 };
 pub use session_catalog::*;
-#[cfg(feature = "testing")]
-pub mod session_execution_lease;
-#[cfg(not(feature = "testing"))]
-pub(crate) mod session_execution_lease;
 #[cfg(feature = "testing")]
 pub mod session_manager;
 #[cfg(not(feature = "testing"))]

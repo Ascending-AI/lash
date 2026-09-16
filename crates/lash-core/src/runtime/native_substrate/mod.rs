@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 mod awaiter;
-pub(crate) mod lane_wait;
+#[allow(unused_imports)]
+pub(crate) use lash_core_effect::queued_lane_wait as lane_wait;
 mod policy;
 mod process_work;
 mod queued;

@@ -5,7 +5,10 @@
 //! scoped controller, both thin handles on one shared driver. Every method of
 //! the three ports those types answer is a forward to the driver plus two
 //! backend facts ([`EffectReplayCapabilities`]) — so the forwards live here,
-//! once, as blanket impls keyed on three integration traits, and a store
+//! once: the [`AwaitEventResolver`] port is one shared implementation macro
+//! (the trait lives in `lash-core-effect`, so a blanket impl over the
+//! integration traits would violate coherence), and the other two ports are
+//! blanket impls, all keyed on three integration traits, and a store
 //! implements only those: *which driver* ([`StoreReplayAdapter`]), *I am the
 //! host* ([`StoreReplayHost`]), and *I am a controller for this scope*
 //! ([`StoreReplayController`]). Before this module each store carried its own
@@ -42,7 +45,7 @@ pub trait StoreReplayAdapter: Send + Sync {
 /// Marks a store's deployment-level host: the type that mints scoped
 /// controllers. Gets [`EffectHost`] for free.
 #[async_trait]
-pub trait StoreReplayHost: StoreReplayAdapter {
+pub trait StoreReplayHost: StoreReplayAdapter + AwaitEventResolver {
     /// Stable identity of the await-event deployment backing this host.
     fn turn_control_binding_id(&self) -> String;
 
@@ -89,7 +92,7 @@ pub trait StoreReplayHost: StoreReplayAdapter {
 
 /// Marks a store's scoped controller and names the scope it executes against.
 /// Gets [`RuntimeEffectController`] for free.
-pub trait StoreReplayController: StoreReplayAdapter {
+pub trait StoreReplayController: StoreReplayAdapter + AwaitEventResolver {
     /// The scope whose journal this controller executes against.
     fn execution_scope(&self) -> &ExecutionScope;
 }
@@ -124,97 +127,57 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreRep
     }
 }
 
-fn capabilities<T: StoreReplayAdapter + ?Sized>(adapter: &T) -> EffectReplayCapabilities {
+#[doc(hidden)]
+pub fn store_replay_capabilities<T: StoreReplayAdapter + ?Sized>(
+    adapter: &T,
+) -> EffectReplayCapabilities {
     adapter.replay_driver().row_store.capabilities()
 }
 
-#[async_trait]
-impl<T: StoreReplayAdapter> AwaitEventResolver for T {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        StoreReplayAdapter::await_event_authority_binding_id(self)
-    }
-
-    async fn prepare_completion_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<crate::CompletionKeyPreparation, RuntimeError> {
-        if !may_defer {
-            return Ok(crate::CompletionKeyPreparation::NotNeeded);
+#[macro_export]
+macro_rules! impl_store_replay_await_event_resolver {
+    ($($impl_head:tt)*) => {
+        #[$crate::async_trait]
+        $($impl_head)* {
+            fn await_event_authority_binding_id(&self) -> Option<String> {
+                $crate::facade_support::effect_replay_driver::StoreReplayAdapter::await_event_authority_binding_id(self)
+            }
+            async fn prepare_completion_key(&self, scope: &$crate::ExecutionScope, wait: $crate::AwaitEventWaitIdentity, may_defer: bool) -> Result<$crate::CompletionKeyPreparation, $crate::RuntimeError> {
+                if !may_defer { return Ok($crate::CompletionKeyPreparation::NotNeeded); }
+                match $crate::facade_support::effect_replay_driver::store_replay_capabilities(self).completion_keys {
+                    $crate::facade_support::effect_replay_driver::CompletionKeys::Unsupported => Ok($crate::CompletionKeyPreparation::Unsupported),
+                    $crate::facade_support::effect_replay_driver::CompletionKeys::Issued => $crate::AwaitEventResolver::await_event_key(self, scope, wait).await.map($crate::CompletionKeyPreparation::Issued),
+                }
+            }
+            async fn await_event_key(&self, scope: &$crate::ExecutionScope, wait: $crate::AwaitEventWaitIdentity) -> Result<$crate::AwaitEventKey, $crate::RuntimeError> {
+                $crate::facade_support::effect_replay_driver::StoreReplayAdapter::replay_driver(self).await_event_key(scope, wait).await
+            }
+            async fn resolve_await_event(&self, key: &$crate::AwaitEventKey, resolution: $crate::Resolution) -> Result<$crate::ResolveOutcome, $crate::RuntimeError> {
+                $crate::facade_support::effect_replay_driver::StoreReplayAdapter::replay_driver(self).resolve_await_event(key, resolution).await
+            }
+            async fn peek_await_event(&self, key: &$crate::AwaitEventKey) -> Result<Option<$crate::Resolution>, $crate::RuntimeError> {
+                $crate::facade_support::effect_replay_driver::StoreReplayAdapter::replay_driver(self).peek_await_event(key).await
+            }
+            async fn await_await_event(&self, key: &$crate::AwaitEventKey, cancel: $crate::facade_support::effect_replay_driver::ReplayCancellationToken, deadline: Option<std::time::Instant>) -> Result<$crate::Resolution, $crate::RuntimeError> {
+                $crate::facade_support::effect_replay_driver::StoreReplayAdapter::replay_driver(self).await_await_event(key, cancel, deadline).await
+            }
+            async fn revoke_await_events_for_session(&self, session_id: &$crate::SessionId) -> Result<(), $crate::RuntimeError> {
+                $crate::facade_support::effect_replay_driver::StoreReplayAdapter::replay_driver(self).revoke_await_events_for_session(session_id).await
+            }
+            async fn cancel_await_events_for_session(&self, session_id: &$crate::SessionId) -> Result<(), $crate::RuntimeError> {
+                $crate::facade_support::effect_replay_driver::StoreReplayAdapter::replay_driver(self).cancel_await_events_for_session(session_id).await
+            }
+            async fn retire_await_events_for_scope(&self, scope: &$crate::ExecutionScope) -> Result<(), $crate::RuntimeError> {
+                $crate::facade_support::effect_replay_driver::StoreReplayAdapter::replay_driver(self).retire_await_events_for_scope(scope).await
+            }
         }
-        match capabilities(self).completion_keys {
-            CompletionKeys::Unsupported => Ok(crate::CompletionKeyPreparation::Unsupported),
-            CompletionKeys::Issued => self
-                .await_event_key(scope, wait)
-                .await
-                .map(crate::CompletionKeyPreparation::Issued),
-        }
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.replay_driver().await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.replay_driver()
-            .resolve_await_event(key, resolution)
-            .await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        self.replay_driver().peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<Instant>,
-    ) -> Result<Resolution, RuntimeError> {
-        self.replay_driver()
-            .await_await_event(key, cancel, deadline)
-            .await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.replay_driver()
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.replay_driver()
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn retire_await_events_for_scope(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<(), RuntimeError> {
-        self.replay_driver()
-            .retire_await_events_for_scope(scope)
-            .await
-    }
+    };
 }
+
+impl_store_replay_await_event_resolver!(
+    impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> AwaitEventResolver
+        for ScopedStoreReplayController<P, A>
+);
 
 #[async_trait]
 impl<T: StoreReplayHost> EffectHost for T {
@@ -360,7 +323,8 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
         let scope = self.execution_scope();
         envelope.invocation.validate_execution_scope(scope)?;
         let is_tool_batch = matches!(envelope.command, RuntimeEffectCommand::ToolBatch { .. });
-        if is_tool_batch && capabilities(self).tool_batch_redrive == ToolBatchRedrive::ChildrenFirst
+        if is_tool_batch
+            && store_replay_capabilities(self).tool_batch_redrive == ToolBatchRedrive::ChildrenFirst
         {
             // Re-enter the coordinator on redrive so each child command is
             // reconstructed and crosses its own key-addressed journal row.

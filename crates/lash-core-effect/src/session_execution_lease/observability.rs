@@ -2,7 +2,7 @@ use super::SessionExecutionLeaseCommitEvidence;
 use crate::SessionId;
 use crate::{SessionExecutionLease, StoreError};
 
-pub(crate) use lash_core_store::session_execution_lease::{trace_acquisition, trace_busy};
+pub use lash_core_store::session_execution_lease::{trace_acquisition, trace_busy};
 
 pub(super) fn trace_commit_busy_advisory(session_id: &SessionId, holder: &SessionExecutionLease) {
     let holder_owner_id_sha256 = crate::stable_hash::sha256_hex(holder.owner.owner_id.as_bytes());
@@ -10,6 +10,7 @@ pub(super) fn trace_commit_busy_advisory(session_id: &SessionId, holder: &Sessio
         crate::stable_hash::sha256_hex(holder.owner.incarnation_id.as_bytes());
     let holder_executor_id_sha256 = crate::stable_hash::sha256_hex(holder.executor_id.as_bytes());
     tracing::info!(
+        target: "lash_core::runtime::session_execution_lease::observability",
         session_id = session_id.as_str(),
         holder_owner_id_sha256,
         holder_incarnation_id_sha256,
@@ -46,6 +47,7 @@ pub fn trace_commit_cas_rejected(
         evidence.executor_id.as_str()
     });
     tracing::warn!(
+        target: "lash_core::runtime::session_execution_lease::observability",
         session_id = session_id.as_str(),
         fencing_token = evidence.map(|evidence| evidence.fencing_token),
         owner_id = %owner.owner_id,

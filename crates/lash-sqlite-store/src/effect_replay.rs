@@ -92,6 +92,8 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteEffectHost {
     }
 }
 
+lash_core::impl_store_replay_await_event_resolver!(impl lash_core::AwaitEventResolver for SqliteEffectHost);
+
 #[async_trait::async_trait]
 impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
     fn turn_control_binding_id(&self) -> String {
@@ -200,6 +202,8 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteRuntimeEffectController 
         Some(self.turn_control_binding_id.to_string())
     }
 }
+
+lash_core::impl_store_replay_await_event_resolver!(impl lash_core::AwaitEventResolver for SqliteRuntimeEffectController);
 
 impl effect_replay_driver::StoreReplayController for SqliteRuntimeEffectController {
     fn execution_scope(&self) -> &ExecutionScope {

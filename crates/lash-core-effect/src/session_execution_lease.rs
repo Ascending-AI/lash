@@ -53,7 +53,7 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
-use super::Clock;
+use crate::Clock;
 use crate::LeaseTimings;
 use crate::store::{
     RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, SessionExecutionLease,
@@ -61,8 +61,8 @@ use crate::store::{
 };
 
 mod observability;
-pub(crate) use observability::trace_acquisition;
-pub(crate) use observability::trace_busy;
+pub use observability::trace_acquisition;
+pub use observability::trace_busy;
 pub use observability::trace_commit_cas_rejected;
 
 static NEXT_LEASE_GUARD_ID: AtomicU64 = AtomicU64::new(1);
@@ -99,7 +99,7 @@ mod loss_cause {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SessionExecutionLeaseContinuity {
+pub struct SessionExecutionLeaseContinuity {
     guard_id: u64,
     fencing_token: u64,
 }
@@ -137,7 +137,7 @@ pub struct SessionExecutionLeaseGuard {
     renew_task: tokio::task::JoinHandle<()>,
 }
 
-pub(super) enum SessionExecutionLeaseGuardAcquisition {
+pub enum SessionExecutionLeaseGuardAcquisition {
     Acquired(SessionExecutionLeaseGuard),
     Busy(SessionExecutionLease),
 }
@@ -148,13 +148,13 @@ pub(super) enum SessionExecutionLeaseGuardAcquisition {
 /// Retaining this authority cannot renew, release, or otherwise keep the lane
 /// alive after the uniquely-owned turn-driver guard is dropped.
 #[derive(Clone)]
-pub(crate) struct BorrowedLaneAuthority {
+pub struct BorrowedLaneAuthority {
     lease: Arc<StdMutex<SessionExecutionLease>>,
     loss_cause: Arc<AtomicU8>,
 }
 
 impl BorrowedLaneAuthority {
-    pub(super) fn fence(&self) -> SessionExecutionLeaseAuthority {
+    pub fn fence(&self) -> SessionExecutionLeaseAuthority {
         self.lease.lock_recover().fence()
     }
 
@@ -188,7 +188,7 @@ impl SessionExecutionLeaseGuard {
         Self::try_acquire_for_executor(store, session_id, owner, executor_id, timings, clock).await
     }
 
-    pub(super) async fn try_acquire_for_executor(
+    pub async fn try_acquire_for_executor(
         store: Arc<dyn RuntimePersistence>,
         session_id: &SessionId,
         owner: &crate::LeaseOwnerIdentity,
@@ -211,7 +211,7 @@ impl SessionExecutionLeaseGuard {
         }
     }
 
-    pub(super) async fn try_acquire_with_busy_holder(
+    pub async fn try_acquire_with_busy_holder(
         store: Arc<dyn RuntimePersistence>,
         session_id: &SessionId,
         owner: &crate::LeaseOwnerIdentity,
@@ -276,7 +276,7 @@ impl SessionExecutionLeaseGuard {
         }
     }
 
-    pub(super) fn borrowed_authority(&self) -> BorrowedLaneAuthority {
+    pub fn borrowed_authority(&self) -> BorrowedLaneAuthority {
         BorrowedLaneAuthority {
             lease: Arc::clone(&self.lease),
             loss_cause: Arc::clone(&self.loss_cause),
@@ -312,7 +312,7 @@ impl SessionExecutionLeaseGuard {
 
     /// Record an already-acknowledged release: the commit that carried this
     /// lease's completion succeeded, so the backend has released it.
-    pub(super) fn mark_released(&self) {
+    pub fn mark_released(&self) {
         if self
             .release_state
             .swap(release_state::RELEASED, Ordering::AcqRel)
@@ -323,6 +323,7 @@ impl SessionExecutionLeaseGuard {
         self.renew_task.abort();
         let completion = self.completion();
         tracing::debug!(
+            target: "lash_core::runtime::session_execution_lease",
             session_id = %completion.session_id,
             owner_id = %completion.owner.owner_id,
             incarnation_id = %completion.owner.incarnation_id,
@@ -337,7 +338,7 @@ impl SessionExecutionLeaseGuard {
         self.loss_cause.load(Ordering::Acquire) != loss_cause::NONE
     }
 
-    pub(super) fn continuity(&self) -> Option<SessionExecutionLeaseContinuity> {
+    pub fn continuity(&self) -> Option<SessionExecutionLeaseContinuity> {
         let lease = self.lease.lock_recover();
         if self.is_lost() || lease.expires_at_epoch_ms <= self.clock.timestamp_ms() {
             return None;
@@ -376,6 +377,7 @@ impl SessionExecutionLeaseGuard {
             self.release_state
                 .store(release_state::RELEASED, Ordering::Release);
             tracing::debug!(
+                target: "lash_core::runtime::session_execution_lease",
                 session_id = %completion.session_id,
                 owner_id = %completion.owner.owner_id,
                 incarnation_id = %completion.owner.incarnation_id,
@@ -404,6 +406,7 @@ impl SessionExecutionLeaseGuard {
         self.release_state
             .store(release_state::RELEASED, Ordering::Release);
         tracing::debug!(
+            target: "lash_core::runtime::session_execution_lease",
             session_id = %completion.session_id,
             owner_id = %completion.owner.owner_id,
             incarnation_id = %completion.owner.incarnation_id,
@@ -468,6 +471,7 @@ pub async fn commit_runtime_state_with_fresh_session_execution_lease(
                 Ok(()) => {}
                 Err(release_error) => {
                     tracing::warn!(
+                        target: "lash_core::runtime::session_execution_lease",
                         error = %release_error,
                         original_error = %error,
                         session_id = session_id.as_str(),
@@ -486,7 +490,7 @@ pub async fn commit_runtime_state_with_fresh_session_execution_lease(
 /// token, and expiry inside the commit transaction. No claim, rotation, or
 /// release occurs on either outcome; the outer guard therefore remains the
 /// sole owner of renewal and eventual release.
-pub(super) async fn commit_runtime_state_with_borrowed_lease(
+pub async fn commit_runtime_state_with_borrowed_lease(
     lease: &BorrowedLaneAuthority,
     store: Arc<dyn RuntimePersistence>,
     commit: RuntimeCommit,
@@ -530,6 +534,7 @@ impl Drop for SessionExecutionLeaseGuard {
         let store = Arc::clone(&self.store);
         let lease_lost = self.is_lost();
         tracing::debug!(
+            target: "lash_core::runtime::session_execution_lease",
             session_id = %completion.session_id,
             owner_id = %completion.owner.owner_id,
             incarnation_id = %completion.owner.incarnation_id,
@@ -551,6 +556,7 @@ impl Drop for SessionExecutionLeaseGuard {
         crate::task::spawn(async move {
             match store.release_session_execution_lease(&completion).await {
                 Ok(()) => tracing::debug!(
+                    target: "lash_core::runtime::session_execution_lease",
                     session_id = %completion.session_id,
                     owner_id = %completion.owner.owner_id,
                     incarnation_id = %completion.owner.incarnation_id,
@@ -561,6 +567,7 @@ impl Drop for SessionExecutionLeaseGuard {
                     "best-effort drop release completed"
                 ),
                 Err(StoreError::SessionExecutionLeaseReleaseRefused { .. }) => tracing::debug!(
+                    target: "lash_core::runtime::session_execution_lease",
                     session_id = %completion.session_id,
                     owner_id = %completion.owner.owner_id,
                     incarnation_id = %completion.owner.incarnation_id,
@@ -571,6 +578,7 @@ impl Drop for SessionExecutionLeaseGuard {
                     "best-effort drop release was stale and left the successor lease untouched"
                 ),
                 Err(error) => tracing::warn!(
+                    target: "lash_core::runtime::session_execution_lease",
                     error = %error,
                     session_id = %completion.session_id,
                     owner_id = %completion.owner.owner_id,
@@ -611,6 +619,7 @@ fn spawn_renewal_task(
                     match validate_renewed_session_execution_lease(&presented, &renewed) {
                         Ok(()) => {
                             tracing::debug!(
+                                target: "lash_core::runtime::session_execution_lease",
                                 session_id = %renewed.session_id,
                                 owner_id = %renewed.owner.owner_id,
                                 incarnation_id = %renewed.owner.incarnation_id,
@@ -656,6 +665,7 @@ fn spawn_renewal_task(
                 if established_loss_cause != loss_cause::NONE {
                     loss_cause.store(established_loss_cause, Ordering::Release);
                     tracing::warn!(
+                        target: "lash_core::runtime::session_execution_lease",
                         error = %err,
                         session_id = %fence.session_id,
                         owner_id = %fence.owner.owner_id,
@@ -673,6 +683,7 @@ fn spawn_renewal_task(
                     );
                 } else {
                     tracing::warn!(
+                        target: "lash_core::runtime::session_execution_lease",
                         error = %err,
                         session_id = %fence.session_id,
                         owner_id = %fence.owner.owner_id,
@@ -752,15 +763,15 @@ mod renewal_install_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::in_memory_store::InMemorySessionStore;
     use crate::store::{SessionCommitStore, SessionExecutionLeaseStore};
+    use lash_core_memory::in_memory_store::InMemorySessionStore;
 
     const SESSION_ID: &str = "cancelled-release";
 
     async fn acquire_gated_guard() -> (
         Arc<InMemorySessionStore>,
         SessionExecutionLeaseGuard,
-        Arc<crate::runtime::in_memory_store::test_support::SessionExecutionLeaseReleaseGate>,
+        Arc<lash_core_memory::in_memory_store::test_support::SessionExecutionLeaseReleaseGate>,
     ) {
         let store = Arc::new(InMemorySessionStore::new());
         let guard = SessionExecutionLeaseGuard::try_acquire(
@@ -769,7 +780,7 @@ mod tests {
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "acquire-gated-guard-executor",
             LeaseTimings::default(),
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim lease")
@@ -818,7 +829,7 @@ mod tests {
             &owner,
             "borrowed-commit-leaves-outer-guard-fence-valid-executor",
             LeaseTimings::default(),
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim outer lane")
@@ -858,7 +869,7 @@ mod tests {
             &owner,
             "lapsed-guard-cannot-authorize-borrowed-commit-executor",
             timings,
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim outer lane")
@@ -1004,7 +1015,7 @@ mod tests {
             &owner,
             "stale-in-band-release-refusal-is-terminal-and-benign-executor",
             LeaseTimings::default(),
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim predecessor guard")
@@ -1053,7 +1064,7 @@ mod tests {
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "clean-guard-drop-releases-before-ttl-for-immediate-peer-reclaim-executor",
             LeaseTimings::default(),
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim lease")
@@ -1087,7 +1098,7 @@ mod tests {
 
     #[tokio::test]
     async fn stalled_drop_release_falls_back_to_ttl_without_freeing_the_reclaimer() {
-        let clock = Arc::new(crate::testing::TestClock::new(1_000));
+        let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(1_000));
         let store_clock: Arc<dyn crate::Clock> = clock.clone();
         let store = Arc::new(InMemorySessionStore::with_clock(store_clock));
         let guard_clock: Arc<dyn crate::Clock> = clock.clone();
@@ -1182,7 +1193,7 @@ mod tests {
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "transient-renewal-failure-still-requires-a-backend-release-executor",
             timings,
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim lease")
@@ -1231,7 +1242,7 @@ mod tests {
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "renewal-install-refusal-still-requires-a-backend-release-executor",
             timings,
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim lease")
@@ -1282,7 +1293,7 @@ mod tests {
             &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
             "definitive-renewal-fence-rejection-skips-the-owner-side-release-executor",
             timings,
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim lease")
@@ -1307,10 +1318,10 @@ mod tests {
 
     #[tokio::test]
     async fn named_refusals_trace_typed_redacted_decision_evidence() {
-        use crate::runtime::tests::trace_capture::CapturedFieldKind;
+        use lash_core_ids::trace_capture::CapturedFieldKind;
 
         fn assert_refusal_event(
-            event: &crate::runtime::tests::trace_capture::CapturedEvent,
+            event: &lash_core_ids::trace_capture::CapturedEvent,
             operation: &str,
             decision_basis: &str,
             presented: &SessionExecutionLeaseAuthority,
@@ -1425,14 +1436,13 @@ mod tests {
             fencing_token: current.fencing_token,
         };
 
-        let (renewal_error, renewal_capture) =
-            crate::runtime::tests::trace_capture::capturing(|| async {
-                store
-                    .renew_session_execution_lease(&presented, 60_000)
-                    .await
-                    .expect_err("stale renewal refused")
-            })
-            .await;
+        let (renewal_error, renewal_capture) = lash_core_ids::trace_capture::capturing(|| async {
+            store
+                .renew_session_execution_lease(&presented, 60_000)
+                .await
+                .expect_err("stale renewal refused")
+        })
+        .await;
         assert!(matches!(
             renewal_error,
             StoreError::SessionExecutionLeaseRenewalRefused { .. }
@@ -1445,7 +1455,7 @@ mod tests {
             &current,
         );
 
-        let (_, execution_capture) = crate::runtime::tests::trace_capture::capturing(|| async {
+        let (_, execution_capture) = lash_core_ids::trace_capture::capturing(|| async {
             crate::store_backend_support::require_current_session_execution_lease(
                 &SessionId::from(SESSION_ID),
                 Some(
@@ -1479,14 +1489,13 @@ mod tests {
         assert_eq!(execution_event.field("generation_matched"), "Some(true)");
         assert_eq!(execution_event.field("expiry_matched"), "Some(true)");
 
-        let (release_error, release_capture) =
-            crate::runtime::tests::trace_capture::capturing(|| async {
-                store
-                    .release_session_execution_lease(&presented)
-                    .await
-                    .expect_err("stale release refused")
-            })
-            .await;
+        let (release_error, release_capture) = lash_core_ids::trace_capture::capturing(|| async {
+            store
+                .release_session_execution_lease(&presented)
+                .await
+                .expect_err("stale release refused")
+        })
+        .await;
         assert!(matches!(
             release_error,
             StoreError::SessionExecutionLeaseReleaseRefused { .. }
@@ -1537,7 +1546,7 @@ mod tests {
             .await
             .expect("release current lease");
 
-        let (error, capture) = crate::runtime::tests::trace_capture::capturing(|| async {
+        let (error, capture) = lash_core_ids::trace_capture::capturing(|| async {
             store
                 .admit_session_state(&presented)
                 .await
@@ -1578,7 +1587,7 @@ mod tests {
             &owner,
             "rotated-token-refusal-marks-the-old-renewal-loop-lost-executor",
             timings,
-            Arc::new(crate::runtime::SystemClock),
+            Arc::new(lash_core_ids::clock::SystemClock),
         )
         .await
         .expect("claim predecessor guard")

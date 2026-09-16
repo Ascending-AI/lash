@@ -14992,8 +14992,10 @@
         "testing"
       ],
       "dependencies": [
+        "async-trait",
         "hmac",
         "lash-internal-core-ids",
+        "lash-internal-core-memory",
         "lash-internal-core-store",
         "lash-internal-sansio",
         "serde",
@@ -15001,6 +15003,7 @@
         "sha2",
         "tokio",
         "tokio-util",
+        "tracing",
         "uuid"
       ],
       "manifest": "crates/lash-core-effect/Cargo.toml",
@@ -15041,6 +15044,7 @@
         "sha2",
         "tokio",
         "tracing",
+        "tracing-subscriber",
         "uuid"
       ],
       "manifest": "crates/lash-core-ids/Cargo.toml",

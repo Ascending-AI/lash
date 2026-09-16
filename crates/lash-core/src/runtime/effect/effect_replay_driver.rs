@@ -77,7 +77,11 @@
 
 use crate::SessionId;
 mod adapter;
-pub use adapter::{StoreReplayAdapter, StoreReplayController, StoreReplayHost};
+pub use adapter::{
+    StoreReplayAdapter, StoreReplayController, StoreReplayHost, store_replay_capabilities,
+};
+#[doc(hidden)]
+pub use tokio_util::sync::CancellationToken as ReplayCancellationToken;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};

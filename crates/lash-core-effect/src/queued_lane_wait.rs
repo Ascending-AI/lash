@@ -29,7 +29,7 @@
 //! row. Nothing here subtracts a local timestamp from a store-written one. The
 //! local clock is used only to measure a slice, which is clock-domain free.
 
-use crate::runtime::effect::QueuedLaneHolder;
+use crate::queued_lane::QueuedLaneHolder;
 
 /// Total in-process waiting for a busy session lane, as a multiple of the
 /// observed holder's own persisted lease term.
@@ -190,6 +190,7 @@ pub(crate) fn lane_busy_error(
 pub(crate) fn trace_busy_wait(holder: &QueuedLaneHolder, slice_ms: u64, waited_ms: u64) {
     let lease = holder.lease();
     tracing::info!(
+        target: "lash_core::runtime::native_substrate::lane_wait",
         session_id = %lease.session_id,
         holder_owner_id = %lease.owner.owner_id,
         holder_incarnation_id = %lease.owner.incarnation_id,
@@ -213,6 +214,7 @@ pub(crate) fn trace_busy_gave_up(
 ) {
     let lease = holder.lease();
     tracing::info!(
+        target: "lash_core::runtime::native_substrate::lane_wait",
         session_id = %lease.session_id,
         holder_owner_id = %lease.owner.owner_id,
         holder_incarnation_id = %lease.owner.incarnation_id,

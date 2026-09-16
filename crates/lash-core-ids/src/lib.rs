@@ -19,4 +19,6 @@ pub mod task;
 #[cfg(any(test, feature = "testing"))]
 pub mod test_clock;
 pub mod test_watchdog;
+#[cfg(feature = "testing")]
+pub mod trace_capture;
 pub mod worker_capacity;
