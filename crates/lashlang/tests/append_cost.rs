@@ -8,7 +8,8 @@
 //! loop that appended n items moved n²/2 members.
 //!
 //! This is a cost assertion, not a timing one. A counting global allocator
-//! measures the bytes the VM asks the allocator for while a program runs; the
+//! measures, per thread, the bytes the VM asks the allocator for while a
+//! program runs, so a case running beside this one cannot move the figure; the
 //! law is read off the bytes each append costs at two list lengths. Under the
 //! rebuild the per-append figure grew with the list (4x the items, ~4x the
 //! cost per item); an in-place append leaves it flat. Wall-clock time never
@@ -21,7 +22,7 @@
 //! `crates/lash-typescript/tests/array_append.rs`.
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::cell::Cell;
 
 use lashlang::{
     AbilityOp, AbilityResult, AssignPathStep, AssignTarget, BinaryOp, ExecutionHost,
@@ -32,7 +33,32 @@ use lashlang::{
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
-static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
+thread_local! {
+    /// Allocated bytes, charged to the thread that asked for them.
+    ///
+    /// Per thread rather than per process for the reason FIG-3221 records in
+    /// `dialect_cost.rs`: the cases here run concurrently under plain
+    /// `cargo test`, and a process-global counter folds a sibling case's
+    /// allocations into whatever window happens to be open. Each case measures
+    /// on its own libtest thread and blocks on its own future there, so a
+    /// thread's total over a window is exactly the run that window measured.
+    static ALLOCATED_BYTES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Charges `bytes` to the calling thread.
+///
+/// The key is `const`-initialised and holds a `Copy` type, so it registers no
+/// destructor and this call allocates nothing — it cannot re-enter the
+/// allocator.
+fn charge_to_this_thread(bytes: usize) {
+    let _ =
+        ALLOCATED_BYTES.try_with(|counter| counter.set(counter.get().saturating_add(bytes as u64)));
+}
+
+/// What the calling thread has allocated so far.
+fn allocated_bytes_on_this_thread() -> u64 {
+    ALLOCATED_BYTES.try_with(Cell::get).unwrap_or(0)
+}
 
 struct CountingAllocator;
 
@@ -44,7 +70,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let pointer = unsafe { System.alloc(layout) };
         if !pointer.is_null() {
-            ALLOCATED_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+            charge_to_this_thread(layout.size());
         }
         pointer
     }
@@ -56,7 +82,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let grown = unsafe { System.realloc(pointer, layout, new_size) };
         if !grown.is_null() && new_size > layout.size() {
-            ALLOCATED_BYTES.fetch_add((new_size - layout.size()) as u64, Ordering::Relaxed);
+            charge_to_this_thread(new_size - layout.size());
         }
         grown
     }
@@ -88,10 +114,10 @@ impl ExecutionHost for Host {
 fn run_measured(program: &Program) -> (Value, u64) {
     let compiled = compile_ast(program).expect("cost probe should compile");
     let mut state = State::new();
-    let before = ALLOCATED_BYTES.load(Ordering::Relaxed);
+    let before = allocated_bytes_on_this_thread();
     let outcome = futures::executor::block_on(execute(&compiled, &mut state, &Host))
         .expect("cost probe should execute");
-    let allocated = ALLOCATED_BYTES.load(Ordering::Relaxed) - before;
+    let allocated = allocated_bytes_on_this_thread() - before;
     let ExecutionOutcome::Finished(value) = outcome else {
         panic!("cost probe must finish");
     };
