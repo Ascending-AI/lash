@@ -195,3 +195,60 @@ fn pending_input_cancellation_respects_admission_order_and_terminal_states() {
         );
     }
 }
+
+#[test]
+#[should_panic(
+    expected = "queued-ingress boundary `queued-no-mode`: queued-ingress payload has no `ingress_mode` key"
+)]
+fn queued_ingress_without_a_mode_key_is_refused_rather_than_read_two_ways() {
+    // On main this event was read two ways by one store: the projection
+    // defaulted the absent key to next-turn (`input_state:
+    // "deferred_next_turn"`) while `ModelPendingInput` defaulted it to
+    // active-turn, so `queued_next_turn_boundaries` returned `[]` for the row
+    // the same store had just described as deferred to the next turn. One
+    // decoder now refuses the malformed boundary instead of inventing an
+    // answer for it.
+    let mut store = ModelStore::default();
+    store.apply_boundary(&BoundaryEvent::new(
+        "queued-no-mode",
+        "session",
+        BoundaryKind::QueuedIngress,
+        0,
+        "queued",
+        json!({"source_key": "k"}),
+    ));
+}
+
+#[test]
+fn queued_ingress_mode_survives_the_round_trip_the_model_and_the_live_world_share() {
+    for mode in [QueuedIngressMode::ActiveTurn, QueuedIngressMode::NextTurn] {
+        let mut store = ModelStore::default();
+        let observed = store.apply_boundary(&BoundaryEvent::new(
+            "queued",
+            "session",
+            BoundaryKind::QueuedIngress,
+            0,
+            "queued",
+            json!({"source_key": "k", "ingress_mode": mode.as_str()}),
+        ));
+
+        assert_eq!(
+            QueuedIngressMode::from_payload(&observed),
+            Ok(mode),
+            "the projected observation must re-decode to the mode it was given"
+        );
+        assert_eq!(
+            observed["input_state"],
+            match mode {
+                QueuedIngressMode::ActiveTurn => ACTIVE_TURN_INPUT_STATE,
+                QueuedIngressMode::NextTurn => NEXT_TURN_INPUT_STATE,
+            }
+        );
+        let held_for_next_turn = store.queued_next_turn_boundaries("session");
+        assert_eq!(
+            held_for_next_turn == vec!["queued".to_string()],
+            mode == QueuedIngressMode::NextTurn,
+            "the row the store holds for the next turn must agree with the mode it projected"
+        );
+    }
+}

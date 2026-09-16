@@ -1,4 +1,5 @@
 use super::*;
+use crate::scheduler::QueuedIngressMode;
 use lash_sansio::ProcessId;
 
 pub(super) fn trace_has_queued_cancel_race(lines: &[&TraceEventLine]) -> bool {
@@ -14,12 +15,8 @@ pub(super) fn trace_has_queued_cancel_race(lines: &[&TraceEventLine]) -> bool {
             else {
                 return false;
             };
-            queued
-                .event
-                .payload
-                .get("ingress_mode")
-                .and_then(Value::as_str)
-                == Some("active_turn")
+            QueuedIngressMode::from_payload(&queued.event.payload)
+                == Ok(QueuedIngressMode::ActiveTurn)
                 && queued
                     .event
                     .observed
@@ -1046,12 +1043,8 @@ fn select_queued_turn_followup_provider_evidence(
 ) -> Vec<&TraceEventLine> {
     for queued in event_lines.iter().filter(|line| {
         event_satisfies_scenario_evidence(&line.event, "queued_ingress")
-            && line
-                .event
-                .observed
-                .get("ingress_mode")
-                .and_then(Value::as_str)
-                == Some("active_turn")
+            && QueuedIngressMode::from_payload(&line.event.observed)
+                == Ok(QueuedIngressMode::ActiveTurn)
     }) {
         if let Some(provider) = event_lines
             .iter()

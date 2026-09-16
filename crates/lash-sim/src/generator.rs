@@ -8,7 +8,7 @@ use crate::runtime_providers::{
     MIGRATED_RUNTIME_PROVIDER_KINDS, runtime_provider_kind_for_session,
     runtime_script_name_for_kind,
 };
-use crate::scheduler::{BoundaryEvent, BoundaryKind, next_seed};
+use crate::scheduler::{BoundaryEvent, BoundaryKind, QueuedIngressMode, next_seed};
 use crate::trace::{StableAliases, WorkloadExpectations};
 
 pub const GENERATOR_VERSION: &str = "lash-sim.generated-workload.v9";
@@ -472,21 +472,6 @@ enum PlannedOperation {
         session: usize,
         lease_index: usize,
     },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum QueuedIngressMode {
-    ActiveTurn,
-    NextTurn,
-}
-
-impl QueuedIngressMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::ActiveTurn => "active_turn",
-            Self::NextTurn => "next_turn",
-        }
-    }
 }
 
 struct StateMachinePlanner {
@@ -1328,7 +1313,7 @@ fn hex_digest(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduler::BoundaryKind;
+    use crate::scheduler::{BoundaryKind, QueuedIngressMode};
 
     #[test]
     fn workload_generation_is_seed_and_version_deterministic() {
@@ -1371,12 +1356,16 @@ mod tests {
             .boundaries
             .iter()
             .filter(|boundary| boundary.kind == BoundaryKind::QueuedIngress)
-            .filter_map(|boundary| boundary.payload.get("ingress_mode"))
-            .filter_map(Value::as_str)
+            .map(|boundary| {
+                boundary
+                    .queued_ingress_mode()
+                    .expect("generated queued-ingress boundary declares its mode")
+            })
             .collect::<std::collections::BTreeSet<_>>();
 
         assert!(
-            modes.contains("active_turn") && modes.contains("next_turn"),
+            modes.contains(&QueuedIngressMode::ActiveTurn)
+                && modes.contains(&QueuedIngressMode::NextTurn),
             "expected both active_turn and next_turn queued ingress modes, got {modes:?}"
         );
     }

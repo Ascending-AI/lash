@@ -617,15 +617,12 @@ pub(super) fn queued_active_turn_input_hidden_semantics(events: &[DeliveredBound
                 .get("text")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            let active_turn_queued = queued.payload.get("ingress_mode").and_then(Value::as_str)
-                == Some("active_turn")
-                && queued.observed.get("ingress_mode").and_then(Value::as_str)
-                    == Some("active_turn")
-                && queued
-                    .observed
-                    .get("input_state")
-                    .and_then(Value::as_str)
-                    .is_some_and(|state| state.starts_with("pending"))
+            let active_turn_queued = QueuedIngressMode::from_payload(&queued.payload)
+                == Ok(QueuedIngressMode::ActiveTurn)
+                && QueuedIngressMode::from_payload(&queued.observed)
+                    == Ok(QueuedIngressMode::ActiveTurn)
+                && queued.observed.get("input_state").and_then(Value::as_str)
+                    == Some(ACTIVE_TURN_INPUT_STATE)
                 && source_key.is_some()
                 && source_key == observed_source_key
                 && queued

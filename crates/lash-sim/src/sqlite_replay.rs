@@ -20,7 +20,7 @@ use crate::runtime_contracts::{
 use crate::runtime_providers::{
     runtime_provider_components, runtime_scripts_for_texts as runtime_provider_scripts_for_texts,
 };
-use crate::scheduler::{BoundaryEvent, BoundaryKind};
+use crate::scheduler::{BoundaryEvent, BoundaryKind, QueuedIngressMode};
 use crate::store::{
     BackendCheckpointReplayEvidence, CheckpointWriteCollector, CheckpointWriteEvent, ModelStore,
     ObservedSessionStoreFactory,
@@ -508,7 +508,10 @@ impl SqliteRuntimeReplayWorld {
             .session
             .enqueue(lash::TurnInput::text(text.to_string()))
             .id(source_key);
-        if event.payload.get("ingress_mode").and_then(Value::as_str) == Some("active_turn") {
+        let ingress_mode = event
+            .queued_ingress_mode()
+            .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?;
+        if ingress_mode == QueuedIngressMode::ActiveTurn {
             let active_turn_id = event
                 .payload
                 .get("active_turn_id")
@@ -532,11 +535,7 @@ impl SqliteRuntimeReplayWorld {
             "source_key": source_key,
             "input_id": acceptance.input_id,
             "input_state": input_state.as_str(),
-            "ingress_mode": event
-                .payload
-                .get("ingress_mode")
-                .and_then(Value::as_str)
-                .unwrap_or("next_turn"),
+            "ingress_mode": ingress_mode.as_str(),
             "active_turn_id": event.payload.get("active_turn_id").cloned().unwrap_or(Value::Null),
         }))
     }

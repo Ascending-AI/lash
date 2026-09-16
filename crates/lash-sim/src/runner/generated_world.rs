@@ -1,5 +1,6 @@
 use super::*;
 use crate::backend_fault::GeneratedBackendFaultHarness;
+use crate::scheduler::QueuedIngressMode;
 use lash_sansio::SessionId;
 
 /// Suspend resolutions resume a turn only after the generated workload has
@@ -347,7 +348,10 @@ impl GeneratedRuntimeWorld {
             .get("active_turn_id")
             .and_then(Value::as_str)
             .map(str::to_string);
-        if event.payload.get("ingress_mode").and_then(Value::as_str) == Some("active_turn") {
+        let ingress_mode = event
+            .queued_ingress_mode()
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        if ingress_mode == QueuedIngressMode::ActiveTurn {
             let active_turn_id = observed_active_turn_id
                 .as_deref()
                 .unwrap_or(&event.boundary_id);
@@ -369,11 +373,7 @@ impl GeneratedRuntimeWorld {
             "source_key": source_key,
             "input_id": acceptance.input_id,
             "input_state": input_state.as_str(),
-            "ingress_mode": event
-                .payload
-                .get("ingress_mode")
-                .and_then(Value::as_str)
-                .unwrap_or("next_turn"),
+            "ingress_mode": ingress_mode.as_str(),
             "active_turn_id": observed_active_turn_id,
         }))
     }
