@@ -41,6 +41,86 @@ enum PersistedValue {
 
 include!(concat!(env!("OUT_DIR"), "/rlm_snapshot_fields.rs"));
 
+// Serialized field order of the snapshot's dependency-owned nodes.
+//
+// These types live in `lash-sansio` and `lash-lashlang-runtime`, and the build
+// script used to derive each list by serializing an all-fields-set witness.
+// That put both crates -- and every first-party crate beneath them -- into
+// Bazel's exec configuration, compiled a second time at `opt-level=3` for an
+// output no product artifact consumes (FIG-3032). The lists are declared here
+// instead, and `generated_snapshot_field_schemas_match_all_fields_set_serialization`
+// re-derives every one of them from the same witnesses at test time, so a
+// field added, removed or reordered upstream still fails the suite rather than
+// silently moving the canonical envelope.
+
+/// `lash_lashlang_runtime::DeferredResolutionRecord`.
+const DEFERRED_RESOLUTION_FIELDS: &[&str] = &["link_key", "resolutions"];
+
+/// `lash_lashlang_runtime::DeferredResolutionLinkKey`.
+const DEFERRED_LINK_KEY_FIELDS: &[&str] = &["address"];
+
+/// `lash_lashlang_runtime::DeferredTriggerResolutionRecord`.
+const DEFERRED_TRIGGER_RESOLUTION_FIELDS: &[&str] = &["link_key", "resolutions"];
+
+/// `lash_lashlang_runtime::TriggerResolution`.
+const TRIGGER_RESOLUTION_FIELDS: &[&str] = &[
+    "kind",
+    "provider_id",
+    "constructor_path",
+    "input_type",
+    "event_type",
+    "route",
+    "provider_ids",
+];
+
+/// `lash_lashlang_runtime::Resolution`.
+const RESOLUTION_FIELDS: &[&str] = &["kind", "definition", "source_id", "execution_binding"];
+
+/// `lash_sansio::ToolDefinition`.
+const TOOL_DEFINITION_FIELDS: &[&str] = &[
+    "id",
+    "name",
+    "description",
+    "compact_contract",
+    "activation",
+    "bindings",
+    "argument_projection",
+    "retry_policy",
+    "input_schema",
+    "output_schema",
+    "output_contract",
+    "examples",
+];
+
+/// `lash_sansio::SchemaContract`.
+const SCHEMA_CONTRACT_FIELDS: &[&str] = &["canonical", "projection"];
+
+/// `lash_sansio::SchemaProjectionPolicy`.
+const SCHEMA_PROJECTION_FIELDS: &[&str] = &["mode", "overrides"];
+
+/// `lash_sansio::SchemaProjectionOverride`.
+const SCHEMA_OVERRIDE_FIELDS: &[&str] = &["dialect", "schema"];
+
+/// `lash_sansio::CompactToolContract`.
+const COMPACT_CONTRACT_FIELDS: &[&str] = &[
+    "name",
+    "signature",
+    "returns",
+    "parameters",
+    "return_fields",
+    "description",
+    "examples",
+];
+
+/// `lash_sansio::ToolRetryPolicy`.
+const RETRY_POLICY_FIELDS: &[&str] = &["type", "max_attempts", "base_delay_ms", "max_delay_ms"];
+
+/// `lash_sansio::ToolOutputContract`.
+const OUTPUT_CONTRACT_FIELDS: &[&str] = &["kind", "input_field", "default_schema"];
+
+/// `lash_sansio::ToolArgumentProjectionPolicy`.
+const ARGUMENT_PROJECTION_FIELDS: &[&str] = &["kind", "field"];
+
 fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
     if matches!(
         data.iter()

@@ -51,9 +51,10 @@ lash-sqlite-store = { workspace = true }
 insta = "1"
 tempfile = { workspace = true }
 
+# The build script parses this crate's own `src/executor/state.rs` with `syn`
+# and emits the declaration order of the two types declared there. It must not
+# grow a first-party dependency: Bazel compiles a build script's whole closure
+# a second time in the exec configuration at `opt-level=3`, so one runtime
+# crate here duplicates the entire first-party tree beneath it (FIG-3032).
 [build-dependencies]
-lash-lashlang-runtime = { workspace = true }
-lash-sansio = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
 syn = { version = "2", features = ["full"] }
