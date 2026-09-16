@@ -99,7 +99,13 @@ pub use lashlang_graph::{
 /// attribution, and complete trigger cause identity in trace graph subjects.
 /// Version 21 gives a context-window overflow its own turn failure reason so
 /// a trace reader can tell a recoverable overflow from a provider error.
-pub const TRACE_SCHEMA_VERSION: u32 = 21;
+/// Version 22 types the last free-form outcome string in the crate — a retry
+/// attempt's `usage_disposition` becomes a closed
+/// [`TraceAttemptUsageDisposition`], so a record spelling it any other way is
+/// refused instead of decoded — and drops the unreachable `rejected` branch-edge
+/// selection, replacing it with the typed arm the `branch_selected` event
+/// already carried.
+pub const TRACE_SCHEMA_VERSION: u32 = 22;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -513,11 +519,33 @@ pub struct TraceRetryAttempt {
     /// Provider-reported usage for this attempt. Absence is not zero usage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TraceTokenUsage>,
-    /// Why `usage` is absent when it is: `reported`, `unreported_by_provider`,
-    /// `unreported_after_abort`, or `unreported_after_failure` (LLM attempts
-    /// only; tool attempts carry none).
+    /// Why `usage` is absent when it is. LLM attempts only; tool attempts
+    /// carry none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage_disposition: Option<String>,
+    pub usage_disposition: Option<TraceAttemptUsageDisposition>,
+}
+
+/// Why an attempt's provider-reported usage is present or absent.
+///
+/// Mirrors `lash_sansio::llm::types::AttemptUsageDisposition`, the vocabulary's
+/// owner, with the same wire spellings; the trace layer was the only one that
+/// flattened it to a free-form string.
+///
+/// # Integrator class
+///
+/// Reporting integrations exhaustively render these dispositions when
+/// explaining a call whose usage never arrived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceAttemptUsageDisposition {
+    /// The provider reported usage for this attempt.
+    Reported,
+    /// The provider completed the attempt without reporting usage.
+    UnreportedByProvider,
+    /// The attempt was aborted before usage could be collected.
+    UnreportedAfterAbort,
+    /// The attempt failed before usage could be collected.
+    UnreportedAfterFailure,
 }
 
 /// Terminal state of one provider or tool attempt in a trace retry ladder.

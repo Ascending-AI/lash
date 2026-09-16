@@ -379,13 +379,24 @@ fn lashlang_graph_store_builds_graph_state() {
             .map(|edge| edge.selection),
         Some(TraceLashlangEdgeSelection::Selected)
     );
+    // The unselected arm stays unmarked: nothing in the execution map says an
+    // edge is a branch arm, so which arm ran is read from the branch node's
+    // typed selection instead.
     assert_eq!(
         graph
             .edges
             .iter()
             .find(|edge| edge.id == "else-edge")
             .map(|edge| edge.selection),
-        Some(TraceLashlangEdgeSelection::Rejected)
+        Some(TraceLashlangEdgeSelection::Unknown)
+    );
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "branch")
+            .and_then(|node| node.branch_selection),
+        Some(TraceBranchSelection::Then)
     );
 }
 

@@ -5,7 +5,7 @@ use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    TraceEvent, TraceLabelMetadata, TraceLanguageExecution,
+    TraceBranchSelection, TraceEvent, TraceLabelMetadata, TraceLanguageExecution,
     TraceLanguageExecutionIdentity as LanguageIdentity,
     TraceLanguageExecutionMap as LanguageExecutionMap, TraceLanguageExecutionPayload,
     TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRecord, TraceRuntimeScope,
@@ -55,13 +55,19 @@ pub enum TraceLashlangNodeObservation {
 }
 
 /// Observed branch-edge selection state.
+///
+/// Only the edge a `BranchSelected` event names is marked. There is no
+/// `Rejected`: the execution map carries data-dependency and sequencing edges
+/// (ADR 0037) and nothing marks an edge as a branch arm, so an unselected arm
+/// is indistinguishable from an ordinary edge leaving the same node. Which arm
+/// ran is read from the typed selection on the branch node itself
+/// ([`TraceLashlangGraphNode::branch_selection`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceLashlangEdgeSelection {
     #[default]
     Unknown,
     Selected,
-    Rejected,
 }
 
 /// Trace-derived Lashlang graph node.
@@ -72,6 +78,11 @@ pub struct TraceLashlangGraphNode {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_metadata: Option<TraceLabelMetadata>,
+    /// Which arm a branch node took, copied from the typed `selected` field of
+    /// the `BranchSelected` event. Absent on every other node, and on a branch
+    /// whose selection has not been observed yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_selection: Option<TraceBranchSelection>,
     #[serde(flatten)]
     pub observation: TraceLashlangNodeObservation,
 }
@@ -88,6 +99,7 @@ impl TraceLashlangGraphNode {
             kind: kind.into(),
             label: label.into(),
             label_metadata,
+            branch_selection: None,
             observation: TraceLashlangNodeObservation::Unobserved,
         }
     }
@@ -310,37 +322,24 @@ fn reduce_lashlang_execution_event(
                 error: error.clone(),
             };
         }
+        // Which arm ran is read from the typed `selected` field. The node
+        // kinds and edge labels beside it are display text the producer builds
+        // from `WorkflowEdgeKind` and the execution site (ADR 0037); they never
+        // spelled `branch_arm`, `then` or `else`, so inferring the selection
+        // from them marked nothing on a real trace.
         TraceLanguageExecutionPayload::BranchSelected {
             node_id,
             occurrence,
             edge_id,
-            ..
+            selected,
         } => {
             let graph = graph_mut(state, identity);
             if let Some(node) = graph.nodes.get_mut(node_id) {
                 node.observation = zero_duration_completion(*occurrence, timestamp);
+                node.branch_selection = Some(*selected);
             }
-            let selected_edge = graph
-                .edges
-                .get(edge_id)
-                .map(|edge| (edge.from.clone(), edge.to.clone()));
             if let Some(edge) = graph.edges.get_mut(edge_id) {
                 edge.selection = TraceLashlangEdgeSelection::Selected;
-            }
-            if let Some((selected_from, selected_to)) = selected_edge {
-                if let Some(selected_node) = graph.nodes.get_mut(&selected_to)
-                    && selected_node.kind == "branch_arm"
-                {
-                    selected_node.observation = zero_duration_completion(*occurrence, timestamp);
-                }
-                for edge in graph.edges.values_mut() {
-                    if edge.from == selected_from
-                        && matches!(edge.label.as_str(), "then" | "else")
-                        && edge.id != *edge_id
-                    {
-                        edge.selection = TraceLashlangEdgeSelection::Rejected;
-                    }
-                }
             }
         }
         TraceLanguageExecutionPayload::ChildStarted {
@@ -533,29 +532,33 @@ mod tests {
                         },
                         TraceLanguageExecutionMapNode {
                             id: "then".to_string(),
-                            kind: "branch_arm".to_string(),
-                            label: "then".to_string(),
+                            kind: "call".to_string(),
+                            label: "notify()".to_string(),
                             label_metadata: None,
                         },
                         TraceLanguageExecutionMapNode {
                             id: "else".to_string(),
-                            kind: "branch_arm".to_string(),
-                            label: "else".to_string(),
+                            kind: "call".to_string(),
+                            label: "skip()".to_string(),
                             label_metadata: None,
                         },
                     ],
+                    // `sequence` is what the producer emits for a control edge
+                    // (`WorkflowEdgeKind::Sequence`); the fixture used to
+                    // invent `then` / `else` labels so the deleted string
+                    // inference had something to match.
                     edges: vec![
                         TraceLanguageExecutionMapEdge {
                             id: "then-edge".to_string(),
                             from: "branch".to_string(),
                             to: "then".to_string(),
-                            label: "then".to_string(),
+                            label: "sequence".to_string(),
                         },
                         TraceLanguageExecutionMapEdge {
                             id: "else-edge".to_string(),
                             from: "branch".to_string(),
                             to: "else".to_string(),
-                            label: "else".to_string(),
+                            label: "sequence".to_string(),
                         },
                     ],
                 },
@@ -808,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_store_marks_selected_and_rejected_branch_edges() {
+    fn graph_store_records_the_typed_branch_arm_and_marks_the_selected_edge() {
         let store = TraceLashlangGraphStore::default();
 
         append_at(&store, started_event("start"), 1_000);
@@ -828,6 +831,20 @@ mod tests {
         );
 
         let graph = store.graph(EFFECT_GRAPH_KEY).expect("graph");
+        let branch = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "branch")
+            .expect("branch node");
+        let serialized = serde_json::to_value(branch).expect("serialize branch node");
+        assert_eq!(serialized["branch_selection"], serde_json::json!("then"));
+        // The selection rides beside a flattened observation, so pin the
+        // round trip rather than only the encode.
+        assert_eq!(
+            &serde_json::from_value::<TraceLashlangGraphNode>(serialized)
+                .expect("decode branch node"),
+            branch,
+        );
         assert_eq!(
             graph
                 .edges
@@ -836,13 +853,16 @@ mod tests {
                 .map(|edge| edge.selection),
             Some(TraceLashlangEdgeSelection::Selected)
         );
+        // The sibling edge stays unmarked: no live producer labels a branch
+        // arm, so the reducer cannot tell an unselected arm from an ordinary
+        // sequencing or data-dependency edge leaving the same node (ADR 0037).
         assert_eq!(
             graph
                 .edges
                 .iter()
                 .find(|edge| edge.id == "else-edge")
                 .map(|edge| edge.selection),
-            Some(TraceLashlangEdgeSelection::Rejected)
+            Some(TraceLashlangEdgeSelection::Unknown)
         );
     }
 
