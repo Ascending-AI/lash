@@ -306,6 +306,58 @@ fn tutorial_trigger_handle() -> serde_json::Value {
     })
 }
 
+/// The two field names a handle record carries.
+///
+/// The runtime owns both and neither is on the `lash` facade, so an example
+/// spells them itself rather than reaching past the facade for them;
+/// `the_tutorial_process_handle_is_what_the_runtime_parses` below is the guard
+/// against that spelling drifting.
+const HANDLE_MARKER_FIELD: &str = "__handle__";
+const HANDLE_MARKER_KIND: &str = "lash";
+
+/// The process the one process-starting tutorial starts.
+const TUTORIAL_PROCESS_ID: &str = "workbench-tutorial-process";
+const TUTORIAL_PROCESS_INCARNATION: u64 = 1;
+
+/// The handle record the runtime hands back from a process start.
+///
+/// The id itself is minted, never hand-spelled: `lash::process::HandleId`
+/// is the facade's own minting authority, so `await handle` refuses any
+/// record whose id this module did not produce.
+fn tutorial_process_handle() -> serde_json::Value {
+    let id = lash::process::HandleId::process(TUTORIAL_PROCESS_ID, TUTORIAL_PROCESS_INCARNATION);
+    let mut record = serde_json::Map::new();
+    record.insert(
+        HANDLE_MARKER_FIELD.to_string(),
+        serde_json::Value::String(HANDLE_MARKER_KIND.to_string()),
+    );
+    record.insert(
+        "id".to_string(),
+        serde_json::Value::String(id.as_str().to_string()),
+    );
+    serde_json::Value::Object(record)
+}
+
+/// The locally spelled handle record still is one, by the runtime's own parse.
+///
+/// `lashlang::is_process_handle` is the public face of
+/// `lashlang::runtime::access::parse_handle_record`, the runtime's single
+/// handle authority: it reads `HANDLE_MARKER_FIELD` and `id` and asks
+/// `lash-sansio` to parse them. If either field name or the kind string moves,
+/// this fails here rather than turning the process-starting tutorial's `await`
+/// into a silent refusal inside the run below.
+#[test]
+fn the_tutorial_process_handle_is_what_the_runtime_parses() {
+    let value = lashlang::from_json(tutorial_process_handle());
+    let lashlang::Value::Record(record) = &value else {
+        panic!("a handle record is a record, got {value:?}");
+    };
+    assert!(
+        lashlang::is_process_handle(record),
+        "the handle record spelling drifted from the runtime's own parse: {value:?}"
+    );
+}
+
 impl TutorialHost {
     fn new() -> Self {
         Self {
@@ -346,14 +398,7 @@ impl TutorialHost {
             ])));
         }
         if host_operation == process_start {
-            // A process handle is minted, never hand-spelled: `await handle`
-            // refuses any record whose id this module did not produce.
-            return Ok(lashlang::from_json(
-                lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
-                    "workbench-tutorial-process",
-                    1,
-                )),
-            ));
+            return Ok(lashlang::from_json(tutorial_process_handle()));
         }
         Err(lashlang::ExecutionHostError::new(format!(
             "the workbench tutorials reached an unanswered host operation `{host_operation}`"
