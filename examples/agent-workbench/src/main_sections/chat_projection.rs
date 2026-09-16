@@ -1,4 +1,5 @@
 use super::*;
+use lash::SessionId;
 use lash::TurnId;
 
 // Projection of a chat snapshot from the two sources the workbench reads: the
@@ -48,6 +49,88 @@ pub(crate) fn replayed_active_user_rows(
         });
     }
     replayed_prompts
+}
+
+/// The user rows this session's product-event log carries on the workbench's
+/// own authority, keyed by the turn each one was submitted for.
+///
+/// Both readers of the product log start here — the `/api/state` snapshot and
+/// the settlement republish on the live stream — so the two paths ask
+/// `ui_owned_turn_input_replacements` the same question about the same rows.
+pub(crate) fn ui_owned_user_rows_by_turn<'a>(
+    messages: impl IntoIterator<Item = &'a ChatMessage>,
+) -> BTreeMap<TurnId, ChatMessage> {
+    messages
+        .into_iter()
+        .filter_map(|message| {
+            workbench_turn_id_from_user_message_id(&message.id)
+                .map(|turn_id| (TurnId::from(turn_id), message.clone()))
+        })
+        .collect()
+}
+
+/// The chat rows in a session's product-event log, in publication order.
+pub(crate) fn product_chat_messages(state: &AppState, session_id: &SessionId) -> Vec<ChatMessage> {
+    state
+        .event_tx
+        .snapshot(session_id)
+        .events
+        .iter()
+        .filter_map(|event| match &event.item {
+            StreamItem::Message { message } => Some(message.clone()),
+            StreamItem::TurnInput { .. }
+            | StreamItem::ModelCallRecorded { .. }
+            | StreamItem::Done { .. } => None,
+        })
+        .collect()
+}
+
+/// The committed message ids a UI-owned user row already stands for, for a
+/// reader that needs only the decision and not the replacement row —
+/// `republish_committed_ingress_messages` above.
+pub(crate) fn ui_owned_committed_message_ids(
+    state: &AppState,
+    session_id: &SessionId,
+    read_view: &lash::persistence::SessionReadView,
+) -> BTreeSet<String> {
+    let product_messages = product_chat_messages(state, session_id);
+    let ui_user_rows = ui_owned_user_rows_by_turn(product_messages.iter());
+    ui_owned_turn_input_replacements(read_view, &ui_user_rows)
+        .into_keys()
+        .collect()
+}
+
+/// Republishes a settling turn's committed ingress messages onto the live
+/// stream, so a page that joined mid-turn ends the turn holding the exact
+/// committed graph projection that `/api/state` and resume read.
+///
+/// Every committed ingress message is republished except the ones a UI-owned
+/// row already stands for. Re-publishing is otherwise harmless because the
+/// browser deduplicates committed message ids, but it cannot recognize its own
+/// `workbench-user:{turn_id}` row as the same text as the runtime's
+/// `m_ingress_{input_id}` commit — the two ids are in deliberately separate
+/// namespaces (FIG-972) — so republishing the turn's opening input appended a
+/// second copy of the operator's own words above the reply, which stood until
+/// the next snapshot rebuilt the transcript (FIG-3206). Asking
+/// `ui_owned_committed_message_ids` keeps one decision for the live stream and
+/// the snapshot; a mid-turn injected input has no UI row and still republishes.
+pub(crate) fn republish_committed_ingress_messages(state: &AppState, session: &lash::LashSession) {
+    let session_id = session.session_id();
+    let read_view = session.read_view();
+    let ui_owned = ui_owned_committed_message_ids(state, &session_id, &read_view);
+    for message in read_view
+        .messages()
+        .iter()
+        .filter(|message| message.id.starts_with("m_ingress_") && !ui_owned.contains(&message.id))
+    {
+        state.publish_for_session_identified(
+            &session_id,
+            format!("message:{}", message.id),
+            StreamItem::Message {
+                message: chat_message_from_committed(message),
+            },
+        );
+    }
 }
 
 /// The committed messages this snapshot replaces with UI-owned user rows.
@@ -426,14 +509,8 @@ pub(crate) fn project_chat(
     product_messages: Vec<ChatMessage>,
 ) -> ChatProjection {
     let replayed_active_rows = replayed_active_user_rows(state, active_turns, &product_messages);
-    let ui_user_rows = product_messages
-        .iter()
-        .chain(replayed_active_rows.iter())
-        .filter_map(|message| {
-            workbench_turn_id_from_user_message_id(&message.id)
-                .map(|turn_id| (TurnId::from(turn_id), message.clone()))
-        })
-        .collect::<BTreeMap<_, _>>();
+    let ui_user_rows =
+        ui_owned_user_rows_by_turn(product_messages.iter().chain(replayed_active_rows.iter()));
     let user_replacements = ui_owned_turn_input_replacements(read_view, &ui_user_rows);
     let running_turn_ids = active_turns
         .iter()
