@@ -3,12 +3,13 @@ use crate::SessionId;
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::sync::MutexExt;
 
-pub(super) fn turn_cancellation_authority() -> crate::TurnCancellationAuthority {
-    let resolver: Arc<dyn crate::AwaitEventResolver> =
-        Arc::new(crate::NativeRuntimeEffectController::default());
-    crate::TurnCancellationAuthority::new(
-        format!("in-memory-session-store:{}", uuid::Uuid::new_v4()),
-        resolver,
+pub(super) fn turn_cancellation_authority()
+-> Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority> {
+    Arc::new(
+        lash_core_effect::core_internal::NativeAwaitEventAuthority::new(format!(
+            "in-memory-session-store:{}",
+            uuid::Uuid::new_v4()
+        )),
     )
 }
 
@@ -18,7 +19,8 @@ pub(super) fn turn_cancellation_authority() -> crate::TurnCancellationAuthority 
 #[derive(Clone)]
 pub struct InMemorySessionStoreFactory {
     pub(super) clock: Arc<dyn crate::Clock>,
-    pub(super) turn_cancellation_authority: crate::TurnCancellationAuthority,
+    pub(super) turn_cancellation_authority:
+        Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority>,
     pub(super) stores: Arc<Mutex<HashMap<SessionId, Arc<InMemorySessionStore>>>>,
     pub(super) retired_stores: Arc<Mutex<HashMap<SessionId, Arc<InMemorySessionStore>>>>,
     pub(super) write_transaction: Arc<Mutex<()>>,
@@ -131,9 +133,9 @@ impl Default for InMemorySessionStoreFactory {
 }
 
 impl InMemorySessionStoreFactory {
-    /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
+    /// Concrete constructor behind [`Self::create_store`]; the
     /// gated conformance factory shares it.
-    pub(crate) fn create_in_memory_store(
+    pub fn create_in_memory_store(
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<InMemorySessionStore>, crate::StoreError> {
@@ -203,9 +205,9 @@ impl InMemorySessionStoreFactory {
         Ok(store)
     }
 
-    /// Concrete lookup behind [`SessionStoreFactory::open_existing_store`];
+    /// Concrete lookup behind [`Self::open_existing_store`];
     /// the gated conformance factory shares it.
-    pub(crate) fn open_existing_in_memory_store(
+    pub fn open_existing_in_memory_store(
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Option<Arc<InMemorySessionStore>> {
@@ -213,23 +215,26 @@ impl InMemorySessionStoreFactory {
     }
 }
 
-#[async_trait::async_trait]
-impl SessionStoreFactory for InMemorySessionStoreFactory {
-    async fn reclaim_retained_evidence(
+impl InMemorySessionStoreFactory {
+    #[expect(
+        clippy::result_large_err,
+        reason = "MaintenanceFailure carries the partial report by value"
+    )]
+    pub async fn reclaim_retained_evidence(
         &self,
         bound: crate::store::RetentionBound,
     ) -> crate::store::MaintenanceResult<crate::store::RetentionReport> {
         Ok(self.reclaim_retained_evidence_in_memory(bound))
     }
 
-    async fn create_store(
+    pub async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<dyn RuntimePersistence>, crate::StoreError> {
         Ok(self.create_in_memory_store(request)? as Arc<dyn RuntimePersistence>)
     }
 
-    async fn open_existing_store(
+    pub async fn open_existing_store(
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
@@ -240,7 +245,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .map(|store| store as Arc<dyn RuntimePersistence>))
     }
 
-    async fn read_session(
+    pub async fn read_session(
         &self,
         session_id: &SessionId,
     ) -> Result<Option<crate::SessionReadView>, crate::StoreError> {
@@ -252,7 +257,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         crate::store::load_persisted_session_read_view(store.as_ref()).await
     }
 
-    async fn list_sessions(
+    pub async fn list_sessions(
         &self,
         filter: &crate::SessionListFilter,
     ) -> Result<Vec<crate::SessionSummary>, crate::StoreError> {
@@ -271,7 +276,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         Ok(summaries)
     }
 
-    async fn open_existing_store_by_id(
+    pub async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
@@ -284,7 +289,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .map(|store| store as Arc<dyn RuntimePersistence>))
     }
 
-    async fn pending_turn_cancel_closure_pins(
+    pub async fn pending_turn_cancel_closure_pins(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::StoreError> {
@@ -297,7 +302,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         }
     }
 
-    async fn retire_turn_cancel_closure_scope(
+    pub async fn retire_turn_cancel_closure_scope(
         &self,
         scope: &crate::ExecutionScope,
     ) -> Result<(), crate::StoreError> {
@@ -330,7 +335,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         Ok(())
     }
 
-    async fn has_claimable_queued_work(
+    pub async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
         now_epoch_ms: u64,
@@ -358,12 +363,12 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         )))
     }
 
-    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
+    pub async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         crate::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
         Ok(self.deleted_session_ids.lock_recover().contains(session_id))
     }
 
-    async fn delete_session(
+    pub async fn delete_session(
         &self,
         session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
@@ -461,7 +466,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         Ok(crate::store::SessionBlobReclaimReport::default())
     }
 
-    async fn pin(&self, node_id: &str) -> Result<crate::ForkPoint, crate::StoreError> {
+    pub async fn pin(&self, node_id: &str) -> Result<crate::ForkPoint, crate::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
         if let Some((checkpoint_ref, _, source_session_id)) =
             self.node_anchors.lock_recover().get(node_id).cloned()
@@ -522,7 +527,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         })
     }
 
-    async fn unpin(&self, node_id: &str) -> Result<(), crate::StoreError> {
+    pub async fn unpin(&self, node_id: &str) -> Result<(), crate::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
         let mut anchors = self.node_anchors.lock_recover().clone();
         if anchors.remove(node_id).is_none() {
@@ -548,7 +553,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         Ok(())
     }
 
-    async fn fork_points(&self) -> Result<Vec<crate::ForkPoint>, crate::StoreError> {
+    pub async fn fork_points(&self) -> Result<Vec<crate::ForkPoint>, crate::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
         let graph = self.global_session_graph.lock_recover().clone();
         let anchors = self.node_anchors.lock_recover();
@@ -603,7 +608,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         clippy::expect_used,
         reason = "a graph node selected as a frame is non-empty"
     )]
-    async fn fork_at(
+    pub async fn fork_at(
         &self,
         request: &crate::ForkSessionRequest,
     ) -> Result<crate::ForkSessionReceipt, crate::StoreError> {
@@ -1181,7 +1186,7 @@ pub(crate) mod lineage_conformance_support {
         }
     }
 
-    pub fn handles() -> LineageConformanceHandles {
+    pub fn handles() -> LineageConformanceHandles<InMemorySessionStoreFactory> {
         let factory = InMemorySessionStoreFactory::new();
         LineageConformanceHandles {
             factory: Arc::new(factory.clone()),

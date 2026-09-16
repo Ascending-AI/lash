@@ -152,11 +152,11 @@ elide = "sql_idempotent_index"
 
 [[surface]]
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
-constant_path = "crates/lash-core/src/runtime/process/events.rs"
+constant_path = "crates/lash-core-store/src/process_identity.rs"
 description = "serialized ProcessWakeDelivery outbox payload"
 
-# The payload struct moved to `lash-core-store`; the stamped constant still
-# lives with the outbox writer in `lash-core`.
+# The payload struct and the stamped constant both live in `lash-core-store`;
+# `lash-core` re-exports the constant at its outbox-writer path.
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-core-store/src/process_identity.rs"]

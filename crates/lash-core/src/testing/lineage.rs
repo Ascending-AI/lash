@@ -1,30 +1,17 @@
 //! Raw lineage diagnostics for backend fixtures.
-use crate::*;
-use std::sync::Arc;
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GraphFactObservation {
-    pub node_id: crate::NodeId,
-    pub parent_node_id: Option<crate::NodeId>,
-    pub owning_session_id: SessionId,
-    pub generation: u64,
-    pub frame_node_id: crate::NodeId,
-    pub is_frame: bool,
-}
+pub use lash_core_store::testing::lineage::{GraphFactObservation, LineageConformanceInjector};
 
-#[async_trait::async_trait]
-pub trait LineageConformanceInjector: Send + Sync {
-    async fn force_lineage(&self, session_id: &SessionId, ancestor_node_id: &str);
-    async fn tombstone_node(&self, node_id: &str);
-    async fn lineage_ancestors(
-        &self,
-        session_id: &SessionId,
-    ) -> Vec<crate::store::ForkLineageAncestor>;
-    async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation>;
-    async fn all_graph_facts(&self) -> Vec<GraphFactObservation>;
-}
+pub type LineageConformanceHandles =
+    lash_core_store::testing::lineage::LineageConformanceHandles<dyn crate::SessionStoreFactory>;
 
-#[derive(Clone)]
-pub struct LineageConformanceHandles {
-    pub factory: Arc<dyn SessionStoreFactory>,
-    pub injector: Arc<dyn LineageConformanceInjector>,
+pub(crate) fn handles_from_concrete<F>(
+    handles: lash_core_store::testing::lineage::LineageConformanceHandles<F>,
+) -> LineageConformanceHandles
+where
+    F: crate::SessionStoreFactory + 'static,
+{
+    LineageConformanceHandles {
+        factory: handles.factory,
+        injector: handles.injector,
+    }
 }

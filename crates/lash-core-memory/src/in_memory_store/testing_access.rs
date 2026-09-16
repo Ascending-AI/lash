@@ -20,9 +20,9 @@ impl InMemorySessionStore {
     #[cfg(any(test, feature = "testing"))]
     pub fn with_turn_cancellation_authority_for_testing(
         mut self,
-        authority: crate::TurnCancellationAuthority,
+        authority: impl lash_core_store::turn_control_binding::StoreTurnCancellationAuthority,
     ) -> Self {
-        self.turn_cancellation_authority = Some(authority);
+        self.turn_cancellation_authority = Some(std::sync::Arc::new(authority));
         self
     }
 
@@ -359,25 +359,6 @@ impl crate::store::StoreTestSupport for InMemorySessionStore {
     ) -> Result<(), crate::StoreError> {
         self.stamp_session_state_version_and_corrupt_payload_in_memory(version);
         Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::store::ConformanceSessionStoreFactory for super::InMemorySessionStoreFactory {
-    async fn create_conformance_store(
-        &self,
-        request: &crate::SessionStoreCreateRequest,
-    ) -> Result<std::sync::Arc<dyn crate::store::ConformancePersistence>, crate::StoreError> {
-        Ok(self.create_in_memory_store(request)?)
-    }
-
-    async fn open_existing_conformance_store(
-        &self,
-        request: &crate::SessionStoreCreateRequest,
-    ) -> Result<Option<std::sync::Arc<dyn crate::store::ConformancePersistence>>, String> {
-        Ok(self
-            .open_existing_in_memory_store(request)
-            .map(|store| store as std::sync::Arc<dyn crate::store::ConformancePersistence>))
     }
 }
 

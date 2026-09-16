@@ -343,8 +343,8 @@ mod tests {
     use crate::store::{GraphAppend, SessionCommitStore};
     use crate::{
         DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkCompletion, QueuedWorkKind,
-        RuntimeCommit, RuntimeSessionState, SessionStoreCreateRequest, SessionStoreFactory,
-        StoreError, TokenLedgerEntry, TokenUsage, TurnInputCompletion,
+        RuntimeCommit, RuntimeSessionState, SessionStoreCreateRequest, StoreError,
+        TokenLedgerEntry, TokenUsage, TurnInputCompletion,
     };
 
     #[tokio::test]

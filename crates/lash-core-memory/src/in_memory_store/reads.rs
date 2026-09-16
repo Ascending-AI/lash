@@ -65,7 +65,6 @@ impl InMemorySessionStore {
 #[cfg(test)]
 mod conformance_mapping_tests {
     use super::*;
-    use crate::SessionStoreFactory;
 
     #[tokio::test]
     async fn invalid_active_path_is_typed_corruption() {

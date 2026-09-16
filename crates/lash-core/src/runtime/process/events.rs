@@ -808,7 +808,7 @@ fn cancellation_replay_key(process_ref: &ProcessRef, request: &CancelRequest) ->
 
 /// Version 3 carries full admitted effect addresses and complete trigger causes
 /// in the invocation delivered with a process wake.
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 3;
+pub use lash_core_store::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProcessEventKind {

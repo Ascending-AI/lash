@@ -260,6 +260,10 @@ impl WakeDeliveryState {
     }
 }
 
+/// Version 3 carries full admitted effect addresses and complete trigger causes
+/// in the invocation delivered with a process wake.
+pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 3;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessWakeDelivery {
     pub version: u32,

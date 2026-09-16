@@ -305,6 +305,14 @@ impl NativeRuntimeEffectController {
         Arc::clone(&self.await_events)
     }
 
+    pub(super) fn with_await_event_registry(await_events: Arc<AwaitEventRegistry>) -> Self {
+        Self {
+            await_events,
+            groups: Arc::new(NativeEffectGroups::default()),
+            process_lifetime_completion_keys_enabled: false,
+        }
+    }
+
     /// Register the resolver that says what code runs a grouped child, once.
     ///
     /// Until this is called the controller answers

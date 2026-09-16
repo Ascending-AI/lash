@@ -130,9 +130,7 @@ mod tests {
 
     use crate::session_graph::SharedJsonValue;
     use crate::store::StoreMaintenance;
-    use crate::{
-        SessionNodePayload, SessionNodeRecord, SessionStoreCreateRequest, SessionStoreFactory,
-    };
+    use crate::{SessionNodePayload, SessionNodeRecord, SessionStoreCreateRequest};
     use lash_sansio::sync::MutexExt;
 
     /// The in-memory backend answers in the same maintenance outcome contract

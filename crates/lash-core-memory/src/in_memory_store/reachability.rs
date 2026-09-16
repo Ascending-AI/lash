@@ -176,7 +176,6 @@ impl InMemorySessionStore {
 #[cfg(test)]
 mod tests {
     use crate::SessionId;
-    use crate::SessionStoreFactory;
     use crate::runtime::in_memory_store::InMemorySessionStoreFactory;
     use crate::session_graph::SharedJsonValue;
     use crate::testing::store_fixtures::{

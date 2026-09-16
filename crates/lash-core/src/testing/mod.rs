@@ -218,15 +218,7 @@ use crate::{
 /// default on the successor. This pin cannot mask an exact-selection defect:
 /// exact claims bypass the configured policy entirely
 /// ([`select_exact_turn_work_claim_prefix`](crate::store::queued_work::select_exact_turn_work_claim_prefix)).
-pub fn queued_work_claim_policy(max_rows: usize) -> crate::QueuedWorkClaimPolicy {
-    crate::QueuedWorkClaimPolicy {
-        max_context_tokens: usize::MAX / 4,
-        action_token_reserve: 1,
-        max_rows,
-        max_pending_age_ms: u64::MAX,
-        drain_policy: crate::runtime::shared_drain_mode_policy(crate::DrainMode::All),
-    }
-}
+pub use lash_core_store::testing::queued_work_claim_policy;
 
 /// Fresh test executor host identity used by runtime construction.
 ///
@@ -249,47 +241,7 @@ pub fn response_synthesized_from_aborted_stream(events: &[LlmStreamEvent]) -> Ll
     crate::runtime::response_synthesized_from_aborted_stream(events)
 }
 
-/// Controllable epoch clock shared by store and runtime conformance tests.
-#[derive(Debug)]
-pub struct TestClock(std::sync::atomic::AtomicU64);
-
-impl TestClock {
-    pub fn new(timestamp_ms: u64) -> Self {
-        Self(std::sync::atomic::AtomicU64::new(timestamp_ms))
-    }
-
-    pub fn advance(&self, duration_ms: u64) {
-        self.0
-            .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    pub fn set(&self, timestamp_ms: u64) {
-        self.0
-            .store(timestamp_ms, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::Clock for TestClock {
-    fn now(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        let timestamp_ms = self.0.load(std::sync::atomic::Ordering::SeqCst);
-        chrono::DateTime::from(
-            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
-        )
-    }
-
-    async fn sleep(&self, duration: std::time::Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep_until(&self, deadline: std::time::Instant) {
-        tokio::time::sleep_until(deadline.into()).await;
-    }
-}
+pub use lash_core_ids::test_clock::TestClock;
 
 #[test]
 fn test_clock_wall_clock_faces_agree() {

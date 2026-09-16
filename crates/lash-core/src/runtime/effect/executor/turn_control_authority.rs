@@ -99,18 +99,33 @@ impl lash_core_store::turn_control_binding::StoreTurnCancellationAuthority
 
 /// Recover the concrete authority a store handed back through the seam.
 ///
-/// `TurnCancellationAuthority` is the sole implementor, and only this crate
-/// constructs one, so a handle that is anything else is a programming error.
+/// Two concrete variants are known: `TurnCancellationAuthority` (custom
+/// resolver, constructed only in this crate) and
+/// [`lash_core_effect::core_internal::NativeAwaitEventAuthority`] (the erased
+/// native registry handle stores mint). A handle that is anything else is a
+/// programming error.
 #[expect(
     clippy::expect_used,
-    reason = "this crate is the sole implementor and the sole constructor of the trait object, so another concrete type is a programming error, per the message"
+    reason = "only the two known concrete authority variants are constructed, so another concrete type is a programming error, per the message"
 )]
 pub fn concrete_turn_cancellation_authority(
     handle: &Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority>,
 ) -> TurnCancellationAuthority {
     let any: &dyn std::any::Any = handle.as_ref();
+    if let Some(authority) =
+        any.downcast_ref::<lash_core_effect::core_internal::NativeAwaitEventAuthority>()
+    {
+        return TurnCancellationAuthority::new(
+            handle.binding_id(),
+            Arc::new(
+                super::NativeRuntimeEffectController::with_await_event_registry(
+                    authority.registry(),
+                ),
+            ),
+        );
+    }
     any.downcast_ref::<TurnCancellationAuthority>()
-        .expect("a store turn-cancellation authority is always a TurnCancellationAuthority")
+        .expect("a store turn-cancellation authority must be a known native or custom authority")
         .clone()
 }
 
@@ -256,6 +271,100 @@ mod tests {
                 &turn_control_binding_id_for_scope("test-authority", &process_scope).unwrap()
             ),
             process_scope
+        );
+    }
+
+    #[tokio::test]
+    async fn store_authority_recovery_preserves_promises_across_reopen() {
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let request = crate::testing::store_fixtures::session_store_request(
+            &crate::SessionId::from("authority-reopen"),
+            "model",
+            crate::SessionRelation::Root,
+        );
+        let store = factory.create_store(&request).await.unwrap();
+        let first = super::concrete_turn_cancellation_authority(
+            &store.turn_cancellation_authority().unwrap(),
+        );
+        let scope = crate::ExecutionScope::turn("authority-reopen", "turn");
+        let key = first
+            .resolver()
+            .await_event_key(&scope, crate::AwaitEventWaitIdentity::TurnCancelGate)
+            .await
+            .unwrap();
+        let reopened = factory
+            .open_existing_store(&request)
+            .await
+            .unwrap()
+            .unwrap();
+        let second = super::concrete_turn_cancellation_authority(
+            &reopened.turn_cancellation_authority().unwrap(),
+        );
+        assert_eq!(first.binding_id(), second.binding_id());
+        assert_eq!(
+            second
+                .resolver()
+                .await_event_key(&scope, crate::AwaitEventWaitIdentity::TurnCancelGate)
+                .await
+                .unwrap(),
+            key
+        );
+        assert_eq!(
+            second
+                .resolver()
+                .resolve_await_event(&key, crate::Resolution::Cancelled)
+                .await
+                .unwrap(),
+            crate::ResolveOutcome::Accepted
+        );
+        assert_eq!(
+            first.resolver().peek_await_event(&key).await.unwrap(),
+            Some(crate::Resolution::Cancelled)
+        );
+        first
+            .resolver()
+            .revoke_await_events_for_session(&crate::SessionId::from("authority-reopen"))
+            .await
+            .unwrap();
+        assert_eq!(
+            second
+                .resolver()
+                .peek_await_event(&key)
+                .await
+                .unwrap_err()
+                .code,
+            crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked
+        );
+    }
+
+    #[tokio::test]
+    async fn concrete_custom_authority_recovery_preserves_resolver_identity() {
+        let resolver: std::sync::Arc<dyn crate::AwaitEventResolver> =
+            std::sync::Arc::new(crate::NativeRuntimeEffectController::default());
+        let authority = super::TurnCancellationAuthority::new("custom-authority", resolver.clone());
+        let recovered =
+            super::concrete_turn_cancellation_authority(&authority.into_store_authority());
+        assert_eq!(recovered.binding_id(), "custom-authority");
+        assert!(std::sync::Arc::ptr_eq(&recovered.resolver(), &resolver));
+    }
+
+    #[tokio::test]
+    async fn memory_factory_trait_adapter_uses_same_store() {
+        let concrete = crate::InMemorySessionStoreFactory::new();
+        let request = crate::testing::store_fixtures::session_store_request(
+            &crate::SessionId::from("factory-adapter"),
+            "model",
+            crate::SessionRelation::Root,
+        );
+        let direct = concrete.create_store(&request).await.unwrap();
+        let facade: std::sync::Arc<dyn crate::SessionStoreFactory> = std::sync::Arc::new(concrete);
+        let reopened = facade.open_existing_store(&request).await.unwrap().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&direct, &reopened));
+        assert!(
+            !facade
+                .session_was_deleted(&request.session_id)
+                .await
+                .unwrap()
         );
     }
 }

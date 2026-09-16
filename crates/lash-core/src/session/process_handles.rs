@@ -391,7 +391,7 @@ mod tests {
     };
     use crate::{
         ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
-        ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _, SessionStoreFactory as _,
+        ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
     };
     use lash_sansio::sync::MutexExt as _;
     use std::collections::BTreeMap;

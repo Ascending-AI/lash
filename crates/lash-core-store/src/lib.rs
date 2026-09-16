@@ -51,6 +51,9 @@ pub mod turn_failure_evidence;
 pub mod turn_input_vocabulary;
 pub mod usage;
 
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
 pub mod store_backend_support;
 
 // Crate-root vocabulary. These re-exports exist so the moved modules keep the

@@ -1,6 +1,5 @@
 use super::*;
 use crate::AttachmentStore as _;
-use crate::SessionStoreFactory as _;
 
 const FIRST_BYTES: &[u8] = b"authorized attachment";
 const DENIED_BYTES: &[u8] = b"denied attachment";

@@ -2089,6 +2089,7 @@ dependencies = [
  "lash-internal-core-effect",
  "lash-internal-core-ids",
  "lash-internal-core-llm",
+ "lash-internal-core-memory",
  "lash-internal-core-store",
  "lash-internal-sansio",
  "lash-internal-trace",
@@ -2154,6 +2155,23 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-core-memory"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "lash-internal-core-effect",
+ "lash-internal-core-ids",
+ "lash-internal-core-memory",
+ "lash-internal-core-store",
+ "lash-internal-sansio",
+ "rmp-serde",
+ "serde_json",
  "tokio",
  "tracing",
  "uuid",

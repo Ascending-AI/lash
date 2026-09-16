@@ -16,5 +16,7 @@ pub mod perf_witness;
 pub mod stable_hash;
 pub mod stable_identity;
 pub mod task;
+#[cfg(any(test, feature = "testing"))]
+pub mod test_clock;
 pub mod test_watchdog;
 pub mod worker_capacity;

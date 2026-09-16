@@ -118,12 +118,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
     ) -> Option<
         std::sync::Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority>,
     > {
-        self.turn_cancellation_authority.clone().map(|authority| {
-            std::sync::Arc::new(authority)
-                as std::sync::Arc<
-                    dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority,
-                >
-        })
+        self.turn_cancellation_authority.clone()
     }
 
     async fn validate_turn_cancellation_binding(

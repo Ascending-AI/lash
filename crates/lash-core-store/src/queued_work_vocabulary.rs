@@ -775,6 +775,40 @@ pub struct QueuedTurnWork {
 pub fn process_wake_source_key(process_id: &ProcessId, sequence: u64) -> String {
     format!("process:{process_id}:event:{sequence}:wake")
 }
+
+/// Constant producer-selected merge key for process wakes.
+///
+/// The key says only that wake rows are eligible to share a turn. Work kind,
+/// delivery boundary, authority, elevation, row count, age, and rendered size
+/// remain independent claim gates.
+pub const PROCESS_WAKE_MERGE_KEY: &str = "lash.process_wake";
+
+pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
+    process_wake_batch_draft_with_delivery_policy(wake, DeliveryPolicy::EarliestSafeBoundary)
+}
+
+/// Draft a process wake using the host-selected delivery boundary.
+///
+/// Delivery timing is independent of merge eligibility: it remains a selector
+/// compatibility gate and is never encoded into the merge key.
+pub fn process_wake_batch_draft_with_delivery_policy(
+    wake: ProcessWakeDelivery,
+    delivery_policy: DeliveryPolicy,
+) -> QueuedWorkBatchDraft {
+    let source_key = process_wake_source_key(&wake.process_id, wake.sequence);
+    let process_id = wake.process_id.clone();
+    let sequence = wake.sequence;
+    let authority = wake.authority.clone();
+    QueuedWorkBatchDraft::new(
+        wake.target_session_id.clone(),
+        delivery_policy,
+        crate::TurnWorkPayload::process_wake(wake),
+    )
+    .with_source_key(source_key)
+    .with_process_wake_source(process_id, sequence)
+    .with_authority(authority)
+    .with_merge_key(PROCESS_WAKE_MERGE_KEY)
+}
 /// A turn-work item; session commands cannot be constructed through this type.
 #[derive(Clone, Debug)]
 pub struct TurnWorkPayload(QueuedWorkPayload);
