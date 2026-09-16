@@ -74,6 +74,7 @@ dependencies = [
  "lash-internal-remote-protocol",
  "lash-internal-restate",
  "lash-internal-rlm-types",
+ "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-subagents",
  "lash-internal-typescript",

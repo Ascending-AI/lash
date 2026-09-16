@@ -271,6 +271,183 @@ fn the_workbench_typescript_tutorials_link() {
     );
 }
 
+/// Linking is not execution: the refusals that matter most to prompt copy fire
+/// in the VM.
+///
+/// `"..." + handle` links cleanly and then refuses at runtime with
+/// `TS_OBJECT_STRING_COERCION` (a plain object has no string the dialect will
+/// guess), which is exactly what a model copying the tutorial verbatim hit on
+/// the workbench (FIG-3211). So every tutorial is *run*, not just linked, and
+/// the control below proves this harness can still see that refusal.
+struct TutorialHost {
+    environment: lashlang::LashlangHostEnvironment,
+}
+
+/// The one subscription key the tutorial host hands back.
+const TUTORIAL_SUBSCRIPTION_KEY: &str = "workbench-tutorial-subscription";
+
+/// A registration handle shaped like the one the runtime returns.
+///
+/// `execute_trigger_command` (lash-lashlang-runtime) serializes the mutation
+/// receipt and adds `type`/`id`. What this fixture depends on is only what the
+/// ticket depends on: it is a plain record, and `subscription_key` is the
+/// string-formed field the tutorials render.
+fn tutorial_trigger_handle() -> serde_json::Value {
+    serde_json::json!({
+        "type": "trigger_handle",
+        "id": TUTORIAL_SUBSCRIPTION_KEY,
+        "subscription_key": TUTORIAL_SUBSCRIPTION_KEY,
+        "subscription_id": "workbench-tutorial-subscription-id",
+        "incarnation": "1",
+        "revision": 1,
+        "definition_fingerprint": "workbench-tutorial-fingerprint",
+        "enabled": true,
+        "disposition": "created"
+    })
+}
+
+impl TutorialHost {
+    fn new() -> Self {
+        Self {
+            environment: workbench_link_environment(),
+        }
+    }
+
+    /// Resolves the call the way the real runtime does, then answers it.
+    ///
+    /// Resolution goes through `resolve_lashlang_module_operation`, the same
+    /// function `LashlangExecutionHost` uses, so a renamed or moved binding
+    /// surfaces as an unanswered operation instead of falling into a default.
+    fn resource_result(
+        &self,
+        call: &lashlang::ResourceOperation,
+    ) -> Result<lashlang::Value, lashlang::ExecutionHostError> {
+        let lashlang::Value::Resource(receiver) = &call.receiver else {
+            return Err(lashlang::ExecutionHostError::new(format!(
+                "`{}` was called on something that is not a module authority",
+                call.operation
+            )));
+        };
+        let host_operation = lash_lashlang_runtime::resolve_lashlang_module_operation(
+            &self.environment,
+            receiver,
+            &call.operation,
+        )?;
+        let process_start = lash_plugin_process_controls::process_start_tool_definition()
+            .manifest()
+            .id
+            .to_string();
+        if host_operation == lashlang::TriggerHostOperation::Register.host_operation() {
+            return Ok(lashlang::from_json(tutorial_trigger_handle()));
+        }
+        if host_operation == lashlang::TriggerHostOperation::List.host_operation() {
+            return Ok(lashlang::from_json(serde_json::json!([
+                tutorial_trigger_handle()
+            ])));
+        }
+        if host_operation == process_start {
+            // A process handle is minted, never hand-spelled: `await handle`
+            // refuses any record whose id this module did not produce.
+            return Ok(lashlang::from_json(
+                lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
+                    "workbench-tutorial-process",
+                    1,
+                )),
+            ));
+        }
+        Err(lashlang::ExecutionHostError::new(format!(
+            "the workbench tutorials reached an unanswered host operation `{host_operation}`"
+        )))
+    }
+}
+
+impl lashlang::ExecutionHost for TutorialHost {
+    async fn perform(
+        &self,
+        op: lashlang::AbilityOp,
+    ) -> Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
+        match op {
+            lashlang::AbilityOp::ResourceOperation(call) => self
+                .resource_result(&call)
+                .map(lashlang::AbilityResult::Value),
+            // The one tutorial that awaits a process awaits a subagent branch,
+            // whose declared output is `{ summary, key_metrics }`.
+            lashlang::AbilityOp::Await(_) => Ok(lashlang::AbilityResult::Value(
+                lashlang::from_json(serde_json::json!({
+                    "summary": "what the branch found",
+                    "key_metrics": ["first metric", "second metric"]
+                })),
+            )),
+            lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityResult::Value(value)),
+            lashlang::AbilityOp::Print(_) => Ok(lashlang::AbilityResult::Unit),
+            other => Err(lashlang::ExecutionHostError::new(format!(
+                "the workbench tutorials should not reach {other:?}"
+            ))),
+        }
+    }
+}
+
+/// Runs one tutorial cell through the dialect's own lower/link/compile path.
+async fn run_tutorial(source: &str) -> Result<lashlang::ExecutionOutcome, String> {
+    let host = TutorialHost::new();
+    let linked = lash_typescript::link(source, &host.environment)
+        .map_err(|error| format!("does not link: {error}"))?;
+    let compiled = lashlang::compile_linked(&linked);
+    lashlang::execute(&compiled, &mut lashlang::State::new(), &host)
+        .await
+        .map_err(|error| format!("{error:?}"))
+}
+
+/// Every tutorial the prompt ships runs to a finish, with no `TS_` refusal.
+///
+/// FIG-3211: the button-watcher tutorial ended in
+/// `finish("… `" + handle + "` …")`, and `triggers.register` returns a plain
+/// record, so the cell the prompt taught failed on its last line. Linking never
+/// saw it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
+    let programs = typescript_prompt_programs();
+    assert_eq!(
+        programs.len(),
+        3,
+        "the TypeScript prompt must carry all three tutorials"
+    );
+    let mut hits = Vec::new();
+    for (index, program) in programs.iter().enumerate() {
+        match run_tutorial(program).await {
+            Ok(lashlang::ExecutionOutcome::Finished(_)) => {}
+            Ok(other) => hits.push(format!("tutorial {}: {other:?}", index + 1)),
+            Err(problem) => hits.push(format!("tutorial {}: {problem}", index + 1)),
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "prompt programs the runtime refuses: {hits:#?}"
+    );
+
+    // Non-vacuity, and the regression itself: put the handle back into the
+    // string the way the prompt used to spell it, and the same harness must
+    // refuse it. A prompt that stopped rendering a handle field would fail the
+    // substitution assertion rather than pass this test vacuously.
+    let button_watcher = programs
+        .iter()
+        .find(|program| program.contains("button watcher"))
+        .expect("the prompt carries the button-watcher tutorial");
+    assert_eq!(
+        button_watcher.matches("handle.subscription_key").count(),
+        1,
+        "the button-watcher tutorial must render the handle's string-formed field"
+    );
+    let regressed = button_watcher.replace("handle.subscription_key", "handle");
+    let problem = run_tutorial(&regressed)
+        .await
+        .expect_err("string-concatenating a registration handle must be refused");
+    assert!(
+        problem.contains("TS_OBJECT_STRING_COERCION"),
+        "the refusal this prompt copy must never teach: {problem}"
+    );
+}
+
 // ADR 0096: the fixtures that resolved a recorded dialect from the session bag
 // and refused a malformed one are gone with `RlmDialect`.
 
