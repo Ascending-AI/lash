@@ -120,6 +120,74 @@ class HygieneTests(unittest.TestCase):
                     )
                     self.assertCountEqual(expected, git("rev-list", f"{resolved_base}..HEAD").splitlines())
 
+    def hygiene(self, base):
+        return subprocess.run(
+            ["bash", "scripts/ci/check-diff-hygiene.sh"], cwd=self.repo,
+            env={**os.environ, "BASE_SHA": base, "DIFF_HYGIENE_BYPASS": "0"},
+            text=True, capture_output=True,
+        )
+
+    def mode_fixture(self):
+        """A tracked executable script and a tracked data file, plus their base."""
+        script = self.repo / "tool.sh"
+        script.write_text("#!/usr/bin/env bash\necho hi\n")
+        script.chmod(0o755)
+        (self.repo / "data.bin").write_text("seed\n")
+        self.commit()
+        return self.git("rev-parse", "HEAD").stdout.strip()
+
+    def test_mode_change_is_refused_in_both_directions(self):
+        # FIG-2851: nothing in CI had a mode vocabulary, so a script silently
+        # losing its executable bit -- or a data file silently gaining one --
+        # reached main with every gate green.
+        base = self.mode_fixture()
+        # Precondition: editing the same two files without touching their modes
+        # passes, so the refusal below is about the mode and nothing else.
+        (self.repo / "tool.sh").write_text("#!/usr/bin/env bash\necho edited\n")
+        (self.repo / "data.bin").write_text("edited\n")
+        self.commit()
+        content_only = self.hygiene(base)
+        self.assertEqual(0, content_only.returncode, content_only.stdout + content_only.stderr)
+        for path, mode, arrow in (("tool.sh", 0o644, "100755 -> 100644"),
+                                  ("data.bin", 0o755, "100644 -> 100755")):
+            with self.subTest(path=path):
+                (self.repo / path).chmod(mode)
+                self.commit()
+                result = self.hygiene(base)
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                self.assertIn(f"Check F (file mode change) failed for '{path}' ({arrow})",
+                              result.stderr)
+
+    def test_acknowledged_mode_change_is_allowed(self):
+        base = self.mode_fixture()
+        (self.repo / "data.bin").chmod(0o755)
+        self.git("add", ".")
+        self.git("commit", "-qm",
+                 "Make the fixture runnable\n\nMode-Change: data.bin it is executed directly by the launcher")
+        result = self.hygiene(base)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("1 mode change(s) checked", result.stdout)
+
+    def test_mode_change_footer_without_a_reason_is_refused(self):
+        base = self.mode_fixture()
+        (self.repo / "data.bin").chmod(0o755)
+        self.git("add", ".")
+        self.git("commit", "-qm", "Make the fixture runnable\n\nMode-Change: data.bin")
+        result = self.hygiene(base)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Mode-Change needs '<path> <reason>' with a non-empty reason", result.stderr)
+
+    def test_mode_change_footer_for_another_path_does_not_cover_the_change(self):
+        base = self.mode_fixture()
+        (self.repo / "data.bin").chmod(0o755)
+        self.git("add", ".")
+        self.git("commit", "-qm",
+                 "Make the fixture runnable\n\nMode-Change: tool.sh a path that did not change mode")
+        result = self.hygiene(base)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Check F (file mode change) failed for 'data.bin'", result.stderr)
+        self.assertIn("Mode-change acknowledgement rot: 'Mode-Change: tool.sh'", result.stderr)
+
     def test_fuzz_corpus_seeds_are_exempt_from_added_file_count_only(self):
         corpus = self.repo / "fuzz/corpus/target_a"
         corpus.mkdir(parents=True)
