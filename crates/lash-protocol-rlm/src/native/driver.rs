@@ -30,10 +30,11 @@ use super::finish::{
     internal_assistant_prose_message_for_turn, no_progress_stop_message, validate_finish_value,
 };
 use super::stall::{
-    LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE, reply_fingerprint, stalled_attempts,
+    LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE, native_reply_fingerprint, stalled_attempts,
 };
 use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rlm_driver_state};
 use crate::protocol::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
+use crate::protocol::stall::{ExtractionCounts, ExtractionDiagnostic};
 
 #[derive(Clone)]
 pub struct NativeDriver {
@@ -88,10 +89,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         actions
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the parts payload is a vector of crate-owned extraction parts, whose serde_json encoding cannot fail"
-    )]
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
@@ -101,6 +98,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
     ) -> Vec<DriverAction> {
         let mut actions = Vec::new();
         let parts = super::tool::assistant_parts(normalized_response_parts(&llm_response));
+        let fingerprint = native_reply_fingerprint(&parts);
         let prose = llm_response.full_text();
         let reasoning = parts
             .iter()
@@ -141,7 +139,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             };
             actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                 LLM_EXTRACTION_PHASE,
-                serde_json::json!({ "turn_id": ctx.turn_id(), "decision": decision, "dialect": self.dialect.language_id() }),
+                ExtractionDiagnostic::new(
+                    ctx.turn_id(),
+                    &fingerprint,
+                    decision,
+                    &termination,
+                    native_counts(self.dialect.language_id(), &prose, &action, &reasoning),
+                )
+                .payload(),
             )]));
             let cap = ctx
                 .generation()
@@ -221,8 +226,17 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 .to_string()
             }
         };
-        actions.push(DriverAction::AppendEvents(vec![diagnostic_event(LLM_EXTRACTION_PHASE,
-            serde_json::json!({ "turn_id": ctx.turn_id(), "decision": decision, "dialect": self.dialect.language_id(), "reply_fingerprint": reply_fingerprint(&serde_json::to_string(&parts).expect("parts serialize")) }))]));
+        actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
+            LLM_EXTRACTION_PHASE,
+            ExtractionDiagnostic::new(
+                ctx.turn_id(),
+                &fingerprint,
+                &decision,
+                &termination,
+                native_counts(self.dialect.language_id(), &prose, &action, &reasoning),
+            )
+            .payload(),
+        )]));
         match action {
             super::tool::NativeAction::Malformed { repair_copy, .. } => {
                 let events = vec![super::transport::repair_event(
@@ -809,4 +823,40 @@ fn diagnostic_event(phase: &str, payload: Value) -> SessionHistoryRecord {
             payload,
         },
     )))
+}
+
+/// The counts for one native attempt.
+///
+/// A native reply says in two parts what a cell reply says in one, so
+/// `full_text_chars` is the prose and the program together; there are no fences
+/// between them to account for. An attempt whose call did not parse committed
+/// no program and is counted as the prose it did say.
+fn native_counts<'a>(
+    language_id: &'a str,
+    prose: &str,
+    action: &super::tool::NativeAction,
+    reasoning: &[RlmReasoningPart],
+) -> ExtractionCounts<'a> {
+    let prose_chars = prose.chars().count();
+    let reasoning_chars = crate::protocol::stall::reasoning_diagnostic_chars(
+        reasoning
+            .iter()
+            .map(|part| (part.text.as_str(), part.replay.as_ref())),
+    );
+    match action {
+        super::tool::NativeAction::Execute { code } => {
+            let code_chars = code.chars().count();
+            ExtractionCounts::program(
+                language_id,
+                prose_chars + code_chars,
+                prose_chars,
+                reasoning_chars,
+                code_chars,
+                1,
+            )
+        }
+        super::tool::NativeAction::ProseOnly | super::tool::NativeAction::Malformed { .. } => {
+            ExtractionCounts::prose(language_id, prose_chars, prose_chars, reasoning_chars)
+        }
+    }
 }

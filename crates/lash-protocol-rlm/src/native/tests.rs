@@ -1128,3 +1128,128 @@ fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
         }
     }
 }
+
+fn native_extraction_payloads(machine: &TurnMachine) -> Vec<serde_json::Value> {
+    machine
+        .events()
+        .iter()
+        .filter_map(|event| {
+            let lash_core::SessionHistoryRecord::Protocol(event) = event else {
+                return None;
+            };
+            match crate::projection::decode_rlm_protocol_event(event) {
+                Some(RlmProtocolEvent::RlmDiagnostic(d)) if d.phase == "native_extraction" => {
+                    Some(d.payload)
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// The reply fingerprint names "the reply a host would compare and not the
+/// reasoning summary that varies between two identical answers"
+/// (`protocol/stall.rs`). Two attempts answering with the same prose and the
+/// same program are one repeated reply however the provider narrated it, so a
+/// host reading its stall evidence must see one fingerprint twice.
+#[test]
+fn native_reasoning_does_not_move_the_stall_reply_fingerprint() {
+    let fingerprint_for = |reasoning: &str| {
+        let mut machine = TurnMachine::new(
+            config(true, RlmTermination::Natural),
+            Vec::new(),
+            Arc::new(Vec::new()),
+            0,
+        );
+        let initial = drain(&mut machine);
+        reply(
+            &mut machine,
+            &initial,
+            vec![
+                LlmOutputPart::Reasoning {
+                    text: reasoning.to_string(),
+                    replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                        encrypted_content: Some(format!("{reasoning}-blob")),
+                        ..Default::default()
+                    }),
+                },
+                text("Ready."),
+                call("call-1", "execute_code", r#"{"code":"finish(\"ok\")"}"#),
+            ],
+        );
+        let payloads = native_extraction_payloads(&machine);
+        assert_eq!(payloads.len(), 1, "one attempt, one diagnostic");
+        payloads[0]["reply_fingerprint"]
+            .as_str()
+            .expect("every extraction diagnostic fingerprints its reply")
+            .to_string()
+    };
+
+    assert_eq!(
+        fingerprint_for("Plan A."),
+        fingerprint_for("Plan B, at length."),
+        "identical replies fingerprint identically"
+    );
+}
+
+/// One concept, one shape. Both channels serialize the same
+/// `ExtractionDiagnostic`, so a host reading `native_extraction` gets the
+/// fields it reads on `llm_extraction` — and never the `dialect` key ADR 0096
+/// retired, which the native literal was the last producer of.
+#[test]
+fn native_extraction_diagnostic_matches_the_shared_shape() {
+    let prose = "Ready.";
+    let code = "finish(\"ok\")";
+    let reasoning = "Plan.";
+
+    let mut machine = TurnMachine::new(
+        config(true, RlmTermination::Natural),
+        Vec::new(),
+        Arc::new(Vec::new()),
+        0,
+    );
+    let initial = drain(&mut machine);
+    reply(
+        &mut machine,
+        &initial,
+        vec![
+            LlmOutputPart::Reasoning {
+                text: reasoning.to_string(),
+                replay: None,
+            },
+            text(prose),
+            call(
+                "call-1",
+                "execute_code",
+                &serde_json::json!({ "code": code }).to_string(),
+            ),
+        ],
+    );
+
+    let payloads = native_extraction_payloads(&machine);
+    assert_eq!(payloads.len(), 1, "one attempt, one diagnostic");
+    let mut payload = payloads.into_iter().next().unwrap();
+    let object = payload.as_object_mut().unwrap();
+    let fingerprint = object.remove("reply_fingerprint").unwrap();
+    let fingerprint = fingerprint.as_str().unwrap();
+    assert_eq!(fingerprint.len(), 16, "fingerprint: {fingerprint}");
+    assert!(
+        fingerprint.chars().all(|c| c.is_ascii_hexdigit()),
+        "fingerprint: {fingerprint}"
+    );
+    assert_eq!(
+        serde_json::Value::Object(object.clone()),
+        serde_json::json!({
+            "turn_id": "parity-turn",
+            "decision": "execute_typescript",
+            "termination": "natural",
+            "counts": {
+                "full_text_chars": prose.chars().count() + code.chars().count(),
+                "prose_chars": prose.chars().count(),
+                "code_chars": code.chars().count(),
+                "reasoning_chars": reasoning.chars().count(),
+                "typescript_cell_count": 1,
+            },
+        })
+    );
+}

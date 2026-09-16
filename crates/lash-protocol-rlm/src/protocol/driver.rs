@@ -42,7 +42,8 @@ use super::finish::{
     output_limit_retry_message, validate_finish_value,
 };
 use super::stall::{
-    LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE, reply_fingerprint, stalled_attempts,
+    ExtractionCounts, ExtractionDiagnostic, LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE,
+    reply_fingerprint, stalled_attempts,
 };
 use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rlm_driver_state};
 
@@ -188,10 +189,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
-                        self.dialect.language_id(),
                         decision,
                         &termination,
-                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
+                        prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
                     ),
                 )]));
                 let mut retry_events = Vec::new();
@@ -234,10 +234,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
-                        self.dialect.language_id(),
                         "retry_output_limit_prose",
                         &termination,
-                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
+                        prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
                     ),
                 )]));
                 let mut retry_events = Vec::new();
@@ -297,10 +296,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
-                        self.dialect.language_id(),
                         "retry_malformed_cell_fence",
                         &termination,
-                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
+                        prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
                     ),
                 )]));
                 let mut retry_events = Vec::new();
@@ -344,10 +342,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
-                        self.dialect.language_id(),
                         "finish_prose",
                         &termination,
-                        LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
+                        prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
                     ),
                 )]));
                 if !reasoning.is_empty() {
@@ -382,10 +379,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 llm_extraction_payload(
                     ctx.turn_id(),
                     &fingerprint,
-                    self.dialect.language_id(),
                     "request_finish",
                     &termination,
-                    LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
+                    prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
                 ),
             )]));
             let mut events = Vec::new();
@@ -434,10 +430,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             llm_extraction_payload(
                 ctx.turn_id(),
                 &fingerprint,
-                self.dialect.language_id(),
                 self.dialect.execution_diagnostic_name(),
                 &termination,
-                LlmExtractionCounts::cell(&assistant_text, &reasoning, &cell),
+                cell_counts(
+                    self.dialect.language_id(),
+                    &assistant_text,
+                    &reasoning,
+                    &cell,
+                ),
             ),
         )]));
 
@@ -1141,102 +1141,50 @@ fn diagnostic_event(phase: &str, payload: Value) -> SessionHistoryRecord {
     )))
 }
 
-struct LlmExtractionCounts {
-    full_text_chars: usize,
-    prose_chars: usize,
-    code_chars: usize,
-    reasoning_chars: usize,
-    cell_count: usize,
+/// The counts for an attempt whose reply carried no executable cell.
+fn prose_only_counts<'a>(
+    language_id: &'a str,
+    assistant_text: &str,
+    reasoning: &[RlmReasoningPart],
+) -> ExtractionCounts<'a> {
+    let chars = assistant_text.chars().count();
+    ExtractionCounts::prose(language_id, chars, chars, reasoning_chars(reasoning))
 }
 
-impl LlmExtractionCounts {
-    fn prose_only(assistant_text: &str, reasoning: &[RlmReasoningPart]) -> Self {
-        Self {
-            full_text_chars: assistant_text.chars().count(),
-            prose_chars: assistant_text.chars().count(),
-            code_chars: 0,
-            reasoning_chars: reasoning_diagnostic_chars(reasoning),
-            cell_count: 0,
-        }
-    }
-
-    fn cell(assistant_text: &str, reasoning: &[RlmReasoningPart], cell: &CellExtraction) -> Self {
-        Self {
-            full_text_chars: assistant_text.chars().count(),
-            prose_chars: cell.prose.chars().count(),
-            code_chars: cell.code.chars().count(),
-            reasoning_chars: reasoning_diagnostic_chars(reasoning),
-            cell_count: cell.cell_count,
-        }
-    }
+/// The counts for an attempt whose reply carried a cell. `full_text_chars`
+/// covers the fences the cell arrived in, so it exceeds `prose + code`.
+fn cell_counts<'a>(
+    language_id: &'a str,
+    assistant_text: &str,
+    reasoning: &[RlmReasoningPart],
+    cell: &CellExtraction,
+) -> ExtractionCounts<'a> {
+    ExtractionCounts::program(
+        language_id,
+        assistant_text.chars().count(),
+        cell.prose.chars().count(),
+        reasoning_chars(reasoning),
+        cell.code.chars().count(),
+        cell.cell_count,
+    )
 }
 
-fn reasoning_diagnostic_chars(reasoning: &[RlmReasoningPart]) -> usize {
-    reasoning
-        .iter()
-        .map(|part| {
-            part.text.chars().count().max(usize::from(
-                part.replay
-                    .as_ref()
-                    .is_some_and(|replay| !replay.is_empty()),
-            ))
-        })
-        .sum()
+fn reasoning_chars(reasoning: &[RlmReasoningPart]) -> usize {
+    crate::protocol::stall::reasoning_diagnostic_chars(
+        reasoning
+            .iter()
+            .map(|part| (part.text.as_str(), part.replay.as_ref())),
+    )
 }
 
-/// The per-attempt extraction diagnostic.
-///
-/// `turn_id` is what scopes the no-progress count. The driver's view of history
-/// is the whole active session path, not one turn, so a diagnostic that cannot
-/// name its own turn cannot be told apart from a previous turn's tail — and
-/// several terminal shapes (a prose-only chat turn, a finish request, a
-/// turn-limit stop) leave a trailing diagnostic with no execution after it.
-/// Diagnostics written before this field existed name no turn and are read as
-/// belonging to an earlier one, which under-counts rather than mis-stops.
-///
-/// `reply_fingerprint` is evidence for hosts only; lash attaches no runtime
-/// behavior to a repeat. It is derived state, not new information, and it lives
-/// in the diagnostic for the same reason the count does: the driver's only
-/// durable view of the turn is what the turn committed.
-#[expect(
-    clippy::expect_used,
-    reason = "count_payload is built by this fn as a serde_json::json! object, so as_object_mut is always Some"
-)]
 fn llm_extraction_payload(
     turn_id: &TurnId,
     reply_fingerprint: &str,
-    language_id: &str,
     decision: &str,
     termination: &RlmTermination,
-    counts: LlmExtractionCounts,
+    counts: ExtractionCounts<'_>,
 ) -> Value {
-    let mut count_payload = serde_json::json!({
-        "full_text_chars": counts.full_text_chars,
-        "prose_chars": counts.prose_chars,
-        "code_chars": counts.code_chars,
-        "reasoning_chars": counts.reasoning_chars,
-    });
-    count_payload
-        .as_object_mut()
-        .expect("extraction counts are an object")
-        .insert(
-            format!("{language_id}_cell_count"),
-            serde_json::json!(counts.cell_count),
-        );
-    serde_json::json!({
-        "turn_id": turn_id,
-        "decision": decision,
-        "reply_fingerprint": reply_fingerprint,
-        "termination": termination_diagnostic_name(termination),
-        "counts": count_payload,
-    })
-}
-
-fn termination_diagnostic_name(termination: &RlmTermination) -> &'static str {
-    match termination {
-        RlmTermination::FinishRequired { .. } => "finish_required",
-        RlmTermination::Natural => "natural",
-    }
+    ExtractionDiagnostic::new(turn_id, reply_fingerprint, decision, termination, counts).payload()
 }
 
 #[cfg(test)]
@@ -1306,10 +1254,17 @@ mod tests {
             }),
         }];
 
-        assert_eq!(reasoning_diagnostic_chars(&reasoning), 1);
+        assert_eq!(reasoning_chars(&reasoning), 1);
         assert_eq!(
-            LlmExtractionCounts::prose_only("", &reasoning).reasoning_chars,
-            1
+            serde_json::to_value(prose_only_counts("typescript", "", &reasoning)).unwrap(),
+            serde_json::json!({
+                "full_text_chars": 0,
+                "prose_chars": 0,
+                "code_chars": 0,
+                "reasoning_chars": 1,
+                "typescript_cell_count": 0,
+            }),
+            "an attempt that ran no program renders its code counters as zero"
         );
     }
 
