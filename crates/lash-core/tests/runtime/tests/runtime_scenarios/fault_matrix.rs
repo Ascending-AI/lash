@@ -433,6 +433,7 @@ fn run_fast_gate_with_fake_cargo(shard: &str) -> Vec<Vec<String>> {
         .arg(format!("fast:{shard}"))
         .current_dir(repo_root)
         .env("HOME", temp.path())
+        .env_remove("LASH_CONFIDENCE_STAGE")
         .env("PATH", path)
         .env("LASH_FAKE_CARGO_LOG", &log_path)
         .env("LASH_CONFIDENCE_OUT_DIR", &out_dir)
