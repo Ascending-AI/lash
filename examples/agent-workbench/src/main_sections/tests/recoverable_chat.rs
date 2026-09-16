@@ -2065,7 +2065,7 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
     );
 }
 
-fn user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
+pub(crate) fn user_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
     snapshot
         .state
         .messages

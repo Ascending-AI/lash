@@ -71,16 +71,7 @@ pub(crate) async fn app_state(
         &active_turn_ids,
     );
     let product_events = state.event_tx.snapshot(&session_id);
-    let product_messages = product_events
-        .events
-        .iter()
-        .filter_map(|event| match &event.item {
-            StreamItem::Message { message } => Some(message.clone()),
-            StreamItem::TurnInput { .. }
-            | StreamItem::ModelCallRecorded { .. }
-            | StreamItem::Done { .. } => None,
-        })
-        .collect::<Vec<_>>();
+    let product_messages = product_chat_messages(&state, &session_id);
     let unknown_turn_terminals = state.unknown_turn_terminals.for_session(&session_id);
     let ChatProjection {
         messages,
