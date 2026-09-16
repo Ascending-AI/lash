@@ -385,7 +385,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             head_revision: next_head_revision,
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
-            committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
+            committed_leaf_node_id: commit.graph.leaf_node_id().cloned(),
             realized_node_timestamps,
             committed_usage_delta_identities: commit
                 .usage_deltas

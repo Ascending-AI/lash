@@ -681,7 +681,7 @@ impl TurnBoundary {
         }
         state.agent_frames = state.session_graph.agent_frame_records(&session_id);
         let persisted_node_ids = graph
-            .nodes
+            .nodes()
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();

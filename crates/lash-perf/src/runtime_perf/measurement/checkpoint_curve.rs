@@ -281,10 +281,10 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                         );
                     }
                     commit.turn_commit_hash()?;
-                    if commit.graph.nodes.len() != fixture.point.graph_rows {
+                    if commit.graph.nodes().len() != fixture.point.graph_rows {
                         anyhow::bail!(
                             "{prefix} committed {} graph rows, expected {}",
-                            commit.graph.nodes.len(),
+                            commit.graph.nodes().len(),
                             fixture.point.graph_rows
                         );
                     }

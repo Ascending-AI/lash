@@ -593,7 +593,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let authoritative_revision = locked_revision.max(actual_revision);
         let node_ids = commit
             .graph
-            .nodes
+            .nodes()
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<Vec<_>>();
@@ -609,29 +609,6 @@ impl SessionCommitStore for PostgresSessionStore {
         .into_iter()
         .map(lash_core::NodeId::from)
         .collect::<std::collections::HashSet<_>>();
-        let selected_leaf_is_live = match commit.graph.leaf_node_id() {
-            Some(leaf_node_id) => sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(
-                    SELECT 1 FROM lash_graph_nodes
-                    WHERE node_id = $1 AND tombstoned = FALSE
-                )",
-            )
-            .bind(leaf_node_id.as_str())
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?,
-            None => false,
-        };
-        let has_live_nodes = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                SELECT 1 FROM lash_graph_nodes
-                WHERE session_id = $1 AND tombstoned = FALSE
-            )",
-        )
-        .bind(commit.session_id.as_str())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
         let published_leaf = match old_leaf_node_id {
             None => lash_core::store::PublishedLeafFacts::Absent,
             Some(node_id) => match parent_node_facts {
@@ -644,8 +621,6 @@ impl SessionCommitStore for PostgresSessionStore {
             published_leaf,
             requested_ancestor_is_active,
             occupied_node_ids,
-            selected_leaf_is_live,
-            has_live_nodes,
         })?;
         let sql_head_revision = sql_monotonic_counter_value(
             "session_head_revision",
@@ -692,7 +667,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .await
             .map_err(store_sqlx_error)?;
         }
-        for (node, facts) in commit.graph.nodes.iter().zip(plan.planned_node_facts()) {
+        for (node, facts) in commit.graph.nodes().iter().zip(plan.planned_node_facts()) {
             let node_json = node.encode_storage_body().map_err(|err| {
                 StoreError::Backend(format!("failed to encode graph node body: {err}"))
             })?;

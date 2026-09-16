@@ -115,6 +115,12 @@ pub struct RuntimeCommit {
     pub config: crate::PersistedSessionConfig,
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub graph: GraphAppend,
+    /// Resident leaf observed when this commit was built. For
+    /// `GraphAppend::PreserveHead` this is the effective committed leaf bound
+    /// into the whole-commit hash; for `Extend` it records the base the
+    /// appended nodes extend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_base_leaf_node_id: Option<crate::NodeId>,
     pub checkpoint: HydratedSessionCheckpoint,
     /// Usage rows published atomically by this commit, each carrying a stable
     /// identity so retrying an unknown commit outcome cannot double-account.

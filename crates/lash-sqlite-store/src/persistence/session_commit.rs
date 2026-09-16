@@ -559,32 +559,7 @@ impl SessionCommitStore for Store {
                             .map_err(sqlite_error)?
                             .is_some(),
                     };
-                    let occupied_node_ids = occupied_node_ids_conn(tx, &commit.graph.nodes)?;
-                    let selected_leaf_is_live = match commit.graph.leaf_node_id() {
-                        Some(leaf_node_id) => tx
-                            .query_row(
-                                "SELECT 1 FROM graph_nodes
-                                 WHERE node_id = ?1 AND tombstoned = 0
-                                 LIMIT 1",
-                                params![leaf_node_id.as_str()],
-                                |_| Ok(()),
-                            )
-                            .optional()
-                            .map_err(sqlite_error)?
-                            .is_some(),
-                        None => false,
-                    };
-                    let has_live_nodes = tx
-                        .query_row(
-                            "SELECT 1 FROM graph_nodes
-                             WHERE session_id = ?1 AND tombstoned = 0
-                             LIMIT 1",
-                            params![commit.session_id.as_str()],
-                            |_| Ok(()),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?
-                        .is_some();
+                    let occupied_node_ids = occupied_node_ids_conn(tx, commit.graph.nodes())?;
                     let published_leaf = match old_leaf_node_id {
                         None => lash_core::store::PublishedLeafFacts::Absent,
                         Some(node_id) => match parent_node_facts {
@@ -597,8 +572,6 @@ impl SessionCommitStore for Store {
                         published_leaf,
                         requested_ancestor_is_active,
                         occupied_node_ids,
-                        selected_leaf_is_live,
-                        has_live_nodes,
                     })?;
                     let sql_head_revision = sql_monotonic_counter_value(
                         "session_head_revision",
@@ -739,7 +712,7 @@ impl SessionCommitStore for Store {
                     insert_graph_nodes_conn(
                         tx,
                         &commit.session_id,
-                        &commit.graph.nodes,
+                        &commit.graph.nodes(),
                         plan.planned_node_facts(),
                     )?;
                     let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());

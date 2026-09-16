@@ -47,12 +47,6 @@ pub struct FreshRuntimeCommitFacts {
     /// Incoming node ids already occupied in durable history, including
     /// tombstoned rows.
     pub occupied_node_ids: HashSet<crate::NodeId>,
-    /// Whether a selected leaf not included in this append resolves to a live
-    /// durable node.
-    pub selected_leaf_is_live: bool,
-    /// Whether this session owns any live durable graph-node row, including a
-    /// live row outside the active path.
-    pub has_live_nodes: bool,
 }
 
 /// The previously published leaf observed under commit authority.
@@ -298,32 +292,13 @@ impl RuntimeCommitPlanner {
         if let Some(node) = self
             .commit
             .graph
-            .nodes
+            .nodes()
             .iter()
             .find(|node| facts.occupied_node_ids.contains(&node.node_id))
         {
             return Err(StoreError::NodeIdCollision {
                 node_id: node.node_id.clone(),
             });
-        }
-
-        match self.commit.graph.leaf_node_id() {
-            Some(leaf_node_id)
-                if !self
-                    .commit
-                    .graph
-                    .appended_nodes()
-                    .any(|node| node.node_id == *leaf_node_id)
-                    && !facts.selected_leaf_is_live =>
-            {
-                return Err(StoreError::InvalidGraphLeaf {
-                    leaf_node_id: Some(leaf_node_id.clone()),
-                });
-            }
-            None if !self.commit.graph.nodes.is_empty() || facts.has_live_nodes => {
-                return Err(StoreError::InvalidGraphLeaf { leaf_node_id: None });
-            }
-            _ => {}
         }
 
         let (old_leaf_node_id, parent_node_facts) = match facts.published_leaf {
@@ -335,25 +310,25 @@ impl RuntimeCommitPlanner {
                 });
             }
         };
-        match self.commit.graph.nodes.first() {
-            None if self.commit.graph.leaf_node_id != old_leaf_node_id => {
-                return Err(StoreError::InvalidGraphLeaf {
-                    leaf_node_id: self.commit.graph.leaf_node_id.clone(),
-                });
-            }
-            Some(first) if first.parent_node_id.as_ref() != old_leaf_node_id.as_ref() => {
-                return Err(StoreError::InvalidGraphParent {
-                    node_id: first.node_id.clone(),
-                    expected: old_leaf_node_id.clone(),
-                    actual: first.parent_node_id.clone(),
-                });
-            }
-            _ => {}
+        let committed_leaf_node_id = self
+            .commit
+            .graph
+            .leaf_node_id()
+            .cloned()
+            .or_else(|| old_leaf_node_id.clone());
+        if let Some(first) = self.commit.graph.nodes().first()
+            && first.parent_node_id.as_ref() != old_leaf_node_id.as_ref()
+        {
+            return Err(StoreError::InvalidGraphParent {
+                node_id: first.node_id.clone(),
+                expected: old_leaf_node_id.clone(),
+                actual: first.parent_node_id.clone(),
+            });
         }
 
         let (planned_node_facts, derived_frame_node_id) =
             derive_appended_node_facts(&self.commit.graph, parent_node_facts)?;
-        if let Some(leaf_node_id) = self.commit.graph.leaf_node_id.clone()
+        if let Some(leaf_node_id) = committed_leaf_node_id.clone()
             && derived_frame_node_id.is_none()
         {
             return Err(StoreError::MissingFrameOpenAncestor { leaf_node_id });
@@ -413,6 +388,7 @@ impl RuntimeCommitPlanner {
             actual_head_revision: facts.actual_head_revision,
             next_head_revision,
             old_leaf_node_id,
+            committed_leaf_node_id,
             derived_frame_node_id,
             planned_node_facts,
             realized_node_timestamps: self.realized_node_timestamps.clone(),
@@ -435,6 +411,7 @@ pub struct RuntimeCommitPlan<'a> {
     actual_head_revision: u64,
     next_head_revision: u64,
     old_leaf_node_id: Option<crate::NodeId>,
+    committed_leaf_node_id: Option<crate::NodeId>,
     derived_frame_node_id: Option<crate::NodeId>,
     planned_node_facts: Vec<PlannedNodeFacts>,
     realized_node_timestamps: Vec<crate::session_graph::RealizedNodeTimestamp>,
@@ -464,7 +441,7 @@ impl<'a> RuntimeCommitPlan<'a> {
 
     /// Whether head publication selects a leaf different from the prior head.
     pub fn head_changed(&self) -> bool {
-        self.old_leaf_node_id != self.commit.graph.leaf_node_id
+        self.old_leaf_node_id != self.committed_leaf_node_id
     }
 
     /// Error prescribed when a conditional head write affected no row. The
@@ -493,7 +470,7 @@ impl<'a> RuntimeCommitPlan<'a> {
                     .expect("derived graph node identities are non-empty")
             }),
             checkpoint_ref: Some(checkpoint_ref),
-            leaf_node_id: self.commit.graph.leaf_node_id.clone(),
+            leaf_node_id: self.committed_leaf_node_id.clone(),
         }
     }
 
@@ -508,7 +485,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             head_revision: self.next_head_revision,
             checkpoint_ref,
             manifest,
-            committed_leaf_node_id: self.commit.graph.leaf_node_id.clone(),
+            committed_leaf_node_id: self.committed_leaf_node_id.clone(),
             realized_node_timestamps: self.realized_node_timestamps.clone(),
             committed_usage_delta_identities: self.committed_usage_delta_identities.clone(),
             failure_evidence: self.commit.failure_evidence.clone(),
@@ -538,8 +515,8 @@ fn derive_appended_node_facts(
     graph: &super::GraphAppend,
     mut parent: Option<ParentNodeFacts>,
 ) -> Result<(Vec<PlannedNodeFacts>, Option<crate::NodeId>), StoreError> {
-    let mut planned = Vec::with_capacity(graph.nodes.len());
-    for node in &graph.nodes {
+    let mut planned = Vec::with_capacity(graph.nodes().len());
+    for node in graph.nodes() {
         let generation = match parent.as_ref() {
             Some(parent) => StoreError::checked_monotonic_increment(
                 "session_graph_generation",
@@ -684,8 +661,6 @@ mod tests {
             published_leaf: PublishedLeafFacts::Absent,
             requested_ancestor_is_active: true,
             occupied_node_ids: HashSet::new(),
-            selected_leaf_is_live: false,
-            has_live_nodes: false,
         }) {
             Ok(_) => panic!("exhausted head revision must refuse"),
             Err(error) => error,
@@ -715,8 +690,6 @@ mod tests {
             },
             requested_ancestor_is_active: true,
             occupied_node_ids: HashSet::new(),
-            selected_leaf_is_live: false,
-            has_live_nodes: false,
         });
         assert!(
             matches!(result, Err(StoreError::InvalidGraphLeaf { leaf_node_id: Some(id) }) if id == "retired-parent")

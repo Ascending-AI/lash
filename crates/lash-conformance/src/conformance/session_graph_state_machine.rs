@@ -950,18 +950,19 @@ impl SessionGraphScenario {
         let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(operation.clone());
         commit.graph = malformed_graph_append(&state, &operation, shape % 4)?;
-        if matches!(shape % 4, 0 | 3) {
-            commit.current_frame_node_id = commit.graph.leaf_node_id.clone().map(|frame_node_id| {
-                crate::FrameNodeId::new(frame_node_id).expect("test frame identity is non-empty")
-            });
+        if matches!(shape % 4, 0 | 2 | 3) {
+            commit.current_frame_node_id =
+                commit.graph.leaf_node_id().cloned().map(|frame_node_id| {
+                    crate::FrameNodeId::new(frame_node_id)
+                        .expect("test frame identity is non-empty")
+                });
         }
         let error = commit_runtime_state_for_property(&live.store, commit, "malformed")
             .await
             .expect_err("malformed session graph commit must be rejected");
         let typed = match shape % 4 {
-            0 => matches!(error, crate::StoreError::NodeIdCollision { .. }),
-            1 | 3 => matches!(error, crate::StoreError::InvalidGraphParent { .. }),
-            _ => matches!(error, crate::StoreError::InvalidGraphLeaf { .. }),
+            0 | 2 => matches!(error, crate::StoreError::NodeIdCollision { .. }),
+            _ => matches!(error, crate::StoreError::InvalidGraphParent { .. }),
         };
         if !typed {
             return Err(format!(
@@ -1482,22 +1483,42 @@ fn malformed_graph_append(
                     protocol_turn_options: crate::ProtocolTurnOptions::default(),
                 },
             };
-            crate::GraphAppend {
+            crate::GraphAppend::Extend {
                 nodes: vec![frame(old_leaf), frame(Some(node_id.clone().into()))],
-                leaf_node_id: Some(node_id.into()),
             }
         }
         1 => {
             let node = plugin_node(0, Some("missing-parent".into()));
-            crate::GraphAppend {
-                leaf_node_id: Some(node.node_id.clone()),
-                nodes: vec![node],
+            crate::GraphAppend::Extend { nodes: vec![node] }
+        }
+        2 => {
+            let resident_frame_key = state
+                .session_graph
+                .nodes
+                .iter()
+                .find_map(|node| match &node.payload {
+                    crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
+                        Some(frame_key.clone())
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| "malformed subject has no resident frame".to_string())?;
+            let node_id =
+                crate::frame_node_id(&state.session_id, resident_frame_key.as_str()).into_inner();
+            crate::GraphAppend::Extend {
+                nodes: vec![crate::SessionNodeRecord {
+                    node_id: node_id.clone().into(),
+                    parent_node_id: old_leaf.clone(),
+                    timestamp: "1970-01-01T00:00:00Z".to_string(),
+                    payload: crate::SessionNodePayload::FrameOpen {
+                        frame_key: resident_frame_key,
+                        reason: crate::AgentFrameReason::initial(),
+                        assignment: crate::AgentFrameAssignment::from_policy(state.policy.clone()),
+                        protocol_turn_options: crate::ProtocolTurnOptions::default(),
+                    },
+                }],
             }
         }
-        2 => crate::GraphAppend {
-            nodes: vec![plugin_node(0, old_leaf)],
-            leaf_node_id: Some("missing-leaf".into()),
-        },
         _ => {
             let frame_key = crate::FrameKey::from_caller_material(&format!(
                 "malformed-cycle-{}",
@@ -1505,7 +1526,7 @@ fn malformed_graph_append(
             ))
             .expect("non-empty frame material");
             let node_id = crate::frame_node_id(&state.session_id, frame_key.as_str()).into_inner();
-            crate::GraphAppend {
+            crate::GraphAppend::Extend {
                 nodes: vec![crate::SessionNodeRecord {
                     node_id: node_id.clone().into(),
                     parent_node_id: Some(node_id.clone().into()),
@@ -1517,7 +1538,6 @@ fn malformed_graph_append(
                         protocol_turn_options: crate::ProtocolTurnOptions::default(),
                     },
                 }],
-                leaf_node_id: Some(node_id.into()),
             }
         }
     })

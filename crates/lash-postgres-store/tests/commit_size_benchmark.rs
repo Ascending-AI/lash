@@ -162,10 +162,7 @@ fn realistic_commit(
     commit.current_frame_node_id = Some(frame_node_id);
     commit.config = PersistedSessionConfig::from(&state.policy);
     commit.config.provider_id = "benchmark".to_string();
-    commit.graph = GraphAppend {
-        leaf_node_id: nodes.last().map(|node| node.node_id.clone()),
-        nodes,
-    };
+    commit.graph = GraphAppend::Extend { nodes };
     for index in 0..SMALL_CHECKPOINT_COMPONENTS {
         let len = 64 + (index % 5) * 32;
         commit.checkpoint.components.insert(

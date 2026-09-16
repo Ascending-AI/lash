@@ -675,17 +675,22 @@ fn generated_cases() -> Vec<GeneratedCase> {
 }
 
 fn materialize_graph(session_id: &SessionId, spec: &GraphSpec) -> GraphAppend {
-    GraphAppend {
-        nodes: spec
-            .nodes
-            .iter()
-            .copied()
-            .map(|node| node.materialize(session_id))
-            .collect(),
-        leaf_node_id: spec
-            .leaf_node_id
-            .map(|node_id| scoped_node_id(session_id, node_id).into()),
+    let nodes = spec
+        .nodes
+        .iter()
+        .copied()
+        .map(|node| node.materialize(session_id))
+        .collect::<Vec<_>>();
+    if nodes.is_empty() {
+        return GraphAppend::PreserveHead;
     }
+    debug_assert_eq!(
+        spec.leaf_node_id
+            .map(|node_id| scoped_node_id(session_id, node_id)),
+        nodes.last().map(|node| node.node_id.to_string()),
+        "an extended graph leaf must be its terminal appended node"
+    );
+    GraphAppend::Extend { nodes }
 }
 
 // A commit is genuinely this many independent parts; bundling them into a
@@ -1229,12 +1234,14 @@ impl BackendRunner {
                         .collect(),
                 );
                 let next_frame_node_id = commit.current_frame_node_id.clone();
-                let next_leaf_node_id = commit.graph.leaf_node_id.clone();
                 let result = self.store().commit_runtime_state(commit).await;
                 match result {
                     Ok(result) => {
                         self.current_frame_node_id = next_frame_node_id;
-                        self.current_leaf_node_id = next_leaf_node_id.map(|id| id.to_string());
+                        self.current_leaf_node_id = result
+                            .committed_leaf_node_id
+                            .clone()
+                            .map(|id| id.to_string());
                         if matches!(*checkpoint, CheckpointSpec::Bodies) {
                             self.checkpoint_component_refs = Some(CheckpointComponentRefs {
                                 components: result.manifest.components.clone(),

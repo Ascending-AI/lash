@@ -596,9 +596,8 @@ pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn Runtim
         crate::CommitBudgetLimit::bounded(CONFIGURED_NODE_LIMIT),
     );
     let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
-    commit.graph = crate::GraphAppend {
+    commit.graph = crate::GraphAppend::Extend {
         nodes: vec![parent, child],
-        leaf_node_id: None,
     };
 
     let error = store
@@ -872,8 +871,6 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             actual_head_revision: same_leaf_commit.expected_head_revision,
             requested_ancestor_is_active: true,
             occupied_node_ids: std::collections::HashSet::new(),
-            selected_leaf_is_live: true,
-            has_live_nodes: true,
             published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
@@ -912,8 +909,6 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             actual_head_revision: changed_commit.expected_head_revision,
             requested_ancestor_is_active: true,
             occupied_node_ids: std::collections::HashSet::new(),
-            selected_leaf_is_live: false,
-            has_live_nodes: true,
             published_leaf: crate::store::PublishedLeafFacts::Live(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
