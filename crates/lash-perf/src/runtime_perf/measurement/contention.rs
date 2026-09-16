@@ -971,25 +971,11 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
     workers: usize,
+    // Resolved by the one caller, like the checkpoint-curve and high-traffic
+    // harnesses beside it: this function used to carry a fourth copy of the
+    // availability preamble.
+    database_url: Option<&str>,
 ) -> anyhow::Result<RuntimePerfRunResult> {
-    let database_url = scenario
-        .uses_postgres()
-        .then(configured_postgres_database_url)
-        .flatten();
-    if scenario.uses_postgres() && database_url.is_none() {
-        if postgres_is_required() {
-            anyhow::bail!(
-                "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
-                scenario.name()
-            );
-        }
-        eprintln!(
-            "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
-            scenario.name()
-        );
-        return Ok(skipped_runtime_perf_result(scenario, chat_turns));
-    }
-
     let workers = workers.max(1);
     let target_completions = workers
         .checked_mul(chat_turns)
@@ -1000,7 +986,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let sqlite_root = (!scenario.uses_postgres())
         .then(|| make_temp_bench_dir(&format!("lash-runtime-perf-{}", scenario.name())))
         .transpose()?;
-    let postgres_namespace = match database_url.as_deref() {
+    let postgres_namespace = match database_url {
         Some(url) => Some(lash_postgres_store::testing::IsolatedDatabase::create(url).await),
         None => None,
     };

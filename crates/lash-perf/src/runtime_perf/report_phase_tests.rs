@@ -402,6 +402,50 @@ fn durable_queued_work_contention_inventory_is_backend_complete_and_opt_in() {
     }
 }
 
+/// The harness partition and the phase contracts state the same thing.
+///
+/// `run_once_inner` used to select three scenario groups with predicate
+/// early-returns and then carry a six-variant `unreachable!()` arm naming the
+/// same groups: one partition written twice, with nothing relating the copies.
+/// Narrowing `is_high_traffic`, or retargeting a `phase_contract`, compiled
+/// green and panicked the first time that scenario was selected. The dispatch
+/// now names its own variants, so the compiler owns exhaustiveness -- and this
+/// keeps the predicates, which still steer budgets and summarization, honest
+/// about the same partition.
+#[test]
+fn harness_predicates_and_phase_contracts_describe_one_partition() {
+    for scenario in RuntimePerfScenario::KNOWN {
+        let contract = scenario.phase_contract();
+        assert_eq!(
+            scenario.is_checkpoint_curve(),
+            contract == ScenarioPhaseContract::CheckpointCurve,
+            "{}",
+            scenario.name()
+        );
+        assert_eq!(
+            scenario.is_high_traffic(),
+            contract == ScenarioPhaseContract::HighTraffic,
+            "{}",
+            scenario.name()
+        );
+        assert_eq!(
+            scenario.is_queued_work_contention(),
+            contract == ScenarioPhaseContract::QueuedWorkContention,
+            "{}",
+            scenario.name()
+        );
+    }
+
+    // Every scenario with its own harness is durable and uses the runtime
+    // harness kind, so the generic turn path is what the remaining contract
+    // means.
+    for scenario in RuntimePerfScenario::KNOWN {
+        if scenario.phase_contract() != ScenarioPhaseContract::StableDurableTurn {
+            assert!(scenario.is_durable(), "{}", scenario.name());
+        }
+    }
+}
+
 #[test]
 fn durable_checkpoint_curve_inventory_is_backend_complete_and_opt_in() {
     let scenarios = [

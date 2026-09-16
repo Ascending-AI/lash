@@ -206,6 +206,52 @@ pub(crate) async fn run_once(
     Ok(result)
 }
 
+/// How a scenario's PostgreSQL requirement resolved.
+enum PostgresTarget {
+    /// The scenario does not use PostgreSQL.
+    NotNeeded,
+    /// The scenario uses PostgreSQL and a URL is configured.
+    Configured(String),
+    /// The scenario uses PostgreSQL, none is configured, and it is not
+    /// required: the run reports itself skipped rather than failing.
+    Skipped,
+}
+
+impl PostgresTarget {
+    fn url(&self) -> Option<&str> {
+        match self {
+            Self::Configured(url) => Some(url.as_str()),
+            Self::NotNeeded | Self::Skipped => None,
+        }
+    }
+}
+
+/// The "does this scenario have the database it needs" rule, stated once.
+///
+/// It used to be written out four times -- the checkpoint-curve branch, the
+/// high-traffic branch, the generic dispatch below, and a fourth copy inside
+/// `run_once_durable_queued_work_contention` -- with the same bail message and
+/// the same skip message in each.
+fn resolve_postgres_target(scenario: RuntimePerfScenario) -> anyhow::Result<PostgresTarget> {
+    if !scenario.uses_postgres() {
+        return Ok(PostgresTarget::NotNeeded);
+    }
+    if let Some(url) = configured_postgres_database_url() {
+        return Ok(PostgresTarget::Configured(url));
+    }
+    if postgres_is_required() {
+        anyhow::bail!(
+            "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
+            scenario.name()
+        );
+    }
+    eprintln!(
+        "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
+        scenario.name()
+    );
+    Ok(PostgresTarget::Skipped)
+}
+
 #[expect(
     clippy::expect_used,
     reason = "the run commits into one active runtime frame scope, so its read view resolves after the run, per the message"
@@ -217,68 +263,49 @@ async fn run_once_inner(
     checkpoint_curve: &CheckpointCurveConfig,
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
-    if scenario.is_checkpoint_curve() {
-        let postgres_database_url = if scenario.uses_postgres() {
-            configured_postgres_database_url()
-        } else {
-            None
-        };
-        if scenario.uses_postgres() && postgres_database_url.is_none() {
-            if postgres_is_required() {
-                anyhow::bail!(
-                    "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
-                    scenario.name()
-                );
-            }
-            eprintln!(
-                "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
-                scenario.name()
-            );
-            return Ok(skipped_runtime_perf_result(scenario, chat_turns));
-        }
-        return Box::pin(run_once_durable_checkpoint_curve(
-            scenario,
-            chat_turns,
-            checkpoint_curve,
-            postgres_database_url.as_deref(),
-        ))
-        .await;
+    let postgres = resolve_postgres_target(scenario)?;
+    if matches!(postgres, PostgresTarget::Skipped) {
+        return Ok(skipped_runtime_perf_result(scenario, chat_turns));
     }
-    if scenario.is_queued_work_contention() {
-        return Box::pin(run_once_durable_queued_work_contention(
-            scenario,
-            chat_turns,
-            contention_workers,
-        ))
-        .await;
-    }
-    if scenario.is_high_traffic() {
-        let database_url = scenario
-            .uses_postgres()
-            .then(configured_postgres_database_url)
-            .flatten();
-        if scenario.uses_postgres() && database_url.is_none() {
-            if postgres_is_required() {
-                anyhow::bail!(
-                    "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
-                    scenario.name()
-                );
-            }
-            eprintln!(
-                "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
-                scenario.name()
-            );
-            return Ok(skipped_runtime_perf_result(scenario, chat_turns));
-        }
-        return Box::pin(run_once_high_traffic(
-            scenario,
-            chat_turns,
-            high_traffic,
-            database_url.as_deref(),
-        ))
-        .await;
-    }
+
+    // One dispatch. The three groups below used to be selected by predicate
+    // early-returns above this match, so their membership was stated twice --
+    // once in `scenarios.rs` and once as the `unreachable!()` arm this match
+    // ended with. Narrowing a predicate compiled green and panicked at run
+    // time; now the compiler owns the partition.
     match scenario {
+        RuntimePerfScenario::DurableCheckpointCurveSqlite
+        | RuntimePerfScenario::DurableCheckpointCurvePostgres => {
+            return Box::pin(run_once_durable_checkpoint_curve(
+                scenario,
+                chat_turns,
+                checkpoint_curve,
+                postgres.url(),
+            ))
+            .await;
+        }
+        RuntimePerfScenario::DurableQueuedWorkContentionSqlite
+        | RuntimePerfScenario::DurableQueuedWorkContentionPostgres => {
+            return Box::pin(run_once_durable_queued_work_contention(
+                scenario,
+                chat_turns,
+                contention_workers,
+                postgres.url(),
+            ))
+            .await;
+        }
+        RuntimePerfScenario::HighTrafficLoadSqlite
+        | RuntimePerfScenario::HighTrafficLoadPostgres
+        | RuntimePerfScenario::HighTrafficKneeSqlite
+        | RuntimePerfScenario::HighTrafficKneePostgres => {
+            return Box::pin(run_once_high_traffic(
+                scenario,
+                chat_turns,
+                high_traffic,
+                postgres.url(),
+            ))
+            .await;
+        }
         RuntimePerfScenario::WriterContention2Workers
         | RuntimePerfScenario::WriterContention8Workers => {
             return Box::pin(run_once_writer_contention(scenario, chat_turns)).await;
@@ -357,37 +384,13 @@ async fn run_once_inner(
         | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
         | RuntimePerfScenario::DurableRlmCheckpointTurnPostgres
         | RuntimePerfScenario::DurableAgentChildTurnSqlite
-        | RuntimePerfScenario::DurableAgentChildTurnPostgres
-        | RuntimePerfScenario::DurableCheckpointCurveSqlite
-        | RuntimePerfScenario::DurableCheckpointCurvePostgres => {}
-        RuntimePerfScenario::HighTrafficLoadSqlite
-        | RuntimePerfScenario::HighTrafficLoadPostgres
-        | RuntimePerfScenario::HighTrafficKneeSqlite
-        | RuntimePerfScenario::HighTrafficKneePostgres
-        | RuntimePerfScenario::DurableQueuedWorkContentionSqlite
-        | RuntimePerfScenario::DurableQueuedWorkContentionPostgres => {
-            unreachable!("direct-dispatch scenarios return before the generic dispatch")
+        | RuntimePerfScenario::DurableAgentChildTurnPostgres => {
+            // The generic turn harness below. Every other scenario returned
+            // from its own arm, so this list is what "generic" means.
         }
     }
 
-    let postgres_database_url = if scenario.uses_postgres() {
-        configured_postgres_database_url()
-    } else {
-        None
-    };
-    if scenario.uses_postgres() && postgres_database_url.is_none() {
-        if postgres_is_required() {
-            anyhow::bail!(
-                "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
-                scenario.name()
-            );
-        }
-        eprintln!(
-            "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
-            scenario.name()
-        );
-        return Ok(skipped_runtime_perf_result(scenario, chat_turns));
-    }
+    let postgres_database_url = postgres.url();
 
     // The runtime-work witness is process-global and exclusive. Durable
     // scenarios are the ones whose commit boundary is worth counting, and the
@@ -433,7 +436,7 @@ async fn run_once_inner(
             lashlang_execution_jsonl_path: Some(root.join("lashlang-execution.jsonl")),
             trace_level: lash::tracing::TraceLevel::Extended,
         });
-    let mut runtime = if let Some(database_url) = postgres_database_url.as_deref() {
+    let mut runtime = if let Some(database_url) = postgres_database_url {
         build_runtime_with_postgres_store(scenario, database_url).await?
     } else if let Some(root) = sqlite_root.as_ref() {
         build_runtime_with_sqlite_store(scenario, root.clone()).await?
