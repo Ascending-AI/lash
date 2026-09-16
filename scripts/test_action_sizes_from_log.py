@@ -119,7 +119,9 @@ class TestCpuFloorTest(unittest.TestCase):
         self.assertEqual(generator.TEST_CPU_FLOOR, 4)
         properties = generator.exec_properties("crate_with_no_row_at_all", "test")
         self.assertEqual(properties["cpu_count"], str(generator.TEST_CPU_FLOOR))
-        self.assertEqual(properties["memory_kb"], str(generator.DEFAULT_MEMORY_KB))
+        # The floor widens the cap, so it may not shrink the cgroup: the pair
+        # replaces CI's memory default too (FIG-3310).
+        self.assertEqual(properties["memory_kb"], str(generator.CI_DEFAULT_MEMORY_KB))
 
     def test_a_measured_test_row_above_the_floor_is_left_alone(self) -> None:
         generator.ACTION_SIZES["floor_probe/test"] = {
@@ -249,7 +251,9 @@ class CiDefaultsTest(unittest.TestCase):
         self.assertNotIn("--config=shared", self.ACTION.read_text(encoding="utf-8"))
 
     def test_no_generated_target_asks_for_less_than_the_ci_default(self) -> None:
-        pattern = re.compile(r'exec_properties = \{"cpu_count": "(\d+)", "memory_kb"')
+        pattern = re.compile(
+            r'exec_properties = \{"cpu_count": "(\d+)", "memory_kb": "(\d+)"\}'
+        )
         seen = 0
         for path in sorted(ROOT.rglob("BUILD.bazel")):
             text = path.read_text(encoding="utf-8")
@@ -262,7 +266,38 @@ class CiDefaultsTest(unittest.TestCase):
                     generator.CI_DEFAULT_CPU_COUNT,
                     f"{path}: a sized target below CI's own default cap",
                 )
+                self.assertGreaterEqual(
+                    int(match.group(2)),
+                    generator.CI_DEFAULT_MEMORY_KB,
+                    f"{path}: a sized target below CI's own default cgroup",
+                )
         self.assertGreater(seen, 0)
+
+    def test_no_emitted_request_states_less_memory_than_the_ci_default(self) -> None:
+        """The function itself, over every key the table carries and one it does not.
+
+        The BUILD sweep above only sees what the generator has already written;
+        this is the law it wrote them under. A measured row above the default
+        is still honoured, so the floor cannot be mistaken for a fixed size.
+        """
+        keys = sorted(generator.ACTION_SIZES) + ["crate_with_no_row_at_all/test"]
+        emitted = 0
+        for key in keys:
+            crate_name, _, kind = key.rpartition("/")
+            properties = generator.exec_properties(crate_name, kind)
+            if not properties:
+                continue
+            emitted += 1
+            measured = (generator.ACTION_SIZES.get(key) or {}).get("memory_kb", 0)
+            with self.subTest(key=key):
+                self.assertGreaterEqual(
+                    int(properties["memory_kb"]),
+                    generator.CI_DEFAULT_MEMORY_KB,
+                    "an emitted request may not shrink the action's cgroup",
+                )
+                if measured > generator.CI_DEFAULT_MEMORY_KB:
+                    self.assertEqual(properties["memory_kb"], str(measured))
+        self.assertGreater(emitted, 0)
 
 
 class DefaultsAgreeTest(unittest.TestCase):

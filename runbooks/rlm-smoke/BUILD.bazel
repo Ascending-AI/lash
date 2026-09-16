@@ -33,7 +33,7 @@ lash_rust_unit_test(
     crate_name = "rlm_smoke_host",
     crate_root = "src/main.rs",
     declared_features = [],
-    exec_properties = {"cpu_count": "4", "memory_kb": "2097152"},
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     library = None,
     library_crate_name = None,
     manifest_dir = "runbooks/rlm-smoke",
