@@ -1,7 +1,9 @@
 use std::future::Future;
+use std::sync::Arc;
 
-use super::*;
-use crate::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
+use lash_sansio::sync::MutexExt;
+
+use crate::worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
 
 /// Permit owned by one native process execution. All clones refer to the same
 /// slot so child-turn and native-effect task boundaries can park the outer run.
@@ -12,7 +14,7 @@ use crate::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
 /// branch would observe no held permit and could resume without reacquiring it.
 /// Intra-run parallel execution must replace this shared-slot protocol before
 /// it is introduced.
-pub(super) struct ProcessExecutionPermit {
+pub struct ProcessExecutionPermit {
     supplier: Arc<dyn WorkerSlotSupplier>,
     kind: WorkerSlotKind,
     held: std::sync::Mutex<Option<WorkerSlotPermit>>,
@@ -38,7 +40,7 @@ const QUEUED_WORK_EXECUTION_PERMIT_TELEMETRY: ExecutionPermitTelemetry = Executi
 };
 
 impl ProcessExecutionPermit {
-    pub(super) fn new(
+    pub fn new(
         supplier: Arc<dyn WorkerSlotSupplier>,
         permit: WorkerSlotPermit,
         dispatcher_changed: Arc<tokio::sync::Notify>,
@@ -136,10 +138,10 @@ impl ProcessExecutionPermit {
 }
 
 tokio::task_local! {
-    pub(super) static PROCESS_EXECUTION_PERMIT: Arc<ProcessExecutionPermit>;
+    pub static PROCESS_EXECUTION_PERMIT: Arc<ProcessExecutionPermit>;
 }
 
-pub(crate) async fn scope_process_execution_permit<F: Future>(
+pub async fn scope_process_execution_permit<F: Future>(
     supplier: Arc<dyn WorkerSlotSupplier>,
     permit: WorkerSlotPermit,
     dispatcher_changed: Arc<tokio::sync::Notify>,
@@ -153,7 +155,7 @@ pub(crate) async fn scope_process_execution_permit<F: Future>(
     PROCESS_EXECUTION_PERMIT.scope(permit, future).await
 }
 
-pub(crate) async fn scope_queued_work_execution_permit<F: Future>(
+pub async fn scope_queued_work_execution_permit<F: Future>(
     supplier: Arc<dyn WorkerSlotSupplier>,
     permit: WorkerSlotPermit,
     dispatcher_changed: Arc<tokio::sync::Notify>,
@@ -177,15 +179,13 @@ pub async fn release_process_execution_permit_while<F: Future>(future: F) -> F::
     }
 }
 
-pub(crate) async fn ensure_process_execution_permit() {
+pub async fn ensure_process_execution_permit() {
     if let Ok(permit) = PROCESS_EXECUTION_PERMIT.try_with(Arc::clone) {
         permit.ensure_acquired().await;
     }
 }
 
-pub(crate) fn inherit_process_execution_permit<F: Future>(
-    future: F,
-) -> impl Future<Output = F::Output> {
+pub fn inherit_process_execution_permit<F: Future>(future: F) -> impl Future<Output = F::Output> {
     let permit = PROCESS_EXECUTION_PERMIT.try_with(Arc::clone).ok();
     async move {
         match permit {

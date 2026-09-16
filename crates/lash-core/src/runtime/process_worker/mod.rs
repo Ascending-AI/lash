@@ -15,7 +15,7 @@ use self::registration::registration_from_record;
 
 mod drain;
 mod parent_end;
-mod permit;
+use lash_core_ids::execution_permit as permit;
 mod recovery;
 mod registration;
 #[path = "../native_substrate/worklist.rs"]

@@ -3,7 +3,8 @@
 //! Split out of `control.rs` verbatim to keep every file in this module under
 //! the production file-size budget; no item, signature or path changed.
 
-use super::*;
+use crate::{ProcessId, SessionId};
+use serde::{Deserialize, Serialize};
 
 // =============================================================================
 // Effect host + controller trait + scope + error
@@ -156,6 +157,16 @@ pub struct ExternalCompletionError {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<serde_json::Value>,
+}
+
+impl ExternalCompletionError {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            raw: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

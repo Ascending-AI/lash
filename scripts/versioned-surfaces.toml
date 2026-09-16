@@ -383,12 +383,12 @@ symbols = ["process_transfer_set_preimage"]
 
 [[surface]]
 constant = "AWAIT_EVENT_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/runtime/effect/promise_semantics.rs"
+constant_path = "crates/lash-core-effect/src/promise_semantics.rs"
 description = "stable await-event promise identity and authenticated material"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/effect/promise_semantics.rs"]
+paths = ["crates/lash-core-effect/src/promise_semantics.rs"]
 symbols = ["promise_key_preimage", "sign_material"]
 
 [[surface]]

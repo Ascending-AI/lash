@@ -2,6 +2,8 @@
 WORKSPACE_COMPILE_TARGETS = [
     "//crates/lash-conformance:lash-conformance",
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core-effect:lash-core-effect",
+    "//crates/lash-core-effect:lash-core-effect__unit_test",
     "//crates/lash-core-ids:lash-core-ids",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm",
@@ -186,6 +188,8 @@ WORKSPACE_COMPILE_TARGETS = [
 WORKSPACE_CLIPPY_TARGETS = [
     "//crates/lash-conformance:lash-conformance",
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core-effect:lash-core-effect",
+    "//crates/lash-core-effect:lash-core-effect__unit_test",
     "//crates/lash-core-ids:lash-core-ids",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm",
@@ -368,6 +372,7 @@ WORKSPACE_CLIPPY_TARGETS = [
 
 WORKSPACE_RUST_SOURCE_TARGETS = [
     "//crates/lash-conformance:rust_sources",
+    "//crates/lash-core-effect:rust_sources",
     "//crates/lash-core-ids:rust_sources",
     "//crates/lash-core-llm:rust_sources",
     "//crates/lash-core-store:rust_sources",
@@ -413,6 +418,7 @@ WORKSPACE_RUST_SOURCE_TARGETS = [
 
 WORKSPACE_BAZEL_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core-effect:lash-core-effect__unit_test",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-store:lash-core-store__unit_test",
@@ -513,6 +519,7 @@ WORKSPACE_BAZEL_TEST_TARGETS = [
 
 WORKSPACE_DEV_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core-effect:lash-core-effect__unit_test",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-store:lash-core-store__unit_test",
@@ -634,6 +641,7 @@ WORKSPACE_CARGO_TEST_TARGETS = [
 
 WORKSPACE_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
+    "//crates/lash-core-effect:lash-core-effect__unit_test",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-store:lash-core-store__unit_test",

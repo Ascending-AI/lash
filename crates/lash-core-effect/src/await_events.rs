@@ -13,14 +13,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::RuntimeError;
 
-use super::executor::{
-    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome,
-};
-use super::promise_semantics::{
+use crate::promise_semantics::{
     PromiseState, PromiseTransition, SessionRevocationTransition, WaitStopReason, cancel_sweep,
     constant_time_eq, derive_key_id, resolve, revoke_session, session_allows_access, sign_material,
     turn_control_wait_stop,
 };
+use crate::{AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome};
 
 type HmacSha256 = Hmac<sha2::Sha256>;
 
@@ -94,7 +92,7 @@ impl AwaitEventRegistryState {
 type AwaitEventRegistryShard = Arc<std::sync::Mutex<AwaitEventRegistryState>>;
 
 #[derive(Debug)]
-pub(super) struct AwaitEventRegistry {
+pub struct AwaitEventRegistry {
     secret: Vec<u8>,
     session_shards: RwLock<HashMap<SessionId, AwaitEventRegistryShard>>,
     unscoped_shard: AwaitEventRegistryShard,
@@ -117,8 +115,14 @@ pub(super) struct AwaitEventRegistry {
     after_pending: std::sync::Mutex<Option<PendingCheckHook>>,
 }
 
+impl Default for AwaitEventRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AwaitEventRegistry {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self::with_limits(COMPLETED_TURN_CONTROL_KEY_LIMIT, REVOKED_SESSION_LIMIT)
     }
 
@@ -156,7 +160,7 @@ impl AwaitEventRegistry {
 
     /// Snapshot the registered, unresolved keys of one session without
     /// materializing a shard for an unknown session.
-    pub(super) fn outstanding_for_session(
+    pub fn outstanding_for_session(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<AwaitEventKey>, RuntimeError> {
@@ -196,7 +200,7 @@ impl AwaitEventRegistry {
         shard.lock_recover()
     }
 
-    pub(super) fn key_for(
+    pub fn key_for(
         &self,
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
@@ -228,7 +232,7 @@ impl AwaitEventRegistry {
 
     /// Whether `scope` carries an in-process retirement tombstone. Session
     /// scopes never do: they are fenced per session shard by revocation.
-    pub(super) fn scope_is_retired(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
+    pub fn scope_is_retired(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
         if scope.session_id().is_some() {
             return Ok(false);
         }
@@ -296,7 +300,7 @@ impl AwaitEventRegistry {
         clippy::expect_used,
         reason = "a resolve transition always carries a public outcome"
     )]
-    pub(super) fn resolve(
+    pub fn resolve(
         &self,
         key: &AwaitEventKey,
         resolution: Resolution,
@@ -359,10 +363,7 @@ impl AwaitEventRegistry {
         Ok(ResolveOutcome::Accepted)
     }
 
-    pub(super) fn peek_resolution(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
+    pub fn peek_resolution(&self, key: &AwaitEventKey) -> Result<Option<Resolution>, RuntimeError> {
         let shard = self.shard_for_scope(&key.scope);
         let state = Self::locked_state(&shard);
         if state.revoked || self.scope_is_retired(&key.scope)? {
@@ -433,7 +434,7 @@ impl AwaitEventRegistry {
         Ok(())
     }
 
-    pub(super) async fn await_resolution(
+    pub async fn await_resolution(
         &self,
         key: &AwaitEventKey,
         cancel: CancellationToken,
@@ -443,7 +444,7 @@ impl AwaitEventRegistry {
         if let Some(resolution) = self.peek_resolution(key)? {
             return Ok(resolution);
         }
-        crate::runtime::process_worker::release_process_execution_permit_while(
+        lash_core_ids::execution_permit::release_process_execution_permit_while(
             self.await_resolution_inner(key, cancel, deadline, clock),
         )
         .await
@@ -547,7 +548,7 @@ impl AwaitEventRegistry {
     /// `await_event_unknown_or_revoked`, matching entries are drained, and a
     /// bounded recent-session tombstone cache rejects keys created after
     /// deletion without growing for the lifetime of the process.
-    pub(super) fn revoke_session(&self, session_id: &SessionId) -> Result<(), RuntimeError> {
+    pub fn revoke_session(&self, session_id: &SessionId) -> Result<(), RuntimeError> {
         let shard = self.shard_for_session(session_id);
         let newly_revoked = {
             let mut state = Self::locked_state(&shard);
@@ -589,17 +590,14 @@ impl AwaitEventRegistry {
     /// with `await_event_unknown_or_revoked`, its entries are dropped, and a
     /// permanent fence rejects later mints, resolves, peeks, and waits under
     /// the scope. The in-process twin of the durable scope-retirement fence.
-    pub(super) fn retire_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+    pub fn retire_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
         self.retire_scope_gated(scope, false).map(|_| ())
     }
 
     /// [`retire_scope`](Self::retire_scope) only if no waiter is parked on a
     /// promise under `scope`. The proof and the fence happen under one lock,
     /// so no waiter can park between them. Answers whether the scope retired.
-    pub(super) fn retire_scope_if_quiescent(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<bool, RuntimeError> {
+    pub fn retire_scope_if_quiescent(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
         self.retire_scope_gated(scope, true)
     }
 
@@ -610,7 +608,9 @@ impl AwaitEventRegistry {
     ) -> Result<bool, RuntimeError> {
         scope.validate()?;
         if scope.session_id().is_some() {
-            return Err(super::executor::await_event_scope_not_retirable(scope));
+            return Err(crate::await_event_support::await_event_scope_not_retirable(
+                scope,
+            ));
         }
         let scope_id = scope.journal_identity()?.key().to_string();
         {
@@ -651,10 +651,12 @@ impl AwaitEventRegistry {
     /// Lift the fence on a non-session `scope` whose owner is registered
     /// again. Only the fence goes; the scope starts with no promises, which is
     /// what a re-registered process id expects.
-    pub(super) fn reinstate_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
+    pub fn reinstate_scope(&self, scope: &ExecutionScope) -> Result<(), RuntimeError> {
         scope.validate()?;
         if scope.session_id().is_some() {
-            return Err(super::executor::await_event_scope_not_retirable(scope));
+            return Err(crate::await_event_support::await_event_scope_not_retirable(
+                scope,
+            ));
         }
         let scope_id = scope.journal_identity()?;
         self.retired_scopes.lock_recover().remove(scope_id.key());
@@ -699,7 +701,7 @@ impl AwaitEventRegistry {
     /// waits keep their terminal, and waits registered afterwards behave
     /// normally. This is the standalone host lever, in contrast to the
     /// tombstoning [`revoke_session`](Self::revoke_session).
-    pub(super) fn cancel_session(&self, session_id: &SessionId) -> Result<(), RuntimeError> {
+    pub fn cancel_session(&self, session_id: &SessionId) -> Result<(), RuntimeError> {
         let Some(shard) = self.existing_session_shard(session_id) else {
             return Ok(());
         };

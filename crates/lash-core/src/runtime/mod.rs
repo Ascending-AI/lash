@@ -110,11 +110,11 @@ pub(crate) mod turn_loop;
 pub mod turn_queue;
 #[cfg(not(feature = "testing"))]
 mod turn_queue;
+use lash_core_ids::worker_capacity;
 #[cfg(feature = "testing")]
 pub use lash_core_store::usage;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::usage;
-mod worker_capacity;
 
 use std::any::Any;
 use std::collections::HashMap;

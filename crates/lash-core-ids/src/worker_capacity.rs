@@ -15,7 +15,7 @@ pub enum WorkerSlotKind {
 
 impl WorkerSlotKind {
     #[cfg(feature = "otel-trace")]
-    pub(crate) const fn attribute_value(self) -> &'static str {
+    pub const fn attribute_value(self) -> &'static str {
         match self {
             Self::Process => "process",
             Self::QueuedWork => "queued_work",
@@ -68,13 +68,13 @@ pub trait WorkerSlotSupplier: Send + Sync {
     fn available_slots(&self, kind: WorkerSlotKind) -> usize;
 }
 
-pub(crate) struct DefaultWorkerSlotSupplier {
+pub struct DefaultWorkerSlotSupplier {
     process: Arc<Semaphore>,
     queued_work: Arc<Semaphore>,
 }
 
 impl DefaultWorkerSlotSupplier {
-    pub(crate) fn new(process: usize, queued_work: usize) -> Self {
+    pub fn new(process: usize, queued_work: usize) -> Self {
         Self {
             process: Arc::new(Semaphore::new(process)),
             queued_work: Arc::new(Semaphore::new(queued_work)),
@@ -116,7 +116,7 @@ impl WorkerSlotSupplier for DefaultWorkerSlotSupplier {
 }
 
 #[derive(Clone)]
-pub(crate) struct WorkerCapacityMetrics {
+pub struct WorkerCapacityMetrics {
     #[cfg(feature = "otel-trace")]
     worker_id: Arc<str>,
     #[cfg(feature = "otel-trace")]
@@ -136,7 +136,7 @@ impl Default for WorkerCapacityMetrics {
 }
 
 impl WorkerCapacityMetrics {
-    pub(crate) fn slots(&self, kind: WorkerSlotKind, in_use: usize, available: usize) {
+    pub fn slots(&self, kind: WorkerSlotKind, in_use: usize, available: usize) {
         #[cfg(feature = "otel-trace")]
         self.inner
             .record_slots(&self.worker_id, kind.attribute_value(), in_use, available);
@@ -144,7 +144,7 @@ impl WorkerCapacityMetrics {
         let _ = (kind, in_use, available);
     }
 
-    pub(crate) fn intake_depth(&self, kind: WorkerSlotKind, depth: usize) {
+    pub fn intake_depth(&self, kind: WorkerSlotKind, depth: usize) {
         #[cfg(feature = "otel-trace")]
         self.inner
             .record_intake_depth(&self.worker_id, kind.attribute_value(), depth);
@@ -153,7 +153,7 @@ impl WorkerCapacityMetrics {
     }
 }
 
-pub(crate) struct ObservedWorkerSlotSupplier {
+pub struct ObservedWorkerSlotSupplier {
     inner: Arc<dyn WorkerSlotSupplier>,
     process_in_use: Arc<AtomicUsize>,
     queued_work_in_use: Arc<AtomicUsize>,
@@ -161,10 +161,7 @@ pub(crate) struct ObservedWorkerSlotSupplier {
 }
 
 impl ObservedWorkerSlotSupplier {
-    pub(crate) fn new(
-        inner: Arc<dyn WorkerSlotSupplier>,
-        metrics: WorkerCapacityMetrics,
-    ) -> Arc<Self> {
+    pub fn new(inner: Arc<dyn WorkerSlotSupplier>, metrics: WorkerCapacityMetrics) -> Arc<Self> {
         Arc::new(Self {
             inner,
             process_in_use: Arc::new(AtomicUsize::new(0)),

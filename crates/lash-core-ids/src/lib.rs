@@ -7,6 +7,7 @@
 //! original path.
 
 pub mod clock;
+pub mod execution_permit;
 pub mod identity_json;
 pub mod operational_metrics;
 pub mod panic_containment;
@@ -16,3 +17,4 @@ pub mod stable_hash;
 pub mod stable_identity;
 pub mod task;
 pub mod test_watchdog;
+pub mod worker_capacity;

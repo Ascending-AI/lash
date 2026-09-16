@@ -1,4 +1,5 @@
 use super::*;
+use crate::ProcessId;
 
 struct ToolIntentGateSink {
     gate: Arc<tokio::sync::Mutex<()>>,

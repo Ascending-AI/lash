@@ -1,5 +1,7 @@
 pub mod await_event_coordinator;
-mod await_events;
+mod await_events {
+    pub use lash_core_effect::core_internal::AwaitEventRegistry;
+}
 pub mod effect_replay_driver;
 mod envelope;
 pub(crate) mod executor;
@@ -11,7 +13,7 @@ mod native_host;
 mod store_turn_control;
 pub use store_turn_control::bind_store_turn_control_authority;
 mod outcome;
-pub mod promise_semantics;
+pub use lash_core_effect::promise_semantics;
 mod validation;
 
 pub use envelope::{

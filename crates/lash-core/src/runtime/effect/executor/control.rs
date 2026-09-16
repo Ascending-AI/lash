@@ -1,4 +1,3 @@
-use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 pub use lash_core_store::await_event_identity::*;
@@ -6,7 +5,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -24,7 +22,7 @@ pub use handle::RuntimeEffectControllerHandle;
 pub use handle::{BoundaryReason, SegmentProgress};
 
 mod lane;
-mod retirement;
+use lash_core_effect::retirement;
 mod scope;
 mod task;
 pub use lane::*;

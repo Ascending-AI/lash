@@ -191,13 +191,13 @@ pub(crate) fn cancel_sweep(
 
 /// Why an await-event waiter stopped before its promise resolved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WaitStopReason {
+pub enum WaitStopReason {
     Cancelled,
     TimedOut,
 }
 
 /// Classify a stopped turn-control waiter in the shared promise policy.
-pub(crate) fn turn_control_wait_stop(
+pub fn turn_control_wait_stop(
     wait: &AwaitEventWaitIdentity,
     reason: WaitStopReason,
 ) -> Option<(RuntimeErrorCode, &'static str)> {
