@@ -11,6 +11,7 @@ load(
     "WORKSPACE_COMPILE_TARGETS",
     "WORKSPACE_BAZEL_TEST_TARGETS",
     "WORKSPACE_DEFERRED_TEST_TARGETS",
+    "WORKSPACE_DEV_TEST_TARGETS",
     "WORKSPACE_RUST_SOURCE_TARGETS",
     "WORKSPACE_TEST_TARGETS",
 )
@@ -62,6 +63,14 @@ test_suite(
 test_suite(
     name = "deferred_tests",
     tests = WORKSPACE_DEFERRED_TEST_TARGETS,
+)
+
+# The developer default: `workspace_tests` minus the labels too slow for an
+# edit loop (the lash-sim profile/minimizer cases and the TypeScript no-abort
+# stress binary). `//:workspace_tests` remains the PR partition CI runs.
+test_suite(
+    name = "dev_tests",
+    tests = WORKSPACE_DEV_TEST_TARGETS,
 )
 
 # Runtime inputs for the few tests whose asserted contract spans package

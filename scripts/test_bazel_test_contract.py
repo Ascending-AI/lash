@@ -138,10 +138,20 @@ class BazelTestContractTests(unittest.TestCase):
         cargo_labels = set(generated_list("WORKSPACE_CARGO_TEST_TARGETS"))
         deferred_labels = set(generated_list("WORKSPACE_DEFERRED_TEST_TARGETS"))
 
-        self.assertEqual(125, len(all_labels))
-        self.assertEqual(108, len(bazel_labels))
+        dev_labels = set(generated_list("WORKSPACE_DEV_TEST_TARGETS"))
+
+        self.assertEqual(114, len(all_labels))
+        self.assertEqual(97, len(bazel_labels))
+        self.assertEqual(95, len(dev_labels))
         self.assertEqual(16, len(cargo_labels))
         self.assertEqual(1, len(deferred_labels))
+        self.assertEqual(
+            {
+                "//crates/lash-sim:lash-sim__unit_test",
+                "//crates/lash-typescript:integration__test",
+            },
+            bazel_labels - dev_labels,
+        )
         self.assertFalse(bazel_labels & cargo_labels)
         self.assertFalse(bazel_labels & deferred_labels)
         self.assertFalse(cargo_labels & deferred_labels)
@@ -208,6 +218,8 @@ class BazelTestContractTests(unittest.TestCase):
         root_build = (ROOT / "BUILD.bazel").read_text(encoding="utf-8")
         self.assertIn('name = "workspace_tests"', root_build)
         self.assertIn("tests = WORKSPACE_BAZEL_TEST_TARGETS", root_build)
+        self.assertIn('name = "dev_tests"', root_build)
+        self.assertIn("tests = WORKSPACE_DEV_TEST_TARGETS", root_build)
 
         with tempfile.TemporaryDirectory() as temporary:
             args_log = pathlib.Path(temporary) / "args"
@@ -229,7 +241,7 @@ class BazelTestContractTests(unittest.TestCase):
                 check=True,
             )
             self.assertEqual(
-                ["test", "--config=local", "//:workspace_tests"],
+                ["test", "--config=local", "//:dev_tests"],
                 args_log.read_text(encoding="utf-8").splitlines(),
             )
 
@@ -716,7 +728,7 @@ class BazelTestContractTests(unittest.TestCase):
             set(generated_list("WORKSPACE_COMPILE_TARGETS")) - build_scripts,
             clippy,
         )
-        self.assertEqual(191, len(clippy))
+        self.assertEqual(180, len(clippy))
         # The half that actually compiles `build.rs` is linted, not exempted.
         self.assertIn("//crates/lash-protocol-rlm:build_script_", clippy)
         self.assertTrue(

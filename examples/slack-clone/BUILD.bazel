@@ -71,27 +71,6 @@ lash_rust_binary(
     version = "0.0.0-dev",
 )
 
-lash_rust_unit_test(
-    name = "slack-clone-bot__bin__unit_test",
-    crate_features = [],
-    crate_name = "slack_clone_bot",
-    crate_root = "src/bin/bot.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = ":slack-clone",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [],
-    version = "0.0.0-dev",
-)
-
 lash_rust_binary(
     name = "slack-clone-mcp-http-server__bin",
     crate_features = [],
@@ -110,27 +89,6 @@ lash_rust_binary(
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
     rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_unit_test(
-    name = "slack-clone-mcp-http-server__bin__unit_test",
-    crate_features = [],
-    crate_name = "slack_clone_mcp_http_server",
-    crate_root = "src/bin/mcp_http_server.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = ":slack-clone",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
     tags = [],
     version = "0.0.0-dev",
 )
@@ -157,27 +115,6 @@ lash_rust_binary(
     version = "0.0.0-dev",
 )
 
-lash_rust_unit_test(
-    name = "slack-clone-mcp-server__bin__unit_test",
-    crate_features = [],
-    crate_name = "slack_clone_mcp_server",
-    crate_root = "src/bin/mcp_server.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = ":slack-clone",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [],
-    version = "0.0.0-dev",
-)
-
 lash_rust_binary(
     name = "slack-clone-platform__bin",
     crate_features = [],
@@ -196,27 +133,6 @@ lash_rust_binary(
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
     rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_unit_test(
-    name = "slack-clone-platform__bin__unit_test",
-    crate_features = [],
-    crate_name = "slack_clone_platform",
-    crate_root = "src/bin/platform.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = ":slack-clone",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
     tags = [],
     version = "0.0.0-dev",
 )
@@ -441,85 +357,6 @@ lash_rust_feature_binary(
     version = "0.0.0-dev",
 )
 
-lash_rust_feature_test(
-    name = "slack-clone-bot__bin__unit_test__fv_085a2096",
-    crate_features = [],
-    crate_name = "slack_clone_bot",
-    crate_root = "src/bin/bot.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_085a2096",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1331fe13", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_3a7ba3da", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_b06a3b7b", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be9207b7", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "slack-clone-bot__bin__unit_test__fv_0eb8b93e",
-    crate_features = [
-        "e2e",
-    ],
-    crate_name = "slack_clone_bot",
-    crate_root = "src/bin/bot.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_0eb8b93e",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1331fe13", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_3a7ba3da", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_b06a3b7b", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be9207b7", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "slack-clone-bot__bin__unit_test__fv_7c2b349b",
-    crate_features = [
-        "live-e2e",
-    ],
-    crate_name = "slack_clone_bot",
-    crate_root = "src/bin/bot.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_7c2b349b",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_2b5be84a", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_57b5325b", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_547ce538", "//crates/lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_9a7312e5", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_8a499eb7", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_3c64e54c", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_8a90df87", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_6f07bee9", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_8bf607ac", "//crates/lashlang": "//crates/lashlang:lashlang__fv_7e1ea0c3"},
-    version = "0.0.0-dev",
-)
-
 lash_rust_feature_binary(
     name = "slack-clone-live-e2e__bin__fv_7c2b349b",
     crate_features = [
@@ -657,85 +494,6 @@ lash_rust_feature_binary(
     version = "0.0.0-dev",
 )
 
-lash_rust_feature_test(
-    name = "slack-clone-mcp-http-server__bin__unit_test__fv_085a2096",
-    crate_features = [],
-    crate_name = "slack_clone_mcp_http_server",
-    crate_root = "src/bin/mcp_http_server.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_085a2096",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1331fe13", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_3a7ba3da", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_b06a3b7b", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be9207b7", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "slack-clone-mcp-http-server__bin__unit_test__fv_0eb8b93e",
-    crate_features = [
-        "e2e",
-    ],
-    crate_name = "slack_clone_mcp_http_server",
-    crate_root = "src/bin/mcp_http_server.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_0eb8b93e",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1331fe13", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_3a7ba3da", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_b06a3b7b", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be9207b7", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "slack-clone-mcp-http-server__bin__unit_test__fv_7c2b349b",
-    crate_features = [
-        "live-e2e",
-    ],
-    crate_name = "slack_clone_mcp_http_server",
-    crate_root = "src/bin/mcp_http_server.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_7c2b349b",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_2b5be84a", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_57b5325b", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_547ce538", "//crates/lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_9a7312e5", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_8a499eb7", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_3c64e54c", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_8a90df87", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_6f07bee9", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_8bf607ac", "//crates/lashlang": "//crates/lashlang:lashlang__fv_7e1ea0c3"},
-    version = "0.0.0-dev",
-)
-
 lash_rust_feature_binary(
     name = "slack-clone-mcp-server__bin__fv_085a2096",
     crate_features = [],
@@ -818,85 +576,6 @@ lash_rust_feature_binary(
     version = "0.0.0-dev",
 )
 
-lash_rust_feature_test(
-    name = "slack-clone-mcp-server__bin__unit_test__fv_085a2096",
-    crate_features = [],
-    crate_name = "slack_clone_mcp_server",
-    crate_root = "src/bin/mcp_server.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_085a2096",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1331fe13", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_3a7ba3da", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_b06a3b7b", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be9207b7", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "slack-clone-mcp-server__bin__unit_test__fv_0eb8b93e",
-    crate_features = [
-        "e2e",
-    ],
-    crate_name = "slack_clone_mcp_server",
-    crate_root = "src/bin/mcp_server.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_0eb8b93e",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1331fe13", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_3a7ba3da", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_b06a3b7b", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be9207b7", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "slack-clone-mcp-server__bin__unit_test__fv_7c2b349b",
-    crate_features = [
-        "live-e2e",
-    ],
-    crate_name = "slack_clone_mcp_server",
-    crate_root = "src/bin/mcp_server.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_7c2b349b",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_2b5be84a", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_57b5325b", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_547ce538", "//crates/lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_9a7312e5", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_8a499eb7", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_3c64e54c", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_8a90df87", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_6f07bee9", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_8bf607ac", "//crates/lashlang": "//crates/lashlang:lashlang__fv_7e1ea0c3"},
-    version = "0.0.0-dev",
-)
-
 lash_rust_feature_binary(
     name = "slack-clone-platform__bin__fv_085a2096",
     crate_features = [],
@@ -971,85 +650,6 @@ lash_rust_feature_binary(
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
     rustc_env = {},
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_2b5be84a", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_57b5325b", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_547ce538", "//crates/lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_9a7312e5", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_8a499eb7", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_3c64e54c", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_8a90df87", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_6f07bee9", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_8bf607ac", "//crates/lashlang": "//crates/lashlang:lashlang__fv_7e1ea0c3"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "slack-clone-platform__bin__unit_test__fv_085a2096",
-    crate_features = [],
-    crate_name = "slack_clone_platform",
-    crate_root = "src/bin/platform.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_085a2096",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1331fe13", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_3a7ba3da", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_b06a3b7b", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be9207b7", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "slack-clone-platform__bin__unit_test__fv_0eb8b93e",
-    crate_features = [
-        "e2e",
-    ],
-    crate_name = "slack_clone_platform",
-    crate_root = "src/bin/platform.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_0eb8b93e",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1331fe13", "//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_97e0fd02", "//crates/lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_3a7ba3da", "//crates/lash-plugin-tool-output-budget": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__fv_b06a3b7b", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_be9207b7", "//crates/lash-provider-auth": "//crates/lash-provider-auth:lash-provider-auth__fv_d46af3c6", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_e69289de", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_2f3996c6", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_178a92ce", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "slack-clone-platform__bin__unit_test__fv_7c2b349b",
-    crate_features = [
-        "live-e2e",
-    ],
-    crate_name = "slack_clone_platform",
-    crate_root = "src/bin/platform.rs",
-    declared_features = [
-        "e2e",
-        "live-e2e",
-    ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    library = "//examples/slack-clone:slack-clone__fv_7c2b349b",
-    library_crate_name = "slack_clone",
-    manifest_dir = "examples/slack-clone",
-    package_name = "slack-clone",
     tags = [
         "feature-lane",
         "manual",

@@ -32,18 +32,22 @@ live-e2e = ["lash/rlm"]
 [[bin]]
 name = "slack-clone-platform"
 path = "src/bin/platform.rs"
+test = false
 
 [[bin]]
 name = "slack-clone-bot"
 path = "src/bin/bot.rs"
+test = false
 
 [[bin]]
 name = "slack-clone-mcp-server"
 path = "src/bin/mcp_server.rs"
+test = false
 
 [[bin]]
 name = "slack-clone-mcp-http-server"
 path = "src/bin/mcp_http_server.rs"
+test = false
 
 [[bin]]
 name = "slack-clone-live-e2e"
