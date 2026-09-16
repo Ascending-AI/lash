@@ -281,11 +281,18 @@ finish_current_step() {
 # only yields them while some other workspace member happens to turn that
 # feature on. Every conformance run in this gate builds them through here
 # first, so the spawn cannot fail with ENOENT.
+# `helper_executable` resolves the helper from the *running test binary's* own
+# profile directory, so every runner with its own target directory needs its own
+# copy. Pass one to build there; omit it for the ambient target directory.
 build_conformance_helpers() {
+  local target_args=()
+  if [ -n "${1:-}" ]; then
+    target_args=(--target-dir "$1")
+  fi
   cargo build -p lash-internal-sqlite-store --locked --features testing \
-    --example sqlite-await-event-helper
+    --example sqlite-await-event-helper "${target_args[@]}"
   cargo build -p lash-internal-postgres-store --locked --features testing \
-    --example postgres-await-event-helper
+    --example postgres-await-event-helper "${target_args[@]}"
 }
 
 gate_postgres_image="postgres:16-alpine"
@@ -2173,6 +2180,22 @@ EOF
   require_tool cargo-llvm-cov cargo-llvm-cov 0.8.7
   require_llvm_tools
   cargo llvm-cov clean --workspace
+  # cargo-llvm-cov compiles into `<target>/llvm-cov-target`, not `<target>`, so
+  # the helper examples built for every other stage are invisible to the test
+  # binaries this one runs: `lash_conformance::helper_executable` resolves the
+  # helper beside the binary that spawns it, and the cold-process conformance
+  # tests are part of `--tests`. Build them into that tree under the
+  # instrumentation environment cargo-llvm-cov exports, so they share the
+  # dependency artifacts the coverage run is about to build rather than forcing
+  # a second, uninstrumented compile of the whole closure.
+  local llvm_cov_env
+  llvm_cov_env="$(cargo llvm-cov show-env --export-prefix 2>/dev/null)"
+  (
+    # shellcheck disable=SC1090
+    eval "$llvm_cov_env"
+    build_conformance_helpers \
+      "${CARGO_LLVM_COV_TARGET_DIR:?cargo llvm-cov show-env must report its target directory}/llvm-cov-target"
+  )
   local coverage_package_args=()
   local package
   for package in "${selected_packages[@]}"; do

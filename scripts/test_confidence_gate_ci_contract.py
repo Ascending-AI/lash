@@ -1859,11 +1859,12 @@ derive_mutation_jobs() {{
     def test_every_conformance_run_builds_its_spawn_helpers_first(self) -> None:
         """The cold-process suites spawn example binaries nothing else builds.
 
-        `lash_conformance::helper_executable` resolves
-        `target/<profile>/examples/<name>`, and both helpers carry
-        `required-features = ["testing"]`, so no `cargo test --test conformance`
-        invocation produces them. One shared function builds them; this pins
-        that every conformance command in the gate is reached through it.
+        `lash_conformance::helper_executable` resolves the helper from the
+        *running test binary's own* `<target>/<profile>/examples`, and both
+        helpers carry `required-features = ["testing"]`, so no
+        `cargo test --test conformance` invocation produces them. One shared
+        function builds them; this pins that every conformance command in the
+        gate is reached through it, into the target directory it runs against.
         """
         gate = GATE.read_text(encoding="utf-8")
 
@@ -1889,7 +1890,7 @@ derive_mutation_jobs() {{
             if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\(\) \{$", line):
                 built = False
                 continue
-            if stripped == "build_conformance_helpers":
+            if stripped.split()[0:1] == ["build_conformance_helpers"]:
                 built = True
                 continue
             if "--test conformance" in stripped:
@@ -1899,6 +1900,36 @@ derive_mutation_jobs() {{
                     f"conformance run not preceded by build_conformance_helpers: {stripped}",
                 )
         self.assertGreaterEqual(conformance_commands, 10)
+
+        # The coverage stage is the one runner with its own target directory:
+        # cargo-llvm-cov compiles into `<target>/llvm-cov-target`, so a helper
+        # in `<target>/debug/examples` is invisible to the binaries it runs and
+        # the four cold-process tests fail on spawn with ENOENT. Its build must
+        # name that directory, and must ask cargo-llvm-cov where it is rather
+        # than spelling the layout a second time.
+        self.assertIn('target_args=(--target-dir "$1")', definition)
+        coverage = shell_function_body(gate, "run_coverage_blind_spots")
+        self.assertIn("cargo llvm-cov show-env --export-prefix", coverage)
+        self.assertIn("CARGO_LLVM_COV_TARGET_DIR", coverage)
+        self.assertIn("/llvm-cov-target", coverage)
+        build_at = coverage.index("build_conformance_helpers")
+        # The instrumentation environment is evaluated in a subshell, so it
+        # reaches the helper build and nothing else.
+        self.assertLess(coverage.index('eval "$llvm_cov_env"'), build_at)
+        # And the build runs before the coverage test run it is for. Compare
+        # against the command, not the prose: the comment above the build says
+        # `--tests` too.
+        test_run_at = next(
+            index
+            for index, line in enumerate(coverage.splitlines())
+            if line.strip() == "--tests \\"
+        )
+        build_line = next(
+            index
+            for index, line in enumerate(coverage.splitlines())
+            if line.strip().startswith("build_conformance_helpers")
+        )
+        self.assertLess(build_line, test_run_at)
 
     def test_every_gate_postgres_container_preloads_pg_stat_statements(self) -> None:
         """The statement-count tests measure through the extension.
