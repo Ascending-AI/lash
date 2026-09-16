@@ -961,10 +961,11 @@ pub use store::{
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
     SessionExecutionLeaseObservation, SessionExecutionLeaseRenewalInstallMismatch,
-    SessionExecutionLeaseStore, SessionMeta, SessionStateAdmission, StoreBackend, StoreError,
-    StoreMaintenance, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
+    SessionExecutionLeaseStore, SessionMeta, SessionStateAdmission, StoreBackend,
+    StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp,
+    StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
     StoreSchemaVerdict, TurnCancelRepairDecision, TurnCancelRepairResult, TurnInputStore,
-    VacuumReport, WorkClaim, WorkCompletion,
+    VacuumReport, WorkClaim, WorkCompletion, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

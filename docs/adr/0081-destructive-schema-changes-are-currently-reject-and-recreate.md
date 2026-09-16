@@ -53,6 +53,25 @@ version, openability, complete-integrity, or row-validation claim. Unsupported
 comparison grammar is a typed inconclusive error. These calls remain outside
 ordinary startup and never apply DDL or repair data.
 
+## The store records which release wrote it
+
+A reject-and-recreate boundary is only actionable if the operator can tell which
+release is on the other side of it, and component integers alone cannot say. Both
+SQL backends therefore carry a durable release stamp — `release_stamp` in the
+SQLite durable core, `lash_release_stamp` in PostgreSQL — holding the writing
+release's crate version string, the schema versions it required, and when that
+release first wrote the store. It is written on the first open of an unstamped
+store and advanced only when a strictly newer release opens it; a reopen under
+the same release leaves the row alone, and an older build never downgrades it.
+Store preflight surfaces the stamp on its schema report as a typed three-state
+answer — stamped, unstamped, or unreadable — so a store no stamping build has
+written reports an explicit absence rather than an empty release, and a stamp
+this build cannot read stays undecided rather than collapsing into that absence.
+The same fact rides the open-time refusal: when the stamp is still readable, the
+message names the writing release after its existing sentences, so a host that
+upgrades into a refusal is told which release reopens the store instead of being
+left to work backwards from two integers.
+
 ## Consequences
 
 - A destructive cutover advances the Postgres component version and every

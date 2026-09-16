@@ -29,6 +29,8 @@ mod pre_sleep_spec_cutover;
 mod process_prune_reclaim;
 #[path = "refcount_benchmark.rs"]
 mod refcount_benchmark;
+#[path = "release_stamp.rs"]
+mod release_stamp;
 #[path = "session_execution_lease_renewal.rs"]
 mod session_execution_lease_renewal;
 #[path = "store_effect_group_drain_conformance.rs"]

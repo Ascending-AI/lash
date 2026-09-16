@@ -437,6 +437,13 @@ const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
          runs against; the rows this session can reach are compared by `checkpoint_blobs`",
     ),
     (
+        "release_stamp",
+        "deployment metadata, not session state: the single row records which lash release wrote \
+         the store, it is written by the schema-open path rather than by any driven operation, \
+         and it carries no session id, so a session-scoped digest query could not read it \
+         either; owned by the release-stamp conformance law (FIG-3092)",
+    ),
+    (
         "process_definitions",
         "definition-registry surface: this fixture wires no ProcessDefinitionRegistry, so no \
          driven operation can write it, and the row is keyed by its owner scope rather than by a \

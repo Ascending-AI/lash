@@ -63,8 +63,9 @@ pub use maintenance::{
 };
 pub use preflight::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
-    StoreBackend, StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict,
+    StoreBackend, StoreComponentVersion, StorePreflight, StoreReleaseStamp, StoreReleaseState,
+    StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
+    compare_releases, release_stamp_advances,
 };
 pub use queued_work::{
     PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClaimOutcome,

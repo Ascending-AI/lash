@@ -57,7 +57,7 @@ use std::collections::BTreeMap;
 
 use lash_core::{
     DurableItem, DurableScan, DurableSurface, ScanCoverage, StoreError, StorePreflight,
-    StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
+    StoreReleaseState, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
 };
 
 use crate::formats::{DurableFormat, FormatProbe, durable_formats};
@@ -66,7 +66,8 @@ use report::{FormatTally, reads_version};
 
 pub use report::{
     ComponentReadability, ComponentVerdict, DrainBlocker, FormatEvidence, FoundVersion, NotScanned,
-    PreflightMode, PreflightOutcome, PreflightReport, SchemaDatabaseReport, SchemaReport,
+    PreflightMode, PreflightOutcome, PreflightReport, ReleaseStampComponent, ReleaseStampReport,
+    SchemaDatabaseReport, SchemaReport,
 };
 
 /// How many items one page of a surface walk asks for.
@@ -559,6 +560,32 @@ fn schema_report(status: &StoreSchemaStatus) -> SchemaReport {
                 }
             })
             .collect(),
+        release: release_report(&status.release),
+    }
+}
+
+fn release_report(release: &StoreReleaseState) -> ReleaseStampReport {
+    match release {
+        StoreReleaseState::Stamped(stamp) => ReleaseStampReport::Stamped {
+            release: stamp.release.clone(),
+            schema_versions: stamp
+                .schema_versions
+                .iter()
+                .map(|component| ReleaseStampComponent {
+                    component: component.component.clone(),
+                    version: component.version,
+                })
+                .collect(),
+            written_at_epoch_ms: stamp.written_at_epoch_ms,
+        },
+        StoreReleaseState::Unstamped => ReleaseStampReport::Unstamped,
+        StoreReleaseState::Unreadable { reason } => ReleaseStampReport::Unreadable {
+            reason: reason.clone(),
+        },
+        // A state this build does not know is undecided, never an absence.
+        other => ReleaseStampReport::Unreadable {
+            reason: format!("unrecognised release stamp state: {other}"),
+        },
     }
 }
 

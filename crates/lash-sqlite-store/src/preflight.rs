@@ -37,8 +37,8 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use lash_core::{
-    DurableScan, DurableScanPage, StoreBackend, StoreError, StorePreflight, StoreSchemaDatabase,
-    StoreSchemaStatus, StoreSchemaVerdict,
+    DurableScan, DurableScanPage, StoreBackend, StoreError, StorePreflight, StoreReleaseState,
+    StoreSchemaDatabase, StoreSchemaStatus, StoreSchemaVerdict,
 };
 
 pub(crate) mod walk;
@@ -103,6 +103,40 @@ async fn read_user_version(path: &Path) -> Result<Option<i64>, String> {
         })
         .await;
     probe.map_err(|err| err.to_string())
+}
+
+/// Read the release stamp the durable core carries, read-only.
+///
+/// An absent database reports [`StoreReleaseState::Unstamped`] on purpose: the
+/// deployment records no writing release, and that is the same answer a host
+/// needs whether nothing has been provisioned yet or a pre-stamp build wrote
+/// it. A database that exists but cannot be read is
+/// [`StoreReleaseState::Unreadable`] instead — an undecided stamp is not an
+/// absent one.
+async fn read_release_state(path: &Path) -> StoreReleaseState {
+    if !path.exists() {
+        return StoreReleaseState::Unstamped;
+    }
+    let conn = match SqliteConnection::open_readonly(path).await {
+        Ok(conn) => conn,
+        Err(err) => {
+            return StoreReleaseState::Unreadable {
+                reason: err.to_string(),
+            };
+        }
+    };
+    let read = conn
+        .call(|c| {
+            c.pragma_update(None, "query_only", true)?;
+            crate::release_stamp::read(c)
+        })
+        .await;
+    match read {
+        Ok(state) => state,
+        Err(err) => StoreReleaseState::Unreadable {
+            reason: err.to_string(),
+        },
+    }
 }
 
 /// A read-only handle over a SQLite deployment, built from the same paths a
@@ -194,7 +228,8 @@ impl StorePreflight for SqliteStorePreflight {
         for (database, path) in self.declared() {
             databases.push(verify_schema_at(path, database).await);
         }
-        Ok(StoreSchemaStatus { databases })
+        let release = read_release_state(self.durable_core.as_path()).await;
+        Ok(StoreSchemaStatus { databases, release })
     }
 
     /// Walk one page of one durable surface. See [`walk`] for the read-only

@@ -493,6 +493,19 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_work_items (
 
 
 --
+-- Name: lash_release_stamp; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_release_stamp (
+    singleton boolean DEFAULT true NOT NULL,
+    release_version text NOT NULL,
+    schema_versions text NOT NULL,
+    written_at_epoch_ms bigint NOT NULL,
+    CONSTRAINT lash_release_stamp_singleton_check CHECK (singleton)
+);
+
+
+--
 -- Name: lash_runtime_effect_group; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1085,6 +1098,13 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 
 
 --
+-- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=98', 1700000000000);
+
+
+--
 -- Data for Name: lash_runtime_effect_group; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1111,7 +1131,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 97);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 98);
 
 
 --
@@ -1539,6 +1559,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_batches
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_items
     ADD CONSTRAINT lash_queued_work_items_pkey PRIMARY KEY (batch_id, item_index);
+
+
+--
+-- Name: lash_release_stamp lash_release_stamp_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_release_stamp
+    ADD CONSTRAINT lash_release_stamp_pkey PRIMARY KEY (singleton);
 
 
 --

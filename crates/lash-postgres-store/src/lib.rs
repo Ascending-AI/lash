@@ -364,7 +364,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // encoding -- so component 95 is rejected and recreated rather than migrated:
 // the resolved duration cannot be turned back into the deadline the guest
 // asked for.
-const SCHEMA_VERSION: i32 = 97;
+const SCHEMA_VERSION: i32 = 98;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -609,7 +609,7 @@ impl PostgresStorage {
                 .await
                 .map_err(store_sqlx_error)?;
         if found_version != Some(SCHEMA_VERSION) {
-            return Err(version_mismatch_error(found_version));
+            return Err(version_mismatch_error(found_version, None));
         }
         let signing_secret: Option<Vec<u8>> = sqlx::query_scalar(
             "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
@@ -1049,6 +1049,8 @@ mod process_lifecycle_sql;
 mod process_lifecycle_sql_tests;
 #[path = "postgres/process_registry.rs"]
 mod process_registry;
+#[path = "postgres/release_stamp.rs"]
+mod release_stamp;
 #[path = "postgres/required_constraints.rs"]
 mod required_constraints;
 #[path = "postgres/runtime_persistence/mod.rs"]

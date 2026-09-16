@@ -14,6 +14,8 @@ mod process_definitions_registry;
 mod process_event_time_cutover;
 #[path = "process_prune_reclaim.rs"]
 mod process_prune_reclaim;
+#[path = "release_stamp.rs"]
+mod release_stamp;
 #[path = "required_constraints.rs"]
 mod required_constraints;
 #[path = "session_meta.rs"]

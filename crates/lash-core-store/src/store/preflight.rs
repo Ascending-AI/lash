@@ -153,6 +153,225 @@ pub enum StoreSchemaOutcome {
     Undecided,
 }
 
+/// One schema-carrying component and the version it was stamped at.
+///
+/// Carried inside a release stamp rather than derived at read time: the point
+/// of the stamp is to say what the *writing* build required, and a tuple
+/// recomputed by the reading build would say what the reader requires instead.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StoreComponentVersion {
+    /// The component's operator-facing name, e.g. `durable core`. Never
+    /// contains `;` or `=`, which delimit the durable encoding.
+    pub component: String,
+    /// The version that component required when the stamp was written.
+    pub version: i64,
+}
+
+/// Which lash release wrote a durable store, and when.
+///
+/// The release string is the writing build's crate version. On `main` that is
+/// the honest `0.0.0-dev` placeholder every workspace manifest carries; a
+/// released build carries the version the release workflow stamped into its
+/// ephemeral checkout, so the constant *is* the release-time injection rather
+/// than a substitute for one (see `scripts/release_version.py`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoreReleaseStamp {
+    /// The writing build's crate version.
+    pub release: String,
+    /// What each schema-carrying component required when the stamp was
+    /// written, in component order.
+    pub schema_versions: Vec<StoreComponentVersion>,
+    /// Wall-clock time the stamp was written, in epoch milliseconds.
+    ///
+    /// The instant this *release* first wrote the store, not the instant of
+    /// the most recent open: a reopen under the same release leaves the stamp
+    /// alone, so the field answers "since when has this release owned these
+    /// bytes?".
+    pub written_at_epoch_ms: i64,
+}
+
+impl StoreReleaseStamp {
+    /// The durable encoding of [`StoreReleaseStamp::schema_versions`].
+    ///
+    /// Deliberately not serde: the store contract carries no derives, and the
+    /// two SQL backends must agree on one byte-for-byte text so the shared
+    /// conformance law can compare them. Components are joined with `;` and
+    /// each is `name=version`.
+    pub fn encode_schema_versions(versions: &[StoreComponentVersion]) -> String {
+        versions
+            .iter()
+            .map(|version| format!("{}={}", version.component, version.version))
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    /// Read back [`StoreReleaseStamp::encode_schema_versions`].
+    ///
+    /// `None` for text this build cannot read, which a caller reports as
+    /// [`StoreReleaseState::Unreadable`] rather than as an empty tuple: a
+    /// stamp nobody could parse is not a stamp that recorded nothing.
+    pub fn decode_schema_versions(encoded: &str) -> Option<Vec<StoreComponentVersion>> {
+        if encoded.is_empty() {
+            return Some(Vec::new());
+        }
+        encoded
+            .split(';')
+            .map(|entry| {
+                let (component, version) = entry.rsplit_once('=')?;
+                if component.is_empty() {
+                    return None;
+                }
+                Some(StoreComponentVersion {
+                    component: component.to_string(),
+                    version: version.parse().ok()?,
+                })
+            })
+            .collect()
+    }
+}
+
+/// What a store said about the release that wrote it.
+///
+/// Three answers rather than an `Option`, for the reason
+/// [`StoreSchemaVerdict::Unreadable`] exists: a store that carries no stamp and
+/// a stamp that could not be read are different findings, and collapsing them
+/// into "absent" would report an unread stamp as an observed absence.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StoreReleaseState {
+    /// The store records which release wrote it.
+    Stamped(StoreReleaseStamp),
+    /// The store is readable and records no release. Either nothing has opened
+    /// it yet, or it was last written by a build older than the stamp itself.
+    ///
+    /// This is the default because a handle that has read nothing has observed
+    /// no stamp, and the absence is the honest starting point.
+    #[default]
+    Unstamped,
+    /// The stamp could not be read. Carries the backend's own words.
+    Unreadable {
+        /// The backend's diagnostic, verbatim.
+        reason: String,
+    },
+}
+
+impl StoreReleaseState {
+    /// The writing release, when one was read.
+    pub fn release(&self) -> Option<&str> {
+        match self {
+            StoreReleaseState::Stamped(stamp) => Some(stamp.release.as_str()),
+            StoreReleaseState::Unstamped | StoreReleaseState::Unreadable { .. } => None,
+        }
+    }
+}
+
+impl std::fmt::Display for StoreReleaseState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StoreReleaseState::Stamped(stamp) => write!(
+                f,
+                "written by lash release {} at epoch ms {} ({})",
+                stamp.release,
+                stamp.written_at_epoch_ms,
+                StoreReleaseStamp::encode_schema_versions(&stamp.schema_versions)
+            ),
+            StoreReleaseState::Unstamped => {
+                write!(f, "no release stamp (nothing has stamped this store)")
+            }
+            StoreReleaseState::Unreadable { reason } => {
+                write!(f, "release stamp unreadable: {reason}")
+            }
+        }
+    }
+}
+
+/// Precedence of two release strings, or `None` when either is not a version
+/// this build can order.
+///
+/// Semantic-version precedence over the two shapes `scripts/release_version.py`
+/// can produce — `X.Y.Z` and `X.Y.Z-prerelease` — implemented here rather than
+/// taken as a dependency, because the whole comparison is the update rule and
+/// it has to be readable next to it.
+pub fn compare_releases(left: &str, right: &str) -> Option<std::cmp::Ordering> {
+    let left = parse_release(left)?;
+    let right = parse_release(right)?;
+    Some(left.cmp(&right))
+}
+
+/// Whether `candidate` replaces `existing` as the store's release stamp.
+///
+/// The update rule, in one place both SQL backends call: a strictly newer
+/// release advances the stamp, and nothing else touches it. A store written by
+/// a newer release than the one opening it keeps the newer stamp — that is the
+/// "never downgraded" half, and it is what keeps the stamp answering "which
+/// release wrote these bytes" rather than "which build last booted". Two
+/// releases this build cannot order leave the existing stamp in place, because
+/// an unorderable pair is not evidence that the candidate is newer.
+pub fn release_stamp_advances(existing: &str, candidate: &str) -> bool {
+    compare_releases(existing, candidate) == Some(std::cmp::Ordering::Less)
+}
+
+/// A release parsed into the tuple semantic-version precedence orders on.
+///
+/// A release with no pre-release sorts above every pre-release of the same
+/// core version, which the `Option` ordering would invert, so the presence
+/// flag is carried as a `bool` that sorts `false` (a pre-release) first.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct ParsedRelease {
+    core: (u64, u64, u64),
+    is_release: bool,
+    prerelease: Vec<PrereleaseIdentifier>,
+}
+
+/// One dot-separated pre-release identifier. Numeric identifiers sort below
+/// alphanumeric ones and compare numerically; alphanumeric ones compare as
+/// ASCII.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum PrereleaseIdentifier {
+    Numeric(u64),
+    Alphanumeric(String),
+}
+
+fn parse_release(release: &str) -> Option<ParsedRelease> {
+    let (core, prerelease) = match release.split_once('-') {
+        Some((core, prerelease)) => (core, Some(prerelease)),
+        None => (release, None),
+    };
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let identifiers = match prerelease {
+        None => Vec::new(),
+        Some(prerelease) => {
+            if prerelease.is_empty() {
+                return None;
+            }
+            prerelease
+                .split('.')
+                .map(|identifier| {
+                    if identifier.is_empty() {
+                        return None;
+                    }
+                    if identifier.chars().all(|c| c.is_ascii_digit()) {
+                        identifier.parse().ok().map(PrereleaseIdentifier::Numeric)
+                    } else {
+                        Some(PrereleaseIdentifier::Alphanumeric(identifier.to_string()))
+                    }
+                })
+                .collect::<Option<Vec<_>>>()?
+        }
+    };
+    Some(ParsedRelease {
+        core: (major, minor, patch),
+        is_release: identifiers.is_empty(),
+        prerelease: identifiers,
+    })
+}
+
 /// One schema-carrying database inside a deployment, and its verdict.
 ///
 /// A SQLite deployment has several — durable core, process registry, triggers,
@@ -176,6 +395,13 @@ pub struct StoreSchemaDatabase {
 pub struct StoreSchemaStatus {
     /// The databases, in the order the backend would open them.
     pub databases: Vec<StoreSchemaDatabase>,
+    /// Which lash release wrote this store, when the store records one.
+    ///
+    /// The schema integers above say what this build requires; they never say
+    /// which build produced the data, which is the question a host upgrading
+    /// crate versions actually has. It rides on the same report because it is
+    /// read on the same read-only pass.
+    pub release: StoreReleaseState,
 }
 
 impl StoreSchemaStatus {
@@ -214,6 +440,7 @@ impl StoreSchemaStatus {
 
 impl std::fmt::Display for StoreSchemaStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "release: {}", self.release)?;
         for database in &self.databases {
             match &database.verdict {
                 StoreSchemaVerdict::Matches => {
@@ -519,6 +746,7 @@ mod tests {
         // The defect the boolean had: nothing refuses, so "is it fine?" said
         // yes over a database nobody could read.
         let status = StoreSchemaStatus {
+            release: StoreReleaseState::Unstamped,
             databases: vec![
                 database("durable core", StoreSchemaVerdict::Matches),
                 database(
@@ -537,6 +765,7 @@ mod tests {
     #[test]
     fn a_refusal_outranks_an_undecided_database_without_hiding_it() {
         let status = StoreSchemaStatus {
+            release: StoreReleaseState::Unstamped,
             databases: vec![
                 database("durable core", StoreSchemaVerdict::Mismatch { found: 36 }),
                 database(
@@ -559,6 +788,7 @@ mod tests {
     #[test]
     fn conformance_names_every_refusing_database_and_only_those() {
         let status = StoreSchemaStatus {
+            release: StoreReleaseState::Unstamped,
             databases: vec![
                 database("durable core", StoreSchemaVerdict::Matches),
                 database(
@@ -586,6 +816,7 @@ mod tests {
     #[test]
     fn an_empty_deployment_is_ready() {
         let status = StoreSchemaStatus {
+            release: StoreReleaseState::Unstamped,
             databases: Vec::new(),
         };
         assert_eq!(status.outcome(), StoreSchemaOutcome::Ready);
@@ -593,9 +824,144 @@ mod tests {
         assert_eq!(status.undecided().count(), 0);
     }
 
+    fn stamp(release: &str) -> StoreReleaseStamp {
+        StoreReleaseStamp {
+            release: release.to_string(),
+            schema_versions: vec![StoreComponentVersion {
+                component: "durable core".to_string(),
+                version: 66,
+            }],
+            written_at_epoch_ms: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn a_newer_release_advances_the_stamp_and_nothing_else_does() {
+        assert!(release_stamp_advances("0.1.0", "0.2.0"));
+        assert!(release_stamp_advances("0.1.0-alpha.1", "0.1.0"));
+        assert!(release_stamp_advances("0.0.0-dev", "0.1.0"));
+        assert!(
+            !release_stamp_advances("0.2.0", "0.1.0"),
+            "an older release must never downgrade the stamp"
+        );
+        assert!(
+            !release_stamp_advances("0.1.0", "0.1.0"),
+            "a reopen under the same release leaves the written-at instant alone"
+        );
+        assert!(
+            !release_stamp_advances("0.1.0", "not-a-version"),
+            "an unorderable candidate is not evidence that it is newer"
+        );
+        assert!(
+            !release_stamp_advances("garbage", "0.1.0"),
+            "an unorderable existing stamp is left for an operator to read"
+        );
+    }
+
+    #[test]
+    fn prerelease_identifiers_order_the_way_semver_precedence_does() {
+        assert_eq!(
+            compare_releases("0.1.0-alpha.2", "0.1.0-alpha.10"),
+            Some(std::cmp::Ordering::Less),
+            "numeric identifiers compare numerically, not as text"
+        );
+        assert_eq!(
+            compare_releases("0.1.0-alpha", "0.1.0-beta"),
+            Some(std::cmp::Ordering::Less)
+        );
+        assert_eq!(
+            compare_releases("0.1.0-alpha", "0.1.0"),
+            Some(std::cmp::Ordering::Less),
+            "a release outranks every pre-release of the same core version"
+        );
+        assert_eq!(
+            compare_releases("0.1.0", "1.0.0-x"),
+            Some(std::cmp::Ordering::Less)
+        );
+        assert_eq!(compare_releases("0.1.0", "0.1"), None);
+        assert_eq!(compare_releases("0.1.0.1", "0.1.0"), None);
+        assert_eq!(compare_releases("0.1.0-", "0.1.0"), None);
+    }
+
+    #[test]
+    fn the_schema_tuple_survives_the_durable_encoding() {
+        let versions = vec![
+            StoreComponentVersion {
+                component: "durable core".to_string(),
+                version: 66,
+            },
+            StoreComponentVersion {
+                component: "process registry".to_string(),
+                version: 38,
+            },
+        ];
+        let encoded = StoreReleaseStamp::encode_schema_versions(&versions);
+        assert_eq!(encoded, "durable core=66;process registry=38");
+        assert_eq!(
+            StoreReleaseStamp::decode_schema_versions(&encoded),
+            Some(versions)
+        );
+        assert_eq!(
+            StoreReleaseStamp::decode_schema_versions(""),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            StoreReleaseStamp::decode_schema_versions("durable core"),
+            None
+        );
+        assert_eq!(StoreReleaseStamp::decode_schema_versions("=5"), None);
+        assert_eq!(
+            StoreReleaseStamp::decode_schema_versions("durable core=x"),
+            None,
+            "a tuple this build cannot read is unreadable, not empty"
+        );
+    }
+
+    #[test]
+    fn an_unstamped_store_is_reported_as_an_absence_not_a_blank_release() {
+        let unstamped = StoreReleaseState::Unstamped;
+        assert_eq!(unstamped.release(), None);
+        let unreadable = StoreReleaseState::Unreadable {
+            reason: "no such table: release_stamp".to_string(),
+        };
+        assert_eq!(unreadable.release(), None);
+        assert_ne!(
+            unstamped, unreadable,
+            "an unread stamp is a different finding from an absent one"
+        );
+        assert_eq!(
+            StoreReleaseState::Stamped(stamp("0.4.1")).release(),
+            Some("0.4.1")
+        );
+    }
+
+    #[test]
+    fn the_report_names_the_writing_release() {
+        let status = StoreSchemaStatus {
+            release: StoreReleaseState::Stamped(stamp("0.4.1")),
+            databases: vec![database("durable core", StoreSchemaVerdict::Matches)],
+        };
+        let rendered = status.to_string();
+        assert!(
+            rendered.contains("written by lash release 0.4.1"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("durable core=66"), "{rendered}");
+
+        let unstamped = StoreSchemaStatus {
+            release: StoreReleaseState::Unstamped,
+            databases: Vec::new(),
+        };
+        assert!(
+            unstamped.to_string().contains("no release stamp"),
+            "{unstamped}"
+        );
+    }
+
     #[test]
     fn rendering_names_the_found_and_expected_versions() {
         let status = StoreSchemaStatus {
+            release: StoreReleaseState::Unstamped,
             databases: vec![database(
                 "durable core",
                 StoreSchemaVerdict::Mismatch { found: 36 },

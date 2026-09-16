@@ -204,6 +204,12 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         },
     ),
     (
+        "release_stamp",
+        PermanentlyExempt {
+            reason: "singleton record of the lash release that wrote this store",
+        },
+    ),
+    (
         "process_events",
         LifecycleOwned {
             scope: "terminal process reclamation",
@@ -374,7 +380,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 50, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 51, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()
