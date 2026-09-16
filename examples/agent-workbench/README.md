@@ -480,7 +480,7 @@ const handle = await triggers.register({
   inputs: (event) => ({ event }),
   name: "inbox concierge"
 });
-finish(`Inbox concierge registered as \`${handle}\`.`);
+finish(`Inbox concierge registered as \`${handle.subscription_key}\`.`);
 </typescript>
 ```
 
@@ -509,7 +509,7 @@ const handle = await triggers.register({
 });
 const registrations = await triggers.list({ name: "button watcher" });
 finish(
-  `Registered button watcher \`${handle}\`. ` +
+  `Registered button watcher \`${handle.subscription_key}\`. ` +
   `Active matching registrations: ${registrations.length}.`
 );
 </typescript>
@@ -537,7 +537,7 @@ const handle = await triggers.register({
 });
 const registrations = await triggers.list({ target: dailyDigest });
 finish(
-  `Registered daily digest \`${handle}\`. ` +
+  `Registered daily digest \`${handle.subscription_key}\`. ` +
   `Active matching registrations: ${registrations.length}.`
 );
 </typescript>

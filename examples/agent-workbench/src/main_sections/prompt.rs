@@ -57,7 +57,7 @@ Available host features:
       name: "button watcher"
     });
     const registrations = await triggers.list({ name: "button watcher" });
-    finish("Registered button watcher `" + handle + "`. Active matching registrations: " + registrations.length + ".");
+    finish("Registered button watcher `" + handle.subscription_key + "`. Active matching registrations: " + registrations.length + ".");
     </typescript>
 
 - For schedule requests, build `cron.Schedule(...)` values and register a process definition with a stable literal `subscription_key`. The fired event is the parameter of the `inputs` arrow, for example `inputs: (event) => ({ tick: event })`; a one-parameter target may omit `inputs` entirely. The workbench syncs enabled `cron.Schedule` registrations to Restate cron objects by stored source key, then emits trigger occurrences with `cron.Tick { fired_at: str }`; use a seconds expression such as `*/10 * * * * *` when the user wants a quick smoke test. Use `await triggers.list({})` to discover registrations and `await triggers.disable({ subscription_key: "schedule-key", expected_revision: 1 })` to disable future occurrence delivery.
@@ -88,7 +88,7 @@ Available host features:
       inputs: (event) => ({ event: event }),
       name: "inbox concierge"
     });
-    finish("Inbox concierge registered as `" + handle + "`.");
+    finish("Inbox concierge registered as `" + handle.subscription_key + "`.");
     </typescript>
 
 Reference only the `inbox.<account>` authorities that actually exist; if the user has not connected an account yet, ask them to add one from the Accounts tab first.
