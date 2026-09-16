@@ -678,6 +678,7 @@ fn assert_store_object(_: Arc<dyn RuntimePersistence>) {}
 fn main() {
     assert_store_object(Arc::new(FacadeStore));
     let _ = SessionHeadMeta::assemble(
+        &SessionId::from("facade"),
         SessionHeadPayload {
             schema_version: 1,
             session_id: SessionId::from("facade"),

@@ -755,6 +755,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         );
         *store.checkpoint.lock_recover() = Some(checkpoint);
         *store.session_head_meta.lock_recover() = Some(crate::store::SessionHeadMeta::assemble(
+            &request.session_id,
             crate::store::SessionHeadPayload {
                 schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
                 session_id: request.session_id.clone(),
@@ -767,7 +768,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             0,
             Some(checkpoint_ref),
             Some(request.node_id.clone()),
-        ));
+        )?);
         *store.session_meta.lock_recover() = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),

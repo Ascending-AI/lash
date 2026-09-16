@@ -498,6 +498,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
         if existing.is_none() {
             let placeholder = SessionHeadMeta::assemble(
+                &commit.session_id,
                 SessionHeadPayload {
                     schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
                     session_id: commit.session_id.clone(),
@@ -507,7 +508,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 0,
                 None,
                 None,
-            );
+            )?;
             sqlx::query(
                 "INSERT INTO lash_sessions
                  (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)

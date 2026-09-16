@@ -413,6 +413,7 @@ pub(super) async fn fork_at_in_catalog(
                 lash_core::store::ForkPlan::derive(&request.session_id, edge_path)?;
             let config = lash_core::PersistedSessionConfig::from(&request.policy);
             let meta = lash_core::store::SessionHeadMeta::assemble(
+                &request.session_id,
                 lash_core::store::SessionHeadPayload {
                     schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
                     session_id: request.session_id.clone(),
@@ -432,7 +433,7 @@ pub(super) async fn fork_at_in_catalog(
                 0,
                 Some(checkpoint_ref.clone().into()),
                 Some(request.node_id.clone()),
-            );
+            )?;
             tx.execute(
                 "INSERT INTO session_head
                  (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)

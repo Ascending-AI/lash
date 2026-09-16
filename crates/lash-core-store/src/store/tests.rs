@@ -457,6 +457,77 @@ fn failure_evidence_changes_intent_hash_without_changing_empty_legacy_hash() {
 }
 
 #[test]
+fn session_head_meta_takes_its_identity_from_the_row_key() {
+    let meta = SessionHeadMeta::assemble(
+        &SessionId::from("keyed-session"),
+        SessionHeadPayload {
+            schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
+            session_id: SessionId::from("keyed-session"),
+            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+            current_frame_node_id: None,
+        },
+        7,
+        None,
+        None,
+    )
+    .expect("an agreeing head payload assembles");
+
+    assert_eq!(
+        meta.session_id,
+        SessionId::from("keyed-session"),
+        "the assembled identity is the row key"
+    );
+}
+
+#[test]
+fn session_head_meta_refuses_a_head_json_naming_another_session() {
+    let error = SessionHeadMeta::assemble(
+        &SessionId::from("keyed-session"),
+        SessionHeadPayload {
+            schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
+            session_id: SessionId::from("impostor-session"),
+            config: crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+            current_frame_node_id: None,
+        },
+        7,
+        None,
+        None,
+    )
+    .expect_err("a head payload naming another session is corrupt stored data");
+
+    assert!(
+        matches!(
+            &error,
+            StoreError::StoredDataCorrupt { record_kind, message }
+                if *record_kind == "SessionHeadMeta"
+                    && message.contains("impostor-session")
+                    && message.contains("keyed-session")
+        ),
+        "the refusal names both identities: {error:?}"
+    );
+}
+
+#[test]
+fn session_head_meta_refuses_a_head_json_missing_its_session_id() {
+    // An absent `session_id` decodes through the payload's `"root"` default;
+    // the row key is what decides whether that is this session's identity.
+    let payload: SessionHeadPayload = serde_json::from_value(serde_json::json!({
+        "schema_version": SESSION_HEAD_META_SCHEMA_VERSION,
+        "config": crate::PersistedSessionConfig::new(crate::TurnBudget::Unbounded),
+    }))
+    .expect("a head payload without a session id still decodes");
+
+    let error =
+        SessionHeadMeta::assemble(&SessionId::from("keyed-session"), payload, 0, None, None)
+            .expect_err("an absent head session id must not be invented as `root`");
+
+    assert!(
+        matches!(&error, StoreError::StoredDataCorrupt { record_kind, .. } if *record_kind == "SessionHeadMeta"),
+        "the refusal is corrupt stored data: {error:?}"
+    );
+}
+
+#[test]
 fn session_head_payload_bytes_match_the_legacy_meta_format() {
     #[allow(dead_code)]
     #[derive(serde::Serialize)]
@@ -485,6 +556,7 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
         leaf_node_id: Some("leaf".to_string()),
     };
     let assembled = SessionHeadMeta::assemble(
+        &SessionId::from("column-owned-head"),
         SessionHeadPayload {
             schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
             session_id: SessionId::from("column-owned-head"),
@@ -494,7 +566,8 @@ fn session_head_payload_bytes_match_the_legacy_meta_format() {
         41,
         Some(BlobRef("checkpoint".to_string())),
         Some("leaf".into()),
-    );
+    )
+    .expect("the pinned payload is keyed on its own session");
     let before = serde_json::to_vec(&legacy).expect("serialize legacy session head metadata");
     let after = serde_json::to_vec(&assembled.payload()).expect("serialize session head payload");
 

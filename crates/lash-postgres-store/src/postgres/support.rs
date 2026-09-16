@@ -644,10 +644,11 @@ pub(crate) async fn load_session_head_meta_tx(
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    decode_session_head_meta_row(row)
+    decode_session_head_meta_row(session_id, row)
 }
 
 fn decode_session_head_meta_row(
+    session_id: &SessionId,
     row: Option<sqlx::postgres::PgRow>,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let Some(row) = row else {
@@ -670,11 +671,12 @@ fn decode_session_head_meta_row(
         error => error,
     })?;
     Ok(Some(SessionHeadMeta::assemble(
+        session_id,
         payload,
         u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
         checkpoint_ref.map(Into::into),
         leaf_node_id.map(lash_core::NodeId::from),
-    )))
+    )?))
 }
 
 pub(crate) async fn load_usage_deltas_tx(

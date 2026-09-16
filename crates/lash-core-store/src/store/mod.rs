@@ -275,27 +275,44 @@ pub struct SessionHeadMeta {
 impl SessionHeadMeta {
     /// Combine the JSON payload with all dedicated-column values.
     ///
+    /// The session's identity is owned by the row key the caller bound the
+    /// query to, never by the payload: `session_id` is taken from
+    /// `session_id` and the payload's copy is a checked redundancy. A payload
+    /// naming a different session is refused as corrupt stored data rather
+    /// than adopted, so a mis-keyed or hand-edited `head_json` can no longer
+    /// rewrite a session's live identity.
+    ///
     /// This remains public because external stores assemble rows from their
-    /// own columns. Callers conventionally enforce session binding and node
-    /// derivation before assembly; the constructor cannot validate those facts
-    /// from this projection alone.
+    /// own columns. Callers still enforce node derivation before assembly; the
+    /// constructor cannot validate that fact from this projection alone.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
     pub fn assemble(
+        session_id: &SessionId,
         payload: SessionHeadPayload,
         head_revision: u64,
         checkpoint_ref: Option<BlobRef>,
         leaf_node_id: Option<crate::NodeId>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, StoreError> {
+        if payload.session_id != *session_id {
+            return Err(StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message: format!(
+                    "head_json names session `{}` but the row is keyed on session `{}`",
+                    payload.session_id.as_str(),
+                    session_id.as_str()
+                ),
+            });
+        }
+        Ok(Self {
             schema_version: payload.schema_version,
-            session_id: payload.session_id,
+            session_id: session_id.clone(),
             head_revision,
             config: payload.config,
             current_frame_node_id: payload.current_frame_node_id,
             checkpoint_ref,
             leaf_node_id,
-        }
+        })
     }
 
     /// Project the exact value that may be serialized into `head_json`.
