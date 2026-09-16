@@ -137,10 +137,12 @@ class ClassifyTests(unittest.TestCase):
         """
         plan = ci_plan.classify([("M", "crates/lash-core/src/session/mod.rs")])
         self.assertEqual("true", plan["rust"])
-        self.assertEqual("true", plan["stores"])
+        self.assertEqual("false", plan["stores"])
         self.assertEqual("true", plan["workbench"])
         self.assertEqual("false", plan["regress"])
         self.assertEqual("false", plan["schema"])
+        self.assertEqual("false", plan["facade"])
+        self.assertEqual("false", plan["tooling"])
 
     def test_rust_change_outside_the_workbench_closure_skips_the_cargo_partition(self) -> None:
         for path in (
@@ -210,6 +212,52 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual("false", plan["functional_e2e"])
         self.assertEqual("false", plan["workers_e2e"])
         self.assertEqual("true", plan["workbench"])
+        self.assertEqual("false", plan["facade"])
+        self.assertEqual("false", plan["tooling"])
+
+    def test_facade_selects_the_seal_lane(self) -> None:
+        for path, expected in (
+            ("crates/lash/src/lib.rs", "true"),
+            ("Cargo.toml", "true"),
+            ("Cargo.lock", "true"),
+            ("crates/lash-core/src/lib.rs", "false"),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    expected, ci_plan.classify([("M", path)])["facade"]
+                )
+
+    def test_stores_is_path_derived(self) -> None:
+        for path, expected in (
+            ("crates/lash-postgres-store/src/lib.rs", "true"),
+            ("crates/lash-s3-store/src/lib.rs", "true"),
+            ("crates/lash-core-store/src/lib.rs", "true"),
+            ("crates/lash-conformance/src/lib.rs", "true"),
+            ("crates/lash-sim/src/lib.rs", "true"),
+            ("crates/lash-sqlite-store/migrations/0001_init/up.sql", "true"),
+            ("crates/lash-core/src/lib.rs", "false"),
+            ("examples/agent-workbench/src/main.rs", "false"),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    expected, ci_plan.classify([("M", path)])["stores"]
+                )
+
+    def test_tooling_selects_repo_gates(self) -> None:
+        # `scripts/` is a global invalidator, so a script diff turns on every
+        # family including tooling; the narrower check is a non-global tooling
+        # path that leaves facade and stores off.
+        self.assertEqual("true", ci_plan.classify([("M", "scripts/x.py")])["tooling"])
+        for path, expected in (
+            ("tools/bazel/clippy.bzl", "true"),
+            ("BUILD.bazel", "true"),
+            ("tools/kiln/main.py", "true"),
+            ("crates/lash-core/src/lib.rs", "false"),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    expected, ci_plan.classify([("M", path)])["tooling"]
+                )
 
     def test_readme_prefixed_rust_file_runs_core_families(self) -> None:
         plan = ci_plan.classify([("A", "crates/x/src/readme_gen.rs")])
@@ -258,19 +306,6 @@ def apply_event_deferrals(needs: dict, event: str) -> dict:
 
     for job in ci_plan.DISPATCH_ONLY_JOBS:
         needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
-    for job in ci_plan.QUEUE_REQUIRED_COMPILE_JOBS:
-        rust_on = needs["plan"]["outputs"].get("rust") == "true"
-        fail_open = needs["plan"]["outputs"].get("fail_open") == "true"
-        if event == "pull_request":
-            needs[job]["result"] = "skipped"
-        elif event == "merge_group":
-            needs[job]["result"] = "success" if rust_on or fail_open else "skipped"
-        else:
-            needs[job]["result"] = "success" if rust_on else "skipped"
-    if event in ci_plan.DEFERRED_EVENTS:
-        needs["unicode-tests"]["result"] = (
-            "success" if needs["plan"]["outputs"].get("regress") == "true" else "skipped"
-        )
     return needs
 
 
@@ -989,24 +1024,18 @@ class AggregatorAllowlistTests(unittest.TestCase):
         self.assertNotIn("ci-conclusion", jobs["ci-conclusion"]["needs"])
 
 
-class QueueRequiredCompileLaneTests(unittest.TestCase):
-    """The dedicated compile lane must witness every queued head.
+class DispatchOnlyJobTests(unittest.TestCase):
+    """Deferred compile lanes live on workflow_dispatch alone.
 
-    FIG-2854. The job IDs, the workflow condition and the docs-only
-    expectation are spelled out by hand here rather than derived from
-    ``ci_plan.QUEUE_REQUIRED_COMPILE_JOBS``: a test that reads its expectation
-    out of the set under test still passes after someone empties the set.
+    The queue now runs the same minimal board as a pull request, so
+    `lashlang-git-consumer`, `feature-lanes` and `unicode-tests` joined the
+    other deferred jobs. The job IDs and conditions are spelled out by hand
+    here rather than derived from ``ci_plan.DISPATCH_ONLY_JOBS``: a test that
+    reads its expectation out of the set under test still passes after someone
+    empties the set.
     """
 
-    # `package-feature-checks` and `runtime-feature-boundary` were two more of
-    # these. Their lanes are now compiled by `feature-lanes`, which runs on
-    # pull requests as well, so it is gated like the rest of the Rust family
-    # rather than pinned to the queue.
-    JOBS = ("lashlang-git-consumer",)
-    CONDITION = (
-        "(github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true'))"
-        " || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')"
-    )
+    JOBS = ("lashlang-git-consumer", "feature-lanes", "unicode-tests")
 
     def board(self, event: str, docs_only: bool = False) -> dict:
         needs = successful_needs()
@@ -1022,77 +1051,44 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
         apply_event_deferrals(needs, event)
         return needs
 
-    def test_the_three_lanes_are_registered_and_not_dispatch_only(self) -> None:
+    def test_the_lanes_are_registered_as_dispatch_only(self) -> None:
         aggregator_needs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["ci-conclusion"]["needs"]
         for job in self.JOBS:
             with self.subTest(job=job):
-                self.assertEqual("rust", ci_plan.GATED_JOBS.get(job))
-                self.assertIn(job, ci_plan.QUEUE_REQUIRED_COMPILE_JOBS)
-                self.assertNotIn(job, ci_plan.DISPATCH_ONLY_JOBS)
+                self.assertIn(job, ci_plan.DISPATCH_ONLY_JOBS)
                 self.assertIn(job, aggregator_needs)
-        self.assertEqual(set(self.JOBS), set(ci_plan.QUEUE_REQUIRED_COMPILE_JOBS))
 
-    def test_workflow_conditions_run_them_on_every_merge_group(self) -> None:
+    def test_workflow_conditions_keep_them_off_pull_requests_and_merge_groups(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         for job in self.JOBS:
             with self.subTest(job=job):
-                self.assertEqual(self.CONDITION, jobs[job]["if"])
+                self.assertIn("github.event_name == 'workflow_dispatch'", jobs[job]["if"])
 
-    def test_success_is_required_on_a_production_merge_group(self) -> None:
+    def test_merge_group_accepts_them_skipped(self) -> None:
         self.assertEqual([], ci_plan.evaluate_conclusion(self.board("merge_group"), "merge_group"))
         for job in self.JOBS:
-            for result in ("skipped", "failure", "cancelled"):
+            self.assertEqual("skipped", self.board("merge_group")[job]["result"])
+            for result in ("success", "failure", "cancelled"):
                 with self.subTest(job=job, result=result):
                     needs = self.board("merge_group")
                     needs[job]["result"] = result
                     problems = ci_plan.evaluate_conclusion(needs, "merge_group")
                     self.assertIn(
-                        f"queue-required compile job {job} ended with {result!r} on a"
-                        " merge_group event, expected success",
-                        problems,
-                    )
-
-    def test_docs_only_merge_group_skips_the_compile_lanes(self) -> None:
-        needs = self.board("merge_group", docs_only=True)
-        needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
-        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "merge_group"))
-        for job in self.JOBS:
-            self.assertEqual("skipped", needs[job]["result"])
-            for result in ("success", "failure", "cancelled"):
-                with self.subTest(job=job, result=result):
-                    trial = self.board("merge_group", docs_only=True)
-                    trial[job]["result"] = result
-                    problems = ci_plan.evaluate_conclusion(trial, "merge_group")
-                    self.assertIn(
-                        f"queue-required compile job {job} ended with {result!r} on a"
+                        f"dispatch-only job {job} ended with {result!r} on a"
                         " merge_group event, expected skipped",
                         problems,
                     )
 
-    def test_pull_requests_still_expect_them_skipped(self) -> None:
-        self.assertEqual([], ci_plan.evaluate_conclusion(self.board("pull_request"), "pull_request"))
-        for job in self.JOBS:
-            for result in ("success", "failure", "cancelled"):
-                with self.subTest(job=job, result=result):
-                    needs = self.board("pull_request")
-                    needs[job]["result"] = result
-                    self.assertIn(
-                        f"queue-required compile job {job} ended with {result!r} on a"
-                        " pull_request event, expected skipped",
-                        ci_plan.evaluate_conclusion(needs, "pull_request"),
-                    )
-
-    def test_dispatch_keeps_the_rust_family(self) -> None:
-        dispatch = self.board("workflow_dispatch")
+    def test_workflow_dispatch_requires_them(self) -> None:
         self.assertEqual(
-            [], ci_plan.evaluate_conclusion(dispatch, "workflow_dispatch")
+            [], ci_plan.evaluate_conclusion(self.board("workflow_dispatch"), "workflow_dispatch")
         )
         for job in self.JOBS:
             wrongly_skipped = self.board("workflow_dispatch")
             wrongly_skipped[job]["result"] = "skipped"
-            self.assertIn(
-                f"{job} ended with 'skipped' although plan.rust required it to run",
-                ci_plan.evaluate_conclusion(wrongly_skipped, "workflow_dispatch"),
+            self.assertTrue(
+                any(job in problem for problem in
+                    ci_plan.evaluate_conclusion(wrongly_skipped, "workflow_dispatch"))
             )
 
     def test_the_other_deferred_jobs_are_untouched(self) -> None:
@@ -1104,18 +1100,81 @@ class QueueRequiredCompileLaneTests(unittest.TestCase):
             "functional-e2e-process-operations",
             "fuzz-smoke",
         )
-        self.assertEqual(set(still_deferred), set(ci_plan.DISPATCH_ONLY_JOBS))
-        jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         for job in still_deferred:
             with self.subTest(job=job):
-                self.assertIn("github.event_name == 'workflow_dispatch'", jobs[job]["if"])
-                needs = self.board("merge_group")
-                needs[job]["result"] = "success"
-                self.assertIn(
-                    f"dispatch-only job {job} ended with 'success' on a merge_group"
-                    " event, expected skipped",
-                    ci_plan.evaluate_conclusion(needs, "merge_group"),
-                )
+                self.assertIn(job, ci_plan.DISPATCH_ONLY_JOBS)
+
+
+class FacadeAndToolingGatingTests(unittest.TestCase):
+    """Seal and repo-gates ride their own path-derived families."""
+
+    def board(self, event: str = "pull_request", **families: str) -> dict:
+        needs = successful_needs()
+        needs["plan"]["outputs"].update(
+            {"docs_only": "false", "fail_open": "false"}
+        )
+        needs["plan"]["outputs"].update(
+            {family: "false" for family in ci_plan.FAMILIES}
+        )
+        needs["plan"]["outputs"]["rust"] = "true"
+        needs["plan"]["outputs"].update(families)
+        needs["postgres-store"]["result"] = "skipped"
+        needs["workspace-tests"]["result"] = "skipped"
+        apply_event_deferrals(needs, event)
+        if event == "workflow_dispatch":
+            needs["unicode-tests"]["result"] = (
+                "success"
+                if needs["plan"]["outputs"].get("regress") == "true"
+                else "skipped"
+            )
+        return needs
+
+    def test_core_only_diff_accepts_seal_postgres_and_repo_gates_skipped(self) -> None:
+        needs = self.board()
+        for job in ("check", "postgres-store", "repo-gates"):
+            needs[job]["result"] = "skipped"
+        self.assertEqual(
+            [], ci_plan.evaluate_conclusion(needs, "pull_request")
+        )
+        # Running them anyway is also accepted.
+        for job in ("check", "postgres-store", "repo-gates"):
+            trial = self.board()
+            problems = ci_plan.evaluate_conclusion(trial, "pull_request")
+            self.assertFalse(
+                any(job in problem for problem in problems),
+                f"{job}: {problems}",
+            )
+
+    def test_facade_diff_requires_the_seal_lane(self) -> None:
+        needs = self.board(facade="true")
+        needs["check"]["result"] = "skipped"
+        problems = ci_plan.evaluate_conclusion(needs, "pull_request")
+        self.assertTrue(any("check" in problem for problem in problems))
+        needs["check"]["result"] = "success"
+        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
+
+    def test_dispatch_always_requires_the_seal_lane(self) -> None:
+        needs = self.board("workflow_dispatch")
+        needs["check"]["result"] = "skipped"
+        problems = ci_plan.evaluate_conclusion(needs, "workflow_dispatch")
+        self.assertTrue(any("check" in problem for problem in problems))
+
+    def test_tooling_diff_requires_repo_gates(self) -> None:
+        needs = self.board(tooling="true")
+        needs["repo-gates"]["result"] = "skipped"
+        problems = ci_plan.evaluate_conclusion(needs, "pull_request")
+        self.assertTrue(any("repo-gates" in problem for problem in problems))
+        needs["repo-gates"]["result"] = "success"
+        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
+
+    def test_stores_diff_requires_postgres_store(self) -> None:
+        needs = self.board(stores="true")
+        # With stores on, a skipped postgres-store is rejected.
+        self.assertEqual("skipped", needs["postgres-store"]["result"])
+        problems = ci_plan.evaluate_conclusion(needs, "pull_request")
+        self.assertTrue(any("postgres-store" in problem for problem in problems))
+        needs["postgres-store"]["result"] = "success"
+        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
 
 
 if __name__ == "__main__":

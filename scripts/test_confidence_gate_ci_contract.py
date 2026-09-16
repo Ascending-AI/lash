@@ -347,7 +347,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         writer = yaml.safe_load(SEAL_CACHE_WORKFLOW.read_text(encoding="utf-8"))
         lane = next(
             s for s in ci["jobs"]["check"]["steps"]
-            if "rust-cache@" in s.get("uses", "") and s.get("if") == "matrix.lane == 'seal'"
+            if "rust-cache@" in s.get("uses", "")
         )
         (writer_job,) = writer["jobs"].values()
         saver = next(s for s in writer_job["steps"] if "rust-cache@" in s.get("uses", ""))
@@ -355,11 +355,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(lane["with"], saver["with"])
         self.assertRegex(saver["with"]["shared-key"], r"^linux-seal-[0-9]+$")
         self.assertNotIn("save-if", lane["with"])
-        seal_entry = next(
-            row for row in ci["jobs"]["check"]["strategy"]["matrix"]["include"] if row["lane"] == "seal"
-        )
-        self.assertEqual("${{ github.workspace }}/${{ matrix.target }}", ci["jobs"]["check"]["env"]["CARGO_TARGET_DIR"])
-        self.assertEqual(f"${{{{ github.workspace }}}}/{seal_entry['target']}", writer_job["env"]["CARGO_TARGET_DIR"])
+        self.assertEqual("${{ github.workspace }}/target-seal", ci["jobs"]["check"]["env"]["CARGO_TARGET_DIR"])
+        self.assertEqual(ci["jobs"]["check"]["env"]["CARGO_TARGET_DIR"], writer_job["env"]["CARGO_TARGET_DIR"])
         for name in ("CARGO_TERM_COLOR", "LASH_CI_FEATURES", "RUSTFLAGS"):
             self.assertEqual(ci["env"][name], writer["env"][name], name)
 
@@ -589,31 +586,25 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "functional-e2e",
             "functional-e2e-process-operations",
             "fuzz-smoke",
-        }
-        # `package-feature-checks` and `runtime-feature-boundary` were two more
-        # of these until the feature lanes moved onto the pool: one Bazel job
-        # now compiles every lane command's own resolution, cheaply enough to
-        # run on pull requests, so it is not a merge-group-only compile lane.
-        queue_required = {
+            # Feature lanes, deferred Unicode and the lashlang consumer left
+            # the PR/merge-group board entirely: the queue now runs the same
+            # minimal board as a pull request, and the release dispatch is
+            # their sole home.
+            "feature-lanes",
+            "unicode-tests",
             "lashlang-git-consumer",
         }
         guard = "github.event_name == 'workflow_dispatch'"
         for job in sorted(dispatch_only):
             block = workflow_job_block(workflow, job)
-            self.assertIn(f"if: {guard} && needs.plan.outputs.", block, job)
+            self.assertIn("workflow_dispatch", block, job)
+            self.assertIn(guard, block, job)
         # No `push` trigger at all, and no job may resurrect one.
         self.assertNotIn("\n  push:\n", workflow)
         self.assertNotIn("'push'", workflow)
-        queue_guard = (
-            "if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true'))"
-            " || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')"
-        )
-        for job in sorted(queue_required):
-            self.assertIn(queue_guard, workflow_job_block(workflow, job), job)
 
         plan = runpy.run_path(str(ROOT / "scripts" / "ci_plan.py"))
         self.assertEqual(plan["DISPATCH_ONLY_JOBS"], dispatch_only)
-        self.assertEqual(plan["QUEUE_REQUIRED_COMPILE_JOBS"], queue_required)
         self.assertEqual(plan["DEFERRED_EVENTS"], {"pull_request", "merge_group"})
 
         evaluate = plan["evaluate_conclusion"]
@@ -629,11 +620,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         }
         for job in dispatch_only:
             needs[job] = {"result": "skipped", "outputs": {}}
-        for job in queue_required:
-            needs[job] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
-        for job in queue_required:
-            needs[job] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group"), [])
         dispatch_needs = {
             job: {"result": "success", "outputs": dict(value.get("outputs", {}))}
@@ -689,9 +676,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     ],
                 )
 
-        # postgres-store is unconditional on PR-class events, so a skipped
-        # matrix job must fail the single required conclusion even if plan's
-        # stores family would otherwise allow a skip.
+        # postgres-store is gated on the path-derived stores family, so on a
+        # docs-only diff a skipped matrix job is accepted.
         pr_needs = {
             job: {**value, "outputs": dict(value.get("outputs", {}))}
             for job, value in needs.items()
@@ -2416,18 +2402,15 @@ derive_mutation_jobs() {{
         # --no-fail-fast so one failure never hides the rest (alpha.82 lesson).
         self.assertIn("--no-fail-fast", workspace_tests)
 
-        # check is the cache writer and the workspace check, nothing else.
-        # Gates that neither warm nor consume that superset are sibling jobs,
-        # not serial steps behind twelve minutes of compilation. Doctests were
-        # removed from the repository by ruling (2026-09-13), so no half of
-        # this job runs them on either trust path.
+        # check is the API seal lane, nothing else: the workspace compile
+        # proof moved into the Bazel partition's `//:workspace_compile`
+        # argument. Gates that neither warm nor consume the seal cache are
+        # sibling jobs, not serial steps behind twelve minutes of compilation.
+        # Doctests were removed from the repository by ruling (2026-09-13), so
+        # no half of this job runs them on either trust path.
         check_job = workflow_job_block(workflow, "check")
-        self.assertIn("cargo check --workspace --all-targets --locked", check_job)
+        self.assertNotIn("cargo check --workspace --all-targets --locked", check_job)
         self.assertNotIn("--doc ", check_job)
-        # The trybuild fixture graph is part of that superset. It only reaches
-        # the shared cache if the writer builds it, and it is invisible in the
-        # workflow's shape — dropping this step costs no gate and no red run,
-        # just three shards rebuilding a second copy of lash forever.
         self.assertIn(
             "cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui",
             check_job,

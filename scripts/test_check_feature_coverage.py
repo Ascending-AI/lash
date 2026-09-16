@@ -138,8 +138,13 @@ class FeatureCoverageContractTests(unittest.TestCase):
                 jobs:
                   check:
                     steps:
-                      - name: Check workspace (all targets)
-                        run: cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
+                      - name: Seal-test the API surface
+                        run: cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
+
+                  bazel-tests:
+                    steps:
+                      - name: Test deterministic workspace suite with shared cache
+                        run: bazel test //:workspace_tests //:workspace_compile
 
                   repo-gates:
                     steps:

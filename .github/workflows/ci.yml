@@ -13,10 +13,15 @@ name: CI
 # nothing at all. Trunk breadth on push (FIG-2789) is retired: the queue
 # validates the required core board on its merge-group commit and main merges
 # by fast-forwarding to that same commit, so an automatic push carried a tree
-# CI had already seen. The breadth families — Test heavy suites, Test S3
-# store, Functional E2E, Restate workers E2E, Fuzz smoke, Stack budget,
-# deferred Unicode, worker artifacts — are gated to `workflow_dispatch`
-# alone, which is also the profile release.yml certifies against.
+# CI had already seen. Pull requests and merge_group run the minimal core
+# board — the Bazel partition (tests and the workspace compile) plus
+# path-gated jobs — so wall time is pool queueing, not runner minutes. The
+# breadth families — Test heavy suites, Test S3 store, Functional E2E, Restate
+# workers E2E, Fuzz smoke, Stack budget, deferred Unicode, worker artifacts —
+# are gated to `workflow_dispatch` alone, which is also the profile
+# release.yml certifies against and the sole home of feature lanes, the
+# PG14/PG18 compatibility legs, deferred Unicode, the seal lane on non-facade
+# diffs, and the lashlang consumer.
 
 on:
   # The full profile, and the only home of the heavy families. A manual
@@ -115,6 +120,8 @@ jobs:
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}
+      facade: ${{ steps.classify.outputs.facade }}
+      tooling: ${{ steps.classify.outputs.tooling }}
       schema: ${{ steps.classify.outputs.schema }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
@@ -237,31 +244,24 @@ jobs:
       - name: Check example facade imports
         run: python3 scripts/check_facade_only_examples.py
 
-  # Separate matrix jobs run the workspace check and API seal in parallel. The
-  # matrix result keeps the same required status contexts.
+  # The API seal lane alone: the workspace compile proof moved into the
+  # Bazel partition, which builds `//:workspace_compile` alongside
+  # `//:workspace_tests`. Untrusted (fork/dependabot) pull requests lose no
+  # coverage: the full Cargo workspace build inside `workspace-tests` already
+  # compiles every target. The seal lane runs when the facade crate or the
+  # root manifests changed; the release dispatch always runs it.
   check:
-    name: ${{ matrix.name }}
+    name: Seal-test the API surface
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
-    # Trusted events replace the workspace check with cached Bazel actions,
-    # which need the shared cache credentials. Untrusted events never see them
-    # and keep the Cargo command below.
-    environment: build-cache
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Check workspace
-            lane: workspace
-            target: target
-          - name: Seal-test the API surface
-            lane: seal
-            target: target-seal
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || needs.plan.outputs.facade == 'true'
     env:
       # trybuild derives its fixture/output tree from Cargo's target directory.
       # The seal job has no shared writable output with any other CI job.
-      CARGO_TARGET_DIR: ${{ github.workspace }}/${{ matrix.target }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-seal
 
     steps:
       - name: Check out repository
@@ -287,13 +287,6 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
 
-      - name: Restore cargo cache
-        if: matrix.lane == 'workspace'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-
       # Restore-only. `seal-cache.yml` is the sole writer of `linux-seal-2`,
       # and it must stay the writer: this job never runs on main itself, so a
       # cache saved here lands in a pull request's own branch scope, which no
@@ -311,7 +304,6 @@ jobs:
       # forever, and every run rebuilds the difference. Bump the generation in
       # both files together, then dispatch `seal-cache.yml`.
       - name: Restore isolated seal dependencies
-        if: matrix.lane == 'seal'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
@@ -326,56 +318,9 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      - name: Configure Bazel shared cache
-        if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted == 'true'
-        uses: ./.github/actions/bazel-shared-cache
-        env:
-          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
-          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
-          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
-          CACHE_CA: ${{ secrets.CACHE_CA }}
-          CACHE_CERT: ${{ secrets.CACHE_CERT }}
-          CACHE_KEY: ${{ secrets.CACHE_KEY }}
-
-      # `//:workspace_compile` is every first-party label of the resolved
-      # default workspace graph: libraries, binaries, examples,
-      # benches, build scripts, and the unit- and integration-test crates that
-      # carry the `cfg(test)` shape. It compiles and links them, so it proves a
-      # strict superset of `cargo check --workspace --all-targets`. The graph is
-      # generated from the same `cargo metadata --locked` resolution the Cargo
-      # command uses, so feature unification is identical and the members that
-      # are not `default-members` — `lash-typescript` and `lashlang` — are
-      # present. The one Cargo target outside the resolved graph,
-      # `slack-clone-live-e2e`, is skipped by `cargo check` for the same reason.
-      # Nothing on the runner consumes the compiled outputs, so they stay in
-      # the remote CAS; a compile or link error still fails the build.
-      - name: Check workspace with shared cache
-        if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted == 'true'
-        shell: bash
-        run: |
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            --remote_download_outputs=minimal \
-            //:workspace_compile
-
-      - name: Remove client credentials
-        if: always() && matrix.lane == 'workspace'
-        shell: bash
-        run: rm -rf -- "$RUNNER_TEMP/build-cache"
-
-      # Untrusted pull requests receive no cache credentials, so they keep
-      # exactly the Cargo commands that predate the Bazel branch above.
-      - name: Check workspace (all targets)
-        if: matrix.lane == 'workspace' && needs.plan.outputs.bazel_trusted != 'true'
-        run: |
-          # shellcheck disable=SC2086
-          cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}
-
       # Every existing compile-fail/pass fixture remains in the ui binary.
       # Keep workspace feature unification and the original cargo test command.
       - name: Seal-test the API surface
-        if: matrix.lane == 'seal'
         run: |
           # shellcheck disable=SC2086
           cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
@@ -386,11 +331,14 @@ jobs:
 
   # Python-only repository gates. These were serial steps of `check`, where
   # they sat behind twelve minutes of compilation for no reason: nothing here
-  # depends on the workspace check.
+  # depends on the workspace check. They self-check scripts, build tooling and
+  # CI config, so they are gated to diffs that touch those paths.
   repo-gates:
     name: Repository gates
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    needs: plan
+    if: needs.plan.outputs.tooling == 'true'
 
     steps:
       - name: Check out repository
@@ -552,12 +500,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: plan
-    # Deferred on pull requests per the 2026-08-25 CI-scope ruling, but required
-    # on every merge group -- including docs-only ones. This compile
-    # configuration is resolved nowhere else, and the change classifier
-    # certifies the diff, not the health of the base the group is built over
-    # (FIG-2854).
-    if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')) || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')
+    # Dispatch-only: this compile configuration is resolved nowhere else, so
+    # the release dispatch carries it (FIG-2854). The merge queue runs the same
+    # minimal board as pull requests.
+    if: github.event_name == 'workflow_dispatch' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')
 
     steps:
       - name: Check out repository
@@ -621,17 +567,17 @@ jobs:
   # (`cargo tree`) and the cfg-predicate analysis are pure analysis over
   # `cargo metadata`; they cost seconds and stay where they are.
   #
-  # Unlike the matrix it replaces, this runs on pull requests as well as on
-  # merge groups: on the pool the lane graph is a shared-cache lookup, so the
-  # evidence arrives before the queue instead of inside it. Untrusted events
-  # receive no cache credentials, so they keep the Cargo path: the lanes there
-  # are the pull request's `check` baseline plus the merge queue's own run.
+  # Dispatch-only: the lane graph is a shared-cache lookup on the pool, but it
+  # still doubles the PR job count for evidence the release dispatch already
+  # collects. On the dispatch profile `bazel_trusted` is always true, so the
+  # Cargo fallback below is dead code kept only as documentation of the
+  # untrusted path.
   feature-lanes:
     name: Feature lanes
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: plan
-    if: needs.plan.outputs.bazel_trusted == 'true' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')
+    if: github.event_name == 'workflow_dispatch' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true')
     environment: build-cache
     steps:
       - name: Check out repository
@@ -742,10 +688,13 @@ jobs:
         shell: bash
         run: |
           # shellcheck disable=SC2086
+          # `bazel test` also builds the non-test targets on its command line,
+          # so `//:workspace_compile` restores the workspace compile proof the
+          # deleted check lane carried.
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --cache_test_results=yes --test_output=errors \
-            //:workspace_tests
+            //:workspace_tests //:workspace_compile
 
       - name: Remove client credentials
         if: always()
@@ -1242,8 +1191,8 @@ jobs:
     timeout-minutes: 20
     needs: plan
     if: >-
-      needs.plan.outputs.regress == 'true'
-      || github.event_name == 'workflow_dispatch'
+      github.event_name == 'workflow_dispatch'
+      && (needs.plan.outputs.regress == 'true' || needs.plan.outputs.fail_open == 'true')
     environment: build-cache
     steps:
       - name: Check out repository
@@ -1319,9 +1268,12 @@ jobs:
     env:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
       LASH_REQUIRE_POSTGRES: "1"
-    # The stable matrix always supplies real PostgreSQL evidence on pull requests
-    # and merge groups. The heavier PG16 store/perf coverage remains deferred to
-    # the manual full-profile dispatch per the 2026-08-25 CI-scope ruling.
+    # The stores family is path-derived: only diffs touching a store crate, a
+    # migrations path, or a `.sql` file pay this leg; every other pull request
+    # used to spend 7-18 minutes of runner Cargo on PG16 for evidence nothing
+    # in the diff could change. The heavier PG16 store/perf coverage remains
+    # deferred to the manual full-profile dispatch, which still runs the full
+    # matrix, per the 2026-08-25 CI-scope ruling.
     if: needs.plan.outputs.stores == 'true'
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
