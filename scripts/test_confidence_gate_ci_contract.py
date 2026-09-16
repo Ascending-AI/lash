@@ -1674,6 +1674,84 @@ derive_mutation_jobs() {{
         self.assertIn('cron: "29 4 * * 0"', confidence_workflow)
         self.assertNotIn("scripts/confidence-gate.sh default", workflow)
 
+    def test_every_conformance_run_builds_its_spawn_helpers_first(self) -> None:
+        """The cold-process suites spawn example binaries nothing else builds.
+
+        `lash_conformance::helper_executable` resolves
+        `target/<profile>/examples/<name>`, and both helpers carry
+        `required-features = ["testing"]`, so no `cargo test --test conformance`
+        invocation produces them. One shared function builds them; this pins
+        that every conformance command in the gate is reached through it.
+        """
+        gate = GATE.read_text(encoding="utf-8")
+
+        definition = shell_function_definition(gate, "build_conformance_helpers")
+        for helper in (
+            "-p lash-internal-sqlite-store --locked --features testing",
+            "--example sqlite-await-event-helper",
+            "-p lash-internal-postgres-store --locked --features testing",
+            "--example postgres-await-event-helper",
+        ):
+            self.assertIn(helper, definition)
+
+        # Walk the script in order. A conformance command is only covered by a
+        # helper build that runs inside the same function.
+        built = False
+        conformance_commands = 0
+        for line in gate.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            # Only a top-level definition opens a new scope; the nested
+            # `cleanup_*` traps live inside the function they belong to.
+            if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\(\) \{$", line):
+                built = False
+                continue
+            if stripped == "build_conformance_helpers":
+                built = True
+                continue
+            if "--test conformance" in stripped:
+                conformance_commands += 1
+                self.assertTrue(
+                    built,
+                    f"conformance run not preceded by build_conformance_helpers: {stripped}",
+                )
+        self.assertGreaterEqual(conformance_commands, 10)
+
+    def test_every_gate_postgres_container_preloads_pg_stat_statements(self) -> None:
+        """The statement-count tests measure through the extension.
+
+        `pg_stat_statements` only exists when it is preloaded at server start,
+        so the flag belongs to the container. One shared starter means a later
+        container cannot be added without it.
+        """
+        gate = GATE.read_text(encoding="utf-8")
+
+        definition = shell_function_definition(gate, "start_gate_postgres")
+        self.assertIn("-c shared_preload_libraries=pg_stat_statements", definition)
+        self.assertIn('bash scripts/docker-pull-with-retry.sh "$gate_postgres_image"', definition)
+        self.assertIn('gate_postgres_image="postgres:16-alpine"', gate)
+
+        # `start_gate_postgres` is the only thing in the gate that starts one.
+        docker_runs = [
+            command
+            for command in shell_logical_commands(gate)
+            if command.startswith("docker run")
+        ]
+        self.assertEqual(len(docker_runs), 1)
+        self.assertIn('"$gate_postgres_image"', docker_runs[0])
+
+        starts = [
+            line.strip()
+            for line in gate.splitlines()
+            if line.strip().startswith("start_gate_postgres ")
+        ]
+        self.assertEqual(len(starts), 4, starts)
+
+        # The wrapper CI uses starts the same image the same way.
+        wrapper = (ROOT / "scripts" / "ci" / "with-service.sh").read_text(encoding="utf-8")
+        self.assertIn("shared_preload_libraries=pg_stat_statements", wrapper)
+
     def test_postgres_ci_lane_requires_database_configuration(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
