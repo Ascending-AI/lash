@@ -94,28 +94,59 @@ impl State {
         Ok(!outcome.inserted.is_empty())
     }
 
+    /// Binds `name`, reporting whether it replaced a binding.
+    ///
+    /// The report is about the binding, not about the host view of it: a
+    /// heap-backed name whose value cannot cross the host boundary is live and
+    /// is reported as replaced, even though [`State::globals`] never showed it.
+    /// That is why this cannot hand back the previous value — for exactly those
+    /// bindings there is no host value to hand back.
     pub fn insert_global(
         &mut self,
         name: impl Into<String>,
         value: Value,
-    ) -> Result<Option<Value>, RuntimeError> {
+    ) -> Result<bool, RuntimeError> {
         let name = name.into();
-        let previous = self.globals.get(&name).cloned();
+        let replaced = self.binding_exists(&name);
         self.patch_globals([GlobalPatch::Insert { name, value }])?;
-        Ok(previous)
+        Ok(replaced)
     }
 
+    /// Unbinds `name`, reporting whether a binding was removed.
+    ///
+    /// Reported from the record the removal wrote, on the same rule as
+    /// [`State::insert_global`].
     #[expect(
         clippy::expect_used,
         reason = "a single Remove patch can never exceed the heap byte bound, per the site's message"
     )]
-    pub fn remove_global(&mut self, name: &str) -> Option<Value> {
-        let previous = self.globals.get(name).cloned();
-        self.patch_globals([GlobalPatch::Remove {
-            name: name.to_string(),
-        }])
-        .expect("removing a global cannot exceed the heap bound");
-        previous
+    pub fn remove_global(&mut self, name: &str) -> bool {
+        !self
+            .patch_globals([GlobalPatch::Remove {
+                name: name.to_string(),
+            }])
+            .expect("removing a global cannot exceed the heap bound")
+            .removed
+            .is_empty()
+    }
+
+    /// Whether the runtime roots own the bindings, rather than the host view.
+    ///
+    /// A heapless state has never executed, so `globals` is the only record
+    /// there is and it owns itself. The inference is deliberately sticky: a
+    /// heap that has allocated stays heap-backed, so ownership never moves back
+    /// to the view mid-session.
+    fn heap_backed(&self) -> bool {
+        !self.runtime_globals.is_empty() || self.heap.has_runtime_state()
+    }
+
+    fn binding_exists(&self, name: &str) -> bool {
+        binding_exists(
+            self.heap_backed(),
+            &self.globals,
+            &self.runtime_globals,
+            name,
+        )
     }
 
     /// Applies a batch of global patches as one transaction.
@@ -126,6 +157,10 @@ impl State {
     /// rather than partially applied, and the caller's own bookkeeping can be
     /// committed together with it. The heap is cloned once and collected once
     /// per batch instead of once per key.
+    ///
+    /// Every existence decision and every reported outcome reads the record
+    /// that owns the binding — the runtime roots once the state is heap-backed
+    /// — never the host view, which deliberately omits whole bindings.
     pub fn patch_globals(
         &mut self,
         patch: impl IntoIterator<Item = GlobalPatch>,
@@ -134,28 +169,38 @@ impl State {
         if patch.is_empty() {
             return Ok(GlobalPatchOutcome::default());
         }
-        let heap_backed = !self.runtime_globals.is_empty() || self.heap.has_runtime_state();
+        let heap_backed = self.heap_backed();
         let mut globals = self.globals.clone();
         let mut runtime_globals = self.runtime_globals.clone();
         let mut heap = self.heap.clone();
         let mut outcome = GlobalPatchOutcome::default();
         for operation in patch {
             match operation {
-                GlobalPatch::SetDefault { name, value } if globals.get(&name).is_some() => {
+                GlobalPatch::SetDefault { name, .. }
+                    if binding_exists(heap_backed, &globals, &runtime_globals, &name) =>
+                {
                     outcome.unchanged.push(name);
-                    let _ = value;
                 }
                 GlobalPatch::Insert { name, value } | GlobalPatch::SetDefault { name, value } => {
                     if heap_backed {
                         runtime_globals.remove(&name);
                         let runtime_value = heap.isolate_value(&value)?;
                         runtime_globals.insert(name.clone(), runtime_value);
+                        // The view is a projection of the record just written,
+                        // so the write goes through the projection's rule
+                        // rather than around it.
+                        globals.remove(&name);
+                        if let Some(value) = host_visible(value) {
+                            globals.insert(name.clone(), value);
+                        }
+                    } else {
+                        globals.insert(name.clone(), value);
                     }
-                    globals.insert(name.clone(), value);
                     outcome.inserted.push(name);
                 }
                 GlobalPatch::Remove { name } => {
-                    let existed = globals.remove(&name).is_some();
+                    let existed = binding_exists(heap_backed, &globals, &runtime_globals, &name);
+                    globals.remove(&name);
                     if heap_backed {
                         runtime_globals.remove(&name);
                     }
@@ -239,9 +284,9 @@ impl State {
         // Closures do not cross a program boundary. Their function indices are
         // program-scoped, and the next cell compiles its own program, so a
         // rooted closure would survive collection only to fail that program's
-        // closure validation. `materialize_runtime_globals` already drops these
-        // globals from the exported view for the same reason; the runtime roots
-        // drop them too, which keeps both views agreeing on what a global
+        // closure validation. `host_view` already drops these globals from the
+        // projection for the same reason; the runtime roots drop them too,
+        // which keeps the owner and its projection agreeing on what a global
         // means and leaves the closure as garbage the next collection reclaims.
         let closure_reach = heap.closure_reach();
         let mut closure_rooted = Vec::new();
@@ -253,7 +298,7 @@ impl State {
         for symbol in closure_rooted {
             runtime_globals.remove_symbol(symbol);
         }
-        let globals = materialize_runtime_globals(&runtime_globals, &mut heap)?;
+        let globals = host_view(&runtime_globals, &mut heap)?;
         self.globals = globals;
         self.runtime_globals = runtime_globals;
         self.heap = heap;
@@ -261,24 +306,45 @@ impl State {
     }
 }
 
-pub(super) fn materialize_runtime_globals(
+/// Whether `name` is bound, read from the record that owns the binding.
+///
+/// When the state is heap-backed the runtime roots own the bindings and
+/// `globals` is a lossy projection of them, so asking the projection reports a
+/// live binding as absent — which is how a default used to overwrite one and a
+/// removal used to go unreported.
+fn binding_exists(
+    heap_backed: bool,
+    globals: &Record,
     runtime_globals: &Record,
-    heap: &mut Heap,
-) -> Result<Record, RuntimeError> {
+    name: &str,
+) -> bool {
+    if heap_backed {
+        runtime_globals.get(name).is_some()
+    } else {
+        globals.get(name).is_some()
+    }
+}
+
+/// Projects the heap-rooted runtime globals into the host-facing view.
+///
+/// This is the only derivation of `State::globals` and `Snapshot::globals`:
+/// the live install path, the VM's own `into_globals`, and the snapshot decoder
+/// all come through here, so the omission rule cannot be stated two ways. The
+/// view is never written to the wire precisely because it is derivable from the
+/// roots that are (ADR 0076).
+pub(super) fn host_view(runtime_globals: &Record, heap: &mut Heap) -> Result<Record, RuntimeError> {
     let mut globals = record_with_capacity(runtime_globals.len());
     for entry in runtime_globals.entries.iter() {
         match heap.export_for_instruction(&entry.value) {
-            // A pending-tool handle is execution-private the same way: it
-            // names a request slot of the VM that minted it. Exported, the
-            // next execution would read it as a live handle (and, before the
-            // execution nonce, its index aliased that execution's first
-            // call), so a binding holding one at any depth stays behind.
-            Ok(value) if super::value_contains_tool_handle(&value) => {}
             Ok(value) => {
-                globals.insert_symbolized(entry.symbol, entry.name.clone(), value);
+                if let Some(value) = host_visible(value) {
+                    globals.insert_symbolized(entry.symbol, entry.name.clone(), value);
+                }
             }
-            // Function values remain VM-private heap objects. A closure at any
-            // depth omits the whole global rather than leaking a partial tree.
+            // Function values remain VM-private heap objects, and the remaining
+            // JavaScript exotics have no detached host shape at all. A refused
+            // value at any depth omits the whole global rather than leaking a
+            // partial tree.
             Err(
                 RuntimeError::FunctionValueAtHostBoundary
                 | RuntimeError::JavaScriptExoticAtHostBoundary { .. },
@@ -287,6 +353,16 @@ pub(super) fn materialize_runtime_globals(
         }
     }
     Ok(globals)
+}
+
+/// The one rule for whether an exported value may appear in the host view.
+///
+/// A pending-tool handle is execution-private: it names a request slot of the
+/// VM that minted it. Exported, the next execution would read it as a live
+/// handle (and, before the execution nonce, its index aliased that execution's
+/// first call), so a binding holding one at any depth stays behind.
+fn host_visible(value: Value) -> Option<Value> {
+    (!super::value_contains_tool_handle(&value)).then_some(value)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -604,7 +680,7 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     .into_iter()
                     .map(|entry| entry.object.into_runtime().map(|object| (entry.id, object)))
                     .collect::<Result<_, _>>()?;
-                let heap = Heap::from_wire(
+                let mut heap = Heap::from_wire(
                     HeapRestoreWire {
                         next_id,
                         allocation_counter,
@@ -634,21 +710,11 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     });
                 }
                 drop(forest_roots);
-                let mut globals = Record::new();
-                for (name, value) in runtime_globals.iter() {
-                    match heap.export(value) {
-                        Ok(value) => {
-                            globals.insert(name.to_string(), value);
-                        }
-                        Err(
-                            RuntimeError::FunctionValueAtHostBoundary
-                            | RuntimeError::JavaScriptExoticAtHostBoundary { .. },
-                        ) => {}
-                        Err(error) => {
-                            return Err(SnapshotDecodeError::InvalidEncoding(error.to_string()));
-                        }
-                    }
-                }
+                // The view is not on the wire, so it is re-derived here — by
+                // the same single projection the live install path uses, or a
+                // restored state would not equal the state that was captured.
+                let globals = host_view(&runtime_globals, &mut heap)
+                    .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
                 Ok(Self {
                     globals,
                     runtime_globals,
