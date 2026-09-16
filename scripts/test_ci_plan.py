@@ -688,6 +688,104 @@ class FuzzSmokeTests(unittest.TestCase):
             self.assertTrue(any("empty seed files" in problem for problem in problems))
 
 
+class WorkbenchFeatureClosureTests(unittest.TestCase):
+    """An optional dependency is in the closure only when a feature enables it.
+
+    `lash-runtime` gates one optional first-party dependency per host-wired
+    extension (ADR 0079). The workbench asks for `rlm` and nothing else, so a
+    crate behind `s3` or `google` is not in the binary the Cargo partition
+    builds, and a change to it cannot change what that job executes. These
+    cases are built as a synthetic workspace because in the real manifests
+    every `rlm`-gated crate is also a direct workbench dependency, so the
+    repository alone cannot isolate the rule.
+    """
+
+    def closure(self, facade_manifest: str, workbench_features: str) -> set[str]:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            members = ("facade", "on", "off", "plain")
+            (root / "Cargo.toml").write_text(
+                "[workspace.dependencies]\n"
+                + "".join(
+                    f'{name} = {{ path = "crates/{name}" }}\n' for name in members
+                ),
+                encoding="utf-8",
+            )
+            for name in members:
+                directory = root / "crates" / name
+                directory.mkdir(parents=True)
+                (directory / "Cargo.toml").write_text(
+                    facade_manifest if name == "facade" else f'[package]\nname = "{name}"\n',
+                    encoding="utf-8",
+                )
+            workbench = root / ci_plan.WORKBENCH_MANIFEST_DIR
+            workbench.mkdir(parents=True)
+            (workbench / "Cargo.toml").write_text(
+                '[package]\nname = "agent-workbench"\n\n'
+                "[dependencies]\n"
+                + "facade = { workspace = true"
+                + (f", {workbench_features}" if workbench_features else "")
+                + " }\n",
+                encoding="utf-8",
+            )
+            return set(ci_plan.workbench_dependency_dirs(str(root)))
+
+    FACADE = """[package]
+name = "facade"
+
+[dependencies]
+on = { workspace = true, optional = true }
+off = { workspace = true, optional = true }
+plain = { workspace = true }
+
+[features]
+default = []
+enabled = ["dep:on"]
+disabled = ["dep:off"]
+"""
+
+    def test_only_the_enabled_optional_dependency_is_in_the_closure(self) -> None:
+        closure = self.closure(self.FACADE, 'features = ["enabled"]')
+        self.assertIn("crates/facade", closure)
+        self.assertIn("crates/on", closure)
+        self.assertIn("crates/plain", closure, "a non-optional dependency is unconditional")
+        self.assertNotIn("crates/off", closure)
+
+    def test_a_feature_reached_through_another_feature_still_enables_it(self) -> None:
+        manifest = self.FACADE.replace(
+            'default = []', 'default = ["enabled"]'
+        )
+        self.assertIn("crates/on", self.closure(manifest, ""))
+        self.assertNotIn(
+            "crates/on",
+            self.closure(manifest, "default-features = false"),
+            "`default-features = false` withholds the default feature",
+        )
+
+    def test_an_optional_dependency_keeps_its_implicit_feature(self) -> None:
+        """With no `dep:off` anywhere, `off` is itself the feature that enables it."""
+
+        manifest = self.FACADE.replace('disabled = ["dep:off"]', 'disabled = []')
+        self.assertIn("crates/off", self.closure(manifest, 'features = ["off"]'))
+        self.assertNotIn("crates/off", self.closure(manifest, 'features = ["disabled"]'))
+
+    def test_a_weak_forward_does_not_enable_the_dependency(self) -> None:
+        """`x?/feat` configures `x` if something else turns it on; it never does."""
+
+        manifest = self.FACADE.replace('disabled = ["dep:off"]', 'disabled = ["off?/any"]')
+        self.assertNotIn("crates/off", self.closure(manifest, 'features = ["disabled"]'))
+        self.assertIn(
+            "crates/on",
+            self.closure(
+                manifest.replace('enabled = ["dep:on"]', 'enabled = ["on/any"]'),
+                'features = ["enabled"]',
+            ),
+            "a strong `x/feat` forward does enable it",
+        )
+
+
 class WorkbenchClosureContractTests(unittest.TestCase):
     """The plan's dependency closure must agree with Cargo's own resolution.
 
@@ -698,9 +796,16 @@ class WorkbenchClosureContractTests(unittest.TestCase):
     """
 
     def cargo_workbench_closure(self) -> set[str]:
+        """The closure read off Cargo's own resolution.
+
+        This walks `resolve`, not the raw manifest dependency lists, because
+        an optional dependency is only compiled when a feature enables it and
+        the resolve graph is where Cargo records that decision.
+        """
+
         metadata = json.loads(
             subprocess.run(
-                ["cargo", "metadata", "--format-version", "1", "--locked", "--no-deps"],
+                ["cargo", "metadata", "--format-version", "1", "--locked"],
                 cwd=ROOT, text=True, capture_output=True, check=True,
             ).stdout
         )
@@ -709,23 +814,33 @@ class WorkbenchClosureContractTests(unittest.TestCase):
         def relative(path: str) -> str:
             return Path(path).relative_to(workspace_root).as_posix()
 
-        packages = {
-            relative(str(Path(package["manifest_path"]).parent)): package
+        directory = {
+            package["id"]: relative(str(Path(package["manifest_path"]).parent))
             for package in metadata["packages"]
+            if package.get("source") is None
         }
+        first_party = set(directory)
+        nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+        root = next(
+            identifier
+            for identifier, path in directory.items()
+            if path == ci_plan.WORKBENCH_MANIFEST_DIR
+        )
+
         closure: set[str] = set()
-        pending = [(ci_plan.WORKBENCH_MANIFEST_DIR, True)]
+        pending = [(root, True)]
         while pending:
-            directory, include_dev = pending.pop()
-            if directory in closure:
+            identifier, include_dev = pending.pop()
+            if directory[identifier] in closure:
                 continue
-            closure.add(directory)
-            for dependency in packages[directory]["dependencies"]:
-                if not dependency.get("path"):
+            closure.add(directory[identifier])
+            for dependency in nodes[identifier]["deps"]:
+                if dependency["pkg"] not in first_party:
                     continue
-                if dependency["kind"] == "dev" and not include_dev:
+                kinds = {kind.get("kind") for kind in dependency.get("dep_kinds", [])}
+                if kinds == {"dev"} and not include_dev:
                     continue
-                pending.append((relative(dependency["path"]), False))
+                pending.append((dependency["pkg"], False))
         return closure
 
     def test_the_plan_closure_matches_cargo_metadata(self) -> None:
