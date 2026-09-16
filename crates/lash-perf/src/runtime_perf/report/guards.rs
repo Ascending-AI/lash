@@ -9,6 +9,60 @@ use super::budgets::{
 };
 use super::{RuntimePerfScenario, RuntimePerfScenarioSummary};
 
+/// Which guard classes are allowed to fail the process.
+///
+/// This used to be a `(enforce_budgets, enforce_inventory)` bool pair: four
+/// combinations for three meanings, collapsed at the call site by
+/// `enforce_inventory && !enforce_budgets`. `(true, true)` silently meant
+/// "enforce everything", so `--runtime-perf-enforce-inventory` was a no-op
+/// whenever `--runtime-perf-enforce-budgets` was also passed, and no help text
+/// said so. Three modes, one value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BudgetEnforcement {
+    /// Report everything, fail on nothing.
+    #[default]
+    None,
+    /// Fail only on the machine-independent inventory class. Duration and
+    /// allocation ceilings are calibrated on the release profile.
+    InventoryOnly,
+    /// Fail on every non-advisory class.
+    All,
+}
+
+impl BudgetEnforcement {
+    /// The mode the two CLI flags select.
+    ///
+    /// Passing both is refused rather than silently resolved: it used to mean
+    /// "budgets", which is the opposite of what an operator reaching for the
+    /// narrower flag is asking for.
+    pub fn from_flags(enforce_budgets: bool, enforce_inventory: bool) -> anyhow::Result<Self> {
+        match (enforce_budgets, enforce_inventory) {
+            (true, true) => anyhow::bail!(
+                "--runtime-perf-enforce-inventory is narrower than --runtime-perf-enforce-budgets; pass one"
+            ),
+            (true, false) => Ok(Self::All),
+            (false, true) => Ok(Self::InventoryOnly),
+            (false, false) => Ok(Self::None),
+        }
+    }
+
+    fn enforces(self, class: RuntimePerfGuardClass) -> bool {
+        match self {
+            Self::None => false,
+            Self::InventoryOnly => class == RuntimePerfGuardClass::Inventory,
+            Self::All => true,
+        }
+    }
+
+    /// The label a failure carries, so the operator sees which mode refused.
+    pub(super) fn failure_label(self) -> &'static str {
+        match self {
+            Self::InventoryOnly => "Runtime perf inventory check failed",
+            Self::None | Self::All => "Runtime perf budget exceeded",
+        }
+    }
+}
+
 /// What a guard result is allowed to do when it fails.
 ///
 /// The class is a property of the metric, decided once here rather than
@@ -86,23 +140,22 @@ impl RuntimePerfBudgetResult {
 /// [`report_advisory_exceedances`] and never reach here.
 pub(super) fn enforcement_failures(
     results: &[RuntimePerfBudgetResult],
-    inventory_only: bool,
+    enforcement: BudgetEnforcement,
 ) -> Vec<String> {
     results
         .iter()
-        .filter(|result| gates_run(result, inventory_only))
+        .filter(|result| gates_run(result, enforcement))
         .map(RuntimePerfBudgetResult::describe)
         .collect()
 }
 
 /// Whether a failed guard result is allowed to fail the process. Advisory
-/// (wall-clock) results never are; `--enforce-inventory` narrows the rest to
-/// the machine-independent inventory class.
-pub(super) fn gates_run(result: &RuntimePerfBudgetResult, inventory_only: bool) -> bool {
+/// (wall-clock) results never are; the enforcement mode decides the rest.
+pub(super) fn gates_run(result: &RuntimePerfBudgetResult, enforcement: BudgetEnforcement) -> bool {
     if result.passed || result.class.is_advisory() {
         return false;
     }
-    !inventory_only || result.class == RuntimePerfGuardClass::Inventory
+    enforcement.enforces(result.class)
 }
 
 /// Wall-clock exceedances never fail the run, so the only way they stay
@@ -308,31 +361,66 @@ mod tests {
     }
 
     #[test]
-    fn every_guard_class_declares_its_enforcement_under_both_flag_modes() {
+    fn every_guard_class_declares_its_enforcement_in_every_mode() {
+        use BudgetEnforcement::{All, InventoryOnly, None};
         use RuntimePerfGuardClass::{Allocation, Duration, Inventory};
 
-        for class in RuntimePerfGuardClass::ALL {
-            assert!(
-                !gates_run(&guard_result(class, true), false),
-                "{class:?}: a passing result never fails the run"
+        // The full table: three classes x three modes x passed/failed. The
+        // class axis was already exhaustive; the mode axis used to be two
+        // bools sampled at two of their four combinations.
+        let expected = [
+            (Inventory, None, false),
+            (Inventory, InventoryOnly, true),
+            (Inventory, All, true),
+            (Allocation, None, false),
+            // Allocation ceilings are release-calibrated, so the narrow mode
+            // skips them and the release mode enforces them.
+            (Allocation, InventoryOnly, false),
+            (Allocation, All, true),
+            // Wall-clock ceilings are advisory in every mode (FIG-1385).
+            (Duration, None, false),
+            (Duration, InventoryOnly, false),
+            (Duration, All, false),
+        ];
+        for (class, enforcement, gates) in expected {
+            assert_eq!(
+                gates_run(&guard_result(class, false), enforcement),
+                gates,
+                "{class:?} under {enforcement:?}"
             );
             assert!(
-                !gates_run(&guard_result(class, true), true),
-                "{class:?}: a passing result never fails the inventory run"
+                !gates_run(&guard_result(class, true), enforcement),
+                "{class:?} under {enforcement:?}: a passing result never fails the run"
             );
         }
+        assert_eq!(
+            expected.len(),
+            RuntimePerfGuardClass::ALL.len() * 3,
+            "every class must be listed under every mode"
+        );
+    }
 
-        // Inventory checks are machine-independent, so they gate both the
-        // PR-time inventory run and the release budget run.
-        assert!(gates_run(&guard_result(Inventory, false), true));
-        assert!(gates_run(&guard_result(Inventory, false), false));
-        // Allocation ceilings are release-calibrated: enforced by
-        // --enforce-budgets, skipped by --enforce-inventory.
-        assert!(!gates_run(&guard_result(Allocation, false), true));
-        assert!(gates_run(&guard_result(Allocation, false), false));
-        // Wall-clock ceilings are advisory in every mode (FIG-1385).
-        assert!(!gates_run(&guard_result(Duration, false), true));
-        assert!(!gates_run(&guard_result(Duration, false), false));
+    #[test]
+    fn the_flag_pair_selects_three_modes_and_refuses_the_fourth() {
+        assert_eq!(
+            BudgetEnforcement::from_flags(false, false).unwrap(),
+            BudgetEnforcement::None
+        );
+        assert_eq!(
+            BudgetEnforcement::from_flags(true, false).unwrap(),
+            BudgetEnforcement::All
+        );
+        assert_eq!(
+            BudgetEnforcement::from_flags(false, true).unwrap(),
+            BudgetEnforcement::InventoryOnly
+        );
+        // The fourth combination used to resolve silently to "budgets", which
+        // made the narrower flag a no-op.
+        let both = BudgetEnforcement::from_flags(true, true)
+            .unwrap_err()
+            .to_string();
+        assert!(both.contains("--runtime-perf-enforce-inventory"), "{both}");
+        assert!(both.contains("--runtime-perf-enforce-budgets"), "{both}");
     }
 
     #[test]

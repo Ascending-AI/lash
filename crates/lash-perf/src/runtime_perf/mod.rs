@@ -11,4 +11,4 @@ mod smoke;
 mod store;
 
 pub use duration_trend::run_duration_trend_cli;
-pub use report::run_cli;
+pub use report::{BudgetEnforcement, RuntimePerfRun, run_cli};
