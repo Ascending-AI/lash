@@ -23,6 +23,7 @@ lash_rust_library(
     ],
     extra_compile_data = [
         "//:perf_guard_budgets",
+        "//:perf_duration_level_shifts",
     ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -44,6 +45,7 @@ lash_rust_unit_test(
     exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//:perf_guard_budgets",
+        "//:perf_duration_level_shifts",
     ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -228,6 +230,7 @@ lash_rust_feature_library(
     ],
     extra_compile_data = [
         "//:perf_guard_budgets",
+        "//:perf_duration_level_shifts",
     ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -252,6 +255,7 @@ lash_rust_feature_library(
     ],
     extra_compile_data = [
         "//:perf_guard_budgets",
+        "//:perf_duration_level_shifts",
     ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -277,6 +281,7 @@ lash_rust_feature_test(
     exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//:perf_guard_budgets",
+        "//:perf_duration_level_shifts",
     ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -304,6 +309,7 @@ lash_rust_feature_test(
     exec_properties = {"cpu_count": "4", "memory_kb": "2621440"},
     extra_compile_data = [
         "//:perf_guard_budgets",
+        "//:perf_duration_level_shifts",
     ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
