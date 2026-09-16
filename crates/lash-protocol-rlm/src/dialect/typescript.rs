@@ -914,7 +914,7 @@ mod tests {
             "signal_run",
             "define_process",
             "register_trigger",
-            "__typescript_runtime",
+            lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH,
         ];
         // Misuse shapes for the primitives the Host API block declares. Each
         // must reject, and reject in TypeScript's own vocabulary.

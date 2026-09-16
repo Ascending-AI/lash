@@ -191,7 +191,7 @@ pub(super) async fn typescript_runtime_values_replay_from_the_journal_after_reop
     // module call is linked; before FIG-3079 this form never reached here.
     let receiver = lashlang::Value::Resource(lashlang::ResourceHandle::new(
         lash_lashlang_runtime::TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
-        "__typescript_runtime",
+        lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH,
     ));
 
     async fn sample(
@@ -235,8 +235,8 @@ pub(super) async fn typescript_runtime_values_replay_from_the_journal_after_reop
                 other => panic!("`{operation}` returns a number, got {other:?}"),
             }
         };
-        let now = number("now").await;
-        let random = number("random").await;
+        let now = number(lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION).await;
+        let random = number(lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION).await;
         (now, random)
     }
 

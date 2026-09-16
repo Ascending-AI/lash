@@ -167,8 +167,8 @@ pub(super) fn has_literal_stdlib_receiver(expr: &Expr) -> bool {
 pub(super) fn journaled_runtime_call(operation: &str) -> LashExpr {
     LashExpr::ReceiverCall {
         receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::resolved(
-            vec!["__typescript_runtime".into()],
-            "typescript.Runtime",
+            vec![crate::TYPESCRIPT_RUNTIME_MODULE_PATH.into()],
+            crate::TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
             "builtin",
         ))),
         operation: operation.into(),

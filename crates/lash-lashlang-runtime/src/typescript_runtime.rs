@@ -8,7 +8,7 @@
 /// module call rewrites the receiver to the catalog's resolved module ref,
 /// whose alias is the module-path key `__typescript_runtime`. Both forms reach
 /// a host, so neither alias may gate this dispatch (FIG-3079).
-pub const TYPESCRIPT_RUNTIME_RESOURCE_TYPE: &str = "typescript.Runtime";
+pub use lash_typescript::TYPESCRIPT_RUNTIME_RESOURCE_TYPE;
 
 /// Resolves the TypeScript dialect's nondeterministic standard-library calls.
 ///
@@ -40,7 +40,12 @@ pub async fn journaled_typescript_runtime_value(
             "TypeScript runtime `{operation}` expects no arguments"
         ))));
     }
-    if !matches!(operation, "now" | "random") {
+    if ![
+        lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+        lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION,
+    ]
+    .contains(&operation)
+    {
         return Some(Err(lashlang::ExecutionHostError::new(format!(
             "unknown TypeScript runtime operation `{operation}`"
         ))));
