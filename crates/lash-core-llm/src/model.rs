@@ -342,6 +342,98 @@ mod tests {
         );
     }
 
+    /// The deprecated token-limit constructors are still the public route hosts
+    /// take to build a spec from raw `usize` budgets, so their validation seam
+    /// and the values they carry through are pinned here, not only through the
+    /// builder.
+    #[test]
+    #[expect(
+        deprecated,
+        reason = "this test is the assertion floor for the deprecated token-limit constructors"
+    )]
+    fn model_deprecated_token_limit_constructors_carry_limits_and_refuse_zero() {
+        let spec = ModelSpec::from_token_limits(
+            "provider/deprecated",
+            ReasoningSelection::Effort("high".to_string()),
+            128_000,
+            Some(8_192),
+        )
+        .expect("valid token limits");
+
+        assert_eq!(spec.id, "provider/deprecated");
+        assert_eq!(spec.variant, ReasoningSelection::Effort("high".to_string()));
+        assert_eq!(spec.context_window_tokens(), 128_000);
+        assert_eq!(
+            spec.limits.output_token_capacity.map(NonZeroUsize::get),
+            Some(8_192)
+        );
+        assert_ne!(
+            spec,
+            ModelSpec::default(),
+            "a constructed spec must not collapse to the default spec"
+        );
+
+        let unknown_output_cap = ModelSpec::from_token_limits(
+            "provider/unknown-output",
+            ReasoningSelection::ProviderDefault,
+            4_096,
+            None,
+        )
+        .expect("an unknown output ceiling is valid");
+        assert_eq!(unknown_output_cap.context_window_tokens(), 4_096);
+        assert_eq!(unknown_output_cap.limits.output_token_capacity, None);
+
+        assert_eq!(
+            ModelSpec::from_token_limits(
+                "provider/zero-context",
+                ReasoningSelection::ProviderDefault,
+                0,
+                Some(16),
+            )
+            .expect_err("a zero prompt budget is refused"),
+            ModelLimitsError::ZeroContextWindowTokens
+        );
+        assert_eq!(
+            ModelSpec::from_token_limits(
+                "provider/zero-output",
+                ReasoningSelection::ProviderDefault,
+                4_096,
+                Some(0),
+            )
+            .expect_err("a present zero output capacity is refused"),
+            ModelLimitsError::ZeroOutputTokenCapacity
+        );
+
+        let limits = ModelLimits::from_token_limits(64_000, Some(4_096)).expect("valid limits");
+        assert_eq!(limits.context_window_tokens.get(), 64_000);
+        assert_eq!(
+            limits.output_token_capacity.map(NonZeroUsize::get),
+            Some(4_096)
+        );
+        assert_ne!(
+            limits,
+            ModelLimits::default(),
+            "constructed limits must not collapse to the default limits"
+        );
+
+        assert_eq!(
+            ModelLimits::from_token_limits(32_768, None).expect("valid limits"),
+            ModelLimits {
+                context_window_tokens: NonZeroUsize::new(32_768).expect("non-zero"),
+                output_token_capacity: None,
+            }
+        );
+        assert_eq!(
+            ModelLimits::from_token_limits(0, None).expect_err("a zero prompt budget is refused"),
+            ModelLimitsError::ZeroContextWindowTokens
+        );
+        assert_eq!(
+            ModelLimits::from_token_limits(32_768, Some(0))
+                .expect_err("a present zero output capacity is refused"),
+            ModelLimitsError::ZeroOutputTokenCapacity
+        );
+    }
+
     #[test]
     fn model_spec_builder_covers_model_metadata_and_requires_context_window() {
         let spec = ModelSpec::builder("provider/model")
