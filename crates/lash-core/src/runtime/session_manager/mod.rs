@@ -181,15 +181,11 @@ enum ProcessVisibilityOperation {
 
 impl ProcessVisibility {
     fn consults_filter(self, operation: ProcessVisibilityOperation) -> bool {
-        matches!(
-            (self, operation),
-            (
-                Self::ModelTool,
-                ProcessVisibilityOperation::ListVisible
-                    | ProcessVisibilityOperation::ListVisibleForAttempt
-                    | ProcessVisibilityOperation::ValidateVisible
-            )
-        )
+        match (self, operation) {
+            (_, ProcessVisibilityOperation::ListVisible) => self != Self::Full,
+            (_, ProcessVisibilityOperation::ListVisibleForAttempt) => self != Self::Full,
+            (_, ProcessVisibilityOperation::ValidateVisible) => self != Self::Full,
+        }
     }
 }
 
