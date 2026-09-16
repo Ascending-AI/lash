@@ -211,6 +211,27 @@ impl PostgresStorage {
         Ok(Self { pool })
     }
 
+    /// Open a host-provisioned schema without DDL or seed writes.
+    ///
+    /// Only the component version is checked at runtime. Run [`Self::verify_schema`]
+    /// after host migrations and before rolling out the application to check all
+    /// required relations, columns, and the process-change clock seed.
+    pub async fn from_provisioned_pool(pool: PgPool) -> Result<Self, StoreError> {
+        let mut connection = pool.acquire().await.map_err(store_sqlx_error)?;
+        verify_schema_version(&mut connection).await?;
+        drop(connection);
+        Ok(Self { pool })
+    }
+
+    /// Check a host-provisioned schema in a read-only transaction.
+    ///
+    /// Checks the component version, required relations and columns, and the
+    /// process-change clock seed. It does not compare column types, indexes, or
+    /// constraints; host migration and conformance tests own those checks.
+    pub async fn verify_schema(pool: &PgPool) -> Result<(), StoreError> {
+        verify_provisioned_schema(pool).await
+    }
+
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
@@ -314,6 +335,7 @@ impl PostgresSessionStore {
 }
 
 include!("postgres/schema.rs");
+include!("postgres/schema_check.rs");
 include!("postgres/support.rs");
 include!("postgres/attachments.rs");
 include!("postgres/effect_replay.rs");
