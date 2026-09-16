@@ -27,6 +27,8 @@ FAMILIES = (
     "workbench",
     "regress",
     "schema",
+    "facade",
+    "tooling",
 )
 CHANGE_STATUSES = frozenset({"A", "M", "D", "T"})
 
@@ -216,6 +218,8 @@ def workbench_dependency_dirs(repo_root: str | None = None) -> frozenset[str]:
     return frozenset(requested)
 
 GATED_JOBS = {
+    "check": "facade",
+    "repo-gates": "tooling",
     "lashlang-git-consumer": "rust",
     "feature-lanes": "rust",
     "workspace-tests": "rust",
@@ -230,18 +234,13 @@ GATED_JOBS = {
     "unicode-tests": "regress",
 }
 
-# Dedicated compile configurations that witness a queued rust head, resolving
-# their own feature graph rather than the workspace one, so the workspace check
-# does not cover them. `feature-lanes` used to belong here: its predecessors
-# were deferred on pull requests because fourteen Cargo legs of up to 504 s
-# were too expensive to run twice. On the pool the lane graph is a shared-cache
-# lookup, so it now runs on pull requests too and is an ordinary `rust` family
-# job. What remains here stays skipped on pull_request, skips docs-only merge
-# groups (workspace `check` still compiles those heads), and keeps `rust`
-# family behaviour on workflow_dispatch.
-QUEUE_REQUIRED_COMPILE_JOBS = {
-    "lashlang-git-consumer",
-}
+# `feature-lanes` and `lashlang-git-consumer` used to run on pull requests or
+# merge groups: the lane graph is a pool cache lookup and the consumer compile
+# is resolved nowhere else. Both left the PR critical path when the board was
+# cut to its minimum: a PR runs only the Bazel partition plus path-gated jobs,
+# and the release dispatch is now their sole home alongside the other
+# deferred families.
+
 
 # Jobs deferred entirely to the manual full-profile run (workflow_dispatch):
 # their job-level conditions skip them on pull_request and merge_group events.
@@ -250,15 +249,16 @@ QUEUE_REQUIRED_COMPILE_JOBS = {
 # profile release.yml certifies against.
 # postgres-store is intentionally absent: its focused runtime Agent Scenario
 # runs on pull requests and merge groups while its heavier steps remain
-# dispatch-only. The QUEUE_REQUIRED_COMPILE_JOBS above are absent for the same
-# kind of reason: they are deferred on pull_request only, and required in the
-# queue when rust ran.
+# dispatch-only.
 DISPATCH_ONLY_JOBS = {
     "heavy-tests",
     "stack-budget",
     "s3-store",
     "functional-e2e",
     "functional-e2e-process-operations",
+    "feature-lanes",
+    "unicode-tests",
+    "lashlang-git-consumer",
     # The fuzz smoke stays off the pull-request critical path by design: its
     # bounded corpus run guards trunk without taxing every PR (FIG-878).
     "fuzz-smoke",
@@ -293,8 +293,6 @@ UNGATED_JOBS = {
     "worker-artifacts",
     "plan",
     "facade-only-examples",
-    "check",
-    "repo-gates",
     "lint",
     "diff-hygiene",
     "secret-scan",
@@ -388,6 +386,46 @@ def _is_schema_path(path: str) -> bool:
     return path.startswith(("crates/lash-postgres-store/", "crates/lash-sqlite-store/"))
 
 
+# `stores` is path-derived: every production diff used to pay 7-18 min of
+# runner Cargo for the PG16 leg. The release dispatch still runs the full
+# matrix, so only the PR/merge-queue trigger narrows.
+def _is_stores_path(path: str) -> bool:
+    return (
+        path.startswith(
+            (
+                "crates/lash-postgres-store/",
+                "crates/lash-s3-store/",
+                "crates/lash-core-store/",
+                "crates/lash-conformance/",
+                "crates/lash-sim/",
+                "crates/lash-sqlite-store/",
+            )
+        )
+        or "migrations" in PurePosixPath(path).parts
+        or PurePosixPath(path).suffix == ".sql"
+    )
+
+
+# `facade` gates the seal lane: only the facade crate's public API or the root
+# manifests can break the API surface it seals.
+def _is_facade_path(path: str) -> bool:
+    return path.startswith("crates/lash/") or path in {"Cargo.toml", "Cargo.lock"}
+
+
+# `tooling` gates repo-gates: scripts, build tooling and CI config are the
+# only inputs its self-checks read.
+def _is_tooling_path(path: str) -> bool:
+    name = PurePosixPath(path).name
+    return (
+        path.startswith(("scripts/", "tools/", ".github/", ".config/"))
+        or path == "justfile"
+        or name in {"Cargo.toml", "Cargo.lock", "BUILD.bazel"}
+        or name.startswith("rust-toolchain")
+        or name.startswith("MODULE.bazel")
+        or PurePosixPath(path).suffix == ".bzl"
+    )
+
+
 def _is_docs_path(path: str) -> bool:
     name = PurePosixPath(path).name.lower()
     return (
@@ -411,9 +449,9 @@ def _is_known_path(path: str) -> bool:
     return (
         _is_global_invalidator(path)
         or _is_docs_path(path)
-        or path.startswith(("crates/", "examples/", "runbooks/", ".github/actions/", ".config/", "fuzz/"))
+        or path.startswith(("crates/", "examples/", "runbooks/", ".github/actions/", ".config/", "fuzz/", "tools/"))
         or path.startswith(("src/", "tests/", "benches/"))
-        or suffix in {".rs", ".toml", ".json", ".yaml", ".yml", ".lock"}
+        or suffix in {".rs", ".toml", ".json", ".yaml", ".yml", ".lock", ".bzl", ".bazel"}
     )
 
 
@@ -494,12 +532,17 @@ def classify(
     outputs.update(
         {
             "rust": "true",
-            "stores": str(breadth).lower(),
             "functional_e2e": str(breadth).lower(),
             "workers_e2e": str(breadth).lower(),
             "workbench": str(workbench_hit).lower(),
             "regress": str(any(_is_regress_path(path) for path in paths)).lower(),
             "schema": str(any(_is_schema_path(path) for path in paths)).lower(),
+            "facade": str(any(_is_facade_path(path) for path in paths)).lower(),
+            "tooling": str(any(_is_tooling_path(path) for path in paths)).lower(),
+            # `stores` is path-derived (see _is_stores_path); `functional_e2e`
+            # and `workers_e2e` keep the breadth flag because their jobs are
+            # dispatch/label-only anyway.
+            "stores": str(any(_is_stores_path(path) for path in paths)).lower(),
         }
     )
     return outputs
@@ -582,13 +625,20 @@ def evaluate_conclusion(
                     f" {event_name} event, expected skipped"
                 )
             continue
-        if job in QUEUE_REQUIRED_COMPILE_JOBS and event_name in DEFERRED_EVENTS:
-            rust_on = plan_outputs.get("rust") == "true" or fail_open_output == "true"
-            wanted = "success" if event_name == "merge_group" and rust_on else "skipped"
-            if result != wanted:
+        if job == "check":
+            # The seal lane also runs on every workflow_dispatch, where it is
+            # required regardless of the diff's facade selection.
+            required = (
+                plan_outputs.get("facade") == "true"
+                or event_name == "workflow_dispatch"
+            )
+            if required and result != "success":
                 problems.append(
-                    f"queue-required compile job {job} ended with {result!r} on a"
-                    f" {event_name} event, expected {wanted}"
+                    f"{job} ended with {result!r} on a {event_name} event, expected success"
+                )
+            elif not required and result not in {"success", "skipped"}:
+                problems.append(
+                    f"{job} ended with {result!r} although plan.facade allowed only success or skip"
                 )
             continue
         if job == "postgres-store" and event_name in DEFERRED_EVENTS:
@@ -619,11 +669,13 @@ def evaluate_conclusion(
                     f" expected {wanted}"
                 )
             continue
-        if job == "unicode-tests":
-            if event_name == "workflow_dispatch":
-                wanted = "success"
-            else:
-                wanted = "success" if plan_outputs.get("regress") == "true" else "skipped"
+        if job == "unicode-tests" and event_name == "workflow_dispatch":
+            wanted = (
+                "success"
+                if plan_outputs.get("regress") == "true"
+                or fail_open_output == "true"
+                else "skipped"
+            )
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} on a {event_name} event, expected {wanted}"

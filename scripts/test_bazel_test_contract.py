@@ -788,7 +788,7 @@ class BazelTestContractTests(unittest.TestCase):
         for job_id in ("lint", "check"):
             with self.subTest(job=job_id):
                 self.assertEqual("plan", jobs[job_id]["needs"])
-                self.assertEqual("build-cache", jobs[job_id]["environment"])
+        self.assertEqual("build-cache", jobs["lint"]["environment"])
 
         clippy_bazel = job_step(
             jobs["lint"], "Clippy (workspace, all targets, shared cache)"
@@ -819,29 +819,24 @@ class BazelTestContractTests(unittest.TestCase):
             e2e["run"],
         )
 
-        doc_bazel = job_step(jobs["check"], "Check workspace with shared cache")
-        self.assertEqual(f"matrix.lane == 'workspace' && {trusted}", doc_bazel["if"])
-        self.assertIn("//:workspace_compile", doc_bazel["run"])
-        self.assertNotIn("workspace_doctests", doc_bazel["run"])
-        # Nothing on this runner reads the compiled outputs; a compile error
-        # still fails the build, so the artifacts stay in the remote CAS.
-        self.assertIn("--remote_download_outputs=minimal", doc_bazel["run"])
-
-        check_cargo = job_step(jobs["check"], "Check workspace (all targets)")
-        self.assertEqual(f"matrix.lane == 'workspace' && {untrusted}", check_cargo["if"])
-        self.assertIn(
-            "cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}",
-            check_cargo["run"],
+        # The workspace compile proof moved into the Bazel test partition:
+        # `bazel test` builds the non-test targets on its command line, so
+        # `//:workspace_compile` rides the same invocation. The test run must
+        # keep `toplevel` downloads (BAZEL_SHARED_CACHE_FLAGS sets it), so
+        # `minimal` must not appear here.
+        bazel_test = job_step(
+            jobs["bazel-tests"], "Test deterministic workspace suite with shared cache"
         )
+        self.assertIn("//:workspace_tests //:workspace_compile", bazel_test["run"])
+        self.assertNotIn("workspace_doctests", bazel_test["run"])
+        self.assertNotIn("--remote_download_outputs=minimal", bazel_test["run"])
 
         self.assertNotIn("--doc", yaml.safe_dump(jobs["check"]))
 
-        for job_id in ("lint", "check"):
-            with self.subTest(job=job_id):
-                setup = job_step(jobs[job_id], "Configure Bazel shared cache")
-                self.assertEqual(
-                    "./.github/actions/bazel-shared-cache", setup["uses"]
-                )
+        setup = job_step(jobs["lint"], "Configure Bazel shared cache")
+        self.assertEqual(
+            "./.github/actions/bazel-shared-cache", setup["uses"]
+        )
     def test_service_jobs_never_reuse_a_cached_service_test_result(self) -> None:
         """A cached green for a live-service test is a false green.
 
@@ -945,7 +940,7 @@ class BazelTestContractTests(unittest.TestCase):
             "fail_open": "false",
             **{family: "true" for family in ci_plan.FAMILIES},
         }
-        for job in ci_plan.DISPATCH_ONLY_JOBS | ci_plan.QUEUE_REQUIRED_COMPILE_JOBS:
+        for job in ci_plan.DISPATCH_ONLY_JOBS:
             needs[job]["result"] = "skipped"
         needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
         self.assertEqual(
