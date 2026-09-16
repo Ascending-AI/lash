@@ -10,6 +10,7 @@ case "$LASH_CONFIDENCE_STAGE" in
     bootstrap_tools
     cargo test --workspace --all-targets --locked --no-run
     cargo build --workspace --bins --locked
+    cargo build --workspace --examples --locked
     cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
     ;;
   harnesses)
