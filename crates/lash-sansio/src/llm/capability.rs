@@ -300,14 +300,16 @@ pub enum ModelEffortValidationCategory {
 }
 
 impl ModelEffortValidationCategory {
-    /// Stable snake_case code, matching the serde representation. Turn-driver
-    /// validation surfaces this as the turn-issue code.
-    pub(crate) fn code(&self) -> &'static str {
+    /// The typed turn-failure code the turn driver surfaces for this
+    /// validation category. Its wire spelling matches the serde
+    /// representation of this enum.
+    pub fn failure_code(&self) -> crate::session_model::TurnFailureCode {
+        use crate::session_model::TurnFailureCode as Code;
         match self {
-            Self::UnsupportedEffort => "unsupported_effort",
-            Self::EffortNotConfigurable => "effort_not_configurable",
-            Self::EffortRequired => "effort_required",
-            Self::MalformedCapability => "malformed_capability",
+            Self::UnsupportedEffort => Code::UnsupportedEffort,
+            Self::EffortNotConfigurable => Code::EffortNotConfigurable,
+            Self::EffortRequired => Code::EffortRequired,
+            Self::MalformedCapability => Code::MalformedCapability,
         }
     }
 }
@@ -698,19 +700,27 @@ mod tests {
     #[test]
     fn category_codes_are_stable_snake_case() {
         assert_eq!(
-            ModelEffortValidationCategory::UnsupportedEffort.code(),
+            ModelEffortValidationCategory::UnsupportedEffort
+                .failure_code()
+                .as_str(),
             "unsupported_effort"
         );
         assert_eq!(
-            ModelEffortValidationCategory::EffortNotConfigurable.code(),
+            ModelEffortValidationCategory::EffortNotConfigurable
+                .failure_code()
+                .as_str(),
             "effort_not_configurable"
         );
         assert_eq!(
-            ModelEffortValidationCategory::EffortRequired.code(),
+            ModelEffortValidationCategory::EffortRequired
+                .failure_code()
+                .as_str(),
             "effort_required"
         );
         assert_eq!(
-            ModelEffortValidationCategory::MalformedCapability.code(),
+            ModelEffortValidationCategory::MalformedCapability
+                .failure_code()
+                .as_str(),
             "malformed_capability"
         );
     }

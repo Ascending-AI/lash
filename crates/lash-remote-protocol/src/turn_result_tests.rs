@@ -90,7 +90,7 @@ fn issue_severity_is_required_and_has_pinned_wire_values() {
         );
         let issue = RemoteTurnIssue {
             severity,
-            kind: "runtime".into(),
+            kind: RemoteTurnFailureKind::Runtime,
             code: None,
             terminal_reason: None,
             message: "evidence".into(),
@@ -190,4 +190,78 @@ fn remote_provider_failure_kind_refuses_future_literals() {
             kind
         );
     }
+}
+
+/// FIG-3094: a host distinguishes the failure classes it reacts to by matching
+/// typed arms, never by substring-matching the display message, and the wire
+/// spellings are exactly the ones the untyped field carried.
+#[test]
+fn turn_issue_failure_vocabulary_is_typed_and_wire_stable() {
+    let cases = [
+        (
+            RemoteTurnFailureKind::LlmProvider,
+            RemoteTurnFailureCode::ContextOverflow,
+            "llm_provider",
+            "context_overflow",
+        ),
+        (
+            RemoteTurnFailureKind::LlmProvider,
+            RemoteTurnFailureCode::ContentFilter,
+            "llm_provider",
+            "content_filter",
+        ),
+        (
+            RemoteTurnFailureKind::Runtime,
+            RemoteTurnFailureCode::SessionGraphScope,
+            "runtime",
+            "session_graph_scope",
+        ),
+        (
+            RemoteTurnFailureKind::TokenUsageAccounting,
+            RemoteTurnFailureCode::TokenUsageOverflow,
+            "token_usage_accounting",
+            "token_usage_overflow",
+        ),
+    ];
+    for (kind, code, kind_wire, code_wire) in cases {
+        let issue = RemoteTurnIssue {
+            severity: RemoteTurnIssueSeverity::Blocking,
+            kind: kind.clone(),
+            code: Some(code.clone()),
+            terminal_reason: None,
+            message: "human prose a host must not parse".into(),
+            raw: None,
+            retryable: None,
+            provider_failure_kind: None,
+        };
+        let wire = serde_json::to_value(&issue).expect("serialize issue");
+        assert_eq!(wire["kind"], serde_json::json!(kind_wire));
+        assert_eq!(wire["code"], serde_json::json!(code_wire));
+        let decoded: RemoteTurnIssue = serde_json::from_value(wire).expect("decode issue");
+        assert_eq!(decoded.kind, kind);
+        assert_eq!(decoded.code, Some(code));
+    }
+
+    // A spelling this build does not own — a provider error code, or an arm a
+    // newer peer added — round-trips through the open arms without loss.
+    let foreign = serde_json::json!({
+        "severity": "blocking",
+        "kind": "a_kind_from_a_newer_peer",
+        "code": "429",
+        "message": "rate limited",
+    });
+    let decoded: RemoteTurnIssue =
+        serde_json::from_value(foreign.clone()).expect("decode foreign issue");
+    assert_eq!(
+        decoded.kind,
+        RemoteTurnFailureKind::Unknown("a_kind_from_a_newer_peer".to_string())
+    );
+    assert_eq!(
+        decoded.code,
+        Some(RemoteTurnFailureCode::Other("429".to_string()))
+    );
+    assert_eq!(
+        serde_json::to_value(&decoded).expect("re-encode foreign issue")["kind"],
+        serde_json::json!("a_kind_from_a_newer_peer")
+    );
 }

@@ -14,8 +14,9 @@ pub use lash_sansio::session_model::{
     ConversationRecord, ErrorEnvelope, MAIN_AGENT_INTRO, Message, MessageRole, NoProgressBudget,
     Part, PartKind, PromptBuiltin, PromptSlot, PromptTemplate, PromptTemplateEntry,
     PromptTemplateSection, ProtocolEvent, PruneState, SessionStreamEvent, TokenUsage,
-    TokenUsageOverflow, TurnBudget, default_prompt_template, make_error_envelope, make_error_event,
-    reassign_part_ids, render_prompt, render_transcript_prompt, shared_parts,
+    TokenUsageOverflow, TurnBudget, TurnFailureCode, TurnFailureKind, default_prompt_template,
+    make_error_envelope, make_error_event, reassign_part_ids, render_prompt,
+    render_transcript_prompt, shared_parts,
 };
 
 pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;

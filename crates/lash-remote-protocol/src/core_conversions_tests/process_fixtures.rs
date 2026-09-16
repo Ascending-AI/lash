@@ -110,6 +110,7 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         ),
         disposition: lash_core::RecoveryContract::ExternallyOwned,
         error: None,
+        error_code: None,
         created_at_ms: 1,
         updated_at_ms: 2,
         first_started: None,

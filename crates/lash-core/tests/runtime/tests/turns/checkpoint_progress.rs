@@ -464,7 +464,11 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
         &turn.outcome,
         TurnOutcome::Stopped(TurnStop::PluginAbort)
     ));
-    assert!(turn.errors.iter().any(|issue| issue.kind == "plugin"));
+    assert!(
+        turn.errors
+            .iter()
+            .any(|issue| issue.kind == lash_core::TurnFailureKind::Plugin)
+    );
     assert!(
         active_conversation_messages(&turn.state)
             .iter()
@@ -610,7 +614,11 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
         &turn.outcome,
         TurnOutcome::Stopped(TurnStop::ProviderError)
     ));
-    assert!(turn.errors.iter().any(|issue| issue.kind == "llm_provider"));
+    assert!(
+        turn.errors
+            .iter()
+            .any(|issue| issue.kind == lash_core::TurnFailureKind::LlmProvider)
+    );
     assert!(
         turn.errors
             .iter()
@@ -618,11 +626,10 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
     );
     // The transport's typed retryable signal survives into the host-facing
     // issue instead of living only in trace records.
-    assert!(
-        turn.errors
-            .iter()
-            .any(|issue| issue.kind == "llm_provider" && issue.retryable == Some(true))
-    );
+    assert!(turn.errors.iter().any(
+        |issue| issue.kind == lash_core::TurnFailureKind::LlmProvider
+            && issue.retryable == Some(true)
+    ));
     assert_eq!(turn.llm_calls.len(), 1);
     assert_eq!(turn.llm_calls[0].attempts.len(), 4);
 }
@@ -666,14 +673,17 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
     let issue = turn
         .errors
         .iter()
-        .find(|issue| issue.kind == "llm_provider")
+        .find(|issue| issue.kind == lash_core::TurnFailureKind::LlmProvider)
         .expect("llm_provider issue");
     assert_eq!(issue.retryable, Some(false));
     assert_eq!(
         issue.provider_failure_kind,
         Some(lash_core::ProviderFailureKind::Validation)
     );
-    assert_eq!(issue.code.as_deref(), Some("400"));
+    assert_eq!(
+        issue.code,
+        Some(lash_core::TurnFailureCode::Other("400".to_string()))
+    );
     assert_eq!(turn.llm_calls.len(), 1);
     assert_eq!(turn.llm_calls[0].attempts.len(), 1);
 }

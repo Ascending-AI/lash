@@ -554,8 +554,8 @@ fn output_state_traceback_only() {
 fn output_state_recovered_from_error() {
     let issues = vec![TurnIssue {
         severity: lash_core::runtime::TurnIssueSeverity::Blocking,
-        kind: "runtime".to_string(),
-        code: Some("example".to_string()),
+        kind: lash_core::TurnFailureKind::Runtime,
+        code: Some(lash_core::TurnFailureCode::Other("example".to_string())),
         terminal_reason: None,
         message: "something failed".to_string(),
         raw: None,
@@ -646,8 +646,10 @@ fn producer_severity_controls_completion_independently_of_issue_code() {
         assembler.push(&SessionStreamEvent::Done);
         let issue = TurnIssue {
             severity,
-            kind: "runtime".into(),
-            code: Some("arbitrary-new-code".into()),
+            kind: lash_core::TurnFailureKind::Runtime,
+            code: Some(lash_core::TurnFailureCode::Other(
+                "arbitrary-new-code".to_string(),
+            )),
             terminal_reason: None,
             message: "evidence".into(),
             raw: None,

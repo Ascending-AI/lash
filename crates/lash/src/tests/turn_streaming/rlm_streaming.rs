@@ -1259,9 +1259,11 @@ pub(super) fn rlm_native_provider_tool_call_is_a_traced_non_retryable_turn_issue
             .result
             .errors
             .iter()
-            .find(|issue| issue.code.as_deref() == Some("native_tool_call_not_allowed"))
+            .find(|issue| {
+                issue.code == Some(crate::turn::TurnFailureCode::NativeToolCallNotAllowed)
+            })
             .expect("typed RLM native-tool-call issue");
-        assert_eq!(issue.kind, "rlm_protocol");
+        assert_eq!(issue.kind, crate::turn::TurnFailureKind::RlmProtocol);
         assert_eq!(issue.retryable, Some(false));
         assert!(issue.message.contains("native_lookup"));
         assert!(issue.message.contains("must flow through the cell program"));

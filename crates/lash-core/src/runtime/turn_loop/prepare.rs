@@ -127,7 +127,7 @@ impl LashRuntime {
                     events,
                     Some(TerminalDiagnostic {
                         kind: TerminalDiagnosticKind::InputValidation,
-                        code: Some("invalid_turn_input".to_string()),
+                        code: Some(crate::TurnFailureCode::InvalidTurnInput),
                         message: e,
                         retryable: Some(false),
                         activity: TerminalActivityTarget::UnscopedSink {

@@ -49,11 +49,9 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
         attempt.protocol_position,
         lash_core::ProtocolPosition::TerminalObserved
     );
-    assert!(
-        turn.errors.iter().all(|error| {
-            error.code.as_deref() != Some("stream_evidence_before_response_start")
-        })
-    );
+    assert!(turn.errors.iter().all(|error| {
+        error.code != Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart)
+    }));
 }
 
 #[tokio::test]
@@ -103,9 +101,7 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
         .expect("protocol evidence failure returns an assembled turn");
 
     assert!(matches!(turn.outcome, TurnOutcome::Stopped(_)));
-    assert!(
-        turn.errors.iter().any(|error| {
-            error.code.as_deref() == Some("stream_evidence_before_response_start")
-        })
-    );
+    assert!(turn.errors.iter().any(|error| {
+        error.code == Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart)
+    }));
 }

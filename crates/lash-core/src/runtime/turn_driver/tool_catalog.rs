@@ -88,7 +88,7 @@ impl RuntimeTurnDriver<'_> {
             Ok(surface) => surface,
             Err(err) => {
                 emit!(make_error_event(
-                    "plugin_prompt",
+                    crate::TurnFailureKind::PluginPrompt,
                     None,
                     err.to_string(),
                     Some(err.to_string()),
@@ -316,8 +316,8 @@ impl RuntimeTurnDriver<'_> {
             Ok(resolved) => policy.model.variant = resolved,
             Err(error) => {
                 return Err(Box::new(make_error_event(
-                    "llm_provider",
-                    Some(error.category.code()),
+                    crate::TurnFailureKind::LlmProvider,
+                    Some(error.category.failure_code()),
                     error.message.clone(),
                     Some(error.message),
                 )));

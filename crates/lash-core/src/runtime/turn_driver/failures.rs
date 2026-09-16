@@ -6,8 +6,8 @@ impl RuntimeTurnDriver<'_> {
         err: RuntimeEffectControllerError,
     ) {
         machine.fail_turn(make_error_event(
-            "runtime_effect_controller",
-            Some(err.code.as_str()),
+            crate::TurnFailureKind::RuntimeEffectController,
+            Some(crate::TurnFailureCode::Other(err.code.as_str().to_string())),
             err.message,
             None,
         ));

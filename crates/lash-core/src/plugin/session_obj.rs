@@ -132,12 +132,12 @@ pub(crate) fn plugin_lifecycle_hook_issue(error: PluginError) -> crate::runtime:
         PluginError::SessionExecutionLeaseLost { session_id } => {
             return crate::runtime::TurnIssue {
                 severity: crate::runtime::TurnIssueSeverity::Blocking,
-                kind: "runtime".to_string(),
-                code: Some(
+                kind: crate::TurnFailureKind::Runtime,
+                code: Some(crate::TurnFailureCode::Other(
                     crate::RuntimeErrorCode::SessionExecutionLeaseLost
                         .as_str()
                         .to_string(),
-                ),
+                )),
                 terminal_reason: None,
                 message: format!(
                     "session execution lease for session `{session_id}` was lost before commit"
@@ -151,8 +151,8 @@ pub(crate) fn plugin_lifecycle_hook_issue(error: PluginError) -> crate::runtime:
     };
     crate::runtime::TurnIssue {
         severity: crate::runtime::TurnIssueSeverity::Blocking,
-        kind: "plugin".to_string(),
-        code: Some("lifecycle_hook_failed".to_string()),
+        kind: crate::TurnFailureKind::Plugin,
+        code: Some(crate::TurnFailureCode::LifecycleHookFailed),
         terminal_reason: None,
         message: error.to_string(),
         raw: None,

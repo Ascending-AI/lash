@@ -596,17 +596,18 @@ pub use lash_sansio::{
     CancelOrigin, CancelRequest, CellFailure, CellFailureKind, CheckpointDelivery, CheckpointKind,
     CompactToolContract, DegradedBinding, ExecResponse, ExecutedCall, ExecutedCallOutcome,
     ExecutedCallRecord, FrameKey, FrameKeyError, InputId, LashSchema, LlmCallError, MediaType,
-    Message, MessageOrigin, MessageRole, NodeId, Observation, OmittedToolCalls, Part, PartKind,
-    PluginMessage, PluginRuntimeEvent, ProjectionMode, PromptBuiltin, PromptContribution,
-    PromptContributionBody, PromptContributionGate, PromptLayer, PromptSlot, PromptSlotLayer,
-    PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PruneState, SchemaContract,
-    SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata,
-    TokenUsage, TokenUsageOverflow, ToolActivation, ToolArgumentProjectionPolicy, ToolCallOutcome,
-    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
-    ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition, ToolDiscovery, ToolFailure,
-    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity,
-    ToolIntentKind, ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy,
-    ToolRetryStatus, ToolValue, TurnCause, TurnId, TurnOutputSource,
+    Message, MessageOrigin, MessageRole, NodeId, Observation, ObservedProcessFailure,
+    OmittedToolCalls, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
+    PromptBuiltin, PromptContribution, PromptContributionBody, PromptContributionGate, PromptLayer,
+    PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
+    PruneState, SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy,
+    SessionAppendNode, TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
+    ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolContract,
+    ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource,
+    ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+    ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus,
+    ToolValue, TurnCause, TurnId, TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -774,6 +775,7 @@ pub type TurnMachine = lash_sansio::TurnMachine<HostTurnProtocol>;
 ///
 /// Protocol-engine implementors construct this configuration at their boundary.
 pub type TurnMachineConfig = lash_sansio::TurnMachineConfig<HostTurnProtocol>;
+pub use lash_sansio::{TurnFailureCode, TurnFailureKind};
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{

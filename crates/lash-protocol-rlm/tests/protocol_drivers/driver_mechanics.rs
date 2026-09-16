@@ -79,7 +79,7 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
         Effect::Emit(SessionStreamEvent::Error {
             envelope: Some(envelope),
             ..
-        }) if envelope.code.as_deref() == Some("empty_response")
+        }) if envelope.code == Some(lash_sansio::TurnFailureCode::EmptyResponse)
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,

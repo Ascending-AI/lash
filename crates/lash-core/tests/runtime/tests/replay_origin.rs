@@ -206,7 +206,7 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
     let events = trace_events(&trace_path);
     assert_drop_survived(&turn, &events);
     assert!(turn.errors.iter().any(|error| {
-        error.code.as_deref() == Some("provider_replay_origin_conflict")
+        error.code == Some(lash_core::TurnFailureCode::ProviderReplayOriginConflict)
             && !error.message.contains("foreign-stream-signature")
     }));
     assert!(events.iter().any(|event| matches!(
@@ -336,7 +336,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
     )
     .await;
     assert!(turn.errors.iter().any(|error| {
-        error.code.as_deref() == Some("provider_replay_origin_conflict")
+        error.code == Some(lash_core::TurnFailureCode::ProviderReplayOriginConflict)
             && error.message.contains("confirm2 original provider failure")
     }));
     let events = trace_events(&trace_path);
@@ -344,7 +344,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
     let issue = turn
         .errors
         .iter()
-        .find(|error| error.code.as_deref() == Some("provider_replay_origin_conflict"))
+        .find(|error| error.code == Some(lash_core::TurnFailureCode::ProviderReplayOriginConflict))
         .expect("typed replay-origin conflict issue");
     assert_eq!(
         issue.provider_failure_kind,

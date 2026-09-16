@@ -1,17 +1,25 @@
-use lash_core::session_model::make_error_event;
+use lash_core::session_model::{TurnFailureCode, TurnFailureKind, make_error_event};
 use lash_core::{DriverAction, facade_support::TurnOutcome, facade_support::TurnStop};
 
 pub(crate) fn invalid_driver_state_actions(error: String) -> Vec<DriverAction> {
-    runtime_error_actions("rlm_driver_state", "invalid_driver_state", error)
+    runtime_error_actions(
+        TurnFailureKind::RlmDriverState,
+        TurnFailureCode::InvalidDriverState,
+        error,
+    )
 }
 
 pub(crate) fn invalid_turn_options_actions(error: String) -> Vec<DriverAction> {
-    runtime_error_actions("rlm_turn_options", "invalid_turn_options", error)
+    runtime_error_actions(
+        TurnFailureKind::RlmTurnOptions,
+        TurnFailureCode::InvalidTurnOptions,
+        error,
+    )
 }
 
 pub(crate) fn runtime_error_actions(
-    category: &'static str,
-    code: &'static str,
+    category: TurnFailureKind,
+    code: TurnFailureCode,
     error: String,
 ) -> Vec<DriverAction> {
     vec![

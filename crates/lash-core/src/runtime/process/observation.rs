@@ -64,8 +64,14 @@ pub struct ObservedProcess {
     pub identity: ProcessIdentity,
     /// Declared recovery contract (ADR 0019). Raw fact; hosts classify.
     pub disposition: RecoveryContract,
+    /// Human-readable summary of the terminal failure, for display only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Typed classification of the same terminal failure. Present exactly when
+    /// `error` is, so a polling host discriminates a failure class or a
+    /// cancellation without matching the display string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<crate::ObservedProcessFailure>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
     /// Durable execution-started fact, if the row has begun executing.
@@ -370,6 +376,7 @@ impl ObservedProcess {
             identity,
             disposition: record.disposition,
             error: terminal_error(record.outcome.as_ref()),
+            error_code: terminal_error_code(record.outcome.as_ref()),
             created_at_ms: record.created_at_ms,
             updated_at_ms: record.updated_at_ms,
             first_started: record.first_started.map(|started| *started),
@@ -431,6 +438,31 @@ impl From<ProcessEvent> for ObservedProcessEvent {
             occurred_at_ms: event.occurred_at,
             payload: event.payload,
         }
+    }
+}
+
+/// The typed classification of the same terminal outcome `terminal_error`
+/// renders as prose. The two are produced from one settled outcome and are
+/// present or absent together.
+fn terminal_error_code(
+    outcome: Option<&ProcessAwaitOutput>,
+) -> Option<crate::ObservedProcessFailure> {
+    match outcome? {
+        ProcessAwaitOutput::Settled { output } => match &output.outcome {
+            crate::ToolCallOutcome::Failure(failure) => {
+                Some(crate::ObservedProcessFailure::Failed {
+                    class: failure.class.clone(),
+                    code: failure.code.clone(),
+                })
+            }
+            crate::ToolCallOutcome::Cancelled(cancellation) => {
+                Some(crate::ObservedProcessFailure::Cancelled {
+                    origin: cancellation.origin,
+                })
+            }
+            crate::ToolCallOutcome::Success(_) => None,
+        },
+        ProcessAwaitOutput::Abandoned { .. } | ProcessAwaitOutput::NoLongerRetained { .. } => None,
     }
 }
 
@@ -879,6 +911,20 @@ mod tests {
         assert_eq!(cancelled.status_label(), "cancelled");
         assert!(cancelled.terminal());
         assert_eq!(cancelled.error.as_deref(), Some("cancelled intentionally"));
+
+        // FIG-3094: a polling host reads the typed classification beside the
+        // display string instead of matching the prose.
+        assert_eq!(
+            failed.error_code,
+            Some(crate::ObservedProcessFailure::Failed {
+                class: ToolFailureClass::External,
+                code: "boom".to_string(),
+            })
+        );
+        assert_eq!(
+            cancelled.error_code,
+            Some(crate::ObservedProcessFailure::Cancelled { origin: None })
+        );
     }
 
     #[tokio::test]

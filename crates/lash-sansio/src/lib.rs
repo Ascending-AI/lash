@@ -81,8 +81,9 @@ pub use session_model::{
     PromptTemplate, PromptTemplateEntry, PromptTemplateSection, ProtocolEvent, PruneState,
     RenderedPrompt, ResolvedPromptLayer, SessionAppendNode, SessionHistoryRecord,
     SessionStreamEvent, TokenUsage, TokenUsageOverflow, TurnBudget, TurnCancelDisposition,
-    TurnCancelMode, TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnStop,
-    default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
+    TurnCancelMode, TurnCancellationEvidence, TurnFailureCode, TurnFailureKind, TurnFinish,
+    TurnOutcome, TurnStop, default_prompt_template, messages_are_prompt_resume_safe,
+    resolve_prompt_layers, shared_parts,
 };
 pub use standard_batch::BatchResultRow;
 pub use tool_catalog::{
@@ -99,10 +100,11 @@ pub use tool_contract::{
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason,
     AttachmentMaterializationSource, CancelOrigin, CancelRequest, ModelToolReturn,
-    ModelToolReturnPart, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCallStatus,
-    ToolCancellation, ToolControl, ToolFailure, ToolFailureClass, ToolFailureSource,
-    ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
-    ToolRetryStatus, ToolValue, format_tool_output_content, model_parts_from_tool_output,
+    ModelToolReturnPart, ObservedProcessFailure, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureClass,
+    ToolFailureSource, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+    ToolIntentRefusalReason, ToolRetryStatus, ToolValue, format_tool_output_content,
+    model_parts_from_tool_output,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{

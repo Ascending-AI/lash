@@ -194,7 +194,13 @@ pub use usage_activity::*;
 // require `source_capture`, and a window-76 peer writes neither, so its
 // subscriptions have no contract to validate a delivery against and no route to
 // restore; such a record is refused rather than defaulted. Peers must adopt 77.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 78;
+// Window 79: FIG-3094 types the host-facing failure vocabulary. A turn issue's
+// `kind` and `code` and an observed process's new `error_code` are typed rather
+// than free-form, and the process snapshot carries the typed classification
+// beside its display string. The spellings a window-78 peer writes for `kind`
+// and `code` are unchanged and decode into the same arms, but `error_code` is a
+// field a window-78 peer neither writes nor expects, so peers must adopt 79.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 79;
 
 /// One versioned remote-protocol message.
 ///

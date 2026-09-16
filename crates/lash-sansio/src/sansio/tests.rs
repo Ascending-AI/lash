@@ -1260,8 +1260,8 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
         Effect::Emit(SessionStreamEvent::Error {
             envelope: Some(envelope),
             ..
-        }) if envelope.kind == "token_usage_accounting"
-            && envelope.code.as_deref() == Some("token_usage_overflow")
+        }) if envelope.kind == crate::session_model::TurnFailureKind::TokenUsageAccounting
+            && envelope.code == Some(crate::session_model::TurnFailureCode::TokenUsageOverflow)
             && envelope.user_message.contains("input_total_tokens")
     )));
     assert!(effects.iter().any(|effect| matches!(

@@ -173,8 +173,11 @@ async fn controller_rejection_fails_turn_explicitly() {
         TurnOutcome::Stopped(TurnStop::RuntimeError)
     ));
     assert!(turn.errors.iter().any(|issue| {
-        issue.kind == "runtime_effect_controller"
-            && issue.code.as_deref() == Some("test_controller_rejected")
+        issue.kind == lash_core::TurnFailureKind::RuntimeEffectController
+            && issue.code
+                == Some(lash_core::TurnFailureCode::Other(
+                    "test_controller_rejected".to_string(),
+                ))
     }));
 }
 
@@ -209,8 +212,11 @@ async fn wrong_controller_outcome_fails_turn_explicitly() {
         TurnOutcome::Stopped(TurnStop::RuntimeError)
     ));
     assert!(turn.errors.iter().any(|issue| {
-        issue.kind == "runtime_effect_controller"
-            && issue.code.as_deref() == Some("runtime_effect_wrong_outcome")
+        issue.kind == lash_core::TurnFailureKind::RuntimeEffectController
+            && issue.code
+                == Some(lash_core::TurnFailureCode::Other(
+                    "runtime_effect_wrong_outcome".to_string(),
+                ))
     }));
 }
 

@@ -1,7 +1,9 @@
 use crate::SessionId;
+pub mod failure;
 pub mod message;
 pub mod prompt;
 
+pub use failure::{TurnFailureCode, TurnFailureKind};
 pub use message::{
     BaseRenderCache, Message, MessageRole, MessageSequence, Part, PartAttachment, PartKind,
     PruneState, RenderedPrompt, append_rendered_prompt, messages_are_prompt_resume_safe,
@@ -370,9 +372,14 @@ impl TokenUsage {
 /// [`SessionHistoryRecord`].
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ErrorEnvelope {
-    pub kind: String,
+    /// Typed origin of the failure. Serializes as the same snake_case string
+    /// the field carried when it was a bare `String`, and an unrecognized
+    /// spelling decodes as [`TurnFailureKind::Unknown`] rather than failing.
+    pub kind: TurnFailureKind,
+    /// Typed failure code within `kind`, with the same wire spelling and the
+    /// same forward-compatible decode as `kind`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
+    pub code: Option<TurnFailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<crate::llm::types::LlmTerminalReason>,
     pub user_message: String,
@@ -650,16 +657,16 @@ impl TurnCancellationEvidence {
 }
 
 pub fn make_error_envelope(
-    kind: &str,
-    code: Option<&str>,
+    kind: TurnFailureKind,
+    code: Option<TurnFailureCode>,
     terminal_reason: Option<crate::llm::types::LlmTerminalReason>,
     user_message: impl Into<String>,
     raw: Option<String>,
 ) -> ErrorEnvelope {
     let user_message = user_message.into();
     ErrorEnvelope {
-        kind: kind.to_string(),
-        code: code.map(str::to_string),
+        kind,
+        code,
         terminal_reason,
         user_message,
         raw: raw.map(|s| truncate_raw_error(s.trim())),
@@ -669,8 +676,8 @@ pub fn make_error_envelope(
 }
 
 pub fn make_error_event(
-    kind: &str,
-    code: Option<&str>,
+    kind: TurnFailureKind,
+    code: Option<TurnFailureCode>,
     user_message: impl Into<String>,
     raw: Option<String>,
 ) -> SessionStreamEvent {
@@ -731,7 +738,8 @@ pub fn model_tool_specs(tools: &[ToolDefinition]) -> Vec<LlmToolSpec> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ErrorEnvelope, NoProgressBudget, SessionStreamEvent, TokenUsage, TurnBudget, TurnOutcome,
+        ErrorEnvelope, NoProgressBudget, SessionStreamEvent, TokenUsage, TurnBudget,
+        TurnFailureCode, TurnFailureKind, TurnOutcome,
     };
     use crate::llm::types::{LlmTerminalReason, ProviderFailureKind};
 
@@ -847,7 +855,11 @@ mod tests {
             "raw":"{\"error\":\"rate_limited\"}"
         }"#;
         let envelope: ErrorEnvelope = serde_json::from_str(legacy).expect("legacy envelope");
-        assert_eq!(envelope.kind, "llm_provider");
+        assert_eq!(envelope.kind, TurnFailureKind::LlmProvider);
+        assert_eq!(
+            envelope.code,
+            Some(TurnFailureCode::Other("429".to_string()))
+        );
         assert_eq!(envelope.retryable, None);
         assert_eq!(envelope.provider_failure_kind, None);
 
@@ -872,8 +884,8 @@ mod tests {
     #[test]
     fn error_envelope_roundtrips_retryability_fields() {
         let envelope = ErrorEnvelope {
-            kind: "llm_provider".to_string(),
-            code: Some("429".to_string()),
+            kind: TurnFailureKind::LlmProvider,
+            code: Some(TurnFailureCode::Other("429".to_string())),
             terminal_reason: Some(LlmTerminalReason::ProviderError),
             user_message: "LLM error: rate limited".to_string(),
             raw: None,
@@ -894,8 +906,8 @@ mod tests {
     #[test]
     fn error_envelope_omits_unset_retryability_fields_on_the_wire() {
         let envelope = ErrorEnvelope {
-            kind: "plugin".to_string(),
-            code: Some("plugin_abort".to_string()),
+            kind: TurnFailureKind::Plugin,
+            code: Some(TurnFailureCode::Other("plugin_abort".to_string())),
             terminal_reason: None,
             user_message: "stopped".to_string(),
             raw: None,

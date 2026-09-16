@@ -430,8 +430,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn handle_response(&mut self, response: Response) {
         if let Err(overflow) = self.try_handle_response(response) {
             self.fail_turn(make_error_event(
-                "token_usage_accounting",
-                Some("token_usage_overflow"),
+                crate::session_model::TurnFailureKind::TokenUsageAccounting,
+                Some(crate::session_model::TurnFailureCode::TokenUsageOverflow),
                 format!(
                     "token usage counter `{}` overflowed while accumulating turn usage",
                     overflow.counter()
@@ -507,8 +507,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
             }
             Err(error) => {
                 self.fail_turn(make_error_event(
-                    "execution_environment",
-                    Some("reconfigure_failed"),
+                    crate::session_model::TurnFailureKind::ExecutionEnvironment,
+                    Some(crate::session_model::TurnFailureCode::ReconfigureFailed),
                     format!("Failed to refresh execution environment: {error}"),
                     Some(error),
                 ));
@@ -747,8 +747,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .clone()
             .unwrap_or_else(|| format!("Model call ended with terminal reason {reason:?}."));
         let mut envelope = crate::session_model::make_error_envelope(
-            "llm_provider",
-            Some(reason.code()),
+            crate::session_model::TurnFailureKind::LlmProvider,
+            Some(reason.into()),
             Some(reason),
             diagnostic.clone(),
             None,
@@ -855,8 +855,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn emit_llm_error(&mut self, error: LlmCallError) {
         self.record_llm_error(&error);
         let mut envelope = crate::session_model::make_error_envelope(
-            "llm_provider",
-            error.code.as_deref(),
+            crate::session_model::TurnFailureKind::LlmProvider,
+            error
+                .code
+                .as_deref()
+                .map(crate::session_model::TurnFailureCode::from_wire),
             Some(error.terminal_reason),
             format!("LLM error: {}", error.message),
             error.raw.clone(),
