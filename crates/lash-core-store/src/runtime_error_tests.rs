@@ -144,6 +144,7 @@ fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         | RuntimeErrorCode::InvalidAwaitEventWaitIdentity
         | RuntimeErrorCode::InvalidTurnCancelRequest
         | RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
+        | RuntimeErrorCode::AgentFrameSwitchAuthorConflict
         | RuntimeErrorCode::LlmProvider
         | RuntimeErrorCode::Plugin
         | RuntimeErrorCode::PostgresEffectReplayCorruptRow
@@ -298,6 +299,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
         RuntimeErrorCode::TurnStreamJoin,
         RuntimeErrorCode::EmptyAgentFrameRun,
         RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported,
+        RuntimeErrorCode::AgentFrameSwitchAuthorConflict,
         RuntimeErrorCode::DurableEffectLiveProtocolExtension,
         RuntimeErrorCode::DurableEffectLivePluginInput,
         RuntimeErrorCode::AwaitEventCancelUnsupported,

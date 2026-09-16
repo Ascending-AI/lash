@@ -101,6 +101,12 @@ pub enum RuntimeErrorCode {
     /// switching it would replace resident configuration without a commanded
     /// config patch, and no such patch supports historical-frame switching.
     HistoricalAgentFrameSwitchUnsupported,
+    /// Two authors named a different agent-frame switch for one turn, or named
+    /// the same frame with different seed nodes. A turn materializes at most
+    /// one switch and there is no precedence order between its authors, so the
+    /// commit is refused before any durable write. The identical turn fails
+    /// identically until one of the two authors stops switching.
+    AgentFrameSwitchAuthorConflict,
     DurableEffectLiveProtocolExtension,
     DurableEffectLivePluginInput,
     AwaitEventCancelUnsupported,
@@ -405,6 +411,7 @@ impl RuntimeErrorCode {
             Self::HistoricalAgentFrameSwitchUnsupported => {
                 "historical_agent_frame_switch_unsupported"
             }
+            Self::AgentFrameSwitchAuthorConflict => "agent_frame_switch_author_conflict",
             Self::DurableEffectLiveProtocolExtension => "durable_effect_live_protocol_extension",
             Self::DurableEffectLivePluginInput => "durable_effect_live_plugin_input",
             Self::AwaitEventCancelUnsupported => "await_event_cancel_unsupported",
@@ -663,6 +670,7 @@ impl RuntimeErrorCode {
                 | Self::InvalidAwaitEventWaitIdentity
                 | Self::InvalidTurnCancelRequest
                 | Self::HistoricalAgentFrameSwitchUnsupported
+                | Self::AgentFrameSwitchAuthorConflict
                 | Self::LlmProvider
                 | Self::Plugin
                 | Self::PostgresEffectReplayCorruptRow
@@ -803,6 +811,7 @@ impl RuntimeErrorCode {
             "historical_agent_frame_switch_unsupported" => {
                 Self::HistoricalAgentFrameSwitchUnsupported
             }
+            "agent_frame_switch_author_conflict" => Self::AgentFrameSwitchAuthorConflict,
             "durable_effect_live_protocol_extension" => Self::DurableEffectLiveProtocolExtension,
             "durable_effect_live_plugin_input" => Self::DurableEffectLivePluginInput,
             "await_event_cancel_unsupported" => Self::AwaitEventCancelUnsupported,

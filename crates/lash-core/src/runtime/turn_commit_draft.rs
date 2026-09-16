@@ -28,8 +28,10 @@ pub(in crate::runtime) struct RecordedTurnGraphAppend {
     outcome: crate::AppendSessionNodesOutcome,
 }
 
-/// A FIG-3107 plug-in frame switch recorded under the running turn: one slot,
-/// consumed by the turn's final commit, never at an intermediate boundary.
+/// The one agent-frame switch a running turn carries: recorded by whichever
+/// author reached the slot first (a FIG-3107 plugin switch or the turn's own
+/// `AgentFrameSwitch` outcome), consumed by the turn's final commit, never at
+/// an intermediate boundary.
 #[derive(Clone, Debug)]
 pub(in crate::runtime) struct RecordedFrameSwitch {
     pub(in crate::runtime) identity: String,
@@ -46,8 +48,8 @@ struct TurnGraphAppendDraftInner {
     active_node_ids: HashSet<crate::NodeId>,
     leaf_node_id: Option<crate::NodeId>,
     recorded: Vec<RecordedTurnGraphAppend>,
-    /// Plugin-visible frame switch (FIG-3107): recorded under the running
-    /// turn's id, materialized by the turn's final commit.
+    /// The turn's one agent-frame switch (FIG-3107, FIG-3303): recorded under
+    /// the running turn's id, materialized by the turn's final commit.
     frame_switch: Option<RecordedFrameSwitch>,
     /// Prefix of `recorded` already folded into the turn's final state.
     applied: usize,
@@ -169,10 +171,30 @@ impl TurnGraphAppendDraft {
     }
 
     /// Records a FIG-3107 frame switch under the running turn's scope and
-    /// answers it the way the turn's materialization would: a replayed
-    /// operation id answers the first outcome, a reused operation id for a
-    /// different frame is a typed conflict, and a switch naming the
-    /// already-current frame answers `opened = false` with no fold work.
+    /// answers it the way the turn's materialization would.
+    ///
+    /// This slot is the turn's single owning source of truth for "this commit
+    /// opens this frame" (FIG-3303). Every author records here: a plugin
+    /// through `SessionGraphService::switch_agent_frame`, and the turn's own
+    /// protocol `AgentFrameSwitch` outcome once the outcome is known. One turn
+    /// therefore carries at most one switch and the final commit has exactly
+    /// one application site for it.
+    ///
+    /// The conflict rule is stated on the switch, not on its author - there is
+    /// no precedence order between a plugin and the protocol outcome:
+    ///
+    /// - a second record naming a **different** frame key is refused, because
+    ///   one turn materializes at most one switch;
+    /// - a second record naming the **same** frame key with different
+    ///   `initial_nodes` is refused as well: the first author was already
+    ///   answered with draft ids for its seed nodes, so merging or dropping
+    ///   either author's seeds would silently lose committed content;
+    /// - otherwise the second record is a replay and answers the first
+    ///   outcome unchanged. The first record's reason and task are the ones
+    ///   the commit journals.
+    ///
+    /// A switch naming the already-current frame answers `opened = false` with
+    /// no seed ids and no fold work.
     pub(in crate::runtime) fn record_frame_switch(
         &self,
         session_id: &SessionId,
@@ -188,21 +210,24 @@ impl TurnGraphAppendDraft {
             crate::session_graph::frame_node_id(session_id, request.frame_key.as_str());
         let mut inner = self.inner.lock_recover();
         if let Some(recorded) = &inner.frame_switch {
-            if recorded.identity == request.operation_id {
-                if recorded.frame_key == request.frame_key {
-                    return Ok(recorded.outcome.clone());
-                }
+            if recorded.frame_key != request.frame_key {
                 return Err(crate::PluginError::Session(format!(
-                    "agent-frame switch `{operation_id}` already switched to `{target:?}`, refusing `{key:?}`",
-                    operation_id = request.operation_id,
+                    "turn `{session_id}` already carries agent-frame switch `{recorded_id}` to `{target:?}`; refusing `{operation_id}` to `{key:?}` — one turn materializes at most one switch",
+                    recorded_id = recorded.identity,
                     target = recorded.frame_key,
+                    operation_id = request.operation_id,
                     key = request.frame_key
                 )));
             }
-            return Err(crate::PluginError::Session(format!(
-                "turn `{session_id}` already carries agent-frame switch `{}`; refusing `{}` — one turn materializes at most one switch",
-                recorded.identity, request.operation_id
-            )));
+            if recorded.request.initial_nodes != request.initial_nodes {
+                return Err(crate::PluginError::Session(format!(
+                    "turn `{session_id}` already carries agent-frame switch `{recorded_id}` to `{target:?}` with different initial nodes; refusing `{operation_id}` — a second record of one switch must name the same seed nodes",
+                    recorded_id = recorded.identity,
+                    target = recorded.frame_key,
+                    operation_id = request.operation_id
+                )));
+            }
+            return Ok(recorded.outcome.clone());
         }
         let outcome = if current_frame_node_id == Some(frame_node_id.as_str()) {
             crate::OpenAgentFrameResult {
@@ -231,11 +256,18 @@ impl TurnGraphAppendDraft {
     }
 
     /// Folds the appends recorded since the previous fold into `state`, after
-    /// whatever nodes `state` already holds.
+    /// whatever nodes `state` already holds, then materializes the turn's one
+    /// recorded agent-frame switch.
+    ///
+    /// This is the only place a turn's final commit opens the frame it
+    /// switches to (FIG-3303). The protocol outcome records into the same slot
+    /// as a plugin switch, so the frame is opened once, with the seed nodes
+    /// its author was already answered with, and the typed refusal a switch
+    /// raises reaches the caller with its own code.
     pub(in crate::runtime) fn fold_into_final_state(
         &self,
         state: &mut RuntimeSessionState,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), crate::RuntimeError> {
         let (pending, frame_switch) = {
             let mut inner = self.inner.lock_recover();
             let pending = inner.recorded[inner.applied..].to_vec();
@@ -244,24 +276,25 @@ impl TurnGraphAppendDraft {
             (pending, frame_switch)
         };
         apply_recorded_appends(state, &pending, self.clock.as_ref());
-        if let Some(recorded) = frame_switch {
-            let request = crate::OpenAgentFrameRequest::new(
-                recorded.request.frame_key.clone(),
-                recorded.request.reason.clone(),
-            )
-            .with_initial_nodes(recorded.request.initial_nodes.clone());
-            crate::runtime::state::open_agent_frame_in_state_with_clock(
-                state,
-                request,
-                self.clock.as_ref(),
-            )
-            .map_err(|error| crate::PluginError::Session(error.to_string()))
-            .map(|result| {
-                debug_assert_eq!(result.frame_node_id, recorded.outcome.frame_node_id);
-            })
-        } else {
-            Ok(())
-        }
+        let Some(recorded) = frame_switch else {
+            return Ok(());
+        };
+        let request = crate::OpenAgentFrameRequest::new(
+            recorded.request.frame_key.clone(),
+            recorded.request.reason.clone(),
+        )
+        .with_initial_nodes(recorded.request.initial_nodes.clone());
+        let result = crate::runtime::state::open_agent_frame_in_state_with_clock(
+            state,
+            request,
+            self.clock.as_ref(),
+        )?;
+        // The answer the switch's author already holds and the commit it rides
+        // must name the same frame node and the same seed nodes; anything else
+        // means seed nodes were dropped on the way into the commit.
+        debug_assert_eq!(result.frame_node_id, recorded.outcome.frame_node_id);
+        debug_assert_eq!(result.initial_node_ids, recorded.outcome.initial_node_ids);
+        Ok(())
     }
 
     /// The frame switch recorded but not yet folded, if any. Read before the
