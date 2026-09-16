@@ -21,10 +21,12 @@
 //!
 //! Bytes, never a clock: a counting global allocator records what the VM asks
 //! the allocator for, and every figure below is allocated bytes per iteration.
-//! Nothing here is a timing assertion, so a loaded box does not move it.
+//! Nothing here is a timing assertion, so a loaded box does not move it. The
+//! count is kept per thread, so neither does a sibling case sharing the
+//! process (FIG-3221).
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::cell::Cell;
 
 #[path = "../examples/bench_support/mod.rs"]
 mod bench_support;
@@ -39,7 +41,43 @@ use lashlang::{
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
-static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
+thread_local! {
+    /// Allocated bytes, charged to the thread that asked for them.
+    ///
+    /// This counter was one process-global atomic until FIG-3221, which made
+    /// every figure below the sum of the run being measured and whatever a
+    /// sibling libtest case allocated inside the same window. Bazel hid that
+    /// by running this target with `RUST_TEST_THREADS=1`; `cargo test` — what
+    /// cargo-mutants runs for its baseline — runs the cases in this file
+    /// concurrently in one process, and the AST corpus scenario measured
+    /// 5,893,462 and 5,949,164 bytes/iter (5,956,486 in the confidence
+    /// baseline) against the 3,517,781 budget the same run meets with room to
+    /// spare — 3,091,688 — the moment the two cases stop sharing a counter.
+    ///
+    /// Charging per thread makes a measurement independent of what the rest of
+    /// the process is doing under either runner, which is what the figures
+    /// here have always claimed to be. Every case measures on its own libtest
+    /// thread: `#[tokio::test(flavor = "current_thread")]` drives the future
+    /// on the thread that entered the test, so a thread's own total over a
+    /// window is exactly the work that window ran.
+    static ALLOCATED_BYTES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Charges `bytes` to the calling thread.
+///
+/// The key is `const`-initialised and holds a `Copy` type, so it registers no
+/// destructor and this call allocates nothing — it cannot re-enter the
+/// allocator. `try_with` keeps the allocator total during any teardown in
+/// which thread-local storage is already unavailable.
+fn charge_to_this_thread(bytes: usize) {
+    let _ =
+        ALLOCATED_BYTES.try_with(|counter| counter.set(counter.get().saturating_add(bytes as u64)));
+}
+
+/// What the calling thread has allocated so far.
+fn allocated_bytes_on_this_thread() -> u64 {
+    ALLOCATED_BYTES.try_with(Cell::get).unwrap_or(0)
+}
 
 struct CountingAllocator;
 
@@ -51,7 +89,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let pointer = unsafe { System.alloc(layout) };
         if !pointer.is_null() {
-            ALLOCATED_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+            charge_to_this_thread(layout.size());
         }
         pointer
     }
@@ -63,10 +101,54 @@ unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let grown = unsafe { System.realloc(pointer, layout, new_size) };
         if !grown.is_null() && new_size > layout.size() {
-            ALLOCATED_BYTES.fetch_add((new_size - layout.size()) as u64, Ordering::Relaxed);
+            charge_to_this_thread(new_size - layout.size());
         }
         grown
     }
+}
+
+/// The measurement window is charged to the measuring thread and to no other.
+///
+/// This is the law FIG-3221 broke. With one process-global counter the two
+/// cost cases in this file measured each other whenever libtest ran them
+/// concurrently, and the only thing holding the figures up was the
+/// `RUST_TEST_THREADS=1` this target happens to carry under Bazel — which
+/// `cargo test` never reads. A revert to global accounting fails here, on the
+/// law itself, instead of surfacing as a budget overshoot under one runner and
+/// not the other.
+///
+/// The sibling thread allocates megabytes; this thread allocates a join handle
+/// and a boxed closure. The two are four orders of magnitude apart, so the
+/// bound below is not a noise threshold.
+#[test]
+fn the_allocation_counter_charges_only_the_thread_that_allocated() {
+    const SIBLING_CHUNKS: usize = 64;
+    const SIBLING_CHUNK_BYTES: usize = 64 * 1024;
+
+    let before = allocated_bytes_on_this_thread();
+    let sibling = std::thread::spawn(|| {
+        let mut held: Vec<Vec<u8>> = Vec::with_capacity(SIBLING_CHUNKS);
+        for _ in 0..SIBLING_CHUNKS {
+            held.push(std::hint::black_box(vec![0_u8; SIBLING_CHUNK_BYTES]));
+        }
+        allocated_bytes_on_this_thread()
+    });
+    let Ok(charged_to_the_sibling) = sibling.join() else {
+        panic!("the sibling allocating thread must join");
+    };
+    let charged_here = allocated_bytes_on_this_thread() - before;
+
+    let allocated_elsewhere = (SIBLING_CHUNKS * SIBLING_CHUNK_BYTES) as u64;
+    assert!(
+        charged_to_the_sibling >= allocated_elsewhere,
+        "the sibling thread must be charged what it allocated: {charged_to_the_sibling} bytes \
+         against the {allocated_elsewhere} it asked for"
+    );
+    assert!(
+        charged_here < allocated_elsewhere / 64,
+        "a sibling thread's {allocated_elsewhere} bytes must not land in this thread's window: \
+         this thread was charged {charged_here} bytes across it"
+    );
 }
 
 /// The corpus's own budget file, embedded the way `lash-perf` embeds it
@@ -114,12 +196,12 @@ async fn bytes_per_iteration(
     let mut warm = fresh_state();
     std::hint::black_box(run(&mut warm).await);
 
-    let before = ALLOCATED_BYTES.load(Ordering::Relaxed);
+    let before = allocated_bytes_on_this_thread();
     for _ in 0..iterations {
         let mut state = fresh_state();
         std::hint::black_box(run(&mut state).await);
     }
-    let allocated = ALLOCATED_BYTES.load(Ordering::Relaxed) - before;
+    let allocated = allocated_bytes_on_this_thread() - before;
     allocated as f64 / iterations as f64
 }
 
