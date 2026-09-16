@@ -10,7 +10,8 @@ mod lifecycle;
 mod parent_end;
 mod registration;
 pub use registration::{
-    registration_and_observers_are_atomic, registration_reports_created_then_existing,
+    concurrent_identical_registrations_are_idempotent, registration_and_observers_are_atomic,
+    registration_reports_created_then_existing,
 };
 pub mod status_filters;
 mod turn_parent_end;

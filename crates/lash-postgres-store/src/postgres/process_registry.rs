@@ -406,7 +406,7 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
             now,
         );
         let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
-        sqlx::query(
+        let result = sqlx::query(
             "INSERT INTO lash_processes (
                 process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
                 identity_kind, identity_label,
@@ -415,7 +415,8 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
                 parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested_at_ms,
                 record_json
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+             ON CONFLICT (process_id) DO NOTHING",
         )
         .bind(record.id.as_str())
         .bind(record.incarnation.registration_sequence() as i64)
@@ -437,6 +438,41 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
+        // Registration is idempotent by fingerprint, and on this tier alone the
+        // read that decides that and the insert that acts on it are two
+        // statements on two connections under `READ COMMITTED`. SQLite
+        // serializes every writer through one write flow and the in-memory
+        // registry through one transaction mutex, so only PostgreSQL can have
+        // two callers derive one content-addressed process id — a redelivered
+        // trigger occurrence is exactly that, since FIG-806 makes the
+        // deterministic process id the dedupe point — read "no row" apiece and
+        // both insert. The change clock above orders the pair: the first
+        // holds that row lock from its bump until it commits, so by the time
+        // the second reaches this insert the winner's row is committed and
+        // `ON CONFLICT DO NOTHING` reports zero rows instead of raising
+        // `lash_processes_pkey`. Re-read it under this statement's own
+        // snapshot and abandon the attempt: the rollback takes the clock bump,
+        // the fence lift and the observer rows with it, so the loser adds no
+        // event and no `change_seq` of its own (ADR 0046), and the caller gets
+        // the sequential answer — the exact repeat is the existing row, a
+        // differing fingerprint the typed refusal (FIG-3190).
+        if result.rows_affected() == 0 {
+            let winner = load_process_tx(&mut tx, &record.id).await?;
+            tx.rollback().await.map_err(plugin_sqlx_error)?;
+            let Some(winner) = winner else {
+                return Err(PluginError::Session(format!(
+                    "process `{}` lost the registration insert race to a row that no longer exists",
+                    record.id
+                )));
+            };
+            if winner.registration_fingerprint == record.registration_fingerprint {
+                return Ok(lash_core::ProcessRegistrationOutcome::existing(winner));
+            }
+            return Err(lash_core::durable_identity_conflict(format!(
+                "process `{}` registration fingerprint conflict: existing {}, new {}",
+                record.id, winner.registration_fingerprint, record.registration_fingerprint
+            )));
+        }
         // The owner is back: lift the scope fence a prune left in the journal,
         // in this same transaction, so a registration that fails keeps the id
         // fenced (ADR 0049). The scope lock serializes this against a

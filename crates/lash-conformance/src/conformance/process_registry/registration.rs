@@ -124,3 +124,124 @@ pub async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegi
         "no observer edge may be minted from an embedded wake target"
     );
 }
+
+/// FIG-3190: the repeat may arrive concurrently, and it is still a repeat.
+///
+/// [`registration_reports_created_then_existing`] proves the sequential law:
+/// read the row, and either return it or refuse the fingerprint. On
+/// PostgreSQL that read and the insert are two statements under `READ
+/// COMMITTED` on two connections, so two callers deriving the same
+/// content-addressed process id — a redelivered trigger occurrence is exactly
+/// that — both read "no row" and both insert. SQLite serializes every writer
+/// through one write flow and the in-memory registry through one transaction
+/// mutex, so only PostgreSQL can lose the race, and it lost it as a raw
+/// `duplicate key value violates unique constraint "lash_processes_pkey"`
+/// rather than as the idempotent success the sequential law promises.
+///
+/// The law: however the calls interleave, exactly one registration creates the
+/// row, every other identical one reports the row it created, and a
+/// conflicting registration under that id is the typed fingerprint refusal on
+/// every backend.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn concurrent_identical_registrations_are_idempotent(registry: Arc<dyn ProcessRegistry>) {
+    const RACERS: usize = 8;
+    let id = "registration-concurrent-repeat";
+
+    let start = Arc::new(tokio::sync::Barrier::new(RACERS));
+    let mut racers = Vec::with_capacity(RACERS);
+    for _ in 0..RACERS {
+        let registry = Arc::clone(&registry);
+        let start = Arc::clone(&start);
+        racers.push(crate::task::spawn(async move {
+            start.wait().await;
+            registry
+                .register_process_reporting_disposition(registration(id), &[])
+                .await
+        }));
+    }
+
+    let mut created = 0usize;
+    let mut existing = 0usize;
+    let mut fingerprints = std::collections::BTreeSet::new();
+    let mut incarnations = std::collections::BTreeSet::new();
+    for racer in racers {
+        let outcome = racer
+            .await
+            .expect("concurrent registration task")
+            .expect("a concurrent exact repeat is idempotent, never a raw duplicate-key error");
+        match outcome.disposition {
+            crate::ProcessRegistrationDisposition::Created => created += 1,
+            crate::ProcessRegistrationDisposition::Existing => existing += 1,
+        }
+        fingerprints.insert(outcome.record.registration_fingerprint.clone());
+        incarnations.insert(outcome.record.incarnation.registration_sequence());
+    }
+
+    assert_eq!(
+        created, 1,
+        "exactly one concurrent caller may own the row it inserted"
+    );
+    assert_eq!(
+        existing,
+        RACERS - 1,
+        "every caller that lost the race reports the row the winner created"
+    );
+    assert_eq!(
+        fingerprints.len(),
+        1,
+        "every racer returns the one recorded registration, untouched: {fingerprints:?}"
+    );
+    assert_eq!(
+        incarnations.len(),
+        1,
+        "a losing racer must not mint a second incarnation: {incarnations:?}"
+    );
+
+    // The losing side of the race is not licensed to overwrite either: a
+    // differing fingerprint under the same id stays the typed refusal, not a
+    // raw backend constraint error.
+    let mut conflicting_racers = Vec::with_capacity(RACERS);
+    let conflict_start = Arc::new(tokio::sync::Barrier::new(RACERS));
+    for index in 0..RACERS {
+        let registry = Arc::clone(&registry);
+        let conflict_start = Arc::clone(&conflict_start);
+        conflicting_racers.push(crate::task::spawn(async move {
+            let mut conflicting = registration(id);
+            conflicting.input = std::sync::Arc::new(ProcessInput::External {
+                metadata: serde_json::json!({"suite": "concurrent-conflict", "racer": index}),
+            });
+            conflict_start.wait().await;
+            registry
+                .register_process_reporting_disposition(conflicting, &[])
+                .await
+        }));
+    }
+    for racer in conflicting_racers {
+        let refusal = racer
+            .await
+            .expect("conflicting registration task")
+            .expect_err("a differing fingerprint is a conflict, not a silent overwrite");
+        assert!(
+            refusal.to_string().contains("registration fingerprint"),
+            "the refusal names the fingerprint rather than the backend constraint: {refusal}"
+        );
+    }
+
+    let settled = registry
+        .get_process(&ProcessId::from(id))
+        .await
+        .expect("read the raced row")
+        .expect("the raced row is durable");
+    assert_eq!(
+        settled.registration_fingerprint,
+        fingerprints
+            .iter()
+            .next()
+            .expect("one recorded fingerprint")
+            .clone(),
+        "the recorded row is the one every racer reported"
+    );
+}
