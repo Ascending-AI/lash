@@ -1969,19 +1969,23 @@ async fn runners_for_case_with_clock(
     clock: Arc<dyn Clock>,
 ) -> Vec<BackendRunner> {
     let session_id = SessionId::from(format!("fig-778-{run_nonce}-{}", case.as_str()));
+    // The deterministic relation is declared at creation on every backend:
+    // `save_session_meta` may not move a recorded lineage (FIG-3045), so the
+    // metadata install below rewrites a row that already records it.
+    let relation = SessionRelation::Child {
+        parent_session_id: SessionId::from(format!("fig-778-{run_nonce}-parent")),
+        caused_by: None,
+    };
     let create_request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
-        relation: SessionRelation::Root,
+        relation: relation.clone(),
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let expected_meta = SessionMeta {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
-        relation: SessionRelation::Child {
-            parent_session_id: SessionId::from(format!("fig-778-{run_nonce}-parent")),
-            caused_by: None,
-        },
+        relation,
     };
 
     let memory_factory = Arc::new(InMemorySessionStoreFactory::with_clock(Arc::clone(&clock)));

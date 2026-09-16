@@ -98,6 +98,9 @@ impl InMemorySessionStore {
         Ok(())
     }
 
+    /// Write session metadata, refusing a write that would move the recorded
+    /// lineage (FIG-3045). The relation is a durable fact, so this is the same
+    /// refusal admission answers on a conflicting rebind.
     pub(super) fn replace_session_meta(
         &self,
         meta: crate::SessionMeta,
@@ -113,6 +116,13 @@ impl InMemorySessionStore {
         }
         self.bind_or_verify(&meta.session_id)?;
         let mut durable = self.session_meta.lock_recover();
+        if let Some(recorded) = durable.as_ref() {
+            crate::store_backend_support::guard_session_meta_relation_rewrite(
+                &meta.session_id,
+                &crate::SessionLineage::of(&recorded.relation),
+                &meta.relation,
+            )?;
+        }
         *durable = Some(meta);
         let mut version = self.session_state_version.lock_recover();
         version.get_or_insert(crate::store::CURRENT_SESSION_STATE_VERSION);

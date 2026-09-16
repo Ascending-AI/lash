@@ -189,7 +189,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("chat/alpha"),
         relation: lash_core::SessionRelation::Child {
-            parent_session_id: SessionId::from("parent"),
+            parent_session_id: SessionId::from("preserved-parent"),
             caused_by: None,
         },
         policy: SessionPolicy {
@@ -205,19 +205,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
         .expect("load meta")
         .expect("meta");
     assert_eq!(meta.session_id, "chat/alpha");
-    assert_eq!(meta.parent_session_id(), Some("parent"));
-
-    store
-        .save_session_meta(lash_core::SessionMeta {
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("chat/alpha"),
-            relation: lash_core::SessionRelation::Child {
-                parent_session_id: SessionId::from("preserved-parent"),
-                caused_by: None,
-            },
-        })
-        .await
-        .expect("save meta");
+    assert_eq!(meta.parent_session_id(), Some("preserved-parent"));
 
     let reopened = factory
         .create_store(&SessionStoreCreateRequest {

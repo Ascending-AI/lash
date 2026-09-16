@@ -1087,6 +1087,20 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         binding: &SessionBinding,
     ) -> Result<SessionAdmission, StoreError>;
 
+    /// Write this session's metadata, creating the row when it is absent.
+    ///
+    /// The recorded lineage is write-once. `meta.relation` must declare the
+    /// same lineage the existing row records — the same parent, or the same
+    /// fork source and node — or the write is refused with
+    /// [`StoreError::SessionRelationMismatch`] and the row is left unchanged.
+    /// Admission reads [`SessionRelation::Root`] as "no claim" on a rebind
+    /// because a resume declares no lineage; a write cannot, because the row
+    /// it would record replaces the recorded parent with that root. Causal
+    /// provenance, observer inheritance and the pending observer intents are
+    /// not lineage and are replaced as given, which is what lets the observer
+    /// intent settlement round-trip the metadata it loaded. Use
+    /// [`store_backend_support::guard_session_meta_relation_rewrite`](crate::store_backend_support::guard_session_meta_relation_rewrite)
+    /// so all backends answer identically.
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;
 }
