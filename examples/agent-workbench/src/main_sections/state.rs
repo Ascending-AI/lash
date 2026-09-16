@@ -1335,12 +1335,30 @@ impl ActiveTurns {
         true
     }
 
-    /// Record that the durable tombstone for `session_id` is confirmed.
+    /// Record that the durable tombstone for `session_id` is confirmed, and
+    /// retire the session's routing along with it.
+    ///
+    /// A cancel that could not attach a terminal keeps the turn in this
+    /// registry on purpose: the turn is still routable and may yet commit its
+    /// own terminal, so `turn.cancel_liveness_unknown` retains it rather than
+    /// claim an outcome nobody observed. A confirmed tombstone ends that. The
+    /// session id is gone, every store write against it is refused, and no
+    /// terminal can land for it -- there is no route left to retain. Holding
+    /// the rows left `for_session` non-empty for a deleted id for the life of
+    /// the process, and the ledger is persisted, so past the next boot too
+    /// (FIG-3018). The mark and the rows move under one lock, so no reader
+    /// sees `Retired` beside a live route.
     pub(crate) fn confirm_retirement(&self, session_id: &SessionId) {
-        self.inner
-            .lock_recover()
+        let mut ledger = self.inner.lock_recover();
+        let mut prompts = self.prompts.lock_recover();
+        ledger
             .retirements
             .insert(session_id.clone(), SessionRetirement::Retired);
+        ledger
+            .turns
+            .retain(|(turn_session_id, _)| turn_session_id != session_id);
+        prompts.retain(|(prompt_session_id, _), _| prompt_session_id != session_id);
+        self.persist_snapshot(&ledger.turns, &prompts);
     }
 
     /// Lift a retiring mark after the delete definitively failed and the

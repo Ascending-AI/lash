@@ -1270,3 +1270,109 @@ async fn register_turn_child(
         .await
         .expect("register the awaited process");
 }
+
+#[test]
+fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep() {
+    run_async_test_on_stack_budget("workbench-retired-session-route-pruned", || {
+        a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner()
+    });
+}
+
+/// FIG-3018: a delete whose cancel could not attach a terminal leaves the turn
+/// routed on purpose — the turn may still commit its own terminal, so
+/// `turn.cancel_liveness_unknown` retains the route rather than invent an
+/// outcome. Nothing then removed it: the delete went on to tombstone the
+/// session, and `for_session` stayed non-empty for an id every surface refuses.
+///
+/// Under load that is what made
+/// `session_fence_tests::deleting_a_session_with_a_running_turn_cancels_it_before_retiring`
+/// fail its `active_turns` assertion 4-7 times in 30 runs: the cancel's
+/// terminal attach is bounded, and whether the route survived the delete was
+/// decided by whether the box met that bound. The ordering here is driven by
+/// the `TurnAttach` seam instead, so the branch is reached every run.
+async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner() {
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-retired-route-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
+    // The admin reports the invocation still running, so the cancel's liveness
+    // check keeps the route: this is the retained branch, not the pruned one.
+    let admin_url = spawn_restate_admin_with_workflow_status(Some("running")).await;
+    let state = turn_cancel_test_state(&data_dir, admin_url).await;
+    let session_id = state.current_session_id();
+    let turn_id = TurnId::from("retained-route-turn");
+    state.track_turn_prompt(
+        &session_id,
+        &turn_id,
+        "held by a pending terminal".to_string(),
+        None,
+    );
+
+    let (driver, acknowledge) = expiring_terminal_driver(&state);
+    let receipts = tokio::time::timeout(Duration::from_secs(5), async {
+        let cancel_session = session_id.clone();
+        tokio::join!(
+            state.cancel_turns_for_session_with_driver(
+                &cancel_session,
+                &driver,
+                WorkbenchTurnCancelMode::Abort
+            ),
+            acknowledge
+        )
+        .0
+    })
+    .await
+    .expect("the delete's cancel must not hang")
+    .expect("cancel the routed turn");
+    assert!(
+        matches!(
+            receipts.as_slice(),
+            [TurnCancelReceipt::CancellationRecordedTerminalPending { .. }]
+        ),
+        "the seam must produce a pending terminal: {receipts:?}"
+    );
+    // The precondition this regression needs: the cancel legitimately kept the
+    // route, so the delete is about to tombstone a session that still routes.
+    assert_eq!(
+        state.active_turns.for_session(&session_id),
+        vec![lash::TurnAddress::new(&session_id, &turn_id)],
+        "a pending terminal with a live invocation keeps its route"
+    );
+    assert!(
+        state
+            .active_turns
+            .prompt_for(&session_id, &turn_id)
+            .is_some()
+    );
+
+    // The delete settles: the durable tombstone is a fact.
+    state.settle_retirement_mark(&session_id, &Ok(())).await;
+
+    assert_eq!(
+        state.active_turns.retirement(&session_id),
+        Some(SessionRetirement::Retired)
+    );
+    assert!(
+        state.active_turns.for_session(&session_id).is_empty(),
+        "a tombstoned session keeps no routes"
+    );
+    assert!(
+        state
+            .active_turns
+            .prompt_for(&session_id, &turn_id)
+            .is_none(),
+        "the route's prompt goes with it"
+    );
+    // The registry is persisted, so the next boot must not resurrect the route.
+    let persisted: Value = serde_json::from_slice(
+        &std::fs::read(data_dir.join("active-turns.json")).expect("read persisted active turns"),
+    )
+    .expect("decode persisted active turns");
+    assert_eq!(
+        persisted.pointer("/turns").and_then(Value::as_array),
+        Some(&Vec::new()),
+        "the persisted snapshot drops the retired session's route: {persisted:#}"
+    );
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
