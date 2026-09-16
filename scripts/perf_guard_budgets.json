@@ -114,7 +114,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.25,
+              "budget_ms": 0.095,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -372,7 +372,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.529,
+              "budget_ms": 0.783,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -668,7 +668,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.362,
+              "budget_ms": 1.048,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -840,7 +840,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.408,
+              "budget_ms": 1.181,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -1180,7 +1180,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.378,
+              "budget_ms": 1.051,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -1276,7 +1276,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.4,
+              "budget_ms": 1.203,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -1408,7 +1408,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.37,
+              "budget_ms": 1.079,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -1536,7 +1536,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.436,
+              "budget_ms": 1.093,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -1744,7 +1744,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.42,
+              "budget_ms": 1.17,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -1868,7 +1868,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.36,
+              "budget_ms": 1.05,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -1960,7 +1960,7 @@
               "required": false
             },
             "rlm_lashlang.deferred_trigger_resolve": {
-              "budget_ms": 0.396,
+              "budget_ms": 1.145,
               "required": false
             },
             "rlm_lashlang.execute": {
@@ -2052,7 +2052,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.499,
+              "budget_ms": 0.778,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2116,7 +2116,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.541,
+              "budget_ms": 0.813,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2184,7 +2184,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.529,
+              "budget_ms": 0.748,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2248,7 +2248,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.521,
+              "budget_ms": 0.768,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2312,7 +2312,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.522,
+              "budget_ms": 0.788,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2376,7 +2376,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.559,
+              "budget_ms": 0.77,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2568,7 +2568,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.516,
+              "budget_ms": 0.789,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2644,7 +2644,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.538,
+              "budget_ms": 0.816,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
@@ -2824,7 +2824,7 @@
               "required": false
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.507,
+              "budget_ms": 0.774,
               "required": true
             }
           }
@@ -2892,7 +2892,7 @@
               "required": true
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.509,
+              "budget_ms": 0.742,
               "required": true
             }
           }
@@ -3012,7 +3012,7 @@
               "required": false
             },
             "plugin_hook.after_turn.rolling_history": {
-              "budget_ms": 0.492,
+              "budget_ms": 0.75,
               "required": true
             },
             "plugin_hook.context_transform.rolling_history": {
