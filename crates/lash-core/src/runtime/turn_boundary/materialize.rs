@@ -1,6 +1,5 @@
 use crate::SessionId;
 use crate::TurnId;
-use crate::facade_support::AgentFrameReasonFacadeOps;
 use std::collections::BTreeSet;
 
 use crate::{
@@ -129,48 +128,6 @@ pub(super) fn materialize_terminal_output(
         }],
         clock,
     );
-}
-
-pub(super) fn materialize_agent_frame_switch(
-    state: &mut RuntimeSessionState,
-    outcome: &TurnOutcome,
-    clock: &dyn crate::Clock,
-    materializes: bool,
-) -> Result<(), crate::RuntimeError> {
-    let TurnOutcome::AgentFrameSwitch {
-        frame_key,
-        initial_nodes,
-        ..
-    } = outcome
-    else {
-        return Ok(());
-    };
-    // The pre-snapshot decision and this post-snapshot state must never diverge;
-    // fail in debug/tests instead of silently clearing the wrong frame's state.
-    debug_assert_eq!(
-        materializes,
-        agent_frame_switch_materializes(
-            &state.session_id,
-            frame_key,
-            state.current_frame_node_id.as_deref(),
-        )
-    );
-    if !materializes {
-        return Ok(());
-    }
-    // A protocol outcome naming a persisted historical frame is the same
-    // resident-config replacement the open API refuses; the commit aborts
-    // before any durable write rather than switching without a config patch.
-    super::super::open_agent_frame_in_state_with_clock(
-        state,
-        crate::OpenAgentFrameRequest::new(
-            frame_key.clone(),
-            crate::AgentFrameReason::continue_as(),
-        )
-        .with_initial_nodes(initial_nodes.clone()),
-        clock,
-    )
-    .map(|_| ())
 }
 
 #[cfg(test)]

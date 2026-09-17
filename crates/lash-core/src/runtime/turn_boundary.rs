@@ -3,6 +3,7 @@ use super::{
     RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft,
 };
 use crate::TurnId;
+use crate::facade_support::AgentFrameReasonFacadeOps;
 use crate::facade_support::SessionGraphFacadeOps;
 #[cfg(test)]
 use crate::facade_support::SessionNodeProjection;
@@ -334,21 +335,11 @@ impl TurnBoundary {
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> Result<AcceptedTurnCommit, StoreError> {
-        let agent_frame_switch_materializes = match &returned_turn.outcome {
-            TurnOutcome::AgentFrameSwitch { frame_key, .. } => agent_frame_switch_materializes(
-                &self.state().session_id,
-                frame_key,
-                self.state().current_frame_node_id.as_deref(),
-            ),
-            _ => match self.graph_appends.pending_frame_switch() {
-                Some(recorded) => agent_frame_switch_materializes(
-                    &self.state().session_id,
-                    &recorded.frame_key,
-                    self.state().current_frame_node_id.as_deref(),
-                ),
-                None => false,
-            },
-        };
+        // Record the outcome before capturing execution state: a second author
+        // that conflicts refuses here, with nothing captured and nothing
+        // written.
+        self.record_outcome_frame_switch(&returned_turn.outcome)?;
+        let agent_frame_switch_materializes = self.recorded_frame_switch_materializes();
         let (store, plugins, execution_state_update) = match session {
             Some(session) => {
                 let store = session.history_store();
@@ -445,6 +436,61 @@ impl TurnBoundary {
         }
     }
 
+    /// Records a protocol `AgentFrameSwitch` outcome into the turn's one
+    /// agent-frame switch slot (FIG-3303).
+    ///
+    /// The outcome is one author of the turn's switch, not a second place the
+    /// switch lives: it reconciles with a plugin-recorded switch through the
+    /// slot's own conflict rule (see
+    /// [`TurnGraphAppendDraft::record_frame_switch`]), so two authors naming
+    /// different frames refuse the commit instead of opening two frames, and
+    /// two authors naming the same frame commit one open carrying one set of
+    /// seed nodes. Recording the same outcome twice is a replay and answers
+    /// the first record.
+    fn record_outcome_frame_switch(&mut self, outcome: &TurnOutcome) -> Result<(), StoreError> {
+        let TurnOutcome::AgentFrameSwitch {
+            frame_key,
+            task,
+            initial_nodes,
+        } = outcome
+        else {
+            return Ok(());
+        };
+        let request = crate::SwitchAgentFrameRequest::new(
+            format!("{}:turn-outcome-frame-switch", self.operation_scope.id()),
+            frame_key.clone(),
+            crate::AgentFrameReason::continue_as(),
+        )
+        .with_task(task.clone())
+        .with_initial_nodes(initial_nodes.clone());
+        let session_id = self.state().session_id.clone();
+        let current_frame_node_id = self.state().current_frame_node_id.clone();
+        self.graph_appends
+            .record_frame_switch(&session_id, current_frame_node_id.as_deref(), &request)
+            .map(|_| ())
+            .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
+                error: Box::new(RuntimeError::new(
+                    RuntimeErrorCode::AgentFrameSwitchAuthorConflict,
+                    error.to_string(),
+                )),
+            })
+    }
+
+    /// Whether this turn's one recorded switch opens a frame the session is
+    /// not already in. Derived from the slot alone, so the commit and the
+    /// protocol-execution clear it drives answer the same question.
+    fn recorded_frame_switch_materializes(&self) -> bool {
+        self.graph_appends
+            .pending_frame_switch()
+            .is_some_and(|recorded| {
+                materialize::agent_frame_switch_materializes(
+                    &self.state().session_id,
+                    &recorded.frame_key,
+                    self.state().current_frame_node_id.as_deref(),
+                )
+            })
+    }
+
     async fn final_commit_with_snapshots(
         &mut self,
         input: FinalCommitInput<'_>,
@@ -471,6 +517,11 @@ impl TurnBoundary {
             recorded_attachment_intent_ids,
             session_execution_lease_completion,
         } = input;
+        // Every path into the final commit reconciles the same way. A turn
+        // driven through `final_commit` already recorded this outcome so the
+        // refusal lands before execution state is captured; recording it here
+        // again is a replay of that record and answers it unchanged.
+        self.record_outcome_frame_switch(outcome)?;
         let clock = Arc::clone(&self.clock);
         let graph_appends = self.graph_appends.clone();
         let protocol_terminal_output = self.protocol_terminal_output.clone();
@@ -496,24 +547,26 @@ impl TurnBoundary {
             &terminal_message_id,
             &protocol_terminal_output,
         );
-        materialize_agent_frame_switch(
-            state,
-            outcome,
-            clock.as_ref(),
+        // The pre-snapshot decision that cleared protocol execution state and
+        // this post-snapshot state must never diverge; fail in debug/tests
+        // instead of silently clearing the wrong frame's state.
+        debug_assert_eq!(
             agent_frame_switch_materializes,
-        )
-        .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
-            error: Box::new(error),
-        })?;
+            graph_appends
+                .pending_frame_switch()
+                .is_some_and(|recorded| materialize::agent_frame_switch_materializes(
+                    &state.session_id,
+                    &recorded.frame_key,
+                    state.current_frame_node_id.as_deref(),
+                ))
+        );
         // Appends recorded after finalization (finalize-turn hooks) land here,
-        // after everything the turn materialized.
+        // after everything the turn materialized, and the turn's one recorded
+        // agent-frame switch opens after them.
         graph_appends
             .fold_into_final_state(state)
             .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
-                error: Box::new(RuntimeError::new(
-                    RuntimeErrorCode::PluginFinalizeTurn,
-                    error.to_string(),
-                )),
+                error: Box::new(error),
             })?;
         let state = self.final_state_mut();
 
