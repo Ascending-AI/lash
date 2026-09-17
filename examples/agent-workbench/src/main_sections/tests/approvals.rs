@@ -200,7 +200,7 @@ finish(result);
             .expect("unknown resolve");
         assert_eq!(unknown_outcome, lash::ResolveOutcome::UnknownOrRevoked);
         approvals
-            .mark_decided(&approval.key, "approved")
+            .mark_decided(&approval.key, approvals::ApprovalDecision::Approved)
             .expect("settle approval row");
         let output = turn
             .await
@@ -215,6 +215,131 @@ finish(result);
             }))
         );
         assert!(approvals.pending().unwrap().is_empty());
+    });
+}
+
+/// FIG-3293: a crash between the ledger write and the completion resolve
+/// leaves a decided row over an outstanding wait. The row no longer lists as
+/// pending, so the retry — and the boot reconcile — must re-drive `resolve`
+/// from the recorded decision instead of reporting "not pending".
+#[test]
+fn a_decided_but_unresolved_approval_repairs_on_retry() {
+    run_async_test_on_stack_budget("workbench-approval-repair", || async {
+        let directory = tempfile::tempdir().expect("approval tempdir");
+        let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
+            .expect("open approval ledger");
+        let effect_host = Arc::new(
+            lash_sqlite_store::SqliteEffectHost::open(&directory.path().join("effects.db"))
+                .await
+                .expect("open durable effect host"),
+        );
+        let provider = lash::testing::TestProvider::builder()
+            .kind("workbench-approval-repair")
+            .complete(|_| async {
+                Ok(text_response(
+                    r#"<typescript>
+const result = await ops.apply_change({ target: "demo-cluster", change: "enable safe mode" });
+finish(result);
+</typescript>"#,
+                ))
+            })
+            .build()
+            .into_handle();
+        let core = approval_test_core(
+            directory.path(),
+            provider,
+            approvals.clone(),
+            effect_host.clone(),
+        )
+        .await;
+        let session = core
+            .session("approval-repair")
+            .open()
+            .await
+            .expect("open approval session");
+        let turn_scope = lash::durability::EffectHost::scoped_static(
+            effect_host.as_ref(),
+            lash::runtime::ExecutionScope::turn("approval-repair", "approval-repair-turn"),
+        )
+        .expect("scope approval turn")
+        .expect("durable approval scope");
+        let mut turn = tokio::spawn(async move {
+            session
+                .turn(lash::TurnInput::text("Apply the demo change."))
+                .turn_id("approval-repair-turn")
+                .require_finish()
+                .expect("require approval finish")
+                .advanced()
+                .run_with_scope(turn_scope)
+                .await
+        });
+        let approval = wait_for_approval(&approvals, &mut turn).await;
+
+        // The crash point under test: the ledger recorded the decision and the
+        // completion resolve never ran.
+        approvals
+            .mark_decided(&approval.key, approvals::ApprovalDecision::Approved)
+            .expect("record decision");
+        assert!(
+            approvals.pending().unwrap().is_empty(),
+            "the decided row no longer lists as pending"
+        );
+
+        let process_registry = Arc::new(
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &directory.path().join("processes.db"),
+                directory.path().join("processes-sessions"),
+            )
+            .await
+            .expect("open process registry"),
+        ) as Arc<dyn lash::process::ProcessRegistry>;
+        let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
+            lash_sqlite_store::SqliteSessionStoreFactory::new(directory.path().join("sessions")),
+        );
+        let state = AppState {
+            unknown_turn_terminals: UnknownTurnTerminals::default(),
+            core,
+            attachment_store: test_attachment_store(),
+            session_store_factory,
+            trigger_store: in_memory_trigger_store(),
+            process_observer: lash::process::ProcessWorkObserver::new(process_registry),
+            sessions: WorkbenchSessions::fresh(),
+            messages: Arc::new(Mutex::new(Vec::new())),
+            selected_model: Arc::new(Mutex::new(ModelSelection {
+                model: "test-model".to_string(),
+                model_variant: Default::default(),
+            })),
+            trace_sink: None,
+            lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
+            event_tx: SessionEventRegistry::new(16),
+            queued_work_driver: inert_queued_work(),
+            restate_ingress_url: "http://127.0.0.1:8080".to_string(),
+            restate_admin_url: "http://127.0.0.1:9070".to_string(),
+            restate_http: reqwest::Client::new(),
+            restate_cron_job_keys: Arc::new(Mutex::new(BTreeMap::new())),
+            mail_world: mail::MailWorld::new(),
+            active_turns: ActiveTurns::default(),
+            authorization: WorkbenchAuthorization::allow_all(),
+            approvals: approvals.clone(),
+        };
+
+        let response = decide_approval(&state, &approval.key, true)
+            .await
+            .expect("the retry repairs the recorded decision");
+        assert_eq!(response.0["decision"], json!("approved"));
+
+        let output = turn
+            .await
+            .expect("approval turn task")
+            .expect("approval turn succeeds");
+        assert_eq!(
+            output.final_value(),
+            Some(&json!({
+                "status": "applied",
+                "target": "demo-cluster",
+                "change": "enable safe mode"
+            }))
+        );
     });
 }
 
@@ -285,7 +410,7 @@ try {
             lash::ResolveOutcome::Accepted
         );
         approvals
-            .mark_decided(&approval.key, "denied")
+            .mark_decided(&approval.key, approvals::ApprovalDecision::Denied)
             .expect("settle denial row");
         let output = turn
             .await
@@ -387,7 +512,7 @@ finish(result.status);
             lash::ResolveOutcome::Accepted
         );
         reopened_approvals
-            .mark_decided(&after_restart.key, "approved")
+            .mark_decided(&after_restart.key, approvals::ApprovalDecision::Approved)
             .expect("settle reopened approval row");
         let output = turn
             .await

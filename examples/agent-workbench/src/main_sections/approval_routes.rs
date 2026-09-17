@@ -67,17 +67,62 @@ pub(crate) async fn decide_approval(
         .pending()
         .map_err(AppError::internal)?
         .into_iter()
-        .find(|approval| approval.key == key_id)
-        .ok_or_else(|| AppError::bad_request(format!("approval `{key_id}` is not pending")))?;
-    let key = state
-        .approvals
-        .completion_key(key_id)
-        .map_err(AppError::internal)?;
-    let resolution = if approved {
-        approvals::approval_resolution(&pending)
-    } else {
-        approvals::denial_resolution()
+        .find(|approval| approval.key == key_id);
+    // The ledger row is the decision's durable record, so it is written first
+    // and the wait resolution is derived from it. A crash between the two
+    // writes leaves a decided row over an outstanding wait; the decided arm
+    // re-drives `resolve` with the recorded decision, which `AlreadyResolved`
+    // makes idempotent. The boot reconcile runs the same repair for rows the
+    // operator never retries.
+    let (decision, key, tool, arguments, requesting_session) = match pending {
+        Some(pending) => {
+            let not_pending = |error: approvals::ApprovalError| match error {
+                approvals::ApprovalError::NotPending(_) => {
+                    AppError::bad_request(format!("approval `{key_id}` is not pending"))
+                }
+                other => AppError::internal(other),
+            };
+            let key = state
+                .approvals
+                .completion_key(key_id)
+                .map_err(not_pending)?;
+            let decision = if approved {
+                approvals::ApprovalDecision::Approved
+            } else {
+                approvals::ApprovalDecision::Denied
+            };
+            state
+                .approvals
+                .mark_decided(key_id, decision)
+                .map_err(not_pending)?;
+            (
+                decision,
+                key,
+                pending.tool,
+                pending.arguments,
+                pending.requesting_session,
+            )
+        }
+        None => {
+            let decided = state
+                .approvals
+                .decided()
+                .map_err(AppError::internal)?
+                .into_iter()
+                .find(|approval| approval.key == key_id)
+                .ok_or_else(|| {
+                    AppError::bad_request(format!("approval `{key_id}` is not pending"))
+                })?;
+            (
+                decided.decision,
+                decided.completion_key,
+                decided.tool,
+                decided.arguments,
+                decided.requesting_session,
+            )
+        }
     };
+    let resolution = approvals::resolution_for(decision, &arguments);
     let outcome = state
         .core
         .completions()
@@ -98,25 +143,55 @@ pub(crate) async fn decide_approval(
             )));
         }
     }
-    let decision = if approved { "approved" } else { "denied" };
-    state
-        .approvals
-        .mark_decided(key_id, decision)
-        .map_err(AppError::internal)?;
     state.trace_for_session(
-        &SessionId::from(pending.requesting_session),
+        &SessionId::from(requesting_session),
         "approval.decided",
         json!({
             "key": key_id,
-            "tool": pending.tool,
-            "arguments": pending.arguments,
-            "decision": decision,
+            "tool": tool,
+            "arguments": arguments,
+            "decision": decision.as_str(),
             "resolve_outcome": outcome,
         }),
     );
     Ok(Json(json!({
         "key": key_id,
-        "decision": decision,
+        "decision": decision.as_str(),
         "outcome": outcome,
     })))
+}
+
+/// Boot-time half of the repair: a crash can leave a decided ledger row over a
+/// wait that was never resolved, and the pending list no longer shows it for
+/// an operator to retry. Re-resolve every decided row; `resolve` is
+/// idempotent, so rows whose wait already settled are observed, not re-driven.
+pub(crate) async fn reconcile_decided_approvals(state: &AppState) {
+    let decided = match state.approvals.decided() {
+        Ok(decided) => decided,
+        Err(error) => {
+            eprintln!("agent-workbench approval reconcile cannot read the ledger: {error}");
+            return;
+        }
+    };
+    for decided in decided {
+        let resolution = approvals::resolution_for(decided.decision, &decided.arguments);
+        match state
+            .core
+            .completions()
+            .resolve(decided.completion_key.clone(), resolution.clone())
+            .await
+        {
+            Ok(lash::ResolveOutcome::Accepted) | Ok(lash::ResolveOutcome::UnknownOrRevoked) => {}
+            Ok(lash::ResolveOutcome::AlreadyResolved { terminal }) if terminal == resolution => {}
+            Ok(lash::ResolveOutcome::AlreadyResolved { .. }) => eprintln!(
+                "agent-workbench approval reconcile: {} was decided {} but the wait resolved differently",
+                decided.key,
+                decided.decision.as_str()
+            ),
+            Err(error) => eprintln!(
+                "agent-workbench approval reconcile could not resolve {}: {error}",
+                decided.key
+            ),
+        }
+    }
 }
