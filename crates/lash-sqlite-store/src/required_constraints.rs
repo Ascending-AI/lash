@@ -5,8 +5,8 @@ use std::path::Path;
 
 use lash_core::StoreError;
 use lash_core::store_backend_support::required_constraints::{
-    InspectedConstraint, RequiredConstraintReport, SQLITE_EXPECTED_CONSTRAINTS,
-    SqliteConstraintDatabase, compare_required_constraints, extract_named_check_expressions,
+    EXPECTED_CONSTRAINTS, InspectedConstraint, RequiredConstraintReport, SqliteConstraintDatabase,
+    compare_required_constraints, extract_named_check_expressions,
 };
 
 use crate::{SqliteDatabase, conn::SqliteConnection, sqlite_error};
@@ -59,17 +59,9 @@ pub async fn inspect_required_constraints_at(
         .collect::<BTreeMap<_, _>>();
 
     let mut expected = Vec::new();
-    for constraint in SQLITE_EXPECTED_CONSTRAINTS {
-        let Some(component) = constraint.sqlite_database else {
-            return Err(StoreError::RequiredConstraintInspectionInconclusive {
-                backend: "sqlite",
-                table: constraint.table.to_string(),
-                constraint: constraint.name.to_string(),
-                detail: "registered SQLite constraint has no database component".to_string(),
-            });
-        };
-        if sqlite_database(component) == database {
-            expected.push(*constraint);
+    for constraint in EXPECTED_CONSTRAINTS {
+        if sqlite_database(constraint.sqlite_database) == database {
+            expected.push(constraint.sqlite);
         }
     }
     let mut actual = Vec::new();

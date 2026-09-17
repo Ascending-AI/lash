@@ -378,8 +378,9 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // The enclosing catalog uses the current causal discriminator vocabulary;
     // only the deliberately obsolete checkpoint component remains historical.
     let causal_constraint =
-        lash_core::store_backend_support::required_constraints::POSTGRES_EXPECTED_CONSTRAINTS
+        lash_core::store_backend_support::required_constraints::EXPECTED_CONSTRAINTS
             .iter()
+            .map(|constraint| constraint.postgres)
             .find(|constraint| constraint.name == "ck_session_meta_caused_by_kind")
             .expect("registered session causal discriminator constraint");
     sqlx::raw_sql(&format!(
