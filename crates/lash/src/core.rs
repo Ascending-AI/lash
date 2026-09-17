@@ -949,12 +949,8 @@ pub struct LashCoreBuilder {
     // `RuntimeHostConfig` has no `Default`: the generic host-owned durability
     // dependencies must be named. They are collected here and resolved in
     // `build()`, which errors if any is unset.
-    effect_host: Option<Arc<dyn EffectHost>>,
-    attachment_store: Option<Arc<dyn AttachmentStore>>,
-    process_env_store: Option<Arc<dyn ProcessExecutionEnvStore>>,
-    commit_budget: Option<facade_support::CommitBudget>,
+    deps: runtime_host_config::HostDependencies,
     max_attachment_bytes: Option<Option<u64>>,
-    queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     native_substrate: NativeSubstrateConfig,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
@@ -999,12 +995,8 @@ impl LashCoreBuilder {
             provider: None,
             store_factory: None,
             session_creation_store_factory: None,
-            effect_host: None,
-            attachment_store: None,
-            process_env_store: None,
-            commit_budget: None,
+            deps: runtime_host_config::HostDependencies::default(),
             max_attachment_bytes: None,
-            queued_work_batching: None,
             process_wake_delivery_policy: None,
             native_substrate: NativeSubstrateConfig::default(),
             trigger_store: None,
@@ -1084,7 +1076,7 @@ impl LashCoreBuilder {
 
     /// Configures the attachment store and returns the updated builder.
     pub fn attachment_store(mut self, attachment_store: Arc<dyn AttachmentStore>) -> Self {
-        self.attachment_store = Some(attachment_store);
+        self.deps.attachment_store = Some(attachment_store);
         self
     }
 
@@ -1093,7 +1085,7 @@ impl LashCoreBuilder {
         mut self,
         process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     ) -> Self {
-        self.process_env_store = Some(process_env_store);
+        self.deps.process_env_store = Some(process_env_store);
         self
     }
 
@@ -1101,7 +1093,7 @@ impl LashCoreBuilder {
     /// commit. Hosts must choose bounded or unbounded behavior explicitly for
     /// both dimensions.
     pub fn commit_budget(mut self, commit_budget: facade_support::CommitBudget) -> Self {
-        self.commit_budget = Some(commit_budget);
+        self.deps.commit_budget = Some(commit_budget);
         self
     }
 
@@ -1122,7 +1114,7 @@ impl LashCoreBuilder {
         mut self,
         policy: facade_support::QueuedWorkBatchingConfig,
     ) -> Self {
-        self.queued_work_batching = Some(policy);
+        self.deps.queued_work_batching = Some(policy);
         self
     }
 
@@ -1153,7 +1145,7 @@ impl LashCoreBuilder {
     /// for in-process execution, or a workflow-backed host for durable
     /// execution.
     pub fn effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
-        self.effect_host = Some(effect_host);
+        self.deps.effect_host = Some(effect_host);
         self
     }
 
