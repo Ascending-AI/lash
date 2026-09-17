@@ -1,49 +1,10 @@
 use crate::support::SessionError;
 use lash_sansio::SessionId;
 
-/// Why a host-selected queued-work drain was refused before executing a turn.
-///
-/// Requested IDs with no remaining durable row are idempotently satisfied and
-/// do not cause refusal. Each cause here means at least one still-present row
-/// could not be executed under the requested atomic composition; no selected
-/// turn was started.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SelectedQueuedWorkDrainRefusalCause {
-    /// The requested present rows do not form one claimable queue composition.
-    ///
-    /// This includes physical queue gaps and mismatched batching gates. The
-    /// attempted selected composition remains unexecuted.
-    UnclaimableTogether {
-        /// Requested batch IDs that the store could not claim with the rest.
-        unclaimed_batch_ids: Vec<lash_core::BatchId>,
-    },
-    /// A requested row belongs to an interrupted claim whose complete,
-    /// already-journaled composition must be redriven atomically. If a request
-    /// partially covers more than one interrupted claim, this names the
-    /// physically earliest incomplete claim in durable enqueue order.
-    InterruptedBatchRequiresFullComposition {
-        /// Complete interrupted composition, in durable enqueue order.
-        required_batch_ids: Vec<lash_core::BatchId>,
-    },
-    /// Another host currently owns the session's execution lane while at least
-    /// one requested row remains present.
-    ExecutionLaneBusy,
-    /// One requested row renders larger than the entire model context window.
-    ///
-    /// No drain policy can make such a row fit, so Lash names it and the window
-    /// it would require rather than wedging the queue. Recovery is host policy:
-    /// compact or split the work, or run the session on a larger-window model.
-    QueuedItemExceedsContextWindow {
-        /// Durable identity of the oversized row.
-        batch_id: lash_core::BatchId,
-        /// Durable queue position of the oversized row.
-        batch_enqueue_seq: u64,
-        /// Conservative tokens this row alone needs.
-        required_context_tokens: usize,
-        /// The session model's context window.
-        max_context_tokens: usize,
-    },
-}
+// The refusal vocabulary is core's own type, re-exported so a host never
+// reaches into `lash_core` — the same shape ADR 0079 sanctions for the rest
+// of the queue types at the crate root.
+pub use lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause;
 
 #[derive(Debug, thiserror::Error)]
 /// Errors returned while configuring or operating the embedded Lash runtime.
