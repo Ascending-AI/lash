@@ -68,35 +68,16 @@ pub(super) fn validate_outcome_table(
 
     for entry in table.iter().filter(|entry| entry.level_2.is_some()) {
         let expectation = entry.level_2.as_ref().expect("filtered level-2 row");
-        match (&expectation.exact, &expectation.known_defect) {
-            (Some(exact), None) => {
-                let observed = exact.exact().ok_or_else(|| {
-                    format!(
-                        "level-2 exact expectation must specify terminal, pending_inputs, and queued_work: {:?}",
-                        entry.point
-                    )
-                })?;
-                if observed != DurableEndState::CORRECT {
-                    return Err(format!(
-                        "ordinary level-2 expectation must assert the correct durable end state exactly: {:?}",
-                        entry.point
-                    ));
-                }
-            }
-            (None, Some(known_defect)) => {
+        match expectation {
+            Level2Expectation::Exact(_) => {}
+            Level2Expectation::KnownDefect(known_defect) => {
                 if !is_ticket_id(&known_defect.ticket) {
                     return Err(format!(
                         "known-defect expectation requires a ticket id: {:?}",
                         entry.point
                     ));
                 }
-                let defective = known_defect.expected_defective.exact().ok_or_else(|| {
-                    format!(
-                        "known-defect expectation must specify terminal, pending_inputs, and queued_work exactly: {:?}",
-                        entry.point
-                    )
-                })?;
-                if defective == DurableEndState::CORRECT {
+                if known_defect.expected_defective == DurableEndState::CORRECT {
                     return Err(format!(
                         "known-defect expectation must differ from the correct durable end state: {:?}",
                         entry.point
@@ -111,12 +92,6 @@ pub(super) fn validate_outcome_table(
                         known_defect.ticket, entry.point
                     ));
                 }
-            }
-            _ => {
-                return Err(format!(
-                    "level-2 expectation must contain exactly one of `exact` or `known_defect`: {:?}",
-                    entry.point
-                ));
             }
         }
     }
@@ -149,12 +124,6 @@ pub(super) fn validate_durable_recovery_rulings(
         if ruling.outcome.trim().is_empty() {
             return Err(format!(
                 "durable recovery scenario `{}` must explain its ruling",
-                ruling.scenario
-            ));
-        }
-        if ruling.exact.exact().is_none() {
-            return Err(format!(
-                "durable recovery scenario `{}` must pin an exact end state",
                 ruling.scenario
             ));
         }

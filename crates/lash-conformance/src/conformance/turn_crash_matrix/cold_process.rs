@@ -188,16 +188,10 @@ pub fn cold_process_turn_expectations() -> Vec<(&'static str, usize, usize, Stri
                 .find(|entry| entry.point == point)
                 .and_then(|entry| entry.level_2.as_ref())
                 .expect("level-2 action has a committed expectation");
-            let (end_state, known_defect) = match (&expectation.exact, &expectation.known_defect) {
-                (Some(exact), None) => (
-                    exact.exact().expect("validated exact end-state expectation"),
-                    None,
-                ),
-                (None, Some(defect)) => {
-                    let expected = defect
-                        .expected_defective
-                        .exact()
-                        .expect("validated exact known-defect expectation");
+            let (end_state, known_defect) = match expectation {
+                Level2Expectation::Exact(_) => (DurableEndState::CORRECT, None),
+                Level2Expectation::KnownDefect(defect) => {
+                    let expected = defect.expected_defective;
                     let notice = format!(
                         "KNOWN-DEFECT {} reproduced exactly for {}: observed {}; fixing {} must produce the correct durable end state {}",
                         defect.ticket,
@@ -208,12 +202,11 @@ pub fn cold_process_turn_expectations() -> Vec<(&'static str, usize, usize, Stri
                     );
                     (expected, Some(notice))
                 }
-                _ => unreachable!("validated level-2 end-state expectation"),
             };
             (
                 action.command(),
-                expectation.effect_executions.at_crash,
-                expectation.effect_executions.after_recovery,
+                expectation.effect_executions().at_crash,
+                expectation.effect_executions().after_recovery,
                 end_state.summary(),
                 known_defect,
             )
@@ -236,8 +229,6 @@ pub fn cold_process_durable_recovery_expectation(scenario: &str) -> String {
         .find(|ruling| ruling.scenario == scenario)
         .unwrap_or_else(|| panic!("unknown durable recovery scenario `{scenario}`"))
         .exact
-        .exact()
-        .expect("validated exact durable recovery ruling")
         .summary()
 }
 

@@ -158,24 +158,7 @@ pub(super) fn split_runtime_completion_boundaries(
 }
 
 pub(crate) fn is_scheduler_owned_runtime_completion(kind: BoundaryKind) -> bool {
-    match kind {
-        BoundaryKind::Provider
-        | BoundaryKind::Cancellation
-        | BoundaryKind::BackendFailure
-        | BoundaryKind::ProviderMutation
-        | BoundaryKind::Tool
-        | BoundaryKind::ExecCode
-        | BoundaryKind::DurableEffect
-        | BoundaryKind::Worker
-        | BoundaryKind::ProcessWake
-        | BoundaryKind::Observer => true,
-        BoundaryKind::Ingress
-        | BoundaryKind::QueuedIngress
-        | BoundaryKind::ProviderEvent
-        | BoundaryKind::ProcessLifecycle
-        | BoundaryKind::Trigger
-        | BoundaryKind::LeaseTime => false,
-    }
+    runtime_completion_family(kind).is_some()
 }
 
 pub(super) async fn register_ready_runtime_completions(
@@ -193,7 +176,12 @@ pub(super) async fn register_ready_runtime_completions(
             queue.defer(event);
             continue;
         }
-        let family = runtime_completion_family(&event);
+        let Some(family) = runtime_completion_family(event.kind) else {
+            return Err(FixedScriptRunnerError::Assertion(format!(
+                "queued runtime completion `{}` has no completion family for {:?}",
+                event.boundary_id, event.kind
+            )));
+        };
         let units = runtime_completion_units(&event)?;
         if event.kind == BoundaryKind::Provider {
             let turn_event = event.clone();
@@ -292,25 +280,25 @@ fn completion_session_alias(event: &BoundaryEvent) -> String {
         .to_string()
 }
 
-pub(super) fn runtime_completion_family(event: &BoundaryEvent) -> &'static str {
-    match event.kind {
-        BoundaryKind::Provider => "provider_turn_completion",
-        BoundaryKind::Cancellation => "queued_input_cancellation",
-        BoundaryKind::BackendFailure => "backend_retry_or_failure",
-        BoundaryKind::ProviderMutation => "provider_script_mutation",
-        BoundaryKind::Tool => "tool_return",
-        BoundaryKind::ExecCode => "exec_result",
-        BoundaryKind::DurableEffect => "durable_effect_completion",
-        BoundaryKind::Worker => "worker_lease_completion",
-        BoundaryKind::ProcessWake => "process_wake",
-        BoundaryKind::Observer => "observer_snapshot",
+pub(super) fn runtime_completion_family(kind: BoundaryKind) -> Option<RuntimeCompletionFamily> {
+    Some(match kind {
+        BoundaryKind::Provider => RuntimeCompletionFamily::ProviderTurnCompletion,
+        BoundaryKind::Cancellation => RuntimeCompletionFamily::QueuedInputCancellation,
+        BoundaryKind::BackendFailure => RuntimeCompletionFamily::BackendRetryOrFailure,
+        BoundaryKind::ProviderMutation => RuntimeCompletionFamily::ProviderScriptMutation,
+        BoundaryKind::Tool => RuntimeCompletionFamily::ToolReturn,
+        BoundaryKind::ExecCode => RuntimeCompletionFamily::ExecResult,
+        BoundaryKind::DurableEffect => RuntimeCompletionFamily::DurableEffectCompletion,
+        BoundaryKind::Worker => RuntimeCompletionFamily::WorkerLeaseCompletion,
+        BoundaryKind::ProcessWake => RuntimeCompletionFamily::ProcessWake,
+        BoundaryKind::Observer => RuntimeCompletionFamily::ObserverSnapshot,
         BoundaryKind::Ingress
         | BoundaryKind::QueuedIngress
         | BoundaryKind::ProviderEvent
         | BoundaryKind::ProcessLifecycle
         | BoundaryKind::Trigger
-        | BoundaryKind::LeaseTime => "runtime_completion",
-    }
+        | BoundaryKind::LeaseTime => return None,
+    })
 }
 
 pub(super) fn runtime_completion_units(

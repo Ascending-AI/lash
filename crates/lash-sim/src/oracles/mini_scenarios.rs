@@ -273,7 +273,7 @@ pub(super) fn mini_standard_provider_error_without_checkpoint(
         matches!(
             event.kind,
             BoundaryKind::ProviderMutation | BoundaryKind::BackendFailure
-        ) && event.payload.get("runtime_completion").is_some()
+        ) && PendingRuntimeBoundary::from_payload(&event.payload).is_some()
             && event.sequence
                 < next_provider_sequence(events, &event.actor_alias).unwrap_or(usize::MAX)
     });
@@ -316,7 +316,7 @@ pub(super) fn mini_rlm_finish_required_prose_repair(
             && events
                 .iter()
                 .filter(|event| event.kind == BoundaryKind::Provider)
-                .any(|event| event.payload.get("runtime_completion").is_some()),
+                .any(|event| PendingRuntimeBoundary::from_payload(&event.payload).is_some()),
         "finish-required repair mini-replay observed repeated provider completions and observer convergence",
         "finish-required repair mini-replay lacked repeated provider/observer convergence",
     )
@@ -436,15 +436,15 @@ pub(super) fn first_event(
 }
 
 pub(super) fn provider_completion_units(event: &DeliveredBoundary) -> Vec<String> {
-    event
-        .payload
-        .pointer("/runtime_completion/completion_units")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|unit| unit.get("unit").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect()
+    PendingRuntimeBoundary::from_payload(&event.payload)
+        .map(|pending| {
+            pending
+                .completion_units
+                .iter()
+                .map(|unit| unit.unit.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(super) fn next_provider_sequence(
@@ -579,11 +579,10 @@ pub(super) fn scenario_evidence_satisfied(
         }),
         "provider_mutation" => events.iter().any(|event| {
             event.kind == BoundaryKind::ProviderMutation
-                && event
-                    .payload
-                    .pointer("/runtime_completion/completion_family")
-                    .and_then(Value::as_str)
-                    == Some("provider_script_mutation")
+                && PendingRuntimeBoundary::from_payload(&event.payload)
+                    .is_some_and(|pending| {
+                        pending.completion_family == RuntimeCompletionFamily::ProviderScriptMutation
+                    })
                 && event
                     .observed
                     .pointer("/provider_parser_matrix/matrix/real_provider_parser_execution")
@@ -667,11 +666,10 @@ pub(super) fn scenario_evidence_satisfied(
                     .get("backend_failure")
                     .and_then(Value::as_bool)
                     == Some(true)
-                && event
-                    .payload
-                    .pointer("/runtime_completion/completion_family")
-                    .and_then(Value::as_str)
-                    == Some("backend_retry_or_failure")
+                && PendingRuntimeBoundary::from_payload(&event.payload)
+                    .is_some_and(|pending| {
+                        pending.completion_family == RuntimeCompletionFamily::BackendRetryOrFailure
+                    })
                 && event
                     .observed
                     .pointer("/production_store_error/type")

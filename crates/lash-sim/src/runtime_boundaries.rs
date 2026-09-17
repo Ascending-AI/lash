@@ -183,8 +183,7 @@ impl RuntimeBoundaryHarness {
             BoundaryKind::ProcessLifecycle => self.run_process_lifecycle(event).await,
             BoundaryKind::Worker => self.run_worker_stale_completion(event).await,
             kind => Err(RuntimeBoundaryError::new(format!(
-                "runtime boundary harness does not own {}",
-                kind.name()
+                "runtime boundary harness does not own {kind}"
             ))),
         }
     }

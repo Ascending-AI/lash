@@ -199,7 +199,7 @@ pub async fn replay_trace_to_postgres(
             store.project_boundary_observation(&event)
         };
         runtime_replayed_boundary_count += 1;
-        replayed_boundary_families.insert(boundary_family_name(event.kind).to_string());
+        replayed_boundary_families.insert(event.kind.to_string());
         if normalize_backend_observed(event.kind, &observed)
             != normalize_backend_observed(event.kind, &delivered.observed)
         {
@@ -209,8 +209,7 @@ pub async fn replay_trace_to_postgres(
                 "sim.oracle.postgres-boundary-replay.v1",
                 format!(
                     "Postgres replay boundary `{}` ({}) reproduced different observed data",
-                    event.boundary_id,
-                    boundary_family_name(event.kind)
+                    event.boundary_id, event.kind
                 ),
             );
             write_divergence_artifact(
@@ -222,7 +221,7 @@ pub async fn replay_trace_to_postgres(
                 &actual_summary,
                 Some(PostgresBoundaryDivergence {
                     boundary_id: event.boundary_id,
-                    boundary_kind: boundary_family_name(event.kind).to_string(),
+                    boundary_kind: event.kind.to_string(),
                     expected_observed: delivered.observed.clone(),
                     actual_observed: observed,
                 }),
@@ -432,8 +431,7 @@ impl PostgresRuntimeReplayWorld {
             | BoundaryKind::ProviderMutation
             | BoundaryKind::LeaseTime => Err(PostgresReplayError::Assertion(format!(
                 "boundary `{}` ({}) is owned by the replay projector, not the Postgres runtime world",
-                event.boundary_id,
-                boundary_family_name(event.kind)
+                event.boundary_id, event.kind
             ))),
         }
     }
@@ -1209,27 +1207,6 @@ fn is_runtime_backed_boundary(kind: BoundaryKind) -> bool {
             | BoundaryKind::ProcessLifecycle
             | BoundaryKind::Worker
     )
-}
-
-fn boundary_family_name(kind: BoundaryKind) -> &'static str {
-    match kind {
-        BoundaryKind::Ingress => "ingress",
-        BoundaryKind::QueuedIngress => "queued_ingress",
-        BoundaryKind::Provider => "provider",
-        BoundaryKind::ProviderEvent => "provider_event",
-        BoundaryKind::Tool => "tool",
-        BoundaryKind::ExecCode => "exec_code",
-        BoundaryKind::DurableEffect => "durable_effect",
-        BoundaryKind::ProcessWake => "process_wake",
-        BoundaryKind::ProcessLifecycle => "process_lifecycle",
-        BoundaryKind::Worker => "worker",
-        BoundaryKind::Observer => "observer",
-        BoundaryKind::Cancellation => "cancellation",
-        BoundaryKind::Trigger => "trigger",
-        BoundaryKind::BackendFailure => "backend_failure",
-        BoundaryKind::ProviderMutation => "provider_mutation",
-        BoundaryKind::LeaseTime => "lease_time",
-    }
 }
 
 pub(crate) fn redact_database_url(database_url: &str) -> String {

@@ -132,7 +132,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::Provider,
             json!({
                 "text": "answer for session-001 turn 1",
-                "runtime_completion": runtime_completion("provider_turn_completion", 0),
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 0),
                 "expected_provider_exchange_count": 1,
             }),
             json!({
@@ -187,12 +187,11 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::Cancellation,
             json!({
                 "target": "session-001:queue:001",
-                "runtime_completion": {
-                    "completion_family": "queued_input_cancellation",
-                    "completion_units": [{"unit": "runtime:cancel_pending_turn_input", "at": 2}],
-                    "ready_at": 2,
-                    "registered_after": "session-001:queue:001"
-                }
+                "runtime_completion": runtime_completion_registered_after(
+                    RuntimeCompletionFamily::QueuedInputCancellation,
+                    2,
+                    "session-001:queue:001",
+                )
             }),
             json!({
                 "cancel_outcome": "cancelled",
@@ -206,7 +205,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             "session-001:observer:reconnect:001",
             "session-001",
             BoundaryKind::Observer,
-            json!({"runtime_completion": runtime_completion("observer_snapshot", 3)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ObserverSnapshot, 3)}),
             json!({"reconnected": true, "turn_index": 2}),
         ),
         delivered_with_payload(
@@ -216,7 +215,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::Provider,
             json!({
                 "text": "answer for session-001 turn 2",
-                "runtime_completion": runtime_completion("provider_turn_completion", 4),
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 4),
                 "expected_provider_exchange_count": 2,
             }),
             json!({
@@ -234,7 +233,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::Provider,
             json!({
                 "text": "answer for session-002 turn 1",
-                "runtime_completion": runtime_completion("provider_turn_completion", 5),
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 5),
                 "expected_provider_exchange_count": 1,
             }),
             json!({
@@ -252,7 +251,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::Provider,
             json!({
                 "text": "answer for session-002 turn 2",
-                "runtime_completion": runtime_completion("provider_turn_completion", 6),
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 6),
                 "expected_provider_exchange_count": 2,
             }),
             json!({
@@ -271,7 +270,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             json!({
                 "process_id": "process-001",
                 "sequence": 1,
-                "runtime_completion": runtime_completion("process_wake", 7),
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 7),
             }),
             json!({
                 "claimed_once": true,
@@ -300,7 +299,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             json!({
                 "process_id": "process-001",
                 "sequence": 1,
-                "runtime_completion": runtime_completion("process_wake", 8),
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 8),
             }),
             json!({
                 "claimed_once": false,
@@ -326,7 +325,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             "worker-001:worker:001",
             "worker-001",
             BoundaryKind::Worker,
-            json!({"runtime_completion": runtime_completion("worker_lease_completion", 9)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 9)}),
             json!({
                 "stale_completion_rejected": true,
                 "runtime_active_lease": {},
@@ -338,7 +337,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             "session-001:durable:001:first",
             "session-001",
             BoundaryKind::DurableEffect,
-            json!({"runtime_completion": runtime_completion("durable_effect_completion", 10)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 10)}),
             json!({
                 "durable_key": "durable/session-001",
                 "replayed": false,
@@ -353,7 +352,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             "session-001:durable:001:replay",
             "session-001",
             BoundaryKind::DurableEffect,
-            json!({"runtime_completion": runtime_completion("durable_effect_completion", 11)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 11)}),
             json!({
                 "durable_key": "durable/session-001",
                 "replayed": true,
@@ -368,7 +367,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             "session-001:tool:001",
             "session-001",
             BoundaryKind::Tool,
-            json!({"runtime_completion": runtime_completion("tool_return", 12)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ToolReturn, 12)}),
             json!({
                 "runtime_tool_output": {},
                 "runtime_tool_record": {},
@@ -380,7 +379,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             "session-001:exec:001",
             "session-001",
             BoundaryKind::ExecCode,
-            json!({"runtime_completion": runtime_completion("exec_result", 13)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ExecResult, 13)}),
             json!({
                 "runtime_effect_outcome": {
                     "result": {
@@ -419,7 +418,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::BackendFailure,
             json!({
                 "operation": "commit_runtime_state:001",
-                "runtime_completion": runtime_completion("backend_retry_or_failure", 15),
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 15),
             }),
             json!({
                 "attempt": 1,
@@ -442,7 +441,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::BackendFailure,
             json!({
                 "operation": "commit_runtime_state:001",
-                "runtime_completion": runtime_completion("backend_retry_or_failure", 16),
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 16),
             }),
             json!({
                 "attempt": 2,
@@ -463,7 +462,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             "session-001:provider-mutation:001",
             "session-001",
             BoundaryKind::ProviderMutation,
-            json!({"runtime_completion": runtime_completion("provider_script_mutation", 17)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderScriptMutation, 17)}),
             json!({
                 "mutation": "malformed_sse_chunk",
                 "provider_parser_matrix": {
@@ -484,7 +483,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             "session-001:provider-mutation:002",
             "session-001",
             BoundaryKind::ProviderMutation,
-            json!({"runtime_completion": runtime_completion("provider_script_mutation", 18)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderScriptMutation, 18)}),
             json!({
                 "mutation": "rate_limit_error_envelope",
                 "provider_parser_matrix": {
@@ -511,7 +510,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             "session-001:provider-mutation:003",
             "session-001",
             BoundaryKind::ProviderMutation,
-            json!({"runtime_completion": runtime_completion("provider_script_mutation", 19)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderScriptMutation, 19)}),
             json!({
                 "mutation": "dropped_terminal_event",
                 "provider_parser_matrix": {
@@ -556,7 +555,7 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
             BoundaryKind::Provider,
             json!({
                 "text": "answer for session-001 turn 3",
-                "runtime_completion": runtime_completion("provider_turn_completion", 21),
+                "runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 21),
                 "expected_provider_exchange_count": 3,
             }),
             json!({
@@ -718,18 +717,40 @@ pub(super) fn delivered_with_payload(
     }
 }
 
-pub(super) fn runtime_completion(family: &str, ready_at: u64) -> serde_json::Value {
-    json!({
-        "completion_family": family,
-        "completion_units": [
-            {
-                "unit": format!("runtime:{family}"),
-                "at": ready_at
-            }
-        ],
-        "ready_at": ready_at,
-        "registered_after": "session-001:ingress"
+pub(super) fn runtime_completion(
+    family: RuntimeCompletionFamily,
+    ready_at: u64,
+) -> serde_json::Value {
+    runtime_completion_registered_after(family, ready_at, "session-001:ingress")
+}
+
+pub(super) fn runtime_completion_registered_after(
+    family: RuntimeCompletionFamily,
+    ready_at: u64,
+    registered_after: &str,
+) -> serde_json::Value {
+    let family_name = serde_json::to_value(family)
+        .expect("completion family serializes")
+        .as_str()
+        .expect("completion family serializes to a string")
+        .to_string();
+    serde_json::to_value(PendingRuntimeBoundary {
+        schema: PENDING_RUNTIME_BOUNDARY_SCHEMA.to_string(),
+        pending_id: format!("pending:{family_name}:{ready_at}"),
+        boundary_id: format!("session-001:{family_name}:{ready_at}"),
+        actor_alias: "session-001".to_string(),
+        kind: BoundaryKind::Provider,
+        completion_family: family,
+        original_scheduled_at: ready_at,
+        ready_at,
+        registered_after: registered_after.to_string(),
+        registered_after_sequence: 0,
+        completion_units: vec![RuntimeCompletionUnit::new(
+            format!("runtime:{family_name}"),
+            ready_at,
+        )],
     })
+    .expect("pending runtime boundary fixture serializes")
 }
 
 pub(super) fn provider_mutation_observed(mutation: &str) -> serde_json::Value {

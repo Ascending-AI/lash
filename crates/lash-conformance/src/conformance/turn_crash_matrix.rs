@@ -250,44 +250,46 @@ struct Level2EffectExecutions {
     after_recovery: usize,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct DurableEndStateExpectation {
-    #[serde(default)]
-    terminal: Option<usize>,
-    #[serde(default)]
-    pending_inputs: Option<usize>,
-    #[serde(default)]
-    queued_work: Option<usize>,
+struct DurableEndState {
+    terminal: usize,
+    pending_inputs: usize,
+    queued_work: usize,
 }
 
-impl DurableEndStateExpectation {
-    fn exact(self) -> Option<DurableEndState> {
-        Some(DurableEndState {
-            terminal: self.terminal?,
-            pending_inputs: self.pending_inputs?,
-            queued_work: self.queued_work?,
-        })
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+/// An ordinary level-2 ruling: the recovered durable end state is exactly
+/// [`DurableEndState::CORRECT`], so the triple is not restated per row.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct KnownDefectExpectation {
-    #[serde(default)]
-    ticket: String,
-    #[serde(default)]
-    expected_defective: DurableEndStateExpectation,
+struct Level2ExactExpectation {
+    effect_executions: Level2EffectExecutions,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct Level2Expectation {
+struct KnownDefectExpectation {
     effect_executions: Level2EffectExecutions,
-    #[serde(default)]
-    exact: Option<DurableEndStateExpectation>,
-    #[serde(default)]
-    known_defect: Option<KnownDefectExpectation>,
+    ticket: String,
+    expected_defective: DurableEndState,
+}
+
+/// Exactly one of the two level-2 end-state rulings; the externally tagged
+/// representation rejects rows carrying both or neither.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum Level2Expectation {
+    Exact(Level2ExactExpectation),
+    KnownDefect(KnownDefectExpectation),
+}
+
+impl Level2Expectation {
+    fn effect_executions(&self) -> &Level2EffectExecutions {
+        match self {
+            Self::Exact(exact) => &exact.effect_executions,
+            Self::KnownDefect(defect) => &defect.effect_executions,
+        }
+    }
 }
 
 /// Reviewable recovery ruling for one generated point.
@@ -307,7 +309,7 @@ struct TurnCrashOutcome {
 struct DurableRecoveryRuling {
     scenario: String,
     outcome: String,
-    exact: DurableEndStateExpectation,
+    exact: DurableEndState,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -315,13 +317,6 @@ struct DurableRecoveryRuling {
 enum ReviewedTurnCrashRuling {
     CrashPoint(TurnCrashOutcome),
     DurableRecovery(DurableRecoveryRuling),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct DurableEndState {
-    terminal: usize,
-    pending_inputs: usize,
-    queued_work: usize,
 }
 
 impl DurableEndState {
@@ -2429,21 +2424,25 @@ mod tests {
             .iter_mut()
             .find(|entry| entry.level_2.is_some())
             .expect("level-2 row");
-        let expectation = entry.level_2.as_mut().expect("level-2 expectation");
-        expectation.exact = None;
-        expectation.known_defect = Some(KnownDefectExpectation {
+        let effect_executions = *entry
+            .level_2
+            .as_ref()
+            .expect("level-2 expectation")
+            .effect_executions();
+        entry.level_2 = Some(Level2Expectation::KnownDefect(KnownDefectExpectation {
+            effect_executions,
             ticket: "FIG-999".to_string(),
-            expected_defective: DurableEndStateExpectation {
-                terminal: Some(1),
-                pending_inputs: Some(0),
-                queued_work: Some(1),
+            expected_defective: DurableEndState {
+                terminal: 1,
+                pending_inputs: 0,
+                queued_work: 1,
             },
-        });
+        }));
         entry.outcome = "KNOWN-DEFECT FIG-999; correct durable end state terminal=1, pending_inputs=0, queued_work=0".to_string();
-        expectation
-            .known_defect
-            .as_mut()
-            .expect("installed known-defect fixture")
+        match entry.level_2.as_mut() {
+            Some(Level2Expectation::KnownDefect(defect)) => defect,
+            _ => unreachable!("installed known-defect fixture"),
+        }
     }
 
     #[test]
@@ -2509,22 +2508,6 @@ mod tests {
         assert!(
             validate_outcome_table(&generated, &table).is_err(),
             "a known defect without a ticket id must invalidate the oracle"
-        );
-    }
-
-    #[test]
-    fn outcome_validation_rejects_a_non_exact_known_defect() {
-        let generated = generated_points(&golden_trace());
-        let mut table = turn_crash_matrix_outcomes();
-        assert!(
-            validate_outcome_table(&generated, &table).is_ok(),
-            "the synthetic defect test must start from a valid oracle"
-        );
-        let defect = install_known_defect_fixture(&mut table);
-        defect.expected_defective.queued_work = None;
-        assert!(
-            validate_outcome_table(&generated, &table).is_err(),
-            "a non-exact known-defect state must invalidate the oracle"
         );
     }
 

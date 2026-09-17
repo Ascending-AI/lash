@@ -223,11 +223,9 @@ pub(super) fn exec_semantic_fact(
 ) -> Result<ScenarioContractGeneratedFact, String> {
     let Some(exec) = events.iter().find(|event| {
         event.kind == BoundaryKind::ExecCode
-            && event
-                .payload
-                .pointer("/runtime_completion/completion_family")
-                .and_then(Value::as_str)
-                == Some("exec_result")
+            && PendingRuntimeBoundary::from_payload(&event.payload).is_some_and(|pending| {
+                pending.completion_family == RuntimeCompletionFamily::ExecResult
+            })
             && event.observed.get("runtime_effect_outcome").is_some()
             && event
                 .observed
@@ -703,10 +701,8 @@ pub(super) fn cancellation_terminalizes_pending_input(events: &[DeliveredBoundar
                 .get("text")
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            let registered_after = cancel
-                .payload
-                .pointer("/runtime_completion/registered_after")
-                .and_then(Value::as_str);
+            let registered_after = PendingRuntimeBoundary::from_payload(&cancel.payload)
+                .map(|pending| pending.registered_after);
             let cancelled = cancel
                 .observed
                 .get("cancelled")
@@ -718,7 +714,7 @@ pub(super) fn cancellation_terminalizes_pending_input(events: &[DeliveredBoundar
                     .and_then(Value::as_str)
                     == Some("cancelled")
                 && cancel.sequence > queued.sequence
-                && registered_after == Some(target);
+                && registered_after.as_deref() == Some(target);
             let leaked_after_cancel = events.iter().any(|event| {
                 event.kind == BoundaryKind::Provider
                     && event.actor_alias == cancel.actor_alias
