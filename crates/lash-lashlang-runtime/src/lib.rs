@@ -1378,7 +1378,7 @@ mod process;
 mod typed_output;
 
 pub use bridge::{
-    lashlang_value_to_json, process_event_payload, process_sleep,
+    ExecutionCancellation, lashlang_value_to_json, process_event_payload, process_sleep,
     protocol_tool_output_to_lashlang_value, protocol_tool_reply_to_lashlang_value,
 };
 pub use catalogue_preview::{

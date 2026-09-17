@@ -18,7 +18,6 @@ use lash_trace::{
     TraceRuntimeSubject, TraceSink,
 };
 use lashlang::{ExecutionHost, ExecutionHostError};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     LASHLANG_ENGINE_KIND, LashlangHostEnvironmentCheck, LashlangHostError, LashlangProcessEngine,
@@ -330,7 +329,10 @@ pub async fn run_lashlang_process(
         lashlang_execution_trace.emit_started(&artifact);
     }
     let processes = context.processes();
-    let cancellation = context.cancellation_token();
+    // The run's own cancellation scope: cancelled when the engine cancels this
+    // process, and also when the run itself observes a terminal the guest may
+    // not catch — a cancelled tool call.
+    let cancellation = crate::ExecutionCancellation::child_of(&context.cancellation_token());
     let (ctx, guard, mut state) = {
         let _phase = context.named_phase("rlm_process.build_context");
         let runtime_context = match context.into_runtime_context(tool_catalog) {
@@ -416,7 +418,7 @@ async fn execute_lashlang(
     compiled: Arc<lashlang::CompiledProgram>,
     state: &mut lashlang::State,
     env: &lashlang::ExecutionEnvironment<'_, LashlangProcessHost<'_>>,
-    cancellation: CancellationToken,
+    cancellation: crate::ExecutionCancellation,
     controller: &dyn lash_core::RuntimeEffectController,
     host: &LashlangProcessHost<'_>,
     segment: (Option<LashlangSegmentState>, String),
@@ -553,10 +555,12 @@ struct LashlangProcessHost<'run> {
     /// Attempt bound stamped onto every child this run starts, resolved once
     /// at the run's first segment and replayed from segment state afterwards.
     child_max_attempts: std::num::NonZeroU32,
-    /// The engine's cancellation token, read by the VM's cooperative
-    /// cancellation probe so a cancelled process terminates as an uncatchable
-    /// host terminal instead of running to completion inside a guest handler.
-    cancellation: CancellationToken,
+    /// This run's cancellation scope, read by the VM's cooperative cancellation
+    /// probe so a cancelled process terminates as an uncatchable host terminal
+    /// instead of running to completion inside a guest handler. It carries the
+    /// engine's cancellation and the cancellations this run observes for itself,
+    /// which is where a cancelled tool call lands.
+    cancellation: crate::ExecutionCancellation,
 }
 
 type ProcessHostAbilityFuture<'a> =
@@ -717,7 +721,7 @@ impl LashlangProcessHost<'_> {
         } else {
             Box::pin(self.ctx.call_tool_by_id(id, tool_id, args, 0)).await
         };
-        protocol_tool_reply_to_lashlang_value(reply)
+        protocol_tool_reply_to_lashlang_value(reply, &self.cancellation)
     }
 
     #[expect(
@@ -792,7 +796,7 @@ impl LashlangProcessHost<'_> {
         let batch = self.ctx.call_tool_batch(invocations).await;
         for (index, reply) in positions.iter().copied().zip(batch.replies) {
             results[index] = Some(lashlang::ResourceOperationResult::from_result(
-                protocol_tool_reply_to_lashlang_value(reply),
+                protocol_tool_reply_to_lashlang_value(reply, &self.cancellation),
             ));
         }
 
@@ -834,7 +838,7 @@ impl LashlangProcessHost<'_> {
                 )
                 .await
         };
-        protocol_tool_reply_to_lashlang_value(reply)
+        protocol_tool_reply_to_lashlang_value(reply, &self.cancellation)
     }
 
     async fn process_event(&self, event: lashlang::ProcessEvent) -> Result<(), ExecutionHostError> {

@@ -581,6 +581,17 @@ fn continue_or_stop_after_nonterminal(
 }
 
 fn terminal_outcome_from_tool_result(record: &ToolCallRecord) -> Option<TurnOutcome> {
+    if let ToolCallOutcome::Cancelled(_) = &record.output.outcome {
+        // A cancelled call is an uncatchable host terminal, not a value the
+        // model can react to: the run it was dispatched for is over, so the
+        // turn ends cancelled with evidence lash mints for itself.
+        return Some(TurnOutcome::Stopped(TurnStop::Cancelled {
+            evidence: lash_core::facade_support::TurnCancellationEvidence::internal(format!(
+                "tool-call-cancelled:{}",
+                record.tool
+            )),
+        }));
+    }
     if !record.output.is_success() {
         return None;
     }

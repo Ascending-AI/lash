@@ -397,7 +397,7 @@ finish(result.status);
     });
 }
 
-async fn async_completion_reopen_and_redrive(resolution: lash::Resolution) {
+async fn async_completion_reopen_and_redrive(resolution: lash::Resolution, slug: &str) {
     let directory = tempfile::tempdir().expect("async completion directory");
     let approval_path = directory.path().join("approvals.db");
     let effect_path = directory.path().join("effects.db");
@@ -438,7 +438,8 @@ try {
         effect_host.clone(),
     )
     .await;
-    let session = core.session("async-completion").open().await.unwrap();
+    let session_id = format!("async-completion-{slug}");
+    let session = core.session(&session_id).open().await.unwrap();
     let scope = lash::durability::EffectHost::scoped_static(
         effect_host.as_ref(),
         session.turn_scope("async-turn"),
@@ -476,7 +477,7 @@ try {
         effect_host.clone(),
     )
     .await;
-    let session = core.session("async-completion").open().await.unwrap();
+    let session = core.session(&session_id).open().await.unwrap();
     let key = approvals.completion_key(&pending.key).unwrap();
     assert_eq!(
         core.completions()
@@ -515,14 +516,18 @@ try {
         },
         "redrive retains the exact typed terminal resolution"
     );
-    let value = output
-        .final_value()
-        .expect("the program handles every tool outcome");
+    let value = output.final_value().cloned();
     match resolution {
         lash::Resolution::Ok(expected) => {
-            assert_eq!(value, &json!({"ok": true, "value": expected}))
+            assert_eq!(
+                value.as_ref(),
+                Some(&json!({"ok": true, "value": expected}))
+            )
         }
         lash::Resolution::Err(error) => {
+            let value = value
+                .as_ref()
+                .expect("the program handles every tool outcome");
             assert_eq!(value["ok"], false);
             assert_eq!(value["error"], error.message);
             assert_eq!(value["cause"]["class"], "execution");
@@ -531,6 +536,9 @@ try {
             assert_eq!(value["cause"]["retry"]["type"], "never");
         }
         lash::Resolution::Timeout => {
+            let value = value
+                .as_ref()
+                .expect("the program handles every tool outcome");
             assert_eq!(value["ok"], false);
             assert_eq!(value["error"], "pending tool completion timed out");
             assert_eq!(value["cause"]["class"], "timeout");
@@ -539,21 +547,18 @@ try {
             assert_eq!(value["cause"]["retry"]["type"], "never");
         }
         lash::Resolution::Cancelled => {
-            assert_eq!(value["ok"], false);
-            // ADR 0096: TypeScript rejects with an `Error` rather than handing
-            // back the Lashlang result wrapper, so the cancellation fields are
-            // read off the rejection instead of a JSON-encoded error string.
-            // ADR 0096: TypeScript rejects with an `Error` rather than handing
-            // back the Lashlang result wrapper, so the cancellation payload
-            // arrives inside the rejection message. The fields asserted are the
-            // same ones the wrapper carried.
-            let message = value["error"].as_str().expect("cancellation message");
-            let encoded = &message[message
-                .find('{')
-                .expect("the rejection carries the cancellation payload")..];
-            let cancellation: Value = serde_json::from_str(encoded).unwrap();
-            assert_eq!(cancellation["message"], "pending tool completion cancelled");
-            assert_eq!(cancellation["source"], "cancellation");
+            // ADR 0096 + the FIG-3271 cancellation contract: a cancelled call
+            // is an uncatchable host terminal, not a rejection the guest's
+            // catch can settle, so the turn ends cancelled without a value.
+            assert!(
+                matches!(
+                    &output.result.outcome,
+                    lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
+                ),
+                "the turn terminates cancelled instead of re-prompting the model: {:?}",
+                output.result.outcome
+            );
+            assert_eq!(value, None, "a cancelled call produces no guest value");
         }
     }
     let history = session.read_view();
@@ -582,7 +587,8 @@ try {
     let trajectory = trajectories[0];
     assert_eq!(trajectory["id"], "lashlang_step_async-turn_0");
     assert_eq!(
-        &trajectory["final_output"], value,
+        trajectory["final_output"],
+        serde_json::to_value(&value).unwrap(),
         "history retains the actual terminal result"
     );
     assert_eq!(trajectory["calls"].as_array().unwrap().len(), 1);
@@ -613,7 +619,7 @@ try {
         effect_host,
     )
     .await;
-    let session = reopened.session("async-completion").open().await.unwrap();
+    let session = reopened.session(&session_id).open().await.unwrap();
     assert_eq!(
         serde_json::to_value(session.read_view().active_events()).unwrap(),
         before_reopen,
@@ -624,9 +630,10 @@ try {
 #[test]
 fn async_completion_success_crosses_session_reopen_and_redrive() {
     run_async_test_on_stack_budget("async-completion-success", || async {
-        Box::pin(async_completion_reopen_and_redrive(lash::Resolution::Ok(
-            json!({"status": "applied"}),
-        )))
+        Box::pin(async_completion_reopen_and_redrive(
+            lash::Resolution::Ok(json!({"status": "applied"})),
+            "success",
+        ))
         .await;
     });
 }
@@ -636,6 +643,7 @@ fn async_completion_failure_crosses_session_reopen_and_redrive() {
     run_async_test_on_stack_budget("async-completion-failure", || async {
         Box::pin(async_completion_reopen_and_redrive(
             approvals::denial_resolution(),
+            "failure",
         ))
         .await;
     });
@@ -646,6 +654,7 @@ fn async_completion_timeout_crosses_session_reopen_and_redrive() {
     run_async_test_on_stack_budget("async-completion-timeout", || async {
         Box::pin(async_completion_reopen_and_redrive(
             lash::Resolution::Timeout,
+            "timeout",
         ))
         .await;
     });
@@ -656,6 +665,7 @@ fn async_completion_cancel_crosses_session_reopen_and_redrive() {
     run_async_test_on_stack_budget("async-completion-cancel", || async {
         Box::pin(async_completion_reopen_and_redrive(
             lash::Resolution::Cancelled,
+            "cancel",
         ))
         .await;
     });

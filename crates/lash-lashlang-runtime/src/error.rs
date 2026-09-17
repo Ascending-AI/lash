@@ -195,9 +195,12 @@ pub enum LashlangHostError {
         #[source]
         source: serde_json::Error,
     },
-    /// A tool rejected the call with its original message.
+    /// A tool call was cancelled, with the cancellation's own message.
+    ///
+    /// Reported alongside a cancelled execution scope, not as a failure the
+    /// guest may catch and continue past: see `bridge::ExecutionCancellation`.
     #[error("{message}")]
-    ToolRejected { message: String },
+    ToolCancelled { message: String },
     /// `sleep for` received a value outside its duration vocabulary.
     #[error(
         "`sleep for` expects a non-negative millisecond number or duration string, got {actual}"
