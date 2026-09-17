@@ -99,8 +99,13 @@ it does not substitute for the judged browser row.
    runtime retry instruction in that order. **The partial answer is not a wire
    message on this route.** The truncated reply is retained by the RLM protocol in its bound
    `history` variable, witnessed by the paired `protocol_step` record whose
-   `RlmDiagnostic.decision` is `retry_output_limit_cell`. Require that record for the same
-   turn rather than an assistant message carrying the partial answer.
+   `RlmDiagnostic.decision` is `retry_output_limit_cell` or `retry_output_limit_prose` — the
+   same output-limit retry's two sibling branches, `_cell` when the truncated reply cut an
+   unclosed cell and `_prose` when it carried no cell, so which fires is model behaviour on
+   the prompt rather than a configuration the row controls. Require one of the two records
+   for the same turn rather than an assistant message carrying the partial answer. The
+   retained partial is observable without its text: the retry's user frame reports
+   `history`: `HistoryItem[]` with an entry count that grows by one per retained reply.
 
    Do **not** read this as "an RLM conversation carries no assistant message at all". It
    carries none until the model emits a cell that actually executes; from that iteration
@@ -156,7 +161,7 @@ it does not substitute for the judged browser row.
 | Cap on the wire | `generation_disposition.output_token_cap` is `applied` or `clamped_to_capacity` on the response and its attempts | | |
 | Request accounted for | `body_len` + `body_sha256` present; `body_json_omitted_reason: "size_limit"` whenever `body_len` exceeds the 2 KiB cap | | |
 | Instructions | One `composition_changed` fingerprint spans both calls; retry text absent from `rendered_system_prompt` | | |
-| Position | Retry instruction follows its turn's user content and precedes the next user frame; `protocol_step` `retry_output_limit_cell` witnesses the partial; the partial answer itself never appears as a wire message | | |
+| Position | Retry instruction follows its turn's user content and precedes the next user frame; `protocol_step` `retry_output_limit_cell` or `retry_output_limit_prose` witnesses the partial; the partial answer itself never appears as a wire message | | |
 | Product agreement | Rendered outcome, API state, and trace identities agree | | |
 | Ownership | Only this row's Workbench and containers stopped | | |
 
