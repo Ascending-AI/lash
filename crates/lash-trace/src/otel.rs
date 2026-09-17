@@ -15,7 +15,10 @@ use opentelemetry::trace::{
 use opentelemetry::{Context, InstrumentationScope, KeyValue, Value as OtelValue, global};
 use serde_json::Value;
 
-use crate::{TraceContext, TraceEvent, TraceRecord, TraceSink, TraceSinkError, TraceTokenUsage};
+use crate::{
+    TraceContext, TraceEvent, TraceRecord, TraceSink, TraceSinkError, TraceTokenUsage, llm_node_id,
+    tool_node_id, turn_node_id,
+};
 
 mod metrics;
 pub use metrics::{RuntimeTuningMetrics, ToolIntentMetrics, WorkerCapacityMetrics};
@@ -333,13 +336,12 @@ where
             }
             TraceEvent::ExecCodeStarted { .. }
             | TraceEvent::ExecCodeCompleted { .. }
-            | TraceEvent::ExecCodeFailed { .. }
-            | TraceEvent::ObservationProjection { .. } => self.emit_instant(
-                record,
-                typed_diagnostic_span_name(&record.event)
-                    .expect("typed diagnostic has an OTel span name"),
-                None,
-            ),
+            | TraceEvent::ExecCodeFailed { .. } => {
+                self.emit_instant(record, "lash.exec_code", None)
+            }
+            TraceEvent::ObservationProjection { .. } => {
+                self.emit_instant(record, "lash.observation_projection", None)
+            }
             TraceEvent::RlmStep { .. } => self.emit_instant(record, "lash.rlm.step", None),
             TraceEvent::ProtocolStep { .. } => {
                 self.emit_instant(record, format!("lash.{}", record.event.kind()), None)
@@ -1359,20 +1361,16 @@ where
     active.get(&key).map(|span| span.context.clone())
 }
 
+/// Active-span key for the turn this context belongs to, in the shared
+/// `graph_node_id` key space ([`crate::turn_node_id`]). A context the emitter
+/// already stamped but that carries no derivable turn identity falls back to
+/// its `graph_node_id` as-is.
 fn turn_key(context: &TraceContext) -> Option<String> {
-    let session_id = context.session_id.as_deref()?;
-    let turn_id = context
-        .turn_id
-        .as_deref()
-        .or(context.graph_node_id.as_deref())?;
-    Some(format!("turn:{session_id}:{turn_id}"))
+    turn_node_id(context).or_else(|| context.graph_node_id.clone())
 }
 
 fn llm_key(context: &TraceContext) -> Option<String> {
-    context
-        .llm_call_id
-        .as_deref()
-        .map(|llm_call_id| format!("llm:{llm_call_id}"))
+    context.llm_call_id.as_deref().map(llm_node_id)
 }
 
 fn tool_key(event: &TraceEvent) -> Option<String> {
@@ -1384,7 +1382,7 @@ fn tool_key(event: &TraceEvent) -> Option<String> {
         | TraceEvent::ToolCallCompleted {
             call_id: Some(call_id),
             ..
-        } => Some(format!("tool:{call_id}")),
+        } => Some(tool_node_id(call_id)),
         _ => None,
     }
 }
@@ -1400,14 +1398,6 @@ fn typed_diagnostic_protocol_payload(event: &TraceEvent) -> Value {
             "payload": payload,
         }
     })
-}
-
-fn typed_diagnostic_span_name(event: &TraceEvent) -> Option<&'static str> {
-    match event.kind() {
-        "exec_code_started" | "exec_code_completed" | "exec_code_failed" => Some("lash.exec_code"),
-        "observation_projection" => Some("lash.observation_projection"),
-        _ => None,
-    }
 }
 
 fn record_time(record: &TraceRecord) -> SystemTime {
