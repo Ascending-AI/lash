@@ -1,4 +1,4 @@
-use crate::{NodeId, SessionId};
+use crate::NodeId;
 use lash_sansio::core_support::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -270,6 +270,7 @@ impl TurnGraphEditor {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
     where
         I: IntoIterator<Item = crate::NodeId>,
@@ -279,30 +280,6 @@ impl TurnGraphEditor {
 
     pub(super) fn persisted_node_ids(&self) -> HashSet<NodeId> {
         self.committed_node_ids.clone()
-    }
-
-    pub(super) fn remap_node_ids(&mut self, session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
-        if mapping.is_empty() {
-            return;
-        }
-        let by_old = mapping.iter().cloned().collect::<HashMap<_, _>>();
-        Arc::make_mut(&mut self.base_graph).remap_node_ids(session_id, mapping);
-        for node in &mut self.appended_nodes {
-            if let Some(derived) = by_old.get(&node.node_id) {
-                node.node_id = derived.clone();
-            }
-            if let Some(parent) = node.parent_node_id.as_mut()
-                && let Some(derived) = by_old.get(parent)
-            {
-                *parent = derived.clone();
-            }
-        }
-        self.appended_node_indices = self
-            .appended_node_indices
-            .drain()
-            .map(|(id, index)| (by_old.get(&id).cloned().unwrap_or(id), index))
-            .collect();
-        self.append_builder.remap_node_ids(mapping);
     }
 
     pub(super) fn into_session_graph(self) -> SessionGraph {

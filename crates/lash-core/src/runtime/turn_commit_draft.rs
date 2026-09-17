@@ -492,31 +492,6 @@ impl TurnCommitDraft {
         self.graph.graph_commit()
     }
 
-    pub(super) fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
-    where
-        I: IntoIterator<Item = crate::NodeId>,
-    {
-        self.graph.mark_node_ids_persisted(node_ids);
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "derived graph node identities are non-empty"
-    )]
-    pub(super) fn remap_node_ids(
-        &mut self,
-        session_id: &SessionId,
-        mapping: &[(crate::NodeId, crate::NodeId)],
-    ) {
-        self.graph.remap_node_ids(session_id, mapping);
-        if let Some(current) = self.state.current_frame_node_id.as_mut()
-            && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str())
-        {
-            *current = crate::FrameNodeId::new(derived.clone())
-                .expect("derived graph node identities are non-empty");
-        }
-    }
-
     fn apply_message_projection(&mut self, messages: &MessageSequence) {
         if let Some(appended_messages) = self.graph.message_delta_if_current_preserved(messages) {
             self.graph
