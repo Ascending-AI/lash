@@ -44,7 +44,7 @@ pub use turn_protocol::{
     TurnCause, TurnMachineConfig, WaitingExecState, WaitingLlmState, render_turn_causes_prompt,
 };
 mod machine_state;
-use machine_state::{EffectDeliveryStatus, MachineState};
+use machine_state::{EffectDelivery, MachineState};
 pub use machine_state::{
     TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine,
 };

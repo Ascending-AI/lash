@@ -479,6 +479,18 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-protocol-rlm/src/native/state.rs:NATIVE_DRIVER_STATE_VERSION": (
         "sha256:5fba57c12525c184666bfd36859f770e35d754113e0d94b9e6c971f7fea3b03b"
     ),
+    # FIG-3237 (live): each waiting variant's `effect_id` plus the
+    # `#[serde(skip)]` delivery flag folded into one `EffectDelivery` record,
+    # serialized transparently as the bare id under the variant's existing
+    # `effect_id` key (machine_state.rs). The `status` field stays
+    # runtime-only and deserializes to its `Pending` default, so checkpoint
+    # bytes are identical on both sides and a restored checkpoint still
+    # re-delivers; the checkpoint round-trip and redelivery tests confirm.
+    # TURN_CHECKPOINT_SCHEMA_VERSION stays 3. Any further guarded-shape drift
+    # re-fails the gate.
+    "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
+        "sha256:6056583b23117ff129cf39d93b9407bb95b0d06bf6e495f633b147662da1ed79"
+    ),
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved
