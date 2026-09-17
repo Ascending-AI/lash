@@ -142,39 +142,30 @@ def summarize_runtime(report: dict[str, Any]) -> str:
         lines.append(f"## scenario: {scenario}  ({s['runs']} runs × {s['chat_turns']} turns)")
         lines.append("")
         lines.append("phase totals (median/p95 across runs):")
-        lines.append(
-            f"  build_runtime         {fmt_metric_percentiles(s['build_runtime_ms'])}  "
-            f"alloc={fmt_bytes(s['build_runtime_alloc_bytes']['median']):>10s}  "
-            f"live={fmt_bytes(s['build_runtime_live_bytes']['median']):>10s}"
-        )
-        lines.append(
-            f"  seed_state            {fmt_metric_percentiles(s['seed_state_ms'])}  "
-            f"alloc={fmt_bytes(s['seed_state_alloc_bytes']['median']):>10s}  "
-            f"live={fmt_bytes(s['seed_state_live_bytes']['median']):>10s}"
-        )
-        lines.append(
-            f"  run_turn (sum)        {fmt_metric_percentiles(s['run_turn_ms'])}  "
-            f"alloc={fmt_bytes(s['run_turn_alloc_bytes']['median']):>10s}  "
-            f"live={fmt_bytes(s['run_turn_live_bytes']['median']):>10s}"
-        )
-        lines.append(
-            f"  await_background      {fmt_metric_percentiles(s['await_background_work_ms'])}  "
-            f"alloc={fmt_bytes(s['await_background_work_alloc_bytes']['median']):>10s}  "
-            f"live={fmt_bytes(s['await_background_work_live_bytes']['median']):>10s}"
-        )
-        lines.append(
-            f"  export_state          {fmt_metric_percentiles(s['export_state_ms'])}  "
-            f"alloc={fmt_bytes(s['export_state_alloc_bytes']['median']):>10s}  "
-            f"live={fmt_bytes(s['export_state_live_bytes']['median']):>10s}"
-        )
-        lines.append(
-            f"  TOTAL                 {fmt_metric_percentiles(s['total_ms'])}  "
-            f"alloc={fmt_bytes(s['total_alloc_bytes']['median']):>10s}  "
-            f"live={fmt_bytes(s['total_live_bytes']['median']):>10s}"
-        )
+        # stage_summary is keyed by stage name; a stage that did not run has
+        # no entry and is reported as absent rather than as a zero.
+        stages = s.get("stage_summary", {})
+        stage_rows = [
+            ("build_runtime", "build_runtime"),
+            ("seed_state", "seed_state"),
+            ("run_turn (sum)", "run_turn"),
+            ("await_background", "await_background_work"),
+            ("export_state", "export_state"),
+            ("TOTAL", "total"),
+        ]
+        for label, key in stage_rows:
+            stage = stages.get(key)
+            if stage is None:
+                lines.append(f"  {label:22s}  did not run")
+                continue
+            lines.append(
+                f"  {label:22s}{fmt_metric_percentiles(stage['duration_ms'])}  "
+                f"alloc={fmt_bytes(stage['alloc_bytes']['median']):>10s}  "
+                f"live={fmt_bytes(stage['live_bytes']['median']):>10s}"
+            )
         lines.append("")
 
-        rss = s.get("rss_after_export_kb")
+        rss = (stages.get("export_state") or {}).get("rss_after_kb")
         if rss is not None:
             growth = s.get("rss_growth_kb")
             hwm = s.get("hwm_growth_kb")
@@ -216,28 +207,38 @@ def summarize_runtime(report: dict[str, Any]) -> str:
                 )
             lines.append("")
 
+        def turn_total(turn_summary: dict[str, Any], metric: str) -> float | None:
+            stage = (turn_summary.get("stage_summary") or {}).get("total")
+            return stage.get(metric, {}).get("median") if stage else None
+
         first = s.get("first_turn") or {}
         last = s.get("last_turn") or {}
         steady = s.get("steady_state_turn") or {}
-        if first and last:
-            d_total = last["total_ms"]["median"] - first["total_ms"]["median"]
-            d_alloc = last["total_alloc_bytes"]["median"] - first["total_alloc_bytes"]["median"]
-            d_live = last["total_live_bytes"]["median"] - first["total_live_bytes"]["median"]
+        first_total = turn_total(first, "duration_ms")
+        last_total = turn_total(last, "duration_ms")
+        if first_total is not None and last_total is not None:
+            d_total = last_total - first_total
+            d_alloc = (turn_total(last, "alloc_bytes") or 0.0) - (
+                turn_total(first, "alloc_bytes") or 0.0
+            )
+            d_live = (turn_total(last, "live_bytes") or 0.0) - (
+                turn_total(first, "live_bytes") or 0.0
+            )
             lines.append("turn growth (last vs first, median across runs):")
             lines.append(
-                f"  total_ms     first={fmt_ms(first['total_ms']['median']):>9s}  "
-                f"steady={fmt_ms(steady.get('total_ms', {}).get('median')) if steady else 'n/a':>9s}  "
-                f"last={fmt_ms(last['total_ms']['median']):>9s}  Δ={d_total:+.2f}ms"
+                f"  total_ms     first={fmt_ms(first_total):>9s}  "
+                f"steady={fmt_ms(turn_total(steady, 'duration_ms')):>9s}  "
+                f"last={fmt_ms(last_total):>9s}  Δ={d_total:+.2f}ms"
             )
             lines.append(
-                f"  alloc_bytes  first={fmt_bytes(first['total_alloc_bytes']['median']):>10s}  "
-                f"steady={fmt_bytes(steady.get('total_alloc_bytes', {}).get('median', 0)):>10s}  "
-                f"last={fmt_bytes(last['total_alloc_bytes']['median']):>10s}  Δ={fmt_bytes(d_alloc)}"
+                f"  alloc_bytes  first={fmt_bytes(turn_total(first, 'alloc_bytes') or 0):>10s}  "
+                f"steady={fmt_bytes(turn_total(steady, 'alloc_bytes') or 0):>10s}  "
+                f"last={fmt_bytes(turn_total(last, 'alloc_bytes') or 0):>10s}  Δ={fmt_bytes(d_alloc)}"
             )
             lines.append(
-                f"  live_bytes   first={fmt_bytes(first['total_live_bytes']['median']):>10s}  "
-                f"steady={fmt_bytes(steady.get('total_live_bytes', {}).get('median', 0)):>10s}  "
-                f"last={fmt_bytes(last['total_live_bytes']['median']):>10s}  Δ={fmt_bytes(d_live)}"
+                f"  live_bytes   first={fmt_bytes(turn_total(first, 'live_bytes') or 0):>10s}  "
+                f"steady={fmt_bytes(turn_total(steady, 'live_bytes') or 0):>10s}  "
+                f"last={fmt_bytes(turn_total(last, 'live_bytes') or 0):>10s}  Δ={fmt_bytes(d_live)}"
             )
             lines.append("")
 
@@ -252,13 +253,19 @@ def summarize_runtime(report: dict[str, Any]) -> str:
                     f"  {'turn':>4}  {'run_ms':>8}  {'alloc':>11}  {'live_Δ':>11}  {'rss_kb':>8}"
                 )
                 for t in turns:
-                    a = t["allocations"]["total"]
-                    rss = t["memory"].get("rss_after_await_kb")
+                    t_stages = t.get("stages", {})
+                    run_stage = t_stages.get("run_turn")
+                    total_stage = t_stages.get("total")
+                    a = (total_stage or {}).get("allocations", {})
+                    rss = (t_stages.get("await_background_work") or total_stage or {}).get(
+                        "rss_after_kb"
+                    )
+                    run_ms = run_stage["duration_ms"] if run_stage else None
                     lines.append(
                         f"  {t['turn_index']:>4}  "
-                        f"{t['run_turn_ms']:>6.2f}ms  "
-                        f"{fmt_bytes(a['bytes_allocated']):>11s}  "
-                        f"{fmt_bytes(a['net_live_bytes']):>11s}  "
+                        f"{fmt_ms(run_ms):>9s}  "
+                        f"{fmt_bytes(a.get('bytes_allocated', 0)):>11s}  "
+                        f"{fmt_bytes(a.get('net_live_bytes', 0)):>11s}  "
                         f"{rss if rss is not None else 'n/a':>8}"
                     )
                 lines.append("")
@@ -443,26 +450,35 @@ def metric_pairs(name: str, baseline: dict[str, Any], current: dict[str, Any]) -
             f"Δ={delta_str:>12s} ({pct:+.1f}%)"
         )
 
+    def stage_median(summary: dict[str, Any], stage: str, metric: str) -> float | None:
+        entry = (summary.get("stage_summary") or {}).get(stage)
+        return entry.get(metric, {}).get("median") if entry else None
+
     rows.append(f"### {name}")
     rows.append(
         cmp("run_turn_ms",
-            baseline["run_turn_ms"]["median"], current["run_turn_ms"]["median"], lambda v: fmt_ms(v))
+            stage_median(baseline, "run_turn", "duration_ms"),
+            stage_median(current, "run_turn", "duration_ms"), lambda v: fmt_ms(v))
     )
     rows.append(
         cmp("total_ms",
-            baseline["total_ms"]["median"], current["total_ms"]["median"], lambda v: fmt_ms(v))
+            stage_median(baseline, "total", "duration_ms"),
+            stage_median(current, "total", "duration_ms"), lambda v: fmt_ms(v))
     )
     rows.append(
         cmp("run_turn_alloc_bytes",
-            baseline["run_turn_alloc_bytes"]["median"], current["run_turn_alloc_bytes"]["median"], fmt_bytes)
+            stage_median(baseline, "run_turn", "alloc_bytes"),
+            stage_median(current, "run_turn", "alloc_bytes"), fmt_bytes)
     )
     rows.append(
         cmp("total_alloc_bytes",
-            baseline["total_alloc_bytes"]["median"], current["total_alloc_bytes"]["median"], fmt_bytes)
+            stage_median(baseline, "total", "alloc_bytes"),
+            stage_median(current, "total", "alloc_bytes"), fmt_bytes)
     )
     rows.append(
         cmp("total_live_bytes",
-            baseline["total_live_bytes"]["median"], current["total_live_bytes"]["median"], fmt_bytes)
+            stage_median(baseline, "total", "live_bytes"),
+            stage_median(current, "total", "live_bytes"), fmt_bytes)
     )
     if baseline.get("rss_growth_kb") and current.get("rss_growth_kb"):
         rows.append(

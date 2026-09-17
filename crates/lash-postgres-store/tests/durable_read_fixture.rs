@@ -23,8 +23,14 @@ mod fixture;
 
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
 const FIXTURE_SCHEMA: &str = "lash_durable_read_fixture";
+const BOUNDARY_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-80-fbbeedbb5/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
+];
+const CURRENT_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-79-171f490d0eb3/postgres-expected.json",
 ];
 const NEWEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-77-e102f2b9f861/postgres-expected.json",
@@ -158,7 +164,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 98);
+    assert_eq!(PostgresStorage::schema_version(), 99);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -375,11 +381,23 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("refresh refusal fixture pending-input and process-lease catalog");
+    // The trigger subscription table cut over to the lifecycle column shape
+    // with no migration, so the refusal fixture discards its pre-cutover rows
+    // and takes the current catalog.
+    sqlx::query("DROP TABLE IF EXISTS lash_trigger_subscriptions")
+        .execute(&pool)
+        .await
+        .expect("discard pre-cutover trigger subscription rows");
+    sqlx::raw_sql(schema_trigger_subscriptions_ddl())
+        .execute(&pool)
+        .await
+        .expect("recreate the trigger subscription catalog from the authoritative DDL");
     // The enclosing catalog uses the current causal discriminator vocabulary;
     // only the deliberately obsolete checkpoint component remains historical.
     let causal_constraint =
-        lash_core::store_backend_support::required_constraints::POSTGRES_EXPECTED_CONSTRAINTS
+        lash_core::store_backend_support::required_constraints::EXPECTED_CONSTRAINTS
             .iter()
+            .map(|constraint| constraint.postgres)
             .find(|constraint| constraint.name == "ck_session_meta_caused_by_kind")
             .expect("registered session causal discriminator constraint");
     sqlx::raw_sql(&format!(
@@ -525,6 +543,18 @@ fn schema_process_registry_ddl() -> &'static str {
         .find("CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (")
         .map(|offset| start + offset)
         .expect("process registry DDL must precede tool-intent submissions");
+    &ddl[start..end]
+}
+
+fn schema_trigger_subscriptions_ddl() -> &'static str {
+    let ddl = PostgresStorage::schema_ddl();
+    let start = ddl
+        .find("CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions (")
+        .expect("schema DDL must declare trigger subscriptions");
+    let end = ddl[start..]
+        .find("\n\n-- The named process-definition registry")
+        .map(|offset| start + offset)
+        .expect("trigger subscription DDL must precede the process-definition registry");
     &ddl[start..end]
 }
 

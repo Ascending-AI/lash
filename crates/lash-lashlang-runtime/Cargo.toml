@@ -28,6 +28,7 @@ lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 lash-core = { workspace = true }
+lash-core-worker = { workspace = true }
 lash-remote-protocol = { workspace = true }
 lash-trace = { workspace = true }
 lash-typescript = { workspace = true }

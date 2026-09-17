@@ -59,9 +59,45 @@ fn process_signature_refuses_invalid_names_without_broadening_type_validation() 
     ));
     ProcessSignature::try_new(
         vec![param("value", TypeExpr::Enum(Vec::new()))],
-        TypeExpr::Union(vec![TypeExpr::Str]),
+        TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Int]),
     )
     .expect("FIG-2879 does not add unrelated TypeExpr restrictions");
+}
+
+#[test]
+fn union_members_hold_at_least_two_variants() {
+    // FIG-3269: the two-member floor is structural. `UnionMembers::new`
+    // refuses degenerate member lists and `TypeExpr::union` collapses
+    // them instead.
+    assert!(UnionMembers::new(Vec::new()).is_none());
+    assert!(UnionMembers::new(vec![TypeExpr::Str]).is_none());
+    assert_eq!(
+        TypeExpr::union(vec![TypeExpr::Str]),
+        TypeExpr::Str,
+        "a one-member union collapses to the member"
+    );
+    assert_eq!(
+        TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Str]),
+        TypeExpr::Str,
+        "duplicate members deduplicate before the floor is checked"
+    );
+
+    // The wire keeps the bare member sequence `Union(Vec)` wrote, and
+    // decoding a degenerate sequence refuses.
+    let union = TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Null]);
+    let wire = serde_json::to_value(&union).unwrap();
+    assert_eq!(wire, serde_json::json!({"Union": ["Str", "Null"]}));
+    assert_eq!(serde_json::from_value::<TypeExpr>(wire).unwrap(), union);
+    for degenerate in [
+        serde_json::json!({"Union": []}),
+        serde_json::json!({"Union": ["Str"]}),
+    ] {
+        let label = degenerate.to_string();
+        assert!(
+            serde_json::from_value::<TypeExpr>(degenerate).is_err(),
+            "degenerate union wire must refuse: {label}"
+        );
+    }
 }
 
 #[test]
@@ -150,7 +186,7 @@ fn type_expr_formatting_covers_nested_shapes() {
         },
         TypeField {
             name: "value".into(),
-            ty: TypeExpr::Union(vec![TypeExpr::Int, TypeExpr::Null]),
+            ty: TypeExpr::union(vec![TypeExpr::Int, TypeExpr::Null]),
             optional: false,
         },
     ]);

@@ -72,11 +72,9 @@ pub(super) struct Linker<'module> {
     /// nested definition has to reach the child's own start site — one level
     /// deeper than any start argument the enclosing start can carry.
     pub(super) lifted_process_aliases: RefCell<BTreeMap<String, (String, TypeExpr)>>,
-    /// The AST path of every expression in the program, keyed by node pointer:
-    /// `main`-rooted paths are the `children()` index chain, and a declaration
-    /// body's path is prefixed with `u32::MAX` plus the declaration index so a
-    /// literal inside a process body cannot collide with a `main` path.
-    pub(super) expression_paths: BTreeMap<usize, Vec<u32>>,
+    /// The [`AstPath`] of every expression in the program, keyed by node
+    /// pointer — `main`-rooted and declaration-body-rooted alike.
+    pub(super) expression_paths: BTreeMap<usize, AstPath>,
 }
 
 impl<'module> Linker<'module> {
@@ -84,13 +82,14 @@ impl<'module> Linker<'module> {
         program: &'module Program,
         surface: &'module LashlangHostEnvironment,
     ) -> Self {
+        let (expression_paths, expression_spans) = program_node_maps(program);
         Self {
             program,
             surface,
             process_types: BTreeMap::new(),
             function_signatures: BTreeMap::new(),
             type_defs: BTreeMap::new(),
-            expression_spans: expression_spans_by_pointer(program),
+            expression_spans,
             expected_type_facts: None,
             completion_facts: RefCell::new(BTreeMap::new()),
             collect_completion: Cell::new(false),
@@ -101,7 +100,7 @@ impl<'module> Linker<'module> {
             inferred_signals: RefCell::new(BTreeMap::new()),
             lifted_declarations: RefCell::new(Vec::new()),
             lifted_process_aliases: RefCell::new(BTreeMap::new()),
-            expression_paths: expression_paths_by_pointer(program),
+            expression_paths,
         }
     }
 
@@ -121,6 +120,10 @@ impl<'module> Linker<'module> {
         self
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "a declaration count below u32::MAX is guaranteed by any AST that got this far"
+    )]
     pub(super) fn link_program(&mut self) -> Result<Program, LinkError> {
         // Single walk: collect declaration metadata, then lower (and validate)
         // declarations in source order, then lower main. Declaration errors
@@ -133,7 +136,7 @@ impl<'module> Linker<'module> {
             .iter()
             .enumerate()
             .map(|(index, declaration)| {
-                let span = self.program.declaration_spans.get(index).copied();
+                let span = declaration_span(self.program, index);
                 self.lower_declaration(declaration, span)
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -143,17 +146,18 @@ impl<'module> Linker<'module> {
         }
         let main = self.lower_expr(&self.program.main, &mut scope)?.0;
         let mut declarations = declarations;
-        let mut declaration_spans = self.program.declaration_spans.clone();
+        let mut spans = self.program.spans.clone();
         for (declaration, span) in self.lifted_declarations.borrow_mut().drain(..) {
-            declaration_spans.push(span.unwrap_or(Span { start: 0, end: 0 }));
+            if let Some(span) = span {
+                let index = u32::try_from(declarations.len()).expect("declaration index fits u32");
+                spans.insert(AstPath::declaration(index, Vec::new()), span);
+            }
             declarations.push(declaration);
         }
         Ok(Program {
             declarations,
             main,
-            declaration_spans,
-            expression_spans: self.program.expression_spans.clone(),
-            expression_source_spans: self.program.expression_source_spans.clone(),
+            spans,
         })
     }
 
@@ -161,7 +165,7 @@ impl<'module> Linker<'module> {
         self.ensure_label_annotations_enabled_for_program()?;
         let mut names = BTreeSet::new();
         for (index, declaration) in self.program.declarations.iter().enumerate() {
-            let span = self.program.declaration_spans.get(index).copied();
+            let span = declaration_span(self.program, index);
             let (namespace, name) = match declaration {
                 Declaration::Type(decl) => {
                     let name = decl.name.as_str();
@@ -239,7 +243,7 @@ impl<'module> Linker<'module> {
             let Declaration::Process(process) = declaration else {
                 continue;
             };
-            let span = self.program.declaration_spans.get(index).copied();
+            let span = declaration_span(self.program, index);
             let output = self.infer_process_output(process, span)?;
             if let Some(expected) = &process.return_ty
                 && !self.is_type_assignable(&output, expected)
@@ -264,7 +268,7 @@ impl<'module> Linker<'module> {
             return Ok(());
         }
         for (index, declaration) in self.program.declarations.iter().enumerate() {
-            let span = self.program.declaration_spans.get(index).copied();
+            let span = declaration_span(self.program, index);
             if let Declaration::Process(process) = declaration
                 && (process.label.is_some() || expr_has_label_annotation(&process.body))
             {
@@ -283,18 +287,17 @@ impl<'module> Linker<'module> {
         Ok(())
     }
 
-    /// The source span recorded for the expression at `path`, falling back to
-    /// the root statement that contains it when the program was built from an
-    /// AST and carries no nested spans.
+    /// The source span recorded for the `main`-rooted expression at `path`,
+    /// falling back to the root statement that contains it when the program
+    /// was built from an AST and carries no nested spans.
     pub(super) fn annotation_span(&self, path: &[u32]) -> Option<Span> {
         self.program
-            .expression_source_spans
-            .iter()
-            .find(|source_span| source_span.path == path)
-            .map(|source_span| source_span.span)
+            .spans
+            .get(&AstPath::main(path.to_vec()))
+            .copied()
             .or_else(|| {
-                let root = *path.first()? as usize;
-                self.program.expression_spans.get(root).copied()
+                let root = *path.first()?;
+                self.program.spans.get(&AstPath::main(vec![root])).copied()
             })
     }
 
@@ -376,7 +379,7 @@ impl<'module> Linker<'module> {
                     })
                     .collect::<Option<Vec<_>>>()?,
             ),
-            TypeExpr::Union(items) => TypeExpr::Union(
+            TypeExpr::Union(items) => TypeExpr::union(
                 items
                     .iter()
                     .map(|item| self.close_schema_type_expr(item, resolving))
@@ -475,7 +478,7 @@ impl<'module> Linker<'module> {
                     })
                     .collect(),
             ),
-            TypeExpr::Union(items) => TypeExpr::Union(
+            TypeExpr::Union(items) => TypeExpr::union(
                 items
                     .iter()
                     .map(|item| self.resolve_type_aliases_inner(item, seen))

@@ -89,29 +89,24 @@ pub(super) fn lashlang_execution_paths(program: &Program) -> FxHashMap<usize, La
 }
 
 pub(crate) fn expression_source_spans(program: &Program) -> FxHashMap<usize, Span> {
-    let spans_by_path = program
-        .expression_source_spans
-        .iter()
-        .map(|source_span| (source_span.path.clone(), source_span.span))
-        .collect::<FxHashMap<_, _>>();
     let mut spans = FxHashMap::default();
     let mut path = Vec::new();
-    collect_expression_source_spans(&program.main, &mut path, &spans_by_path, &mut spans);
+    collect_expression_source_spans(&program.main, &mut path, &program.spans, &mut spans);
     spans
 }
 
 fn collect_expression_source_spans(
     expr: &Expr,
     path: &mut Vec<u32>,
-    spans_by_path: &FxHashMap<Vec<u32>, Span>,
+    program_spans: &BTreeMap<AstPath, Span>,
     spans: &mut FxHashMap<usize, Span>,
 ) {
-    if let Some(span) = spans_by_path.get(path.as_slice()).copied() {
+    if let Some(span) = program_spans.get(&AstPath::main(path.clone())).copied() {
         spans.insert(expr_key(expr), span);
     }
     for (index, child) in expr.children().enumerate() {
         path.push(index as u32);
-        collect_expression_source_spans(child, path, spans_by_path, spans);
+        collect_expression_source_spans(child, path, program_spans, spans);
         path.pop();
     }
 }
@@ -452,7 +447,7 @@ mod tests {
                 ty: TypeExpr::Int,
                 optional: false,
             }]),
-            TypeExpr::Union(vec![TypeExpr::Str, TypeExpr::Null]),
+            TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Null]),
             TypeExpr::Process(crate::ProcessType::known(
                 crate::ProcessSignature::try_new(Vec::new(), TypeExpr::Str).unwrap(),
             )),

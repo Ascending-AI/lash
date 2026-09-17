@@ -718,9 +718,20 @@ impl RuntimeTurnDriver<'_> {
         // classifies its typed Stop response. This is the same evidence seam
         // used for provider cancellation above.
         let cancellation_evidence = self.turn_control.evidence();
+        // A cancelled tool call ended the cell as an uncatchable host terminal,
+        // so the execution settles as cancelled even without a host cancel
+        // request. The protocol then reads the cancelled record off the call
+        // ledger and finishes the turn cancelled itself.
+        let tool_call_cancelled = result.as_ref().ok().is_some_and(|output| {
+            output.calls.iter().any(|call| {
+                call.host_record.as_ref().is_some_and(|record| {
+                    record.output.status() == lash_sansio::ToolCallStatus::Cancelled
+                })
+            })
+        });
         if let Some(code_executor) = self.session.plugins().code_executor() {
             code_executor
-                .settle_code_execution(if cancellation_evidence.is_some() {
+                .settle_code_execution(if cancellation_evidence.is_some() || tool_call_cancelled {
                     crate::plugin::CodeExecutionDisposition::Cancelled
                 } else {
                     crate::plugin::CodeExecutionDisposition::Accepted

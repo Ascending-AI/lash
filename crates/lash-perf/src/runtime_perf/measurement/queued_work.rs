@@ -271,23 +271,24 @@ pub(super) async fn run_once_queued_work_claim_stress(
 
         turns.push(RuntimePerfTurnResult {
             turn_index,
-            run_turn_ms,
-            await_background_work_ms,
-            total_ms: round3(run_turn_ms + await_background_work_ms),
-            memory: RuntimePerfTurnMemoryRunResult {
-                rss_before_kb: turn_before_memory.rss_kb,
-                rss_after_turn_kb: after_turn_memory.rss_kb,
-                rss_after_await_kb: after_await_memory.rss_kb,
-                peak_hwm_before_kb: turn_before_memory.hwm_kb,
-                peak_hwm_after_await_kb: after_await_memory.hwm_kb,
-                rss_growth_kb: diff_opt_i64(turn_before_memory.rss_kb, after_await_memory.rss_kb),
-                hwm_growth_kb: diff_opt_i64(turn_before_memory.hwm_kb, after_await_memory.hwm_kb),
-            },
-            allocations: RuntimePerfTurnAllocationRunResult {
-                run_turn: run_turn_alloc,
-                await_background_work: await_background_work_alloc,
-                total: turn_total_alloc,
-            },
+            stages: turn_stages(
+                RuntimePerfStageRunResult::measured(
+                    run_turn_ms,
+                    run_turn_alloc,
+                    after_turn_memory.rss_kb,
+                ),
+                Some(RuntimePerfStageRunResult::measured(
+                    await_background_work_ms,
+                    await_background_work_alloc,
+                    after_await_memory.rss_kb,
+                )),
+                RuntimePerfStageRunResult::measured(
+                    round3(run_turn_ms + await_background_work_ms),
+                    turn_total_alloc,
+                    after_await_memory.rss_kb,
+                ),
+            ),
+            memory: memory_span(turn_before_memory, after_await_memory),
             phase_profile,
             turn_usage: TokenUsage::default(),
             usage_delta: SessionUsageReport::default(),
@@ -313,20 +314,48 @@ pub(super) async fn run_once_queued_work_claim_stress(
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     let after_export_memory = process_memory_sample();
     let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
-    let last_turn_memory = turns.last().map(|turn| &turn.memory);
     Ok(RuntimePerfRunResult {
         scenario: scenario.name().to_string(),
         scenario_harness: scenario.scenario_harness().name().to_string(),
         chat_turns,
         stack_profile: None,
-        build_runtime_ms,
-        seed_state_ms,
-        run_turn_ms: round3(turns.iter().map(|turn| turn.run_turn_ms).sum()),
-        await_background_work_ms: round3(
-            turns.iter().map(|turn| turn.await_background_work_ms).sum(),
+        stages: run_stages(
+            [
+                (
+                    stage::BUILD_RUNTIME,
+                    RuntimePerfStageRunResult::measured(
+                        build_runtime_ms,
+                        build_runtime_alloc,
+                        after_build_memory.rss_kb,
+                    ),
+                ),
+                (
+                    stage::SEED_STATE,
+                    RuntimePerfStageRunResult::measured(
+                        seed_state_ms,
+                        seed_state_alloc,
+                        after_seed_memory.rss_kb,
+                    ),
+                ),
+                (
+                    stage::EXPORT_STATE,
+                    RuntimePerfStageRunResult::measured(
+                        export_state_ms,
+                        export_state_alloc,
+                        after_export_memory.rss_kb,
+                    ),
+                ),
+                (
+                    stage::TOTAL,
+                    RuntimePerfStageRunResult::measured(
+                        elapsed_ms(total_started),
+                        total_alloc,
+                        after_export_memory.rss_kb,
+                    ),
+                ),
+            ],
+            &turns,
         ),
-        export_state_ms,
-        total_ms: elapsed_ms(total_started),
         session_nodes: enqueued_batches,
         active_path_messages: completed_batches,
         extra_counters: BTreeMap::from([
@@ -350,30 +379,7 @@ pub(super) async fn run_once_queued_work_claim_stress(
         ]),
         metric_samples: BTreeMap::new(),
         metric_samples_ms: BTreeMap::new(),
-        memory: RuntimePerfMemoryRunResult {
-            rss_before_kb: before_memory.rss_kb,
-            rss_after_build_kb: after_build_memory.rss_kb,
-            rss_after_seed_kb: after_seed_memory.rss_kb,
-            rss_after_turn_kb: last_turn_memory.and_then(|memory| memory.rss_after_turn_kb),
-            rss_after_await_kb: last_turn_memory.and_then(|memory| memory.rss_after_await_kb),
-            rss_after_export_kb: after_export_memory.rss_kb,
-            peak_hwm_before_kb: before_memory.hwm_kb,
-            peak_hwm_after_export_kb: after_export_memory.hwm_kb,
-            rss_growth_kb: diff_opt_i64(before_memory.rss_kb, after_export_memory.rss_kb),
-            hwm_growth_kb: diff_opt_i64(before_memory.hwm_kb, after_export_memory.hwm_kb),
-        },
-        allocations: RuntimePerfAllocationRunResult {
-            build_runtime: build_runtime_alloc,
-            seed_state: seed_state_alloc,
-            run_turn: sum_allocation_deltas(turns.iter().map(|turn| &turn.allocations.run_turn)),
-            await_background_work: sum_allocation_deltas(
-                turns
-                    .iter()
-                    .map(|turn| &turn.allocations.await_background_work),
-            ),
-            export_state: export_state_alloc,
-            total: total_alloc,
-        },
+        memory: memory_span(before_memory, after_export_memory),
         phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
         turns,
         cumulative_usage: SessionUsageReport::default(),
@@ -791,23 +797,24 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
 
         turns.push(RuntimePerfTurnResult {
             turn_index,
-            run_turn_ms,
-            await_background_work_ms,
-            total_ms: round3(run_turn_ms + await_background_work_ms),
-            memory: RuntimePerfTurnMemoryRunResult {
-                rss_before_kb: turn_before_memory.rss_kb,
-                rss_after_turn_kb: after_turn_memory.rss_kb,
-                rss_after_await_kb: after_await_memory.rss_kb,
-                peak_hwm_before_kb: turn_before_memory.hwm_kb,
-                peak_hwm_after_await_kb: after_await_memory.hwm_kb,
-                rss_growth_kb: diff_opt_i64(turn_before_memory.rss_kb, after_await_memory.rss_kb),
-                hwm_growth_kb: diff_opt_i64(turn_before_memory.hwm_kb, after_await_memory.hwm_kb),
-            },
-            allocations: RuntimePerfTurnAllocationRunResult {
-                run_turn: run_turn_alloc,
-                await_background_work: await_background_work_alloc,
-                total: turn_total_alloc,
-            },
+            stages: turn_stages(
+                RuntimePerfStageRunResult::measured(
+                    run_turn_ms,
+                    run_turn_alloc,
+                    after_turn_memory.rss_kb,
+                ),
+                Some(RuntimePerfStageRunResult::measured(
+                    await_background_work_ms,
+                    await_background_work_alloc,
+                    after_await_memory.rss_kb,
+                )),
+                RuntimePerfStageRunResult::measured(
+                    round3(run_turn_ms + await_background_work_ms),
+                    turn_total_alloc,
+                    after_await_memory.rss_kb,
+                ),
+            ),
+            memory: memory_span(turn_before_memory, after_await_memory),
             phase_profile,
             turn_usage: TokenUsage::default(),
             usage_delta: SessionUsageReport::default(),
@@ -835,21 +842,49 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     let after_export_memory = process_memory_sample();
     let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
-    let last_turn_memory = turns.last().map(|turn| &turn.memory);
 
     Ok(RuntimePerfRunResult {
         scenario: scenario.name().to_string(),
         scenario_harness: scenario.scenario_harness().name().to_string(),
         chat_turns,
         stack_profile: None,
-        build_runtime_ms,
-        seed_state_ms,
-        run_turn_ms: round3(turns.iter().map(|turn| turn.run_turn_ms).sum()),
-        await_background_work_ms: round3(
-            turns.iter().map(|turn| turn.await_background_work_ms).sum(),
+        stages: run_stages(
+            [
+                (
+                    stage::BUILD_RUNTIME,
+                    RuntimePerfStageRunResult::measured(
+                        build_runtime_ms,
+                        build_runtime_alloc,
+                        after_build_memory.rss_kb,
+                    ),
+                ),
+                (
+                    stage::SEED_STATE,
+                    RuntimePerfStageRunResult::measured(
+                        seed_state_ms,
+                        seed_state_alloc,
+                        after_seed_memory.rss_kb,
+                    ),
+                ),
+                (
+                    stage::EXPORT_STATE,
+                    RuntimePerfStageRunResult::measured(
+                        export_state_ms,
+                        export_state_alloc,
+                        after_export_memory.rss_kb,
+                    ),
+                ),
+                (
+                    stage::TOTAL,
+                    RuntimePerfStageRunResult::measured(
+                        elapsed_ms(total_started),
+                        total_alloc,
+                        after_export_memory.rss_kb,
+                    ),
+                ),
+            ],
+            &turns,
         ),
-        export_state_ms,
-        total_ms: elapsed_ms(total_started),
         session_nodes: active_enqueued + next_enqueued,
         active_path_messages: completed_inputs,
         extra_counters: BTreeMap::from([
@@ -868,30 +903,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
         ]),
         metric_samples: BTreeMap::new(),
         metric_samples_ms: BTreeMap::new(),
-        memory: RuntimePerfMemoryRunResult {
-            rss_before_kb: before_memory.rss_kb,
-            rss_after_build_kb: after_build_memory.rss_kb,
-            rss_after_seed_kb: after_seed_memory.rss_kb,
-            rss_after_turn_kb: last_turn_memory.and_then(|memory| memory.rss_after_turn_kb),
-            rss_after_await_kb: last_turn_memory.and_then(|memory| memory.rss_after_await_kb),
-            rss_after_export_kb: after_export_memory.rss_kb,
-            peak_hwm_before_kb: before_memory.hwm_kb,
-            peak_hwm_after_export_kb: after_export_memory.hwm_kb,
-            rss_growth_kb: diff_opt_i64(before_memory.rss_kb, after_export_memory.rss_kb),
-            hwm_growth_kb: diff_opt_i64(before_memory.hwm_kb, after_export_memory.hwm_kb),
-        },
-        allocations: RuntimePerfAllocationRunResult {
-            build_runtime: build_runtime_alloc,
-            seed_state: seed_state_alloc,
-            run_turn: sum_allocation_deltas(turns.iter().map(|turn| &turn.allocations.run_turn)),
-            await_background_work: sum_allocation_deltas(
-                turns
-                    .iter()
-                    .map(|turn| &turn.allocations.await_background_work),
-            ),
-            export_state: export_state_alloc,
-            total: total_alloc,
-        },
+        memory: memory_span(before_memory, after_export_memory),
         phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
         turns,
         cumulative_usage: SessionUsageReport::default(),
@@ -903,10 +915,7 @@ fn queued_work_stress_commit(
     completed_queue_claims: Vec<QueuedWorkCompletion>,
 ) -> RuntimeCommit {
     RuntimeCommit {
-        graph: GraphAppend {
-            nodes: Vec::new(),
-            leaf_node_id: None,
-        },
+        graph: GraphAppend::PreserveHead,
         completed_queue_claims,
         ..RuntimeCommit::persisted_state_for_test(state, &[])
     }

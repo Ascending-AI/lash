@@ -154,9 +154,14 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .await
             .expect("run cancellation turn")
             .result;
-        assert_eq!(
-            cancelled.final_value(),
-            Some(&json!("cancellation observed"))
+        assert!(
+            matches!(
+                &cancelled.outcome,
+                lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
+            ),
+            "a cancelled tool is an uncatchable host terminal, so the catch's \
+             finish is never reached and the turn ends cancelled: {:?}",
+            cancelled.outcome
         );
         let cancellation_output = &cancelled.tool_calls[0].output;
         let cancellation_status =

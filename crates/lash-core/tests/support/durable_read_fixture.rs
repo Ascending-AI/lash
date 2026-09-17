@@ -261,7 +261,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 79;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 81;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -420,6 +420,16 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (
             crate::FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             78,
+            79,
+        ),
+        (
+            crate::CURRENT_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            79,
+            80,
+        ),
+        (
+            crate::BOUNDARY_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            80,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -1432,7 +1442,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .expect("durable fixture drift: trigger subscription read failed");
     assert_eq!(subscriptions.len(), 1);
     assert_eq!(subscriptions[0].subscription_key, TRIGGER_KEY);
-    assert!(subscriptions[0].enabled);
+    assert!(subscriptions[0].lifecycle.enabled());
     let occurrences = handles
         .triggers
         .list_occurrences(TriggerOccurrenceFilter::default())
@@ -1446,7 +1456,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .expect("durable fixture drift: trigger delivery read failed");
     assert_eq!(deliveries.len(), 1);
     assert_eq!(deliveries[0].subscription.subscription_key, TRIGGER_KEY);
-    assert!(deliveries[0].subscription.enabled);
+    assert!(deliveries[0].subscription.lifecycle.enabled());
     assert_eq!(
         deliveries[0].reservation_status,
         TriggerDeliveryReservationOutcome::AlreadyReserved

@@ -74,7 +74,7 @@ pub(crate) fn stalled_attempts_in_phase(
             }
             // An earlier turn's execution, or this turn's last progress point.
             Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
-                if !entry.id.starts_with(&trajectory_prefix) || entry.error.is_none() =>
+                if !entry.id.starts_with(&trajectory_prefix) || entry.outcome.error().is_none() =>
             {
                 break;
             }
@@ -103,7 +103,8 @@ fn count_pending_attempts(
             };
             match crate::projection::decode_rlm_protocol_event(event) {
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
-                    if entry.error.is_none() && entry.id.starts_with(trajectory_prefix) =>
+                    if entry.outcome.error().is_none()
+                        && entry.id.starts_with(trajectory_prefix) =>
                 {
                     *attempts = 0;
                 }

@@ -26,8 +26,11 @@ def load_percentiles_module():
 def run_result(total_ms: float, turns: list[float], phase_ms: dict[str, float]) -> dict:
     return {
         "scenario": "standard",
-        "total_ms": total_ms,
-        "turns": [{"total_ms": value, "phase_profile": {}} for value in turns],
+        "stages": {"total": {"duration_ms": total_ms}},
+        "turns": [
+            {"stages": {"total": {"duration_ms": value}}, "phase_profile": {}}
+            for value in turns
+        ],
         "phase_profile": {
             phase: {"duration_ms": duration} for phase, duration in phase_ms.items()
         },
@@ -84,6 +87,32 @@ class RuntimePerfPercentilesTest(unittest.TestCase):
         )
         self.assertEqual(rows["phase:commit.duration_ms"]["p95"], 29.0)
         self.assertEqual(rows["phase:wake.duration_ms"]["p99"], 7.92)
+
+    def test_runs_without_a_total_stage_contribute_no_sample(self) -> None:
+        percentiles = load_percentiles_module()
+        skipped = {
+            "scenario": "standard",
+            "stages": {},
+            "turns": [{"stages": {}, "phase_profile": {}}],
+            "phase_profile": {},
+        }
+        payload = {
+            "results": [
+                run_result(10.0, [100.0, 2.0], {"commit": 10.0}),
+                skipped,
+                run_result(30.0, [100.0, 8.0], {"commit": 30.0}),
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = pathlib.Path(tmp) / "runtime.json"
+            report.write_text(json.dumps(payload))
+            rows = {
+                row["metric"]: row for row in percentiles.summarize_report(report)
+            }
+
+        self.assertEqual(rows["total_wall_ms"]["samples"], 2)
+        self.assertEqual(rows["steady_state_turn_wall_ms"]["samples"], 2)
 
     def test_cli_prints_and_writes_the_same_table(self) -> None:
         payload = {"results": [run_result(12.0, [20.0, 5.0], {"commit": 3.0})]}

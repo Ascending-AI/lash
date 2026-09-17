@@ -221,6 +221,22 @@ pub struct RemoteTriggerRegistration {
     pub enabled: bool,
 }
 
+impl RemoteTriggerRegistration {
+    /// The registration ingest check (FIG-3258): the same non-empty fields the
+    /// subscription spec requires, run on the third spelling of the spec,
+    /// which previously converted peer input without validating any of it.
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        require_non_empty(type_name, "subscription_key", &self.subscription_key)?;
+        require_non_empty(type_name, "incarnation", &self.incarnation)?;
+        require_non_empty(type_name, "source_type", &self.source_type)?;
+        require_non_empty(type_name, "source_key", &self.source_key)?;
+        self.registrant.validate(type_name)?;
+        self.target.identity.validate(type_name)?;
+        self.target.input.validate(type_name)?;
+        self.target.inputs.validate(type_name)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerTarget {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -340,8 +356,12 @@ impl RemoteTriggerSourceCapture {
     }
 }
 
+/// What a trigger subscription declares (FIG-3258): the fields the draft
+/// submits and the record retains. One struct carries them once so a field
+/// added to one spelling cannot be dropped by the other; both DTOs embed it
+/// flattened, leaving the wire shape unchanged.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteTriggerSubscriptionDraft {
+pub struct RemoteTriggerSubscriptionSpec {
     pub subscription_key: String,
     pub env_ref: RemoteProcessExecutionEnvRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -365,6 +385,48 @@ pub struct RemoteTriggerSubscriptionDraft {
     pub target_label: Option<String>,
 }
 
+impl RemoteTriggerSubscriptionSpec {
+    /// The one spec validator every path runs (FIG-3258): the draft's
+    /// registration request, a stored record, and registration ingest all
+    /// funnel here.
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        require_non_empty(type_name, "subscription_key", &self.subscription_key)?;
+        self.env_ref.validate(type_name)?;
+        if let Some(wake_target) = &self.wake_target {
+            wake_target.validate(type_name)?;
+        }
+        require_non_empty(type_name, "source_type", &self.source_type)?;
+        require_non_empty(type_name, "source_key", &self.source_key)?;
+        self.target.validate(type_name)?;
+        self.target_identity.validate(type_name)?;
+        for event_type in &self.event_types {
+            event_type.validate(type_name)?;
+        }
+        self.source_capture.validate(type_name)?;
+        self.input_template.validate(type_name)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteTriggerSubscriptionDraft {
+    #[serde(flatten)]
+    pub spec: RemoteTriggerSubscriptionSpec,
+}
+
+impl std::ops::Deref for RemoteTriggerSubscriptionDraft {
+    type Target = RemoteTriggerSubscriptionSpec;
+
+    fn deref(&self) -> &Self::Target {
+        &self.spec
+    }
+}
+
+impl std::ops::DerefMut for RemoteTriggerSubscriptionDraft {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.spec
+    }
+}
+
 impl RemoteTriggerSubscriptionDraft {
     pub fn for_process(
         subscription_key: impl Into<String>,
@@ -376,20 +438,22 @@ impl RemoteTriggerSubscriptionDraft {
     ) -> Self {
         let target_label = target_identity.label.clone();
         Self {
-            subscription_key: subscription_key.into(),
-            env_ref,
-            wake_target: None,
-            name: None,
-            source_type: source_type.into(),
-            source_key: source_key.into(),
-            source: serde_json::Value::Object(serde_json::Map::new()),
-            payload_schema: serde_json::Value::Object(serde_json::Map::new()),
-            source_capture: RemoteTriggerSourceCapture::default(),
-            target,
-            target_identity,
-            event_types: Vec::new(),
-            input_template: RemoteTriggerInputTemplate::default(),
-            target_label,
+            spec: RemoteTriggerSubscriptionSpec {
+                subscription_key: subscription_key.into(),
+                env_ref,
+                wake_target: None,
+                name: None,
+                source_type: source_type.into(),
+                source_key: source_key.into(),
+                source: serde_json::Value::Object(serde_json::Map::new()),
+                payload_schema: serde_json::Value::Object(serde_json::Map::new()),
+                source_capture: RemoteTriggerSourceCapture::default(),
+                target,
+                target_identity,
+                event_types: Vec::new(),
+                input_template: RemoteTriggerInputTemplate::default(),
+                target_label,
+            },
         }
     }
 
@@ -437,40 +501,7 @@ impl RemoteTriggerSubscriptionDraft {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty(
-            "RemoteTriggerSubscriptionDraft",
-            "subscription_key",
-            &self.subscription_key,
-        )?;
-        self.env_ref.validate("RemoteTriggerSubscriptionDraft")?;
-        if let Some(wake_target) = &self.wake_target {
-            wake_target.validate("RemoteTriggerSubscriptionDraft")?;
-        }
-        require_non_empty(
-            "RemoteTriggerSubscriptionDraft",
-            "source_type",
-            &self.source_type,
-        )?;
-        require_non_empty(
-            "RemoteTriggerSubscriptionDraft",
-            "source_key",
-            &self.source_key,
-        )?;
-        self.target.validate("RemoteTriggerSubscriptionDraft")?;
-        self.target_identity
-            .validate("RemoteTriggerSubscriptionDraft")?;
-        for event_type in &self.event_types {
-            event_type.validate("RemoteTriggerSubscriptionDraft")?;
-        }
-        validate_remote_trigger_target_label(
-            "RemoteTriggerSubscriptionDraft",
-            self.target_label.as_deref(),
-            self.target_identity.label.as_deref(),
-        )?;
-        self.source_capture
-            .validate("RemoteTriggerSubscriptionDraft")?;
-        self.input_template
-            .validate("RemoteTriggerSubscriptionDraft")
+        self.spec.validate("RemoteTriggerSubscriptionDraft")
     }
 }
 
@@ -478,46 +509,54 @@ impl RemoteTriggerSubscriptionDraft {
 pub struct RemoteTriggerSubscriptionRecord {
     pub subscription_id: String,
     pub owner_scope: RemoteTriggerOwnerScope,
-    pub subscription_key: String,
     pub incarnation: String,
     pub revision: u64,
     pub definition_fingerprint: String,
     pub registrant: RemoteProcessOriginator,
-    pub env_ref: RemoteProcessExecutionEnvRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_target: Option<RemoteSessionScope>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    pub source_type: String,
-    pub source_key: String,
-    #[serde(default)]
-    pub source: serde_json::Value,
-    #[serde(default)]
-    pub payload_schema: serde_json::Value,
-    pub source_capture: RemoteTriggerSourceCapture,
-    pub target: RemoteProcessInput,
-    pub target_identity: RemoteProcessIdentity,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub event_types: Vec<RemoteProcessEventType>,
-    #[serde(default)]
-    pub input_template: RemoteTriggerInputTemplate,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_label: Option<String>,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default)]
-    pub tombstoned: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deleted_at_ms: Option<u64>,
+    #[serde(flatten)]
+    pub spec: RemoteTriggerSubscriptionSpec,
+    /// The subscription's one lifecycle fact (FIG-1951). The tagged enum makes
+    /// the five invalid `(enabled, tombstoned, deleted_at_ms)` triples a
+    /// window-79 peer could assert unrepresentable at decode.
+    pub lifecycle: RemoteTriggerSubscriptionLifecycle,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
+}
+
+impl std::ops::Deref for RemoteTriggerSubscriptionRecord {
+    type Target = RemoteTriggerSubscriptionSpec;
+
+    fn deref(&self) -> &Self::Target {
+        &self.spec
+    }
+}
+
+impl std::ops::DerefMut for RemoteTriggerSubscriptionRecord {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.spec
+    }
+}
+
+/// The wire mirror of `lash_core::TriggerSubscriptionLifecycle`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "lifecycle",
+    content = "deleted_at_ms",
+    rename_all = "snake_case"
+)]
+pub enum RemoteTriggerSubscriptionLifecycle {
+    /// Live and routable.
+    Enabled,
+    /// Live, retained, not routable.
+    Disabled,
+    /// Fenced behind a tombstone taken at the carried timestamp.
+    Tombstoned(u64),
 }
 
 impl RemoteTriggerSubscriptionRecord {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "subscription_id", &self.subscription_id)?;
         self.owner_scope.validate(type_name)?;
-        require_non_empty(type_name, "subscription_key", &self.subscription_key)?;
         require_non_empty(type_name, "incarnation", &self.incarnation)?;
         require_non_empty(
             type_name,
@@ -525,41 +564,7 @@ impl RemoteTriggerSubscriptionRecord {
             &self.definition_fingerprint,
         )?;
         self.registrant.validate(type_name)?;
-        self.env_ref.validate(type_name)?;
-        if let Some(wake_target) = &self.wake_target {
-            wake_target.validate(type_name)?;
-        }
-        require_non_empty(type_name, "source_type", &self.source_type)?;
-        require_non_empty(type_name, "source_key", &self.source_key)?;
-        self.target.validate(type_name)?;
-        self.target_identity.validate(type_name)?;
-        for event_type in &self.event_types {
-            event_type.validate(type_name)?;
-        }
-        validate_remote_trigger_target_label(
-            type_name,
-            self.target_label.as_deref(),
-            self.target_identity.label.as_deref(),
-        )?;
-        self.source_capture.validate(type_name)?;
-        self.input_template.validate(type_name)
-    }
-}
-
-fn validate_remote_trigger_target_label(
-    type_name: &'static str,
-    target_label: Option<&str>,
-    identity_label: Option<&str>,
-) -> Result<(), RemoteProtocolError> {
-    match (target_label, identity_label) {
-        (Some(target_label), Some(identity_label)) if target_label != identity_label => {
-            Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: "target_label must match target_identity.label when both are present"
-                    .to_string(),
-            })
-        }
-        _ => Ok(()),
+        self.spec.validate(type_name)
     }
 }
 

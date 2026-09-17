@@ -778,7 +778,7 @@ pub(super) async fn assert_trigger_delivery(
 ) -> Result<()> {
     let trigger_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM lash_trigger_subscriptions
-         WHERE source_type = $1 AND enabled = true",
+         WHERE source_type = $1 AND lifecycle = 'enabled'",
     )
     .bind(BUTTON_SOURCE_TYPE)
     .fetch_one(pool)

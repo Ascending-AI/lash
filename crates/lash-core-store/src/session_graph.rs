@@ -1295,11 +1295,11 @@ impl SessionGraph {
         &mut self,
         append: &crate::store::GraphAppend,
     ) -> Result<(), crate::StoreError> {
-        for node in self.nodes.iter().chain(&append.nodes) {
+        for node in self.nodes.iter().chain(append.nodes()) {
             crate::session_graph_integrity::validate_node_id(&node.node_id)?;
         }
 
-        let mut occupied_ids = HashSet::with_capacity(self.nodes.len() + append.nodes.len());
+        let mut occupied_ids = HashSet::with_capacity(self.nodes.len() + append.nodes().len());
         for node in &self.nodes {
             if !occupied_ids.insert(node.node_id.as_str()) {
                 return Err(crate::StoreError::NodeIdCollision {
@@ -1308,7 +1308,7 @@ impl SessionGraph {
             }
         }
         let resident_ids = occupied_ids.clone();
-        for node in &append.nodes {
+        for node in append.nodes() {
             if !occupied_ids.insert(node.node_id.as_str()) {
                 return Err(crate::StoreError::NodeIdCollision {
                     node_id: node.node_id.clone(),
@@ -1317,7 +1317,7 @@ impl SessionGraph {
         }
         append.validate_append_topology()?;
 
-        if let Some(first) = append.nodes.first()
+        if let Some(first) = append.nodes().first()
             && let Some(parent_node_id) = first.parent_node_id.as_deref()
             && !resident_ids.contains(parent_node_id)
         {
@@ -1327,29 +1327,18 @@ impl SessionGraph {
                 actual: first.parent_node_id.clone(),
             });
         }
-        if append.nodes.is_empty()
-            && let Some(leaf_node_id) = append.leaf_node_id.as_deref()
-            && !resident_ids.contains(leaf_node_id)
-        {
-            return Err(crate::StoreError::InvalidGraphLeaf {
-                leaf_node_id: append.leaf_node_id.clone(),
-            });
-        }
 
-        if append.nodes.is_empty() {
-            if self.leaf_node_id != append.leaf_node_id {
-                self.data_mut().leaf_node_id = append.leaf_node_id.clone();
-            }
+        if append.nodes().is_empty() {
             return Ok(());
         }
 
-        let extends_active_leaf = append.nodes[0].parent_node_id == self.leaf_node_id;
+        let extends_active_leaf = append.nodes()[0].parent_node_id == self.leaf_node_id;
         if extends_active_leaf {
-            self.append_prebuilt_nodes(append.nodes.clone());
+            self.append_prebuilt_nodes(append.nodes().to_vec());
         } else {
             let data = self.data_mut();
-            data.nodes.extend(append.nodes.iter().cloned());
-            data.leaf_node_id = append.leaf_node_id.clone();
+            data.nodes.extend(append.nodes().iter().cloned());
+            data.leaf_node_id = append.leaf_node_id().cloned();
         }
         Ok(())
     }

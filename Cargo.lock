@@ -2304,6 +2304,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-lashlang",
  "lash-internal-remote-protocol",
  "lash-internal-sansio",
@@ -2711,9 +2712,7 @@ dependencies = [
  "async-trait",
  "lash-internal-core",
  "lash-internal-lashlang-runtime",
- "serde",
  "serde_json",
- "serde_path_to_error",
 ]
 
 [[package]]

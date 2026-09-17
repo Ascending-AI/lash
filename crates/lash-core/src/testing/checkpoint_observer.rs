@@ -522,8 +522,16 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
         usage: checkpoint_usage_write(commit),
         components,
         state: Some(CheckpointStateWrite {
-            submitted_graph_append: serde_json::to_value(&commit.graph)
-                .expect("runtime graph append is serializable"),
+            // The observation keeps the pre-enum `GraphAppend` wire shape:
+            // checkers fold appended node rows plus the leaf the commit
+            // publishes, which for `PreserveHead` is the resident base leaf.
+            submitted_graph_append: serde_json::json!({
+                "nodes": commit.graph.nodes(),
+                "leaf_node_id": commit
+                    .graph
+                    .leaf_node_id()
+                    .or(commit.graph_base_leaf_node_id.as_ref()),
+            }),
             submitted_turn_state: serde_json::to_value(&checkpoint.turn_state)
                 .expect("runtime turn state is serializable"),
             submitted_usage_rows: serde_json::to_value(

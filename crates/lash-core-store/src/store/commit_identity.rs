@@ -1372,11 +1372,19 @@ struct RuntimeCommitIntent<'a> {
 /// excluded fields is invisible by design.
 impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
     fn from(commit: &'a RuntimeCommit) -> Self {
+        let append = &commit.graph;
+        let graph = GraphCommitIntent {
+            nodes: append.nodes().iter().map(SessionNodeIntent::from).collect(),
+            leaf_node_id: append
+                .leaf_node_id()
+                .or(commit.graph_base_leaf_node_id.as_ref())
+                .map(|node_id| node_id.as_str()),
+        };
         Self {
             session_id: &commit.session_id,
             config: &commit.config,
             current_frame_node_id: commit.current_frame_node_id.as_deref(),
-            graph: GraphCommitIntent::from(&commit.graph),
+            graph,
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
             usage_deltas: &commit.usage_deltas,
             failure_evidence: &commit.failure_evidence,
@@ -1408,15 +1416,6 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
 struct GraphCommitIntent<'a> {
     nodes: Vec<SessionNodeIntent<'a>>,
     leaf_node_id: Option<&'a str>,
-}
-
-impl<'a> From<&'a GraphAppend> for GraphCommitIntent<'a> {
-    fn from(graph: &'a GraphAppend) -> Self {
-        Self {
-            nodes: graph.nodes.iter().map(SessionNodeIntent::from).collect(),
-            leaf_node_id: graph.leaf_node_id.as_deref(),
-        }
-    }
 }
 
 #[derive(serde::Serialize)]

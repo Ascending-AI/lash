@@ -1849,6 +1849,21 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         registration = registration
             .with_process_provenance(lash_core::ProcessProvenance::new(originator))
             .with_wake_session_id(wake_session_id);
+        // This fixture's `start` registers directly, so it performs the
+        // journaled effect's env publish itself: a spec-carrying start is
+        // staged under its start-scoped owner and stamped with the reference
+        // the publish produced.
+        if registration.env_ref.is_none()
+            && let Some(spec) = options.env_spec.as_ref()
+        {
+            let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
+                self.env_store.as_ref(),
+                &lash_core::ArtifactOwner::process_start(&registration.id),
+                spec,
+            )
+            .await?;
+            registration = registration.with_execution_env_ref(Some(env_ref));
+        }
         lash_core::ProcessRegistrar::register_process_with_observers(
             self.registry.as_ref(),
             registration,

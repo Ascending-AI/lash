@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use lash_core::StoreError;
 use lash_core::store_backend_support::required_constraints::{
-    InspectedConstraint, POSTGRES_EXPECTED_CONSTRAINTS, RequiredConstraintReport,
+    EXPECTED_CONSTRAINTS, InspectedConstraint, RenderedConstraint, RequiredConstraintReport,
     compare_required_constraints,
 };
 use sqlx::{Connection as _, PgConnection, PgPool, Row};
@@ -41,11 +41,15 @@ pub(crate) async fn inspect_required_constraints_under_advisory_lock(
 pub(crate) async fn inspect_required_constraints(
     connection: &mut PgConnection,
 ) -> Result<RequiredConstraintReport, StoreError> {
+    let expected: Vec<RenderedConstraint> = EXPECTED_CONSTRAINTS
+        .iter()
+        .map(|constraint| constraint.postgres)
+        .collect();
     let search_path = read_search_path(connection).await?;
     let Some(installation) = resolve_installation(connection, &search_path).await? else {
-        return compare_required_constraints("postgres", POSTGRES_EXPECTED_CONSTRAINTS, Vec::new());
+        return compare_required_constraints("postgres", &expected, Vec::new());
     };
-    let table_names = POSTGRES_EXPECTED_CONSTRAINTS
+    let table_names = expected
         .iter()
         .map(|constraint| constraint.table.to_string())
         .collect::<Vec<_>>();
@@ -84,7 +88,7 @@ pub(crate) async fn inspect_required_constraints(
             continue;
         };
         let name: String = row.get("name");
-        if !POSTGRES_EXPECTED_CONSTRAINTS
+        if !expected
             .iter()
             .any(|expected| expected.table == *table && expected.name == name)
         {
@@ -98,5 +102,5 @@ pub(crate) async fn inspect_required_constraints(
             enforced: row.get("enforced"),
         });
     }
-    compare_required_constraints("postgres", POSTGRES_EXPECTED_CONSTRAINTS, actual)
+    compare_required_constraints("postgres", &expected, actual)
 }

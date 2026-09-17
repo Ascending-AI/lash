@@ -101,10 +101,8 @@ pub mod facade_ops {
                     .ok_or_else(|| {
                         ReconfigureError::Validation("tool registry live source id overflow".into())
                     })?;
-                let state_revision =
-                    super::registry_impl::checked_state_revision(inner.state_revision)?;
+                inner.commit()?;
                 inner.state.next_live_source_id = next_live_source_id;
-                inner.state_revision = state_revision;
                 format!("live:{next_live_source_id}")
             };
             self.upsert_source(Arc::new(ToolProviderSource::new(

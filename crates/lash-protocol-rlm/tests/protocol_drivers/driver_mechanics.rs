@@ -93,8 +93,11 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
     );
 }
 
+/// FIG-2777: a provider tool call on the tool-less cell channel is malformed
+/// provider output. The offending response is still emitted, but the turn
+/// repairs instead of stopping on a protocol violation.
 #[test]
-fn native_tool_call_failure_preserves_the_offending_llm_response_event() {
+fn native_tool_call_preserves_the_offending_llm_response_event_and_repairs() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
@@ -121,10 +124,50 @@ fn native_tool_call_failure_preserves_the_offending_llm_response_event() {
             .iter()
             .any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::LlmResponse { .. })))
     );
-    assert!(effects_include_runtime_error(
-        &effects,
-        "native provider tool call `native_lookup`"
-    ));
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. })),
+        "a stray tool call must never reach execution: {effects:?}"
+    );
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Done { .. })),
+        "a repairable extraction failure must not finish the turn: {effects:?}"
+    );
+    let checkpoint_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Checkpoint { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("a repair round checkpoints before the next request");
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: Default::default(),
+    });
+    let effects = drain_effects(&mut machine);
+    let repair =
+        find_llm_request(&effects).expect("a repair round issues another provider request");
+    let repair_text = repair
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter_map(|block| match block {
+            LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        repair_text.contains("native_lookup"),
+        "the repair copy names the stray call: {repair_text}"
+    );
+    assert!(
+        repair_text.contains("paired `<typescript>...</typescript>` block"),
+        "{repair_text}"
+    );
 }
 
 #[test]
@@ -503,6 +546,79 @@ fn output_limit_prose_retries_with_the_request_cap() {
                 .contains("answer was cut off")
                 && part.content.contains("2048")
                 && part.content.contains("shorter answer")))
+    );
+}
+
+/// S17-A2: the stall epilogue emits the same projection it guards on. A
+/// commentary+final-answer reply disagrees between the raw and normalized
+/// projections, so the retained assistant message must carry the normalized
+/// text — and a reply whose projection is empty must never write a zero-part
+/// assistant message to history.
+#[test]
+fn output_limit_retry_emits_the_guarded_projection_with_no_empty_parts() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("answer me")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            parts: vec![
+                LlmOutputPart::Text {
+                    text: "internal commentary the user never sees".to_string(),
+                    response_meta: Some(lash_sansio::llm::types::ResponseTextMeta {
+                        phase: Some("commentary".to_string()),
+                        ..Default::default()
+                    }),
+                },
+                LlmOutputPart::Text {
+                    text: "the truncated answer".to_string(),
+                    response_meta: Some(lash_sansio::llm::types::ResponseTextMeta {
+                        phase: Some("final_answer".to_string()),
+                        ..Default::default()
+                    }),
+                },
+            ],
+            terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    let messages = machine.messages();
+    let assistant = messages
+        .iter()
+        .find(|message| {
+            message.role == MessageRole::Assistant
+                && message
+                    .parts
+                    .iter()
+                    .any(|part| part.content.contains("the truncated answer"))
+        })
+        .expect("the retry retains the assistant's visible reply");
+    assert!(
+        assistant
+            .parts
+            .iter()
+            .all(|part| !part.content.contains("internal commentary")),
+        "the retained message carries the normalized projection, not the raw one"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| { message.role != MessageRole::Assistant || !message.parts.is_empty() }),
+        "no zero-part assistant message reaches history"
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Checkpoint { .. })),
+        "the stall retry still checkpoints for the next iteration"
     );
 }
 
@@ -1145,8 +1261,22 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             },
         ]
     );
-    let (_, checkpoint) = find_checkpoint(&effects).expect("after-work checkpoint");
-    assert_eq!(checkpoint, CheckpointKind::AfterWork);
+    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("terminal checkpoint");
+    // A cancelled call record is an uncatchable host terminal: the run it was
+    // dispatched for is over, so the turn checkpoints BeforeCompletion and
+    // settles cancelled instead of re-prompting the model.
+    assert_eq!(checkpoint, CheckpointKind::BeforeCompletion);
+    restored.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: lash_sansio::CheckpointDelivery::default(),
+    });
+    let settled = drain_effects(&mut restored);
+    assert!(matches!(
+        find_turn_outcome(&settled),
+        Some(lash_sansio::TurnOutcome::Stopped(
+            lash_sansio::TurnStop::Cancelled { .. }
+        ))
+    ));
 }
 
 // === FIG-1407: the no-progress budget ===
@@ -1945,7 +2075,10 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
 
     let failed = &trajectory[0];
     assert_eq!(failed.output, vec!["partial output before the failure"]);
-    assert!(failed.error.is_some(), "the failure keeps its own error");
+    assert!(
+        failed.outcome.is_failed(),
+        "the failure keeps its own error"
+    );
 
     let repaired = &trajectory[1];
     assert_eq!(
@@ -1954,7 +2087,8 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
         "the repair iteration must not inherit the failed cell's output"
     );
     assert_eq!(
-        repaired.error, None,
+        repaired.outcome,
+        lash_rlm_types::CellOutcome::Running,
         "a clean cell must not inherit the previous iteration's error"
     );
     assert_eq!(repaired.code, "print \"repaired\"");

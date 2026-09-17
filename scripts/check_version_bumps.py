@@ -485,10 +485,10 @@ IDENTIFIER_RENAME_BASELINES = {
     # constructors/converters widened from pub(crate) to pub for lash-core's
     # callers. SegmentHandover and PersistedSegmentHandover kept every field,
     # derive and serde attribute, so the persisted handover JSON is
-    # byte-identical and LASHLANG_SEGMENT_STATE_VERSION stays 10. (Superseded
+    # byte-identical and LASHLANG_SEGMENT_STATE_VERSION stays 11. (Superseded
     # state: sha256:69b5d38f6c363f2cde541aa4500f5f31618b888826b44a4aa35cfe23a946bd1d.)
     "crates/lash-lashlang-runtime/src/process.rs:LASHLANG_SEGMENT_STATE_VERSION": (
-        "sha256:de22cf26bbe1982db85773d4606b10a1323e3e4fdabb4dd3b044cf740d475709"
+        "sha256:b2b4caa01166c02528582a2d091a8d2ea5466b9faebaf735267ae72858c26dde"
     ),
     # FIG-2865: the canonical projected encoding moved out of state/wire.rs
     # into runtime/projected_wire.rs, which is now inside the snapshot guard's
@@ -530,6 +530,55 @@ IDENTIFIER_RENAME_BASELINES = {
     ),
     "crates/lash-core/src/triggers/router.rs:TRIGGER_DEFINITION_FAMILY_VERSION": (
         "sha256:fb3d470b763cbd828e7df0bde4fd205be0d7cd077de30acd08d25c7b3ad2b73e"
+    ),
+    # FIG-3306 (live): the parked driver states' `error` / `terminal_finish`
+    # field pair folded into `#[serde(flatten)] outcome: ParkedCellOutcome`
+    # (protocol/state.rs, native/state.rs). ParkedCellOutcome writes the same
+    # two keys with the same null-key emission the raw Option fields produced,
+    # and refuses to decode a record carrying both -- a state the old pair
+    # admitted but no writer ever produced. The trajectory-entry and
+    # parked-state serialization tests confirm the stored bytes are identical,
+    # so RLM_SNAPSHOT_VERSION stays 21 and NATIVE_DRIVER_STATE_VERSION stays 2.
+    # Any further guarded-shape drift re-fails the gate.
+    "crates/lash-protocol-rlm/src/executor/snapshot.rs:RLM_SNAPSHOT_VERSION": (
+        "sha256:5077dcfc2a842813eca8b45088eb267164f49d268be559edc1a92002ec23ef8e"
+    ),
+    "crates/lash-protocol-rlm/src/native/state.rs:NATIVE_DRIVER_STATE_VERSION": (
+        "sha256:5fba57c12525c184666bfd36859f770e35d754113e0d94b9e6c971f7fea3b03b"
+    ),
+    # FIG-3237 (live): each waiting variant's `effect_id` plus the
+    # `#[serde(skip)]` delivery flag folded into one `EffectDelivery` record,
+    # serialized transparently as the bare id under the variant's existing
+    # `effect_id` key (machine_state.rs). The `status` field stays
+    # runtime-only and deserializes to its `Pending` default, so checkpoint
+    # bytes are identical on both sides and a restored checkpoint still
+    # re-delivers; the checkpoint round-trip and redelivery tests confirm.
+    # TURN_CHECKPOINT_SCHEMA_VERSION stays 3. Any further guarded-shape drift
+    # re-fails the gate.
+    "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
+        "sha256:6056583b23117ff129cf39d93b9407bb95b0d06bf6e495f633b147662da1ed79"
+    ),
+    # FIG-3230: GraphAppend became the explicit-intent enum
+    # (`Extend { nodes }` / `PreserveHead`), so the semantic-boundary
+    # projection's `graph.nodes` field read became `graph.nodes()` and the
+    # exhaustive destructure gained the ignored `graph_base_leaf_node_id`.
+    # `nodes()` returns the identical appended-node slice the field carried
+    # (`&nodes` for Extend, `&[]` for PreserveHead, matching the old
+    # `nodes: vec![]` arm), so `appended_payloads` collects the same payload
+    # sequence in the same order. The projection's serialized fields
+    # (operation key, session id, config, appended payloads, usage deltas) and
+    # every serde attribute and constant are unchanged, so the encoded
+    # identity bytes are identical on both sides: RECORD_CONFIG stays 3,
+    # CREATE_SESSION stays 3, and USAGE_LEDGER stays 5. One-time baseline;
+    # any further guarded-shape drift re-fails the gate.
+    "crates/lash-core-store/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
+    ),
+    "crates/lash-core-store/src/store/semantic_boundary.rs:CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
+    ),
+    "crates/lash-core-store/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
     ),
 }
 

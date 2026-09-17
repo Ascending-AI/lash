@@ -351,14 +351,30 @@ pub struct PersistedSessionRead {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct GraphAppend {
-    pub nodes: Vec<crate::SessionNodeRecord>,
-    pub leaf_node_id: Option<crate::NodeId>,
+pub enum GraphAppend {
+    Extend {
+        nodes: Vec<crate::SessionNodeRecord>,
+    },
+    PreserveHead,
 }
 
 impl GraphAppend {
+    pub fn nodes(&self) -> &[crate::SessionNodeRecord] {
+        match self {
+            Self::Extend { nodes } => nodes,
+            Self::PreserveHead => &[],
+        }
+    }
+
+    pub fn nodes_mut(&mut self) -> &mut [crate::SessionNodeRecord] {
+        match self {
+            Self::Extend { nodes } => nodes,
+            Self::PreserveHead => &mut [],
+        }
+    }
+
     pub fn leaf_node_id(&self) -> Option<&crate::NodeId> {
-        self.leaf_node_id.as_ref()
+        self.nodes().last().map(|node| &node.node_id)
     }
 }
 
@@ -542,6 +558,7 @@ impl RuntimeCommit {
             config: _,
             current_frame_node_id: _,
             graph: _,
+            graph_base_leaf_node_id: _,
             checkpoint: _,
             usage_deltas: _,
             failure_evidence,
@@ -575,7 +592,7 @@ impl RuntimeCommit {
     /// frame-open nodes and operation identity for all other nodes.
     pub fn validate_node_derivation(&self) -> Result<(), StoreError> {
         let completed = &self.turn_commit;
-        for (ordinal, node) in self.graph.nodes.iter().enumerate() {
+        for (ordinal, node) in self.graph.nodes().iter().enumerate() {
             let expected = match &node.payload {
                 crate::SessionNodePayload::FrameOpen { frame_key, .. } => crate::NodeId::new(
                     crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str())
@@ -598,8 +615,8 @@ impl RuntimeCommit {
     /// Rejects duplicate node IDs within one append batch before store implementors mutate durable
     /// graph state.
     pub fn validate_append_node_ids_unique(&self) -> Result<(), StoreError> {
-        let mut seen = std::collections::HashSet::with_capacity(self.graph.nodes.len());
-        for node in &self.graph.nodes {
+        let mut seen = std::collections::HashSet::with_capacity(self.graph.nodes().len());
+        for node in self.graph.nodes() {
             if !seen.insert(node.node_id.as_str()) {
                 return Err(StoreError::NodeIdCollision {
                     node_id: node.node_id.clone(),
@@ -718,6 +735,7 @@ impl RuntimeCommit {
             config: persisted_session_config_from_state(state),
             current_frame_node_id,
             graph,
+            graph_base_leaf_node_id: state.session_graph.leaf_node_id.clone(),
             checkpoint: build_checkpoint_from_persisted_state(state)?,
             usage_deltas: usage_deltas.to_vec(),
             failure_evidence: Vec::new(),
@@ -1087,6 +1105,20 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
         binding: &SessionBinding,
     ) -> Result<SessionAdmission, StoreError>;
 
+    /// Write this session's metadata, creating the row when it is absent.
+    ///
+    /// The recorded lineage is write-once. `meta.relation` must declare the
+    /// same lineage the existing row records — the same parent, or the same
+    /// fork source and node — or the write is refused with
+    /// [`StoreError::SessionRelationMismatch`] and the row is left unchanged.
+    /// Admission reads [`SessionRelation::Root`] as "no claim" on a rebind
+    /// because a resume declares no lineage; a write cannot, because the row
+    /// it would record replaces the recorded parent with that root. Causal
+    /// provenance, observer inheritance and the pending observer intents are
+    /// not lineage and are replaced as given, which is what lets the observer
+    /// intent settlement round-trip the metadata it loaded. Use
+    /// [`store_backend_support::guard_session_meta_relation_rewrite`](crate::store_backend_support::guard_session_meta_relation_rewrite)
+    /// so all backends answer identically.
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;
 }

@@ -223,6 +223,7 @@ fn turn_routing_state_survives_web_process_reconstruction() {
     turns.insert_with_prompt(
         &session_id,
         "durable-stop-turn",
+        WorkbenchTurnKind::User,
         Some("actual restored prompt".into()),
         None,
     );
@@ -232,8 +233,10 @@ fn turn_routing_state_survives_web_process_reconstruction() {
     let recovered_turns = ActiveTurns::persistent(turns_path).expect("recover turns");
     assert_eq!(recovered_ids.current(), session_id);
     assert_eq!(
-        recovered_turns.for_session(&session_id),
-        vec![lash::TurnAddress::new(&session_id, "durable-stop-turn")]
+        recovered_turns
+            .for_session(&session_id)
+            .map(|active_turn| active_turn.address),
+        Some(lash::TurnAddress::new(&session_id, "durable-stop-turn"))
     );
     let recovered_prompt = recovered_turns
         .prompt_for(&session_id, &TurnId::from("durable-stop-turn"))

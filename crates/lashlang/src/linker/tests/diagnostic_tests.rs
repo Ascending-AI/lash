@@ -56,6 +56,27 @@ fn unknown_name_in_process_body_carries_declaration_span() {
 }
 
 #[test]
+fn unknown_name_in_process_body_carries_the_expressions_own_span() {
+    // process scan() { finish missing }
+    //
+    // S18-A1: the unified span table addresses declaration bodies in the same
+    // vocabulary as `main`, so a span recorded for the offending expression —
+    // `missing` sits at declaration 0, body child 0, argument 0 — wins over
+    // the declaration's span instead of being unreachable.
+    let mut program = unknown_name_in_process_body();
+    program.spans.insert(
+        AstPath::declaration(0, vec![0, 0]),
+        Span { start: 7, end: 14 },
+    );
+    let err = LinkedModule::link(program, full_host_environment()).expect_err("unknown name");
+    let LinkError::UnknownName { name, span } = &err else {
+        panic!("expected UnknownName, got {err:?}");
+    };
+    assert_eq!(name, "missing");
+    assert_eq!(*span, Some(Span { start: 7, end: 14 }));
+}
+
+#[test]
 fn unknown_top_level_name_on_line_40_fails_at_link() {
     // value_1 = 1
     // ... 38 more assignments ...

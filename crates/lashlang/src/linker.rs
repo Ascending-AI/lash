@@ -9,8 +9,8 @@ use crate::artifact::{
     HostRequirements, ModuleArtifact, host_requirements_for_program_with_catalog,
 };
 use crate::ast::{
-    AssignPathStep, AstString, Declaration, Expr, ListComprehensionClause, ProcessDecl,
-    ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TypeExpr, TypeField,
+    AssignPathStep, AstPath, AstRoot, AstString, Declaration, Expr, ListComprehensionClause,
+    ProcessDecl, ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TypeExpr, TypeField,
     format_type_expr,
 };
 use crate::span::Span;
@@ -48,8 +48,7 @@ use type_helpers::{
 mod facets;
 pub use facets::analyze_workflow_program;
 use facets::{
-    expression_paths_by_pointer, expression_spans_by_pointer, recover_workflow_binding,
-    workflow_diagnostic_owner_key,
+    declaration_span, program_node_maps, recover_workflow_binding, workflow_diagnostic_owner_key,
 };
 #[cfg(test)]
 mod tests;

@@ -675,17 +675,22 @@ fn generated_cases() -> Vec<GeneratedCase> {
 }
 
 fn materialize_graph(session_id: &SessionId, spec: &GraphSpec) -> GraphAppend {
-    GraphAppend {
-        nodes: spec
-            .nodes
-            .iter()
-            .copied()
-            .map(|node| node.materialize(session_id))
-            .collect(),
-        leaf_node_id: spec
-            .leaf_node_id
-            .map(|node_id| scoped_node_id(session_id, node_id).into()),
+    let nodes = spec
+        .nodes
+        .iter()
+        .copied()
+        .map(|node| node.materialize(session_id))
+        .collect::<Vec<_>>();
+    if nodes.is_empty() {
+        return GraphAppend::PreserveHead;
     }
+    debug_assert_eq!(
+        spec.leaf_node_id
+            .map(|node_id| scoped_node_id(session_id, node_id)),
+        nodes.last().map(|node| node.node_id.to_string()),
+        "an extended graph leaf must be its terminal appended node"
+    );
+    GraphAppend::Extend { nodes }
 }
 
 // A commit is genuinely this many independent parts; bundling them into a
@@ -1229,12 +1234,14 @@ impl BackendRunner {
                         .collect(),
                 );
                 let next_frame_node_id = commit.current_frame_node_id.clone();
-                let next_leaf_node_id = commit.graph.leaf_node_id.clone();
                 let result = self.store().commit_runtime_state(commit).await;
                 match result {
                     Ok(result) => {
                         self.current_frame_node_id = next_frame_node_id;
-                        self.current_leaf_node_id = next_leaf_node_id.map(|id| id.to_string());
+                        self.current_leaf_node_id = result
+                            .committed_leaf_node_id
+                            .clone()
+                            .map(|id| id.to_string());
                         if matches!(*checkpoint, CheckpointSpec::Bodies) {
                             self.checkpoint_component_refs = Some(CheckpointComponentRefs {
                                 components: result.manifest.components.clone(),
@@ -1969,19 +1976,23 @@ async fn runners_for_case_with_clock(
     clock: Arc<dyn Clock>,
 ) -> Vec<BackendRunner> {
     let session_id = SessionId::from(format!("fig-778-{run_nonce}-{}", case.as_str()));
+    // The deterministic relation is declared at creation on every backend:
+    // `save_session_meta` may not move a recorded lineage (FIG-3045), so the
+    // metadata install below rewrites a row that already records it.
+    let relation = SessionRelation::Child {
+        parent_session_id: SessionId::from(format!("fig-778-{run_nonce}-parent")),
+        caused_by: None,
+    };
     let create_request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
-        relation: SessionRelation::Root,
+        relation: relation.clone(),
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let expected_meta = SessionMeta {
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
-        relation: SessionRelation::Child {
-            parent_session_id: SessionId::from(format!("fig-778-{run_nonce}-parent")),
-            caused_by: None,
-        },
+        relation,
     };
 
     let memory_factory = Arc::new(InMemorySessionStoreFactory::with_clock(Arc::clone(&clock)));

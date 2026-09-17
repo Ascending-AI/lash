@@ -189,7 +189,7 @@ impl AppState {
     }
 
     pub(crate) fn publish_trigger_dispatch_done(&self, session_id: &SessionId, operation_id: &str) {
-        if self.active_turns.for_session(session_id).is_empty() {
+        if self.active_turns.for_session(session_id).is_none() {
             self.publish_for_session_identified(
                 session_id,
                 format!("operation:{operation_id}:done"),
@@ -203,7 +203,14 @@ impl AppState {
 
     #[cfg(test)]
     pub(crate) fn track_turn(&self, session_id: &SessionId, turn_id: &TurnId) {
-        self.active_turns.insert(session_id, turn_id);
+        self.active_turns
+            .insert(session_id, turn_id, WorkbenchTurnKind::User);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn track_queued_turn(&self, session_id: &SessionId, turn_id: &TurnId) {
+        self.active_turns
+            .insert(session_id, turn_id, WorkbenchTurnKind::Queued);
     }
 
     #[cfg(test)]
@@ -214,8 +221,13 @@ impl AppState {
         prompt: String,
         attachment_id: Option<String>,
     ) {
-        self.active_turns
-            .insert_with_prompt(session_id, turn_id, Some(prompt), attachment_id);
+        self.active_turns.insert_with_prompt(
+            session_id,
+            turn_id,
+            WorkbenchTurnKind::User,
+            Some(prompt),
+            attachment_id,
+        );
     }
 
     /// Delete `session_id`, reclaim the finished work it left behind, and report
@@ -244,7 +256,8 @@ impl AppState {
             // Model a turn appearing after the first attempt's journaled
             // snapshot, then fail retention once. A correct redrive reuses the
             // snapshot instead of turning this post-tombstone retry terminal.
-            self.active_turns.insert(&session_id, &turn_id);
+            self.active_turns
+                .insert(&session_id, &turn_id, WorkbenchTurnKind::User);
             return Err(AppError::retryable_internal(
                 "injected post-tombstone process-retention failure",
             ));
@@ -374,8 +387,11 @@ impl AppState {
                 lash::EmbedError::Store(error),
             )
         })?;
-        let mut receipts = Vec::with_capacity(active.len());
-        for address in active {
+        // At most one, structurally: the registry is keyed by session. The
+        // receipts stay a list because that is what this returns to its
+        // callers and what the traces are shaped around.
+        let mut receipts = Vec::with_capacity(active.iter().len());
+        if let Some(ActiveTurn { address, kind, .. }) = active {
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
             let cancel = driver
                 .request_cancel(
@@ -433,7 +449,7 @@ impl AppState {
                 },
             };
             let routing_retained = if receipt.terminal_is_pending() {
-                match self.restate_turn_is_active(&address).await {
+                match self.restate_turn_is_active(&address, kind).await {
                     Ok(true) => true,
                     Ok(false) => {
                         self.active_turns
@@ -484,15 +500,20 @@ impl AppState {
         Ok(receipts)
     }
 
+    /// Whether Restate still reports the turn's invocation as running.
+    ///
+    /// The workflow name comes from the claim's own kind. It used to be
+    /// re-derived by sniffing the turn id for a `workbench-queued-` prefix,
+    /// with every other shape falling through to the user workflow — and this
+    /// probe is what decides whether a pending-terminal cancel keeps or drops
+    /// the routing claim, so the wrong name answered `None` and dropped a turn
+    /// that was still running.
     pub(crate) async fn restate_turn_is_active(
         &self,
         address: &lash::TurnAddress,
+        kind: WorkbenchTurnKind,
     ) -> AnyhowResult<bool> {
-        let workflow = if address.turn_id.starts_with("workbench-queued-") {
-            "WorkbenchQueuedTurnWorkflow"
-        } else {
-            "WorkbenchTurnWorkflow"
-        };
+        let workflow = kind.workflow_name();
         let admin =
             lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
                 self.restate_admin_url.clone(),
@@ -1212,8 +1233,9 @@ pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
 pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> WorkItem {
     let kind = item.kind().to_string();
     let label = item.label().to_string();
+    let state = item.state();
     let mut process = work_process_from_observed(item.process);
-    process.status_label = work_item_status_label(item.state, process.status_label);
+    process.status_label = work_item_status_label(state, process.status_label);
     WorkItem {
         process,
         events: item
@@ -1221,7 +1243,7 @@ pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> 
             .into_iter()
             .map(work_event_from_observed)
             .collect(),
-        state: item.state,
+        state,
         kind,
         label,
     }

@@ -21,7 +21,7 @@ fn edits_environment() -> LashlangHostEnvironment {
             "tool:index/run",
             TypeExpr::Object(vec![lashlang::TypeField {
                 name: "edits".into(),
-                ty: TypeExpr::Union(vec![
+                ty: TypeExpr::union(vec![
                     TypeExpr::List(Box::new(TypeExpr::Dict)),
                     TypeExpr::Null,
                 ]),

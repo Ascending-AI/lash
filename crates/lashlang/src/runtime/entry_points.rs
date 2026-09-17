@@ -80,9 +80,7 @@ pub fn compile_process(
     let process_program = Program {
         declarations: program.declarations.clone(),
         main: process.body.clone(),
-        declaration_spans: program.declaration_spans.clone(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     };
     compile_ast(&process_program).map_err(|error| RuntimeError::ValidationFailed {
         reason: error.to_string(),
@@ -103,9 +101,7 @@ pub fn compile_linked_process(
     let process_program = Program {
         declarations: linked_program.declarations.clone(),
         main: process.body.clone(),
-        declaration_spans: linked_program.declaration_spans.clone(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     };
     let process_ref = linked
         .artifact
@@ -148,9 +144,7 @@ pub fn compile_module_artifact_process(
     let process_program = Program {
         declarations: artifact.canonical_ir.declarations.clone(),
         main: process.body.clone(),
-        declaration_spans: artifact.canonical_ir.declaration_spans.clone(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     };
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,
@@ -238,17 +232,17 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         // never revisits those (FIG-2865).
         crate::runtime::projected_refresh::refresh_record(&mut globals, projected);
         crate::runtime::projected_refresh::refresh_heap(&mut heap, projected);
-        let slots = SlotState::from_globals_with_scratch(
+        let slots = SlotState::from_globals(
             globals,
             &program.chunk.slot_names,
-            scratch,
             projected,
+            std::mem::take(&mut scratch.slot_values),
         );
-        let mut vm = Vm::new_with_scratch_and_mode(
+        let mut vm = Vm::new(
             &program.chunk,
             slots,
             host,
-            scratch,
+            Some(scratch),
             host.execution_mode(),
         );
         vm.install_heap(heap);
@@ -260,8 +254,9 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         let (mut globals, mut heap) = state.take_runtime();
         crate::runtime::projected_refresh::refresh_record(&mut globals, projected);
         crate::runtime::projected_refresh::refresh_heap(&mut heap, projected);
-        let slots = SlotState::from_globals(globals, &program.chunk.slot_names, projected);
-        let mut vm = Vm::new_with_mode(&program.chunk, slots, host, host.execution_mode());
+        let slots =
+            SlotState::from_globals(globals, &program.chunk.slot_names, projected, Vec::new());
+        let mut vm = Vm::new(&program.chunk, slots, host, None, host.execution_mode());
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;
         let (runtime_globals, heap) = vm.into_state_parts()?;

@@ -154,12 +154,20 @@ mod tests {
                         .all(|byte| byte.is_ascii_lowercase() || (b'2'..=b'7').contains(&byte))),
             "{name}"
         );
-        assert_eq!(meta.module_path, vec!["appworld".to_string()]);
-        assert_eq!(
-            meta.operation.as_deref(),
-            name.rsplit_once("__").map(|(_, operation)| operation)
-        );
-        assert!(meta.aliases.is_empty());
+        // `ToolBinding` fields exist only when `lash-tool-support/lashlang`
+        // is on; the feature-off stub drops bindings, so only the name
+        // assertions apply there.
+        #[cfg(feature = "lashlang")]
+        {
+            assert_eq!(meta.module_path, vec!["appworld".to_string()]);
+            assert_eq!(
+                meta.operation.as_deref(),
+                name.rsplit_once("__").map(|(_, operation)| operation)
+            );
+            assert!(meta.aliases.is_empty());
+        }
+        #[cfg(not(feature = "lashlang"))]
+        let _ = meta;
     }
 
     #[test]
@@ -177,7 +185,10 @@ mod tests {
         let (neighbor_name, neighbor_binding) = build_prefixed_name("directory", "get_user");
 
         assert_eq!(alone_name, neighbor_name);
+        #[cfg(feature = "lashlang")]
         assert_eq!(alone_binding.operation, neighbor_binding.operation);
+        #[cfg(not(feature = "lashlang"))]
+        let _ = (alone_binding, neighbor_binding);
     }
 
     #[test]

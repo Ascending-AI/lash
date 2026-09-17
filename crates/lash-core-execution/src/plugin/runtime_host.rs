@@ -152,12 +152,17 @@ pub trait SessionGraphService: Send + Sync {
     /// Same durable semantics as the in-turn `SwitchAgentFrame` control: the
     /// named frame key, its naming material and reason are journaled with the
     /// running turn, the switch materializes at that turn's final commit
-    /// through the same agent-frame-switch materializer (fresh frame with
-    /// `initial_nodes`, protocol execution cleared), it is replay-deterministic
-    /// because it derives from the requested frame material, and it is
-    /// idempotent on redrive — a replayed operation id answers the first
-    /// commit's outcome, and a different id naming the already-current frame
-    /// reports `opened = false` instead of failing.
+    /// (fresh frame with `initial_nodes`, protocol execution cleared), it is
+    /// replay-deterministic because it derives from the requested frame
+    /// material, and a switch naming the already-current frame reports
+    /// `opened = false` instead of failing.
+    ///
+    /// A turn materializes at most one agent-frame switch, and this call and
+    /// the turn's own `AgentFrameSwitch` outcome are two authors of that one
+    /// switch with no precedence order between them (FIG-3303). A second
+    /// author naming a different frame key, or the same key with different
+    /// `initial_nodes`, is refused; an author repeating the recorded switch is
+    /// answered its first outcome, so redrive is idempotent.
     ///
     /// Reachable only under the running session's turn scope: the switch is a
     /// turn-owned graph operation. A switch for a different session or from a
@@ -176,11 +181,13 @@ pub trait SessionGraphService: Send + Sync {
 
 /// Post-turn plugin-requested agent-frame switch (FIG-3107).
 ///
-/// The operation id is the switch's idempotency identity: re-deriving the same
-/// switch (same id) collapses onto the first outcome, and reusing an id for a
-/// different frame is a typed conflict. The frame key names the target frame;
-/// `initial_nodes` seed the fresh frame's history; `task` records the switch's
-/// task label exactly as the in-turn control does.
+/// The frame key names the target frame and carries the turn's conflict rule:
+/// a turn holds one switch, so a second author naming a different key, or the
+/// same key with different `initial_nodes`, is a typed conflict, while
+/// re-deriving the recorded switch collapses onto its first outcome. The
+/// operation id is the switch's stable identity in that record; `initial_nodes`
+/// seed the fresh frame's history; `task` records the switch's task label
+/// exactly as the in-turn control does.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SwitchAgentFrameRequest {
     /// Stable idempotency identity of this switch.

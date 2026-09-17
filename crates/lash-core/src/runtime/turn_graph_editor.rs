@@ -1,4 +1,4 @@
-use crate::{NodeId, SessionId};
+use crate::NodeId;
 use lash_sansio::core_support::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -258,18 +258,13 @@ impl TurnGraphEditor {
             .cloned()
             .collect::<Vec<_>>();
         if nodes.is_empty() {
-            GraphAppend {
-                nodes: Vec::new(),
-                leaf_node_id: self.leaf_node_id(),
-            }
+            GraphAppend::PreserveHead
         } else {
-            GraphAppend {
-                nodes,
-                leaf_node_id: self.leaf_node_id(),
-            }
+            GraphAppend::Extend { nodes }
         }
     }
 
+    #[cfg(test)]
     pub(super) fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
     where
         I: IntoIterator<Item = crate::NodeId>,
@@ -279,30 +274,6 @@ impl TurnGraphEditor {
 
     pub(super) fn persisted_node_ids(&self) -> HashSet<NodeId> {
         self.committed_node_ids.clone()
-    }
-
-    pub(super) fn remap_node_ids(&mut self, session_id: &SessionId, mapping: &[(NodeId, NodeId)]) {
-        if mapping.is_empty() {
-            return;
-        }
-        let by_old = mapping.iter().cloned().collect::<HashMap<_, _>>();
-        Arc::make_mut(&mut self.base_graph).remap_node_ids(session_id, mapping);
-        for node in &mut self.appended_nodes {
-            if let Some(derived) = by_old.get(&node.node_id) {
-                node.node_id = derived.clone();
-            }
-            if let Some(parent) = node.parent_node_id.as_mut()
-                && let Some(derived) = by_old.get(parent)
-            {
-                *parent = derived.clone();
-            }
-        }
-        self.appended_node_indices = self
-            .appended_node_indices
-            .drain()
-            .map(|(id, index)| (by_old.get(&id).cloned().unwrap_or(id), index))
-            .collect();
-        self.append_builder.remap_node_ids(mapping);
     }
 
     pub(super) fn into_session_graph(self) -> SessionGraph {
@@ -330,9 +301,8 @@ impl TurnGraphEditor {
         match Arc::try_unwrap(self.base_graph) {
             Ok(mut graph) => {
                 graph
-                    .apply_append(&crate::GraphAppend {
+                    .apply_append(&crate::GraphAppend::Extend {
                         nodes: self.appended_nodes,
-                        leaf_node_id,
                     })
                     .unwrap_or_else(|error| {
                         panic!("turn graph editor produced an invalid append: {error}")
@@ -459,10 +429,13 @@ mod tests {
 
         editor.append_active_conversation_messages(&[first]);
         let pending = editor.graph_commit();
-        assert_eq!(pending.nodes.len(), 1);
-        assert_eq!(pending.leaf_node_id, Some(pending.nodes[0].node_id.clone()));
-        editor.mark_node_ids_persisted(pending.nodes.iter().map(|node| node.node_id.clone()));
-        assert!(editor.graph_commit().nodes.is_empty());
+        assert_eq!(pending.nodes().len(), 1);
+        assert_eq!(
+            pending.leaf_node_id().cloned(),
+            Some(pending.nodes()[0].node_id.clone())
+        );
+        editor.mark_node_ids_persisted(pending.nodes().iter().map(|node| node.node_id.clone()));
+        assert!(editor.graph_commit().nodes().is_empty());
 
         let graph = editor.into_session_graph();
         assert_eq!(graph.nodes.len(), 1);
@@ -571,11 +544,11 @@ mod tests {
         let durable = message("durable", "original");
         editor.append_active_conversation_messages(std::slice::from_ref(&durable));
         let pending = editor.graph_commit();
-        editor.mark_node_ids_persisted(pending.nodes.iter().map(|node| node.node_id.clone()));
+        editor.mark_node_ids_persisted(pending.nodes().iter().map(|node| node.node_id.clone()));
 
         editor.project_active_read_state(&[message("durable", "projected")]);
 
-        assert!(editor.graph_commit().nodes.is_empty());
+        assert!(editor.graph_commit().nodes().is_empty());
         assert_eq!(editor.message_sequence()[0].parts[0].content, "projected");
         assert_eq!(
             editor.take_projection_diagnostics(),

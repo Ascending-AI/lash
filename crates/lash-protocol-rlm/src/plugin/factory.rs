@@ -235,6 +235,7 @@ impl RlmProtocolPluginFactory {
         let config = rlm_protocol_config(self.config.clone(), process_lifecycle_available);
         let surface = rlm_lashlang_surface(&config, process_lifecycle_available)
             .with_plugin_extensions(plugin_host.extensions())
+            .and_then(|surface| surface.with_plugin_extensions(plugins.session_extensions()))
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         let host_environment = surface
             .host_environment(&tool_catalog)
@@ -268,19 +269,17 @@ impl RlmProtocolPluginFactory {
             )
             .map_err(|err| {
                 lashlang::ModuleCompileError::Link(lashlang::ModuleCompileDiagnostic {
-                    stage: lashlang::ModuleCompileStage::Link,
                     message: err.to_string(),
-                    offset: None,
                     span: None,
-                    line: None,
-                    column: None,
                     diagnostic: Some(err.to_string()),
                 })
             })?;
         let program = lash_typescript::parse(&request.source).map_err(|diagnostic| {
             lashlang::ModuleCompileError::parse_failure(
-                &request.source,
-                diagnostic.span.map(|span| span.start),
+                diagnostic.span.map(|span| lashlang::Span {
+                    start: span.start,
+                    end: span.end,
+                }),
                 diagnostic.message.clone(),
                 lash_typescript::format_diagnostic(&request.source, &diagnostic),
             )
@@ -512,6 +511,50 @@ mod label_annotation_tests {
         assert!(host_environment.language_features.label_annotations);
         lashlang::LinkedModule::link(labelled_program(), &host_environment)
             .expect("default surface links label annotations");
+    }
+
+    #[test]
+    fn typescript_parse_failure_keeps_its_own_source_span() {
+        // FIG-3268: the factory used to hand `parse_failure` only
+        // `span.start`, so the diagnostic's `span` stayed `None` and the
+        // end of the offending token was lost.
+        let factory = std::sync::Arc::new(
+            crate::RlmProtocolPluginFactory::new(
+                crate::RlmProtocolPluginConfig::builder()
+                    .channel(crate::RlmChannel::Cell)
+                    .instruction_limit(crate::InstructionBound::instructions(1_000_000))
+                    .wall_clock(crate::WallClockBound::secs(30))
+                    .memory_limit(crate::MemoryBound::mebibytes(64))
+                    .build(),
+                lashlang::global_in_memory_lashlang_artifact_store(),
+            )
+            .with_process_lifecycle(false),
+        );
+        let factory_plugin: std::sync::Arc<dyn lash_core::facade_support::PluginFactory> =
+            factory.clone();
+        let plugin_host = lash_core::facade_support::PluginHost::new(vec![factory_plugin]);
+        let source = "process 42oops() { finish \"x\" }";
+        let err = factory
+            .compile_lashlang_module(
+                &plugin_host,
+                false,
+                crate::LashlangModuleCompileRequest::new(
+                    "factory-test",
+                    source,
+                    lash_core::ProcessExecutionEnvSpec::new(
+                        Default::default(),
+                        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                    ),
+                ),
+            )
+            .expect_err("invalid typescript must fail to parse");
+
+        let lashlang::ModuleCompileError::Parse(diagnostic) = err else {
+            panic!("expected parse error");
+        };
+        let span = diagnostic.span.expect("parse failure carries a span");
+        assert_eq!(diagnostic.offset(), Some(span.start));
+        assert_eq!(&source[span.start..span.end], "42");
     }
 
     #[test]

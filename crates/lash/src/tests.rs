@@ -385,7 +385,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             head_revision: next_head_revision,
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),
-            committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
+            committed_leaf_node_id: commit.graph.leaf_node_id().cloned(),
             realized_node_timestamps,
             committed_usage_delta_identities: commit
                 .usage_deltas
@@ -1846,27 +1846,6 @@ fn queued_text_provider(texts: Vec<impl Into<String>>) -> ProviderHandle {
         .complete(move |_request| {
             let responses = Arc::clone(&responses);
             async move { Ok(responses.lock().await.pop_front().expect("queued response")) }
-        })
-        .build()
-        .into_handle()
-}
-
-#[cfg(feature = "rlm")]
-fn native_tool_call_provider() -> ProviderHandle {
-    crate::testing::TestProvider::builder()
-        .kind("native-tool-call-under-rlm")
-        .complete(|_request| async move {
-            Ok(LlmResponse {
-                parts: vec![LlmOutputPart::ToolCall {
-                    call_id: "native-call-1".to_string(),
-                    tool_name: "native_lookup".to_string(),
-                    input_json: r#"{"query":"forbidden"}"#.to_string(),
-                    replay: None,
-                }],
-                terminal_reason: lash_core::LlmTerminalReason::ToolUse,
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            })
         })
         .build()
         .into_handle()

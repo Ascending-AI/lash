@@ -30,7 +30,7 @@ fn numbers(values: &[f64]) -> Expr {
 fn email_union_type() -> Expr {
     builders::type_literal(TypeExpr::Object(vec![builders::type_field(
         "email",
-        TypeExpr::Union(vec![TypeExpr::Str, TypeExpr::Null]),
+        TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Null]),
         false,
     )]))
 }
@@ -1139,12 +1139,12 @@ async fn validate_object_type_accepts_image_descriptors() {
             builders::type_field("size", TypeExpr::Int, false),
             builders::type_field(
                 "width",
-                TypeExpr::Union(vec![TypeExpr::Int, TypeExpr::Null]),
+                TypeExpr::union(vec![TypeExpr::Int, TypeExpr::Null]),
                 false,
             ),
             builders::type_field(
                 "height",
-                TypeExpr::Union(vec![TypeExpr::Int, TypeExpr::Null]),
+                TypeExpr::union(vec![TypeExpr::Int, TypeExpr::Null]),
                 false,
             ),
         ])),

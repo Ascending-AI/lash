@@ -635,8 +635,8 @@ fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
         .into_iter()
         .filter(|entry| {
             entry
-                .error
-                .as_deref()
+                .outcome
+                .error()
                 .is_some_and(|error| !error.trim().is_empty())
         })
         .collect()
@@ -695,8 +695,8 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
         .iter()
         .filter(|entry| {
             entry
-                .error
-                .as_deref()
+                .outcome
+                .error()
                 .is_some_and(|error| !error.trim().is_empty())
         })
         .collect::<Vec<_>>();
@@ -707,7 +707,7 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
                 out,
                 "- iteration={} error={}",
                 entry.protocol_iteration,
-                preview(entry.error.as_deref().unwrap_or_default(), 900)
+                preview(entry.outcome.error().map_or("", String::as_str), 900,)
             );
             if !entry.code.trim().is_empty() {
                 let _ = writeln!(out, "  code={}", preview(&entry.code, 900));
@@ -719,8 +719,8 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
             "last_rlm_step: iteration={} final_output={}",
             entry.protocol_iteration,
             entry
-                .final_output
-                .as_ref()
+                .outcome
+                .terminal_value()
                 .map_or_else(|| "none".to_string(), serde_json::Value::to_string)
         );
         if !entry.code.trim().is_empty() {

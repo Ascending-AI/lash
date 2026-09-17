@@ -340,7 +340,7 @@ fn superseded_failure_indices(
                         prose_entries.push(entry.index);
                     }
                     Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                        if step.error.is_some() {
+                        if step.outcome.is_failed() {
                             pending_failure_entries.append(&mut prose_entries);
                             pending_failure_entries.push(entry.index);
                             any_failure_pending = true;
@@ -620,21 +620,24 @@ pub(crate) fn step_output_text(
             let _ = write!(out, "\n- {} → {}", call.operation, call.outcome.as_str());
         }
     }
-    if let Some(error) = &entry.error {
-        if !out.is_empty() {
-            out.push_str("\n\n");
+    match &entry.outcome {
+        lash_rlm_types::CellOutcome::Failed(error) => {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str(error);
         }
-        out.push_str(error);
-    }
-    if let Some(final_output) = &entry.final_output {
-        if !out.is_empty() {
-            out.push_str("\n\n");
+        lash_rlm_types::CellOutcome::Finished(final_output) => {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str("Final output:\n");
+            out.push_str(
+                &serde_json::to_string_pretty(final_output)
+                    .unwrap_or_else(|_| final_output.to_string()),
+            );
         }
-        out.push_str("Final output:\n");
-        out.push_str(
-            &serde_json::to_string_pretty(final_output)
-                .unwrap_or_else(|_| final_output.to_string()),
-        );
+        lash_rlm_types::CellOutcome::Running => {}
     }
     if out.is_empty() {
         out.push_str("(no printed output)");

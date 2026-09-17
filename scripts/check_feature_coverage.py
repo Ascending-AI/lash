@@ -1168,7 +1168,12 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
     for aggregate in ("//:feature_lanes", "//:feature_lane_tests"):
         if aggregate not in feature_job:
             failures.append(f"feature-lanes does not build {aggregate}")
-    if "needs.plan.outputs.bazel_trusted == 'true'" not in feature_job:
+    # The lanes are dispatch-only, and a dispatch is a trusted event: the
+    # pull-request and merge-group boards do not compile the lane graph.
+    if (
+        "needs.plan.outputs.bazel_trusted == 'true'" not in feature_job
+        and "github.event_name == 'workflow_dispatch'" not in feature_job
+    ):
         failures.append("feature-lanes does not require a trusted shared cache")
 
     conclusion = workflow_job_block(workflow, "ci-conclusion")
@@ -1177,10 +1182,11 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
     if re.search(r"^      - check\s*$", conclusion, re.MULTILINE) is None:
         failures.append("ci-conclusion does not require the baseline check job")
 
-    check_job = workflow_job_block(workflow, "check")
-    baseline_shell = "cargo check --workspace --all-targets --locked ${LASH_CI_FEATURES}"
-    if baseline_shell not in check_job:
-        failures.append("check does not execute the workspace default baseline")
+    # The workspace default baseline is the Bazel `//:workspace_compile`
+    # aggregate, carried by the partition job's single invocation.
+    bazel_job = workflow_job_block(workflow, "bazel-tests")
+    if "//:workspace_compile" not in bazel_job:
+        failures.append("bazel-tests does not execute the workspace default baseline")
 
     repo_gates = workflow_job_block(workflow, "repo-gates")
     for invocation in (

@@ -14,41 +14,39 @@ use lash::TurnId;
 /// Returns replayed prompt rows, which the caller appends after the product
 /// rows so ordering is unchanged.
 pub(crate) fn replayed_active_user_rows(
-    state: &AppState,
-    active_turns: &[lash::TurnAddress],
+    active_turn: Option<&ActiveTurn>,
     product_messages: &[ChatMessage],
 ) -> Vec<ChatMessage> {
-    let mut turn_ids = product_messages
+    let turn_ids = product_messages
         .iter()
         .filter_map(|message| workbench_turn_id_from_user_message_id(&message.id))
         .map(TurnId::from)
         .collect::<BTreeSet<_>>();
-    let mut replayed_prompts = Vec::new();
-    for address in active_turns {
-        if turn_ids.contains(&address.turn_id) {
-            continue;
-        }
-        let Some(prompt) = state
-            .active_turns
-            .prompt_for(&address.session_id, &address.turn_id)
-        else {
-            continue;
-        };
-        turn_ids.insert(address.turn_id.clone());
-        replayed_prompts.push(ChatMessage {
-            id: workbench_turn_user_message_id(&address.turn_id),
-            role: "user".to_string(),
-            text: prompt.text,
-            at: String::new(),
-            attachments: prompt
-                .attachment_id
-                .into_iter()
-                .map(ChatAttachment::from_id)
-                .collect(),
-            provenance: None,
-        });
+    // The turn and its prompt arrive from one read of one lock, so this row
+    // can no longer be built from a turn that a concurrent removal has since
+    // retired, nor dropped because the prompt read raced the turn read.
+    let Some(active_turn) = active_turn else {
+        return Vec::new();
+    };
+    if turn_ids.contains(&active_turn.address.turn_id) {
+        return Vec::new();
     }
-    replayed_prompts
+    let Some(prompt) = active_turn.prompt.as_ref() else {
+        return Vec::new();
+    };
+    vec![ChatMessage {
+        id: workbench_turn_user_message_id(&active_turn.address.turn_id),
+        role: "user".to_string(),
+        text: prompt.text.clone(),
+        at: String::new(),
+        attachments: prompt
+            .attachment_id
+            .iter()
+            .cloned()
+            .map(ChatAttachment::from_id)
+            .collect(),
+        provenance: None,
+    }]
 }
 
 /// The user rows this session's product-event log carries on the workbench's
@@ -430,8 +428,8 @@ pub(crate) fn transcript_rows_from_committed(
                         if !step.code.trim().is_empty() =>
                     {
                         let mut output = step.output.join("\n");
-                        if let Some(final_output) = step.final_output {
-                            let final_output = serde_json::to_string_pretty(&final_output)
+                        if let Some(final_output) = step.outcome.terminal_value() {
+                            let final_output = serde_json::to_string_pretty(final_output)
                                 .unwrap_or_else(|_| final_output.to_string());
                             if !output.is_empty() {
                                 output.push('\n');
@@ -443,8 +441,8 @@ pub(crate) fn transcript_rows_from_committed(
                             language: language.to_string(),
                             code: step.code,
                             output,
-                            success: step.error.is_none(),
-                            error: step.error,
+                            success: !step.outcome.is_failed(),
+                            error: step.outcome.error().cloned(),
                             tools: transcript_tools(step.calls, step.calls_omitted),
                         }]
                     }
@@ -502,19 +500,18 @@ pub(crate) struct ChatProjection {
 /// Builds the two public chat projections from one set of replacement,
 /// historical-row and stable-id deduplication rules.
 pub(crate) fn project_chat(
-    state: &AppState,
     read_view: &lash::persistence::SessionReadView,
-    active_turns: &[lash::TurnAddress],
+    active_turn: Option<&ActiveTurn>,
     current_frame_input_turn_ids: &BTreeSet<TurnId>,
     product_messages: Vec<ChatMessage>,
 ) -> ChatProjection {
-    let replayed_active_rows = replayed_active_user_rows(state, active_turns, &product_messages);
+    let replayed_active_rows = replayed_active_user_rows(active_turn, &product_messages);
     let ui_user_rows =
         ui_owned_user_rows_by_turn(product_messages.iter().chain(replayed_active_rows.iter()));
     let user_replacements = ui_owned_turn_input_replacements(read_view, &ui_user_rows);
-    let running_turn_ids = active_turns
-        .iter()
-        .map(|address| address.turn_id.clone())
+    let running_turn_ids = active_turn
+        .map(|active_turn| active_turn.address.turn_id.clone())
+        .into_iter()
         .collect::<BTreeSet<_>>();
     let rlm_reply_ids = durable_rlm_reply_message_ids(read_view.messages(), &running_turn_ids);
     let replaced_committed_ids = user_replacements.keys().cloned().collect::<BTreeSet<_>>();

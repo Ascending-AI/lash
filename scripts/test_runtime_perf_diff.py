@@ -37,15 +37,20 @@ def report(
         "results": [
             {
                 "scenario": "durable_standard_tool_turn_sqlite",
-                "total_ms": value,
+                "stages": {
+                    "total": {
+                        "duration_ms": value,
+                        "allocations": {
+                            "allocations": 100,
+                            "bytes_allocated": bytes_allocated,
+                        },
+                    }
+                },
                 "turns": [
-                    {"total_ms": value / 2, "phase_profile": {}},
-                    {"total_ms": value / 2, "phase_profile": {}},
+                    {"stages": {"total": {"duration_ms": value / 2}}, "phase_profile": {}},
+                    {"stages": {"total": {"duration_ms": value / 2}}, "phase_profile": {}},
                 ],
                 "phase_profile": {"CommittedTurn": {"duration_ms": value / 4}},
-                "allocations": {
-                    "total": {"allocations": 100, "bytes_allocated": bytes_allocated}
-                },
                 "extra_counters": dict(counters),
             }
             for value in total_ms

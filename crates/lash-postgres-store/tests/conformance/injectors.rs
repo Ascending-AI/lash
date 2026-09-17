@@ -278,17 +278,18 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                 }
             }
             FenceIntegrityTarget::TriggerRevision { subscription_id } => {
-                let (value, json, enabled, tombstoned): (i64, String, bool, bool) = sqlx::query_as(
-                    "SELECT revision, record_json, enabled, tombstoned
+                let (value, json, lifecycle, deleted_at_ms): (i64, String, String, Option<i64>) =
+                    sqlx::query_as(
+                        "SELECT revision, record_json, lifecycle, deleted_at_ms
                          FROM lash_trigger_subscriptions WHERE subscription_id = $1",
-                )
-                .bind(subscription_id)
-                .fetch_one(self.storage.pool())
-                .await
-                .expect("observe Postgres trigger revision");
+                    )
+                    .bind(subscription_id)
+                    .fetch_one(self.storage.pool())
+                    .await
+                    .expect("observe Postgres trigger revision");
                 FenceIntegrityObservation {
                     value,
-                    mutation_fingerprint: format!("{json}:{enabled}:{tombstoned}"),
+                    mutation_fingerprint: format!("{json}:{lifecycle}:{deleted_at_ms:?}"),
                 }
             }
         }

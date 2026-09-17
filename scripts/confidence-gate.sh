@@ -186,10 +186,36 @@ declare -A confidence_fast_shard_steps=(
 )
 SIM_SEARCH_MIN_SEEDS=4
 SIM_SEARCH_MIN_MAX_BOUNDARIES=256
-# Full-lane sim-search seeds across the nine `sim-search-<i>` shards, sized to
-# fit the 100-minute job cap instead of left at a number no shard has ever
-# reached: every shard of run 35091816279 was cancelled at exactly 100 minutes
-# without writing a search summary at all.
+# Full-lane sim-search seeds across the nine `sim-search-<i>` shards: the seed
+# space the shards partition, not the thing that bounds a shard's wall clock.
+# Per-seed cost varies ~3x (measured 36-112 s/seed through this script at 2000
+# max boundaries) and each shard runs its seeds twice -- once as the search
+# lane and once as the named regression corpus -- so a seed-count estimate
+# alone cannot keep a shard inside the 100-minute job cap. Every shard of run
+# 35091816279 was cancelled at exactly 100 minutes without writing a search
+# summary at all.
+#
+# The bound is now wall-clock: each sim-search invocation gets --time-budget
+# derived from the job cap minus the measured fixed cost of the CI steps
+# before this script runs, minus whatever this script has already burned, and
+# lash-sim stops cleanly at the budget and records reached_seeds in the
+# summary. The SIM_SEARCH_MIN_SEEDS floor still applies to the reached count.
+#
+#   job cap                                        100 min = 6000 s
+#   - download shared build                        -19.5 min   (measured)
+#   - restore shared build                          -3.5 min   (measured)
+#   - checkout, toolchain, protoc                     -2 min
+#   = lane budget                                    75 min = 4500 s
+SIM_SEARCH_FULL_SEEDS=243
+SIM_SEARCH_JOB_CAP_SECONDS=6000
+SIM_SEARCH_SETUP_SECONDS=1500
+
+# Per-leg mutant budgets for the mutation-packages stage. The stage's full
+# pass is unsharded and cannot fit the 100-minute job cap: run 35117123483
+# measured 1,641 mutants for protocol-rlm, 1,663 for postgres-store, and
+# ~7,400 for lashlang (its 1/64 smoke shard alone is 116 mutants, more than
+# a leg can judge), and all three legs were cancelled at exactly 100 minutes
+# with no verdict written.
 #
 #   job cap                                        100 min
 #   - download shared build                        -19.5 min   (measured)
@@ -197,20 +223,45 @@ SIM_SEARCH_MIN_MAX_BOUNDARIES=256
 #   - checkout, toolchain, protoc                     -2 min
 #   = lane budget                                    75 min = 4500 s
 #
-# A shard runs the search twice, once as the search lane and once as the named
-# regression corpus below it, and the pair was measured end to end through this
-# script at 2000 max boundaries: 4 seeds per shard cost 552 s (143 s search +
-# 409 s corpus). Taking ~105 s of that as per-invocation setup leaves about
-# 112 s per seed per shard. Per-seed cost is not uniform -- the same binary run
-# over the first four seeds of an unsharded space cost 36 s/seed -- so this is
-# the expensive end of the measurement, deliberately.
+# The workflow matrix fans each package out into fixed legs
+# (LASH_MUTATION_PACKAGES_SHARD "leg/legs"). A leg judges two bounded slices
+# of the package's mutant space -- a quick smoke slice and a deeper full
+# slice -- where slice index ((run - 1) * legs + leg - 1) % denom + 1 is
+# derived from LASH_MUTATION_RUN_INDEX so a run's legs cover consecutive
+# slices and successive runs sweep the space instead of re-judging one
+# prefix. Covering a 1,600-mutant space inside one run would need ~80 legs
+# at these budgets, so the sweep is spread across runs. Sizing uses the
+# per-mutant wall clock measured in run 35117123483 at --jobs 2, each leg
+# paying one unmutated baseline plus its slice, and targets ~75% of the
+# lane budget:
 #
-#   27 seeds/shard -> 105 + 27*112 = 3129 s = 52 min, 70% of the lane budget
+#   smoke slice: MUTATION_PACKAGES_SMOKE_MUTANTS mutants at the 180 s cap
+#   full slice:  MUTATION_PACKAGES_FULL_MUTANTS[package] at the 600 s cap
 #
-# 9 * 27 = 243. Every shard now records `shard_seconds` in sim/search.json:
-# re-pin this from the first completed run's measurement rather than from the
-# estimate above.
-SIM_SEARCH_FULL_SEEDS=243
+#   package            legs  smoke m/m  full m/m   smoke            full
+#   core                2     ~2.5       ~4        12*2.5+8 = 38 m    5*4+12 = 32 m    95 m
+#   lashlang            4     ~0.8       ~0.8      12*0.8+4 = 14 m   48*0.8+4 = 42 m    81 m
+#   protocol-rlm        4     ~1.3       ~1.3      12*1.3+8 = 24 m   20*1.3+8 = 34 m    83 m
+#   protocol-standard   1     ~0.2       ~0.2       ~6 m             all ~61 mutants   ~45 m
+#   sqlite-store        3     ~1.5       ~1.5      12*1.5+8 = 26 m   16*1.5+8 = 32 m    83 m
+#   postgres-store      4     ~1.0       ~4        12*1.0+8 = 20 m    8*4+12 = 44 m    89 m
+#
+# These are expected-case budgets, not worst case: a leg whose mutants all
+# hit the per-test cap still overruns, which is why postgres-store keeps the
+# smallest slice. Every leg records the judged shard, the counted mutant
+# space and the slice's wall clock in a mutation-shard.json sidecar next to
+# confidence-status.json: re-pin these budgets from a completed run's
+# measurement rather than from this estimate.
+MUTATION_PACKAGES_SMOKE_MUTANTS=12
+declare -A MUTATION_PACKAGES_FULL_MUTANTS=(
+  [lash-internal-core]="5"
+  [lash-internal-lashlang]="48"
+  [lash-internal-protocol-rlm]="20"
+  [lash-internal-protocol-standard]="64"
+  [lash-internal-sqlite-store]="16"
+  [lash-internal-postgres-store]="8"
+)
+MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=16
 case "$lane" in
   fast) default_mutation_scope="none" ;;
   default|mutation) default_mutation_scope="targeted" ;;
@@ -249,6 +300,20 @@ if ! [[ "$mutation_jobs" =~ ^[1-9][0-9]*$ ]]; then
   echo "LASH_MUTATION_JOBS must be a positive integer, got: ${mutation_jobs}" >&2
   exit 2
 fi
+if [ -n "${LASH_MUTATION_RUN_INDEX:-}" ] && ! [[ "$LASH_MUTATION_RUN_INDEX" =~ ^[1-9][0-9]*$ ]]; then
+  echo "LASH_MUTATION_RUN_INDEX must be a positive integer, got: ${LASH_MUTATION_RUN_INDEX}" >&2
+  exit 2
+fi
+if [ -n "${LASH_MUTATION_PACKAGES_SHARD:-}" ]; then
+  if ! [[ "$LASH_MUTATION_PACKAGES_SHARD" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]]; then
+    echo "LASH_MUTATION_PACKAGES_SHARD must be \"leg/legs\", got: ${LASH_MUTATION_PACKAGES_SHARD}" >&2
+    exit 2
+  fi
+  if ((${BASH_REMATCH[1]} > ${BASH_REMATCH[2]})); then
+    echo "LASH_MUTATION_PACKAGES_SHARD leg exceeds its leg count: ${LASH_MUTATION_PACKAGES_SHARD}" >&2
+    exit 2
+  fi
+fi
 mutation_failures=0
 mutation_postgres_container=""
 mutation_postgres_database_url=""
@@ -281,11 +346,18 @@ finish_current_step() {
 # only yields them while some other workspace member happens to turn that
 # feature on. Every conformance run in this gate builds them through here
 # first, so the spawn cannot fail with ENOENT.
+# `helper_executable` resolves the helper from the *running test binary's* own
+# profile directory, so every runner with its own target directory needs its own
+# copy. Pass one to build there; omit it for the ambient target directory.
 build_conformance_helpers() {
+  local target_args=()
+  if [ -n "${1:-}" ]; then
+    target_args=(--target-dir "$1")
+  fi
   cargo build -p lash-internal-sqlite-store --locked --features testing \
-    --example sqlite-await-event-helper
+    --example sqlite-await-event-helper "${target_args[@]}"
   cargo build -p lash-internal-postgres-store --locked --features testing \
-    --example postgres-await-event-helper
+    --example postgres-await-event-helper "${target_args[@]}"
 }
 
 gate_postgres_image="postgres:16-alpine"
@@ -778,6 +850,7 @@ run_mutants_recorded() {
   shift 2
   mutation_commands_run=$((${mutation_commands_run:-0} + 1))
   mkdir -p "$artifact"
+  local mutation_started_at=$SECONDS
   set +e
   # cargo-mutants creates one scratch/build directory per concurrent job. Keep
   # Cargo's target relative to each scratch tree: an inherited absolute target
@@ -786,7 +859,7 @@ run_mutants_recorded() {
   CARGO_TARGET_DIR=target "$@"
   local exit_code=$?
   set -e
-  local status
+  local status run_seconds=$((SECONDS - mutation_started_at))
   if [ "$exit_code" -eq 0 ]; then
     status="passed"
   else
@@ -802,6 +875,19 @@ run_mutants_recorded() {
   "scope": "${mutation_scope}"
 }
 EOF
+  # Bounded legs record which shard of the mutant space they judged and what
+  # it cost, so MUTATION_PACKAGES_* budgets are re-pinned from measurement.
+  if [ -n "${MUTATION_RECORDED_SHARD:-}" ]; then
+    cat >"${artifact}/mutation-shard.json" <<EOF
+{
+  "schema": "lash.confidence.mutation-shard.v1",
+  "name": "${name}",
+  "shard": "${MUTATION_RECORDED_SHARD}",
+  "mutants_found": ${MUTATION_RECORDED_MUTANTS_FOUND:-null},
+  "run_seconds": ${run_seconds}
+}
+EOF
+  fi
 }
 
 start_mutation_postgres() {
@@ -1219,6 +1305,22 @@ run_sim_provider_scripts() {
   run_minimizer_fixture_suite
 }
 
+# Wall-clock budget for one sim-search pass: the CI job cap minus the fixed
+# cost measured before this script starts (shared-build download and restore,
+# checkout, toolchain), minus whatever this script has already burned, split
+# evenly across the passes still to run. The corpus pass therefore inherits
+# whatever the search pass left unused.
+sim_search_pass_budget_seconds() {
+  local passes_left="$1"
+  local job_cap_seconds="${LASH_SIM_JOB_CAP_SECONDS:-$SIM_SEARCH_JOB_CAP_SECONDS}"
+  local setup_seconds="${LASH_SIM_SETUP_SECONDS:-$SIM_SEARCH_SETUP_SECONDS}"
+  local remaining=$((job_cap_seconds - setup_seconds - (SECONDS - script_started_at)))
+  if ((remaining < 0)); then
+    remaining=0
+  fi
+  printf '%s\n' "$((remaining / passes_left))"
+}
+
 run_sim_search_lane() {
   if [ "$lane" = "fast" ]; then
     return
@@ -1250,6 +1352,15 @@ run_sim_search_lane() {
   if [ -n "$search_salt" ]; then
     salt_args+=(--salt "$search_salt")
   fi
+  # A dedicated sim-search shard is bounded by wall clock: each of the two
+  # passes (search lane, then named regression corpus) gets an even share of
+  # the lane budget that remains when it starts. Other lanes that reach this
+  # function are not bounded by a job cap, so they run unbudgeted.
+  local search_budget_args=()
+  if [ -n "$sim_search_shard" ]; then
+    search_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 2)")
+    step "sim-search pass budgets from ${SIM_SEARCH_JOB_CAP_SECONDS}s job cap - ${SIM_SEARCH_SETUP_SECONDS}s setup: search ${search_budget_args[1]}s"
+  fi
   local search_started_at="$SECONDS"
   cargo run -p lash-sim --locked -- run \
     --out "$search_dir" \
@@ -1258,10 +1369,12 @@ run_sim_search_lane() {
     --max-boundaries "$search_max_boundaries" \
     --shard "$search_shard" \
     --mode search \
-    "${salt_args[@]}"
+    "${salt_args[@]}" \
+    "${search_budget_args[@]}"
   local search_seconds=$((SECONDS - search_started_at))
-  # The shard budget is sized from an estimate; record what this shard actually
-  # cost so the next run re-pins SIM_SEARCH_FULL_SEEDS from a measurement.
+  # The shard is bounded by --time-budget and the summary records how many of
+  # its selected seeds it reached; record the wall clock it actually cost so
+  # the fixed-cost constants stay honest.
   python3 - "${search_dir}/summary.json" "${out_dir}/sim/search.json" "$search_max_boundaries" "$SIM_SEARCH_MIN_SEEDS" "$SIM_SEARCH_MIN_MAX_BOUNDARIES" "$search_seconds" <<'PY'
 import json
 import sys
@@ -1284,10 +1397,12 @@ artifact = {
     "configured_max_boundaries": int(max_boundaries),
     "required_min_seeds": min_seeds,
     "required_min_max_boundaries": min_max_boundaries,
+    "time_budget_seconds": summary.get("time_budget_seconds"),
     "search_seconds": int(search_seconds),
     "summary_path": summary_path,
     "counts": {
         "generated_seeds": counts.get("generated_seeds"),
+        "reached_seeds": counts.get("reached_seeds"),
         "boundary_events": counts.get("boundary_events"),
         "oracle_passes": counts.get("oracle_passes"),
         "oracle_failures": counts.get("oracle_failures"),
@@ -1301,8 +1416,12 @@ required_interleaving_depth = 2
 errors = []
 if summary.get("mode") != "search":
     errors.append("sim search lane must run in search mode")
-if counts.get("generated_seeds", 0) < min_seeds:
-    errors.append(f"sim search run must execute at least {min_seeds} generated seeds in this shard")
+if (counts.get("reached_seeds") or 0) < min_seeds:
+    errors.append(
+        f"sim search run must reach at least {min_seeds} seeds in this shard "
+        f"(reached {counts.get('reached_seeds') or 0} of "
+        f"{counts.get('generated_seeds') or 0} selected)"
+    )
 if int(max_boundaries) < min_max_boundaries:
     errors.append(f"sim search run must configure at least {min_max_boundaries} max boundaries")
 if counts.get("boundary_events", 0) < 512:
@@ -1329,6 +1448,10 @@ PY
 
   local corpus_dir="${out_dir}/sim-regression-${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
   step "Named simulation regression corpus (${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}, ${search_seeds} seeds, shard ${search_shard})"
+  local corpus_budget_args=()
+  if [ -n "$sim_search_shard" ]; then
+    corpus_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 1)")
+  fi
   local corpus_started_at="$SECONDS"
   cargo run -p lash-sim --locked -- run \
     --out "$corpus_dir" \
@@ -1337,7 +1460,8 @@ PY
     --max-boundaries "$search_max_boundaries" \
     --shard "$search_shard" \
     --mode search \
-    --corpus "${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
+    --corpus "${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}" \
+    "${corpus_budget_args[@]}"
   local corpus_seconds=$((SECONDS - corpus_started_at))
   # Both passes run the same seeds, so a shard costs the pair. Fold the second
   # half in, so one artifact carries the whole lane's wall clock.
@@ -2173,6 +2297,22 @@ EOF
   require_tool cargo-llvm-cov cargo-llvm-cov 0.8.7
   require_llvm_tools
   cargo llvm-cov clean --workspace
+  # cargo-llvm-cov compiles into `<target>/llvm-cov-target`, not `<target>`, so
+  # the helper examples built for every other stage are invisible to the test
+  # binaries this one runs: `lash_conformance::helper_executable` resolves the
+  # helper beside the binary that spawns it, and the cold-process conformance
+  # tests are part of `--tests`. Build them into that tree under the
+  # instrumentation environment cargo-llvm-cov exports, so they share the
+  # dependency artifacts the coverage run is about to build rather than forcing
+  # a second, uninstrumented compile of the whole closure.
+  local llvm_cov_env
+  llvm_cov_env="$(cargo llvm-cov show-env --export-prefix 2>/dev/null)"
+  (
+    # shellcheck disable=SC1090
+    eval "$llvm_cov_env"
+    build_conformance_helpers \
+      "${CARGO_LLVM_COV_TARGET_DIR:?cargo llvm-cov show-env must report its target directory}/llvm-cov-target"
+  )
   local coverage_package_args=()
   local package
   for package in "${selected_packages[@]}"; do
@@ -2229,14 +2369,67 @@ Lashlang, protocol, and durable-store code.
 EOF
 }
 
+# The mutation-packages stage judges a bounded slice of a package's mutant
+# space per leg (LASH_MUTATION_PACKAGES_BOUNDED, set by the stage). The slice
+# is `budget` mutants wide, counted once per leg via `cargo mutants --list`
+# (a source scan, no build), so the shard count tracks the space as it grows.
+# `rotate` picks the leg's slice from its LASH_MUTATION_PACKAGES_SHARD
+# "leg/legs" coordinate and LASH_MUTATION_RUN_INDEX: leg `leg` of run `run`
+# judges slice ((run - 1) * legs + leg - 1) % denom + 1, so the run's legs
+# cover consecutive slices and successive runs sweep the space. Without
+# `rotate` the first slice is judged.
+mutation_packages_shard() {
+  local package="$1" budget="$2" rotate="${3:-}"
+  local count denom index=1
+  count="$(
+    cargo mutants -p "$package" \
+      "${area_mutation_file_args[@]}" \
+      --cargo-arg=--locked \
+      --list 2>/dev/null | wc -l | tr -d ' '
+  )"
+  # A count the leg cannot trust must not degrade to shard 1/1 -- that would
+  # rerun the whole mutant space inside the 100-minute cap it cannot fit.
+  if ! [[ "$count" =~ ^[0-9]+$ ]] || ((count < 1)); then
+    echo "cargo mutants --list counted no mutants for ${package}; refusing to run an unbounded slice" >&2
+    exit 2
+  fi
+  denom=$(( (count + budget - 1) / budget ))
+  if ((denom < 1)); then denom=1; fi
+  if [ "$rotate" = "rotate" ]; then
+    local leg_spec="${LASH_MUTATION_PACKAGES_SHARD:-1/1}"
+    local leg="${leg_spec%/*}" legs="${leg_spec#*/}"
+    local base=0
+    if [ -n "${LASH_MUTATION_RUN_INDEX:-}" ]; then
+      base=$((LASH_MUTATION_RUN_INDEX - 1))
+    fi
+    index=$(( (base * legs + leg - 1) % denom + 1 ))
+  fi
+  mutation_packages_mutants_found="$count"
+  mutation_packages_shard_result="$index/$denom"
+}
+
 run_mutation_smoke() {
   step "Mutation smoke shards (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
-  local shard="${LASH_MUTATION_SMOKE_SHARD:-1/64}"
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
+  local package shard
   for package in "${selected_packages[@]}"; do
+    mutation_packages_mutants_found=""
+    if [ -n "${LASH_MUTATION_SMOKE_SHARD:-}" ]; then
+      shard="$LASH_MUTATION_SMOKE_SHARD"
+    elif [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+      mutation_packages_shard "$package" "$MUTATION_PACKAGES_SMOKE_MUTANTS" rotate
+      shard="$mutation_packages_shard_result"
+      # The stage runs one package per leg, so the last computed smoke shard
+      # is the leg's; per-artifact shard fields stay authoritative regardless.
+      mutation_packages_smoke_shard="$shard"
+    else
+      shard="1/64"
+    fi
     if [ "$package" = "lash-internal-postgres-store" ]; then
-      run_postgres_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
+      MUTATION_RECORDED_SHARD="$shard" \
+        MUTATION_RECORDED_MUTANTS_FOUND="${mutation_packages_mutants_found:-}" \
+        run_postgres_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
         cargo mutants \
         -p "$package" \
         "${area_mutation_file_args[@]}" \
@@ -2247,7 +2440,9 @@ run_mutation_smoke() {
         --minimum-test-timeout 30 \
         --output "${out_dir}/mutants-${package}-smoke"
     else
-      run_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
+      MUTATION_RECORDED_SHARD="$shard" \
+        MUTATION_RECORDED_MUTANTS_FOUND="${mutation_packages_mutants_found:-}" \
+        run_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
         cargo mutants \
         -p "$package" \
         "${area_mutation_file_args[@]}" \
@@ -2369,9 +2564,26 @@ run_mutation_full() {
   step "Full mutation suites (${mutation_jobs} concurrent jobs)"
   require_tool cargo-mutants cargo-mutants 27.1.0
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-600}"
+  local package shard
   for package in "${selected_packages[@]}"; do
+    local shard_args=()
+    shard=""
+    mutation_packages_mutants_found=""
+    if [ -n "${LASH_MUTATION_FULL_SHARD:-}" ]; then
+      shard="$LASH_MUTATION_FULL_SHARD"
+    elif [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+      mutation_packages_shard "$package" \
+        "${MUTATION_PACKAGES_FULL_MUTANTS[$package]:-$MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT}" \
+        rotate
+      shard="$mutation_packages_shard_result"
+    fi
+    if [ -n "${shard:-}" ]; then
+      shard_args=(--shard "$shard")
+    fi
     if [ "$package" = "lash-internal-postgres-store" ]; then
-      run_postgres_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
+      MUTATION_RECORDED_SHARD="${shard:-}" \
+        MUTATION_RECORDED_MUTANTS_FOUND="${mutation_packages_mutants_found:-}" \
+        run_postgres_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
         cargo mutants \
         -p "$package" \
         "${area_mutation_file_args[@]}" \
@@ -2379,9 +2591,12 @@ run_mutation_full() {
         --test-tool cargo \
         --timeout "$timeout" \
         --minimum-test-timeout 60 \
+        "${shard_args[@]}" \
         --output "${out_dir}/mutants-${package}-full"
     else
-      run_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
+      MUTATION_RECORDED_SHARD="${shard:-}" \
+        MUTATION_RECORDED_MUTANTS_FOUND="${mutation_packages_mutants_found:-}" \
+        run_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
         cargo mutants \
         -p "$package" \
         "${area_mutation_file_args[@]}" \
@@ -2390,6 +2605,7 @@ run_mutation_full() {
         --jobs "$mutation_jobs" \
         --timeout "$timeout" \
         --minimum-test-timeout 60 \
+        "${shard_args[@]}" \
         --output "${out_dir}/mutants-${package}-full"
     fi
   done
@@ -2429,11 +2645,16 @@ mutation_artifact_json() {
       exit_code="$(awk -F': ' '/"exit_code"/ { gsub(/,/, "", $2); print $2; exit }' "$status_path")"
     fi
   fi
-  printf '{"name":"%s","status":"%s","artifact":"%s","command_status":"%s","caught":%s,"missed":%s,"timeout":%s,"unviable":%s,"exit_code":%s}' \
+  local shard="null"
+  if [ -f "${artifact}/mutation-shard.json" ]; then
+    shard="\"$(awk -F'\"' '/"shard"/ {print $4; exit}' "${artifact}/mutation-shard.json")\""
+  fi
+  printf '{"name":"%s","status":"%s","artifact":"%s","command_status":"%s","shard":%s,"caught":%s,"missed":%s,"timeout":%s,"unviable":%s,"exit_code":%s}' \
     "$name" \
     "$status" \
     "${artifact#"$out_dir"/}" \
     "$([ -f "$status_path" ] && echo "${artifact#"$out_dir"/}/confidence-status.json" || echo "not_run")" \
+    "$shard" \
     "$caught" \
     "$missed" \
     "$timeout" \
@@ -2543,7 +2764,9 @@ write_mutation_evidence_summary() {
   local path="${out_dir}/$(artifact_path mutation_evidence)"
   local evidence_status mutation_semantics
   evidence_status="$(mutation_evidence_status)"
-  if [ "$lane" = "full" ] && [ "$area" = "all" ]; then
+  if [ "${LASH_MUTATION_PACKAGES_BOUNDED:-0}" = "1" ]; then
+    mutation_semantics="bounded per-leg evidence: the smoke canary plus one rotating shard of the package's full mutant space, recorded per artifact in mutation-shard.json"
+  elif [ "$lane" = "full" ] && [ "$area" = "all" ]; then
     mutation_semantics="true full lane requires targeted, smoke, and full critical-package cargo-mutants artifacts; not_run shards are never counted as passed"
   elif [ "$lane" = "full" ]; then
     mutation_semantics="explicit area-scoped full depth requires targeted, smoke, and full cargo-mutants artifacts for the selected packages and source filters; it does not claim global full confidence"
@@ -2614,7 +2837,7 @@ EOF
     cat <<EOF
 
   ],
-  "smoke_shard": "${LASH_MUTATION_SMOKE_SHARD:-1/64}",
+  "smoke_shard": "${LASH_MUTATION_SMOKE_SHARD:-${mutation_packages_smoke_shard:-1/64}}",
   "critical_package_smoke_status": "$([[ "$mutation_scope" = "smoke" || "$mutation_scope" = "full" ]] && echo "run" || echo "not_run_by_mutation_scope")",
   "full_mutation_status": "$(full_mutation_status)",
   "true_full_command": "LASH_CONFIDENCE_OUT_DIR=${out_root} LASH_CONFIDENCE_MUTATION_SCOPE=full scripts/confidence-gate.sh full",

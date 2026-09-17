@@ -25,22 +25,34 @@ pub struct EmbeddedRuntimeBuilder {
     process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
     store: Option<Arc<dyn RuntimePersistence>>,
     attachment_manifest_store: Option<Arc<dyn RuntimePersistence>>,
-    process_registry: Option<Arc<dyn ProcessRegistry>>,
     drivers: Box<EmbeddedRuntimeDriverBindings>,
+}
+
+/// How this builder will wire process work, as one owner rather than a
+/// registry field beside an optional wiring. `build` turns it into the
+/// matching [`RuntimeWork`] state with the configured queued-work port.
+#[derive(Default)]
+enum ProcessWorkBinding {
+    #[default]
+    None,
+    /// A watched registry with no resolved process port yet.
+    RegistryOnly(Arc<dyn ProcessRegistry>),
+    /// Full process work; the wiring carries its own registry.
+    Wired(crate::ProcessWorkWiring),
 }
 
 /// Cold builder-only bindings live off the async build frame. Keeping this
 /// optional host wiring together avoids growing every `build` caller's future
 /// as new native drivers are added.
 struct EmbeddedRuntimeDriverBindings {
-    process: Option<crate::ProcessWorkWiring>,
+    process: ProcessWorkBinding,
     queued: Arc<dyn crate::QueuedWorkSubstrate>,
 }
 
 impl Default for EmbeddedRuntimeDriverBindings {
     fn default() -> Self {
         Self {
-            process: None,
+            process: ProcessWorkBinding::None,
             queued: Arc::new(crate::NoQueuedWork::new()),
         }
     }
@@ -69,7 +81,6 @@ impl EmbeddedRuntimeBuilder {
             process_definitions: None,
             store: None,
             attachment_manifest_store: None,
-            process_registry: None,
             drivers: Box::default(),
         }
     }
@@ -216,14 +227,16 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
+    /// Configure a watched registry with no process port yet. A later
+    /// [`Self::with_process_work`] replaces it, and vice versa: one owner,
+    /// last write wins.
     pub fn with_process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
-        self.process_registry = Some(process_registry);
+        self.drivers.process = ProcessWorkBinding::RegistryOnly(process_registry);
         self
     }
 
     pub fn with_process_work(mut self, wiring: crate::ProcessWorkWiring) -> Self {
-        self.process_registry = Some(Arc::clone(wiring.registry()));
-        self.drivers.process = Some(wiring);
+        self.drivers.process = ProcessWorkBinding::Wired(wiring);
         self
     }
 
@@ -387,22 +400,14 @@ impl EmbeddedRuntimeBuilder {
         };
         // `assemble_runtime` owns the (store, registry) wiring + residency so the
         // worker rebuild cannot drift from the live open path.
-        let work = match (self.process_registry, self.drivers.process) {
-            (Some(_), None) => {
-                return Err(SessionError::Protocol(
-                    "process registry requires a process-work port".to_string(),
-                ));
+        let queued = Arc::clone(&self.drivers.queued);
+        let work = match self.drivers.process {
+            ProcessWorkBinding::None => super::host::RuntimeWork::sessions_only(queued),
+            ProcessWorkBinding::RegistryOnly(registry) => {
+                super::host::RuntimeWork::registry_only(registry, queued)
             }
-            (Some(_), Some(wiring)) => {
-                super::host::RuntimeWork::processes(wiring, Arc::clone(&self.drivers.queued))
-            }
-            (None, Some(_)) => {
-                return Err(SessionError::Protocol(
-                    "process-work port requires a process registry".to_string(),
-                ));
-            }
-            (None, None) => {
-                super::host::RuntimeWork::sessions_only(Arc::clone(&self.drivers.queued))
+            ProcessWorkBinding::Wired(wiring) => {
+                super::host::RuntimeWork::processes(wiring, queued)
             }
         };
         LashRuntime::assemble_runtime(

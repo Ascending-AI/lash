@@ -1592,9 +1592,7 @@ fn compile_labeled_process_with_historical_context(
     let process_program = Program {
         declarations: linked.program().declarations.clone(),
         main: process.body.clone(),
-        declaration_spans: linked.program().declaration_spans.clone(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     };
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,

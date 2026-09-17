@@ -1,17 +1,29 @@
 //! Shared expected definitions and comparison support for named SQL `CHECK`s.
 //!
 //! Store adapters use this module for explicit read-only inspection. The
-//! source-congruence gate imports the same registries, so the expected
+//! source-congruence gate imports the same registry, so the expected
 //! expressions have one owner.
 
 use std::collections::BTreeMap;
 
 use crate::StoreError;
 
-/// One named `CHECK` Lash requires in a published store schema.
+/// One named `CHECK` Lash requires in the published store schemas: the
+/// same logical constraint rendered once per backend, so a row added
+/// here is gated on both stores at once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExpectedConstraint {
-    pub sqlite_database: Option<SqliteConstraintDatabase>,
+    /// Which SQLite schema component owns the table carrying the check.
+    pub sqlite_database: SqliteConstraintDatabase,
+    /// The check as SQLite declares it.
+    pub sqlite: RenderedConstraint,
+    /// The check as PostgreSQL declares it.
+    pub postgres: RenderedConstraint,
+}
+
+/// A named `CHECK` as one backend declares it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RenderedConstraint {
     pub table: &'static str,
     pub name: &'static str,
     pub expression: &'static str,
@@ -26,280 +38,331 @@ pub enum SqliteConstraintDatabase {
     EffectReplay,
 }
 
+const fn rendered(
+    table: &'static str,
+    name: &'static str,
+    expression: &'static str,
+) -> RenderedConstraint {
+    RenderedConstraint {
+        table,
+        name,
+        expression,
+    }
+}
+
 const fn expected_constraint(
-    table: &'static str,
-    name: &'static str,
-    expression: &'static str,
+    sqlite_database: SqliteConstraintDatabase,
+    sqlite: RenderedConstraint,
+    postgres: RenderedConstraint,
 ) -> ExpectedConstraint {
     ExpectedConstraint {
-        sqlite_database: None,
-        table,
-        name,
-        expression,
+        sqlite_database,
+        sqlite,
+        postgres,
     }
 }
 
-const fn sqlite_constraint(
-    database: SqliteConstraintDatabase,
-    table: &'static str,
-    name: &'static str,
-    expression: &'static str,
-) -> ExpectedConstraint {
-    ExpectedConstraint {
-        sqlite_database: Some(database),
-        table,
-        name,
-        expression,
-    }
-}
-
-/// Named `CHECK`s required from SQLite's four published schema components.
-pub const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
-    sqlite_constraint(
+/// The named `CHECK`s Lash's published schemas must declare, one row per
+/// constraint with each backend's rendering beside the other.
+pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "attachment_manifest",
-        "ck_attachment_manifest_owner_identity",
-        "(owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)",
+        rendered(
+            "attachment_manifest",
+            "ck_attachment_manifest_owner_identity",
+            "(owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)",
+        ),
+        rendered(
+            "lash_attachment_manifest",
+            "ck_lash_attachment_manifest_owner_identity",
+            "(owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "pending_turn_inputs",
-        "ck_pending_turn_inputs_state",
-        "state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')",
+        rendered(
+            "pending_turn_inputs",
+            "ck_pending_turn_inputs_state",
+            "state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')",
+        ),
+        rendered(
+            "lash_pending_turn_inputs",
+            "ck_pending_turn_inputs_state",
+            "state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "pending_turn_inputs",
-        "ck_pending_turn_inputs_state_ingress",
-        "(json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))",
+        rendered(
+            "pending_turn_inputs",
+            "ck_pending_turn_inputs_state_ingress",
+            "(json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))",
+        ),
+        rendered(
+            "lash_pending_turn_inputs",
+            "ck_pending_turn_inputs_state_ingress",
+            "((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "pending_turn_inputs",
-        "ck_pending_turn_inputs_claim_id_token_all_or_none",
-        "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+        rendered(
+            "pending_turn_inputs",
+            "ck_pending_turn_inputs_claim_id_token_all_or_none",
+            "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+        ),
+        rendered(
+            "lash_pending_turn_inputs",
+            "ck_pending_turn_inputs_claim_id_token_all_or_none",
+            "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "queued_work_batches",
-        "ck_queued_work_batches_work_kind",
-        "work_kind IN ('turn', 'control')",
+        rendered(
+            "queued_work_batches",
+            "ck_queued_work_batches_work_kind",
+            "work_kind IN ('turn', 'control')",
+        ),
+        rendered(
+            "lash_queued_work_batches",
+            "ck_queued_work_batches_work_kind",
+            "work_kind IN ('turn', 'control')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "queued_work_batches",
-        "ck_queued_work_batches_delivery_policy",
-        "delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')",
+        rendered(
+            "queued_work_batches",
+            "ck_queued_work_batches_delivery_policy",
+            "delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')",
+        ),
+        rendered(
+            "lash_queued_work_batches",
+            "ck_queued_work_batches_delivery_policy",
+            "delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "queued_work_batches",
-        "ck_queued_work_batches_claim_id_token_all_or_none",
-        "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+        rendered(
+            "queued_work_batches",
+            "ck_queued_work_batches_claim_id_token_all_or_none",
+            "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+        ),
+        rendered(
+            "lash_queued_work_batches",
+            "ck_queued_work_batches_claim_id_token_all_or_none",
+            "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "session_execution_leases",
-        "ck_session_execution_leases_identity_all_or_none",
-        "(lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL)",
+        rendered(
+            "session_execution_leases",
+            "ck_session_execution_leases_identity_all_or_none",
+            "(lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL)",
+        ),
+        rendered(
+            "lash_session_execution_leases",
+            "ck_session_execution_leases_identity_all_or_none",
+            "(lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL)",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "session_meta",
-        "ck_session_meta_relation_kind",
-        "relation_kind IN ('root', 'child', 'fork')",
+        rendered(
+            "session_meta",
+            "ck_session_meta_relation_kind",
+            "relation_kind IN ('root', 'child', 'fork')",
+        ),
+        rendered(
+            "lash_session_meta",
+            "ck_session_meta_relation_kind",
+            "relation_kind IN ('root', 'child', 'fork')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "session_meta",
-        "ck_session_meta_caused_by_kind",
-        "caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
+        rendered(
+            "session_meta",
+            "ck_session_meta_caused_by_kind",
+            "caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
+        ),
+        rendered(
+            "lash_session_meta",
+            "ck_session_meta_caused_by_kind",
+            "caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "session_meta",
-        "ck_session_meta_observer_inheritance_kind",
-        "observer_inheritance_kind IN ('all', 'none', 'only')",
+        rendered(
+            "session_meta",
+            "ck_session_meta_observer_inheritance_kind",
+            "observer_inheritance_kind IN ('all', 'none', 'only')",
+        ),
+        rendered(
+            "lash_session_meta",
+            "ck_session_meta_observer_inheritance_kind",
+            "observer_inheritance_kind IN ('all', 'none', 'only')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::DurableCore,
-        "process_definitions",
-        "ck_process_definitions_lifecycle",
-        "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
+        rendered(
+            "process_definitions",
+            "ck_process_definitions_lifecycle",
+            "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
+        ),
+        rendered(
+            "lash_process_definitions",
+            "ck_process_definitions_lifecycle",
+            "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
-        "processes",
-        "ck_processes_status",
-        "status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')",
+        rendered(
+            "processes",
+            "ck_processes_status",
+            "status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')",
+        ),
+        rendered(
+            "lash_processes",
+            "ck_processes_status",
+            "status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
-        "processes",
-        "ck_processes_parent_scope_kind",
-        "parent_scope_kind IN ('turn', 'process', 'host')",
+        rendered(
+            "processes",
+            "ck_processes_parent_scope_kind",
+            "parent_scope_kind IN ('turn', 'process', 'host')",
+        ),
+        rendered(
+            "lash_processes",
+            "ck_processes_parent_scope_kind",
+            "parent_scope_kind IN ('turn', 'process', 'host')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
-        "processes",
-        "ck_processes_parent_scope_id",
-        "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)",
+        rendered(
+            "processes",
+            "ck_processes_parent_scope_id",
+            "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)",
+        ),
+        rendered(
+            "lash_processes",
+            "ck_processes_parent_scope_id",
+            "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
-        "processes",
-        "ck_processes_on_parent_end",
-        "on_parent_end IN ('abandon', 'cancel')",
+        rendered(
+            "processes",
+            "ck_processes_on_parent_end",
+            "on_parent_end IN ('abandon', 'cancel')",
+        ),
+        rendered(
+            "lash_processes",
+            "ck_processes_on_parent_end",
+            "on_parent_end IN ('abandon', 'cancel')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
-        "parent_end_plans",
-        "ck_parent_end_plans_kind",
-        "parent_kind IN ('turn', 'process')",
+        rendered(
+            "parent_end_plans",
+            "ck_parent_end_plans_kind",
+            "parent_kind IN ('turn', 'process')",
+        ),
+        rendered(
+            "lash_parent_end_plans",
+            "ck_parent_end_plans_kind",
+            "parent_kind IN ('turn', 'process')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
-        "process_wake_deliveries",
-        "ck_process_wake_deliveries_state",
-        "state IN ('pending', 'enqueuing', 'enqueued', 'discarded')",
+        rendered(
+            "process_wake_deliveries",
+            "ck_process_wake_deliveries_state",
+            "state IN ('pending', 'enqueuing', 'enqueued', 'discarded')",
+        ),
+        rendered(
+            "lash_process_wake_deliveries",
+            "ck_process_wake_deliveries_state",
+            "state IN ('pending', 'enqueuing', 'enqueued', 'discarded')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
-        "process_wake_deliveries",
-        "ck_process_wake_deliveries_discard_reason",
-        "discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')",
+        rendered(
+            "process_wake_deliveries",
+            "ck_process_wake_deliveries_discard_reason",
+            "discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')",
+        ),
+        rendered(
+            "lash_process_wake_deliveries",
+            "ck_process_wake_deliveries_discard_reason",
+            "discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::ProcessRegistry,
-        "tool_intent_submissions",
-        "ck_tool_intent_submissions_kind",
-        "kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger')",
+        rendered(
+            "tool_intent_submissions",
+            "ck_tool_intent_submissions_kind",
+            "kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger')",
+        ),
+        rendered(
+            "lash_tool_intent_submissions",
+            "ck_tool_intent_submissions_kind",
+            "kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
         SqliteConstraintDatabase::Triggers,
-        "trigger_subscriptions",
-        "ck_trigger_subscriptions_live_enabled",
-        "NOT (enabled AND tombstoned)",
+        rendered(
+            "trigger_subscriptions",
+            "ck_trigger_subscriptions_lifecycle",
+            "lifecycle IN ('enabled', 'disabled', 'tombstoned')",
+        ),
+        rendered(
+            "lash_trigger_subscriptions",
+            "ck_trigger_subscriptions_lifecycle",
+            "lifecycle IN ('enabled', 'disabled', 'tombstoned')",
+        ),
     ),
-    sqlite_constraint(
+    expected_constraint(
+        SqliteConstraintDatabase::Triggers,
+        rendered(
+            "trigger_subscriptions",
+            "ck_trigger_subscriptions_lifecycle_deleted_at",
+            "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
+        ),
+        rendered(
+            "lash_trigger_subscriptions",
+            "ck_trigger_subscriptions_lifecycle_deleted_at",
+            "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
+        ),
+    ),
+    expected_constraint(
         SqliteConstraintDatabase::EffectReplay,
-        "runtime_effect_replay",
-        "ck_runtime_effect_replay_status",
-        "status IN ('in_progress', 'completed', 'failed')",
-    ),
-];
-
-/// Named `CHECK`s required from the published PostgreSQL schema.
-pub const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
-    expected_constraint(
-        "lash_process_definitions",
-        "ck_process_definitions_lifecycle",
-        "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
-    ),
-    expected_constraint(
-        "lash_attachment_manifest",
-        "ck_lash_attachment_manifest_owner_identity",
-        "(owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)",
-    ),
-    expected_constraint(
-        "lash_pending_turn_inputs",
-        "ck_pending_turn_inputs_state",
-        "state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')",
-    ),
-    expected_constraint(
-        "lash_pending_turn_inputs",
-        "ck_pending_turn_inputs_state_ingress",
-        "((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))",
-    ),
-    expected_constraint(
-        "lash_pending_turn_inputs",
-        "ck_pending_turn_inputs_claim_id_token_all_or_none",
-        "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
-    ),
-    expected_constraint(
-        "lash_queued_work_batches",
-        "ck_queued_work_batches_work_kind",
-        "work_kind IN ('turn', 'control')",
-    ),
-    expected_constraint(
-        "lash_queued_work_batches",
-        "ck_queued_work_batches_delivery_policy",
-        "delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')",
-    ),
-    expected_constraint(
-        "lash_queued_work_batches",
-        "ck_queued_work_batches_claim_id_token_all_or_none",
-        "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
-    ),
-    expected_constraint(
-        "lash_session_execution_leases",
-        "ck_session_execution_leases_identity_all_or_none",
-        "(lease_owner_id IS NULL AND lease_owner_incarnation_id IS NULL AND lease_executor_id IS NULL AND lease_token IS NULL) OR (lease_owner_id IS NOT NULL AND lease_owner_incarnation_id IS NOT NULL AND lease_executor_id IS NOT NULL AND lease_token IS NOT NULL)",
-    ),
-    expected_constraint(
-        "lash_session_meta",
-        "ck_session_meta_relation_kind",
-        "relation_kind IN ('root', 'child', 'fork')",
-    ),
-    expected_constraint(
-        "lash_session_meta",
-        "ck_session_meta_caused_by_kind",
-        "caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
-    ),
-    expected_constraint(
-        "lash_session_meta",
-        "ck_session_meta_observer_inheritance_kind",
-        "observer_inheritance_kind IN ('all', 'none', 'only')",
-    ),
-    expected_constraint(
-        "lash_processes",
-        "ck_processes_status",
-        "status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')",
-    ),
-    expected_constraint(
-        "lash_processes",
-        "ck_processes_parent_scope_kind",
-        "parent_scope_kind IN ('turn', 'process', 'host')",
-    ),
-    expected_constraint(
-        "lash_processes",
-        "ck_processes_parent_scope_id",
-        "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'process') AND parent_scope_id IS NOT NULL)",
-    ),
-    expected_constraint(
-        "lash_processes",
-        "ck_processes_on_parent_end",
-        "on_parent_end IN ('abandon', 'cancel')",
-    ),
-    expected_constraint(
-        "lash_parent_end_plans",
-        "ck_parent_end_plans_kind",
-        "parent_kind IN ('turn', 'process')",
-    ),
-    expected_constraint(
-        "lash_process_wake_deliveries",
-        "ck_process_wake_deliveries_state",
-        "state IN ('pending', 'enqueuing', 'enqueued', 'discarded')",
-    ),
-    expected_constraint(
-        "lash_process_wake_deliveries",
-        "ck_process_wake_deliveries_discard_reason",
-        "discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')",
-    ),
-    expected_constraint(
-        "lash_tool_intent_submissions",
-        "ck_tool_intent_submissions_kind",
-        "kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger')",
-    ),
-    expected_constraint(
-        "lash_trigger_subscriptions",
-        "ck_trigger_subscriptions_live_enabled",
-        "NOT (enabled AND tombstoned)",
-    ),
-    expected_constraint(
-        "lash_runtime_effect_replay",
-        "ck_runtime_effect_replay_status",
-        "status IN ('in_progress', 'completed', 'failed')",
+        rendered(
+            "runtime_effect_replay",
+            "ck_runtime_effect_replay_status",
+            "status IN ('in_progress', 'completed', 'failed')",
+        ),
+        rendered(
+            "lash_runtime_effect_replay",
+            "ck_runtime_effect_replay_status",
+            "status IN ('in_progress', 'completed', 'failed')",
+        ),
     ),
 ];
 
@@ -359,10 +422,10 @@ pub struct InspectedConstraint {
     pub enforced: bool,
 }
 
-/// Compare live checks with the single published registry.
+/// Compare live checks with the registry's rendering for one backend.
 pub fn compare_required_constraints(
     backend: &'static str,
-    expected: &[ExpectedConstraint],
+    expected: &[RenderedConstraint],
     actual: Vec<InspectedConstraint>,
 ) -> Result<RequiredConstraintReport, StoreError> {
     let mut actual_by_name = BTreeMap::new();
@@ -1174,7 +1237,11 @@ mod tests {
 
     #[test]
     fn unsupported_syntax_is_inconclusive() {
-        let expected = [expected_constraint("t", "ck", "value = 'ok'")];
+        let expected = [RenderedConstraint {
+            table: "t",
+            name: "ck",
+            expression: "value = 'ok'",
+        }];
         let error = compare_required_constraints(
             "test",
             &expected,

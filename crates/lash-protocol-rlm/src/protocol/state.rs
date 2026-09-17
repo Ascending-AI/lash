@@ -1,8 +1,9 @@
+use lash_core::AttachmentRef;
 use lash_core::llm::types::ProviderReasoningReplay;
-use lash_core::{AttachmentRef, CellFailure};
-use serde_json::Value;
 
 use lash_rlm_types::RlmExecutedCall;
+
+use crate::cell_outcome::ParkedCellOutcome;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) struct RlmReasoningPart {
@@ -25,10 +26,11 @@ pub(super) struct RlmDriverState {
     /// concatenated `combined_output: String` and a sibling
     /// `observations: Vec<String>` — the two carried the same content.
     pub(super) output: Vec<String>,
-    pub(super) error: Option<CellFailure>,
+    /// What the cell resolved to. Parked as the `error` / `terminal_finish`
+    /// key pair recorded states already carry.
+    #[serde(flatten)]
+    pub(super) outcome: ParkedCellOutcome,
     pub(super) code: String,
-    /// Executor-requested terminal value, pending driver validation and adjudication.
-    pub(super) terminal_finish: Option<Value>,
 }
 
 #[expect(

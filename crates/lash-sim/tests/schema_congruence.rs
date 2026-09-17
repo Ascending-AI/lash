@@ -1,5 +1,5 @@
 use lash_core::store_backend_support::required_constraints::{
-    ExpectedConstraint, POSTGRES_EXPECTED_CONSTRAINTS, SQLITE_EXPECTED_CONSTRAINTS,
+    EXPECTED_CONSTRAINTS, RenderedConstraint,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -305,7 +305,7 @@ fn ddl_constraints(source: &str) -> BTreeSet<(&str, &str)> {
 
 fn validate_expected_constraints(
     source: &str,
-    registry: &[ExpectedConstraint],
+    registry: &[RenderedConstraint],
     dialect: &str,
 ) -> Result<(), String> {
     let mut failures = Vec::new();
@@ -521,15 +521,27 @@ fn schema_congruence_registry_matches_both_backends() {
     }
 }
 
+fn sqlite_expected_constraints() -> Vec<RenderedConstraint> {
+    EXPECTED_CONSTRAINTS
+        .iter()
+        .map(|constraint| constraint.sqlite)
+        .collect()
+}
+
+fn postgres_expected_constraints() -> Vec<RenderedConstraint> {
+    EXPECTED_CONSTRAINTS
+        .iter()
+        .map(|constraint| constraint.postgres)
+        .collect()
+}
+
 #[test]
 fn schema_congruence_expected_constraints_match_both_backends() {
+    let sqlite_registry = sqlite_expected_constraints();
+    let postgres_registry = postgres_expected_constraints();
     for (dialect, source, registry) in [
-        ("SQLite", SQLITE_SCHEMA_SOURCE, SQLITE_EXPECTED_CONSTRAINTS),
-        (
-            "Postgres",
-            POSTGRES_SCHEMA_SOURCE,
-            POSTGRES_EXPECTED_CONSTRAINTS,
-        ),
+        ("SQLite", SQLITE_SCHEMA_SOURCE, &sqlite_registry[..]),
+        ("Postgres", POSTGRES_SCHEMA_SOURCE, &postgres_registry[..]),
     ] {
         if let Err(failures) = validate_expected_constraints(source, registry, dialect) {
             panic!("{dialect} expected-constraints validation failed:\n{failures}");
@@ -560,17 +572,19 @@ fn attachment_condemnation_phases_match_the_persisted_vocabulary() {
 
 #[test]
 fn schema_congruence_rejects_a_dropped_registered_constraint() {
+    let sqlite_registry = sqlite_expected_constraints();
+    let postgres_registry = postgres_expected_constraints();
     for (dialect, source, registry, declaration) in [
         (
             "SQLite",
             SQLITE_SCHEMA_SOURCE,
-            SQLITE_EXPECTED_CONSTRAINTS,
+            &sqlite_registry[..],
             "    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),\n",
         ),
         (
             "Postgres",
             POSTGRES_SCHEMA_SOURCE,
-            POSTGRES_EXPECTED_CONSTRAINTS,
+            &postgres_registry[..],
             "    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),\n",
         ),
     ] {

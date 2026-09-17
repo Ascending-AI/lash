@@ -35,8 +35,7 @@ fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHis
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: None,
-            final_output: None,
+            outcome: lash_rlm_types::CellOutcome::Running,
         },
     )))
 }
@@ -57,8 +56,7 @@ fn terminal_step_event(
             images,
             calls: Vec::new(),
             calls_omitted: 0,
-            error: None,
-            final_output: Some(final_output),
+            outcome: lash_rlm_types::CellOutcome::Finished(final_output),
         },
     )))
 }
@@ -719,8 +717,7 @@ fn printed_images_render_as_llm_image_blocks() {
             }],
             calls: Vec::new(),
             calls_omitted: 0,
-            error: None,
-            final_output: None,
+            outcome: lash_rlm_types::CellOutcome::Running,
         }),
     ));
     let events = [event];

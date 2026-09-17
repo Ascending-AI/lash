@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use super::*;
 use crate::trace::value_digest;
 
@@ -171,6 +173,7 @@ struct DeterminismFailure {
     rerun: SimulationTrace,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_generated_sim_profile(
     artifact_root: impl AsRef<Path>,
     profile: &str,
@@ -179,6 +182,7 @@ pub async fn run_generated_sim_profile(
     shard: SimShard,
     mode: SimRunMode,
     seed_source: SimSeedSource,
+    time_budget: Option<Duration>,
 ) -> Result<GeneratedSimProfileReport, FixedScriptRunnerError> {
     lash_core::panic_containment::set_loud(true);
     let configured_seeds = seeds.max(1);
@@ -209,6 +213,7 @@ pub async fn run_generated_sim_profile(
                     .collect::<Vec<_>>(),
                 max_boundaries,
                 labels,
+                time_budget,
             ))
             .await
         }
@@ -219,6 +224,7 @@ pub async fn run_generated_sim_profile(
                 &indexed_seeds,
                 max_boundaries,
                 labels,
+                time_budget,
             ))
             .await
         }
@@ -244,6 +250,7 @@ pub async fn run_generated_sim_profile_for_seeds(
         seed_values,
         max_boundaries,
         labels,
+        None,
     ))
     .await
 }
@@ -254,6 +261,7 @@ async fn run_generated_evidence_profile(
     seed_values: &[u64],
     max_boundaries: usize,
     labels: GeneratedRunLabels,
+    time_budget: Option<Duration>,
 ) -> Result<GeneratedSimProfileReport, FixedScriptRunnerError> {
     validate_workload_profile(profile)?;
     if seed_values.is_empty() {
@@ -282,7 +290,14 @@ async fn run_generated_evidence_profile(
     let mut interleaving_depth_max = 0;
     let mut interleaving_depth_min = usize::MAX;
 
+    // A time budget bounds the sweep between seeds: a seed that starts always
+    // runs to completion, and the loop stops cleanly once the budget is spent.
+    let sweep_started = Instant::now();
+    let mut reached_seeds = 0usize;
     for seed in seed_values.iter().copied() {
+        if time_budget.is_some_and(|budget| sweep_started.elapsed() >= budget) {
+            break;
+        }
         let workload = generate_workload(seed, profile, boundary_limit)?;
         let trace_path = replay_dir.join(format!("seed-{seed:016x}.trace.json"));
         let trace =
@@ -422,6 +437,7 @@ async fn run_generated_evidence_profile(
                 replay_dir.display()
             ),
         });
+        reached_seeds += 1;
     }
 
     oracle_verdicts.push(runtime_proof.runtime_invariant.clone());
@@ -501,6 +517,7 @@ async fn run_generated_evidence_profile(
         profile: profile.to_string(),
         shard: labels.shard,
         configured_seeds: labels.configured_seeds,
+        time_budget_seconds: time_budget.map(|budget| budget.as_secs()),
         mode: labels.mode.as_str(),
         seed_source: labels.seed_source.source_name(),
         seed_salt: labels.seed_source.salt().map(ToString::to_string),
@@ -528,15 +545,16 @@ async fn run_generated_evidence_profile(
         provider_transport_exclusions: fixed_manifest.provider_transport_exclusions.clone(),
         counts: GeneratedSimCounts {
             generated_seeds: seed_count,
+            reached_seeds,
             boundary_events,
             scheduler_controlled_boundaries,
             runtime_completion_registrations: scheduler_owned_runtime_completions,
             scheduler_owned_runtime_completions,
             fixed_provider_proofs: fixed_manifest.summary.total_proofs,
             runtime_proofs: runtime_turn_proofs + 3,
-            replay_reports: seed_count,
-            minimized_replays: seed_count,
-            backend_replays: seed_count,
+            replay_reports: reached_seeds,
+            minimized_replays: reached_seeds,
+            backend_replays: reached_seeds,
             scenario_contract_oracles,
             scenario_contract_mini_oracles,
             scenario_contract_slices: scenario_contract_slice_count,
@@ -576,6 +594,7 @@ async fn run_generated_search_profile(
     indexed_seeds: &[(usize, u64)],
     max_boundaries: usize,
     labels: GeneratedRunLabels,
+    time_budget: Option<Duration>,
 ) -> Result<GeneratedSimProfileReport, FixedScriptRunnerError> {
     validate_workload_profile(profile)?;
     std::fs::create_dir_all(artifact_root)?;
@@ -638,10 +657,17 @@ async fn run_generated_search_profile(
         .iter()
         .filter_map(|(index, _)| (index % 20 == 0).then_some(*index))
         .collect::<Vec<_>>();
-    let determinism_attempted = selected_determinism_indices.len();
+    let mut determinism_attempted = 0usize;
     let mut reproduced_identically = 0usize;
 
+    // A time budget bounds the sweep between seeds: a seed that starts always
+    // runs to completion, and the loop stops cleanly once the budget is spent.
+    let sweep_started = Instant::now();
+    let mut reached_seeds = 0usize;
     for (seed_index, seed) in indexed_seeds.iter().copied() {
+        if time_budget.is_some_and(|budget| sweep_started.elapsed() >= budget) {
+            break;
+        }
         let workload = generate_workload(seed, profile, boundary_limit)?;
         let seed_dir = failures_dir.join(format!("seed-{seed:016x}"));
         let trace_path = seed_dir.join("trace.json");
@@ -696,6 +722,7 @@ async fn run_generated_search_profile(
             Err(_) => oracle_failures += 1,
         }
         let determinism_failure = if seed_index % 20 == 0 {
+            determinism_attempted += 1;
             model_property_oracles += 1;
             let rerun = run_generated_workload(
                 generate_workload(seed, profile, boundary_limit)?,
@@ -720,6 +747,7 @@ async fn run_generated_search_profile(
         } else {
             None
         };
+        reached_seeds += 1;
         if trace.oracle.is_passed() && replay_outcome.is_ok() && determinism_failure.is_none() {
             continue;
         }
@@ -891,6 +919,7 @@ async fn run_generated_search_profile(
         profile: profile.to_string(),
         shard: labels.shard,
         configured_seeds: labels.configured_seeds,
+        time_budget_seconds: time_budget.map(|budget| budget.as_secs()),
         mode: labels.mode.as_str(),
         seed_source: labels.seed_source.source_name(),
         seed_salt: labels.seed_source.salt().map(ToString::to_string),
@@ -918,6 +947,7 @@ async fn run_generated_search_profile(
         provider_transport_exclusions: fixed_manifest.provider_transport_exclusions.clone(),
         counts: GeneratedSimCounts {
             generated_seeds: indexed_seeds.len(),
+            reached_seeds,
             boundary_events,
             scheduler_controlled_boundaries,
             runtime_completion_registrations: scheduler_owned_runtime_completions,
@@ -1487,5 +1517,44 @@ mod seed_tests {
         let error = require_identical_simulation_rerun(0, &first, &injected)
             .expect_err("injected nondeterminism must fail loudly");
         assert!(error.to_string().contains("simulator nondeterminism"));
+    }
+
+    #[test]
+    fn time_budget_stops_the_sweep_cleanly_and_records_reached_seeds() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        // A spent budget stops the sweep before the first seed; the run still
+        // writes a summary so the caller can see how far it got.
+        let artifact_root = tmp.path().to_path_buf();
+        let report = run_on_sim_harness_stack(
+            "generated-sim-search-budget-test",
+            SIM_HARNESS_STACK_LIMIT_BYTES,
+            move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(FixedScriptRunnerError::Io)?;
+                runtime.block_on(run_generated_sim_profile(
+                    artifact_root,
+                    "fast-random",
+                    4,
+                    24,
+                    SimShard::new(1, 2).expect("shard"),
+                    SimRunMode::Search,
+                    SimSeedSource::exploration(Some("budget-test-salt".to_string())),
+                    Some(Duration::ZERO),
+                ))
+            },
+        )
+        .expect("generated sim search with spent budget");
+
+        assert_eq!(report.mode, "search");
+        assert_eq!(report.time_budget_seconds, Some(0));
+        // The shard still owns its two selected seeds; none of them ran.
+        assert_eq!(report.counts.generated_seeds, 2);
+        assert_eq!(report.counts.reached_seeds, 0);
+        assert_eq!(report.counts.boundary_events, 0);
+        assert_eq!(report.determinism_sample.attempted_seeds, 0);
+        assert!(tmp.path().join(GENERATED_SIM_SUMMARY).exists());
     }
 }

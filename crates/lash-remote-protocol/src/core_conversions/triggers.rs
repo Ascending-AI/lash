@@ -1,5 +1,29 @@
 use super::*;
 
+impl From<lash_core::TriggerSubscriptionLifecycle> for RemoteTriggerSubscriptionLifecycle {
+    fn from(value: lash_core::TriggerSubscriptionLifecycle) -> Self {
+        match value {
+            lash_core::TriggerSubscriptionLifecycle::Enabled => Self::Enabled,
+            lash_core::TriggerSubscriptionLifecycle::Disabled => Self::Disabled,
+            lash_core::TriggerSubscriptionLifecycle::Tombstoned(deleted_at_ms) => {
+                Self::Tombstoned(deleted_at_ms)
+            }
+        }
+    }
+}
+
+impl From<RemoteTriggerSubscriptionLifecycle> for lash_core::TriggerSubscriptionLifecycle {
+    fn from(value: RemoteTriggerSubscriptionLifecycle) -> Self {
+        match value {
+            RemoteTriggerSubscriptionLifecycle::Enabled => Self::Enabled,
+            RemoteTriggerSubscriptionLifecycle::Disabled => Self::Disabled,
+            RemoteTriggerSubscriptionLifecycle::Tombstoned(deleted_at_ms) => {
+                Self::Tombstoned(deleted_at_ms)
+            }
+        }
+    }
+}
+
 impl From<RemoteTriggerOccurrenceOutcome> for lash_core::TriggerOccurrenceOutcome {
     fn from(value: RemoteTriggerOccurrenceOutcome) -> Self {
         match value {
@@ -330,6 +354,7 @@ impl TryFrom<RemoteTriggerRegistration> for lash_core::facade_support::TriggerRe
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteTriggerRegistration) -> Result<Self, Self::Error> {
+        value.validate("RemoteTriggerRegistration")?;
         let RemoteTriggerRegistration {
             subscription_key,
             incarnation,
@@ -492,7 +517,7 @@ impl TryFrom<RemoteTriggerSubscriptionDraft> for lash_core::TriggerSubscriptionD
 
     fn try_from(value: RemoteTriggerSubscriptionDraft) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteTriggerSubscriptionDraft {
+        let RemoteTriggerSubscriptionSpec {
             subscription_key,
             env_ref,
             wake_target,
@@ -507,7 +532,7 @@ impl TryFrom<RemoteTriggerSubscriptionDraft> for lash_core::TriggerSubscriptionD
             event_types,
             input_template,
             target_label,
-        } = value;
+        } = value.spec;
         Ok(Self {
             subscription_key,
             env_ref: lash_core::ProcessExecutionEnvRef::new(env_ref.as_str().to_string()),
@@ -548,20 +573,22 @@ impl TryFrom<lash_core::TriggerSubscriptionDraft> for RemoteTriggerSubscriptionD
             target_label,
         } = value;
         Ok(Self {
-            subscription_key,
-            env_ref: env_ref.as_str().parse()?,
-            wake_target: wake_target.map(Into::into),
-            name,
-            source_type,
-            source_key,
-            source,
-            payload_schema: payload_schema.schema,
-            source_capture: source_capture.into(),
-            target: target.try_into()?,
-            target_identity: target_identity.into(),
-            event_types: event_types.into_iter().map(Into::into).collect(),
-            input_template: input_template.into(),
-            target_label,
+            spec: RemoteTriggerSubscriptionSpec {
+                subscription_key,
+                env_ref: env_ref.as_str().parse()?,
+                wake_target: wake_target.map(Into::into),
+                name,
+                source_type,
+                source_key,
+                source,
+                payload_schema: payload_schema.schema,
+                source_capture: source_capture.into(),
+                target: target.try_into()?,
+                target_identity: target_identity.into(),
+                event_types: event_types.into_iter().map(Into::into).collect(),
+                input_template: input_template.into(),
+                target_label,
+            },
         })
     }
 }
@@ -591,36 +618,34 @@ impl TryFrom<lash_core::TriggerSubscriptionRecord> for RemoteTriggerSubscription
             event_types,
             input_template,
             target_label,
-            enabled,
-            tombstoned,
-            deleted_at_ms,
+            lifecycle,
             created_at_ms,
             updated_at_ms,
         } = value;
         Ok(Self {
             subscription_id,
             owner_scope: owner_scope.into(),
-            subscription_key,
             incarnation,
             revision,
             definition_fingerprint,
             registrant: registrant.into(),
-            env_ref: env_ref.as_str().parse()?,
-            wake_target: wake_target.map(Into::into),
-            name,
-            source_type,
-            source_key,
-            source,
-            payload_schema: payload_schema.schema,
-            source_capture: source_capture.into(),
-            target: target.try_into()?,
-            target_identity: target_identity.into(),
-            event_types: event_types.into_iter().map(Into::into).collect(),
-            input_template: input_template.into(),
-            target_label,
-            enabled,
-            tombstoned,
-            deleted_at_ms,
+            spec: RemoteTriggerSubscriptionSpec {
+                subscription_key,
+                env_ref: env_ref.as_str().parse()?,
+                wake_target: wake_target.map(Into::into),
+                name,
+                source_type,
+                source_key,
+                source,
+                payload_schema: payload_schema.schema,
+                source_capture: source_capture.into(),
+                target: target.try_into()?,
+                target_identity: target_identity.into(),
+                event_types: event_types.into_iter().map(Into::into).collect(),
+                input_template: input_template.into(),
+                target_label,
+            },
+            lifecycle: lifecycle.into(),
             created_at_ms,
             updated_at_ms,
         })
@@ -635,11 +660,17 @@ impl TryFrom<RemoteTriggerSubscriptionRecord> for lash_core::TriggerSubscription
         let RemoteTriggerSubscriptionRecord {
             subscription_id,
             owner_scope,
-            subscription_key,
             incarnation,
             revision,
             definition_fingerprint,
             registrant,
+            spec,
+            lifecycle,
+            created_at_ms,
+            updated_at_ms,
+        } = value;
+        let RemoteTriggerSubscriptionSpec {
+            subscription_key,
             env_ref,
             wake_target,
             name,
@@ -653,12 +684,7 @@ impl TryFrom<RemoteTriggerSubscriptionRecord> for lash_core::TriggerSubscription
             event_types,
             input_template,
             target_label,
-            enabled,
-            tombstoned,
-            deleted_at_ms,
-            created_at_ms,
-            updated_at_ms,
-        } = value;
+        } = spec;
         Ok(Self {
             subscription_id,
             owner_scope: owner_scope.try_into()?,
@@ -680,9 +706,7 @@ impl TryFrom<RemoteTriggerSubscriptionRecord> for lash_core::TriggerSubscription
             event_types: event_types.into_iter().map(Into::into).collect(),
             input_template: input_template.into(),
             target_label,
-            enabled,
-            tombstoned,
-            deleted_at_ms,
+            lifecycle: lifecycle.into(),
             created_at_ms,
             updated_at_ms,
         })

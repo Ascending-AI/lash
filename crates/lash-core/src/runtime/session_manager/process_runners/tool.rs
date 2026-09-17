@@ -90,7 +90,8 @@ impl RuntimeSessionServices {
         let dispatch = run_context.dispatch();
         let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))
             .prepared_call(&call)
-            .async_process(registration.id.clone(), cancellation)
+            .enclosing_process(Some(registration.id.clone()))
+            .cancellation_token(Some(cancellation))
             .process_events(
                 registration.id.clone(),
                 execution_write_authority,

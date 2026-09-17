@@ -1053,7 +1053,8 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
              ALTER TABLE lash_tool_intent_submissions
                  DROP CONSTRAINT ck_tool_intent_submissions_kind;
              ALTER TABLE lash_trigger_subscriptions
-                 DROP CONSTRAINT ck_trigger_subscriptions_live_enabled;
+                 DROP CONSTRAINT ck_trigger_subscriptions_lifecycle,
+                 DROP CONSTRAINT ck_trigger_subscriptions_lifecycle_deleted_at;
              ALTER TABLE lash_runtime_effect_replay
                  DROP CONSTRAINT ck_runtime_effect_replay_status;
              UPDATE lash_schema_versions
@@ -1115,7 +1116,8 @@ async fn component_65_is_rejected_without_adding_check_constraints() {
         "ck_process_wake_deliveries_state",
         "ck_process_wake_deliveries_discard_reason",
         "ck_tool_intent_submissions_kind",
-        "ck_trigger_subscriptions_live_enabled",
+        "ck_trigger_subscriptions_lifecycle",
+        "ck_trigger_subscriptions_lifecycle_deleted_at",
         "ck_runtime_effect_replay_status",
     ])
     .fetch_one(&scratch.pool)

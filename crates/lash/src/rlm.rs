@@ -197,6 +197,7 @@ pub use lash_lashlang_runtime::{
     DeferredTriggerResolver, LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
     LashlangHostEnvironment, LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface,
     LashlangSurfaceContribution, SharedDeferredTriggerResolver, TriggerGrant, TriggerResolution,
+    lashlang_surface_extension,
 };
 pub use lash_protocol_rlm::{
     ExecutionBounds, InstructionBound, MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,

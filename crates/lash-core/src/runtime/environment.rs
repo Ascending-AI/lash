@@ -47,15 +47,6 @@ pub struct RuntimeEnvironment {
     // `PluginSession` is built from it via `PluginHost::build_session`.
     pub plugin_host: Option<Arc<crate::PluginHost>>,
 
-    /// Host-owned process lifecycle support.
-    ///
-    /// This can be present while `work` is `RuntimeWork::SessionsOnly` in the
-    /// named registry-only state used by the facade's lazy native composition:
-    /// facade/admin/session consumers use the watched registry before the
-    /// native process port is resolved. Once process work is wired, this is the
-    /// registry carried by that same wiring.
-    pub process_registry: Option<Arc<dyn ProcessRegistry>>,
-
     // Host-owned trigger subscription and trigger occurrence routing.
     pub trigger_store: Option<Arc<dyn crate::TriggerStore>>,
 
@@ -73,6 +64,15 @@ pub struct RuntimeEnvironment {
 }
 
 impl RuntimeEnvironment {
+    /// The host-configured process registry, whether this environment is in the
+    /// registry-only state or has full process work wired.
+    ///
+    /// `RuntimeWork` is the sole owner, so this and the runtime built from this
+    /// environment cannot disagree.
+    pub fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
+        self.work.process_registry()
+    }
+
     pub fn process_work(&self) -> Option<Arc<dyn super::ProcessWorkSubstrate>> {
         self.work
             .process_wiring()
@@ -132,7 +132,6 @@ impl RuntimeEnvironmentBuilder {
         Self {
             env: RuntimeEnvironment {
                 plugin_host: None,
-                process_registry: None,
                 trigger_store: None,
                 process_definitions: None,
                 session_store_factory: None,
@@ -147,15 +146,11 @@ impl RuntimeEnvironmentBuilder {
     }
 
     /// Configure the registry-only state used when a host will resolve native
-    /// process work lazily. This is mutually exclusive with
-    /// [`Self::with_process_work`]; attempting to set both is a configuration
-    /// error and panics immediately.
+    /// process work lazily. A later [`Self::with_process_work`] replaces it with
+    /// the full wiring, and vice versa: the work wiring is one owner, so setting
+    /// both is last-write-wins rather than a panic.
     pub fn with_process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
-        assert!(
-            self.env.process_registry.is_none(),
-            "process registry is already configured; use either with_process_registry or with_process_work"
-        );
-        self.env.process_registry = Some(process_registry);
+        self.env.work = self.env.work.with_process_registry(process_registry);
         self
     }
 
@@ -182,14 +177,9 @@ impl RuntimeEnvironmentBuilder {
 
     /// Set the host's process work driver. Every `RuntimeHost` built from this
     /// environment carries it, so process starts can directly drive pending
-    /// work. This is mutually exclusive with [`Self::with_process_registry`];
-    /// attempting to set both is a configuration error and panics immediately.
+    /// work. This replaces a registry-only state configured by
+    /// [`Self::with_process_registry`]; the wiring carries its own registry.
     pub fn with_process_work(mut self, wiring: ProcessWorkWiring) -> Self {
-        assert!(
-            self.env.process_registry.is_none(),
-            "process registry is already configured; use either with_process_registry or with_process_work"
-        );
-        self.env.process_registry = Some(Arc::clone(wiring.registry()));
         self.env.work = self.env.work.with_process_wiring(wiring);
         self
     }
@@ -318,16 +308,7 @@ impl RuntimeEnvironment {
         process: Option<ProcessWorkWiring>,
         queued: Arc<dyn QueuedWorkSubstrate>,
     ) -> Self {
-        self.work = match process {
-            Some(wiring) => {
-                self.process_registry = Some(Arc::clone(wiring.registry()));
-                RuntimeWork::processes(wiring, queued)
-            }
-            None => {
-                self.process_registry = None;
-                RuntimeWork::sessions_only(queued)
-            }
-        };
+        self.work = self.work.with_work_ports(process, queued);
         self
     }
 }
@@ -374,6 +355,69 @@ mod tests {
             termination.treat_missing_done_as_failure
         );
         assert!(Arc::ptr_eq(&env.core.control.effect_host, &effect_host));
+    }
+
+    fn test_process_registry() -> Arc<dyn ProcessRegistry> {
+        Arc::new(crate::TestLocalProcessRegistry::default())
+    }
+
+    fn registry_only_environment(registry: &Arc<dyn ProcessRegistry>) -> RuntimeEnvironment {
+        RuntimeEnvironment::builder(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_process_registry(Arc::clone(registry))
+        .build()
+    }
+
+    /// Rebinding work ports without a process wiring must not silently drop a
+    /// registry the host configured: the registry-only state is a state of the
+    /// work wiring, not a field that `with_work_ports` is free to clear.
+    #[test]
+    fn rebinding_work_ports_without_a_wiring_keeps_a_registry_only_registry() {
+        let registry = test_process_registry();
+        let env = registry_only_environment(&registry);
+        assert!(
+            env.process_registry().is_some(),
+            "a registry-only environment starts with its registry"
+        );
+
+        let rebound = env.with_work_ports(None, Arc::new(NoQueuedWork::new()));
+
+        let kept = rebound
+            .process_registry()
+            .expect("rebinding work ports without a wiring keeps the registry");
+        assert!(
+            Arc::ptr_eq(kept, &registry),
+            "the kept registry is the one the host configured"
+        );
+        assert!(
+            rebound.process_work().is_none(),
+            "no process-work port is invented by keeping the registry"
+        );
+    }
+
+    /// A runtime built from a registry-only environment must report the same
+    /// registry the environment does. The host is assembled from `env.work`
+    /// alone (`LashRuntime::from_environment_for_executor`), so a registry that
+    /// does not live in `work` never reaches the runtime.
+    #[test]
+    fn a_host_built_from_a_registry_only_environment_reports_that_registry() {
+        let registry = test_process_registry();
+        let env = registry_only_environment(&registry);
+
+        let host = super::super::host::RuntimeHost::from_embedded_with_work(
+            super::super::host::EmbeddedRuntimeHost::new(env.core.clone()),
+            env.work.clone(),
+        );
+
+        let observed = host
+            .process_registry()
+            .expect("the runtime host carries the environment's registry");
+        assert!(
+            Arc::ptr_eq(observed, &registry),
+            "the environment and the runtime it builds answer the registry question the same way"
+        );
     }
 
     #[test]

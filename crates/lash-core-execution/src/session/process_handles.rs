@@ -138,20 +138,16 @@ impl RuntimeExecutionContext<'_> {
             // recovery may re-execute them (ADR 0019).
             crate::RecoveryContract::Rerunnable,
         );
-        let registration = match self
-            .attach_captured_process_execution_env(registration)
-            .await
-        {
-            Ok(registration) => registration,
-            Err(err) => return ToolInvocationReply::error(json!(err.to_string())),
-        };
+        let (registration, env_spec) = self.process_start_execution_env(registration);
         let started = match self
             .dispatch
             .processes
             .start(
                 &self.session_id,
                 registration,
-                crate::ProcessStartOptions::new().with_initial_observer(self.session_id.clone()),
+                crate::ProcessStartOptions::new()
+                    .with_initial_observer(self.session_id.clone())
+                    .with_env_spec(env_spec),
                 self.process_scope(self.parent_invocation.clone()),
             )
             .await
@@ -712,10 +708,27 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
         });
+        let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+        let parent = crate::ProcessRegistration::new(
+            "parent-process",
+            crate::ProcessInput::Engine {
+                kind: "test-engine".to_string(),
+                payload: serde_json::json!({"program": "parent"}),
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        )
+        .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
+            "process-env:inherited",
+        )));
         let context = RuntimeExecutionContext::new(
             SessionId::from("session"),
             dispatch,
-            Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            env_store,
             Arc::new(crate::SessionAttachmentStore::in_memory()),
             Arc::new(crate::ChronologicalProjection::default()),
             None,
@@ -724,7 +737,8 @@ mod tests {
         .with_execution_env_spec(crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::testing::standard_test_policy(),
-        ));
+        ))
+        .with_process_execution(&parent, None);
 
         let started = context
             .start_tool_process(

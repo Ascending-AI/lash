@@ -100,7 +100,8 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         config,
         current_frame_node_id: _, // derived from the graph leaf
         graph,
-        checkpoint: _, // rebuilt baseline, not the request
+        graph_base_leaf_node_id: _, // resident head fact, not request content
+        checkpoint: _,              // rebuilt baseline, not the request
         usage_deltas,
         failure_evidence: _, // refused non-empty by validation
         turn_commit,
@@ -119,7 +120,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         operation_key: &operation_key,
         session_id,
         config,
-        appended_payloads: graph.nodes.iter().map(|node| &node.payload).collect(),
+        appended_payloads: graph.nodes().iter().map(|node| &node.payload).collect(),
         usage_deltas,
     };
     let value = serde_json::to_value(&projection).map_err(|err| {

@@ -928,7 +928,7 @@ async fn heap_aware_global_patches_survive_next_cell_and_cold_restore() {
         Value::List(vec![Value::String("kept".into())].into())
     );
 
-    assert!(restored.remove_global("diary").is_some());
+    assert!(restored.remove_global("diary"));
     // With the global gone the name is nobody's, which the TypeScript
     // front-end reports at parse rather than letting it reach the VM.
     assert!(matches!(

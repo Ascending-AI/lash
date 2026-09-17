@@ -98,10 +98,7 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
                 crate::FrameNodeId::new(derived_node_id.clone())
                     .expect("derived test frame identity is non-empty"),
             ),
-            graph: crate::GraphAppend {
-                nodes: vec![node],
-                leaf_node_id: Some(derived_node_id),
-            },
+            graph: crate::GraphAppend::Extend { nodes: vec![node] },
             ..RuntimeCommit::persisted_state_for_test(&state, &[])
         };
         commit
@@ -1764,11 +1761,11 @@ pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersiste
     let commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     let expected_node_ids = commit
         .graph
-        .nodes
+        .nodes()
         .iter()
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
-    let expected_leaf_node_id = commit.graph.leaf_node_id.clone();
+    let expected_leaf_node_id = commit.graph.leaf_node_id().cloned();
     commit_runtime_state_for_test(&store, commit, "active-path")
         .await
         .expect("commit linear graph");

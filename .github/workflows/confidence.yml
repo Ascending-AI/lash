@@ -576,15 +576,76 @@ jobs:
           if-no-files-found: error
 
   confidence-mutation-packages:
-    name: Confidence mutation-packages-${{ matrix.package }}
+    name: Confidence mutation-packages-${{ matrix.package }}-${{ matrix.shard }}
     needs: confidence-build
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lane == 'full' }}
     runs-on: ubuntu-24.04
+    # The cap is unchanged; the lane is sharded to fit inside it instead. A
+    # package's mutant space is far wider than one job can sweep (protocol-rlm
+    # alone listed 1,641 mutants in run 35117123483 and was cancelled at the
+    # cap), so each leg judges a bounded slice whose index rotates per run.
+    # `shards` is the leg count for the package; `shard` is this leg's index.
+    # See MUTATION_PACKAGES_* in scripts/confidence-gate.sh for the slice
+    # arithmetic and per-package leg counts.
     timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
-        package: [lash-internal-core, lash-internal-lashlang, lash-internal-protocol-rlm, lash-internal-protocol-standard, lash-internal-sqlite-store, lash-internal-postgres-store]
+        include:
+          - package: lash-internal-core
+            shard: 1
+            shards: 2
+          - package: lash-internal-core
+            shard: 2
+            shards: 2
+          - package: lash-internal-lashlang
+            shard: 1
+            shards: 4
+          - package: lash-internal-lashlang
+            shard: 2
+            shards: 4
+          - package: lash-internal-lashlang
+            shard: 3
+            shards: 4
+          - package: lash-internal-lashlang
+            shard: 4
+            shards: 4
+          - package: lash-internal-protocol-rlm
+            shard: 1
+            shards: 4
+          - package: lash-internal-protocol-rlm
+            shard: 2
+            shards: 4
+          - package: lash-internal-protocol-rlm
+            shard: 3
+            shards: 4
+          - package: lash-internal-protocol-rlm
+            shard: 4
+            shards: 4
+          - package: lash-internal-protocol-standard
+            shard: 1
+            shards: 1
+          - package: lash-internal-sqlite-store
+            shard: 1
+            shards: 3
+          - package: lash-internal-sqlite-store
+            shard: 2
+            shards: 3
+          - package: lash-internal-sqlite-store
+            shard: 3
+            shards: 3
+          - package: lash-internal-postgres-store
+            shard: 1
+            shards: 4
+          - package: lash-internal-postgres-store
+            shard: 2
+            shards: 4
+          - package: lash-internal-postgres-store
+            shard: 3
+            shards: 4
+          - package: lash-internal-postgres-store
+            shard: 4
+            shards: 4
     steps:
       - name: Check out repository
         env:
@@ -629,15 +690,21 @@ jobs:
         env:
           LASH_CONFIDENCE_STAGE: mutation-packages
           LASH_CONFIDENCE_PACKAGE: ${{ matrix.package }}
-          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-packages-${{ matrix.package }}
+          LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence/stages/mutation-packages-${{ matrix.package }}-${{ matrix.shard }}
+          # This leg is shard index `shard` of the package's `shards` legs;
+          # the gate turns the coordinate plus the run number into the
+          # mutant slice the leg judges. run_number is constant across retry
+          # attempts, so a retried leg re-judges the same slice.
+          LASH_MUTATION_PACKAGES_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
+          LASH_MUTATION_RUN_INDEX: ${{ github.run_number }}
         run: bash scripts/confidence-gate.sh full
 
       - name: Upload mutation-packages evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: confidence-mutation-packages-${{ matrix.package }}-attempt-${{ github.run_attempt }}
-          path: target/confidence/stages/mutation-packages-${{ matrix.package }}/**
+          name: confidence-mutation-packages-${{ matrix.package }}-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
+          path: target/confidence/stages/mutation-packages-${{ matrix.package }}-${{ matrix.shard }}/**
           if-no-files-found: error
 
   sim-search:

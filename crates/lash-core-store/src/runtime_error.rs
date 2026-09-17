@@ -16,6 +16,19 @@ use serde::{Deserialize, Serialize};
 #[non_exhaustive]
 pub enum RuntimeErrorCode {
     AttachmentSourcePolicyDenied,
+    /// An artifact write named an owner a permanent retirement fence has
+    /// already closed. Store implementors return this code instead of
+    /// wording the refusal as prose; the destination-owner form of the same
+    /// fence is [`Self::ArtifactDestinationOwnerRetired`].
+    ArtifactOwnerRetired,
+    /// An artifact transfer named a destination owner a permanent retirement
+    /// fence has already closed. Kept as its own code so the retirement
+    /// target is a fact, not a word that must appear in the message.
+    ArtifactDestinationOwnerRetired,
+    /// An artifact transfer found neither the staging owner's edge nor the
+    /// destination owner's edge. Store implementors return this code so the
+    /// caller that staged the bytes can settle the destination edge itself.
+    ArtifactStagingEdgeMissing,
     EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
@@ -101,6 +114,12 @@ pub enum RuntimeErrorCode {
     /// switching it would replace resident configuration without a commanded
     /// config patch, and no such patch supports historical-frame switching.
     HistoricalAgentFrameSwitchUnsupported,
+    /// Two authors named a different agent-frame switch for one turn, or named
+    /// the same frame with different seed nodes. A turn materializes at most
+    /// one switch and there is no precedence order between its authors, so the
+    /// commit is refused before any durable write. The identical turn fails
+    /// identically until one of the two authors stops switching.
+    AgentFrameSwitchAuthorConflict,
     DurableEffectLiveProtocolExtension,
     DurableEffectLivePluginInput,
     AwaitEventCancelUnsupported,
@@ -372,6 +391,9 @@ impl RuntimeErrorCode {
     pub fn as_str(&self) -> &str {
         match self {
             Self::AttachmentSourcePolicyDenied => "attachment_source_policy_denied",
+            Self::ArtifactOwnerRetired => "artifact_owner_retired",
+            Self::ArtifactDestinationOwnerRetired => "artifact_destination_owner_retired",
+            Self::ArtifactStagingEdgeMissing => "artifact_staging_edge_missing",
             Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
@@ -405,6 +427,7 @@ impl RuntimeErrorCode {
             Self::HistoricalAgentFrameSwitchUnsupported => {
                 "historical_agent_frame_switch_unsupported"
             }
+            Self::AgentFrameSwitchAuthorConflict => "agent_frame_switch_author_conflict",
             Self::DurableEffectLiveProtocolExtension => "durable_effect_live_protocol_extension",
             Self::DurableEffectLivePluginInput => "durable_effect_live_plugin_input",
             Self::AwaitEventCancelUnsupported => "await_event_cancel_unsupported",
@@ -663,6 +686,7 @@ impl RuntimeErrorCode {
                 | Self::InvalidAwaitEventWaitIdentity
                 | Self::InvalidTurnCancelRequest
                 | Self::HistoricalAgentFrameSwitchUnsupported
+                | Self::AgentFrameSwitchAuthorConflict
                 | Self::LlmProvider
                 | Self::Plugin
                 | Self::PostgresEffectReplayCorruptRow
@@ -770,6 +794,9 @@ impl RuntimeErrorCode {
     pub fn from_wire_code(code: &str) -> Self {
         match code {
             "attachment_source_policy_denied" => Self::AttachmentSourcePolicyDenied,
+            "artifact_owner_retired" => Self::ArtifactOwnerRetired,
+            "artifact_destination_owner_retired" => Self::ArtifactDestinationOwnerRetired,
+            "artifact_staging_edge_missing" => Self::ArtifactStagingEdgeMissing,
             "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,
@@ -803,6 +830,7 @@ impl RuntimeErrorCode {
             "historical_agent_frame_switch_unsupported" => {
                 Self::HistoricalAgentFrameSwitchUnsupported
             }
+            "agent_frame_switch_author_conflict" => Self::AgentFrameSwitchAuthorConflict,
             "durable_effect_live_protocol_extension" => Self::DurableEffectLiveProtocolExtension,
             "durable_effect_live_plugin_input" => Self::DurableEffectLivePluginInput,
             "await_event_cancel_unsupported" => Self::AwaitEventCancelUnsupported,

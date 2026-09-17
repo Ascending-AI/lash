@@ -266,7 +266,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         )?;
         let hydrated_checkpoint =
             checkpoints::resolve_components(&self.checkpoint_component_blobs, &commit.checkpoint)?;
-        let incoming_nodes = commit.graph.nodes.as_slice();
+        let incoming_nodes = commit.graph.nodes();
         let mut global_node_owners = self.global_node_owners.lock_recover();
         let graph = self.global_session_graph.lock_recover();
         let tombstoned = self.tombstoned_node_ids.lock_recover();
@@ -281,16 +281,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .collect();
         drop(graph);
         drop(tombstoned);
-        let (has_existing_live_nodes, selected_leaf_is_live, published_leaf) = {
+        let published_leaf = {
             let graph = self.global_session_graph.lock_recover();
             let tombstoned = self.tombstoned_node_ids.lock_recover();
-            let has_existing_live_nodes = global_node_owners.iter().any(|(node_id, owner)| {
-                owner == commit.session_id && !tombstoned.contains(node_id)
-            });
-            let selected_leaf_is_live = commit.graph.leaf_node_id().is_some_and(|leaf_node_id| {
-                !tombstoned.contains(leaf_node_id) && graph.find_node(leaf_node_id).is_some()
-            });
-            let published_leaf = match meta.as_ref().and_then(|head| head.leaf_node_id.as_ref()) {
+            match meta.as_ref().and_then(|head| head.leaf_node_id.as_ref()) {
                 None => crate::store::PublishedLeafFacts::Absent,
                 Some(leaf_node_id)
                     if tombstoned.contains(leaf_node_id)
@@ -321,12 +315,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         frame_node_id,
                     })
                 }
-            };
-            (
-                has_existing_live_nodes,
-                selected_leaf_is_live,
-                published_leaf,
-            )
+            }
         };
         let requested_ancestor_is_active = match &commit.turn_commit.append_request_identity {
             crate::AppendRequestIdentity::Append {
@@ -348,13 +337,29 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             published_leaf,
             requested_ancestor_is_active,
             occupied_node_ids,
-            selected_leaf_is_live,
-            has_live_nodes: has_existing_live_nodes,
         })?;
         let mut proposed = self.global_session_graph.lock_recover().clone();
         proposed.apply_append(&commit.graph)?;
+        if let crate::store::GraphAppend::PreserveHead = &commit.graph {
+            // A preserve-head commit still republishes the committing
+            // session's leaf as the global leaf; `graph_base_leaf_node_id`
+            // carries the resident head fact the removed empty-append
+            // `leaf_node_id` field used to.
+            match &commit.graph_base_leaf_node_id {
+                Some(leaf_node_id) if proposed.find_node(leaf_node_id.as_str()).is_none() => {
+                    return Err(crate::StoreError::InvalidGraphLeaf {
+                        leaf_node_id: commit.graph_base_leaf_node_id.clone(),
+                    });
+                }
+                leaf_node_id => proposed.data_mut().leaf_node_id = leaf_node_id.clone(),
+            }
+        }
         let (staged_tombstoned_node_ids, staged_session_heads) = {
-            let new_leaf_node_id = commit.graph.leaf_node_id().cloned();
+            let new_leaf_node_id = commit
+                .graph
+                .leaf_node_id()
+                .or(commit.graph_base_leaf_node_id.as_ref())
+                .cloned();
             let mut tombstoned = self.tombstoned_node_ids.lock_recover().clone();
             let mut session_heads = self.global_session_heads.lock_recover().clone();
             session_heads.insert(

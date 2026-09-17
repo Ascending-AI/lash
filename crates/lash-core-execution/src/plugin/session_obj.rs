@@ -192,6 +192,9 @@ pub struct PluginSession {
     pub(super) tool_access: Arc<std::sync::RwLock<SessionToolAccess>>,
     pub(super) subagent: Option<SubagentSessionContext>,
     pub(super) extensions: PluginExtensions,
+    /// Extensions contributed by this session's plugins. Distinct from
+    /// `extensions` (the host-static contributions every session inherits).
+    pub(super) session_extensions: PluginExtensions,
     pub(super) triggers: crate::TriggerEventCatalog,
     pub(super) contributions: PluginContributions,
 }
@@ -222,6 +225,12 @@ impl PluginSession {
 
     pub fn extensions(&self) -> &PluginExtensions {
         &self.extensions
+    }
+
+    /// Extensions contributed by this session's plugins, distinct from the
+    /// host-static extensions in [`Self::extensions`].
+    pub fn session_extensions(&self) -> &PluginExtensions {
+        &self.session_extensions
     }
 
     pub fn triggers(&self) -> &crate::TriggerEventCatalog {

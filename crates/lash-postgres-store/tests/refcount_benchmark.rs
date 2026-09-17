@@ -56,15 +56,15 @@ async fn commit_state(
         .expect("stamp benchmark commit");
     let root_node_id = commit
         .graph
-        .nodes
+        .nodes()
         .first()
         .expect("benchmark commit has a root")
         .node_id
         .clone();
     let leaf_node_id = commit
         .graph
-        .leaf_node_id
-        .clone()
+        .leaf_node_id()
+        .cloned()
         .expect("benchmark commit has a leaf");
     store
         .commit_runtime_state(commit)

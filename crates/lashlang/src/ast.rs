@@ -1,6 +1,7 @@
 use compact_str::CompactString;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::span::Span;
@@ -12,12 +13,103 @@ pub struct Program {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declarations: Vec<Declaration>,
     pub main: Expr,
+    /// Source spans for the program's nodes, addressed by [`AstPath`]. A
+    /// declaration's own span lives at `AstPath::declaration(i, [])`; absence
+    /// is "no span", so no sentinel ever doubles as offset zero.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "span_table"
+    )]
+    pub spans: BTreeMap<AstPath, Span>,
+}
+
+/// Which tree an [`AstPath`] walks down: `Program::main`, or one entry of
+/// `Program::declarations`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AstRoot {
+    Main,
+    Declaration(u32),
+}
+
+/// A node's address in a `Program`: the root it hangs from plus the
+/// `Expr::children()` index chain that reaches it.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct AstPath {
+    pub root: AstRoot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub declaration_spans: Vec<Span>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub expression_spans: Vec<Span>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub expression_source_spans: Vec<ExpressionSourceSpan>,
+    pub steps: Vec<u32>,
+}
+
+impl AstPath {
+    /// The node `steps` below `Program::main` (`[]` addresses `main` itself).
+    pub fn main(steps: impl Into<Vec<u32>>) -> Self {
+        Self {
+            root: AstRoot::Main,
+            steps: steps.into(),
+        }
+    }
+
+    /// The node `steps` below the body of `Program::declarations[index]`
+    /// (`[]` addresses the declaration itself).
+    pub fn declaration(index: u32, steps: impl Into<Vec<u32>>) -> Self {
+        Self {
+            root: AstRoot::Declaration(index),
+            steps: steps.into(),
+        }
+    }
+
+    /// The flat encoding the lifted-process name hash predates this type on:
+    /// `main` paths are the bare steps; declaration paths are prefixed with
+    /// `u32::MAX` and the declaration index. Kept for that hash only — a
+    /// durable identity input that must not change.
+    pub(crate) fn legacy_steps(&self) -> Vec<u32> {
+        match self.root {
+            AstRoot::Main => self.steps.clone(),
+            AstRoot::Declaration(index) => {
+                let mut steps = Vec::with_capacity(self.steps.len() + 2);
+                steps.push(u32::MAX);
+                steps.push(index);
+                steps.extend_from_slice(&self.steps);
+                steps
+            }
+        }
+    }
+}
+
+/// `Program::spans` serializes as a list of entries: a `BTreeMap`'s struct
+/// key is not a JSON object key, and `ModuleArtifact` encodes `Program` as
+/// JSON. Iteration order is already key order, so the form stays canonical.
+mod span_table {
+    use super::{AstPath, Span};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    #[derive(Serialize, Deserialize)]
+    struct SpanEntry {
+        path: AstPath,
+        span: Span,
+    }
+
+    pub(super) fn serialize<S: Serializer>(
+        spans: &BTreeMap<AstPath, Span>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(spans.iter().map(|(path, span)| SpanEntry {
+            path: path.clone(),
+            span: *span,
+        }))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<AstPath, Span>, D::Error> {
+        Ok(Vec::<SpanEntry>::deserialize(deserializer)?
+            .into_iter()
+            .map(|entry| (entry.path, entry.span))
+            .collect())
+    }
 }
 
 /// The nesting limit an AST must satisfy, whether it came from source or was
@@ -269,9 +361,7 @@ impl Program {
         Self {
             declarations: Vec::new(),
             main: Expr::Block(expressions),
-            declaration_spans: Vec::new(),
-            expression_spans: Vec::new(),
-            expression_source_spans: Vec::new(),
+            spans: BTreeMap::new(),
         }
     }
 
@@ -289,12 +379,6 @@ impl PartialEq for Program {
     fn eq(&self, other: &Self) -> bool {
         self.declarations == other.declarations && self.main == other.main
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExpressionSourceSpan {
-    pub path: Vec<u32>,
-    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1163,9 +1247,119 @@ pub enum TypeExpr {
     Process(ProcessType),
     TriggerHandle(Box<TypeExpr>),
     /// Union of alternative type shapes, e.g. `str | int | null`.
-    /// Always has two or more variants; single-variant parses collapse
-    /// to the underlying `TypeExpr` in the parser.
-    Union(Vec<TypeExpr>),
+    Union(UnionMembers),
+}
+
+/// The members of a [`TypeExpr::Union`]: two or more by construction.
+///
+/// A union of one is that member and a union of zero is meaningless, so
+/// those states are unrepresentable instead of carried as a degenerate
+/// `Union` the artifact encoding would count and write. Build one through
+/// [`UnionMembers::new`] when the members are already normalized, or
+/// [`UnionMembers::deduplicated`] to flatten nested unions and drop
+/// duplicates first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnionMembers(Vec<TypeExpr>);
+
+impl UnionMembers {
+    /// Wraps `members` when it holds at least two type expressions.
+    pub fn new(members: Vec<TypeExpr>) -> Option<Self> {
+        (members.len() >= 2).then_some(Self(members))
+    }
+
+    /// Flattens nested unions and drops duplicate members (first-seen
+    /// order). `Err` hands back the normalized remainder — zero or one
+    /// member — for the caller's collapse rule.
+    pub fn deduplicated(members: Vec<TypeExpr>) -> Result<Self, Vec<TypeExpr>> {
+        let mut flattened = Vec::new();
+        for member in members {
+            match member {
+                TypeExpr::Union(nested) => flattened.extend(nested),
+                member => flattened.push(member),
+            }
+        }
+        let mut unique: Vec<TypeExpr> = Vec::new();
+        for member in flattened {
+            if !unique.contains(&member) {
+                unique.push(member);
+            }
+        }
+        if unique.len() >= 2 {
+            Ok(Self(unique))
+        } else {
+            Err(unique)
+        }
+    }
+
+    /// Maps each member. The result still holds at least two because the
+    /// map preserves member count.
+    pub fn map(&self, f: impl Fn(&TypeExpr) -> TypeExpr) -> Self {
+        Self(self.0.iter().map(f).collect())
+    }
+
+    pub fn as_slice(&self) -> &[TypeExpr] {
+        &self.0
+    }
+
+    pub fn into_vec(self) -> Vec<TypeExpr> {
+        self.0
+    }
+}
+
+impl std::ops::Deref for UnionMembers {
+    type Target = [TypeExpr];
+
+    fn deref(&self) -> &[TypeExpr] {
+        &self.0
+    }
+}
+
+impl IntoIterator for UnionMembers {
+    type Item = TypeExpr;
+    type IntoIter = std::vec::IntoIter<TypeExpr>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a UnionMembers {
+    type Item = &'a TypeExpr;
+    type IntoIter = std::slice::Iter<'a, TypeExpr>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+/// Members serialize as the same bare sequence `Union(Vec<TypeExpr>)`
+/// wrote; decoding re-validates the two-member floor.
+impl Serialize for UnionMembers {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for UnionMembers {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let members = Vec::<TypeExpr>::deserialize(deserializer)?;
+        Self::new(members)
+            .ok_or_else(|| serde::de::Error::custom("a union type needs at least two members"))
+    }
+}
+
+impl TypeExpr {
+    /// Builds a union from member candidates: nested unions flatten and
+    /// duplicates drop. With fewer than two distinct members remaining
+    /// this collapses — one member to itself, none to `Null`, the empty
+    /// union (domains that widen instead, like the JSON-Schema importer,
+    /// keep their own policy).
+    pub fn union(members: Vec<TypeExpr>) -> TypeExpr {
+        match UnionMembers::deduplicated(members) {
+            Ok(members) => TypeExpr::Union(members),
+            Err(rest) => rest.into_iter().next().unwrap_or(TypeExpr::Null),
+        }
+    }
 }
 
 /// A checked, ordered process-call signature.

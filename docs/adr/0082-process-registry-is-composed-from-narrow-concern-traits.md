@@ -66,3 +66,10 @@ wholesale instead of hand-forwarding method-by-method.
   (`ProcessRegistry + ProcessRegistryTestSupport`), unchanged.
 - Registry semantics are unchanged: this decomposition moved method
   declarations and impl-block boundaries only.
+- The same wholesale-delegation rule binds the runtime-persistence
+  decorator surface: `RuntimePersistenceDecorator`'s defaulted forwarder
+  and the blanket component-trait implementations are both generated from
+  one `persistence_operations!` list
+  (`crates/lash-core-store/src/store/runtime_persistence_decorator.rs`), so
+  a defaulted component method can no longer drift past the decorator and
+  silently resolve to the trait's own default.

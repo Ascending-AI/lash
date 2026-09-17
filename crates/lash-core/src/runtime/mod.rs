@@ -257,10 +257,11 @@ pub use native_substrate::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
-    LiveReplaySubscribeOutcome, LiveReplaySubscription, PreparedLiveReplayPublication,
-    RuntimeHandle, RuntimeObservation, SessionCursor, SessionCursorError, SessionObservation,
-    SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
-    SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, ObservationPluginServices,
+    PreparedLiveReplayPublication, RuntimeHandle, RuntimeObservation, SessionCursor,
+    SessionCursorError, SessionObservation, SessionObservationEvent,
+    SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
+    SessionQueueEventKind, SessionResume, SessionRevision,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
@@ -304,8 +305,10 @@ pub use process::{
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     WatchedRegistry, allocate_process_event_sequence, apply_process_event_projection,
-    apply_process_status_projection, artifact_owner_is_permanently_retired,
-    artifact_staging_owner_edge_is_missing, current_epoch_ms, ensure_process_lease_schema_version,
+    apply_process_status_projection, artifact_destination_owner_retired_error,
+    artifact_owner_is_permanently_retired, artifact_owner_retired_error,
+    artifact_staging_edge_missing_error, artifact_staging_owner_edge_is_missing,
+    artifact_store_plugin_error, current_epoch_ms, ensure_process_lease_schema_version,
     fold_process_record, load_process_execution_env, materialize_process_event_semantics,
     prepare_process_event_append, prepare_process_registration, prepare_process_start,
     prepare_process_transition, process_registration_fingerprint, process_runtime_session_ids,

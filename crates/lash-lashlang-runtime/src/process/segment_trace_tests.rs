@@ -1,8 +1,9 @@
 use super::{
     EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangProcessExecutionTrace,
-    LashlangSegmentState, LashlangSegmentStateError, SEGMENT_BOUNDARY_DECLINED_TOTAL,
-    decode_lashlang_segment_state, process_lashlang_execution_result, process_trace_session_id,
-    record_segment_boundary_decline, resolve_child_max_attempts, validate_lashlang_program_hash,
+    LashlangSegmentState, LashlangSegmentStateError, ReplayOrdinalsState,
+    SEGMENT_BOUNDARY_DECLINED_TOTAL, decode_lashlang_segment_state,
+    process_lashlang_execution_result, process_trace_session_id, record_segment_boundary_decline,
+    resolve_child_max_attempts, validate_lashlang_program_hash,
 };
 
 /// `finish null`
@@ -81,10 +82,11 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
     let segment_state = LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: vm.suspend().expect("capture fixture VM continuation"),
-        sleep_sequence: 3,
-        event_sequence: 5,
-        signal_send_sequence: 7,
-        signal_wait_ordinals: [("ready".to_string(), 11)].into(),
+        ordinals: ReplayOrdinalsState {
+            sleep_sequence: 3,
+            event_sequence: 5,
+            signal_wait_ordinals: [("ready".to_string(), 11)].into(),
+        },
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
     };
@@ -160,6 +162,36 @@ fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
     ));
 }
 
+/// The v11 envelope no longer carries `signal_send_sequence`: its only
+/// producer was deleted with the signal special forms (FIG-2999), and a
+/// durable field with no producer is removed rather than round-tripped.
+#[test]
+fn the_current_envelope_carries_no_dead_send_ordinal() {
+    let program = lashlang::compile_ast(&finish_null()).expect("compile pinning program");
+    let mut state = lashlang::State::new();
+    let host = SegmentFixtureHost;
+    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
+    let mut vm =
+        lashlang::Vm::from_state(&program, &mut state, &environment).expect("construct pinning VM");
+    let segment_state = LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: vm.suspend().expect("capture pinning VM continuation"),
+        ordinals: ReplayOrdinalsState {
+            sleep_sequence: 1,
+            event_sequence: 2,
+            signal_wait_ordinals: Default::default(),
+        },
+        started_process_ids: Vec::new(),
+        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
+    };
+    let wire = serde_json::to_value(&segment_state).expect("serialize current segment state");
+    assert_eq!(wire["version"], LASHLANG_SEGMENT_STATE_VERSION);
+    assert!(
+        wire.get("signal_send_sequence").is_none(),
+        "the dead send ordinal must not be written: {wire}"
+    );
+}
+
 #[test]
 fn declined_boundary_is_warned_and_counted() {
     let before = SEGMENT_BOUNDARY_DECLINED_TOTAL.load(Ordering::Relaxed);
@@ -201,10 +233,11 @@ fn predecessor_v6_segment_state_without_the_attempt_bound_is_a_versioned_rejecti
     let segment_state = LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: vm.suspend().expect("capture predecessor VM continuation"),
-        sleep_sequence: 0,
-        event_sequence: 0,
-        signal_send_sequence: 0,
-        signal_wait_ordinals: Default::default(),
+        ordinals: ReplayOrdinalsState {
+            sleep_sequence: 0,
+            event_sequence: 0,
+            signal_wait_ordinals: Default::default(),
+        },
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
     };
@@ -249,10 +282,11 @@ fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_chan
     let segment_state = LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
         vm: vm.suspend().expect("capture pinning VM continuation"),
-        sleep_sequence: 0,
-        event_sequence: 0,
-        signal_send_sequence: 0,
-        signal_wait_ordinals: Default::default(),
+        ordinals: ReplayOrdinalsState {
+            sleep_sequence: 0,
+            event_sequence: 0,
+            signal_wait_ordinals: Default::default(),
+        },
         started_process_ids: Vec::new(),
         child_max_attempts: recorded,
     };

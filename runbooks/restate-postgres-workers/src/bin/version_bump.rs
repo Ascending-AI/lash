@@ -65,9 +65,13 @@ const POST_FLOOR_TABLES: [&str; 2] = ["lash_process_definitions", "lash_release_
 /// The post-floor indexes the fixture must drop by name. Component 95 and 96
 /// installed none: both moved document content, not DDL.
 const POST_FLOOR_INDEXES: [&str; 0] = [];
-/// The columns absent from component 94: none, because every generation since
-/// moved document content rather than the relational shape.
-const POST_FLOOR_COLUMNS: [(&str, &str); 0] = [];
+/// The columns absent from component 94: the trigger subscription lifecycle
+/// pair component 99 installed (FIG-1951) — earlier generations moved document
+/// content, but this one moved the relational shape.
+const POST_FLOOR_COLUMNS: [(&str, &str); 2] = [
+    ("lash_trigger_subscriptions", "lifecycle"),
+    ("lash_trigger_subscriptions", "deleted_at_ms"),
+];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
 const POST_FLOOR_ARTIFACTS: [&str; 2] = ["lash_process_definitions", "lash_release_stamp"];

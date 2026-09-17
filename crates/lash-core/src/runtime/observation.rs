@@ -20,21 +20,32 @@ pub use replay::{
     SessionQueueEventKind, SessionResume, SessionRevision,
 };
 
+/// The plugin query services one resident session publishes together.
+///
+/// They are captured from a single source during observation construction and
+/// are all present or all absent; they are not independently optional.
+#[derive(Clone)]
+pub struct ObservationPluginServices {
+    session: Arc<crate::PluginSession>,
+    read: Arc<dyn crate::plugin::SessionReadService>,
+    process_read: Arc<dyn crate::plugin::ProcessReadService>,
+}
+
 #[derive(Clone)]
 pub struct RuntimeObservation {
     pub session_id: Arc<str>,
     pub revision: SessionRevision,
     pub cursor: SessionCursor,
-    pub policy: crate::SessionPolicy,
     pub read_view: crate::SessionReadView,
     pub persisted_state: super::RuntimeSessionState,
     pub usage_report: super::SessionUsageReport,
     pub tool_state: Option<crate::ToolState>,
-    pub tool_catalog: Arc<Vec<serde_json::Value>>,
-    pub tool_catalog_error: Option<String>,
-    pub plugin_session: Option<Arc<crate::PluginSession>>,
-    pub session_read_service: Option<Arc<dyn crate::plugin::SessionReadService>>,
-    pub process_read_service: Option<Arc<dyn crate::plugin::ProcessReadService>>,
+    /// The session's active tool catalog, or the capture error. One field —
+    /// an error never travels with a catalog.
+    pub tool_catalog: Result<Arc<Vec<serde_json::Value>>, String>,
+    /// The plugin query services, present exactly when a resident session
+    /// could supply all of them.
+    pub plugin_services: Option<ObservationPluginServices>,
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
     pub queue_store: Option<Arc<dyn crate::RuntimePersistence>>,
     pub queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
@@ -50,10 +61,9 @@ impl RuntimeObservation {
         persisted_state: super::RuntimeSessionState,
         usage_report: super::SessionUsageReport,
     ) -> Self {
-        let (tool_catalog, tool_catalog_error) = match runtime.active_tool_catalog_shared() {
-            Ok(catalog) => (catalog, None),
-            Err(err) => (Arc::new(Vec::new()), Some(err.to_string())),
-        };
+        let tool_catalog = runtime
+            .active_tool_catalog_shared()
+            .map_err(|err| err.to_string());
         let tool_state_generation = runtime
             .resident_session
             .is_valid()
@@ -84,37 +94,32 @@ impl RuntimeObservation {
             },
             (None, _) => None,
         };
-        let (plugin_session, session_read_service, process_read_service) =
-            match (runtime.session.as_ref(), runtime.runtime_session_services()) {
-                (Some(session), Ok(services)) => (
-                    Some(Arc::clone(session.plugins())),
-                    Some(services.read_service()),
-                    Some(services.process_read_service()),
-                ),
-                (_, Err(err)) => {
-                    tracing::warn!(
-                        session_id = %runtime.session_id(),
-                        error = %err,
-                        "failed to capture plugin query services for observation",
-                    );
-                    (None, None, None)
-                }
-                (None, _) => (None, None, None),
-            };
+        let plugin_services = match (runtime.session.as_ref(), runtime.runtime_session_services()) {
+            (Some(session), Ok(services)) => Some(ObservationPluginServices {
+                session: Arc::clone(session.plugins()),
+                read: services.read_service(),
+                process_read: services.process_read_service(),
+            }),
+            (_, Err(err)) => {
+                tracing::warn!(
+                    session_id = %runtime.session_id(),
+                    error = %err,
+                    "failed to capture plugin query services for observation",
+                );
+                None
+            }
+            (None, _) => None,
+        };
         Self {
             session_id: Arc::from(runtime.session_id()),
             revision,
             cursor,
-            policy: read_view.policy().clone(),
             read_view,
             persisted_state,
             usage_report,
             tool_state,
             tool_catalog,
-            tool_catalog_error,
-            plugin_session,
-            session_read_service,
-            process_read_service,
+            plugin_services,
             process_registry: runtime.host.process_registry().cloned(),
             queue_store: runtime
                 .session
@@ -157,29 +162,20 @@ impl RuntimeObservation {
         args: serde_json::Value,
         session_id: Option<SessionId>,
     ) -> Result<(String, serde_json::Value), crate::PluginOperationInvokeError> {
-        let Some(plugin_session) = self.plugin_session.as_ref().cloned() else {
+        let Some(services) = self.plugin_services.as_ref() else {
             return Err(crate::PluginOperationInvokeError::Unknown(
-                "runtime session not available".to_string(),
+                "runtime plugin query services not available".to_string(),
             ));
         };
-        let Some(session_read_service) = self.session_read_service.as_ref().cloned() else {
-            return Err(crate::PluginOperationInvokeError::Unknown(
-                "runtime session read service not available".to_string(),
-            ));
-        };
-        let Some(process_read_service) = self.process_read_service.as_ref().cloned() else {
-            return Err(crate::PluginOperationInvokeError::Unknown(
-                "runtime process read service not available".to_string(),
-            ));
-        };
-        plugin_session
+        services
+            .session
             .query_plugin(
                 name,
                 args,
                 session_id,
                 true,
-                session_read_service,
-                process_read_service,
+                Arc::clone(&services.read),
+                Arc::clone(&services.process_read),
             )
             .await
     }

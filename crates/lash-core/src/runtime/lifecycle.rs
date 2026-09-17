@@ -686,7 +686,7 @@ impl LashRuntime {
             .collect::<Vec<_>>();
         if self.state.checkpoint_ref.is_none()
             || self.state.plugin_state_is_dirty()
-            || !self.state.pending_graph_commit().nodes.is_empty()
+            || !self.state.pending_graph_commit().nodes().is_empty()
             || !pending_usage.is_empty()
         {
             let proposed = initial_park_preview(

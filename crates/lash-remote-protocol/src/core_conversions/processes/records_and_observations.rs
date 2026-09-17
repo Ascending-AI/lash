@@ -413,12 +413,11 @@ impl TryFrom<lash_core::facade_support::ObservedWorkItem> for RemoteProcessWorkI
     type Error = RemoteProtocolError;
 
     fn try_from(value: lash_core::facade_support::ObservedWorkItem) -> Result<Self, Self::Error> {
-        let lash_core::facade_support::ObservedWorkItem {
-            process,
-            events,
-            event_tail_sequence,
-            state,
-        } = value;
+        // The coherence fields are computed from the carried record and event
+        // tail — core derives them, so nothing is copied that could disagree.
+        let event_tail_sequence = value.event_tail_sequence();
+        let state = value.state();
+        let lash_core::facade_support::ObservedWorkItem { process, events } = value;
         let item = Self {
             process: process.try_into()?,
             events: events.into_iter().map(Into::into).collect(),
@@ -435,17 +434,17 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkI
 
     fn try_from(value: RemoteProcessWorkItem) -> Result<Self, Self::Error> {
         value.validate("RemoteProcessWorkItem")?;
+        // Validation pinned the declared coherence fields to the derivation;
+        // core rebuilds them, so the wire spellings are never trusted.
         let RemoteProcessWorkItem {
             process,
             events,
-            event_tail_sequence,
-            state,
+            event_tail_sequence: _,
+            state: _,
         } = value;
         Ok(Self {
             process: process.try_into()?,
             events: events.into_iter().map(Into::into).collect(),
-            event_tail_sequence,
-            state: state.into(),
         })
     }
 }

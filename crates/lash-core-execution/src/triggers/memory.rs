@@ -286,12 +286,10 @@ impl TriggerStore for InMemoryTriggerStore {
         let mut changed = 0usize;
         let now = self.clock.timestamp_ms();
         for record in state.subscriptions.values_mut().filter(|record| {
-            record.registrant_session_id() == Some(session_id) && !record.tombstoned
+            record.registrant_session_id() == Some(session_id) && !record.is_tombstoned()
         }) {
             let next_revision = next_trigger_store_revision(record)?;
-            record.enabled = false;
-            record.tombstoned = true;
-            record.deleted_at_ms = Some(now);
+            record.tombstone(now);
             record.revision = next_revision;
             record.updated_at_ms = now;
             changed += 1;
@@ -847,7 +845,8 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
             let definition_fingerprint =
                 trigger_subscription_definition_fingerprint(&owner_scope, &draft);
             if let Some(existing) = state.subscriptions.get(&subscription_id).cloned() {
-                if !existing.tombstoned && existing.definition_fingerprint == definition_fingerprint
+                if !existing.is_tombstoned()
+                    && existing.definition_fingerprint == definition_fingerprint
                 {
                     return Ok(TriggerCommandOutcome::Mutation {
                         receipt: Box::new(TriggerMutationReceipt::from_record(
@@ -860,7 +859,7 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
                     &draft.subscription_key,
                     Some(&existing),
                     Some(definition_fingerprint),
-                    if existing.tombstoned {
+                    if existing.is_tombstoned() {
                         "subscription is tombstoned; use revive"
                     } else {
                         "register does not replace a different definition; use update"
@@ -916,7 +915,7 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
                 existing.incarnation,
                 next_revision,
                 requested_hash,
-                existing.enabled,
+                existing.lifecycle.enabled(),
                 existing.created_at_ms,
                 now,
             );
@@ -974,9 +973,7 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
             ensure_live_revision(existing, expected_revision, None)?;
             let next_revision = next_trigger_revision(existing)?;
             existing.registrant = actor;
-            existing.enabled = false;
-            existing.tombstoned = true;
-            existing.deleted_at_ms = Some(now);
+            existing.tombstone(now);
             existing.revision = next_revision;
             existing.updated_at_ms = now;
             Ok(TriggerCommandOutcome::Mutation {
@@ -1005,7 +1002,7 @@ pub(super) fn apply_in_memory_trigger_command_with_incarnation(
                     "subscription does not exist; use register",
                 ));
             };
-            if !existing.tombstoned || existing.revision != expected_revision {
+            if !existing.is_tombstoned() || existing.revision != expected_revision {
                 return Err(subscription_conflict(
                     &subscription_key,
                     Some(&existing),

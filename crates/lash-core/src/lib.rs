@@ -613,13 +613,14 @@ pub use tool_result::{
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
     TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
-    TriggerEventCatalog, TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome,
-    TriggerMutationReceipt, TriggerOccurrenceFilter, TriggerOccurrenceOutcome,
-    TriggerOccurrenceReclamationReport, TriggerOccurrenceReclamationResult,
-    TriggerOccurrenceRecord, TriggerOccurrenceRequest, TriggerOperationError, TriggerOwnerScope,
-    TriggerProviderRoute, TriggerRetentionReconciliationReport, TriggerRouteRefusal,
-    TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft,
-    TriggerSubscriptionFilter, TriggerSubscriptionRecord, admit_trigger_registration_target,
+    TriggerEventCatalog, TriggerIngressReceipt, TriggerInputBinding, TriggerLifecycleColumnError,
+    TriggerMutationOutcome, TriggerMutationReceipt, TriggerOccurrenceFilter,
+    TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
+    TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
+    TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
+    TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestorer,
+    TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
+    TriggerSubscriptionLifecycle, TriggerSubscriptionRecord, admit_trigger_registration_target,
 };
 
 pub(crate) mod facade_ops {}
@@ -759,7 +760,10 @@ pub use runtime::{
     UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind,
-    WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy, ensure_process_lease_schema_version,
+    WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
+    artifact_destination_owner_retired_error, artifact_owner_retired_error,
+    artifact_staging_edge_missing_error, artifact_store_plugin_error,
+    ensure_process_lease_schema_version,
 };
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 #[allow(unused_imports)]

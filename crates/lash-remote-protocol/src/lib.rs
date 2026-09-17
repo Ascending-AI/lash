@@ -200,7 +200,15 @@ pub use usage_activity::*;
 // beside its display string. The spellings a window-78 peer writes for `kind`
 // and `code` are unchanged and decode into the same arms, but `error_code` is a
 // field a window-78 peer neither writes nor expects, so peers must adopt 79.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 79;
+// Window 80: FIG-1951 replaces a trigger subscription record's
+// `enabled`/`tombstoned`/`deleted_at_ms` triple with one tagged `lifecycle`
+// enum (`enabled` | `disabled` | `tombstoned` + `deleted_at_ms`), and FIG-3259
+// drops the wire-only rule that a `target_label` must equal
+// `target_identity.label`. A window-79 peer writes the three fields and no
+// tag, so its record is refused rather than defaulted, and it refuses a record
+// carrying the tag; peers must adopt 80. The label change only widens the
+// accepted set, so it rides this window rather than taking one of its own.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 80;
 
 /// One versioned remote-protocol message.
 ///

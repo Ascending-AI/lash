@@ -163,9 +163,10 @@ impl<'a> GraphProjector<'a> {
             program,
             source_hash: hex_digest("lash-workflow-source/v3", canonical.as_bytes()),
             spans: program
-                .expression_source_spans
+                .spans
                 .iter()
-                .map(|source_span| (source_span.path.clone(), source_span.span))
+                .filter(|(path, _)| matches!(path.root, lashlang::AstRoot::Main))
+                .map(|(path, span)| (path.steps.clone(), *span))
                 .collect(),
             analysis,
             allow_non_sourceable_expressions,
@@ -965,9 +966,7 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
     Ok(Program {
         declarations,
         main,
-        declaration_spans: Vec::new(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     })
 }
 

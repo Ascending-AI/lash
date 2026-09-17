@@ -44,10 +44,10 @@ fn refusal(outcome: ToolAttemptOutcome) -> String {
 /// coordinator has prepared a call id, which is what the declaration identity
 /// is derived from, and names the process the body runs inside when there is
 /// one.
-fn attempt_context(runtime_process_id: Option<&str>) -> lash_core::ToolContext<'static> {
+fn attempt_context(enclosing_process: Option<&str>) -> lash_core::ToolContext<'static> {
     lash_core::testing::mock_tool_context().__with_attempt_binding_for_testing(
         Some("declaration-call".to_string()),
-        runtime_process_id.map(|id| lash_core::ProcessId::from(id.to_string())),
+        enclosing_process.map(|id| lash_core::ProcessId::from(id.to_string())),
     )
 }
 

@@ -27,14 +27,14 @@ pub use artifact::{
     global_in_memory_lashlang_artifact_store, host_requirements_for_program,
 };
 pub use ast::{
-    AssignPathStep, AssignTarget, BinaryOp, CatchClause, Declaration, Expr, ExprFolder,
-    ExprVisitor, ExpressionSourceSpan, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst,
+    AssignPathStep, AssignTarget, AstPath, AstRoot, BinaryOp, CatchClause, Declaration, Expr,
+    ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LIFTED_PROCESS_NAME_PREFIX,
     LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl,
     ProcessLiteralExpr, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessSignatureError,
     ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
-    check_ast_nesting_depth, fold_expr_children, format_type_expr, lifted_process_identity,
-    validate_ast, walk_expr,
+    UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
+    lifted_process_identity, validate_ast, walk_expr,
 };
 
 /// Names of every source Lashlang builtin, in registry order.
@@ -43,7 +43,7 @@ pub fn builtin_names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
 }
 pub use compile::{
     ModuleCompileDiagnostic, ModuleCompileError, ModuleCompileOutput, ModuleCompileRequest,
-    ModuleCompileStage, compile_module,
+    compile_module,
 };
 pub use identity::{ProcessDefinitionIdentity, ProcessDefinitionIdentityError};
 pub use introspection::{

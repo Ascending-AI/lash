@@ -165,11 +165,11 @@ pub mod triggers {
         TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
         TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestorer,
         TriggerSourceCapture, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-        TriggerSubscriptionRecord, facade_support::TriggerDeliveryEmitOutcome,
-        facade_support::TriggerDeliveryEmitReceipt, facade_support::TriggerEmitReport,
-        facade_support::TriggerEvent, facade_support::TriggerEventType,
-        facade_support::TriggerRegistration, facade_support::TriggerTarget,
-        facade_support::empty_trigger_source_key,
+        TriggerSubscriptionLifecycle, TriggerSubscriptionRecord,
+        facade_support::TriggerDeliveryEmitOutcome, facade_support::TriggerDeliveryEmitReceipt,
+        facade_support::TriggerEmitReport, facade_support::TriggerEvent,
+        facade_support::TriggerEventType, facade_support::TriggerRegistration,
+        facade_support::TriggerTarget, facade_support::empty_trigger_source_key,
     };
     /// The fenced, receipted verb vocabulary for subscription mutation,
     /// including [`TriggerCommand::Enable`] for re-enable, executed by
@@ -229,8 +229,8 @@ pub mod tools {
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
-        DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, LASHLANG_TOOL_BINDING_KEY,
-        RemoteToolGrantBindingExt, ToolBinding, ToolDefinitionBindingExt, ToolManifestBindingExt,
+        DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, RemoteToolGrantBindingExt,
+        TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt, ToolManifestBindingExt,
         catalogue_preview_contribution, catalogue_preview_contribution_for_entries,
         catalogue_preview_contribution_for_entries_with_options,
         catalogue_preview_contribution_for_manifests, catalogue_preview_contribution_with_options,
@@ -630,7 +630,8 @@ pub mod remote {
             RemoteTriggerProviderRoute, RemoteTriggerRegisterSubscriptionReceipt,
             RemoteTriggerRegisterSubscriptionRequest, RemoteTriggerRegistration,
             RemoteTriggerSourceCapture, RemoteTriggerSubscriptionDraft,
-            RemoteTriggerSubscriptionFilter, RemoteTriggerSubscriptionRecord, RemoteTriggerTarget,
+            RemoteTriggerSubscriptionFilter, RemoteTriggerSubscriptionLifecycle,
+            RemoteTriggerSubscriptionRecord, RemoteTriggerSubscriptionSpec, RemoteTriggerTarget,
         };
     }
 

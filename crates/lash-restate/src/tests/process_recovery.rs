@@ -65,7 +65,7 @@ impl InvalidLashlangBindingTool {
             serde_json::Value::Null,
         );
         definition.manifest.bindings.insert(
-            lash_lashlang_runtime::LASHLANG_TOOL_BINDING_KEY.to_string(),
+            lash_lashlang_runtime::TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
             serde_json::json!({ "not": "a tool binding" }),
         );
         definition

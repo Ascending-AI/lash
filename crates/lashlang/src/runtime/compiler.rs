@@ -10,6 +10,7 @@
 //! at compile time).
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
@@ -18,8 +19,8 @@ use smallvec::SmallVec;
 
 use crate::artifact::CompiledModuleContext;
 use crate::ast::{
-    AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionExpr, JavaScriptLogicalOp,
-    LabelMetadata, ListComprehensionClause, Program, TypeExpr, UnaryOp,
+    AssignPathStep, AssignTarget, AstPath, BinaryOp, Declaration, Expr, FunctionExpr,
+    JavaScriptLogicalOp, LabelMetadata, ListComprehensionClause, Program, TypeExpr, UnaryOp,
 };
 use crate::span::Span;
 use crate::tracking::{LashlangAstPath, LashlangExecutionContext, LashlangExecutionSite};

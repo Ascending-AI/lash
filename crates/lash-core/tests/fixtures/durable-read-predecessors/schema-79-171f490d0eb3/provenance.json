@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 79,
+  "source_commit": "171f490d0eb3",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-1951 schema-80 trigger subscription lifecycle cutover",
+  "artifacts": {
+    "postgres-expected.json": "bca1f52a7400578bc8a9f7c3bd4eb74c20270af35c61b5084286d4bd00dd7d47",
+    "sqlite-expected.json": "a83d8ac13ca9d28eb02e4c7126fbfb08fb9b51006090ee6022a6049c6630a0e4"
+  }
+}

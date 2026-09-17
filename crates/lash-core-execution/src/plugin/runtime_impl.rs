@@ -377,6 +377,11 @@ impl PluginHost {
         } = self.build_session_contributions(&ctx, snapshot)?;
         let registry = build_tool_registry(&contributions, tool_snapshot)?;
         let tools = Arc::clone(&registry) as Arc<dyn ToolProvider>;
+        let session_extensions = PluginExtensions::from_contributions(
+            plugins
+                .iter()
+                .flat_map(|plugin| plugin.extension_contributions()),
+        );
 
         let session = Arc::new(PluginSession {
             state,
@@ -389,6 +394,7 @@ impl PluginHost {
             tool_access: Arc::new(std::sync::RwLock::new(authority.tool_access)),
             subagent: authority.subagent,
             extensions: self.extensions.clone(),
+            session_extensions,
             triggers,
             contributions,
         });

@@ -303,22 +303,179 @@ fn process_terminal_state_for_turn(turn: &crate::AssembledTurn) -> crate::Proces
     }
 }
 
-fn process_turn_summary(
-    turn: &crate::AssembledTurn,
-    state: crate::ProcessStatus,
-) -> Option<String> {
-    if state != crate::ProcessStatus::Failed {
-        return None;
+/// Classify a non-cancelled child stop for the parent.
+///
+/// The `code` is the stop's own spelling, so a parent can tell a provider
+/// error from a refusal without reading prose; the sentence is the fallback
+/// message for a stop whose child authored no text of its own.
+fn process_turn_stop_classification(
+    stop: &crate::TurnStop,
+) -> (crate::ToolFailureClass, &'static str, &'static str) {
+    use crate::ToolFailureClass as Class;
+    match stop {
+        // Cancellation never reaches here: `output_from_process_turn` settles a
+        // cancelled child before classifying a failure.
+        crate::TurnStop::Cancelled { .. } => (
+            Class::Execution,
+            "process_session_turn_cancelled",
+            "background session turn was cancelled",
+        ),
+        crate::TurnStop::Incomplete => (
+            Class::Execution,
+            "process_session_turn_incomplete",
+            "background session turn ended before producing a result",
+        ),
+        crate::TurnStop::InvalidInput => (
+            Class::InvalidRequest,
+            "process_session_turn_invalid_input",
+            "background session turn input was refused",
+        ),
+        crate::TurnStop::MaxTurns => (
+            Class::ResourceLimit,
+            "process_session_turn_max_turns",
+            "background session turn reached its turn limit",
+        ),
+        crate::TurnStop::ToolFailure => (
+            Class::Execution,
+            "process_session_turn_tool_failure",
+            "background session turn stopped on a failed tool call",
+        ),
+        crate::TurnStop::ProviderError => (
+            Class::External,
+            "process_session_turn_provider_error",
+            "background session turn stopped on a provider error",
+        ),
+        crate::TurnStop::ContextOverflow => (
+            Class::ResourceLimit,
+            "process_session_turn_context_overflow",
+            "background session turn exceeded the model's context window",
+        ),
+        crate::TurnStop::PluginAbort => (
+            Class::Execution,
+            "process_session_turn_plugin_abort",
+            "background session turn was aborted by a plugin",
+        ),
+        crate::TurnStop::RuntimeError => (
+            Class::Internal,
+            "process_session_turn_runtime_error",
+            "background session turn stopped on a runtime error",
+        ),
+        crate::TurnStop::SubmittedError { .. } => (
+            Class::Execution,
+            "process_session_turn_submitted_error",
+            "background session turn submitted a failure without a reason",
+        ),
+        crate::TurnStop::ToolError { .. } => (
+            Class::Execution,
+            "process_session_turn_tool_error",
+            "background session turn stopped on a tool error without a message",
+        ),
     }
-    match &turn.outcome {
-        crate::TurnOutcome::Stopped(
-            crate::TurnStop::SubmittedError { value } | crate::TurnStop::ToolError { value, .. },
-        ) => value
-            .get("reason")
-            .and_then(serde_json::Value::as_str)
-            .map(ToOwned::to_owned),
-        _ => Some("background session turn failed".to_string()),
+}
+
+/// The child's own text for a stop that carries one.
+///
+/// `submit_error` and every other `task.fail` spelling land as a projected
+/// [`crate::ToolFailure`], whose human reason is `message`; a value that
+/// carries a bare `reason` string (a host-authored `SubmittedError`) is read
+/// from that field. Nothing is invented: a stop with no authored text yields
+/// `None` and the caller falls back to the stop's own sentence.
+fn authored_stop_text(value: &serde_json::Value) -> Option<String> {
+    ["reason", "message"]
+        .into_iter()
+        .filter_map(|field| value.get(field))
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .find(|text| !text.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+/// The child turn's first blocking issue: the root cause the assembler
+/// recorded, ahead of any consequence it recorded afterwards.
+fn first_blocking_issue(turn: &crate::AssembledTurn) -> Option<&crate::TurnIssue> {
+    turn.errors
+        .iter()
+        .find(|issue| issue.severity == crate::TurnIssueSeverity::Blocking)
+}
+
+/// Project a failed child turn onto the failure the parent's spawn result,
+/// the child's process record and its terminal process event all carry.
+///
+/// The child's own reason is the message wherever the child authored one, the
+/// stop's code keeps the categories apart, and the typed diagnostics — the
+/// child's [`crate::TurnFailureKind`]/[`crate::TurnFailureCode`] and the
+/// stop's projected value — ride the existing `raw` channel, bounded.
+fn failure_from_process_turn(turn: &crate::AssembledTurn) -> crate::ToolFailure {
+    let crate::TurnOutcome::Stopped(stop) = &turn.outcome else {
+        return crate::ToolFailure::tool(
+            crate::ToolFailureClass::Internal,
+            "process_session_turn_failed",
+            "background session turn failed",
+        );
+    };
+    let (class, code, sentence) = process_turn_stop_classification(stop);
+    let issue = first_blocking_issue(turn);
+    let (authored, stop_value) = match stop {
+        crate::TurnStop::SubmittedError { value } | crate::TurnStop::ToolError { value, .. } => {
+            (authored_stop_text(value), Some(value))
+        }
+        _ => (
+            issue
+                .map(|issue| issue.message.trim())
+                .filter(|message| !message.is_empty())
+                .map(ToOwned::to_owned),
+            None,
+        ),
+    };
+    let message = match (authored, stop_value.is_some()) {
+        // A child that authored its own terminal reason reaches the parent
+        // verbatim: the parent model reads the child's words, not ours.
+        (Some(text), true) => text,
+        // A category stop has no child-authored terminal text, so the
+        // assembler's blocking issue qualifies the stop's own sentence.
+        (Some(text), false) => format!("{sentence}: {text}"),
+        (None, _) => sentence.to_string(),
+    };
+    let mut failure = crate::ToolFailure::tool(
+        class,
+        code,
+        lash_sansio::session_model::truncate_raw_error(&message),
+    );
+    failure.raw = process_turn_failure_raw(stop_value, issue).map(crate::ToolValue::untrusted_json);
+    failure
+}
+
+/// Bounded diagnostics for a failed child turn, or `None` when the child
+/// produced neither a projected stop value nor a blocking issue.
+fn process_turn_failure_raw(
+    stop_value: Option<&serde_json::Value>,
+    issue: Option<&crate::TurnIssue>,
+) -> Option<serde_json::Value> {
+    let mut raw = serde_json::Map::new();
+    if let Some(value) = stop_value {
+        raw.insert(
+            "stop".to_string(),
+            serde_json::Value::String(lash_sansio::session_model::truncate_raw_error(
+                &value.to_string(),
+            )),
+        );
     }
+    if let Some(issue) = issue {
+        raw.insert("kind".to_string(), issue.kind.as_str().into());
+        if let Some(code) = issue.code.as_ref() {
+            raw.insert("code".to_string(), code.as_str().into());
+        }
+        if let Some(retryable) = issue.retryable {
+            raw.insert("retryable".to_string(), retryable.into());
+        }
+        raw.insert(
+            "issue".to_string(),
+            serde_json::Value::String(lash_sansio::session_model::truncate_raw_error(
+                issue.message.trim(),
+            )),
+        );
+    }
+    (!raw.is_empty()).then_some(serde_json::Value::Object(raw))
 }
 
 fn output_from_process_turn(
@@ -347,12 +504,7 @@ fn output_from_process_turn(
         return crate::ToolCallOutput::cancelled(cancellation);
     }
     if state == crate::ProcessStatus::Failed {
-        return crate::ToolCallOutput::failure(crate::ToolFailure::tool(
-            crate::ToolFailureClass::Execution,
-            "process_session_turn_failed",
-            process_turn_summary(&turn, state)
-                .unwrap_or_else(|| "background session turn failed".to_string()),
-        ));
+        return crate::ToolCallOutput::failure(failure_from_process_turn(&turn));
     }
     crate::ToolCallOutput::success(serde_json::json!({
         "process_id": registration.id,
@@ -364,6 +516,156 @@ fn output_from_process_turn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-2975: every non-cancelled child stop reaches the parent as its own
+    /// failure. The pre-fix runner answered all ten with one code and one
+    /// sentence, so a parent model could not tell a retryable provider error
+    /// from a deliberate refusal.
+    #[test]
+    fn every_non_cancelled_child_stop_is_distinguishable_to_the_parent() {
+        let stops = [
+            crate::TurnStop::Incomplete,
+            crate::TurnStop::InvalidInput,
+            crate::TurnStop::MaxTurns,
+            crate::TurnStop::ToolFailure,
+            crate::TurnStop::ProviderError,
+            crate::TurnStop::ContextOverflow,
+            crate::TurnStop::PluginAbort,
+            crate::TurnStop::RuntimeError,
+            crate::TurnStop::SubmittedError {
+                value: serde_json::json!({ "reason": "missing shard amber" }),
+            },
+            crate::TurnStop::ToolError {
+                tool_name: "submit_error".to_string(),
+                value: serde_json::json!({
+                    "class": "execution",
+                    "code": "subagent_submit_error",
+                    "message": "missing shard amber",
+                }),
+            },
+        ];
+
+        let mut seen = std::collections::BTreeSet::new();
+        for stop in stops {
+            let failure = failed_child_failure(stop.clone());
+            assert!(
+                seen.insert(failure.code.clone()),
+                "two stops share the code `{}`: {stop:?}",
+                failure.code
+            );
+            assert_ne!(
+                failure.message, "background session turn failed",
+                "{stop:?} still collapses onto the shared generic message"
+            );
+            assert_eq!(failure.source, crate::ToolFailureSource::Tool);
+        }
+        assert_eq!(seen.len(), 10);
+    }
+
+    /// The child's own terminal words reach the parent verbatim: a parent
+    /// model reads the child's reason, not a summary of it.
+    #[test]
+    fn a_child_authored_stop_reason_reaches_the_parent_verbatim() {
+        let submitted = failed_child_failure(crate::TurnStop::SubmittedError {
+            value: serde_json::json!({ "reason": "missing shard amber" }),
+        });
+        assert_eq!(submitted.message, "missing shard amber");
+        assert_eq!(submitted.code, "process_session_turn_submitted_error");
+
+        let tool_error = failed_child_failure(crate::TurnStop::ToolError {
+            tool_name: "submit_error".to_string(),
+            value: serde_json::json!({
+                "class": "execution",
+                "code": "subagent_submit_error",
+                "message": "missing shard amber",
+            }),
+        });
+        assert_eq!(tool_error.message, "missing shard amber");
+        assert_eq!(tool_error.code, "process_session_turn_tool_error");
+        assert!(
+            tool_error
+                .raw
+                .as_ref()
+                .map(crate::ToolValue::to_json_value)
+                .is_some_and(|raw| raw["stop"]
+                    .as_str()
+                    .is_some_and(|stop| stop.contains("subagent_submit_error"))),
+            "the projected stop rides the bounded `raw` channel: {tool_error:?}"
+        );
+    }
+
+    /// A stop the child did not author text for carries the assembler's own
+    /// blocking issue — including its typed kind and code — rather than a
+    /// sentence with nothing behind it.
+    #[test]
+    fn a_category_stop_carries_the_child_turn_blocking_issue() {
+        let mut turn =
+            crate::testing::mock_assembled_turn(&SessionId::from("failing-child"), "unused");
+        turn.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError);
+        turn.errors = vec![crate::TurnIssue {
+            severity: crate::TurnIssueSeverity::Blocking,
+            kind: crate::TurnFailureKind::LlmProvider,
+            code: Some(crate::TurnFailureCode::ContextOverflow),
+            terminal_reason: None,
+            message: "the request exceeded the model's context window".to_string(),
+            raw: None,
+            retryable: Some(false),
+            provider_failure_kind: None,
+        }];
+
+        let failure = failure_from_process_turn(&turn);
+        assert_eq!(failure.code, "process_session_turn_provider_error");
+        assert_eq!(failure.class, crate::ToolFailureClass::External);
+        assert_eq!(
+            failure.message,
+            "background session turn stopped on a provider error: the request exceeded the model's context window"
+        );
+        let raw = failure
+            .raw
+            .as_ref()
+            .map(crate::ToolValue::to_json_value)
+            .expect("typed diagnostics ride `raw`");
+        assert_eq!(raw["kind"], serde_json::json!("llm_provider"));
+        assert_eq!(raw["code"], serde_json::json!("context_overflow"));
+        assert_eq!(raw["retryable"], serde_json::json!(false));
+    }
+
+    /// Run one stopped child turn through the runner's own projection, so the
+    /// assertions cover the failure a parent, a process record and a terminal
+    /// process event all read.
+    fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
+        let mut turn =
+            crate::testing::mock_assembled_turn(&SessionId::from("failing-child"), "unused");
+        turn.outcome = crate::TurnOutcome::Stopped(stop);
+        let registration = crate::ProcessRegistration::new(
+            "process:subagent:failing-child",
+            crate::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            crate::RecoveryContract::ExternallyOwned,
+            crate::ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        );
+        let state = process_terminal_state_for_turn(&turn);
+        assert_eq!(
+            state,
+            crate::ProcessStatus::Failed,
+            "precondition: the stop must fold to a failed process"
+        );
+        let output = output_from_process_turn(
+            &registration,
+            &SessionId::from("failing-child"),
+            turn,
+            state,
+        );
+        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("a failed child turn must project a tool failure");
+        };
+        failure
+    }
     use crate::llm::types::LlmStreamEvent;
     use crate::runtime::tests::helpers::{
         MockCall, mock_provider, native_scope, runtime_with_plugins_and_tools_and_host,

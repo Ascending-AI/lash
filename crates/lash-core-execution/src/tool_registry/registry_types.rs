@@ -159,17 +159,32 @@ pub(super) struct ToolRegistryState {
 
 #[derive(Clone)]
 pub(super) struct ToolRegistryInner {
-    /// Changes whenever the live source map changes, even when the admitted
-    /// surface is byte-equivalent and its generation therefore stays stable.
-    pub(super) source_revision: u64,
-    /// Changes whenever private registry state changes, including restores
-    /// that intentionally preserve or adopt the public generation.
-    pub(super) state_revision: u64,
+    /// The optimistic-CAS fence every retry loop observes. [`Self::commit`]
+    /// is its only bump site, so "every write moves the fence" is structural.
+    /// `state.generation` is a different counter — the public admitted-surface
+    /// identity exported in `ToolState` — and is not part of this fence.
+    pub(super) write_revision: u64,
     pub(super) sources: BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
     /// Original live sources retained only by a pinned registry for explicit
     /// replay-grant routing. Resident dispatch uses `sources` exclusively.
     pub(super) granted_sources: Option<BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>>,
     pub(super) state: ToolRegistryState,
+}
+
+fn checked_write_revision(write_revision: u64) -> Result<u64, ReconfigureError> {
+    write_revision.checked_add(1).ok_or_else(|| {
+        ReconfigureError::Validation("tool registry write revision overflow".to_string())
+    })
+}
+
+impl ToolRegistryInner {
+    /// Advance the write fence exactly once. Every mutator routes its write
+    /// through here, before mutating under the write guard, so an overflow
+    /// refusal leaves the registry unmodified.
+    pub(super) fn commit(&mut self) -> Result<(), ReconfigureError> {
+        self.write_revision = checked_write_revision(self.write_revision)?;
+        Ok(())
+    }
 }
 
 /// Outcome of `ToolRegistry::restore_state`: the adopted generation plus the

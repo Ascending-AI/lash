@@ -88,7 +88,7 @@ impl TriggerStore for PostgresTriggerStore {
         {
             let rows = sqlx::query(
                 "SELECT record_json FROM lash_trigger_subscriptions
-                 WHERE owner_scope = $1 AND tombstoned = FALSE FOR UPDATE",
+                 WHERE owner_scope = $1 AND lifecycle <> 'tombstoned' FOR UPDATE",
             )
             .bind(owner_scope.namespace())
             .fetch_all(&mut *tx)
@@ -147,7 +147,7 @@ impl TriggerStore for PostgresTriggerStore {
             sqlx::query(
                 "INSERT INTO lash_trigger_subscriptions (
                     subscription_id, owner_scope, subscription_key, incarnation, revision,
-                    definition_fingerprint, source_type, source_key, enabled, tombstoned,
+                    definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
                     created_at_ms, updated_at_ms, record_json
                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                  ON CONFLICT (subscription_id) DO UPDATE SET
@@ -158,8 +158,8 @@ impl TriggerStore for PostgresTriggerStore {
                     definition_fingerprint = EXCLUDED.definition_fingerprint,
                     source_type = EXCLUDED.source_type,
                     source_key = EXCLUDED.source_key,
-                    enabled = EXCLUDED.enabled,
-                    tombstoned = EXCLUDED.tombstoned,
+                    lifecycle = EXCLUDED.lifecycle,
+                    deleted_at_ms = EXCLUDED.deleted_at_ms,
                     updated_at_ms = EXCLUDED.updated_at_ms,
                     record_json = EXCLUDED.record_json",
             )
@@ -171,8 +171,8 @@ impl TriggerStore for PostgresTriggerStore {
             .bind(&record.definition_fingerprint)
             .bind(&record.source_type)
             .bind(&record.source_key)
-            .bind(record.enabled)
-            .bind(record.tombstoned)
+            .bind(record.lifecycle.as_column())
+            .bind(record.lifecycle.deleted_at_ms().map(|ms| ms as i64))
             .bind(record.created_at_ms as i64)
             .bind(record.updated_at_ms as i64)
             .bind(serde_json::to_string(record).map_err(process_decode_error)?)
@@ -236,7 +236,7 @@ impl TriggerStore for PostgresTriggerStore {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let rows = sqlx::query(
             "SELECT subscription_id, record_json FROM lash_trigger_subscriptions
-             WHERE owner_scope = $1 AND tombstoned = FALSE FOR UPDATE",
+             WHERE owner_scope = $1 AND lifecycle <> 'tombstoned' FOR UPDATE",
         )
         .bind(&owner_scope)
         .fetch_all(&mut *tx)
@@ -249,16 +249,14 @@ impl TriggerStore for PostgresTriggerStore {
             let mut record: TriggerSubscriptionRecord =
                 serde_json::from_str(&json).map_err(process_decode_error)?;
             let next_revision = lash_core::facade_support::next_trigger_store_revision(&record)?;
-            record.enabled = false;
-            record.tombstoned = true;
-            record.deleted_at_ms = Some(now);
+            record.tombstone(now);
             record.revision = next_revision;
             record.updated_at_ms = now;
             let sql_revision =
                 plugin_sql_counter_value("trigger_subscription_revision", record.revision)?;
             sqlx::query(
                 "UPDATE lash_trigger_subscriptions
-                 SET enabled = FALSE, tombstoned = TRUE, revision = $2,
+                 SET lifecycle = 'tombstoned', deleted_at_ms = $3, revision = $2,
                      updated_at_ms = $3, record_json = $4
                  WHERE subscription_id = $1",
             )
@@ -911,7 +909,7 @@ pub(crate) fn list_subscriptions_query(
 ) -> sqlx::QueryBuilder<'static, sqlx::Postgres> {
     let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
         "SELECT subscription_id, record_json FROM lash_trigger_subscriptions
-         WHERE tombstoned = FALSE",
+         WHERE lifecycle <> 'tombstoned'",
     );
     if let Some(owner_scope) = filter.registrant_scope_id.as_ref() {
         query
@@ -934,7 +932,8 @@ pub(crate) fn list_subscriptions_query(
             .push_bind(source_key.clone());
     }
     if let Some(enabled) = filter.enabled {
-        query.push(" AND enabled = ").push_bind(enabled);
+        let lifecycle = if enabled { "enabled" } else { "disabled" };
+        query.push(" AND lifecycle = ").push_bind(lifecycle);
     }
     query.push(" ORDER BY owner_scope ASC, subscription_key ASC");
     query
@@ -947,7 +946,7 @@ async fn reserve_postgres_deliveries(
 ) -> Result<Vec<TriggerDeliveryReservation>, PluginError> {
     let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
         "SELECT subscription_id, record_json FROM lash_trigger_subscriptions
-         WHERE enabled = TRUE AND tombstoned = FALSE AND source_type = ",
+         WHERE lifecycle = 'enabled' AND source_type = ",
     );
     query
         .push_bind(&occurrence.source_type)

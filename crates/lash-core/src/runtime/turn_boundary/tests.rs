@@ -63,7 +63,8 @@ fn turn_draft_appends_resident_nodes_not_yet_durable() {
         Arc::new(crate::SystemClock),
         "masked-path-regression",
     );
-    let GraphAppend { nodes, .. } = draft.graph_commit();
+    let graph = draft.graph_commit();
+    let nodes = graph.nodes();
     assert_eq!(
         nodes
             .iter()
@@ -160,6 +161,53 @@ fn frame_key(material: &str) -> FrameKey {
 }
 fn frame_request(frame_key: FrameKey, reason: AgentFrameReason) -> OpenAgentFrameRequest {
     OpenAgentFrameRequest::new(frame_key, reason)
+}
+fn switch_request(
+    operation_id: &str,
+    frame_key: FrameKey,
+    reason: AgentFrameReason,
+    initial_nodes: Vec<crate::SessionAppendNode>,
+) -> crate::SwitchAgentFrameRequest {
+    crate::SwitchAgentFrameRequest::new(operation_id, frame_key, reason)
+        .with_initial_nodes(initial_nodes)
+}
+fn seed_node(text: &str) -> crate::SessionAppendNode {
+    crate::SessionAppendNode::message(crate::PluginMessage::text(MessageRole::Assistant, text))
+}
+fn frame_switch_commit_input<'a>(
+    returned_state: &'a crate::SessionSnapshot,
+    outcome: &'a TurnOutcome,
+    store: &'a RecordingStore,
+) -> FinalCommitInput<'a> {
+    FinalCommitInput {
+        returned_state,
+        tool_calls: &[],
+        omitted: None,
+        plugins: None,
+        execution_state_update: ExecutionStateUpdate::Clear,
+        agent_frame_switch_materializes: true,
+        store: Some(store),
+        usage_deltas: &[],
+        failure_evidence: &[],
+        outcome,
+        claim_settlement: TurnClaimSettlement::for_test(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+        ),
+        current_session_lease_fence: None,
+        enqueued_queue_batches: Vec::new(),
+        interrupted_turn_input_turn_id: None,
+        interrupted_turn_input_cancellation: None,
+        interrupted_turn_cancel_intent: None,
+        turn_cancel_closure_settlement: None,
+        turn_control_resolver: None,
+        recorded_attachment_intent_ids: Default::default(),
+        session_execution_lease_completion: None,
+    }
 }
 
 #[tokio::test]
@@ -359,7 +407,7 @@ async fn leased_boundary(
     (TurnBoundary::from_state(state), lease)
 }
 #[test]
-fn agent_frame_switch_materializes_outcome_seed_without_tool_call_event() {
+fn agent_frame_switch_seeds_the_new_frame_without_a_tool_call_event() {
     let graph =
         SessionGraph::from_active_read_state(&[text_message("u0", MessageRole::User, "old frame")]);
     let mut state = state_with_graph(graph);
@@ -370,17 +418,24 @@ fn agent_frame_switch_materializes_outcome_seed_without_tool_call_event() {
         MessageRole::User,
         "seed message",
     ));
-    materialize_agent_frame_switch(
-        &mut state,
-        &TurnOutcome::AgentFrameSwitch {
-            frame_key: frame_key.clone(),
-            task: "next task".to_string(),
-            initial_nodes: vec![seed_node],
-        },
-        &crate::SystemClock,
-        true,
-    )
-    .expect("materialize a fresh frame switch");
+    let draft = TurnGraphAppendDraft::from_resident_state(&state, Arc::new(crate::SystemClock));
+    let recorded = draft
+        .record_frame_switch(
+            &state.session_id.clone(),
+            state.current_frame_node_id.as_deref(),
+            &switch_request(
+                "session-1:turn:turn-outcome-frame-switch",
+                frame_key.clone(),
+                AgentFrameReason::continue_as(),
+                vec![seed_node],
+            ),
+        )
+        .expect("record the turn's one frame switch");
+    assert!(recorded.opened);
+    assert_eq!(recorded.initial_node_ids.len(), 1);
+    draft
+        .fold_into_final_state(&mut state)
+        .expect("materialize a fresh frame switch");
     let expected_frame_node_id =
         crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
 
@@ -576,6 +631,207 @@ fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
             .nearest_frame_node_id(state.session_graph.leaf_node_id.as_deref())
             .map(crate::NodeId::as_str),
         Some(frame_b.frame_node_id.as_str())
+    );
+}
+
+/// A turn carries at most one agent-frame switch (FIG-3303). A plugin that
+/// recorded a switch and a protocol outcome naming a *different* frame are two
+/// authors of one switch: the commit is refused before any durable write
+/// rather than opening both frames and leaving the run to die on the handoff
+/// target check.
+#[tokio::test]
+async fn final_commit_refuses_a_second_frame_switch_author_naming_another_frame() {
+    let store = RecordingStore::default();
+    let state = state_with_graph(SessionGraph::from_active_read_state(&[text_message(
+        "u0",
+        MessageRole::User,
+        "first frame",
+    )]));
+    let opening_frame_node_id = state.current_frame_node_id.clone();
+    let expected_frames =
+        serde_json::to_value(&state.agent_frames).expect("agent frame records serialize");
+
+    let (mut pipeline, _lease) = leased_boundary(&store, state).await;
+    let session_id = pipeline.state().session_id.clone();
+    let current_frame_node_id = pipeline.state().current_frame_node_id.clone();
+    let recorded = pipeline
+        .graph_appends()
+        .record_frame_switch(
+            &session_id,
+            current_frame_node_id.as_deref(),
+            &switch_request(
+                "rolling-history:recovery",
+                frame_key("frame-plugin"),
+                AgentFrameReason::compaction(),
+                vec![seed_node("compaction summary")],
+            ),
+        )
+        .expect("a plugin records the turn's frame switch");
+    assert!(recorded.opened);
+
+    let outcome = TurnOutcome::AgentFrameSwitch {
+        frame_key: frame_key("frame-outcome"),
+        task: "continue as the outcome's frame".to_string(),
+        initial_nodes: Vec::new(),
+    };
+    let returned_state = pipeline.export_state_for_assembly();
+    let error = pipeline
+        .final_commit_with_snapshots(frame_switch_commit_input(&returned_state, &outcome, &store))
+        .await
+        .expect_err("two authors naming different frames must refuse the commit");
+
+    let runtime_error = crate::runtime::runtime_error_from_store_commit(error);
+    assert_eq!(
+        runtime_error.code,
+        crate::RuntimeErrorCode::AgentFrameSwitchAuthorConflict
+    );
+    assert!(runtime_error.code.is_terminal());
+    assert!(
+        runtime_error
+            .message
+            .contains("one turn materializes at most one switch"),
+        "refusal names the rule: {}",
+        runtime_error.message
+    );
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
+
+    let state = pipeline.into_final_state();
+    assert_eq!(state.current_frame_node_id, opening_frame_node_id);
+    assert_eq!(
+        serde_json::to_value(&state.agent_frames).expect("agent frame records serialize"),
+        expected_frames
+    );
+}
+
+/// Same frame key, different seed nodes: the plugin was already answered with
+/// draft ids for its seeds, so the commit refuses rather than silently
+/// dropping one author's seeds past a frame-node-id-only guard.
+#[tokio::test]
+async fn final_commit_refuses_a_second_frame_switch_author_with_other_seed_nodes() {
+    let store = RecordingStore::default();
+    let state = state_with_graph(SessionGraph::from_active_read_state(&[text_message(
+        "u0",
+        MessageRole::User,
+        "first frame",
+    )]));
+    let opening_frame_node_id = state.current_frame_node_id.clone();
+
+    let (mut pipeline, _lease) = leased_boundary(&store, state).await;
+    let session_id = pipeline.state().session_id.clone();
+    let current_frame_node_id = pipeline.state().current_frame_node_id.clone();
+    let recorded = pipeline
+        .graph_appends()
+        .record_frame_switch(
+            &session_id,
+            current_frame_node_id.as_deref(),
+            &switch_request(
+                "rolling-history:recovery",
+                frame_key("frame-next"),
+                AgentFrameReason::compaction(),
+                vec![seed_node("compaction summary")],
+            ),
+        )
+        .expect("a plugin records the turn's frame switch");
+    assert_eq!(recorded.initial_node_ids.len(), 1);
+
+    let outcome = TurnOutcome::AgentFrameSwitch {
+        frame_key: frame_key("frame-next"),
+        task: "continue as the same frame".to_string(),
+        initial_nodes: Vec::new(),
+    };
+    let returned_state = pipeline.export_state_for_assembly();
+    let error = pipeline
+        .final_commit_with_snapshots(frame_switch_commit_input(&returned_state, &outcome, &store))
+        .await
+        .expect_err("a second author with other seed nodes must refuse the commit");
+
+    let runtime_error = crate::runtime::runtime_error_from_store_commit(error);
+    assert_eq!(
+        runtime_error.code,
+        crate::RuntimeErrorCode::AgentFrameSwitchAuthorConflict
+    );
+    assert!(
+        runtime_error
+            .message
+            .contains("must name the same seed nodes"),
+        "refusal names the rule: {}",
+        runtime_error.message
+    );
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
+    assert_eq!(
+        pipeline.into_final_state().current_frame_node_id,
+        opening_frame_node_id
+    );
+}
+
+/// One switch, two authors that agree: the frame opens once, carrying the
+/// seed nodes and the reason of the author the slot already answered.
+#[tokio::test]
+async fn final_commit_opens_one_frame_for_two_agreeing_switch_authors() {
+    let store = RecordingStore::default();
+    let state = state_with_graph(SessionGraph::from_active_read_state(&[text_message(
+        "u0",
+        MessageRole::User,
+        "first frame",
+    )]));
+    let opening_frame_node_id = state.current_frame_node_id.clone();
+
+    let (mut pipeline, _lease) = leased_boundary(&store, state).await;
+    let session_id = pipeline.state().session_id.clone();
+    let current_frame_node_id = pipeline.state().current_frame_node_id.clone();
+    let seeds = vec![seed_node("compaction summary")];
+    pipeline
+        .graph_appends()
+        .record_frame_switch(
+            &session_id,
+            current_frame_node_id.as_deref(),
+            &switch_request(
+                "rolling-history:recovery",
+                frame_key("frame-next"),
+                AgentFrameReason::compaction(),
+                seeds.clone(),
+            ),
+        )
+        .expect("a plugin records the turn's frame switch");
+
+    let outcome = TurnOutcome::AgentFrameSwitch {
+        frame_key: frame_key("frame-next"),
+        task: "continue as the same frame".to_string(),
+        initial_nodes: seeds,
+    };
+    let returned_state = pipeline.export_state_for_assembly();
+    pipeline
+        .final_commit_with_snapshots(frame_switch_commit_input(&returned_state, &outcome, &store))
+        .await
+        .expect("two authors of one switch commit once");
+    assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
+
+    let state = pipeline.into_final_state();
+    let expected_frame_node_id =
+        crate::session_graph::frame_node_id(&session_id, frame_key("frame-next").as_str());
+    assert_eq!(
+        state.current_frame_node_id.as_deref(),
+        Some(expected_frame_node_id.as_str())
+    );
+    // Exactly one frame was opened by this commit, and it is the recorded
+    // author's: the outcome's `continue_as` never overwrote the reason the
+    // plugin was answered with.
+    assert_eq!(state.agent_frames.len(), 2);
+    let current = state.current_agent_frame().expect("current frame");
+    assert_eq!(current.reason.as_str(), crate::AgentFrameReason::COMPACTION);
+    assert_eq!(
+        current.previous_frame_node_id.as_deref(),
+        opening_frame_node_id.as_deref()
+    );
+    // The plugin's seed survives the commit exactly once.
+    let current_read = state
+        .session_graph
+        .read_model(Some(&expected_frame_node_id))
+        .expect("read the frame this commit opened");
+    assert_eq!(current_read.messages.len(), 1);
+    assert_eq!(
+        current_read.messages[0].parts[0].content,
+        "compaction summary"
     );
 }
 
@@ -1484,6 +1740,22 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
         Some(b"runtime".as_slice()),
         "storeless commits retain the accepted execution snapshot"
     );
+}
+
+#[test]
+fn state_after_export_is_the_real_committed_state() {
+    let mut boundary = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
+    boundary.state_mut().turn_index = 7;
+
+    let snapshot = boundary.export_state_for_assembly();
+    let state = boundary.state();
+
+    // Finalization must hand out the turn's real state. A fabricated
+    // `RuntimeSessionState::new` placeholder — the old mem::replace
+    // throwaway — would carry a fresh session id and turn_index 0.
+    assert_eq!(state.session_id, SessionId::from("session-1"));
+    assert_eq!(state.turn_index, 7);
+    assert_eq!(snapshot.session_id, state.session_id);
 }
 
 #[test]

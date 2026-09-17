@@ -92,10 +92,10 @@ impl CurrentSessionCapability {
         }
         .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
         let observation = runtime.observe();
-        if let Some(err) = observation.tool_catalog_error.as_ref() {
-            return Err(crate::PluginError::Session(err.clone()));
-        }
-        Ok(Arc::clone(&observation.tool_catalog))
+        observation
+            .tool_catalog
+            .clone()
+            .map_err(crate::PluginError::Session)
     }
 
     pub(in crate::runtime::session_manager) fn current_tool_registry(

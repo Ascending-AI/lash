@@ -362,7 +362,7 @@ async fn fork_and_advance(
     let parent_node_id = state.session_graph.leaf_node_id.clone();
     state
         .session_graph
-        .apply_append(&crate::GraphAppend {
+        .apply_append(&crate::GraphAppend::Extend {
             nodes: vec![crate::SessionNodeRecord {
                 node_id: child_node_id.to_string().into(),
                 parent_node_id,
@@ -377,7 +377,6 @@ async fn fork_and_advance(
                     ),
                 },
             }],
-            leaf_node_id: Some(child_node_id.to_string().into()),
         })
         .expect("append child node");
     child

@@ -31,16 +31,12 @@ pub struct ProcessWorkSnapshot {
 pub struct ObservedWorkItem {
     pub process: ObservedProcess,
     pub events: Vec<ObservedProcessEvent>,
-    /// Sequence of the newest event carried by `events`, or zero for an empty
-    /// tail. Comparing this with `process.last_event_sequence` reveals a
-    /// non-transactionally mis-paired record/event snapshot.
-    pub event_tail_sequence: u64,
-    /// Whether the independently read process record and event tail describe
-    /// one coherent event position. Consumers must not present lifecycle state
-    /// from an item carrying [`ObservedWorkItemState::EventTailMismatch`].
-    pub state: ObservedWorkItemState,
 }
 
+/// The record/event-tail coherence of an [`ObservedWorkItem`], derived from
+/// the carried record and events rather than stored. Consumers must not
+/// present lifecycle state from an item whose [`ObservedWorkItem::state`]
+/// derives [`ObservedWorkItemState::EventTailMismatch`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ObservedWorkItemState {
@@ -123,10 +119,36 @@ impl ObservedWorkItem {
         self.process.label()
     }
 
+    /// Sequence of the newest event carried by `events`, or zero for an empty
+    /// tail. Computed rather than carried: a stored copy could only ever agree
+    /// or lie, so comparing this with `process.last_event_sequence` is the one
+    /// spelling of a mis-paired record/event snapshot.
+    pub fn event_tail_sequence(&self) -> u64 {
+        self.events.last().map_or(0, |event| event.sequence)
+    }
+
+    /// Whether the independently read process record and event tail describe
+    /// one coherent event position. Derived on read so a decoded or hand-built
+    /// item cannot hold a verdict that disagrees with its carried fields.
+    pub fn state(&self) -> ObservedWorkItemState {
+        let event_tail_sequence = self.event_tail_sequence();
+        if self.process.last_event_sequence == event_tail_sequence {
+            ObservedWorkItemState::Coherent
+        } else {
+            ObservedWorkItemState::EventTailMismatch {
+                record_sequence: self.process.last_event_sequence,
+                event_tail_sequence,
+            }
+        }
+    }
+
     /// Reports whether the bounded observer retry still left independently
     /// read record and event-tail positions mis-paired.
     pub fn has_mispaired_event_tail(&self) -> bool {
-        matches!(self.state, ObservedWorkItemState::EventTailMismatch { .. })
+        matches!(
+            self.state(),
+            ObservedWorkItemState::EventTailMismatch { .. }
+        )
     }
 }
 
@@ -225,23 +247,9 @@ impl ProcessWorkObserver {
                 .into_iter()
                 .map(ObservedProcessEvent::from)
                 .collect();
-            let event_tail_sequence = events.last().map_or(0, |event| event.sequence);
             let lease = self.registry.get_process_lease(&process_id).await?;
             let process = ObservedProcess::from_record(record, lease);
-            let state = if process.last_event_sequence == event_tail_sequence {
-                ObservedWorkItemState::Coherent
-            } else {
-                ObservedWorkItemState::EventTailMismatch {
-                    record_sequence: process.last_event_sequence,
-                    event_tail_sequence,
-                }
-            };
-            let item = ObservedWorkItem {
-                process,
-                events,
-                event_tail_sequence,
-                state,
-            };
+            let item = ObservedWorkItem { process, events };
             if !item.has_mispaired_event_tail() || attempt + 1 == SNAPSHOT_READ_ATTEMPTS {
                 return Ok(item);
             }
@@ -599,7 +607,8 @@ mod tests {
         assert_eq!(snapshot.items.len(), 1);
         assert_eq!(snapshot.items[0].events.len(), 2);
         assert_eq!(
-            snapshot.items[0].process.last_event_sequence, snapshot.items[0].event_tail_sequence,
+            snapshot.items[0].process.last_event_sequence,
+            snapshot.items[0].event_tail_sequence(),
             "a stable observation must pair record and event-tail positions"
         );
         assert!(!snapshot.items[0].has_mispaired_event_tail());
@@ -657,9 +666,10 @@ mod tests {
             .await
             .expect("retry observation");
 
-        assert_eq!(item.state, ObservedWorkItemState::Coherent);
+        assert_eq!(item.state(), ObservedWorkItemState::Coherent);
         assert_eq!(
-            item.process.last_event_sequence, item.event_tail_sequence,
+            item.process.last_event_sequence,
+            item.event_tail_sequence(),
             "the retry must pair the refreshed terminal record with its event tail"
         );
         assert!(item.process.terminal());
@@ -696,15 +706,16 @@ mod tests {
             .expect("bounded observation");
 
         assert_eq!(
-            item.state,
+            item.state(),
             ObservedWorkItemState::EventTailMismatch {
                 record_sequence: stale_record.last_event_sequence,
-                event_tail_sequence: item.event_tail_sequence,
+                event_tail_sequence: item.event_tail_sequence(),
             }
         );
         assert!(item.has_mispaired_event_tail());
         assert_ne!(
-            item.process.last_event_sequence, item.event_tail_sequence,
+            item.process.last_event_sequence,
+            item.event_tail_sequence(),
             "the exhausted retry must expose rather than hide the torn snapshot"
         );
     }

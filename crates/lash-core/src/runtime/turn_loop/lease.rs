@@ -191,6 +191,7 @@ impl LashRuntime {
             RuntimeErrorCode::SessionExecutionLeaseLost
                 | RuntimeErrorCode::ExecutionStateCaptureFailed
                 | RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
+                | RuntimeErrorCode::AgentFrameSwitchAuthorConflict
         ) || claims.is_empty()
         {
             return;
@@ -231,6 +232,7 @@ impl LashRuntime {
             RuntimeErrorCode::SessionExecutionLeaseLost
                 | RuntimeErrorCode::ExecutionStateCaptureFailed
                 | RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
+                | RuntimeErrorCode::AgentFrameSwitchAuthorConflict
         ) || claims.is_empty()
         {
             return;

@@ -347,7 +347,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         writer = yaml.safe_load(SEAL_CACHE_WORKFLOW.read_text(encoding="utf-8"))
         lane = next(
             s for s in ci["jobs"]["check"]["steps"]
-            if "rust-cache@" in s.get("uses", "") and s.get("if") == "matrix.lane == 'seal'"
+            if "rust-cache@" in s.get("uses", "")
         )
         (writer_job,) = writer["jobs"].values()
         saver = next(s for s in writer_job["steps"] if "rust-cache@" in s.get("uses", ""))
@@ -355,11 +355,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(lane["with"], saver["with"])
         self.assertRegex(saver["with"]["shared-key"], r"^linux-seal-[0-9]+$")
         self.assertNotIn("save-if", lane["with"])
-        seal_entry = next(
-            row for row in ci["jobs"]["check"]["strategy"]["matrix"]["include"] if row["lane"] == "seal"
-        )
-        self.assertEqual("${{ github.workspace }}/${{ matrix.target }}", ci["jobs"]["check"]["env"]["CARGO_TARGET_DIR"])
-        self.assertEqual(f"${{{{ github.workspace }}}}/{seal_entry['target']}", writer_job["env"]["CARGO_TARGET_DIR"])
+        self.assertEqual("${{ github.workspace }}/target-seal", ci["jobs"]["check"]["env"]["CARGO_TARGET_DIR"])
+        self.assertEqual(ci["jobs"]["check"]["env"]["CARGO_TARGET_DIR"], writer_job["env"]["CARGO_TARGET_DIR"])
         for name in ("CARGO_TERM_COLOR", "LASH_CI_FEATURES", "RUSTFLAGS"):
             self.assertEqual(ci["env"][name], writer["env"][name], name)
 
@@ -589,31 +586,25 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "functional-e2e",
             "functional-e2e-process-operations",
             "fuzz-smoke",
-        }
-        # `package-feature-checks` and `runtime-feature-boundary` were two more
-        # of these until the feature lanes moved onto the pool: one Bazel job
-        # now compiles every lane command's own resolution, cheaply enough to
-        # run on pull requests, so it is not a merge-group-only compile lane.
-        queue_required = {
+            # Feature lanes, deferred Unicode and the lashlang consumer left
+            # the PR/merge-group board entirely: the queue now runs the same
+            # minimal board as a pull request, and the release dispatch is
+            # their sole home.
+            "feature-lanes",
+            "unicode-tests",
             "lashlang-git-consumer",
         }
         guard = "github.event_name == 'workflow_dispatch'"
         for job in sorted(dispatch_only):
             block = workflow_job_block(workflow, job)
-            self.assertIn(f"if: {guard} && needs.plan.outputs.", block, job)
+            self.assertIn("workflow_dispatch", block, job)
+            self.assertIn(guard, block, job)
         # No `push` trigger at all, and no job may resurrect one.
         self.assertNotIn("\n  push:\n", workflow)
         self.assertNotIn("'push'", workflow)
-        queue_guard = (
-            "if: (github.event_name == 'merge_group' && (needs.plan.outputs.rust == 'true' || needs.plan.outputs.fail_open == 'true'))"
-            " || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true')"
-        )
-        for job in sorted(queue_required):
-            self.assertIn(queue_guard, workflow_job_block(workflow, job), job)
 
         plan = runpy.run_path(str(ROOT / "scripts" / "ci_plan.py"))
         self.assertEqual(plan["DISPATCH_ONLY_JOBS"], dispatch_only)
-        self.assertEqual(plan["QUEUE_REQUIRED_COMPILE_JOBS"], queue_required)
         self.assertEqual(plan["DEFERRED_EVENTS"], {"pull_request", "merge_group"})
 
         evaluate = plan["evaluate_conclusion"]
@@ -629,11 +620,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         }
         for job in dispatch_only:
             needs[job] = {"result": "skipped", "outputs": {}}
-        for job in queue_required:
-            needs[job] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
-        for job in queue_required:
-            needs[job] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group"), [])
         dispatch_needs = {
             job: {"result": "success", "outputs": dict(value.get("outputs", {}))}
@@ -689,9 +676,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     ],
                 )
 
-        # postgres-store is unconditional on PR-class events, so a skipped
-        # matrix job must fail the single required conclusion even if plan's
-        # stores family would otherwise allow a skip.
+        # postgres-store is gated on the path-derived stores family, so on a
+        # docs-only diff a skipped matrix job is accepted.
         pr_needs = {
             job: {**value, "outputs": dict(value.get("outputs", {}))}
             for job, value in needs.items()
@@ -831,7 +817,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             f"target/confidence/stages/{stage}/**"
             for stage in ("harnesses", "generated-${{ matrix.shard }}", "minimizer", "backends",
                            "coverage", "mutation-core", "mutation-sim",
-                           "mutation-packages-${{ matrix.package }}")
+                           "mutation-packages-${{ matrix.package }}-${{ matrix.shard }}")
         )
         self.assertCountEqual(consumed_paths, expected_consumed_paths)
 
@@ -1144,6 +1130,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             'local search_shard="${LASH_SIM_SHARD:-1/1}"',
             "--mode search",
             '--shard "$search_shard"',
+            # Shards are bounded by wall clock, not just the seed estimate: a
+            # shard that runs out of time still writes a summary.
+            "sim_search_pass_budget_seconds",
+            "--time-budget",
+            '"reached_seeds": counts.get("reached_seeds")',
+            'counts.get("reached_seeds") or 0) < min_seeds',
             "sim search lane must run in search mode",
         ]
         for snippet in required_gate_snippets:
@@ -1183,16 +1175,15 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         gate = GATE.read_text(encoding="utf-8")
         confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
 
-        # The full lane is sized, not left at a number no shard has reached.
+        # The full lane is sized, not left at a number no shard has reached,
+        # and the wall-clock bound is derived from the job cap minus the
+        # measured fixed cost rather than the seed estimate alone.
         full_seeds = shell_int_constant(gate, "SIM_SEARCH_FULL_SEEDS")
         min_seeds = shell_int_constant(gate, "SIM_SEARCH_MIN_SEEDS")
+        job_cap_seconds = shell_int_constant(gate, "SIM_SEARCH_JOB_CAP_SECONDS")
+        setup_seconds = shell_int_constant(gate, "SIM_SEARCH_SETUP_SECONDS")
         shards = 9
         per_shard = full_seeds // shards
-        # A shard runs two search passes (the search lane and the named
-        # regression corpus). Measured end to end through the gate at 2000 max
-        # boundaries, the pair costs about 105 s of setup plus 112 s per seed,
-        # and that has to fit the cap once 23 minutes of shared-build download
-        # and restore plus two minutes of checkout are taken off it.
         sim_search_cap = int(
             re.search(
                 r"^    timeout-minutes: (\d+)$",
@@ -1200,7 +1191,31 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 re.MULTILINE,
             ).group(1)
         )
-        lane_budget_seconds = (sim_search_cap - 25) * 60
+        # The gate's job cap is the workflow's timeout-minutes on the
+        # sim-search job, and the setup constant is the measured 25 minutes of
+        # shared-build download/restore plus checkout before the script runs.
+        self.assertEqual(job_cap_seconds, sim_search_cap * 60)
+        self.assertEqual(setup_seconds, 25 * 60)
+        lane_budget_seconds = job_cap_seconds - setup_seconds
+        # Each pass is handed the remaining lane budget divided by the passes
+        # still to run, so the corpus pass inherits the search pass's slack.
+        self.assertIn(
+            "remaining=$((job_cap_seconds - setup_seconds - (SECONDS - script_started_at)))",
+            gate,
+        )
+        self.assertIn('printf \'%s\\n\' "$((remaining / passes_left))"', gate)
+        self.assertIn(
+            'search_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 2)")',
+            gate,
+        )
+        self.assertIn(
+            'corpus_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 1)")',
+            gate,
+        )
+        # The estimate still has to be plausible: a shard runs two search
+        # passes (the search lane and the named regression corpus). Measured
+        # end to end through the gate at 2000 max boundaries, the pair costs
+        # about 105 s of setup plus 112 s per seed.
         self.assertLessEqual(
             105 + per_shard * 112,
             lane_budget_seconds,
@@ -1227,6 +1242,223 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             ).group(1)
         )
         self.assertGreaterEqual(mutation_sim_cap, 23 + 49 * 2.03)
+
+    def test_mutation_packages_legs_fit_their_job_cap(self) -> None:
+        """Run 35117123483 cancelled three package legs at the 100-minute cap.
+
+        A cancelled leg writes no verdict at all, and the mutant spaces are
+        far wider than one job can sweep (protocol-rlm alone listed 1,641
+        mutants), so the matrix fans each package out into legs that each
+        judge a bounded slice. The slice index rotates with the run number so
+        successive runs sweep the space instead of re-judging one prefix.
+        """
+        gate = GATE.read_text(encoding="utf-8")
+        stage = (ROOT / "scripts/ci/confidence-stage.sh").read_text(encoding="utf-8")
+        confidence = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())
+        job = confidence["jobs"]["confidence-mutation-packages"]
+
+        # Every leg is bounded: the stage opts in, the matrix hands each leg a
+        # shard coordinate, and the run number rotates the judged slice.
+        self.assertIn("LASH_MUTATION_PACKAGES_BOUNDED=1", stage)
+        run_step = next(
+            s for s in job["steps"] if s.get("name") == "Run mutation-packages"
+        )
+        self.assertEqual(
+            "${{ matrix.shard }}/${{ matrix.shards }}",
+            run_step["env"]["LASH_MUTATION_PACKAGES_SHARD"],
+        )
+        self.assertEqual(
+            "${{ github.run_number }}", run_step["env"]["LASH_MUTATION_RUN_INDEX"]
+        )
+
+        # The matrix fans each package into a contiguous 1..legs set of legs.
+        expected_legs = {
+            "lash-internal-core": 2,
+            "lash-internal-lashlang": 4,
+            "lash-internal-protocol-rlm": 4,
+            "lash-internal-protocol-standard": 1,
+            "lash-internal-sqlite-store": 3,
+            "lash-internal-postgres-store": 4,
+        }
+        rows = job["strategy"]["matrix"]["include"]
+        self.assertEqual(sorted(expected_legs), sorted({r["package"] for r in rows}))
+        for package, leg_count in expected_legs.items():
+            legs = [r for r in rows if r["package"] == package]
+            self.assertEqual(
+                list(range(1, leg_count + 1)),
+                sorted(r["shard"] for r in legs),
+                f"{package} legs are not a contiguous 1..{leg_count} set",
+            )
+            self.assertTrue(
+                all(r["shards"] == leg_count for r in legs),
+                f"{package} legs disagree on the leg count",
+            )
+        self.assertIs(False, job["strategy"]["fail-fast"])
+
+        # Legs are distinguishable in job names, out dirs and artifact names,
+        # so one leg's evidence can never overwrite or impersonate another's.
+        upload = next(s for s in job["steps"] if "upload-artifact@" in s.get("uses", ""))
+        self.assertIn("${{ matrix.package }}-${{ matrix.shard }}", upload["with"]["name"])
+        self.assertIn("${{ matrix.package }}-${{ matrix.shard }}", upload["with"]["path"])
+        self.assertIn(
+            "${{ matrix.package }}-${{ matrix.shard }}",
+            run_step["env"]["LASH_CONFIDENCE_OUT_DIR"],
+        )
+        self.assertIn("${{ matrix.package }}-${{ matrix.shard }}", job["name"])
+
+        # The gate counts the space with `cargo mutants --list`, derives the
+        # slice from the leg coordinate plus the run index, and hands it to
+        # cargo-mutants as --shard in both passes.
+        shard_fn = shell_function_body(gate, "mutation_packages_shard")
+        self.assertIn("--list", shard_fn)
+        self.assertIn("LASH_MUTATION_PACKAGES_SHARD", shard_fn)
+        self.assertIn("LASH_MUTATION_RUN_INDEX", shard_fn)
+        for function in ("run_mutation_smoke", "run_mutation_full"):
+            body = shell_function_body(gate, function)
+            self.assertIn('mutation_packages_shard "$package"', body)
+            self.assertIn("--shard", body)
+            self.assertIn('${LASH_MUTATION_PACKAGES_BOUNDED:-0}', body)
+        self.assertIn(
+            "LASH_MUTATION_SMOKE_SHARD", shell_function_body(gate, "run_mutation_smoke")
+        )
+        self.assertIn(
+            "LASH_MUTATION_FULL_SHARD", shell_function_body(gate, "run_mutation_full")
+        )
+        self.assertIn("LASH_MUTATION_PACKAGES_SHARD must be", gate)
+        self.assertIn(
+            "mutation-shard.json", shell_function_body(gate, "run_mutants_recorded")
+        )
+
+        # Budget arithmetic: fixed cost + smoke slice + full slice must fit
+        # the job cap read out of the workflow, at the per-mutant wall clock
+        # run 35117123483 measured at --jobs 2 (smoke at the 180 s cap, full
+        # at the 600 s cap; each slice also pays the unmutated baseline).
+        cap = job["timeout-minutes"]
+        smoke_budget = shell_int_constant(gate, "MUTATION_PACKAGES_SMOKE_MUTANTS")
+        full_budgets = shell_assoc_array(gate, "MUTATION_PACKAGES_FULL_MUTANTS")
+        shell_int_constant(gate, "MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT")
+        self.assertEqual(sorted(expected_legs), sorted(full_budgets))
+        smoke_minutes_per_mutant = {
+            "lash-internal-core": 2.5,
+            "lash-internal-lashlang": 0.8,
+            "lash-internal-protocol-rlm": 1.3,
+            "lash-internal-protocol-standard": 0.2,
+            "lash-internal-sqlite-store": 1.5,
+            "lash-internal-postgres-store": 1.0,
+        }
+        full_minutes_per_mutant = {
+            "lash-internal-core": 4.0,
+            "lash-internal-lashlang": 0.8,
+            "lash-internal-protocol-rlm": 1.3,
+            "lash-internal-protocol-standard": 0.2,
+            "lash-internal-sqlite-store": 1.5,
+            "lash-internal-postgres-store": 4.0,
+        }
+        for package in expected_legs:
+            with self.subTest(package=package):
+                leg_minutes = (
+                    25
+                    + smoke_budget * smoke_minutes_per_mutant[package]
+                    + 8
+                    + int(full_budgets[package]) * full_minutes_per_mutant[package]
+                    + 12
+                )
+                self.assertLessEqual(
+                    leg_minutes,
+                    cap,
+                    f"{package}: {leg_minutes:.0f}-minute leg does not fit "
+                    f"the {cap}-minute cap",
+                )
+
+    def test_mutation_packages_bounded_leg_rotates_slices(self) -> None:
+        """The leg coordinate plus the run index must pick distinct slices."""
+        gate = GATE.read_text(encoding="utf-8")
+        shard_fn = shell_function_definition(gate, "mutation_packages_shard")
+        smoke_fn = shell_function_definition(gate, "run_mutation_smoke")
+        full_fn = shell_function_definition(gate, "run_mutation_full")
+        harness = f"""\
+set -euo pipefail
+{shard_fn}
+{smoke_fn}
+{full_fn}
+area_mutation_file_args=()
+MUTATION_PACKAGES_SMOKE_MUTANTS=12
+declare -A MUTATION_PACKAGES_FULL_MUTANTS=([pkg-x]="5")
+MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=4
+selected_packages=(pkg-x)
+out_dir="$1"
+mutation_jobs=2
+step() {{ :; }}
+require_tool() {{ :; }}
+cargo() {{
+  if [[ "$*" == *--list* ]]; then seq 1 23; return 0; fi
+}}
+run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
+run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
+"""
+        # 23 mutants at budgets 12 (smoke, denom 2) and 5 (full, denom 5).
+        # Two legs plus the run index walk consecutive slices of each space.
+        cases = [
+            # (run, leg spec) -> (smoke shard, full shard)
+            (1, "1/2", "1/2", "1/5"),
+            (1, "2/2", "2/2", "2/5"),
+            (2, "1/2", "1/2", "3/5"),
+            (2, "2/2", "2/2", "4/5"),
+            (3, "1/2", "1/2", "5/5"),
+        ]
+        for run_index, leg, smoke_shard, full_shard in cases:
+            with self.subTest(run=run_index, leg=leg):
+                env = dict(
+                    os.environ,
+                    LASH_MUTATION_PACKAGES_BOUNDED="1",
+                    LASH_MUTATION_PACKAGES_SHARD=leg,
+                    LASH_MUTATION_RUN_INDEX=str(run_index),
+                )
+                result = subprocess.run(
+                    ["bash", "-c", harness + "\nrun_mutation_smoke\nrun_mutation_full", "t", "/tmp/x"],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn(f"--shard {smoke_shard} ", result.stdout)
+                self.assertIn(f"--shard {full_shard} ", result.stdout)
+
+        # Without the bound flag the full pass stays an unsharded sweep and
+        # the smoke canary keeps its historical 1/64 slice; explicit shard
+        # selectors still win for local reproduction.
+        env = dict(os.environ)
+        for name in (
+            "LASH_MUTATION_PACKAGES_BOUNDED",
+            "LASH_MUTATION_PACKAGES_SHARD",
+            "LASH_MUTATION_RUN_INDEX",
+            "LASH_MUTATION_SMOKE_SHARD",
+            "LASH_MUTATION_FULL_SHARD",
+        ):
+            env.pop(name, None)
+        result = subprocess.run(
+            ["bash", "-c", harness + "\nrun_mutation_smoke\nrun_mutation_full", "t", "/tmp/x"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--shard 1/64 ", result.stdout)
+        full_line = next(
+            line for line in result.stdout.splitlines() if "full mutation" in line
+        )
+        self.assertNotIn("--shard", full_line)
+
+        env["LASH_MUTATION_PACKAGES_BOUNDED"] = "1"
+        env["LASH_MUTATION_FULL_SHARD"] = "3/7"
+        result = subprocess.run(
+            ["bash", "-c", harness + "\nrun_mutation_full", "t", "/tmp/x"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--shard 3/7 ", result.stdout)
 
     def test_lane_composition_is_declared_once_per_path(self) -> None:
         """Four hand-written copies of the same composition is three too many.
@@ -1859,11 +2091,12 @@ derive_mutation_jobs() {{
     def test_every_conformance_run_builds_its_spawn_helpers_first(self) -> None:
         """The cold-process suites spawn example binaries nothing else builds.
 
-        `lash_conformance::helper_executable` resolves
-        `target/<profile>/examples/<name>`, and both helpers carry
-        `required-features = ["testing"]`, so no `cargo test --test conformance`
-        invocation produces them. One shared function builds them; this pins
-        that every conformance command in the gate is reached through it.
+        `lash_conformance::helper_executable` resolves the helper from the
+        *running test binary's own* `<target>/<profile>/examples`, and both
+        helpers carry `required-features = ["testing"]`, so no
+        `cargo test --test conformance` invocation produces them. One shared
+        function builds them; this pins that every conformance command in the
+        gate is reached through it, into the target directory it runs against.
         """
         gate = GATE.read_text(encoding="utf-8")
 
@@ -1889,7 +2122,7 @@ derive_mutation_jobs() {{
             if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\(\) \{$", line):
                 built = False
                 continue
-            if stripped == "build_conformance_helpers":
+            if stripped.split()[0:1] == ["build_conformance_helpers"]:
                 built = True
                 continue
             if "--test conformance" in stripped:
@@ -1899,6 +2132,36 @@ derive_mutation_jobs() {{
                     f"conformance run not preceded by build_conformance_helpers: {stripped}",
                 )
         self.assertGreaterEqual(conformance_commands, 10)
+
+        # The coverage stage is the one runner with its own target directory:
+        # cargo-llvm-cov compiles into `<target>/llvm-cov-target`, so a helper
+        # in `<target>/debug/examples` is invisible to the binaries it runs and
+        # the four cold-process tests fail on spawn with ENOENT. Its build must
+        # name that directory, and must ask cargo-llvm-cov where it is rather
+        # than spelling the layout a second time.
+        self.assertIn('target_args=(--target-dir "$1")', definition)
+        coverage = shell_function_body(gate, "run_coverage_blind_spots")
+        self.assertIn("cargo llvm-cov show-env --export-prefix", coverage)
+        self.assertIn("CARGO_LLVM_COV_TARGET_DIR", coverage)
+        self.assertIn("/llvm-cov-target", coverage)
+        build_at = coverage.index("build_conformance_helpers")
+        # The instrumentation environment is evaluated in a subshell, so it
+        # reaches the helper build and nothing else.
+        self.assertLess(coverage.index('eval "$llvm_cov_env"'), build_at)
+        # And the build runs before the coverage test run it is for. Compare
+        # against the command, not the prose: the comment above the build says
+        # `--tests` too.
+        test_run_at = next(
+            index
+            for index, line in enumerate(coverage.splitlines())
+            if line.strip() == "--tests \\"
+        )
+        build_line = next(
+            index
+            for index, line in enumerate(coverage.splitlines())
+            if line.strip().startswith("build_conformance_helpers")
+        )
+        self.assertLess(build_line, test_run_at)
 
     def test_every_gate_postgres_container_preloads_pg_stat_statements(self) -> None:
         """The statement-count tests measure through the extension.
@@ -2416,18 +2679,15 @@ derive_mutation_jobs() {{
         # --no-fail-fast so one failure never hides the rest (alpha.82 lesson).
         self.assertIn("--no-fail-fast", workspace_tests)
 
-        # check is the cache writer and the workspace check, nothing else.
-        # Gates that neither warm nor consume that superset are sibling jobs,
-        # not serial steps behind twelve minutes of compilation. Doctests were
-        # removed from the repository by ruling (2026-09-13), so no half of
-        # this job runs them on either trust path.
+        # check is the API seal lane, nothing else: the workspace compile
+        # proof moved into the Bazel partition's `//:workspace_compile`
+        # argument. Gates that neither warm nor consume the seal cache are
+        # sibling jobs, not serial steps behind twelve minutes of compilation.
+        # Doctests were removed from the repository by ruling (2026-09-13), so
+        # no half of this job runs them on either trust path.
         check_job = workflow_job_block(workflow, "check")
-        self.assertIn("cargo check --workspace --all-targets --locked", check_job)
+        self.assertNotIn("cargo check --workspace --all-targets --locked", check_job)
         self.assertNotIn("--doc ", check_job)
-        # The trybuild fixture graph is part of that superset. It only reaches
-        # the shared cache if the writer builds it, and it is invisible in the
-        # workflow's shape — dropping this step costs no gate and no red run,
-        # just three shards rebuilding a second copy of lash forever.
         self.assertIn(
             "cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui",
             check_job,
