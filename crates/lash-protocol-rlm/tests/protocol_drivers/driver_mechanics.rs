@@ -93,8 +93,11 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
     );
 }
 
+/// FIG-2777: a provider tool call on the tool-less cell channel is malformed
+/// provider output. The offending response is still emitted, but the turn
+/// repairs instead of stopping on a protocol violation.
 #[test]
-fn native_tool_call_failure_preserves_the_offending_llm_response_event() {
+fn native_tool_call_preserves_the_offending_llm_response_event_and_repairs() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
@@ -121,10 +124,50 @@ fn native_tool_call_failure_preserves_the_offending_llm_response_event() {
             .iter()
             .any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::LlmResponse { .. })))
     );
-    assert!(effects_include_runtime_error(
-        &effects,
-        "native provider tool call `native_lookup`"
-    ));
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. })),
+        "a stray tool call must never reach execution: {effects:?}"
+    );
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Done { .. })),
+        "a repairable extraction failure must not finish the turn: {effects:?}"
+    );
+    let checkpoint_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Checkpoint { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("a repair round checkpoints before the next request");
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: Default::default(),
+    });
+    let effects = drain_effects(&mut machine);
+    let repair =
+        find_llm_request(&effects).expect("a repair round issues another provider request");
+    let repair_text = repair
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter_map(|block| match block {
+            LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        repair_text.contains("native_lookup"),
+        "the repair copy names the stray call: {repair_text}"
+    );
+    assert!(
+        repair_text.contains("paired `<typescript>...</typescript>` block"),
+        "{repair_text}"
+    );
 }
 
 #[test]

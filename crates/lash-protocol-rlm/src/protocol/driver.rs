@@ -8,7 +8,7 @@ use lash_core::sansio::{
 };
 use lash_core::session_model::{
     ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, TurnFailureCode,
-    TurnFailureKind, make_error_envelope, make_error_event,
+    TurnFailureKind, make_error_event,
 };
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmOutputPart, LlmResponse,
@@ -114,12 +114,47 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         let projected = match project_response(llm_response.parts.clone()) {
             Ok(projected) => projected,
             Err(tool_call) => {
+                let full_text = llm_response.full_text();
                 actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
                     protocol_iteration: ctx.protocol_iteration(),
-                    content: llm_response.full_text(),
+                    content: full_text.clone(),
                     duration_ms: 0,
                 }));
-                native_tool_call_failure_actions(&mut actions, ctx.protocol_iteration(), tool_call);
+                // A provider tool call on a request that declared no tools is
+                // malformed provider output, not a protocol crime: the model
+                // was never shown a tool surface, so the stray call gets the
+                // extraction-failure repair the loop already runs for a reply
+                // with no usable cell — one repair round, and the ordinary
+                // stall bound decides the turn if the model repeats it
+                // (FIG-2777).
+                let termination = match decode_rlm_termination_options(ctx.termination()) {
+                    Ok(termination) => termination,
+                    Err(err) => return invalid_turn_options_actions(err),
+                };
+                actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
+                    LLM_EXTRACTION_PHASE,
+                    llm_extraction_payload(
+                        ctx.turn_id(),
+                        &reply_fingerprint(&full_text),
+                        "retry_native_tool_call",
+                        &termination,
+                        prose_only_counts(self.dialect.language_id(), &full_text, &[]),
+                    ),
+                )]));
+                let retry_events = vec![conversation_event(invalid_cell_message(
+                    self.dialect.as_ref(),
+                    rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "native_tool_call"),
+                    &self.dialect.native_tool_call_copy(&tool_call.tool_name),
+                ))];
+                if let Err(err) = continue_or_stop_after_nonterminal(
+                    &ctx,
+                    &mut actions,
+                    Vec::new(),
+                    retry_events,
+                    AttemptProgress::Stalled,
+                ) {
+                    return invalid_turn_options_actions(err);
+                }
                 return actions;
             }
         };
@@ -645,7 +680,6 @@ struct ProjectedResponse {
 
 #[derive(Debug)]
 struct NativeToolCall {
-    call_id: String,
     tool_name: String,
 }
 
@@ -670,10 +704,8 @@ fn project_response(parts: Vec<LlmOutputPart>) -> Result<ProjectedResponse, Nati
                     reasoning.push(RlmReasoningPart { text, replay });
                 }
             }
-            LlmOutputPart::ToolCall {
-                call_id, tool_name, ..
-            } => {
-                return Err(NativeToolCall { call_id, tool_name });
+            LlmOutputPart::ToolCall { tool_name, .. } => {
+                return Err(NativeToolCall { tool_name });
             }
         }
     }
@@ -681,46 +713,6 @@ fn project_response(parts: Vec<LlmOutputPart>) -> Result<ProjectedResponse, Nati
         assistant_text,
         reasoning,
     })
-}
-
-fn native_tool_call_failure_actions(
-    actions: &mut Vec<DriverAction>,
-    protocol_iteration: usize,
-    tool_call: NativeToolCall,
-) {
-    let message = format!(
-        "RLM protocol received native provider tool call `{}`; RLM tools must flow through the cell program, so native provider tool calls are not allowed",
-        tool_call.tool_name
-    );
-    let mut envelope = make_error_envelope(
-        TurnFailureKind::RlmProtocol,
-        Some(TurnFailureCode::NativeToolCallNotAllowed),
-        None,
-        message.clone(),
-        Some(format!(
-            "tool_name={}, call_id={}, protocol_iteration={protocol_iteration}",
-            tool_call.tool_name, tool_call.call_id
-        )),
-    );
-    envelope.retryable = Some(false);
-    actions.extend([
-        DriverAction::AppendEvents(vec![diagnostic_event(
-            "protocol_contract_violation",
-            serde_json::json!({
-                "code": "native_tool_call_not_allowed",
-                "tool_name": tool_call.tool_name,
-                "call_id": tool_call.call_id,
-                "protocol_iteration": protocol_iteration,
-                "constraint": "RLM tools must flow through the cell program",
-                "retryable": false,
-            }),
-        )]),
-        DriverAction::Emit(SessionStreamEvent::Error {
-            message,
-            envelope: Some(envelope),
-        }),
-        DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError)),
-    ]);
 }
 
 /// Test support for exercising the production RLM response-to-history seam.
@@ -768,8 +760,8 @@ pub fn project_conformance_messages_through_rlm_history(
                 .collect();
             let projected = project_response(parts).map_err(|tool_call| {
                 format!(
-                    "RLM conformance history fixture contains native tool call `{}` ({})",
-                    tool_call.tool_name, tool_call.call_id
+                    "RLM conformance history fixture contains native tool call `{}`",
+                    tool_call.tool_name
                 )
             })?;
             let durable = internal_assistant_prose_message(

@@ -474,6 +474,18 @@ impl TypescriptDialect {
         )
     }
 
+    /// What to tell a model whose reply carried a provider tool call on a
+    /// channel that declared no tools.
+    ///
+    /// The call is malformed provider output, not a protocol violation — the
+    /// request showed no tool surface — so the copy names what happened and
+    /// sends the work back inside the cell (FIG-2777).
+    pub(crate) fn native_tool_call_copy(&self, tool_name: &str) -> String {
+        format!(
+            "The model response carried a provider tool call `{tool_name}`, but this channel's request declares no tools, so nothing was executed. Express that work inside the program instead."
+        )
+    }
+
     pub(crate) fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String {
         let cap = output_token_cap
             .map(|cap| format!(" The request cap was {cap} tokens."))
