@@ -352,8 +352,9 @@ fn continuation_test_vm_with_host<'a, H: ExecutionHost>(
         Record::new(),
         &program.chunk.slot_names,
         &ProjectedBindings::new(),
+        Vec::new(),
     );
-    Vm::new_with_mode(&program.chunk, slots, host, ExecutionMode::Foreground)
+    Vm::new(&program.chunk, slots, host, None, ExecutionMode::Foreground)
 }
 
 /// Under stress collection every instruction that can allocate must run inside

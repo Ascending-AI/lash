@@ -968,21 +968,31 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         self.heap = heap;
     }
 
-    pub(crate) fn new_with_mode(
+    /// `scratch` is the recycled-buffer handoff — `Some(&mut scratch)` reuses
+    /// the scratch execution's stack and iterator stack instead of allocating.
+    pub(crate) fn new(
         chunk: &'a Chunk,
         slots: SlotState,
         host: &'a H,
+        scratch: Option<&mut ExecutionScratch>,
         mode: ExecutionMode,
     ) -> Self {
+        let (stack, iter_stack) = match scratch {
+            Some(scratch) => (
+                std::mem::take(&mut scratch.stack),
+                std::mem::take(&mut scratch.iter_stack),
+            ),
+            None => (Vec::new(), Vec::new()),
+        };
         Self {
             chunk,
             ip: 0,
-            stack: Vec::new(),
+            stack,
             last_value: None,
             slots,
             host,
             mode: VmMode::from(mode),
-            iter_stack: Vec::new(),
+            iter_stack,
             active_function: None,
             frames: Vec::new(),
             slot_scratch: None,
@@ -996,45 +1006,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_execution_elapsed: std::time::Duration::ZERO,
             heap: Self::new_heap(host),
             heap_initialized: false,
-            extras_heapified: false,
-            pending_tools: PendingToolMap::new(),
-            execution_nonce: mint_execution_nonce(0),
-            assigned_globals: std::collections::BTreeSet::new(),
-            #[cfg(test)]
-            test_suspension: TestSuspension::Disabled,
-        }
-    }
-
-    pub(crate) fn new_with_scratch_and_mode(
-        chunk: &'a Chunk,
-        slots: SlotState,
-        host: &'a H,
-        scratch: &mut ExecutionScratch,
-        mode: ExecutionMode,
-    ) -> Self {
-        Self {
-            chunk,
-            ip: 0,
-            stack: std::mem::take(&mut scratch.stack),
-            last_value: None,
-            slots,
-            host,
-            mode: VmMode::from(mode),
-            iter_stack: std::mem::take(&mut scratch.iter_stack),
-            active_function: None,
-            frames: Vec::new(),
-            slot_scratch: None,
-            handlers: Vec::new(),
-            finally_stack: Vec::new(),
-            lashlang_execution_occurrences: FxHashMap::default(),
-            profile: None,
-            validation_plans: FxHashMap::default(),
-            pending_error_span: None,
-            instructions_executed: 0,
-            active_execution_elapsed: std::time::Duration::ZERO,
-            heap: Self::new_heap(host),
-            heap_initialized: false,
-            extras_heapified: false,
             pending_tools: PendingToolMap::new(),
             execution_nonce: mint_execution_nonce(0),
             assigned_globals: std::collections::BTreeSet::new(),
@@ -1364,13 +1335,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         values: frame.slots,
                         projected,
                         extras: frame.globals,
+                        extras_heapified: false,
                     },
                     iter_stack: frame
                         .iterator_stack
                         .into_iter()
                         .map(iterator_from_continuation)
                         .collect(),
-                    extras_heapified: false,
                     return_target: match frame.return_target {
                         VmFrameReturnContinuation::Direct => ReturnTarget::Direct,
                         VmFrameReturnContinuation::Callback {
@@ -1407,6 +1378,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 values: continuation.slots,
                 projected,
                 extras: continuation.globals,
+                extras_heapified: false,
             },
             host,
             mode: continuation.mode.into(),
@@ -1433,7 +1405,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 heap
             },
             heap_initialized: true,
-            extras_heapified: false,
             // A resumed VM records assignments from here on. Continuations are
             // only used by durable process segments, which run on their own
             // `State` and never recycle into an `ExecutionScratch`, so there are

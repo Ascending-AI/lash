@@ -69,8 +69,9 @@ pub(super) fn continuation_test_vm<'a>(
         Record::new(),
         &program.chunk.slot_names,
         &ProjectedBindings::new(),
+        Vec::new(),
     );
-    Vm::new_with_mode(&program.chunk, slots, host, ExecutionMode::Foreground)
+    Vm::new(&program.chunk, slots, host, None, ExecutionMode::Foreground)
 }
 
 pub(super) async fn uninterrupted_continuation_result(
@@ -527,9 +528,20 @@ fn continuation_carries_a_projected_binding_slot_by_identity() {
     )]));
     let mut projected = ProjectedBindings::new();
     projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
-    let slots = SlotState::from_globals(Record::new(), &program.chunk.slot_names, &projected);
+    let slots = SlotState::from_globals(
+        Record::new(),
+        &program.chunk.slot_names,
+        &projected,
+        Vec::new(),
+    );
     let host = Host;
-    let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Foreground);
+    let mut vm = Vm::new(
+        &program.chunk,
+        slots,
+        &host,
+        None,
+        ExecutionMode::Foreground,
+    );
 
     let continuation = vm.suspend().expect("a projected slot must be capturable");
     let wire = serde_json::to_value(&continuation).expect("continuation should serialize");
@@ -644,9 +656,14 @@ async fn requested_boundary_mid_run_leaves_the_vm_runnable() {
     let program = crate::compile_linked(&linked);
     let mut projected = ProjectedBindings::new();
     projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
-    let slots = SlotState::from_globals(Record::new(), &program.chunk.slot_names, &projected);
+    let slots = SlotState::from_globals(
+        Record::new(),
+        &program.chunk.slot_names,
+        &projected,
+        Vec::new(),
+    );
     let host = Host;
-    let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Process);
+    let mut vm = Vm::new(&program.chunk, slots, &host, None, ExecutionMode::Process);
 
     assert_eq!(
         vm.run_process_until_effect()
@@ -998,8 +1015,15 @@ async fn suspend_collects_live_heap_before_park_or_keep_running_diverge() {
         Record::new(),
         &program.chunk.slot_names,
         &ProjectedBindings::new(),
+        Vec::new(),
     );
-    let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Foreground);
+    let mut vm = Vm::new(
+        &program.chunk,
+        slots,
+        &host,
+        None,
+        ExecutionMode::Foreground,
+    );
     vm.suspend_after_effects(1);
     assert_eq!(
         vm.run_for_mode().await.expect("run to effect boundary"),
