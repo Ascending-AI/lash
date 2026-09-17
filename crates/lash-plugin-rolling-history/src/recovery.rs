@@ -49,7 +49,11 @@ pub(crate) fn recovery_record_message(record: OverflowRecoveryRecord) -> lash_co
     )
 }
 
-pub(crate) fn recovery_record_kind(message: &Message) -> Option<OverflowRecoveryRecord> {
+/// The prose title selects which plugin messages are recovery records; the
+/// record itself is always read back from the serde payload that follows it.
+/// Returns the payload of the first record part, or `None` when the message
+/// is not a recovery record.
+pub(crate) fn recovery_record_payload(message: &Message) -> Option<&str> {
     if !matches!(
         message.origin,
         Some(MessageOrigin::Plugin { ref plugin_id, .. })
@@ -57,34 +61,28 @@ pub(crate) fn recovery_record_kind(message: &Message) -> Option<OverflowRecovery
     ) {
         return None;
     }
-    for part in message.parts.iter() {
+    message.parts.iter().find_map(|part| {
         let text = part.content.as_str();
-        let (title, rest) = if let Some(rest) = text.strip_prefix(OVERFLOW_RECOVERY_MARKER) {
-            ("pending", rest)
-        } else if let Some(rest) = text.strip_prefix(OVERFLOW_RECOVERY_COMPLETED) {
-            ("completed", rest)
-        } else if let Some(rest) = text.strip_prefix(OVERFLOW_RECOVERY_FAILED) {
-            ("failed", rest)
-        } else if let Some(rest) = text.strip_prefix(OVERFLOW_RECOVERY_EXHAUSTED) {
-            ("exhausted", rest)
-        } else {
-            continue;
-        };
-        let payload: serde_json::Value =
-            serde_json::from_str(rest.trim()).unwrap_or(serde_json::Value::Null);
-        return match title {
-            "pending" => Some(OverflowRecoveryRecord::Pending),
-            "completed" => Some(OverflowRecoveryRecord::Completed),
-            "failed" => Some(OverflowRecoveryRecord::Failed {
-                attempt: payload
-                    .get("attempt")
-                    .and_then(|value| value.as_u64())
-                    .unwrap_or(0) as u32,
-            }),
-            _ => Some(OverflowRecoveryRecord::Exhausted),
-        };
-    }
-    None
+        [
+            OVERFLOW_RECOVERY_MARKER,
+            OVERFLOW_RECOVERY_COMPLETED,
+            OVERFLOW_RECOVERY_FAILED,
+            OVERFLOW_RECOVERY_EXHAUSTED,
+        ]
+        .iter()
+        .find_map(|marker| text.strip_prefix(marker).map(str::trim))
+    })
+}
+
+/// Read a recovery record back from its serialized form. A message carrying a
+/// recovery title whose payload does not deserialize is an error, never a
+/// record guessed from the title.
+pub(crate) fn recovery_record_kind(
+    message: &Message,
+) -> Result<Option<OverflowRecoveryRecord>, serde_json::Error> {
+    recovery_record_payload(message)
+        .map(serde_json::from_str)
+        .transpose()
 }
 
 /// Recovery state derived purely from committed history. Nothing else carries
@@ -93,42 +91,58 @@ pub(crate) fn recovery_record_kind(message: &Message) -> Option<OverflowRecovery
 /// every attempt is settled by a terminal record, and the record order says
 /// how many attempts an open pending state already spent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct OverflowRecoveryState {
-    pub(crate) pending: bool,
-    pub(crate) attempts: usize,
+pub(crate) enum OverflowRecoveryState {
+    /// No still-open pending marker: the last recovery settled or never ran.
+    Idle,
+    /// A pending marker is still open; `attempts` counts the failures it
+    /// already spent.
+    Pending { attempts: usize },
 }
 
 impl OverflowRecoveryState {
     pub(crate) fn derive(records: impl IntoIterator<Item = OverflowRecoveryRecord>) -> Self {
-        let mut state = Self {
-            pending: false,
-            attempts: 0,
-        };
+        let mut state = Self::Idle;
         for record in records {
             match record {
-                OverflowRecoveryRecord::Pending => {
-                    state.pending = true;
-                    state.attempts = 0;
-                }
+                OverflowRecoveryRecord::Pending => state = Self::Pending { attempts: 0 },
                 OverflowRecoveryRecord::Completed | OverflowRecoveryRecord::Exhausted => {
-                    state.pending = false;
-                    state.attempts = 0;
+                    state = Self::Idle;
                 }
                 OverflowRecoveryRecord::Failed { attempt } => {
-                    state.attempts = attempt as usize;
+                    if let Self::Pending { attempts } = &mut state {
+                        *attempts = attempt as usize;
+                    }
                 }
             }
         }
         state
     }
 
+    pub(crate) fn pending(&self) -> bool {
+        matches!(self, Self::Pending { .. })
+    }
+
+    /// Attempts the open pending marker already spent; zero when idle.
+    pub(crate) fn attempts(&self) -> usize {
+        match self {
+            Self::Pending { attempts } => *attempts,
+            Self::Idle => 0,
+        }
+    }
+
     pub(crate) fn exhausted(&self) -> bool {
-        self.pending && self.attempts >= OVERFLOW_RECOVERY_MAX_ATTEMPTS
+        matches!(self, Self::Pending { attempts } if *attempts >= OVERFLOW_RECOVERY_MAX_ATTEMPTS)
     }
 }
 
-pub(crate) fn history_recovery_records(messages: &[Message]) -> Vec<OverflowRecoveryRecord> {
-    messages.iter().filter_map(recovery_record_kind).collect()
+pub(crate) fn history_recovery_records(
+    messages: &[Message],
+) -> Result<Vec<OverflowRecoveryRecord>, serde_json::Error> {
+    messages
+        .iter()
+        .map(recovery_record_kind)
+        .filter_map(Result::transpose)
+        .collect()
 }
 
 /// Elide each oversized part's body so the out-of-band summarization request
@@ -353,7 +367,7 @@ pub(crate) async fn run_overflow_recovery(
     max_context_tokens: usize,
     current_request: &[Message],
 ) -> Result<Option<Vec<Message>>, ContextError> {
-    let attempt_no = state.attempts + 1;
+    let attempt_no = state.attempts() + 1;
 
     let prefix_len = leading_system_prefix_len(history_messages);
     let summary_prefix: Vec<Message> =
@@ -361,7 +375,7 @@ pub(crate) async fn run_overflow_recovery(
 
     let trigger = RecoveryTraceTrigger {
         history_messages: history_messages.len(),
-        attempts: state.attempts,
+        attempts: state.attempts(),
         oversized_elided_parts: 0,
     };
     emit_recovery_trace(
