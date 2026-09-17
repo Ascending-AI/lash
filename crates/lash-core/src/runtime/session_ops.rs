@@ -14,6 +14,36 @@ use super::state::{
     derive_graph_commit_node_ids,
 };
 
+/// How the durable half of `append_session_nodes` failed.
+///
+/// The caller holds the pre-append state and owns the rollback: `StaleBranch`
+/// and `RolledBack` restore the protocol session, `Passthrough` does not.
+enum AppendFailure {
+    /// The commit found the required ancestor inactive; after the protocol
+    /// session is restored the caller answers `StaleBranch`, not an error.
+    StaleBranch { required_node_id: crate::NodeId },
+    /// The durable commit did not land; the caller restores the protocol
+    /// session and surfaces `error`, appending the restore failure to the
+    /// error's context when the restore itself fails.
+    RolledBack(SessionError),
+    /// Outside the rollback contract — commit-envelope construction fails
+    /// before the store is touched, or a post-commit step fails after the
+    /// commit landed. Propagates untouched.
+    Passthrough(SessionError),
+}
+
+/// Append `suffix` to a session error's caller-visible context.
+fn append_session_error_context(error: SessionError, suffix: &str) -> SessionError {
+    match error {
+        SessionError::Store { context, source } => SessionError::Store {
+            context: format!("{context}{suffix}"),
+            source,
+        },
+        SessionError::Protocol(message) => SessionError::Protocol(format!("{message}{suffix}")),
+        error => error,
+    }
+}
+
 impl LashRuntime {
     /// Replace the host-owned state envelope without durable publication.
     /// Reachable only through the test surface (`apply_persistence_state`).
@@ -137,171 +167,53 @@ impl LashRuntime {
         }
         self.stamp_live_plugin_state();
         if let Some(store) = history_store {
-            let requested_node_count = node_ids.len();
-            let mut graph = self.state.pending_graph_commit();
-            let node_id_mapping = match graph.derive_node_ids(&self.state.session_id, &operation) {
-                Ok(mapping) => mapping,
-                Err(source) => {
-                    let mut context =
-                        "failed to derive persisted session graph node identities".to_string();
-                    if let Err(rollback_err) = self
-                        .restore_protocol_session_from_state(
-                            state_before_append,
-                            execution_before_append,
-                        )
-                        .await
-                    {
-                        context.push_str(&format!(
-                            "; failed to restore protocol session: {rollback_err}"
-                        ));
-                    }
-                    return Err(SessionError::Store { context, source });
-                }
-            };
-            let persisted_node_ids = node_id_mapping
-                .iter()
-                .map(|(_, derived)| derived.clone())
-                .collect::<Vec<_>>();
-            let locally_derived_node_ids = persisted_node_ids[persisted_node_ids
-                .len()
-                .saturating_sub(requested_node_count)..]
-                .to_vec();
-            let locally_derived_leaf_node_id = graph
-                .leaf_node_id()
-                .cloned()
-                .unwrap_or_else(|| crate::NodeId::new(String::new()));
-            let mut commit =
-                crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
-                    &self.state,
-                    graph,
-                    &[],
+            return match self
+                .commit_appended_nodes(
+                    store,
+                    &state_before_append,
+                    node_ids,
                     operation,
-                    self.host.core.durability.commit_budget,
-                )
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            commit.turn_commit = append_stamp;
-            commit.debug_assert_append_envelope_scope();
-            let _pre_commit_phase = super::RuntimeNamedPhase::begin(
-                self.turn_phase_probe.clone(),
-                "session_graph_append.pre_commit",
-            );
-            // Lane-less public runtime operation: callers append between turn
-            // drivers, so this handle owns no retained execution guard.
-            //
-            // Structurally excluded from `state::commit_in_lane_context`: this site
-            // is strictly lane-less (never carries a `BorrowedLaneAuthority`) and
-            // interleaves in-memory protocol session rollback
-            // (`restore_protocol_session_from_state`) on commit failure or
-            // `AppendAncestorNotActive` stale-branch response.
-            let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
-                Arc::clone(&store),
-                commit,
-                &self.runtime_lease_owner,
-                &self.runtime_lease_executor_id,
-                self.host.core.control.lease_timings,
-                Arc::clone(&self.host.core.clock),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
-                    if let Err(rollback_err) = self
-                        .restore_protocol_session_from_state(
-                            state_before_append,
-                            execution_before_append,
-                        )
-                        .await
-                    {
-                        return Err(SessionError::Protocol(format!(
-                            "append requires inactive ancestor `{required_node_id}`; failed to restore pre-append protocol session: {rollback_err}"
-                        )));
-                    }
-                    return Ok(crate::AppendSessionNodesOutcome::StaleBranch { required_node_id });
-                }
-                Err(err) => {
-                    if let Err(rollback_err) = self
-                        .restore_protocol_session_from_state(
-                            state_before_append,
-                            execution_before_append,
-                        )
-                        .await
-                    {
-                        let context = format!(
-                            "failed to persist runtime state; failed to restore protocol session: \
-                             {rollback_err}"
-                        );
-                        return Err(super::session_commit_error(&context, err));
-                    }
-                    return Err(super::session_commit_error(
-                        "failed to persist runtime state",
-                        err,
-                    ));
-                }
-            };
-            let receipt_replayed = result.receipt_replayed;
-            let committed_leaf_node_id = result.committed_leaf_node_id.clone();
-            let node_ids = if receipt_replayed {
-                match super::state::receipt_append_node_ids(&result, requested_node_count) {
-                    Ok(node_ids) => node_ids,
-                    Err(source) => {
-                        let mut context =
-                            "append receipt contains an invalid stored node-id result".to_string();
-                        if let Err(rollback_err) = self
-                            .restore_protocol_session_from_state(
-                                state_before_append.clone(),
-                                execution_before_append.clone(),
-                            )
-                            .await
-                        {
-                            context.push_str(&format!(
-                                "; failed to restore pre-append protocol session: {rollback_err}"
-                            ));
-                        }
-                        return Err(SessionError::Store { context, source });
-                    }
-                }
-            } else {
-                locally_derived_node_ids
-            };
-            if receipt_replayed {
-                let mut durable_state = state_before_append.clone();
-                if let Err(source) = crate::store::refresh_persisted_session_state(
-                    store.as_ref(),
-                    &mut durable_state,
+                    append_stamp,
                 )
                 .await
+            {
+                Ok(outcome) => Ok(outcome),
+                // The commit found the required ancestor inactive: after the
+                // protocol session is restored this answers `StaleBranch`, not
+                // an error — that asymmetry is deliberate.
+                Err(AppendFailure::StaleBranch { required_node_id }) => match self
+                    .restore_protocol_session_from_state(
+                        state_before_append,
+                        execution_before_append,
+                    )
+                    .await
                 {
-                    let mut context =
-                        "failed to refresh resident state after append receipt replay".to_string();
-                    if let Err(rollback_err) = self
+                    Ok(()) => {
+                        Ok(crate::AppendSessionNodesOutcome::StaleBranch { required_node_id })
+                    }
+                    Err(rollback_err) => Err(SessionError::Protocol(format!(
+                        "append requires inactive ancestor `{required_node_id}`; failed to \
+                         restore protocol session: {rollback_err}"
+                    ))),
+                },
+                Err(AppendFailure::RolledBack(error)) => {
+                    let error = match self
                         .restore_protocol_session_from_state(
                             state_before_append,
                             execution_before_append,
                         )
                         .await
                     {
-                        context.push_str(&format!(
-                            "; failed to restore pre-append protocol session: {rollback_err}"
-                        ));
-                    }
-                    return Err(SessionError::Store { context, source });
+                        Ok(()) => error,
+                        Err(rollback_err) => append_session_error_context(
+                            error,
+                            &format!("; failed to restore protocol session: {rollback_err}"),
+                        ),
+                    };
+                    Err(error)
                 }
-                self.restore_protocol_session_from_state(durable_state, None)
-                    .await?;
-            } else {
-                super::state::apply_graph_commit_node_id_mapping(&mut self.state, &node_id_mapping)
-                    .map_err(|source| SessionError::Store {
-                        context: "failed to apply persisted session graph node identities"
-                            .to_string(),
-                        source,
-                    })?;
-                self.state.apply_persisted_commit_result(result);
-                self.state.mark_node_ids_persisted(persisted_node_ids);
-            }
-            return Ok(crate::AppendSessionNodesOutcome::Appended {
-                node_ids,
-                leaf_node_id: committed_leaf_node_id.unwrap_or(locally_derived_leaf_node_id),
-            });
+                Err(AppendFailure::Passthrough(error)) => Err(error),
+            };
         }
         Ok(crate::AppendSessionNodesOutcome::Appended {
             node_ids,
@@ -311,6 +223,138 @@ impl LashRuntime {
                 .leaf_node_id
                 .clone()
                 .unwrap_or_else(|| crate::NodeId::new(String::new())),
+        })
+    }
+
+    /// The durable half of [`Self::append_session_nodes`]: derive, commit, and
+    /// settle an already-applied in-memory append.
+    ///
+    /// Owns no protocol-session rollback — the caller holds the pre-append
+    /// state and restores it for every `StaleBranch`/`RolledBack` failure, so
+    /// the undo sequence is written exactly once. `Passthrough` failures sit
+    /// outside that contract: commit-envelope construction fails before the
+    /// store is touched, and post-commit steps fail after the commit landed.
+    async fn commit_appended_nodes(
+        &mut self,
+        store: Arc<dyn crate::store::RuntimePersistence>,
+        state_before_append: &RuntimeSessionState,
+        node_ids: Vec<crate::NodeId>,
+        operation: crate::OperationId,
+        append_stamp: crate::RuntimeTurnCommitStamp,
+    ) -> Result<crate::AppendSessionNodesOutcome, AppendFailure> {
+        let requested_node_count = node_ids.len();
+        let mut graph = self.state.pending_graph_commit();
+        let node_id_mapping = match graph.derive_node_ids(&self.state.session_id, &operation) {
+            Ok(mapping) => mapping,
+            Err(source) => {
+                return Err(AppendFailure::RolledBack(SessionError::Store {
+                    context: "failed to derive persisted session graph node identities".to_string(),
+                    source,
+                }));
+            }
+        };
+        let persisted_node_ids = node_id_mapping
+            .iter()
+            .map(|(_, derived)| derived.clone())
+            .collect::<Vec<_>>();
+        let locally_derived_node_ids = persisted_node_ids[persisted_node_ids
+            .len()
+            .saturating_sub(requested_node_count)..]
+            .to_vec();
+        let locally_derived_leaf_node_id = graph
+            .leaf_node_id()
+            .cloned()
+            .unwrap_or_else(|| crate::NodeId::new(String::new()));
+        let mut commit =
+            crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
+                &self.state,
+                graph,
+                &[],
+                operation,
+                self.host.core.durability.commit_budget,
+            )
+            .map_err(|err| AppendFailure::Passthrough(SessionError::Protocol(err.to_string())))?;
+        commit.turn_commit = append_stamp;
+        commit.debug_assert_append_envelope_scope();
+        let _pre_commit_phase = super::RuntimeNamedPhase::begin(
+            self.turn_phase_probe.clone(),
+            "session_graph_append.pre_commit",
+        );
+        // Lane-less public runtime operation: callers append between turn
+        // drivers, so this handle owns no retained execution guard.
+        //
+        // Structurally excluded from `state::commit_in_lane_context`: this site
+        // is strictly lane-less (never carries a `BorrowedLaneAuthority`) and
+        // interleaves in-memory protocol session rollback
+        // (`restore_protocol_session_from_state`) on commit failure or
+        // `AppendAncestorNotActive` stale-branch response.
+        let result = match super::commit_runtime_state_with_fresh_session_execution_lease(
+            Arc::clone(&store),
+            commit,
+            &self.runtime_lease_owner,
+            &self.runtime_lease_executor_id,
+            self.host.core.control.lease_timings,
+            Arc::clone(&self.host.core.clock),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
+                return Err(AppendFailure::StaleBranch { required_node_id });
+            }
+            Err(err) => {
+                return Err(AppendFailure::RolledBack(super::session_commit_error(
+                    "failed to persist runtime state",
+                    err,
+                )));
+            }
+        };
+        let receipt_replayed = result.receipt_replayed;
+        let committed_leaf_node_id = result.committed_leaf_node_id.clone();
+        let node_ids = if receipt_replayed {
+            match super::state::receipt_append_node_ids(&result, requested_node_count) {
+                Ok(node_ids) => node_ids,
+                Err(source) => {
+                    return Err(AppendFailure::RolledBack(SessionError::Store {
+                        context: "append receipt contains an invalid stored node-id result"
+                            .to_string(),
+                        source,
+                    }));
+                }
+            }
+        } else {
+            locally_derived_node_ids
+        };
+        if receipt_replayed {
+            let mut durable_state = state_before_append.clone();
+            if let Err(source) =
+                crate::store::refresh_persisted_session_state(store.as_ref(), &mut durable_state)
+                    .await
+            {
+                return Err(AppendFailure::RolledBack(SessionError::Store {
+                    context: "failed to refresh resident state after append receipt replay"
+                        .to_string(),
+                    source,
+                }));
+            }
+            self.restore_protocol_session_from_state(durable_state, None)
+                .await
+                .map_err(AppendFailure::Passthrough)?;
+        } else {
+            super::state::apply_graph_commit_node_id_mapping(&mut self.state, &node_id_mapping)
+                .map_err(|source| {
+                    AppendFailure::Passthrough(SessionError::Store {
+                        context: "failed to apply persisted session graph node identities"
+                            .to_string(),
+                        source,
+                    })
+                })?;
+            self.state.apply_persisted_commit_result(result);
+            self.state.mark_node_ids_persisted(persisted_node_ids);
+        }
+        Ok(crate::AppendSessionNodesOutcome::Appended {
+            node_ids,
+            leaf_node_id: committed_leaf_node_id.unwrap_or(locally_derived_leaf_node_id),
         })
     }
 
