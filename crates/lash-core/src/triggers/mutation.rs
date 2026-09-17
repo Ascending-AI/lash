@@ -67,9 +67,14 @@ pub(super) fn mutate_enabled(
         ));
     };
     ensure_live_revision(existing, expected_revision, None)?;
-    if existing.enabled != enabled {
+    let requested = if enabled {
+        crate::triggers::TriggerSubscriptionLifecycle::Enabled
+    } else {
+        crate::triggers::TriggerSubscriptionLifecycle::Disabled
+    };
+    if existing.lifecycle != requested {
         let next_revision = next_trigger_revision(existing)?;
-        existing.enabled = enabled;
+        existing.lifecycle = requested;
         existing.registrant = actor;
         existing.revision = next_revision;
         existing.updated_at_ms = now;
@@ -92,12 +97,12 @@ pub(super) fn ensure_live_revision(
     expected_revision: u64,
     requested_hash: Option<String>,
 ) -> Result<(), TriggerOperationError> {
-    if existing.tombstoned || existing.revision != expected_revision {
+    if existing.is_tombstoned() || existing.revision != expected_revision {
         return Err(subscription_conflict(
             &existing.subscription_key,
             Some(existing),
             requested_hash,
-            if existing.tombstoned {
+            if existing.is_tombstoned() {
                 "subscription is tombstoned"
             } else {
                 "expected revision does not match"
@@ -157,9 +162,11 @@ pub(super) fn subscription_record_from_draft(
         event_types: draft.event_types,
         input_template: draft.input_template,
         target_label: draft.target_label,
-        enabled,
-        tombstoned: false,
-        deleted_at_ms: None,
+        lifecycle: if enabled {
+            crate::triggers::TriggerSubscriptionLifecycle::Enabled
+        } else {
+            crate::triggers::TriggerSubscriptionLifecycle::Disabled
+        },
         created_at_ms,
         updated_at_ms,
     }

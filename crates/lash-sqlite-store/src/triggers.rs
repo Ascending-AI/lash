@@ -239,7 +239,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         let mut stmt = tx
                             .prepare(
                                 "SELECT record_json FROM trigger_subscriptions
-                                 WHERE owner_scope = ?1 AND tombstoned = 0",
+                                 WHERE owner_scope = ?1 AND lifecycle <> 'tombstoned'",
                             )
                             .map_err(process_sqlite_error)?;
                         let rows = stmt
@@ -304,7 +304,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         tx.execute(
                             "INSERT INTO trigger_subscriptions (
                             subscription_id, owner_scope, subscription_key, incarnation, revision,
-                            definition_fingerprint, source_type, source_key, enabled, tombstoned,
+                            definition_fingerprint, source_type, source_key, lifecycle,
+                            deleted_at_ms,
                             created_at_ms, updated_at_ms, record_json
                          )
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
@@ -316,8 +317,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             definition_fingerprint = excluded.definition_fingerprint,
                             source_type = excluded.source_type,
                             source_key = excluded.source_key,
-                            enabled = excluded.enabled,
-                            tombstoned = excluded.tombstoned,
+                            lifecycle = excluded.lifecycle,
+                            deleted_at_ms = excluded.deleted_at_ms,
                             updated_at_ms = excluded.updated_at_ms,
                             record_json = excluded.record_json",
                             params![
@@ -329,8 +330,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                 record.definition_fingerprint.as_str(),
                                 record.source_type.as_str(),
                                 record.source_key.as_str(),
-                                i64::from(record.enabled),
-                                i64::from(record.tombstoned),
+                                record.lifecycle.as_column(),
+                                record.lifecycle.deleted_at_ms().map(|ms| ms as i64),
                                 record.created_at_ms as i64,
                                 record.updated_at_ms as i64,
                                 Self::encode_json(&record)?,
@@ -432,7 +433,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         };
                         if record.registrant_session_id()
                             == Some(&SessionId::from(session_id.as_str()))
-                            && !record.tombstoned
+                            && !record.is_tombstoned()
                         {
                             subscriptions.push((subscription_id, record));
                         }
@@ -442,9 +443,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     for (subscription_id, mut record) in subscriptions {
                         let next_revision =
                             lash_core::facade_support::next_trigger_store_revision(&record)?;
-                        record.enabled = false;
-                        record.tombstoned = true;
-                        record.deleted_at_ms = Some(now);
+                        record.tombstone(now);
                         record.revision = next_revision;
                         record.updated_at_ms = now;
                         let sql_revision = plugin_sql_counter_value(
@@ -454,8 +453,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         deleted += tx
                             .execute(
                                 "UPDATE trigger_subscriptions
-                                 SET enabled = 0, tombstoned = 1, revision = ?2,
-                                     updated_at_ms = ?3, record_json = ?4
+                                 SET lifecycle = 'tombstoned', deleted_at_ms = ?3,
+                                     revision = ?2, updated_at_ms = ?3, record_json = ?4
                                  WHERE subscription_id = ?1",
                                 params![
                                     subscription_id.as_str(),
@@ -1223,10 +1222,14 @@ pub(crate) fn list_subscriptions_query(
         values.push(source_key.clone().into());
     }
     if let Some(enabled) = filter.enabled {
-        sql.push_str(" AND enabled = ?");
-        values.push(i64::from(enabled).into());
+        sql.push_str(" AND lifecycle = ?");
+        values.push(
+            if enabled { "enabled" } else { "disabled" }
+                .to_string()
+                .into(),
+        );
     }
-    sql.push_str(" AND tombstoned = 0 ORDER BY owner_scope ASC, subscription_key ASC");
+    sql.push_str(" AND lifecycle <> 'tombstoned' ORDER BY owner_scope ASC, subscription_key ASC");
     (sql, values)
 }
 
@@ -1236,7 +1239,7 @@ fn reserve_sqlite_deliveries(
     created_at_ms: u64,
 ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
     let mut sql = "SELECT subscription_id, record_json FROM trigger_subscriptions
-         WHERE enabled = 1 AND tombstoned = 0 AND source_type = ?1 AND source_key = ?2"
+         WHERE lifecycle = 'enabled' AND source_type = ?1 AND source_key = ?2"
         .to_string();
     let mut values: Vec<rusqlite::types::Value> = vec![
         occurrence.source_type.clone().into(),

@@ -329,13 +329,26 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         SqliteConstraintDatabase::Triggers,
         rendered(
             "trigger_subscriptions",
-            "ck_trigger_subscriptions_live_enabled",
-            "NOT (enabled AND tombstoned)",
+            "ck_trigger_subscriptions_lifecycle",
+            "lifecycle IN ('enabled', 'disabled', 'tombstoned')",
         ),
         rendered(
             "lash_trigger_subscriptions",
-            "ck_trigger_subscriptions_live_enabled",
-            "NOT (enabled AND tombstoned)",
+            "ck_trigger_subscriptions_lifecycle",
+            "lifecycle IN ('enabled', 'disabled', 'tombstoned')",
+        ),
+    ),
+    expected_constraint(
+        SqliteConstraintDatabase::Triggers,
+        rendered(
+            "trigger_subscriptions",
+            "ck_trigger_subscriptions_lifecycle_deleted_at",
+            "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
+        ),
+        rendered(
+            "lash_trigger_subscriptions",
+            "ck_trigger_subscriptions_lifecycle_deleted_at",
+            "(lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)",
         ),
     ),
     expected_constraint(

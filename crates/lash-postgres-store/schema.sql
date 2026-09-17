@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 98.
+-- lash-postgres-store schema, component version 99.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -641,18 +641,20 @@ CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions (
     definition_fingerprint TEXT NOT NULL,
     source_type TEXT NOT NULL,
     source_key TEXT NOT NULL,
-    enabled BOOLEAN NOT NULL,
-    tombstoned BOOLEAN NOT NULL,
+    lifecycle TEXT NOT NULL,
+    deleted_at_ms BIGINT,
     created_at_ms BIGINT NOT NULL,
     updated_at_ms BIGINT NOT NULL,
     record_json TEXT NOT NULL,
-    CONSTRAINT ck_trigger_subscriptions_live_enabled CHECK (NOT (enabled AND tombstoned)),
+    CONSTRAINT ck_trigger_subscriptions_lifecycle
+        CHECK (lifecycle IN ('enabled', 'disabled', 'tombstoned')),
+    CONSTRAINT ck_trigger_subscriptions_lifecycle_deleted_at CHECK ((lifecycle IN ('enabled', 'disabled') AND deleted_at_ms IS NULL) OR (lifecycle = 'tombstoned' AND deleted_at_ms IS NOT NULL)),
     UNIQUE(owner_scope, subscription_key)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_registrant
     ON lash_trigger_subscriptions(owner_scope, subscription_key);
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_source
-    ON lash_trigger_subscriptions(source_type, source_key, enabled);
+    ON lash_trigger_subscriptions(source_type, source_key, lifecycle);
 
 -- The named process-definition registry (FIG-2995, ADR 0095): owner scope,
 -- name, revision, pinned definition fingerprint, lifecycle tombstone and
@@ -759,7 +761,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 98)
+VALUES ('lash-postgres-store', 99)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

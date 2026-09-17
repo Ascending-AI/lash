@@ -21,22 +21,22 @@ const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 mod version_refusal_tests;
 use version_refusal_tests::decode_empty_envelope;
 
-/// Refusal witness (FIG-2996): the generation-79 decoder rejects its immediate
+/// Refusal witness (FIG-2996): the generation-80 decoder rejects its immediate
 /// predecessor before attempting to decode the envelope body.
 ///
 /// The predecessor is a literal, not `REMOTE_PROTOCOL_VERSION - 1`: a derived
 /// one makes the adjacency assertion below tautological and stops recording
 /// which window was actually witnessed.
 #[test]
-fn immediate_predecessor_remote_protocol_generation_78_is_refused() {
-    const PREDECESSOR: u32 = 78;
+fn immediate_predecessor_remote_protocol_generation_79_is_refused() {
+    const PREDECESSOR: u32 = 79;
     assert_eq!(
         PREDECESSOR + 1,
         REMOTE_PROTOCOL_VERSION,
         "remote-protocol generation adjacency pin"
     );
     let error = decode_empty_envelope(PREDECESSOR)
-        .expect_err("generation-78 remote envelope must be refused");
+        .expect_err("generation-79 remote envelope must be refused");
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
@@ -773,7 +773,7 @@ fn remote_trigger_dtos_json_round_trip() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 57,
-            expected: 79,
+            expected: 80,
         }
     ));
 
@@ -839,7 +839,7 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 62,
-            expected: 79,
+            expected: 80,
         }
     ));
 
@@ -847,33 +847,33 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
         serde_json::to_value(Envelope::new(RemoteTriggerSubscriptionFilter::for_session(
             "session-blue",
         )))
-        .expect("serialize canonical version-79 filter"),
+        .expect("serialize canonical version-80 filter"),
         serde_json::json!({
-            "protocol_version": 79,
+            "protocol_version": 80,
             "registrant_scope_id": "session:session-blue",
         })
     );
 }
 
 #[test]
-fn remote_protocol_79_session_filter_refuses_retired_session_id() {
-    let wire = br#"{"protocol_version":79,"session_id":"session-blue"}"#;
+fn remote_protocol_80_session_filter_refuses_retired_session_id() {
+    let wire = br#"{"protocol_version":80,"session_id":"session-blue"}"#;
     let error = Envelope::<RemoteTriggerSubscriptionFilter>::decode_json(wire)
-        .expect_err("version-79 filter must reject the retired session_id field");
+        .expect_err("version-80 filter must reject the retired session_id field");
     assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
     assert!(error.to_string().contains("session_id"), "{error}");
 }
 
 #[test]
-fn remote_protocol_79_session_filter_refuses_nested_duplicate_fields() {
+fn remote_protocol_80_session_filter_refuses_nested_duplicate_fields() {
     // Re-pinned for FIG-2992: a trigger filter's `target` is now the bare
     // engine-owned definition value, and an opaque JSON value cannot reject a
     // duplicate key. The property being pinned — nested duplicate-field
     // rejection inside a typed DTO — is pinned on the process-list filter's
     // typed originator selector instead.
-    let wire = br#"{"protocol_version":79,"originator":{"type":"host","scope":"a","scope":"b"}}"#;
+    let wire = br#"{"protocol_version":80,"originator":{"type":"host","scope":"a","scope":"b"}}"#;
     let error = Envelope::<RemoteProcessListFilter>::decode_json(wire)
-        .expect_err("version-79 envelope must preserve nested duplicate-field rejection");
+        .expect_err("version-80 envelope must preserve nested duplicate-field rejection");
     assert!(matches!(error, RemoteProtocolError::MessageDecode(_)));
     assert!(
         error.to_string().contains("duplicate field `scope`"),
@@ -1056,7 +1056,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 79,
+            "protocol_version": 80,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1071,7 +1071,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 79,
+            actual: 80,
             expected: 41,
         }
     ));
@@ -1117,7 +1117,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 51,
-            expected: 79,
+            expected: 80,
         }
     ));
 
@@ -1134,7 +1134,7 @@ fn protocol_51_process_reference_is_refused_before_incarnation_decode() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 79, "remote DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 80, "remote DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: ProcessId::from("process:1"),
         input: RemoteProcessInput::External {
@@ -1380,39 +1380,41 @@ fn remote_process_env_spec_rejects_unknown_product_metadata_fields() {
 #[test]
 fn remote_trigger_subscription_dtos_json_round_trip() {
     let draft = RemoteTriggerSubscriptionDraft {
-        source_capture: RemoteTriggerSourceCapture {
-            constructor_path: vec!["ui".to_string(), "button".to_string()],
-            config_schema: serde_json::json!({"type": "object"}),
-            route: RemoteTriggerProviderRoute::Provider {
-                provider_id: "ui-provider".to_string(),
-                route: serde_json::json!({"account": "a"}),
+        spec: RemoteTriggerSubscriptionSpec {
+            source_capture: RemoteTriggerSourceCapture {
+                constructor_path: vec!["ui".to_string(), "button".to_string()],
+                config_schema: serde_json::json!({"type": "object"}),
+                route: RemoteTriggerProviderRoute::Provider {
+                    provider_id: "ui-provider".to_string(),
+                    route: serde_json::json!({"account": "a"}),
+                },
             },
+            subscription_key: "button-watcher".to_string(),
+            env_ref:
+                "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .parse()
+                    .expect("canonical env ref"),
+            wake_target: Some(RemoteSessionScope::new("session")),
+            name: Some("button watcher".to_string()),
+            source_type: "ui.button.pressed".to_string(),
+            source_key: "source-key".to_string(),
+            source: serde_json::json!({ "button": "blue" }),
+            payload_schema: serde_json::json!({ "kind": "any" }),
+            target: RemoteProcessInput::Engine {
+                kind: "lashlang".to_string(),
+                payload: serde_json::json!({
+                    "args": {}
+                }),
+            },
+            target_identity: RemoteProcessIdentity {
+                kind: "lashlang".to_string(),
+                label: Some("on_button".to_string()),
+                definition: Some(remote_process_definition_identity()),
+            },
+            event_types: vec![remote_process_event_type()],
+            input_template: remote_trigger_input_template(),
+            target_label: Some("on_button".to_string()),
         },
-        subscription_key: "button-watcher".to_string(),
-        env_ref:
-            "process-env:v6:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                .parse()
-                .expect("canonical env ref"),
-        wake_target: Some(RemoteSessionScope::new("session")),
-        name: Some("button watcher".to_string()),
-        source_type: "ui.button.pressed".to_string(),
-        source_key: "source-key".to_string(),
-        source: serde_json::json!({ "button": "blue" }),
-        payload_schema: serde_json::json!({ "kind": "any" }),
-        target: RemoteProcessInput::Engine {
-            kind: "lashlang".to_string(),
-            payload: serde_json::json!({
-                "args": {}
-            }),
-        },
-        target_identity: RemoteProcessIdentity {
-            kind: "lashlang".to_string(),
-            label: Some("on_button".to_string()),
-            definition: Some(remote_process_definition_identity()),
-        },
-        event_types: vec![remote_process_event_type()],
-        input_template: remote_trigger_input_template(),
-        target_label: Some("on_button".to_string()),
     };
     draft.validate().expect("valid trigger draft");
     let decoded: RemoteTriggerSubscriptionDraft =
@@ -1420,13 +1422,19 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
             .expect("deserialize draft");
     assert_eq!(decoded.source_type, "ui.button.pressed");
 
+    // FIG-3258: flattening the spec into draft and record must leave the wire
+    // shape exactly as it was — the draft's JSON object is the fourteen spec
+    // fields at top level, with no `spec` key.
+    let draft_json = serde_json::to_value(&draft).expect("serialize draft");
+    let draft_object = draft_json.as_object().expect("draft is a JSON object");
+    assert!(!draft_object.contains_key("spec"));
+    assert_eq!(draft_object.len(), 14);
+
     let record = RemoteTriggerSubscriptionRecord {
-        source_capture: draft.source_capture.clone(),
         subscription_id: "trigger-subscription:v2:blake3:test".to_string(),
         owner_scope: RemoteTriggerOwnerScope::Session {
             session_id: SessionId::from("session"),
         },
-        subscription_key: draft.subscription_key.clone(),
         incarnation: "incarnation-a".to_string(),
         revision: 1,
         definition_fingerprint: "definition-hash-a".to_string(),
@@ -1434,21 +1442,23 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
             session_id: SessionId::from("session"),
             agent_frame_id: None,
         },
-        env_ref: draft.env_ref.clone(),
-        wake_target: draft.wake_target.clone(),
-        name: draft.name.clone(),
-        source_type: draft.source_type.clone(),
-        source_key: draft.source_key.clone(),
-        source: draft.source.clone(),
-        payload_schema: draft.payload_schema.clone(),
-        target: draft.target.clone(),
-        target_identity: draft.target_identity.clone(),
-        event_types: draft.event_types.clone(),
-        input_template: draft.input_template.clone(),
-        target_label: draft.target_label.clone(),
-        enabled: true,
-        tombstoned: false,
-        deleted_at_ms: None,
+        spec: RemoteTriggerSubscriptionSpec {
+            subscription_key: draft.subscription_key.clone(),
+            env_ref: draft.env_ref.clone(),
+            wake_target: draft.wake_target.clone(),
+            name: draft.name.clone(),
+            source_type: draft.source_type.clone(),
+            source_key: draft.source_key.clone(),
+            source: draft.source.clone(),
+            payload_schema: draft.payload_schema.clone(),
+            source_capture: draft.source_capture.clone(),
+            target: draft.target.clone(),
+            target_identity: draft.target_identity.clone(),
+            event_types: draft.event_types.clone(),
+            input_template: draft.input_template.clone(),
+            target_label: draft.target_label.clone(),
+        },
+        lifecycle: RemoteTriggerSubscriptionLifecycle::Enabled,
         created_at_ms: 1,
         updated_at_ms: 2,
     };
@@ -1466,6 +1476,80 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
         subscriptions: vec![record],
     };
     list.validate().expect("valid trigger list");
+}
+
+/// FIG-1951: the window-79 wire spelled a subscription's lifecycle as an
+/// `enabled`/`tombstoned`/`deleted_at_ms` triple with eight representable
+/// combinations and three legal ones, and no validator looked at any of them —
+/// a peer could assert any of the five invalid triples and the conversion
+/// copied them straight into a core record. The tagged enum makes each of the
+/// five a decode refusal rather than a value.
+#[test]
+fn trigger_subscription_lifecycle_refuses_every_invalid_window_79_triple() {
+    fn lifecycle_from(value: serde_json::Value) -> Result<RemoteTriggerSubscriptionLifecycle, ()> {
+        serde_json::from_value::<RemoteTriggerSubscriptionLifecycle>(value).map_err(|_| ())
+    }
+
+    // The three legal states, in the shape this window writes.
+    assert_eq!(
+        lifecycle_from(serde_json::json!({ "lifecycle": "enabled" })),
+        Ok(RemoteTriggerSubscriptionLifecycle::Enabled)
+    );
+    assert_eq!(
+        lifecycle_from(serde_json::json!({ "lifecycle": "disabled" })),
+        Ok(RemoteTriggerSubscriptionLifecycle::Disabled)
+    );
+    assert_eq!(
+        lifecycle_from(serde_json::json!({
+            "lifecycle": "tombstoned",
+            "deleted_at_ms": 17u64,
+        })),
+        Ok(RemoteTriggerSubscriptionLifecycle::Tombstoned(17))
+    );
+
+    // The five invalid states a window-79 peer could assert, each now refused.
+    for invalid in [
+        // A tombstone with no deletion time.
+        serde_json::json!({ "lifecycle": "tombstoned" }),
+        // A live row claiming a deletion time.
+        serde_json::json!({ "lifecycle": "enabled", "deleted_at_ms": 17u64 }),
+        serde_json::json!({ "lifecycle": "disabled", "deleted_at_ms": 17u64 }),
+        // A routable tombstone: the old `enabled = true, tombstoned = true`.
+        serde_json::json!({ "lifecycle": "enabled_tombstoned" }),
+        // The window-79 triple itself carries no tag at all.
+        serde_json::json!({ "enabled": true, "tombstoned": true, "deleted_at_ms": 17u64 }),
+    ] {
+        assert!(
+            lifecycle_from(invalid.clone()).is_err(),
+            "the wire must refuse {invalid}"
+        );
+    }
+}
+
+/// A window-79 record body — the three flat fields, no `lifecycle` tag — must
+/// be refused outright rather than defaulted into an enabled subscription.
+#[test]
+fn a_window_79_trigger_subscription_record_is_refused() {
+    let mut body = serde_json::json!({
+        "subscription_id": "trigger-subscription:v2:blake3:test",
+        "owner_scope": { "scope": "session", "session_id": "session" },
+        "subscription_key": "key",
+        "incarnation": "incarnation-a",
+        "revision": 1,
+        "definition_fingerprint": "definition-hash-a",
+        "registrant": { "origin": "session", "session_id": "session" },
+        "env_ref": canonical_env_ref(),
+        "source_type": "ui.button.pressed",
+        "source_key": "source-key",
+        "created_at_ms": 1,
+        "updated_at_ms": 2,
+        "enabled": true,
+        "tombstoned": false,
+    });
+    assert!(
+        serde_json::from_value::<RemoteTriggerSubscriptionRecord>(body.take()).is_err(),
+        "a window-79 record body must not decode"
+    );
 }
 
 #[test]
@@ -1486,7 +1570,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 79,
+            expected: 80,
         })
     ));
 }
@@ -1525,7 +1609,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 79,
+                expected: 80,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1561,7 +1645,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 79,
+                expected: 80,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1616,7 +1700,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 79,
+                expected: 80,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1648,7 +1732,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 79,
+                expected: 80,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -1810,9 +1894,16 @@ fn process_execution_policy_carries_session_generation_options() {
     ));
 }
 
+/// FIG-3259: core dropped the target-label agreement rule in FIG-2995 — the
+/// label is host-facing presentation, not a second spelling of the identity
+/// label — so the wire must not keep enforcing it. Core registers exactly this
+/// record (`lash-core/src/triggers/router/tests.rs`,
+/// `trigger_store_accepts_a_target_label_independent_of_the_identity`); before
+/// this change the wire refused it, so a host could persist a subscription it
+/// could neither export to a peer nor import back.
 #[test]
-fn trigger_target_label_must_match_identity_label() {
-    let mut draft = RemoteTriggerSubscriptionDraft::for_process(
+fn trigger_target_label_round_trips_independently_of_the_identity_label() {
+    let draft = RemoteTriggerSubscriptionDraft::for_process(
         "label-test",
         canonical_env_ref().parse().expect("canonical env ref"),
         "ui.button.pressed",
@@ -1827,12 +1918,20 @@ fn trigger_target_label_must_match_identity_label() {
         },
     )
     .with_target_label("other-label");
-    assert!(matches!(
-        draft.validate(),
-        Err(RemoteProtocolError::InvalidEnvelope { .. })
-    ));
-    draft.target_label = Some("identity-label".to_string());
-    draft.validate().expect("matching labels validate");
+    draft
+        .validate()
+        .expect("a target label independent of the identity label validates");
+
+    let encoded = serde_json::to_string(&draft).expect("encode the draft");
+    let decoded: RemoteTriggerSubscriptionDraft =
+        serde_json::from_str(&encoded).expect("decode the draft");
+    decoded.validate().expect("the decoded draft validates");
+    assert_eq!(decoded.target_label.as_deref(), Some("other-label"));
+    assert_eq!(
+        decoded.target_identity.label.as_deref(),
+        Some("identity-label")
+    );
+    assert_eq!(decoded, draft);
 }
 
 #[test]

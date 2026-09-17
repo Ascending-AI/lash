@@ -473,17 +473,17 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
                 .expect("observe SQLite session-lease fence"),
             FenceIntegrityTarget::TriggerRevision { subscription_id } => conn
                 .query_row(
-                    "SELECT revision, record_json, enabled, tombstoned
+                    "SELECT revision, record_json, lifecycle, deleted_at_ms
                      FROM trigger_subscriptions WHERE subscription_id = ?1",
                     [subscription_id],
                     |row| {
                         let value: i64 = row.get(0)?;
                         let json: String = row.get(1)?;
-                        let enabled: i64 = row.get(2)?;
-                        let tombstoned: i64 = row.get(3)?;
+                        let lifecycle: String = row.get(2)?;
+                        let deleted_at_ms: Option<i64> = row.get(3)?;
                         Ok(FenceIntegrityObservation {
                             value,
-                            mutation_fingerprint: format!("{json}:{enabled}:{tombstoned}"),
+                            mutation_fingerprint: format!("{json}:{lifecycle}:{deleted_at_ms:?}"),
                         })
                     },
                 )

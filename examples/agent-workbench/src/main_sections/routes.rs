@@ -471,7 +471,7 @@ pub(crate) async fn set_trigger_enabled(
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
     let session_id = state.admit_session(&query, "api.triggers.enable").await?;
     let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
-    let changed = record.enabled != request.enabled;
+    let changed = record.lifecycle.enabled() != request.enabled;
     let command = if request.enabled {
         lash::triggers::TriggerCommand::Enable {
             owner_scope: record.owner_scope.clone(),

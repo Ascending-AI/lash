@@ -277,13 +277,39 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         &mut connection,
         "INSERT INTO lash_trigger_subscriptions (
              subscription_id, owner_scope, subscription_key, incarnation, revision,
-             definition_fingerprint, source_type, source_key, enabled, tombstoned,
+             definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
              created_at_ms, updated_at_ms, record_json
          ) VALUES (
-             'bad-pair', 'owner', 'key', 'incarnation', 1, 'fingerprint',
-             'source', 'key', TRUE, TRUE, 0, 0, '{}'
+             'bad-vocabulary', 'owner', 'key', 'incarnation', 1, 'fingerprint',
+             'source', 'key', 'archived', NULL, 0, 0, '{}'
          )",
-        "ck_trigger_subscriptions_live_enabled",
+        "ck_trigger_subscriptions_lifecycle",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_trigger_subscriptions (
+             subscription_id, owner_scope, subscription_key, incarnation, revision,
+             definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
+             created_at_ms, updated_at_ms, record_json
+         ) VALUES (
+             'tombstone-without-time', 'owner', 'key', 'incarnation', 1, 'fingerprint',
+             'source', 'key', 'tombstoned', NULL, 0, 0, '{}'
+         )",
+        "ck_trigger_subscriptions_lifecycle_deleted_at",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_trigger_subscriptions (
+             subscription_id, owner_scope, subscription_key, incarnation, revision,
+             definition_fingerprint, source_type, source_key, lifecycle, deleted_at_ms,
+             created_at_ms, updated_at_ms, record_json
+         ) VALUES (
+             'live-with-a-deletion-time', 'owner', 'key', 'incarnation', 1, 'fingerprint',
+             'source', 'key', 'enabled', 7, 0, 0, '{}'
+         )",
+        "ck_trigger_subscriptions_lifecycle_deleted_at",
     )
     .await;
     assert_check_rejects(

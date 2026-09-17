@@ -2070,9 +2070,7 @@ fn trigger_subscription_record() -> lash_core::TriggerSubscriptionRecord {
         event_types: draft.event_types,
         input_template: draft.input_template,
         target_label: draft.target_label,
-        enabled: true,
-        tombstoned: false,
-        deleted_at_ms: None,
+        lifecycle: lash_core::TriggerSubscriptionLifecycle::Enabled,
         created_at_ms: 1,
         updated_at_ms: 2,
     }
