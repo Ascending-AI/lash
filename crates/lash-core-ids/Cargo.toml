@@ -24,7 +24,7 @@ otel-trace = ["lash-trace/otel"]
 # site compiled out unless an internal witness explicitly enables this feature.
 perf-witness = []
 # Test-only observation hooks shared with lash-core's unit suites.
-testing = []
+testing = ["dep:tracing-subscriber"]
 
 [lints]
 workspace = true
@@ -37,5 +37,7 @@ lash-trace = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true, features = ["rt", "time"] }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
+uuid = { workspace = true, features = ["v4"] }

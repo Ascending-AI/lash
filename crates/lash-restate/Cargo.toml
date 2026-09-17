@@ -21,6 +21,7 @@ workspace = true
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 lash-core = { workspace = true }
+lash-core-worker = { workspace = true }
 lash-trace = { workspace = true }
 lash-http-transport = { workspace = true }
 restate-sdk = { workspace = true }

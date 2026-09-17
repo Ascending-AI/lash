@@ -1024,6 +1024,7 @@ mod tests {
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("session-a")
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
                 model: crate::ModelSpec::builder("test-model")
                     .context_window_tokens(1024)
@@ -1079,6 +1080,7 @@ mod tests {
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("future-revision-cursor")
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
                 model: crate::ModelSpec::builder("test-model")
                     .context_window_tokens(1024)
@@ -1135,6 +1137,7 @@ mod tests {
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("revision-equivalence")
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
                 model: crate::ModelSpec::builder("test-model")
                     .context_window_tokens(1024)
@@ -1170,6 +1173,7 @@ mod tests {
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("publish-order")
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
                 model: crate::ModelSpec::builder("test-model")
                     .context_window_tokens(1024)
@@ -1216,6 +1220,7 @@ mod tests {
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("auxiliary-reconciliation")
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_policy(crate::SessionPolicy {
                 model: crate::ModelSpec::builder("test-model")
                     .context_window_tokens(1024)

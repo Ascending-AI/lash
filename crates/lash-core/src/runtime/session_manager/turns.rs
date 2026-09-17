@@ -68,7 +68,7 @@ impl ManagedSessionCapability {
                 // boundary, rather than in new boxes at whichever recursive
                 // poll site happens to overflow next.
                 let task = crate::task::spawn(
-                    crate::runtime::process_worker::inherit_process_execution_permit(
+                    crate::runtime::process_permit::inherit_process_execution_permit(
                         run_managed_session_turn(
                             runtime,
                             turn_id.clone(),

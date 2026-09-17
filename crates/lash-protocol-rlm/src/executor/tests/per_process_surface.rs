@@ -1,17 +1,18 @@
 use std::sync::Arc;
 
 use lash_core::facade_support::{
-    DurableProcessWorker, DurableProcessWorkerConfig, InMemoryProcessExecutionEnvStore,
-    InMemorySessionStoreFactory, NativeEffectHost, PluginHost, PluginSessionContext, PluginSpec,
-    PluginSpecFactory, RuntimeHostConfig, empty_trigger_source_key, watch_process_registry,
+    InMemoryProcessExecutionEnvStore, InMemorySessionStoreFactory, NativeEffectHost, PluginHost,
+    PluginSessionContext, PluginSpec, PluginSpecFactory, RuntimeHostConfig,
+    empty_trigger_source_key, watch_process_registry,
 };
 use lash_core::{
     ArtifactOwner, CommitBudget, LashSchema, NativeProcessWork, NoQueuedWork, PluginError,
     PluginOptions, ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessOriginator,
     ProcessRegistry, QueuedWorkBatchingConfig, SessionPolicy, TriggerCommand,
     TriggerCommandOutcome, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, TurnBudget, WorkerProcessWork,
+    TriggerSubscriptionDraft, TurnBudget,
 };
+use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use lash_lashlang_runtime::{
     LashlangProcessEngine, LashlangProcessInput, LashlangSurface, LashlangSurfaceContribution,
     lashlang_process_engine_registration, lashlang_surface_extension,

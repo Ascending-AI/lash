@@ -655,7 +655,7 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
     );
     assert_eq!(
         config.process_execution_concurrency(),
-        lash_core::facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY
+        lash_core_worker::DEFAULT_PROCESS_EXECUTION_CONCURRENCY
     );
     assert_eq!(config.native_substrate.worker_sweep.intake_page.get(), 17);
     assert_eq!(config.native_substrate.work_cadence.delivery_batch.get(), 1);
@@ -664,8 +664,6 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
 
 #[tokio::test]
 async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> Result<()> {
-    use lash_core::SessionStoreFactory as _;
-
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
@@ -764,8 +762,6 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
 
 #[tokio::test]
 async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent() -> Result<()> {
-    use lash_core::SessionStoreFactory as _;
-
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -1284,8 +1280,6 @@ async fn duplicate_only_fork_intents_are_canonical_in_sqlite() -> Result<()> {
 
 #[tokio::test]
 async fn session_create_observer_intent_replays_idempotently_on_open() -> Result<()> {
-    use lash_core::SessionStoreFactory as _;
-
     let session_id = "session-create-observer-recovery";
     let process_id = "session-create-observed-process";
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
@@ -1384,8 +1378,6 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 #[tokio::test]
 async fn attributed_session_observer_intents_settle_in_one_pass_before_open_returns() -> Result<()>
 {
-    use lash_core::SessionStoreFactory as _;
-
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -1604,7 +1596,7 @@ fn durable_process_worker_rejects_incoherent_native_pacing_directly() {
         .expect("build durable process-worker config");
     config.native_substrate.worker_sweep.fetch_retry_base = std::time::Duration::ZERO;
 
-    let Err(error) = lash_core::facade_support::DurableProcessWorker::new(config) else {
+    let Err(error) = lash_core_worker::DurableProcessWorker::new(config) else {
         panic!("direct worker construction must reject zero-delay pacing");
     };
     assert!(
@@ -1708,8 +1700,6 @@ async fn registry_without_store_factory_fails_loudly() {
 
 #[tokio::test]
 async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -> Result<()> {
-    use lash_core::SessionStoreFactory as _;
-
     // Forking creates a session head at a retained point; it does not create a
     // second authority over configuration. The branch resolves the host's spec
     // when it opens, exactly as a reopen of the source would, so the sampling a

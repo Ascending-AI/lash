@@ -5,7 +5,7 @@ error[E0061]: this function takes 2 arguments but 0 arguments were supplied
   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-- two arguments of type `CommitBudget` and `QueuedWorkBatchingConfig` are missing
   |
 note: associated function defined here
- --> $WORKSPACE/crates/lash-core/src/runtime/host.rs
+ --> $WORKSPACE/crates/lash-core-execution/src/runtime/host.rs
   |
   |     pub fn in_memory(
   |            ^^^^^^^^^

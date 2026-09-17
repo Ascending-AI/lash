@@ -8,7 +8,6 @@ use lash_sansio::{EffectAddress, SessionId};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SessionStoreFactory;
     use lash_sansio::sync::MutexExt;
     use pretty_assertions::assert_eq;
 

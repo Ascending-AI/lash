@@ -1,0 +1,53 @@
+[package]
+name = "lash-internal-core-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Durable process worker for the Lash runtime kernel."
+keywords = ["lash", "agent", "runtime", "async", "ai"]
+categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_core_worker"
+doctest = false
+
+[features]
+default = []
+otel-trace = ["lash-core/otel-trace", "lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace", "lash-core-memory/otel-trace", "lash-core-execution/otel-trace"]
+perf-witness = ["lash-core/perf-witness", "lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness", "lash-core-memory/perf-witness", "lash-core-execution/perf-witness"]
+testing = ["lash-core/testing", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-memory/testing", "lash-core-execution/testing"]
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-core = { workspace = true }
+lash-core-ids = { workspace = true }
+lash-core-llm = { workspace = true }
+lash-core-store = { workspace = true }
+lash-core-effect = { workspace = true }
+lash-core-memory = { workspace = true }
+lash-core-execution = { workspace = true }
+lash-sansio = { workspace = true, features = ["schema-validation"] }
+lash-trace = { workspace = true }
+tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt", "rt-multi-thread", "macros"] }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+futures-util = { workspace = true }
+
+[dev-dependencies]
+lash-core = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["test-util"] }
+
+[package.metadata.cargo-shear]
+ignored-paths = ["src/runtime/native_substrate/worklist.rs"]

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use lash::persistence::{
     InMemoryAttachmentStore, InMemoryProcessExecutionEnvStore, InMemorySessionStoreFactory,
     LeaseOwnerIdentity, RuntimeCommit, RuntimeSessionState, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory as _,
+    SessionStoreCreateRequest,
 };
 use lash::process::{
     ProcessInput, ProcessObserverBy, ProcessObserverRegistry as _, ProcessProvenance,

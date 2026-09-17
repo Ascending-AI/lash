@@ -84,6 +84,7 @@ impl LashRuntime {
     /// before any queued command work. Mid-run changes never come through
     /// here — they use the commanded
     /// [`Self::set_protocol_turn_options`] path instead.
+    #[expect(dead_code, reason = "retained during the runtime crate extraction")]
     pub(crate) fn record_materialized_protocol_turn_options(
         &mut self,
         options: crate::ProtocolTurnOptions,
@@ -129,7 +130,9 @@ impl LashRuntime {
             };
             protocol_session
                 .configure_runtime_on_materialize(
-                    crate::plugin::ProtocolRuntimeContext::new(self),
+                    crate::plugin::ProtocolRuntimeContext::new(
+                        &mut self.state.protocol_turn_options,
+                    ),
                     materialization,
                 )
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;

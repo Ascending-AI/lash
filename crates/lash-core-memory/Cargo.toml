@@ -1,0 +1,42 @@
+[package]
+name = "lash-internal-core-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "In-memory runtime persistence for the Lash runtime kernel."
+keywords = ["lash", "agent", "runtime", "async", "ai"]
+categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_core_memory"
+doctest = false
+
+[features]
+default = []
+otel-trace = ["lash-core-ids/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace"]
+perf-witness = ["lash-core-ids/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness"]
+testing = ["lash-core-ids/testing", "lash-core-store/testing", "lash-core-effect/testing"]
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-core-ids = { workspace = true }
+lash-core-store = { workspace = true }
+lash-core-effect = { workspace = true }
+lash-sansio = { workspace = true }
+async-trait = { workspace = true }
+rmp-serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }

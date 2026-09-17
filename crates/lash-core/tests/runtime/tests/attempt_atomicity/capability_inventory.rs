@@ -55,7 +55,8 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
 
 pub(super) fn assert_capability_inventory_complete() {
     let surface = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tool_provider.rs"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../lash-core-execution/src/tool_provider.rs"),
     )
     .expect("read tool_provider surface");
     let surface = surface.as_str();

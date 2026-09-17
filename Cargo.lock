@@ -2083,11 +2083,62 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures-util",
- "hmac",
  "insta",
  "lash-internal-core",
+ "lash-internal-core-effect",
+ "lash-internal-core-execution",
  "lash-internal-core-ids",
  "lash-internal-core-llm",
+ "lash-internal-core-memory",
+ "lash-internal-core-store",
+ "lash-internal-sansio",
+ "lash-internal-trace",
+ "proptest",
+ "rmp-serde",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-core-effect"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "hmac",
+ "lash-internal-core-ids",
+ "lash-internal-core-memory",
+ "lash-internal-core-store",
+ "lash-internal-sansio",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-core-execution"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "hmac",
+ "insta",
+ "lash-internal-core-effect",
+ "lash-internal-core-ids",
+ "lash-internal-core-llm",
+ "lash-internal-core-memory",
  "lash-internal-core-store",
  "lash-internal-sansio",
  "lash-internal-trace",
@@ -2120,6 +2171,8 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -2136,6 +2189,22 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-core-memory"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "lash-internal-core-effect",
+ "lash-internal-core-ids",
+ "lash-internal-core-store",
+ "lash-internal-sansio",
+ "rmp-serde",
+ "serde_json",
  "tokio",
  "tracing",
  "uuid",
@@ -2159,6 +2228,29 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-core-worker"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "lash-internal-core",
+ "lash-internal-core-effect",
+ "lash-internal-core-execution",
+ "lash-internal-core-ids",
+ "lash-internal-core-llm",
+ "lash-internal-core-memory",
+ "lash-internal-core-store",
+ "lash-internal-sansio",
+ "lash-internal-trace",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]
@@ -2212,6 +2304,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-lashlang",
  "lash-internal-remote-protocol",
  "lash-internal-sansio",
@@ -2327,6 +2420,7 @@ dependencies = [
  "fastrand",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-lashlang",
  "lash-internal-plugin-process-controls",
  "lash-internal-postgres-store",
@@ -2358,6 +2452,7 @@ dependencies = [
  "insta",
  "jsonschema",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
  "lash-internal-plugin-process-controls",
@@ -2502,6 +2597,7 @@ dependencies = [
  "http-body-util",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-http-transport",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
@@ -2596,6 +2692,7 @@ dependencies = [
  "async-trait",
  "jsonschema",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-lashlang-runtime",
  "lash-internal-plugin-process-controls",
  "lash-internal-protocol-rlm",
@@ -2734,6 +2831,7 @@ dependencies = [
  "insta",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-http-transport",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
@@ -2785,6 +2883,7 @@ dependencies = [
  "insta",
  "lash-internal-conformance",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-transport",
  "lash-internal-plugin-process-controls",

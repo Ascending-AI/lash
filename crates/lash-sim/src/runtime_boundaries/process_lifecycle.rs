@@ -6,6 +6,7 @@ use lash_core::{
     LeaseOwnerIdentity, ProcessAwaitOutput, ProcessRegistry, RecoveryContract,
     TestProcessRegistryWriteExt,
 };
+use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use serde_json::{Value, json};
 
 use super::RuntimeBoundaryError;
@@ -71,16 +72,16 @@ pub(super) fn lifecycle_worker(
     runtime_host: lash_core::facade_support::RuntimeHostConfig,
     policy: lash_core::SessionPolicy,
     fault_sink: &RecordingWorkerFaultSink,
-) -> lash_core::facade_support::DurableProcessWorker {
+) -> DurableProcessWorker {
     let watched = lash_core::facade_support::watch_process_registry(registry);
-    lash_core::facade_support::DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+    DurableProcessWorker::new(
+        DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(vec![Arc::new(
                 lash_protocol_standard::StandardProtocolPluginFactory::new(),
             )])),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched),
+            WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             owner,
         )

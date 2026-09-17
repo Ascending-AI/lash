@@ -150,6 +150,6 @@ lash_rust_feature_library(
         "manual",
     ],
     extra_deps = {"@crates//:opentelemetry-0.31.0": "opentelemetry"},
-    variant_deps = {"//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_76ece385"},
+    variant_deps = {"//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_c335ed3e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_be35fe9e", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_e62031c0", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c9fcc2be"},
     version = "0.0.0-dev",
 )

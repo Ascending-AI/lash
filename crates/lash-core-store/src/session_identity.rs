@@ -724,3 +724,29 @@ impl SessionStoreCreateRequest {
         self.relation.parent_session_id()
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionObservedProcessReceipt {
+    pub process_id: crate::ProcessId,
+    pub attribution: SessionObserverIntentAttribution,
+    pub outcome: SessionObservedProcessOutcome,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionObservedProcessOutcome {
+    Observed {
+        incarnation: crate::ProcessIncarnation,
+    },
+    IncarnationSuperseded {
+        requested_incarnation: crate::ProcessIncarnation,
+        current_incarnation: crate::ProcessIncarnation,
+    },
+    NotFound,
+    NoLongerRetained {
+        terminal_label: String,
+        pruned_at_ms: u64,
+    },
+    Unavailable {
+        message: String,
+    },
+}

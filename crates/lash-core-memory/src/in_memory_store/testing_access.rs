@@ -1,0 +1,415 @@
+//! Raw diagnostics exposed only to tests and the explicit `testing` feature.
+
+// Test-support module: these fixtures run inside a test, and a broken setup
+// assumption must abort it loudly rather than be reshaped into a runtime error
+// the test under way would then report as a runtime defect. Clippy's
+// `allow-expect-in-tests` reaches `#[test]` functions only, not the fixtures
+// they call.
+#![expect(
+    clippy::expect_used,
+    reason = "test-support fixtures: a broken setup assumption aborts the test"
+)]
+
+use super::InMemorySessionStore;
+use crate::SessionId;
+use lash_sansio::sync::MutexExt;
+
+impl InMemorySessionStore {
+    /// Replace the standalone store's generated turn-cancellation authority
+    /// with the explicit authority owned by a low-level test fixture.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_turn_cancellation_authority_for_testing(
+        mut self,
+        authority: impl lash_core_store::turn_control_binding::StoreTurnCancellationAuthority,
+    ) -> Self {
+        self.turn_cancellation_authority = Some(std::sync::Arc::new(authority));
+        self
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn inject_graph_corruption_for_testing(
+        &self,
+        target: &crate::testing::graph_integrity::GraphIntegrityTarget,
+    ) {
+        use crate::testing::graph_integrity::{GraphIntegrityCorruption, GraphIntegrityRead};
+
+        if target.corruption == GraphIntegrityCorruption::DanglingLeafId {
+            self.session_head_meta
+                .lock()
+                .expect("lock session head")
+                .as_mut()
+                .expect("graph-integrity fixture has a session head")
+                .leaf_node_id = Some(target.missing_node_id.clone());
+            return;
+        }
+        let mut graph = self.global_session_graph.lock().expect("lock global graph");
+        match target.corruption {
+            GraphIntegrityCorruption::OrphanLeaf => {
+                graph
+                    .data_mut()
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.node_id == target.leaf_node_id)
+                    .expect("graph-integrity fixture leaf is durable")
+                    .parent_node_id = Some(target.missing_node_id.clone());
+            }
+            GraphIntegrityCorruption::DuplicateNodeId => {
+                let duplicate = graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.node_id == target.leaf_node_id)
+                    .expect("graph-integrity fixture leaf is durable")
+                    .clone();
+                graph.data_mut().nodes.push(duplicate);
+            }
+            GraphIntegrityCorruption::DanglingLeafId => unreachable!(),
+            GraphIntegrityCorruption::ParentCycle => {
+                if target.read == GraphIntegrityRead::ActivePath {
+                    graph
+                        .data_mut()
+                        .nodes
+                        .iter_mut()
+                        .find(|node| node.node_id == target.root_node_id)
+                        .expect("graph-integrity fixture root is durable")
+                        .parent_node_id = Some(target.leaf_node_id.clone());
+                } else {
+                    let template = graph
+                        .nodes
+                        .iter()
+                        .find(|node| node.node_id == target.leaf_node_id)
+                        .expect("graph-integrity fixture leaf is durable")
+                        .clone();
+                    let node_a_id = crate::NodeId::new(format!("{}-a", target.missing_node_id));
+                    let node_b_id = crate::NodeId::new(format!("{}-b", target.missing_node_id));
+                    let mut node_a = template.clone();
+                    node_a.node_id = node_a_id.clone();
+                    node_a.parent_node_id = Some(node_b_id.clone());
+                    let mut node_b = template;
+                    node_b.node_id = node_b_id;
+                    node_b.parent_node_id = Some(node_a_id);
+                    graph.data_mut().nodes.extend([node_a, node_b]);
+                }
+            }
+        }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn load_whole_graph_for_testing(&self) -> Result<crate::SessionGraph, crate::StoreError> {
+        let leaf_node_id = self
+            .session_head_meta
+            .lock()
+            .expect("lock session head")
+            .as_ref()
+            .and_then(|meta| meta.leaf_node_id.clone());
+        crate::SessionGraph::from_nodes(
+            self.global_session_graph
+                .lock()
+                .expect("lock global graph")
+                .nodes
+                .clone(),
+            leaf_node_id,
+        )
+        .map_err(|error| crate::StoreError::StoredDataCorrupt {
+            record_kind: "SessionGraph",
+            message: error.to_string(),
+        })
+    }
+
+    /// This diagnostic accessor deliberately does not take `write_transaction`.
+    /// It also holds `tombstoned_node_ids` while acquiring `session_graph`;
+    /// callers must not use it concurrently with writes or introduce the
+    /// inverse lock order.
+    pub fn raw_graph_nodes_for_testing(&self) -> Vec<crate::SessionNodeRecord> {
+        let tombstoned = self.tombstoned_node_ids.lock_recover();
+        self.global_session_graph
+            .lock_recover()
+            .nodes
+            .iter()
+            .filter(|node| !tombstoned.contains(&node.node_id))
+            .cloned()
+            .collect()
+    }
+
+    /// Return the durable leaf-node id without loading a session read model.
+    pub fn raw_leaf_node_id_for_testing(&self) -> Option<crate::NodeId> {
+        self.session_head_meta
+            .lock_recover()
+            .as_ref()
+            .and_then(|meta| meta.leaf_node_id.clone())
+    }
+
+    /// Return the durable head revision without loading a session read model.
+    pub fn raw_head_revision_for_testing(&self) -> Option<u64> {
+        self.session_head_meta
+            .lock_recover()
+            .as_ref()
+            .map(|meta| meta.head_revision)
+    }
+
+    /// Return the durable checkpoint ref without constructing a session read model.
+    pub fn raw_checkpoint_ref_for_testing(&self) -> Option<crate::BlobRef> {
+        self.session_head_meta
+            .lock_recover()
+            .as_ref()
+            .and_then(|meta| meta.checkpoint_ref.clone())
+    }
+
+    /// Return raw pending-input lifecycle state for differential tests.
+    pub fn raw_pending_turn_inputs_for_testing(&self) -> Vec<super::RawPendingTurnInputForTesting> {
+        self.pending_turn_inputs
+            .lock_recover()
+            .iter()
+            .map(|entry| {
+                (
+                    entry.input.input_id.clone(),
+                    entry.input.enqueue_seq,
+                    entry.input.state,
+                    entry.claim.id(),
+                    entry.claim.fencing_token,
+                    entry.claim.diagnostic_generation(),
+                )
+            })
+            .collect()
+    }
+
+    /// Return raw queued-work batches and their claim state for differential
+    /// tests. The sequence is backend-local, so callers normalize ordering.
+    pub fn raw_queued_work_for_testing(&self) -> Vec<super::RawQueuedWorkForTesting> {
+        let session_id = self
+            .session_meta
+            .lock_recover()
+            .as_ref()
+            .map(|meta| meta.session_id.clone());
+        self.queued_work
+            .lock_recover()
+            .iter()
+            .filter(|entry| {
+                session_id
+                    .as_ref()
+                    .is_none_or(|session_id| entry.batch.session_id == session_id)
+            })
+            .map(|entry| {
+                (
+                    entry.batch.clone(),
+                    entry.claim.id(),
+                    entry.claim.owner(),
+                    entry.claim.token().is_some(),
+                    entry.claim.fencing_token,
+                    entry.claim.diagnostic_generation(),
+                )
+            })
+            .collect()
+    }
+
+    /// Return the receiver-side process-wake allocation fences directly from
+    /// the in-memory durable map.
+    pub fn raw_wake_redelivery_fences_for_testing(&self) -> Vec<(String, String, u64)> {
+        let mut rows = self
+            .wake_redelivery_fences
+            .lock_recover()
+            .iter()
+            .map(|((session_id, process_id), sequence)| {
+                (session_id.clone(), process_id.clone(), *sequence)
+            })
+            .collect::<Vec<_>>();
+        rows.sort();
+        rows
+    }
+
+    /// Return the current checkpoint exactly as held by the in-memory durable
+    /// implementation, including both content refs and resolved bodies.
+    pub fn raw_checkpoint_for_testing(&self) -> Option<crate::HydratedSessionCheckpoint> {
+        self.checkpoint.lock_recover().clone()
+    }
+
+    /// Return turn-commit receipt identity, intent hash, and replay payload.
+    pub fn raw_runtime_turn_commits_for_testing(
+        &self,
+    ) -> Vec<(String, String, crate::RuntimeCommitReceipt)> {
+        let mut rows = self
+            .runtime_turn_commits
+            .lock_recover()
+            .iter()
+            .map(|((_session_id, operation), record)| {
+                (
+                    operation.clone(),
+                    record.turn_commit_hash.clone(),
+                    record.result.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        rows
+    }
+
+    /// Return every attachment-manifest row owned by this bound session.
+    pub fn raw_attachment_manifest_for_testing(&self) -> Vec<crate::AttachmentManifestEntry> {
+        let session_id = self.bound_session_id.lock_recover().clone().or_else(|| {
+            self.session_meta
+                .lock_recover()
+                .as_ref()
+                .map(|meta| meta.session_id.clone())
+        });
+        let mut rows = self
+            .attachment_manifest
+            .lock_recover()
+            .values()
+            .filter(|entry| Some(entry.session_id.as_str()) == session_id.as_deref())
+            .cloned()
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.attachment_id.cmp(&right.attachment_id));
+        rows
+    }
+
+    pub fn raw_usage_deltas_for_testing(&self) -> Vec<crate::TokenLedgerEntry> {
+        self.usage_deltas
+            .lock_recover()
+            .iter()
+            .map(|delta| delta.entry.clone())
+            .collect()
+    }
+
+    pub fn raw_session_meta_for_testing(&self) -> Option<crate::SessionMeta> {
+        self.session_meta.lock_recover().clone()
+    }
+
+    /// Install deterministic metadata before a cross-backend differential run.
+    pub fn replace_session_meta_for_testing(&self, meta: crate::SessionMeta) {
+        let _transaction = self.write_transaction.lock_recover();
+        *self.session_meta.lock_recover() = Some(meta);
+    }
+
+    pub fn raw_session_execution_leases_for_testing(&self) -> Vec<RawSessionExecutionLeaseRow> {
+        let mut rows = self
+            .session_execution_leases
+            .lock_recover()
+            .iter()
+            .map(|(session_id, lease)| {
+                let held = lease.held_fields();
+                RawSessionExecutionLeaseRow {
+                    session_id: session_id.clone(),
+                    owner: held.map(|fields| fields.owner.clone()),
+                    executor_id: held.map(|fields| fields.executor_id.to_string()),
+                    lease_token: held.map(|fields| fields.lease_token.to_string()),
+                    fencing_token: lease.fencing_token,
+                    claimed_at_epoch_ms: held.map_or(0, |fields| fields.claimed_at_epoch_ms),
+                    lease_term_ms: held.map_or(0, |fields| fields.lease_term_ms),
+                    expires_at_epoch_ms: held.map_or(0, |fields| fields.expires_at_epoch_ms),
+                }
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        rows
+    }
+}
+
+/// One raw session-execution-lease row as the in-memory store holds it.
+///
+/// The differential reader compares these field by field, so the shape is a
+/// named struct rather than a wide tuple: a caller that mismatches
+/// `claimed_at_epoch_ms` against `expires_at_epoch_ms` would otherwise still
+/// typecheck.
+#[derive(Clone, Debug)]
+pub struct RawSessionExecutionLeaseRow {
+    pub session_id: SessionId,
+    pub owner: Option<crate::LeaseOwnerIdentity>,
+    pub executor_id: Option<String>,
+    pub lease_token: Option<String>,
+    pub fencing_token: u64,
+    pub claimed_at_epoch_ms: u64,
+    pub lease_term_ms: u64,
+    pub expires_at_epoch_ms: u64,
+}
+
+impl super::InMemorySessionStoreFactory {
+    /// Return the concrete testing store after `SessionStoreFactory` created it.
+    pub fn raw_store_for_testing(
+        &self,
+        session_id: &SessionId,
+    ) -> Option<std::sync::Arc<InMemorySessionStore>> {
+        self.stores.lock_recover().get(session_id).cloned()
+    }
+
+    /// Return explicit node-anchor rows without mixing in implicit live tips.
+    pub fn raw_node_anchors_for_testing(&self) -> Vec<(crate::NodeId, crate::BlobRef, SessionId)> {
+        let mut rows = self
+            .node_anchors
+            .lock_recover()
+            .iter()
+            .map(
+                |(node_id, (checkpoint_ref, _checkpoint, source_session_id))| {
+                    (
+                        node_id.clone(),
+                        checkpoint_ref.clone(),
+                        source_session_id.clone(),
+                    )
+                },
+            )
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+        rows
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::store::StoreTestSupport for InMemorySessionStore {
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), crate::StoreError> {
+        self.stamp_session_state_version_and_corrupt_payload_in_memory(version);
+        Ok(())
+    }
+}
+
+impl InMemorySessionStore {
+    pub fn bind_session_for_conformance(&self, session_id: &SessionId) {
+        *self.bound_session_id.lock_recover() = Some(session_id.clone());
+        *self.session_meta.lock_recover() = Some(crate::SessionMeta {
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from(session_id.to_string()),
+            relation: crate::SessionRelation::Root,
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::store::StoreMaintenance;
+    use crate::{DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkStore, StoreError};
+
+    #[tokio::test]
+    async fn in_memory_unbound_vacuum_returns_typed_error() {
+        let store = super::InMemorySessionStore::default();
+        let err = store
+            .vacuum()
+            .await
+            .expect_err("unbound vacuum must return SessionNotBound");
+        assert!(
+            matches!(
+                err.stop,
+                crate::store::MaintenanceStop::Failed(StoreError::SessionNotBound)
+            ),
+            "expected SessionNotBound, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queued_work_diagnostic_is_unfiltered_without_session_meta() {
+        let store = super::InMemorySessionStore::default();
+        store
+            .enqueue_queued_work(QueuedWorkBatchDraft::new(
+                "deleted-session",
+                DeliveryPolicy::EarliestSafeBoundary,
+                crate::SessionCommand::RefreshToolCatalog {
+                    reason: "prove post-delete diagnostics are non-vacuous".to_string(),
+                },
+            ))
+            .await
+            .expect("seed queued work without session metadata");
+
+        let rows = store.raw_queued_work_for_testing();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0.session_id, "deleted-session");
+    }
+}

@@ -28,6 +28,7 @@ workspace = true
 lash-trace = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
+lash-core-worker = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-typescript = { workspace = true }
 lashlang = { workspace = true }

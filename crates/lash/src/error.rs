@@ -113,9 +113,7 @@ pub enum EmbedError {
     MissingProcessRegistry,
     #[error("invalid process execution configuration: {0}")]
     /// Wraps the process execution concurrency failure.
-    ProcessExecutionConcurrency(
-        #[from] lash_core::facade_support::ProcessExecutionConcurrencyError,
-    ),
+    ProcessExecutionConcurrency(#[from] lash_core_worker::ProcessExecutionConcurrencyError),
     #[error("invalid queued-work execution configuration: {0}")]
     /// Wraps the queued work execution concurrency failure.
     QueuedWorkExecutionConcurrency(

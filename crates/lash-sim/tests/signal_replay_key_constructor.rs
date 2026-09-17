@@ -28,7 +28,7 @@ const SCANNED_ROOTS: &[&str] = &["crates", "runbooks", "examples"];
 
 /// The one file that may spell the format: the constructor and its `await`
 /// sibling, which share the prefix by construction.
-const EXEMPT_FILES: &[&str] = &["crates/lash-core/src/runtime/process/events.rs"];
+const EXEMPT_FILES: &[&str] = &["crates/lash-core-execution/src/runtime/process/events.rs"];
 
 #[expect(
     clippy::expect_used,

@@ -7,6 +7,7 @@ mod events;
 mod failures;
 mod handlers;
 mod lease;
+mod local_effects;
 mod machine;
 mod streaming;
 mod tool_catalog;
@@ -21,6 +22,7 @@ pub(super) use events::{
     send_turn_input_applications,
 };
 use handlers::foreground_exec_graph_key;
+pub(super) use local_effects::TurnEffectStateUpdate;
 pub(super) use trace::protocol_step_trace_event;
 
 pub(super) struct RuntimeTurnDriver<'a> {

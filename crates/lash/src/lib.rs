@@ -685,10 +685,10 @@ pub mod process {
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
         ObserverInheritance, ParentEndPlan, ProcessChange, ProcessCompletionOutcome,
-        ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessOutcome,
-        ProcessStartOutcome, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone,
-        WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-        WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+        ProcessExecutionWriteAuthority, ProcessOutcome, ProcessStartOutcome,
+        ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone, WaitKind, WaitState,
+        WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryDisposition,
+        WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     };
     pub use lash_core::{
         AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, ArtifactOwner,
@@ -737,6 +737,7 @@ pub mod process {
         WakeDeliveryConfig, facade_support::WakeDeliveryDriveReport,
         facade_support::WakeDeliveryDriver, facade_support::process_wake_source_key,
     };
+    pub use lash_core_worker::ProcessExecutionConcurrencyError;
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         LASHLANG_ENGINE_KIND, LashlangProcessInput, lashlang_process_event_types,
@@ -764,12 +765,13 @@ pub mod durability {
         RuntimeSubject, SegmentProgress, ToolAttemptLaunch, ToolCallLaunch, TriggerLocalExecution,
     };
     pub use lash_core::{
-        EffectHost, TurnCancellationAuthority, WorkerProcessWork,
-        facade_support::DurableProcessWorker, facade_support::DurableProcessWorkerConfig,
-        facade_support::LeaseTimings, facade_support::LeaseTimingsError,
-        facade_support::NativeEffectHost, facade_support::ProcessDrainReport,
-        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
-        facade_support::TerminationPolicy,
+        EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,
+        facade_support::LeaseTimingsError, facade_support::NativeEffectHost,
+        facade_support::ProcessDrainReport, facade_support::RuntimeEnvironment,
+        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
+    };
+    pub use lash_core_worker::{
+        DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork,
     };
 }
 

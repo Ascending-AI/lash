@@ -1,0 +1,62 @@
+[package]
+name = "lash-internal-core-execution"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Process, tool, plugin, session, and effect execution for the Lash runtime kernel."
+keywords = ["lash", "agent", "runtime", "async", "ai"]
+categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_core_execution"
+doctest = false
+
+[features]
+# Keep the execution kernel portable by default.
+default = []
+otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace", "lash-core-memory/otel-trace"]
+# Internal performance instrumentation. Production builds leave every call
+# site compiled out unless an internal witness explicitly enables this feature.
+perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness", "lash-core-memory/perf-witness"]
+# Expose `testing` fixtures shared with `lash-core`'s own tests.
+testing = ["dep:tracing-subscriber", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-memory/testing"]
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-core-ids = { workspace = true }
+lash-core-llm = { workspace = true }
+lash-core-store = { workspace = true }
+lash-core-effect = { workspace = true }
+lash-core-memory = { workspace = true }
+lash-sansio = { workspace = true, features = ["schema-validation"] }
+lash-trace = { workspace = true }
+tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt", "rt-multi-thread", "macros"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde-content = { workspace = true }
+serde_json = { workspace = true }
+rmp-serde = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
+async-trait = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+sha2 = { workspace = true }
+chrono = { workspace = true }
+futures-util = { workspace = true }
+hmac = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
+
+[dev-dependencies]
+insta = "1"
+proptest = "1"
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

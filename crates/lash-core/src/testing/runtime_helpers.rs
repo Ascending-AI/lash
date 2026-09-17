@@ -185,16 +185,7 @@ pub fn set_runtime_provider(runtime: &mut LashRuntime, provider: crate::Provider
     runtime.state.policy.provider_id = provider.kind().to_string();
 }
 
-pub fn standard_test_policy() -> SessionPolicy {
-    SessionPolicy {
-        provider_id: "mock".to_string(),
-        model: crate::ModelSpec::builder("mock-model")
-            .context_window_tokens(200_000)
-            .build()
-            .expect("valid model spec"),
-        ..SessionPolicy::new(crate::TurnBudget::Unbounded)
-    }
-}
+pub use crate::testing::standard_test_policy;
 
 pub fn test_host_config() -> EmbeddedRuntimeHost {
     let mut config = RuntimeHostConfig::in_memory(

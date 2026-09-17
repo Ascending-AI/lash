@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Clock-rule scope exemptions outside lash-core (inventory re-derived at 2fe260e7e):
 # - No lash-core dependency: lash-llm-transport, lash-http-transport, lash-plugin-mcp.
-# - Clock implementation: lash-sim/src/clock.rs:64.
+# - Clock implementations: lash-sim/src/clock.rs:64 and
+#   lash-core-ids/src/test_clock.rs:35,39.
 # - Benchmark harness (24 sites):
 #   lash-perf/src/runtime_perf/measurement/store_hardening.rs:229;
 #   lash-perf/src/runtime_perf/measurement/provider_scenarios.rs:62,213;
@@ -149,7 +150,8 @@ capture_search "clock discipline" "$clock_forbidden" "$tmp_dir/rule1.raw" \
 while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
   case "$file" in
-    crates/lash-core/src/runtime/native_substrate/* | crates/lash-core-ids/src/clock.rs)
+    crates/lash-core/src/runtime/native_substrate/* | crates/lash-core-ids/src/clock.rs | \
+    crates/lash-core-ids/src/test_clock.rs)
       continue
       ;;
   esac

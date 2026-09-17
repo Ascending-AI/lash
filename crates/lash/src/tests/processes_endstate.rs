@@ -2359,7 +2359,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
         "artifact-outage-restarted-host",
     )
     .await?;
-    let restarted_worker = lash_core::facade_support::DurableProcessWorker::new(
+    let restarted_worker = lash_core_worker::DurableProcessWorker::new(
         reopened_core.durable_process_worker_config()?,
     )?;
     let restarted_drive = restarted_worker.drive_pending_processes().await?;

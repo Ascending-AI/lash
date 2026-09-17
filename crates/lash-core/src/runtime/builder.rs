@@ -220,10 +220,7 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    pub(crate) fn with_attachment_manifest_store(
-        mut self,
-        store: Arc<dyn RuntimePersistence>,
-    ) -> Self {
+    pub fn with_attachment_manifest_store(mut self, store: Arc<dyn RuntimePersistence>) -> Self {
         // Runtime state still uses `self.store`; only attachment intent
         // persistence is redirected to this store.
         self.attachment_manifest_store = Some(store);

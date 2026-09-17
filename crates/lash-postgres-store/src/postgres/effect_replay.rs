@@ -78,6 +78,8 @@ impl effect_replay_driver::StoreReplayAdapter for PostgresEffectHost {
     }
 }
 
+lash_core::impl_store_replay_await_event_resolver!(impl lash_core::AwaitEventResolver for PostgresEffectHost);
+
 #[async_trait::async_trait]
 impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
     fn turn_control_binding_id(&self) -> String {
@@ -178,6 +180,8 @@ impl effect_replay_driver::StoreReplayAdapter for PostgresRuntimeEffectControlle
         Some(self.turn_control_binding_id.to_string())
     }
 }
+
+lash_core::impl_store_replay_await_event_resolver!(impl lash_core::AwaitEventResolver for PostgresRuntimeEffectController);
 
 impl effect_replay_driver::StoreReplayController for PostgresRuntimeEffectController {
     fn execution_scope(&self) -> &ExecutionScope {

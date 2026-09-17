@@ -10,6 +10,7 @@ mod api;
 mod create_plan;
 mod current;
 mod direct;
+mod direct_outcome;
 mod graph;
 mod managed;
 mod materialize;
@@ -17,7 +18,7 @@ mod process_runners;
 mod turns;
 mod usage;
 
-pub use direct::DirectCompletionClient;
+pub use crate::direct_completion_client::DirectCompletionClient;
 pub(in crate::runtime) use usage::ChildUsageEventRelay;
 pub(in crate::runtime::session_manager) use usage::{
     ChannelEventSink, LiveChildUsageForwarder, subtract_usage,
@@ -371,7 +372,7 @@ impl RuntimeSessionServices {
         effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
         turn_id: Option<TurnId>,
     ) -> DirectCompletionClient<'run> {
-        DirectCompletionClient::runtime(Arc::clone(self), effect_controller, turn_id)
+        DirectCompletionClient::runtime(self.clone(), effect_controller, turn_id)
     }
 
     /// The host's durable home for the named process-definition registry
@@ -423,6 +424,14 @@ impl RuntimeSessionServices {
             child_usage_event_relay,
             held_session_execution_lease,
         )
+    }
+
+    #[doc(hidden)]
+    pub fn for_worker(
+        runtime: &LashRuntime,
+        persist_usage_to_store: bool,
+    ) -> Result<Self, PluginOperationInvokeError> {
+        Self::new(runtime, persist_usage_to_store, None, None)
     }
 
     /// Turn-scoped services: usage stays in the shared ledger and graph

@@ -839,11 +839,11 @@ pub(super) fn recovery_worker_with_plugins(
         ),
     );
     DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+        lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
             runtime_host,
             store_factory,
-            lash_core::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )

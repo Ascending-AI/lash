@@ -29,7 +29,7 @@ impl<'run> RuntimeTurnDriver<'run> {
     ) -> Result<T, RuntimeEffectControllerError> {
         let scoped_effect_controller = self.scoped_effect_controller.clone();
         let outcome = if let Some(task_controller) = scoped_effect_controller.to_static() {
-            let (local_executor, update) = crate::RuntimeEffectLocalExecutor::turn(
+            let (local_executor, update) = super::local_effects::turn_effect_executor(
                 self,
                 machine,
                 event_tx.clone(),
@@ -48,7 +48,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                     scoped_effect_controller.execution_scope().clone(),
                 )
                 .map_err(RuntimeEffectControllerError::from)?;
-            let (local_executor, update) = crate::RuntimeEffectLocalExecutor::turn(
+            let (local_executor, update) = super::local_effects::turn_effect_executor(
                 self,
                 machine,
                 event_tx.clone(),
@@ -72,7 +72,7 @@ impl<'run> RuntimeTurnDriver<'run> {
 
     fn apply_turn_effect_update(
         &mut self,
-        update: &std::sync::Mutex<Option<crate::runtime::effect::TurnEffectStateUpdate>>,
+        update: &std::sync::Mutex<Option<super::TurnEffectStateUpdate>>,
     ) {
         let update = update.lock_recover().take();
         if let Some(update) = update {

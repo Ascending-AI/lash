@@ -1,240 +1,62 @@
 use super::*;
 use crate::TurnId;
+use crate::direct_completion_client::{DirectCompletionService, DirectExecutionPosition};
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 
-/// Runtime-backed direct completion source.
-///
-/// Carries everything needed to plan and journal a direct LLM effect against
-/// the owning session manager.
-#[derive(Clone)]
-struct RuntimeDirectSource<'run> {
-    manager: Arc<RuntimeSessionServices>,
-    effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-    turn_id: Option<TurnId>,
-}
-
-#[cfg(any(test, feature = "testing"))]
-type TestDirectFn = Arc<
-    dyn Fn(crate::DirectRequest, String) -> Result<crate::DirectCompletion, crate::PluginError>
-        + Send
-        + Sync,
->;
-
-/// Source of direct (single-shot) LLM completions for plugins and tools.
-///
-/// In production this is always backed by the runtime session manager; the
-/// test/testing variants exist only so that out-of-runtime test harnesses can
-/// inject a canned completion without standing up a full runtime.
-#[derive(Clone)]
-enum DirectCompletionSource<'run> {
-    Runtime(RuntimeDirectSource<'run>),
-    #[cfg(any(test, feature = "testing"))]
-    Unavailable(String),
-    #[cfg(any(test, feature = "testing"))]
-    TestFn(TestDirectFn),
-}
-
-#[derive(Clone)]
-pub struct DirectCompletionClient<'run> {
-    source: DirectCompletionSource<'run>,
-    /// The effect this client was minted inside, when the minting site knows
-    /// it. A client stamped with an open `ToolAttempt` must never journal: the
-    /// controller already owns one entry for the whole attempt. Boxed because
-    /// this client is captured by the deep tool-dispatch futures.
-    parent_invocation: Option<Box<crate::RuntimeInvocation>>,
-    inside_tool_attempt: bool,
-}
-
-impl<'run> DirectCompletionClient<'run> {
-    pub(super) fn runtime(
-        manager: Arc<RuntimeSessionServices>,
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-        turn_id: Option<TurnId>,
-    ) -> Self {
-        Self {
-            source: DirectCompletionSource::Runtime(RuntimeDirectSource {
-                manager,
-                effect_controller,
-                turn_id,
-            }),
-            parent_invocation: None,
-            inside_tool_attempt: false,
+impl RuntimeSessionServices {
+    fn direct_invocation_context<'a>(
+        &'a self,
+        effect_controller: crate::ScopedEffectController<'a>,
+        turn_id: Option<&'a crate::TurnId>,
+        position: DirectExecutionPosition,
+    ) -> DirectInvocationContext<'a> {
+        DirectInvocationContext {
+            current: &self.current,
+            usage_capability: &self.usage,
+            effect_controller,
+            turn_id,
+            position,
+            replay_ordinals: self.direct_replay_ordinals.as_ref(),
+            unkeyed_in_flight: self.direct_unkeyed_in_flight.as_ref(),
         }
     }
+}
 
-    pub(crate) fn to_static(&self) -> Option<DirectCompletionClient<'static>> {
-        let source = match &self.source {
-            DirectCompletionSource::Runtime(source) => {
-                DirectCompletionSource::Runtime(RuntimeDirectSource {
-                    manager: Arc::clone(&source.manager),
-                    effect_controller: source.effect_controller.to_static()?,
-                    turn_id: source.turn_id.clone(),
-                })
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::Unavailable(message) => {
-                DirectCompletionSource::Unavailable(message.clone())
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestFn(invoke) => {
-                DirectCompletionSource::TestFn(Arc::clone(invoke))
-            }
-        };
-        Some(DirectCompletionClient {
-            source,
-            parent_invocation: self.parent_invocation.clone(),
-            inside_tool_attempt: self.inside_tool_attempt,
-        })
-    }
-
-    /// Classifies where a direct call sits relative to the journal.
-    ///
-    /// A caller-supplied parent wins when it names an attempt; otherwise the
-    /// invocation this client was minted inside decides. Either answer must be
-    /// `ToolAttempt` for the journal-free branch, because a recorded attempt
-    /// replays without re-entering its body.
-    fn position(
-        &self,
-        _parent_invocation: Option<&crate::RuntimeInvocation>,
-    ) -> DirectExecutionPosition {
-        if self.inside_tool_attempt {
-            DirectExecutionPosition::ToolAttempt
-        } else {
-            DirectExecutionPosition::Independent
-        }
-    }
-
-    pub fn with_tool_attempt_parent_invocation(
-        mut self,
-        parent_invocation: crate::RuntimeInvocation,
-    ) -> Self {
-        self.parent_invocation = Some(Box::new(parent_invocation));
-        self.inside_tool_attempt = true;
-        self
-    }
-
-    pub async fn direct_completion(
+#[async_trait::async_trait]
+impl DirectCompletionService for RuntimeSessionServices {
+    async fn complete(
         &self,
         request: crate::DirectRequest,
         usage_source: &str,
-    ) -> Result<crate::DirectCompletion, crate::PluginError> {
-        self.direct_completion_at(request, usage_source, self.position(None))
-            .await
-    }
-
-    pub(crate) async fn direct_completion_for_tool(
-        &self,
-        request: crate::DirectRequest,
-        usage_source: &str,
-        parent_invocation: Option<&crate::RuntimeInvocation>,
-    ) -> Result<crate::DirectCompletion, crate::PluginError> {
-        self.direct_completion_at(request, usage_source, self.position(parent_invocation))
-            .await
-    }
-
-    async fn direct_completion_at(
-        &self,
-        request: crate::DirectRequest,
-        usage_source: &str,
+        effect_controller: crate::ScopedEffectController<'_>,
+        turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
-        match &self.source {
-            DirectCompletionSource::Runtime(source) => {
-                source
-                    .manager
-                    .direct
-                    .invoke_direct_completion(
-                        source.invocation_context(position),
-                        request,
-                        usage_source,
-                    )
-                    .await
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::Unavailable(message) => {
-                Err(crate::PluginError::Session(message.clone()))
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestFn(invoke) => invoke(request, usage_source.to_string()),
-        }
+        self.direct
+            .invoke_direct_completion(
+                self.direct_invocation_context(effect_controller, turn_id, position),
+                request,
+                usage_source,
+            )
+            .await
     }
 
-    /// Executes an already-normalized request using its non-empty
-    /// `scope.request_id` as the caller-owned durable replay key.
-    ///
-    /// The request id must be unique for each logical direct call. Reusing it
-    /// in the same session, turn, and usage source deliberately replays the
-    /// first result even when the rest of the request differs.
-    ///
-    /// Replay is a property of the journal, so it does not apply inside a
-    /// recorded tool attempt: a client bound to an open `ToolAttempt` executes
-    /// locally and never presents its replay key, and the enclosing attempt
-    /// entry is what redrive replays instead.
-    pub async fn direct_llm_completion(
+    async fn complete_llm(
         &self,
         request: crate::LlmRequest,
         usage_source: &str,
+        effect_controller: crate::ScopedEffectController<'_>,
+        turn_id: Option<&crate::TurnId>,
+        position: DirectExecutionPosition,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
-        match &self.source {
-            DirectCompletionSource::Runtime(source) => {
-                source
-                    .manager
-                    .direct
-                    .invoke_direct_llm_completion(
-                        source.invocation_context(self.position(None)),
-                        request,
-                        usage_source,
-                    )
-                    .await
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::Unavailable(message) => {
-                Err(crate::PluginError::Session(message.clone()))
-            }
-            #[cfg(any(test, feature = "testing"))]
-            DirectCompletionSource::TestFn(_) => Err(crate::PluginError::Session(
-                "direct LLM completions are unavailable in this test context".to_string(),
-            )),
-        }
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn unavailable(message: impl Into<String>) -> Self {
-        Self {
-            source: DirectCompletionSource::Unavailable(message.into()),
-            parent_invocation: None,
-            inside_tool_attempt: false,
-        }
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub fn from_fn<F>(invoke: F) -> Self
-    where
-        F: Fn(crate::DirectRequest, String) -> Result<crate::DirectCompletion, crate::PluginError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        Self {
-            source: DirectCompletionSource::TestFn(Arc::new(invoke)),
-            parent_invocation: None,
-            inside_tool_attempt: false,
-        }
-    }
-}
-
-impl<'run> RuntimeDirectSource<'run> {
-    fn invocation_context(&self, position: DirectExecutionPosition) -> DirectInvocationContext<'_> {
-        DirectInvocationContext {
-            current: &self.manager.current,
-            usage_capability: &self.manager.usage,
-            effect_controller: self.effect_controller.scoped(),
-            turn_id: self.turn_id.as_ref(),
-            position,
-            replay_ordinals: self.manager.direct_replay_ordinals.as_ref(),
-            unkeyed_in_flight: self.manager.direct_unkeyed_in_flight.as_ref(),
-        }
+        self.direct
+            .invoke_direct_llm_completion(
+                self.direct_invocation_context(effect_controller, turn_id, position),
+                request,
+                usage_source,
+            )
+            .await
     }
 }
 
@@ -316,13 +138,6 @@ struct DirectReplayPosition<'a> {
     replay: Option<&'a crate::RuntimeReplay>,
     caused_by: Option<&'a crate::CausalRef>,
     ordinal: u64,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum DirectExecutionPosition {
-    #[default]
-    Independent,
-    ToolAttempt,
 }
 
 impl DirectCompletionCapability {
@@ -422,7 +237,7 @@ impl DirectCompletionCapability {
             }
             DirectExecutionPosition::ToolAttempt => local_executor.execute(envelope).await?,
         };
-        crate::runtime::effect::apply_direct_outcome(
+        super::direct_outcome::apply_direct_outcome(
             current,
             context.usage_capability,
             &request,

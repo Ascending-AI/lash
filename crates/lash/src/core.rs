@@ -1,19 +1,19 @@
 use crate::support::{
-    Arc, AttachmentStore, DurableProcessWorkerConfig, EffectHost, EmbedError,
-    InMemoryLiveReplayStore, LashRuntime, LashSession, LiveReplayStore, NativeQueuedWork,
-    NativeSubstrateConfig, NoQueuedWork, ParkedSession, PluginFactory, PluginHost, PluginOptions,
-    PluginSpec, PluginStack, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
-    PromptLayer, PromptLayerSink, ProviderHandle, QueuedWorkSubstrate, Result, RuntimeEnvironment,
-    RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy,
-    SessionRelation, SessionSpec, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
-    SessionWorkTarget, StaticPluginFactory, TerminationPolicy, ToolProvider, WorkerProcessWork,
-    WorkerSlotSupplier,
+    Arc, AttachmentStore, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime,
+    LashSession, LiveReplayStore, NativeQueuedWork, NativeSubstrateConfig, NoQueuedWork,
+    ParkedSession, PluginFactory, PluginHost, PluginOptions, PluginSpec, PluginStack,
+    ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, PromptLayer, PromptLayerSink,
+    ProviderHandle, QueuedWorkSubstrate, Result, RuntimeEnvironment, RuntimeHandle,
+    RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy, SessionRelation,
+    SessionSpec, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget,
+    StaticPluginFactory, TerminationPolicy, ToolProvider, WorkerSlotSupplier,
 };
 use lash_core::facade_support;
 use lash_core::runtime::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
     RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
+use lash_core_worker::{DurableProcessWorkerConfig, WorkerProcessWork};
 use lash_sansio::SessionId;
 
 mod advanced_builder;
@@ -1266,7 +1266,7 @@ impl LashCoreBuilder {
         }
         let process_execution_concurrency = self
             .process_execution_concurrency
-            .unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
+            .unwrap_or(lash_core_worker::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
         DurableProcessWorkerConfig::validate_process_execution_concurrency(
             process_execution_concurrency,
         )?;

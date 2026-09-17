@@ -23,21 +23,19 @@ fn recovery_local_owner(
 fn recovery_process_worker(
     registry: Arc<dyn lash_core::ProcessRegistry>,
     owner: lash_core::LeaseOwnerIdentity,
-) -> lash_core::facade_support::DurableProcessWorker {
+) -> lash_core_worker::DurableProcessWorker {
     let watched = lash_core::facade_support::watch_process_registry(registry);
-    lash_core::facade_support::DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
-            lash_core::facade_support::RuntimeHostConfig::in_memory(
-                lash_core::CommitBudget::bounded(1024 * 1024, 512),
-                lash_core::QueuedWorkBatchingConfig::new(1),
-            ),
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
-            owner,
+    lash_core_worker::DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
+        Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
+        lash_core::facade_support::RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
         ),
-    )
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        lash_core_worker::WorkerProcessWork::SelfNative(watched),
+        Arc::new(lash_core::NoQueuedWork::new()),
+        owner,
+    ))
     .expect("valid test native substrate config")
 }
 

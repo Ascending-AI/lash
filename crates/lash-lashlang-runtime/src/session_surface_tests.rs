@@ -2,17 +2,16 @@ use super::*;
 use std::sync::Arc;
 
 use lash_core::facade_support::{
-    DurableProcessWorker, DurableProcessWorkerConfig, InMemoryProcessExecutionEnvStore,
-    InMemorySessionStoreFactory, PluginHost, PluginSessionContext, PluginSpec, PluginSpecFactory,
-    RuntimeHostConfig, watch_process_registry,
+    InMemoryProcessExecutionEnvStore, InMemorySessionStoreFactory, PluginHost,
+    PluginSessionContext, PluginSpec, PluginSpecFactory, RuntimeHostConfig, watch_process_registry,
 };
 use lash_core::{
     AdmittedProcessIdentity, ArtifactOwner, CommitBudget, NativeProcessWork, NoQueuedWork,
     OnParentEnd, ParentScope, PluginError, PluginOptions, ProcessExecutionEnvSpec,
     ProcessExecutionEnvStore, ProcessLifecyclePolicy, ProcessProvenance, ProcessRegistration,
     ProcessRegistry, QueuedWorkBatchingConfig, RecoveryContract, SessionPolicy, TurnBudget,
-    WorkerProcessWork,
 };
+use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use lashlang::testing::ast_builders as b;
 
 const SURFACE_PLUGIN_ID: &str = "fig3344.session-surface";

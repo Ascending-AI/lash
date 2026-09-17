@@ -892,8 +892,6 @@ mod tests {
 
     #[tokio::test]
     async fn session_deletion_refusal_keeps_its_type_through_runtime_binding() {
-        use crate::SessionStoreFactory;
-
         let session_id = "deleted-during-runtime-binding";
         let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
         let request = crate::SessionStoreCreateRequest {
@@ -935,7 +933,6 @@ mod tests {
 
     #[tokio::test]
     async fn park_commit_preserves_a_concurrent_session_deletion_refusal() {
-        use crate::SessionStoreFactory;
         use crate::runtime::tests::helpers::{
             EmptyTools, plugin_session_with_tools, standard_test_policy, test_host_config,
         };
@@ -1003,7 +1000,6 @@ mod tests {
 
     #[tokio::test]
     async fn park_commit_keeps_a_transient_backend_failure_as_protocol() {
-        use crate::SessionStoreFactory;
         use crate::runtime::tests::helpers::{
             EmptyTools, plugin_session_with_tools, standard_test_policy, test_host_config,
         };

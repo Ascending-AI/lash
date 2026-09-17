@@ -7,6 +7,7 @@
 //! original path.
 
 pub mod clock;
+pub mod execution_permit;
 pub mod identity_json;
 pub mod operational_metrics;
 pub mod panic_containment;
@@ -15,4 +16,9 @@ pub mod perf_witness;
 pub mod stable_hash;
 pub mod stable_identity;
 pub mod task;
+#[cfg(any(test, feature = "testing"))]
+pub mod test_clock;
 pub mod test_watchdog;
+#[cfg(feature = "testing")]
+pub mod trace_capture;
+pub mod worker_capacity;

@@ -35,5 +35,6 @@ tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
+lash-core-worker = { workspace = true, features = ["testing"] }
 lash-plugin-process-controls = { workspace = true, features = ["lashlang"] }
 tokio-util = { workspace = true, features = ["rt"] }

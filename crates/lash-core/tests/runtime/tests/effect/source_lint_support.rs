@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub(super) fn effect_module_sources(manifest_dir: &Path) -> Vec<PathBuf> {
-    rust_sources_in(manifest_dir.join("src/runtime/effect"))
+    rust_sources_in(manifest_dir.join("../lash-core-execution/src/runtime/effect"))
 }
 
 /// The turn loop's phase modules, so the cutover lint keeps inspecting the
