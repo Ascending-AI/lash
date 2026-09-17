@@ -1179,20 +1179,17 @@ mod tests {
     use super::*;
     use lash_core::{
         AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCancellation,
-        ToolFailureClass, facade_support::AttachmentMeta,
+        ToolFailureClass, facade_support::AttachmentRef,
     };
 
     fn image_ref(id: &str) -> AttachmentSource {
-        AttachmentSource::stored(
-            AttachmentMeta::new(
-                AttachmentId::parse(id).expect("valid attachment id"),
-                MediaType::parse("image/png").unwrap(),
-                3,
-                Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-                Some("tiny".to_string()),
-            )
-            .as_ref(),
-        )
+        AttachmentSource::stored(AttachmentRef::new(
+            AttachmentId::parse(id).expect("valid attachment id"),
+            MediaType::parse("image/png").unwrap(),
+            3,
+            Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
+            Some("tiny".to_string()),
+        ))
     }
 
     #[test]

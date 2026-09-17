@@ -137,14 +137,13 @@ mod tests {
     const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
 
     fn attachment_ref(id: &str) -> crate::AttachmentRef {
-        crate::AttachmentMeta::new(
+        crate::AttachmentRef::new(
             crate::AttachmentId::parse(id).expect("valid attachment id"),
             crate::MediaType::parse("image/png").unwrap(),
             3,
             Some(crate::AttachmentTypeMetadata::image(Some(1), Some(1))),
             Some("tiny".to_string()),
         )
-        .as_ref()
     }
 
     #[test]

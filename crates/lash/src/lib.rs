@@ -516,7 +516,6 @@ pub mod messages {
 pub mod attachments {
     pub use lash_core::{
         AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType,
-        facade_support::AttachmentMeta,
     };
     pub use lash_sansio::{InvalidAttachmentId, InvalidMediaType};
 }

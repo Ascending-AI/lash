@@ -812,15 +812,14 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                     args: serde_json::json!({}),
                     output: lash_core::ToolCallOutput::success_tool_value(
                         lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
-                            lash_core::facade_support::AttachmentMeta::new(
+                            lash_core::facade_support::AttachmentRef::new(
                                 lash_core::AttachmentId::parse("replayed-attachment")
                                     .expect("valid attachment id"),
                                 lash_core::MediaType::parse("image/png").unwrap(),
                                 3,
                                 Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
                                 Some("replayed".to_string()),
-                            )
-                            .as_ref(),
+                            ),
                         )),
                     ),
                     duration_ms: 1,

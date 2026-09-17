@@ -10,11 +10,11 @@ use serde_json::Value;
 
 use crate::llm::types::LlmToolSpec;
 use crate::{
-    AttachmentId, AttachmentMeta, AttachmentRef, AttachmentTypeMetadata, BaseRenderCache,
-    ConversationRecord, MediaType, Message, MessageSequence, ModelEffortValidationCategory,
-    ModelToolReturn, ModelToolReturnPart, PromptContribution, PromptFingerprint, ProtocolEvent,
-    SessionAppendNode, ToolCancellation, ToolCatalog, ToolContract, ToolDefinition, ToolFailure,
-    ToolFailureClass, ToolId, ToolManifest, ToolRetryPolicy, ToolValue,
+    AttachmentId, AttachmentTypeMetadata, BaseRenderCache, ConversationRecord, MediaType, Message,
+    MessageSequence, ModelEffortValidationCategory, ModelToolReturn, ModelToolReturnPart,
+    PromptContribution, PromptFingerprint, ProtocolEvent, SessionAppendNode, ToolCancellation,
+    ToolCatalog, ToolContract, ToolDefinition, ToolFailure, ToolFailureClass, ToolId, ToolManifest,
+    ToolRetryPolicy, ToolValue,
 };
 
 /// Reserved BLAKE3 domains used by workspace hash owners. Entries are
@@ -143,34 +143,6 @@ pub trait AttachmentTypeMetadataCoreSupport {
 impl AttachmentTypeMetadataCoreSupport for AttachmentTypeMetadata {
     fn image(width: Option<u32>, height: Option<u32>) -> Self {
         AttachmentTypeMetadata::image(width, height)
-    }
-}
-
-pub trait AttachmentMetaCoreSupport {
-    fn new(
-        id: AttachmentId,
-        media_type: MediaType,
-        byte_len: u64,
-        type_metadata: Option<AttachmentTypeMetadata>,
-        label: Option<String>,
-    ) -> Self;
-
-    fn as_ref(&self) -> AttachmentRef;
-}
-
-impl AttachmentMetaCoreSupport for AttachmentMeta {
-    fn new(
-        id: AttachmentId,
-        media_type: MediaType,
-        byte_len: u64,
-        type_metadata: Option<AttachmentTypeMetadata>,
-        label: Option<String>,
-    ) -> Self {
-        AttachmentMeta::new(id, media_type, byte_len, type_metadata, label)
-    }
-
-    fn as_ref(&self) -> AttachmentRef {
-        AttachmentMeta::as_ref(self)
     }
 }
 

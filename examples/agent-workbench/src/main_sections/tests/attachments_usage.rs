@@ -195,14 +195,14 @@ async fn run_attachment_usage_gate(
         .await
         .expect("read uploaded bytes from workbench attachment store");
     assert_eq!(stored.bytes, png_bytes);
-    let metadata = lash::attachments::AttachmentMeta::new(
+    let metadata = lash::attachments::AttachmentRef::new(
         uploaded.attachment.id.clone(),
         uploaded.attachment.media_type.clone(),
         uploaded.attachment.byte_len,
         uploaded.attachment.type_metadata.clone(),
         uploaded.attachment.label.clone(),
     );
-    let metadata: lash::attachments::AttachmentMeta = serde_json::from_value(
+    let metadata: lash::attachments::AttachmentRef = serde_json::from_value(
         serde_json::to_value(metadata).expect("serialize uploaded attachment metadata"),
     )
     .expect("deserialize uploaded attachment metadata");
@@ -211,7 +211,7 @@ async fn run_attachment_usage_gate(
     assert_eq!(metadata.byte_len, png_bytes.len() as u64);
     assert_eq!(metadata.type_metadata, uploaded.attachment.type_metadata);
     assert_eq!(metadata.label.as_deref(), Some("usage-gate.png"));
-    assert_eq!(metadata.as_ref(), uploaded.attachment);
+    assert_eq!(metadata, uploaded.attachment);
     assert_eq!(
         uploaded.retrieve_url,
         format!("/api/attachments/{}", uploaded.attachment.id)

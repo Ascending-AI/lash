@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef};
+use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 
 use crate::store::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
@@ -1102,8 +1102,7 @@ impl AttachmentStore for InMemoryAttachmentStore {
         bytes: Vec<u8>,
         meta: AttachmentCreateMeta,
     ) -> Result<AttachmentRef, AttachmentStoreError> {
-        let meta = stored_meta(&bytes, meta);
-        let reference = meta.as_ref();
+        let reference = stored_ref(&bytes, meta);
         let now = now_epoch_ms();
         let mut attachments = self.attachments.lock_recover();
         match attachments.entry(reference.id.clone()) {
@@ -1674,8 +1673,8 @@ impl AttachmentManifest for PersistenceManifestAdapter {
     }
 }
 
-fn stored_meta(bytes: &[u8], meta: AttachmentCreateMeta) -> AttachmentMeta {
-    AttachmentMeta::new(
+fn stored_ref(bytes: &[u8], meta: AttachmentCreateMeta) -> AttachmentRef {
+    AttachmentRef::new(
         content_id(bytes),
         meta.media_type,
         bytes.len() as u64,

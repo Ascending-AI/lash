@@ -8,7 +8,6 @@ use futures_util::TryStreamExt;
 use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStoreFailureClass, AttachmentStorePersistence, StoredAttachment, StoredBlobRef,
-    facade_support::AttachmentMeta,
 };
 use lash_sansio::Redacted;
 use object_store::aws::AmazonS3Builder;
@@ -236,7 +235,7 @@ impl AttachmentStore for S3AttachmentStore {
         bytes: Vec<u8>,
         meta: AttachmentCreateMeta,
     ) -> Result<AttachmentRef, AttachmentStoreError> {
-        let meta = AttachmentMeta::new(
+        let meta = AttachmentRef::new(
             lash_core::attachments::content_id(&bytes),
             meta.media_type,
             bytes.len() as u64,
@@ -303,9 +302,9 @@ async fn put_at_path(
     store: &dyn ObjectStore,
     content_path: Path,
     bytes: Vec<u8>,
-    meta: AttachmentMeta,
+    meta: AttachmentRef,
 ) -> Result<AttachmentRef, AttachmentStoreError> {
-    let reference = meta.as_ref();
+    let reference = meta.clone();
     // Unconditional PUT even on a dedup hit: overwriting identical content
     // refreshes the object's LastModified, which is the freshness signal GC's
     // grace window and delete-time re-check rely on (Fix C). Do not short-circuit

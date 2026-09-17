@@ -1135,21 +1135,18 @@ fn format_cancellation_message(cancellation: &ToolCancellation) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AttachmentId, AttachmentMeta, AttachmentTypeMetadata, MediaType};
+    use crate::{AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType};
     use proptest::collection::{btree_map, vec};
     use proptest::prelude::*;
 
     fn attachment_source(id: &str) -> AttachmentSource {
-        AttachmentSource::stored(
-            AttachmentMeta::new(
-                AttachmentId::parse(id).expect("valid attachment id"),
-                MediaType::parse("image/png").unwrap(),
-                3,
-                Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-                Some("tiny".to_string()),
-            )
-            .as_ref(),
-        )
+        AttachmentSource::stored(AttachmentRef::new(
+            AttachmentId::parse(id).expect("valid attachment id"),
+            MediaType::parse("image/png").unwrap(),
+            3,
+            Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
+            Some("tiny".to_string()),
+        ))
     }
 
     fn arbitrary_json_value() -> BoxedStrategy<Value> {
