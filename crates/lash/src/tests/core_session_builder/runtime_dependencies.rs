@@ -580,7 +580,8 @@ async fn facade_native_process_wiring_shares_worker_change_hub() -> Result<()> {
         .clone()
         .with_work_ports(ports.process.clone(), ports.queued_port());
     let wiring_registry = resolved_env
-        .process_registry
+        .process_registry()
+        .cloned()
         .expect("native wiring process registry");
     let process_id = "facade-native-same-hub";
     let mut worker_changes = worker_hub.subscribe(&ProcessId::from(process_id));

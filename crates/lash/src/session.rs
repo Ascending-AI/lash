@@ -140,7 +140,7 @@ impl SessionBuilder {
             return Ok(());
         };
         lash_core::runtime::reconcile_session_process_observer_intents(
-            self.core.env.process_registry.as_deref(),
+            self.core.env.process_registry().map(Arc::as_ref),
             &self.session_id,
             lash_core::runtime::SessionObserverIntentSource::PersistedIfPresent(store),
         )
