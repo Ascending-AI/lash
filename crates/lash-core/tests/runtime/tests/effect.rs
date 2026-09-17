@@ -294,7 +294,7 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
             (name == "direct_tool").then(|| Arc::new(direct_tool_definition().contract()))
         }
 
-        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
             let completion = call
                 .context
                 .direct_completions()
@@ -304,7 +304,7 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
                 )
                 .await
                 .expect("tool direct completion");
-            lash_core::ToolOutcome::ok(serde_json::json!({ "text": completion.text }))
+            lash_core::ToolOutcome::ok(serde_json::json!({ "text": completion.text })).into()
         }
     }
 
@@ -970,7 +970,7 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
             (name == "retry_once").then(|| Arc::new(retry_once_tool_definition().contract()))
         }
 
-        async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
             let attempt = self
                 .attempts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -980,9 +980,10 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
                     "transient",
                     "transient failure",
                     Some(1),
-                );
+                )
+                .into();
             }
-            lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
+            lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })).into()
         }
     }
 

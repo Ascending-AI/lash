@@ -1036,7 +1036,21 @@ mod tests {
     struct BatchRuntimeTools {
         barrier: Arc<Barrier>,
         started: Arc<AtomicUsize>,
-        internal_executed: Arc<AtomicUsize>,
+    }
+
+    struct BatchRuntimeInternalTool {
+        executed: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl lash_core::InternalProcessToolImplementation for BatchRuntimeInternalTool {
+        async fn execute(
+            &self,
+            _call: lash_core::InternalProcessToolCall<'_>,
+        ) -> lash_core::ToolOutcomeDone {
+            self.executed.fetch_add(1, Ordering::SeqCst);
+            lash_core::ToolOutcomeDone::ok(serde_json::json!("internal body ran"))
+        }
     }
 
     pub(super) fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
@@ -1061,42 +1075,30 @@ mod tests {
             vec![
                 runtime_test_tool("alpha").manifest(),
                 runtime_test_tool("beta").manifest(),
-                runtime_test_tool("internal_probe")
-                    .with_activation(lash_core::ToolActivation::Internal)
-                    .manifest(),
             ]
         }
 
         fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
             match name {
                 "alpha" | "beta" => Some(Arc::new(runtime_test_tool(name).contract())),
-                "internal_probe" => Some(Arc::new(
-                    runtime_test_tool(name)
-                        .with_activation(lash_core::ToolActivation::Internal)
-                        .contract(),
-                )),
                 _ => None,
             }
         }
 
-        async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-            if call.name == "internal_probe" {
-                self.internal_executed.fetch_add(1, Ordering::SeqCst);
-                return ToolOutcome::ok(serde_json::json!("internal body ran"));
-            }
+        async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
             self.started.fetch_add(1, Ordering::SeqCst);
             if timeout(Duration::from_millis(100), self.barrier.wait())
                 .await
                 .is_err()
             {
-                return ToolOutcome::err_fmt("batch child tools did not run concurrently");
+                return ToolOutcome::err_fmt("batch child tools did not run concurrently").into();
             }
-            if call.name == "beta"
+            if call.name() == "beta"
                 && call.args.get("value").and_then(|value| value.as_str()) == Some("fail")
             {
-                return ToolOutcome::err_fmt("beta failed");
+                return ToolOutcome::err_fmt("beta failed").into();
             }
-            ToolOutcome::ok(serde_json::json!(call.name))
+            ToolOutcome::ok(serde_json::json!(call.name())).into()
         }
     }
 
@@ -1410,13 +1412,17 @@ mod tests {
             Arc::new(StandardProtocolPluginFactory::new()),
             Arc::new(lash_core::plugin::StaticPluginFactory::new(
                 "standard-batch-test-tools",
-                lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
-                    BatchRuntimeTools {
+                lash_core::facade_support::PluginSpec::new()
+                    .with_tool_provider(Arc::new(BatchRuntimeTools {
                         barrier: Arc::new(Barrier::new(2)),
                         started: Arc::clone(&started),
-                        internal_executed: Arc::clone(&internal_executed),
-                    },
-                )),
+                    }))
+                    .with_internal_tool(lash_core::InternalProcessToolDef::new(
+                        runtime_test_tool("internal_probe"),
+                        Arc::new(BatchRuntimeInternalTool {
+                            executed: Arc::clone(&internal_executed),
+                        }),
+                    )),
             )),
         ];
         let policy = lash_core::SessionPolicy {

@@ -15,8 +15,9 @@ use lash::sync::MutexExt;
 use lash::tools::{
     CataloguePreviewOptions, DeferredToolGrant, DeferredToolResolution, DeferredToolResolver,
     RecordedGrantInstallError, SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider,
-    ToolBinding, ToolCall, ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolId,
-    ToolManifest, ToolManifestBindingExt, ToolOutcome, ToolProvider,
+    ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDefinition,
+    ToolDefinitionBindingExt, ToolId, ToolManifest, ToolManifestBindingExt, ToolOutcome,
+    ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -300,46 +301,50 @@ impl StaticToolExecute for SearchDeferredTools {
         reason = "catalogue.search returns call_paths drawn from this same catalogue's \
                   definitions map, so every result is present"
     )]
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let query = call
-            .args
-            .get("query")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if query.trim().is_empty() {
-            return ToolOutcome::err(json!({
-                "kind": "invalid_query",
-                "message": "tools.search requires a non-empty query"
-            }));
-        }
-        let limit = call
-            .args
-            .get("limit")
-            .and_then(Value::as_u64)
-            .and_then(|limit| usize::try_from(limit).ok())
-            .unwrap_or(5)
-            .clamp(1, SEARCH_RESULT_LIMIT);
-        let results = self.catalogue.search(query, limit);
-        for result in &results {
-            let definition = self
-                .catalogue
-                .definitions
-                .get(&result.call_path)
-                .expect("search result comes from deferred catalogue");
-            let grant = DeferredToolGrant::new(definition.clone())
-                .with_source_id(DEFERRED_SOURCE_ID)
-                .with_execution_binding(json!({
-                    "kind": "agent_workbench_deferred",
-                    "call_path": result.call_path,
-                }));
-            if let Err(error) = self.store.grant(&result.call_path, &grant) {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            let query = call
+                .args
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if query.trim().is_empty() {
                 return ToolOutcome::err(json!({
-                    "kind": "grant_persistence_failed",
-                    "message": error.to_string()
+                    "kind": "invalid_query",
+                    "message": "tools.search requires a non-empty query"
                 }));
             }
-        }
-        ToolOutcome::ok(json!({ "results": results }))
+            let limit = call
+                .args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .and_then(|limit| usize::try_from(limit).ok())
+                .unwrap_or(5)
+                .clamp(1, SEARCH_RESULT_LIMIT);
+            let results = self.catalogue.search(query, limit);
+            for result in &results {
+                let definition = self
+                    .catalogue
+                    .definitions
+                    .get(&result.call_path)
+                    .expect("search result comes from deferred catalogue");
+                let grant = DeferredToolGrant::new(definition.clone())
+                    .with_source_id(DEFERRED_SOURCE_ID)
+                    .with_execution_binding(json!({
+                        "kind": "agent_workbench_deferred",
+                        "call_path": result.call_path,
+                    }));
+                if let Err(error) = self.store.grant(&result.call_path, &grant) {
+                    return ToolOutcome::err(json!({
+                        "kind": "grant_persistence_failed",
+                        "message": error.to_string()
+                    }));
+                }
+            }
+            ToolOutcome::ok(json!({ "results": results }))
+        })
+        .await
+        .into()
     }
 }
 
@@ -390,16 +395,23 @@ impl ToolProvider for DeferredExecutionProvider {
             .map(|definition| Arc::new(definition.contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let Some(definition) = self
-            .definitions
-            .values()
-            .find(|definition| definition.name() == call.name)
-        else {
-            return ToolOutcome::err_fmt(format_args!("unknown deferred tool `{}`", call.name));
-        };
-        self.execute_definition(definition, call.args, call.context)
-            .await
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            let Some(definition) = self
+                .definitions
+                .values()
+                .find(|definition| definition.name() == call.name())
+            else {
+                return ToolOutcome::err_fmt(format_args!(
+                    "unknown deferred tool `{}`",
+                    call.name()
+                ));
+            };
+            self.execute_definition(definition, call.args, call.context)
+                .await
+        })
+        .await
+        .into()
     }
 }
 

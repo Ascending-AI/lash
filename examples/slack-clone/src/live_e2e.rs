@@ -576,14 +576,18 @@ struct EchoTool;
 
 #[async_trait]
 impl StaticToolExecute for EchoTool {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        match serde_json::from_value::<EchoArgs>(call.args.clone()) {
-            Ok(args) if call.name == "structural_echo" => {
-                ToolOutcome::ok(json!(EchoOutput { value: args.value }))
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            match serde_json::from_value::<EchoArgs>(call.args.clone()) {
+                Ok(args) if call.name() == "structural_echo" => {
+                    ToolOutcome::ok(json!(EchoOutput { value: args.value }))
+                }
+                Ok(_) => ToolOutcome::err(json!("unknown tool")),
+                Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
             }
-            Ok(_) => ToolOutcome::err(json!("unknown tool")),
-            Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
-        }
+        })
+        .await
+        .into()
     }
 }
 
@@ -889,19 +893,23 @@ struct SwapTools {
 
 #[async_trait]
 impl StaticToolExecute for SwapTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        match call.name {
-            "read_channel" => self.read_channel().await,
-            "post_channel_message" => match serde_json::from_value(call.args.clone()) {
-                Ok(args) => self.post_message(args).await,
-                Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
-            },
-            "submit_peer_nonce" => match serde_json::from_value(call.args.clone()) {
-                Ok(args) => self.submit(args),
-                Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
-            },
-            other => ToolOutcome::err_fmt(format_args!("unknown tool: {other}")),
-        }
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            match call.name() {
+                "read_channel" => self.read_channel().await,
+                "post_channel_message" => match serde_json::from_value(call.args.clone()) {
+                    Ok(args) => self.post_message(args).await,
+                    Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
+                },
+                "submit_peer_nonce" => match serde_json::from_value(call.args.clone()) {
+                    Ok(args) => self.submit(args),
+                    Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
+                },
+                other => ToolOutcome::err_fmt(format_args!("unknown tool: {other}")),
+            }
+        })
+        .await
+        .into()
     }
 }
 

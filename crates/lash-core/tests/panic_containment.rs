@@ -28,9 +28,9 @@ use lash_core::{
     ModelSpec, PluginOptions, ProtocolBuildInput, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, ScopedEffectController, SessionCreateRequest, SessionPluginSource,
-    SessionPolicy, SessionStartPoint, ToolCall, ToolCallOutcome, ToolContract, ToolDefinition,
-    ToolFailureClass, ToolManifest, ToolOutcome, ToolProvider, ToolRetryStatus, TurnDriverConfig,
-    TurnDriverPreamble, TurnInput,
+    SessionPolicy, SessionStartPoint, ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolContract,
+    ToolDefinition, ToolFailureClass, ToolManifest, ToolProvider, ToolRetryStatus,
+    TurnDriverConfig, TurnDriverPreamble, TurnInput,
 };
 
 fn test_runtime_owner() -> lash_core::LeaseOwnerIdentity {
@@ -259,7 +259,7 @@ impl ToolProvider for PanicTool {
         (name == "panic_tool").then(|| Arc::new(panic_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolAttemptOutcome {
         panic!("tool payload only")
     }
 }

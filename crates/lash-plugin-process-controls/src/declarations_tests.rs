@@ -58,12 +58,14 @@ macro_rules! attempt {
     ($tool:literal, $args:expr, $process:expr) => {{
         let tool_context = attempt_context($process);
         let context = lash_core::AttemptContext::__for_testing(&tool_context, "declaration-scope");
-        tools()
-            .execute_attempt(ToolCall {
-                name: $tool,
-                args: &$args,
-                context: &context,
-            })
+        let tools = tools();
+        let manifest = crate::processes_tool_definitions(true)
+            .into_iter()
+            .find(|definition| definition.name() == $tool)
+            .expect("process-controls manifest resolves")
+            .manifest();
+        tools
+            .execute(ToolCall::new(&manifest, &$args, &context))
             .await
     }};
 }

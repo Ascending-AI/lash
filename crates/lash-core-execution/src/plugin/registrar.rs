@@ -85,6 +85,7 @@ fn register_singleton_hook<H>(
 #[derive(Clone, Default)]
 pub(crate) struct PluginContributions {
     pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
+    pub(crate) internal_tools: Vec<crate::InternalProcessToolDef>,
     pub(crate) orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     pub(crate) triggers: Vec<crate::TriggerEvent>,
     pub(crate) prompt_contributors: Vec<RegisteredHook<PromptContributor>>,
@@ -124,6 +125,14 @@ pub struct ToolRegistrations<'a> {
 impl ToolRegistrations<'_> {
     pub fn provider(self, provider: Arc<dyn ToolProvider>) -> Result<(), PluginError> {
         self.reg.add_tool_provider(provider)
+    }
+
+    /// Register an explicit internal owner-bound process tool definition.
+    /// Internal tools execute through
+    /// [`crate::InternalProcessToolImplementation`] outside the leaf
+    /// `ToolAttempt` frame.
+    pub fn internal(self, definition: crate::InternalProcessToolDef) -> Result<(), PluginError> {
+        self.reg.add_internal_tool(definition)
     }
 
     pub fn orchestrating(
@@ -574,6 +583,14 @@ impl PluginRegistrar {
             &self.registering_plugin_id,
             provider,
         );
+        Ok(())
+    }
+
+    fn add_internal_tool(
+        &mut self,
+        definition: crate::InternalProcessToolDef,
+    ) -> Result<(), PluginError> {
+        self.contributions.internal_tools.push(definition);
         Ok(())
     }
 

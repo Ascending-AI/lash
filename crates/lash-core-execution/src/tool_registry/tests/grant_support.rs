@@ -43,11 +43,11 @@ impl ToolProvider for GrantBindingProvider {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executed_bindings
             .lock_recover()
             .push(call.context.tool_execution_binding().clone());
-        ToolOutcome::ok(json!(call.name))
+        ToolOutcome::ok(json!(call.name())).into()
     }
 }
 
@@ -69,8 +69,8 @@ impl ToolProvider for GrantDeferralProvider {
         self.may_defer && id == &tool_id("host_only")
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(json!("host_only"))
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!("host_only")).into()
     }
 }
 

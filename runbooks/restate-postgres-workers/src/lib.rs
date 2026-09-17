@@ -917,8 +917,8 @@ const DEFERRING_TOOL_IDS: &[&str] = &["tool:async_lookup", "tool:durable_input_r
 
 #[async_trait::async_trait]
 impl StaticToolExecute for E2eTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        self.execute_selected_tool(call).await
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.execute_selected_tool(call).await.into()
     }
 
     /// Both parking tools resolve out of band, so the runtime pre-derives the
@@ -930,7 +930,7 @@ impl StaticToolExecute for E2eTools {
 
 impl E2eTools {
     fn execute_selected_tool<'a>(&'a self, call: ToolCall<'a>) -> E2eToolFuture<'a> {
-        match call.name {
+        match call.name() {
             "app_lookup" => Box::pin(self.app_lookup(call)),
             "async_lookup" => Box::pin(self.async_lookup(call)),
             "batch_side_effect" => Box::pin(self.batch_side_effect(call)),
@@ -938,9 +938,9 @@ impl E2eTools {
             "crash_once" => Box::pin(self.crash_once(call)),
             "durable_input_request" => Box::pin(self.durable_input_request(call)),
             "cancel_gate" => Box::pin(self.cancel_gate(call)),
-            other => {
+            name => {
                 Box::pin(
-                    async move { ToolOutcome::err_fmt(format_args!("unknown e2e tool `{other}`")) },
+                    async move { ToolOutcome::err_fmt(format_args!("unknown e2e tool `{name}`")) },
                 )
             }
         }
@@ -963,7 +963,7 @@ impl E2eTools {
             &self.pool,
             &workflow_id,
             &self.worker_id,
-            call.name,
+            call.name(),
             call.context.tool_call_id(),
             call.args.to_owned(),
             result.clone(),
@@ -997,7 +997,7 @@ impl E2eTools {
             &self.pool,
             &workflow_id,
             &self.worker_id,
-            call.name,
+            call.name(),
             call_id.as_deref(),
             args.clone(),
             serde_json::json!({
@@ -1065,7 +1065,7 @@ impl E2eTools {
             &self.pool,
             &workflow_id,
             &self.worker_id,
-            call.name,
+            call.name(),
             call.context.tool_call_id(),
             call.args.to_owned(),
             result.clone(),
@@ -1133,7 +1133,7 @@ impl E2eTools {
             &self.pool,
             &workflow_id,
             &self.worker_id,
-            call.name,
+            call.name(),
             call.context.tool_call_id(),
             call.args.to_owned(),
             result_json,
@@ -1153,7 +1153,7 @@ impl E2eTools {
             &self.pool,
             &workflow_id,
             &self.worker_id,
-            call.name,
+            call.name(),
             call.context.tool_call_id(),
             call.args.to_owned(),
             result.clone(),
@@ -1213,7 +1213,7 @@ impl E2eTools {
             &self.pool,
             &workflow_id,
             &self.worker_id,
-            call.name,
+            call.name(),
             call.context.tool_call_id(),
             call.args.to_owned(),
             started,

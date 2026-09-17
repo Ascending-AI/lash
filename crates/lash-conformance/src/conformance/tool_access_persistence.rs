@@ -23,8 +23,8 @@ impl crate::ToolProvider for ResidentProvider {
             .then(|| Arc::new(definition("tool:recovery-resident", "recovery_resident").contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        crate::ToolOutcome::ok(serde_json::json!("resident"))
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolOutcome::ok(serde_json::json!("resident")).into()
     }
 }
 

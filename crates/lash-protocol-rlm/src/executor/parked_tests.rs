@@ -73,8 +73,10 @@ impl lash_core::ToolProvider for ParkToolProvider {
         (name == "cell_park").then(|| Arc::new(park_tool_definition().contract))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(call.args["value"].clone())
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async { lash_core::ToolOutcome::ok(call.args["value"].clone()) })
+            .await
+            .into()
     }
 }
 

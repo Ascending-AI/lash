@@ -279,12 +279,12 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
         Ok(PreparedToolCall::identity(tool_id.clone(), pending))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let result = match call.name {
-            "submit_error" => return rlm_support::submit_error_tool_result(call.args),
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let result = match call.name() {
+            "submit_error" => return rlm_support::submit_error_tool_result(call.args).into(),
             other => Err(format!("Unknown tool: {other}")),
         };
-        finalise_tool_result(result)
+        finalise_tool_result(result).into()
     }
 }
 

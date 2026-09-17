@@ -7,6 +7,7 @@ use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod grant_support;
+mod restore_tests;
 use grant_support::{GrantBindingProvider, grant_deferral_registry};
 
 struct MockTool;
@@ -33,7 +34,9 @@ struct CountingPrepareProvider {
 }
 struct LeafBatchTool;
 struct LazyLeafBatchTool;
-struct LazyOrchestratingBatchSource;
+struct LazyOrchestratingBatchSource {
+    definition: crate::facade_support::OrchestratingToolDef,
+}
 struct TestBatchOrchestratingTool;
 struct BlockingLiveTool {
     entered: Arc<tokio::sync::Semaphore>,
@@ -103,20 +106,61 @@ fn test_attempt_context() -> crate::AttemptContext<'static> {
     crate::testing::mock_attempt_context_from(&test_tool_context())
 }
 
+/// Project a leaf attempt outcome back to a plain result for assertions. The
+/// projection asserts the outcome carried no declared intents rather than
+/// silently discarding them.
+#[track_caller]
+fn leaf_outcome(outcome: crate::ToolAttemptOutcome) -> ToolOutcome {
+    match outcome {
+        crate::ToolAttemptOutcome::Done { result, intents } => {
+            assert!(
+                intents.is_empty(),
+                "test leaf executions declare no intents"
+            );
+            ToolOutcome::from_output(result.into_output())
+        }
+        crate::ToolAttemptOutcome::Pending(pending) => ToolOutcome::Pending(Box::new(pending)),
+    }
+}
+
+/// Execute a leaf call through the registry's single execution seam, resolving
+/// the pinned manifest by id first.
+async fn execute_leaf_by_id(
+    registry: &ToolRegistry,
+    tool_id: &crate::ToolId,
+    args: &serde_json::Value,
+    context: &crate::AttemptContext<'_>,
+) -> ToolOutcome {
+    let Some(manifest) = registry.resolve_manifest_by_id(tool_id) else {
+        return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
+    };
+    leaf_outcome(
+        registry
+            .execute(ToolCall::new(&manifest, args, context))
+            .await,
+    )
+}
+
 #[tokio::test]
 async fn internal_execution_route_refuses_non_internal_activation() {
     let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
     let tool = test_tool_context();
     let context = crate::InternalProcessContext::__for_testing(&tool);
 
+    let manifest = registry
+        .resolve_manifest_by_id(&tool_id("mock_tool"))
+        .expect("mock tool manifest resolves");
     let result = registry
-        .execute_internal_by_id(&tool_id("mock_tool"), &serde_json::json!({}), &context)
+        .execute_internal_process_tool(crate::InternalProcessToolCall::new(
+            &manifest,
+            &serde_json::json!({}),
+            &context,
+        ))
         .await;
 
-    assert!(
-        !result.as_output().is_success(),
-        "an Always-activated tool must not cross the internal route"
-    );
+    let Err(result) = result else {
+        panic!("an Always-activated tool must not cross the internal route")
+    };
     assert!(
         result.as_output().value_for_projection()["message"]
             .as_str()
@@ -135,8 +179,8 @@ impl ToolProvider for MockTool {
         contract_from(vec![test_tool("mock_tool", "mock")], name)
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(serde_json::json!("ok"))
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(serde_json::json!("ok")).into()
     }
 }
 
@@ -150,8 +194,8 @@ impl ToolProvider for LeafBatchTool {
         contract_from(vec![test_tool("batch", "leaf batch")], name)
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(serde_json::json!("unreachable"))
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(serde_json::json!("unreachable")).into()
     }
 }
 
@@ -173,8 +217,8 @@ impl ToolProvider for LazyLeafBatchTool {
         contract_from(vec![test_tool("batch", "lazy leaf batch")], name)
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(json!("leaf"))
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!("leaf")).into()
     }
 }
 
@@ -188,7 +232,9 @@ impl ToolSourceExecutor for LazyOrchestratingBatchSource {
         &self,
         _known_resident_ids: &BTreeSet<ToolId>,
     ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
-        Ok(Arc::new(Self))
+        Ok(Arc::new(Self {
+            definition: self.definition.clone(),
+        }))
     }
 
     fn source_key(&self) -> ToolSourceKey {
@@ -211,13 +257,15 @@ impl ToolSourceExecutor for LazyOrchestratingBatchSource {
         contract_from(vec![test_tool("batch", "lazy orchestrating batch")], name)
     }
 
-    async fn execute(
+    async fn prepare_tool_call(
         &self,
-        _tool: &str,
-        _args: &serde_json::Value,
-        _context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        ToolOutcome::err_fmt("orchestrating source cannot execute through the leaf route")
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+    }
+
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Orchestrating(&self.definition)
     }
 }
 
@@ -251,6 +299,7 @@ fn leaf_and_orchestrating_tool_id_collision_is_typed() {
             "orchestrating:tool:batch".to_string(),
             vec![Arc::new(LeafBatchTool) as Arc<dyn ToolProvider>],
         )],
+        Vec::new(),
         vec![test_batch_orchestrating_tool()],
     ) {
         Ok(_) => panic!("cross-lane tool ids must be rejected"),
@@ -309,17 +358,23 @@ fn registration_kind_alone_selects_orchestration_dispatch() {
         "an impostor plugin id cannot change a leaf registration's kind"
     );
 
-    let orchestrating =
-        ToolRegistry::from_tool_registrations(Vec::new(), vec![test_batch_orchestrating_tool()])
-            .expect("typed orchestrating registration");
+    let orchestrating = ToolRegistry::from_tool_registrations(
+        Vec::new(),
+        Vec::new(),
+        vec![test_batch_orchestrating_tool()],
+    )
+    .expect("typed orchestrating registration");
     assert!(orchestrating.is_orchestrating_tool(&tool_id("batch")));
 }
 
 #[tokio::test]
 async fn pre_cutover_batch_snapshot_restores_and_dispatches_as_orchestration() {
-    let source =
-        ToolRegistry::from_tool_registrations(Vec::new(), vec![test_batch_orchestrating_tool()])
-            .expect("source registry");
+    let source = ToolRegistry::from_tool_registrations(
+        Vec::new(),
+        Vec::new(),
+        vec![test_batch_orchestrating_tool()],
+    )
+    .expect("source registry");
     let mut legacy_blob = serde_json::to_value(source.export_state()).expect("serialize state");
     let legacy_entry = legacy_blob["tools"]["tool:batch"]
         .as_object_mut()
@@ -337,9 +392,12 @@ async fn pre_cutover_batch_snapshot_restores_and_dispatches_as_orchestration() {
     let legacy_snapshot: ToolState =
         serde_json::from_value(legacy_blob).expect("deserialize pre-cutover state");
 
-    let target =
-        ToolRegistry::from_tool_registrations(Vec::new(), vec![test_batch_orchestrating_tool()])
-            .expect("target registry");
+    let target = ToolRegistry::from_tool_registrations(
+        Vec::new(),
+        Vec::new(),
+        vec![test_batch_orchestrating_tool()],
+    )
+    .expect("target registry");
     target
         .restore_state(legacy_snapshot)
         .expect("the live surface re-derives the registration lane");
@@ -381,17 +439,18 @@ async fn unadvertised_leaf_cannot_smuggle_an_orchestrating_registration() {
         "only the live typed source can establish the orchestrating lane"
     );
 
-    let leaf_route = registry
-        .execute_by_id(&tool_id("batch"), &json!({}), &test_attempt_context())
-        .await;
+    let leaf_route = execute_leaf_by_id(
+        &registry,
+        &tool_id("batch"),
+        &json!({}),
+        &test_attempt_context(),
+    )
+    .await;
     assert!(
         !leaf_route.is_success(),
         "the unadvertised leaf body cannot execute after the typed source is admitted"
     );
-    assert!(
-        format!("{leaf_route:?}")
-            .contains("orchestrating tools require direct OrchestrationContext dispatch")
-    );
+    assert!(format!("{leaf_route:?}").contains("is an orchestrating tool"));
 
     let context = crate::facade_support::OrchestrationContext::new(test_tool_context());
     let orchestrating_route = registry
@@ -430,8 +489,8 @@ impl ToolProvider for MixedEnabledTool {
         )
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(serde_json::json!("ok"))
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(serde_json::json!("ok")).into()
     }
 }
 
@@ -455,8 +514,8 @@ impl ToolProvider for CountingManifestProvider {
         )
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(serde_json::json!("ok"))
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(serde_json::json!("ok")).into()
     }
 }
 
@@ -483,8 +542,8 @@ impl ToolProvider for CountingPrepareProvider {
         true
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(json!("ok"))
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!("ok")).into()
     }
 }
 
@@ -538,16 +597,30 @@ impl ToolSourceExecutor for ExternalMockSource {
         )
     }
 
-    async fn execute(
+    async fn prepare_tool_call(
         &self,
-        tool: &str,
-        args: &serde_json::Value,
-        _context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+    }
+
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Leaf(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl LeafToolSourceExecutor for ExternalMockSource {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         ToolOutcome::ok(json!({
-            "tool": tool,
-            "args": args
+            "tool": call.name(),
+            "args": call.args
         }))
+        .into()
+    }
+
+    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
+        false
     }
 }
 
@@ -589,15 +662,27 @@ impl ToolSourceExecutor for ExactResolvingSource {
             .then(|| Arc::new(test_tool("host_only", "host-only").contract()))
     }
 
-    async fn execute(
+    async fn prepare_tool_call(
         &self,
-        tool: &str,
-        _args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+    }
+
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Leaf(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl LeafToolSourceExecutor for ExactResolvingSource {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executions.fetch_add(1, Ordering::SeqCst);
-        let _ = context;
-        ToolOutcome::ok(json!(tool))
+        ToolOutcome::ok(json!(call.name())).into()
+    }
+
+    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
+        false
     }
 }
 
@@ -630,13 +715,26 @@ impl ToolSourceExecutor for NamedExactSource {
         None
     }
 
-    async fn execute(
+    async fn prepare_tool_call(
         &self,
-        tool: &str,
-        _args: &serde_json::Value,
-        _context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        ToolOutcome::ok(json!(tool))
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+    }
+
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Leaf(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl LeafToolSourceExecutor for NamedExactSource {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!(call.name())).into()
+    }
+
+    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
+        false
     }
 }
 
@@ -658,8 +756,8 @@ impl ToolProvider for DynamicToolProvider {
             .then(|| Arc::new(dynamic_definition(name).contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(json!(call.name))
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!(call.name())).into()
     }
 }
 
@@ -673,14 +771,14 @@ impl ToolProvider for BlockingLiveTool {
         contract_from(vec![test_tool("blocking_live", "blocking live tool")], name)
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.entered.add_permits(1);
         self.release
             .acquire()
             .await
             .expect("release blocking live tool")
             .forget();
-        ToolOutcome::ok(json!("completed from captured registry"))
+        ToolOutcome::ok(json!("completed from captured registry")).into()
     }
 }
 
@@ -763,8 +861,8 @@ fn indexed_contract_lookup_falls_back_to_by_id_resolution() {
             (id == Self::definition().id()).then(|| Arc::new(Self::definition().contract()))
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("ok"))
+        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(json!("ok")).into()
         }
     }
 
@@ -805,8 +903,8 @@ fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
                 .map(|definition| Arc::new(definition.contract()))
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("ok"))
+        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(json!("ok")).into()
         }
     }
 
@@ -889,12 +987,11 @@ async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_fli
         async move {
             let args = json!({});
             let context = test_attempt_context();
+            let manifest = captured
+                .resolve_manifest("blocking_live")
+                .expect("captured registry resolves blocking_live");
             captured
-                .execute(ToolCall {
-                    name: "blocking_live",
-                    args: &args,
-                    context: &context,
-                })
+                .execute(ToolCall::new(&manifest, &args, &context))
                 .await
         }
     });
@@ -915,7 +1012,7 @@ async fn removal_hides_source_from_new_session_snapshots_without_revoking_in_fli
     );
 
     release.add_permits(1);
-    let completed = executing.await.expect("join captured-registry execution");
+    let completed = leaf_outcome(executing.await.expect("join captured-registry execution"));
     assert!(completed.is_success());
     assert_eq!(
         completed.value_for_projection(),
@@ -1098,7 +1195,9 @@ fn snapshot_resolution_rejects_lazy_live_sources_from_both_lanes() {
         )))
         .expect("lazy leaf source registered");
     registry
-        .upsert_source(Arc::new(LazyOrchestratingBatchSource))
+        .upsert_source(Arc::new(LazyOrchestratingBatchSource {
+            definition: test_batch_orchestrating_tool(),
+        }))
         .expect("lazy orchestrating source registered");
 
     let mut tools = BTreeMap::new();
@@ -1195,9 +1294,13 @@ async fn cold_restore_adds_newly_advertised_tools_and_marks_state_dirty() {
         .expect("new live tool persisted")
         .clone();
     assert!(entry.is_member());
-    let result = resumed
-        .execute_by_id(&tool_id("dynamic_two"), &json!({}), &test_attempt_context())
-        .await;
+    let result = execute_leaf_by_id(
+        &resumed,
+        &tool_id("dynamic_two"),
+        &json!({}),
+        &test_attempt_context(),
+    )
+    .await;
     assert!(result.is_success(), "new live tool executes: {result:?}");
 }
 
@@ -1217,9 +1320,13 @@ async fn fork_with_state_adds_newly_advertised_tools() {
             .get(&tool_id("dynamic_two"))
             .is_some_and(ToolStateEntry::is_member)
     );
-    let result = fork
-        .execute_by_id(&tool_id("dynamic_two"), &json!({}), &test_attempt_context())
-        .await;
+    let result = execute_leaf_by_id(
+        &fork,
+        &tool_id("dynamic_two"),
+        &json!({}),
+        &test_attempt_context(),
+    )
+    .await;
     assert!(result.is_success(), "forked live tool executes: {result:?}");
 }
 
@@ -1241,9 +1348,13 @@ async fn composed_catalog_adds_newly_advertised_base_tools() {
             .get(&tool_id("dynamic_two"))
             .is_some_and(ToolStateEntry::is_member)
     );
-    let result = composed
-        .execute_by_id(&tool_id("dynamic_two"), &json!({}), &test_attempt_context())
-        .await;
+    let result = execute_leaf_by_id(
+        &composed,
+        &tool_id("dynamic_two"),
+        &json!({}),
+        &test_attempt_context(),
+    )
+    .await;
     assert!(
         result.is_success(),
         "composed live tool executes: {result:?}"
@@ -1263,13 +1374,13 @@ async fn dispatch_manifest_lookup_does_not_mutate_registry_generation() {
     let generation_before_dispatch = registry.generation();
 
     let args = json!({});
-    let result = registry
-        .execute(crate::ToolCall {
-            name: "host_only",
-            args: &args,
-            context: &test_attempt_context(),
-        })
-        .await;
+    let attempt = test_attempt_context();
+    let manifest = test_tool("host_only", "host-only").manifest();
+    let result = leaf_outcome(
+        registry
+            .execute(crate::ToolCall::new(&manifest, &args, &attempt))
+            .await,
+    );
 
     assert!(!result.is_success());
     assert_eq!(
@@ -1308,13 +1419,12 @@ async fn unadmitted_exact_manifest_is_not_dispatchable() {
 
     let context = test_attempt_context();
     let args = json!({});
-    let result = registry
-        .execute(crate::ToolCall {
-            name: "host_only",
-            args: &args,
-            context: &context,
-        })
-        .await;
+    let manifest = test_tool("host_only", "host-only").manifest();
+    let result = leaf_outcome(
+        registry
+            .execute(crate::ToolCall::new(&manifest, &args, &context))
+            .await,
+    );
     assert!(!result.is_success());
     assert_eq!(executions.load(Ordering::SeqCst), 0);
 }
@@ -1377,9 +1487,11 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
             .with_granted_source_id(grant.source_id.clone()),
     );
     let args = json!({});
-    let result = registry
-        .execute_by_id(&grant.manifest().id, &args, &context)
-        .await;
+    let result = leaf_outcome(
+        registry
+            .execute(ToolCall::new(grant.manifest(), &args, &context))
+            .await,
+    );
     assert!(result.is_success());
     assert_eq!(result.value_for_projection(), json!("host_only"));
 
@@ -1430,9 +1542,11 @@ async fn execution_grant_without_source_does_not_infer_registry_route() {
         &test_tool_context().with_granted_source_id(grant.source_id.clone()),
     );
     let args = json!({});
-    let result = registry
-        .execute_by_id(&grant.manifest().id, &args, &context)
-        .await;
+    let result = leaf_outcome(
+        registry
+            .execute(ToolCall::new(grant.manifest(), &args, &context))
+            .await,
+    );
 
     assert!(!result.is_success());
     assert_eq!(
@@ -1479,8 +1593,8 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
             None
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!(self.result))
+        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(json!(self.result)).into()
         }
     }
 
@@ -1511,9 +1625,11 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
         &test_tool_context().with_granted_source_id(grant.source_id.clone()),
     );
     let args = json!({});
-    let result = registry
-        .execute_by_id(&grant.manifest().id, &args, &context)
-        .await;
+    let result = leaf_outcome(
+        registry
+            .execute(ToolCall::new(grant.manifest(), &args, &context))
+            .await,
+    );
 
     assert!(result.is_success());
     assert_eq!(result.value_for_projection(), json!("right-provider"));
@@ -1524,18 +1640,26 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
 }
 
 #[tokio::test]
-async fn pinned_source_preserves_provider_by_id_overrides() {
-    struct OverrideProvider;
+async fn pinned_source_preserves_provider_execute_result_and_intents() {
+    struct IntentProvider;
 
-    impl OverrideProvider {
+    impl IntentProvider {
         fn definition() -> ToolDefinition {
-            test_tool("override_route", "by-id override witness")
-                .with_activation(crate::ToolActivation::Internal)
+            test_tool("intent_route", "ordered intent witness")
+        }
+
+        fn intent() -> crate::ToolIntent {
+            crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+                session_id: SessionId::from("registry-test"),
+                process_id: crate::ProcessId::from("pinned-process"),
+                event_type: "pinned.intent".to_string(),
+                payload: json!({ "route": "id" }),
+            })
         }
     }
 
     #[async_trait::async_trait]
-    impl ToolProvider for OverrideProvider {
+    impl ToolProvider for IntentProvider {
         fn tool_manifests(&self) -> Vec<ToolManifest> {
             manifests(vec![Self::definition()])
         }
@@ -1544,76 +1668,45 @@ async fn pinned_source_preserves_provider_by_id_overrides() {
             (name == Self::definition().name()).then(|| Arc::new(Self::definition().contract()))
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("name-route"))
-        }
-
-        async fn execute_by_id(
-            &self,
-            _tool_id: &crate::ToolId,
-            _args: &serde_json::Value,
-            _context: &crate::AttemptContext<'_>,
-        ) -> ToolOutcome {
-            ToolOutcome::ok(json!("id-route"))
-        }
-
-        async fn execute_attempt_by_id(
-            &self,
-            _tool_id: &crate::ToolId,
-            _args: &serde_json::Value,
-            _context: &crate::AttemptContext<'_>,
-        ) -> crate::ToolAttemptOutcome {
+        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
             crate::ToolAttemptOutcome::done(
-                crate::ToolOutcomeDone::ok(json!("id-attempt-route")),
-                crate::ToolIntents::v3(vec![crate::ToolIntent::EmitProcessEvent(
-                    crate::EmitProcessEventIntent {
-                        session_id: SessionId::from("registry-test"),
-                        process_id: crate::ProcessId::from("override-target"),
-                        event_type: "override.observed".to_string(),
-                        payload: json!({}),
-                    },
-                )]),
+                crate::ToolOutcomeDone::ok(json!("id-route")),
+                crate::ToolIntents::v3(vec![Self::intent()]),
             )
-        }
-
-        async fn execute_internal_by_id(
-            &self,
-            _tool_id: &crate::ToolId,
-            _args: &serde_json::Value,
-            _context: &crate::InternalProcessContext<'_>,
-        ) -> ToolOutcome {
-            ToolOutcome::ok(json!("id-internal-route"))
         }
     }
 
-    let registry = ToolRegistry::from_tool_provider(Arc::new(OverrideProvider))
-        .expect("override provider registry")
+    let registry = ToolRegistry::from_tool_provider(Arc::new(IntentProvider))
+        .expect("intent provider registry")
         .compose_session_catalog(true, Vec::new())
-        .expect("pinned override provider registry");
-    let id = tool_id("override_route");
+        .expect("pinned intent provider registry");
+    let id = tool_id("intent_route");
     let args = json!({});
     let attempt = test_attempt_context();
 
-    let normal = registry.execute_by_id(&id, &args, &attempt).await;
-    assert_eq!(normal.value_for_projection(), json!("id-route"));
-
-    let attempted = registry.execute_attempt_by_id(&id, &args, &attempt).await;
-    let crate::ToolAttemptOutcome::Done { result, intents } = attempted else {
-        panic!("override attempt completes")
+    let manifest = registry
+        .resolve_manifest_by_id(&id)
+        .expect("intent manifest");
+    let outcome = registry
+        .execute(ToolCall::new(&manifest, &args, &attempt))
+        .await;
+    let crate::ToolAttemptOutcome::Done { result, intents } = outcome else {
+        panic!("the single execute route completes")
     };
     assert_eq!(
         result.into_output().value_for_projection(),
-        json!("id-attempt-route")
+        json!("id-route")
     );
-    assert_eq!(intents.intents.len(), 1, "the by-id intent is preserved");
-
-    let tool_context = test_tool_context();
-    let internal = crate::InternalProcessContext::__for_testing(&tool_context);
-    let internal_result = registry.execute_internal_by_id(&id, &args, &internal).await;
-    assert_eq!(
-        internal_result.value_for_projection(),
-        json!("id-internal-route")
-    );
+    let [intent] = intents.intents.as_slice() else {
+        panic!("the single execute route returns its declared intents")
+    };
+    let crate::ToolIntent::EmitProcessEvent(intent) = intent else {
+        panic!("the declared intent reaches the caller verbatim")
+    };
+    assert_eq!(intent.event_type, "pinned.intent");
+    assert_eq!(intent.process_id, crate::ProcessId::from("pinned-process"));
+    assert_eq!(intent.session_id, SessionId::from("registry-test"));
+    assert_eq!(intent.payload, json!({ "route": "id" }));
 }
 
 #[tokio::test]
@@ -1644,8 +1737,8 @@ async fn pinned_source_retains_exactly_known_nonadvertised_resident_id() {
             (id == Self::definition().id()).then(|| Arc::new(Self::definition().contract()))
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("known-resident"))
+        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(json!("known-resident")).into()
         }
     }
 
@@ -1671,13 +1764,13 @@ async fn pinned_source_retains_exactly_known_nonadvertised_resident_id() {
     assert!(entry.is_member(), "resident curation remains admitted");
     assert!(!entry.is_orphaned(), "the exact live route remains bound");
 
-    let result = pinned
-        .execute_by_id(
-            &tool_id("known_resident"),
-            &json!({}),
-            &test_attempt_context(),
-        )
-        .await;
+    let result = execute_leaf_by_id(
+        &pinned,
+        &tool_id("known_resident"),
+        &json!({}),
+        &test_attempt_context(),
+    )
+    .await;
     assert_eq!(result.value_for_projection(), json!("known-resident"));
 }
 
@@ -1695,8 +1788,8 @@ async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_adver
             contract_from(vec![test_tool("advertised", "advertised route")], name)
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("advertised-route"))
+        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(json!("advertised-route")).into()
         }
     }
 
@@ -1729,8 +1822,8 @@ async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_adver
                 .then(|| Arc::new(test_tool("known", "valid known-id route").contract()))
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("malformed-route"))
+        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(json!("malformed-route")).into()
         }
     }
 
@@ -1756,10 +1849,14 @@ async fn resident_snapshot_refuses_mismatched_known_id_without_overwriting_adver
     let pin = registry.compose_session_catalog(true, Vec::new());
     let error = pin.err().map(|error| error.to_string());
     let after = serde_json::to_value(registry.export_state()).expect("serialize state");
-    let advertised = registry
-        .execute_by_id(&tool_id("advertised"), &json!({}), &test_attempt_context())
-        .await
-        .value_for_projection();
+    let advertised = execute_leaf_by_id(
+        &registry,
+        &tool_id("advertised"),
+        &json!({}),
+        &test_attempt_context(),
+    )
+    .await
+    .value_for_projection();
 
     assert!(
         error.is_some() && before == after && advertised == json!("advertised-route"),
@@ -1803,8 +1900,8 @@ fn unadmitted_alias_lookup_does_not_fall_through_to_source() {
             None
         }
 
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("unreachable"))
+        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(json!("unreachable")).into()
         }
     }
 
@@ -1841,13 +1938,14 @@ async fn upsert_source_registers_and_executes_external_tools() {
 
     let context = test_attempt_context();
     let args = json!({ "query": "hello" });
-    let result = registry
-        .execute(crate::ToolCall {
-            name: "mcp__demo__search",
-            args: &args,
-            context: &context,
-        })
-        .await;
+    let manifest = registry
+        .resolve_manifest("mcp__demo__search")
+        .expect("registered external tool resolves");
+    let result = leaf_outcome(
+        registry
+            .execute(crate::ToolCall::new(&manifest, &args, &context))
+            .await,
+    );
     assert!(result.is_success());
     assert_eq!(
         result.value_for_projection()["tool"],
@@ -1881,578 +1979,4 @@ fn upsert_source_preserves_membership_on_refresh() {
             .is_member(),
         "a host-removed tool stays a non-member across a source refresh"
     );
-}
-
-#[test]
-fn restore_state_adopts_generation_at_or_above_three() {
-    // Cold rebuild ratchet: a session whose tool catalog advanced to
-    // generation >= 3 restores onto a fresh base-1 registry. `restore_state`
-    // adopts the snapshot's generation verbatim; `apply_state` (a gen-matched
-    // delta) rejects it. This is the exact divergence the durable worker /
-    // session resume rebuild relies on `restore_state` to absorb.
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
-    let snapshot = source.export_state().with_generation_for_conformance(3);
-
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target registry");
-    assert_eq!(
-        target.generation(),
-        1,
-        "a fresh registry starts at generation 1"
-    );
-    let restored = target
-        .restore_state(snapshot.clone())
-        .expect("restore adopts the snapshot generation");
-    assert_eq!(
-        restored.generation, 3,
-        "restore returns the adopted generation"
-    );
-    assert!(
-        restored.orphaned.is_empty(),
-        "all tools resolve, so nothing orphans"
-    );
-    assert_eq!(
-        target.generation(),
-        3,
-        "restore adopts gen 3 onto a base-1 registry without bumping"
-    );
-    // A re-export round-trips at the same generation (idempotent).
-    assert_eq!(target.export_state().generation(), 3);
-
-    // apply_state on the same high-generation snapshot is rejected — proving
-    // the rebuild would have failed without restore_state.
-    let fresh = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("fresh registry");
-    assert!(
-        matches!(
-            fresh.apply_state(snapshot),
-            Err(ReconfigureError::GenerationMismatch {
-                expected: 3,
-                actual: 1
-            })
-        ),
-        "apply_state must reject a gen-3 snapshot on a base-1 registry"
-    );
-}
-
-/// Build a snapshot whose `mcp__demo__search` entry only resolves while
-/// `ExternalMockSource` is registered — restoring it elsewhere orphans it.
-fn snapshot_with_external_tool() -> ToolState {
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
-    source
-        .upsert_source(Arc::new(ExternalMockSource))
-        .expect("source registered");
-    source.export_state()
-}
-
-#[tokio::test]
-async fn restore_orphans_unresolved_tools_instead_of_failing() {
-    let snapshot = snapshot_with_external_tool();
-
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
-    let report = target
-        .restore_state(snapshot)
-        .expect("restore tolerates the missing source");
-    assert_eq!(report.orphaned, vec![tool_id("mcp__demo__search")]);
-
-    // Orphans are non-members: excluded from the catalog listing entirely.
-    assert!(
-        !target
-            .tool_manifests()
-            .into_iter()
-            .any(|manifest| manifest.name == "mcp__demo__search"),
-        "orphans are excluded from the catalog"
-    );
-    let exported = target.export_state();
-    assert!(
-        !exported
-            .tool_manifests()
-            .into_iter()
-            .any(|manifest| manifest.name == "mcp__demo__search"),
-        "exported ToolState also excludes the orphan from the catalog"
-    );
-    let entry = exported
-        .get(&tool_id("mcp__demo__search"))
-        .expect("orphan exported");
-    assert!(entry.is_orphaned());
-    assert!(!entry.is_member(), "orphans are never catalog members");
-
-    // Execution fails loudly with a precise error.
-    let context = test_attempt_context();
-    let args = json!({ "query": "hello" });
-    let result = target
-        .execute(crate::ToolCall {
-            name: "mcp__demo__search",
-            args: &args,
-            context: &context,
-        })
-        .await;
-    assert!(!result.is_success());
-    assert!(
-        format!("{result:?}").contains("unavailable"),
-        "orphan execution error names the condition: {result:?}"
-    );
-
-    // Bound tools are unaffected.
-    assert!(target.resolve_contract("mock_tool").is_some());
-}
-
-#[tokio::test]
-async fn crafted_orchestrating_orphan_cannot_block_a_legitimate_leaf_registration() {
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
-    let mut crafted_blob =
-        serde_json::to_value(source.export_state()).expect("serialize leaf state");
-    crafted_blob["tools"]["tool:mock_tool"]["registration_kind"] = json!("orchestrating");
-    let crafted_snapshot: ToolState =
-        serde_json::from_value(crafted_blob).expect("deserialize crafted state");
-
-    let target = ToolRegistry::empty();
-    let report = target
-        .restore_state(crafted_snapshot)
-        .expect("an unresolved crafted entry remains an orphan");
-    assert_eq!(report.orphaned, vec![tool_id("mock_tool")]);
-    assert!(target.is_orchestrating_tool(&tool_id("mock_tool")));
-
-    let orphan_result = target
-        .execute_by_id(&tool_id("mock_tool"), &json!({}), &test_attempt_context())
-        .await;
-    assert!(
-        !orphan_result.is_success(),
-        "a claimed lane never makes an orphan executable"
-    );
-    assert!(format!("{orphan_result:?}").contains("unavailable"));
-
-    target
-        .upsert_source(Arc::new(ToolProviderSource::new(
-            "legitimate-leaf",
-            vec![Arc::new(MockTool)],
-        )))
-        .expect("the live leaf lane supersedes the stored claim");
-    assert!(
-        !target.is_orchestrating_tool(&tool_id("mock_tool")),
-        "the rebound kind comes from the legitimate live source"
-    );
-    let rebound = target
-        .execute_by_id(&tool_id("mock_tool"), &json!({}), &test_attempt_context())
-        .await;
-    assert!(rebound.is_success(), "the legitimate leaf executes");
-    assert_eq!(rebound.value_for_projection(), json!("ok"));
-}
-
-#[tokio::test]
-async fn orphan_rebinds_when_source_is_upserted_again() {
-    let snapshot = snapshot_with_external_tool();
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
-    target.restore_state(snapshot).expect("restore");
-    let orphaned_generation = target.generation();
-
-    target
-        .upsert_source(Arc::new(ExternalMockSource))
-        .expect("the returning source must not conflict with its own orphan");
-    assert!(
-        target.generation() > orphaned_generation,
-        "rebinding bumps the generation"
-    );
-
-    let exported = target.export_state();
-    let entry = exported
-        .get(&tool_id("mcp__demo__search"))
-        .expect("entry kept");
-    assert!(
-        !entry.is_orphaned(),
-        "the orphan rebound to the live source"
-    );
-    assert!(
-        entry.is_member(),
-        "the rebound tool is a catalog member again"
-    );
-
-    let context = test_attempt_context();
-    let args = json!({ "query": "hello" });
-    let result = target
-        .execute(crate::ToolCall {
-            name: "mcp__demo__search",
-            args: &args,
-            context: &context,
-        })
-        .await;
-    assert!(result.is_success(), "rebound tool executes: {result:?}");
-}
-
-#[test]
-fn restore_uses_live_manifest_and_preserves_membership_for_same_id() {
-    struct UpdatedMockTool;
-
-    #[async_trait::async_trait]
-    impl ToolProvider for UpdatedMockTool {
-        fn tool_manifests(&self) -> Vec<ToolManifest> {
-            manifests(vec![test_tool("mock_tool", "live manifest")])
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-            contract_from(vec![test_tool("mock_tool", "live manifest")], name)
-        }
-
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("updated"))
-        }
-    }
-
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source");
-    let mut snapshot = source.export_state();
-    snapshot
-        .set_membership(&tool_id("mock_tool"), false)
-        .expect("opt out");
-    let target =
-        ToolRegistry::from_tool_provider(Arc::new(UpdatedMockTool)).expect("target registry");
-
-    target.restore_state(snapshot).expect("restore");
-    let exported = target.export_state();
-    let entry = exported.get(&tool_id("mock_tool")).expect("same id");
-    assert_eq!(entry.manifest().description, "live manifest");
-    assert!(!entry.is_member(), "membership remains attached to the id");
-}
-
-#[test]
-fn orphan_rebinds_at_explicit_source_admission() {
-    let snapshot = host_only_snapshot(1);
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
-    let report = target.restore_state(snapshot).expect("restore");
-    assert_eq!(report.orphaned, vec![tool_id("host_only")]);
-
-    target
-        .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
-        .expect("source admission re-derives the surface");
-    let manifest = target
-        .resolve_manifest("host_only")
-        .expect("admitted source rebound the persisted id");
-    assert_eq!(manifest.name, "host_only");
-    let entry = target.export_state();
-    let entry = entry.get(&tool_id("host_only")).expect("entry kept");
-    assert!(
-        !entry.is_orphaned(),
-        "source admission clears the orphan flag"
-    );
-    assert!(entry.is_member(), "the rebound tool is a catalog member");
-}
-
-#[test]
-fn restore_binds_snapshot_id_from_source_that_advertises_nothing() {
-    let snapshot = host_only_snapshot(1);
-
-    let target = ToolRegistry::empty();
-    target
-        .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
-        .expect("lazy source registered before restore");
-    let report = target.restore_state(snapshot).expect("lazy id binds");
-
-    assert!(report.orphaned.is_empty());
-    let exported = target.export_state();
-    let entry = exported
-        .get(&tool_id("host_only"))
-        .expect("snapshot-only id retained");
-    assert!(!entry.is_orphaned());
-    assert!(entry.is_member());
-}
-
-#[tokio::test]
-async fn source_admission_preserves_snapshot_curation_without_authority_latching() {
-    let target = ToolRegistry::empty();
-    target
-        .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
-        .expect("exact source registered");
-    target
-        .restore_state(host_only_snapshot(1))
-        .expect("snapshot id admitted from the exact source");
-
-    let result = target
-        .execute_by_id(&tool_id("host_only"), &json!({}), &test_attempt_context())
-        .await;
-
-    assert!(
-        result.is_success(),
-        "authority policy is not registry curation: {result:?}"
-    );
-    assert!(
-        target
-            .export_state()
-            .get(&tool_id("host_only"))
-            .expect("admitted tool recorded")
-            .is_member()
-    );
-}
-
-#[test]
-fn restore_drops_superseded_orphan_and_does_not_transfer_opt_out() {
-    struct ReplacedSearchTool;
-    #[async_trait::async_trait]
-    impl ToolProvider for ReplacedSearchTool {
-        fn tool_manifests(&self) -> Vec<ToolManifest> {
-            manifests(vec![ToolDefinition::raw(
-                "tool:replaced",
-                "mcp__demo__search",
-                "a different implementation under the same name",
-                ToolDefinition::default_input_schema(),
-                json!({}),
-            )])
-        }
-        fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
-            None
-        }
-        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("ok"))
-        }
-    }
-
-    let mut snapshot = snapshot_with_external_tool();
-    snapshot
-        .set_membership(&tool_id("mcp__demo__search"), false)
-        .expect("opt out old id");
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
-    target
-        .add_tool_provider(Arc::new(ReplacedSearchTool))
-        .expect("replacement registered");
-    let report = target
-        .restore_state(snapshot)
-        .expect("same name with a different id supersedes the old orphan");
-    assert!(report.orphaned.is_empty());
-
-    let exported = target.export_state();
-    assert!(
-        !exported.contains(&tool_id("mcp__demo__search")),
-        "the old unresolved grant is superseded by the live name"
-    );
-    assert!(
-        exported
-            .get(&crate::ToolId::from("tool:replaced"))
-            .is_some_and(ToolStateEntry::is_member),
-        "membership policy is per id, so the replacement defaults to member"
-    );
-}
-
-#[test]
-fn apply_state_round_trips_while_orphans_exist() {
-    // `export_state` → edit → `apply_state` must work with an orphan in
-    // the snapshot: the exported orphan flag exempts it from strictness.
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
-    target
-        .restore_state(snapshot_with_external_tool())
-        .expect("restore");
-
-    let mut edited = target.export_state();
-    edited
-        .set_membership(&tool_id("mock_tool"), false)
-        .expect("edit bound tool");
-    target
-        .apply_state(edited)
-        .expect("apply accepts the snapshot it exported");
-    let exported = target.export_state();
-    assert!(
-        exported
-            .get(&tool_id("mcp__demo__search"))
-            .unwrap()
-            .is_orphaned()
-    );
-    assert!(
-        !exported.get(&tool_id("mock_tool")).unwrap().is_member(),
-        "the host-removed bound tool stays a non-member through the round-trip"
-    );
-
-    // But a snapshot that does NOT mark the tool orphaned still fails —
-    // strictness is preserved for entries that were bound at export.
-    let strict = snapshot_with_external_tool().with_generation_for_conformance(target.generation());
-    assert!(matches!(
-        target.apply_state(strict),
-        Err(ReconfigureError::Validation(_))
-    ));
-}
-
-#[test]
-fn orphan_flag_serializes_and_legacy_snapshots_deserialize_as_bound() {
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
-    target
-        .restore_state(snapshot_with_external_tool())
-        .expect("restore");
-    let value = serde_json::to_value(target.export_state()).expect("serializes");
-    assert_eq!(
-        value["tools"]["tool:mcp__demo__search"]["orphaned"],
-        json!(true)
-    );
-    assert!(
-        value["tools"]["tool:mock_tool"].get("orphaned").is_none(),
-        "bound entries omit the flag, keeping old and new snapshots byte-compatible"
-    );
-
-    let legacy: ToolStateEntry = serde_json::from_value(json!({
-        "manifest": value["tools"]["tool:mock_tool"]["manifest"]
-    }))
-    .expect("legacy entry without the flag deserializes");
-    assert!(!legacy.is_orphaned());
-}
-
-#[test]
-fn legacy_member_false_decodes_as_host_curation_intent() {
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source");
-    let manifest = serde_json::to_value(
-        source
-            .export_state()
-            .get(&tool_id("mock_tool"))
-            .expect("mock entry")
-            .manifest(),
-    )
-    .expect("serialize mock manifest");
-    let legacy: ToolStateEntry = serde_json::from_value(json!({
-        "manifest": manifest,
-        "member": false
-    }))
-    .expect("legacy non-member entry decodes");
-
-    let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
-    target
-        .restore_state(ToolState::new(
-            1,
-            [(tool_id("mock_tool"), legacy)].into_iter().collect(),
-        ))
-        .expect("legacy curation restores against the live source");
-
-    assert!(
-        !target
-            .export_state()
-            .get(&tool_id("mock_tool"))
-            .expect("restored mock entry")
-            .is_member(),
-        "legacy member=false remains an explicit host opt-out"
-    );
-}
-
-#[test]
-fn remove_source_removes_all_source_tools() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
-    registry
-        .upsert_source(Arc::new(ExternalMockSource))
-        .expect("source registered");
-    registry
-        .remove_source_id("external")
-        .expect("source removed");
-    let defs = registry.tool_manifests();
-    assert!(!defs.iter().any(|def| def.name == "mcp__demo__search"));
-}
-
-#[test]
-fn remove_source_preserves_non_member_curation_across_reattach() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
-    registry
-        .upsert_source(Arc::new(ExternalMockSource))
-        .expect("source registered");
-    let external_id = tool_id("mcp__demo__search");
-    let mut disabled = registry.export_state();
-    disabled
-        .set_membership(&external_id, false)
-        .expect("external tool exists");
-    registry
-        .apply_state(disabled)
-        .expect("disable external tool");
-
-    let before_detach = registry.export_state();
-    let disabled_entry = before_detach
-        .get(&external_id)
-        .expect("precondition: external tool remains stored while disabled");
-    assert!(
-        !disabled_entry.member && !disabled_entry.is_orphaned(),
-        "precondition: the live external tool stores an explicit member=false opt-out"
-    );
-
-    registry
-        .remove_source_id("external")
-        .expect("source detached");
-    let detached = registry.export_state();
-    let detached_entry = detached
-        .get(&external_id)
-        .expect("detaching a source keeps its tools as orphans");
-    assert!(detached_entry.is_orphaned());
-    assert!(
-        !detached_entry.member,
-        "the orphan retains the stored member=false curation bit"
-    );
-
-    let encoded = serde_json::to_value(&detached).expect("serialize detached state");
-    let decoded: ToolState = serde_json::from_value(encoded).expect("deserialize detached state");
-    let restored = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("restore registry");
-    let report = restored
-        .restore_state(decoded)
-        .expect("restore detached state");
-    assert_eq!(report.orphaned, vec![external_id.clone()]);
-    assert!(
-        restored
-            .export_state()
-            .get(&external_id)
-            .is_some_and(|entry| entry.is_orphaned() && !entry.member),
-        "the exported orphan round-trips with its curation bit"
-    );
-
-    registry
-        .upsert_source(Arc::new(ExternalMockSource))
-        .expect("source reattached");
-    let rebound = registry.export_state();
-    let rebound_entry = rebound.get(&external_id).expect("tool rebounds by id");
-    assert!(!rebound_entry.is_orphaned());
-    assert!(
-        !rebound_entry.is_member(),
-        "the rebound tool remains a non-member after detach and reattach"
-    );
-}
-
-#[test]
-fn project_tool_catalog_projects_all_members_with_catalog_metadata() {
-    fn member_fixture(name: &str) -> crate::ToolDefinition {
-        crate::ToolDefinition::raw(
-            format!("tool:{name}"),
-            name,
-            format!("desc for {name}"),
-            crate::ToolDefinition::default_input_schema(),
-            serde_json::json!({}),
-        )
-    }
-    let catalog = project_tool_catalog(["read_file", "search_tools"].map(|name| {
-        let definition = member_fixture(name);
-        crate::ToolCatalogEntry {
-            manifest: definition.manifest,
-            contract: Arc::new(definition.contract),
-        }
-    }));
-    assert_eq!(catalog.len(), 2);
-    assert_eq!(catalog[0]["name"], serde_json::json!("read_file"));
-    assert_eq!(
-        catalog[0]["contract"]["signature"],
-        serde_json::json!("read_file({})")
-    );
-    // Membership is the execution gate; the projection emits no tier.
-    assert!(catalog[0].get("availability").is_none());
-    assert!(catalog[0].get("showcased").is_none());
-    assert!(catalog[0].get("callable").is_none());
-    assert!(catalog[0].get("searchable").is_none());
-    assert_eq!(catalog[1]["name"], serde_json::json!("search_tools"));
-}
-
-#[test]
-fn project_tool_catalog_preserves_dynamic_output_contracts() {
-    fn member_fixture(name: &str) -> crate::ToolDefinition {
-        crate::ToolDefinition::raw(
-            format!("tool:{name}"),
-            name,
-            format!("desc for {name}"),
-            crate::ToolDefinition::default_input_schema(),
-            serde_json::json!({}),
-        )
-    }
-    let definition = member_fixture("llm_query")
-        .with_output_from_input_schema("output", Some(serde_json::json!({ "type": "string" })));
-    let catalog = project_tool_catalog([crate::ToolCatalogEntry {
-        manifest: definition.manifest,
-        contract: Arc::new(definition.contract),
-    }]);
-
-    assert_eq!(
-        catalog[0]["contract"]["signature"],
-        serde_json::json!("llm_query<T = str>({})")
-    );
-    assert_eq!(catalog[0]["contract"]["returns"], serde_json::json!("T"));
 }

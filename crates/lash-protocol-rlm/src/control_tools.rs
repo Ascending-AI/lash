@@ -27,12 +27,12 @@ impl ToolProvider for RlmControlToolsProvider {
             .then(|| Arc::new(continue_as_tool_definition_for(self.vocabulary).contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let result = match call.name {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let result = match call.name() {
             "continue_as" => continue_as_switch_frame(call.args, call.context),
-            _ => return ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name)),
+            _ => return ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into(),
         };
-        finalise_tool_result(result)
+        finalise_tool_result(result).into()
     }
 }
 
@@ -444,13 +444,21 @@ mod tests {
             ),
         );
         let context = lash_core::testing::mock_attempt_context_from(&context);
-        provider
-            .execute(lash_core::ToolCall {
-                name: "continue_as",
-                args,
-                context: &context,
-            })
+        let manifest = provider
+            .resolve_manifest("continue_as")
+            .expect("continue_as manifest");
+        match provider
+            .execute(lash_core::ToolCall::new(&manifest, args, &context))
             .await
+        {
+            lash_core::ToolAttemptOutcome::Done { result, intents } => {
+                assert!(intents.is_empty(), "continue_as emits no intents");
+                ToolOutcome::from_output(result.into_output())
+            }
+            lash_core::ToolAttemptOutcome::Pending(pending) => {
+                ToolOutcome::Pending(Box::new(pending))
+            }
+        }
     }
 
     async fn run_continue_as(

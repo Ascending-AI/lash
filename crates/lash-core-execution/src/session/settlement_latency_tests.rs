@@ -133,8 +133,8 @@ impl crate::ToolProvider for LatencyProbeTools {
             .any(|tool| tool.id() == tool_id && tool.name() != SLOW_SYNCHRONOUS_PROBE)
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        if call.name == SLOW_SYNCHRONOUS_PROBE {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        if call.name() == SLOW_SYNCHRONOUS_PROBE {
             let settled = match &self.awaited_leaf {
                 Some(signal) => signal.wait().await,
                 // The synchronous probe exists only for the handshake case; a
@@ -146,20 +146,22 @@ impl crate::ToolProvider for LatencyProbeTools {
                     crate::ToolFailureClass::Internal,
                     "awaited_leaf_never_settled",
                     "the later leaf never settled while this leaf held its drain slot",
-                ));
+                ))
+                .into();
             }
             return crate::ToolOutcome::failure(crate::ToolFailure::runtime(
                 crate::ToolFailureClass::Internal,
                 "probe_failed",
                 format!("{SLOW_SYNCHRONOUS_PROBE} rejected"),
-            ));
+            ))
+            .into();
         }
         let key = call
             .context
             .completion_key()
             .expect("probe tools run on a controller that issues completion keys");
         let controller = Arc::clone(&self.controller);
-        let name = call.name.to_string();
+        let name = call.name().to_string();
         let delay = probe_delay(&name);
         crate::task::spawn(async move {
             tokio::time::sleep(delay).await;
@@ -174,7 +176,7 @@ impl crate::ToolProvider for LatencyProbeTools {
             )
             .await;
         });
-        crate::ToolOutcome::pending(crate::PendingCompletion::new())
+        crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new())
     }
 }
 
@@ -311,7 +313,7 @@ impl crate::ToolProvider for GrantedRetryProbeTools {
             .then(|| Arc::new(self.catalog_definition.contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         crate::ToolOutcome::retryable_failure(
             crate::ToolFailureClass::External,
@@ -319,6 +321,7 @@ impl crate::ToolProvider for GrantedRetryProbeTools {
             "retry probe failure",
             Some(0),
         )
+        .into()
     }
 }
 
@@ -568,12 +571,12 @@ impl crate::ToolProvider for MixedBatchProbeTools {
         mixed_batch_tools().iter().any(|tool| tool.id() == tool_id)
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        if call.name == PROCESS_AWAIT_LEAF {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        if call.name() == PROCESS_AWAIT_LEAF {
             // No out-of-band actor and no timer: the runtime arms the declared
             // resolver at the park site, and the process terminal is what
             // delivers the outcome.
-            return crate::ToolOutcome::pending(
+            return crate::ToolAttemptOutcome::Pending(
                 crate::PendingCompletion::new().resolved_by_process_terminal(awaited_process_ref()),
             );
         }
@@ -601,7 +604,7 @@ impl crate::ToolProvider for MixedBatchProbeTools {
             )
             .await;
         });
-        crate::ToolOutcome::pending(crate::PendingCompletion::new())
+        crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new())
     }
 }
 

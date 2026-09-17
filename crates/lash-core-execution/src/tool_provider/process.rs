@@ -3,6 +3,10 @@ use crate::SessionId;
 use std::sync::Arc;
 
 use crate::plugin::PluginError;
+use crate::{
+    PreparedToolCall, ToolActivation, ToolContract, ToolDefinition, ToolId, ToolManifest,
+    ToolOutcome, ToolOutcomeDone, ToolPrepareCall,
+};
 
 /// Owner-bound capabilities for an internal durable process body.
 ///
@@ -13,35 +17,11 @@ use crate::plugin::PluginError;
 #[derive(Clone)]
 pub struct InternalProcessContext<'run> {
     context: super::ToolContext<'run>,
-    captured_resident_route: Option<super::CapturedResidentRoute>,
 }
 
 impl<'run> InternalProcessContext<'run> {
     pub(crate) fn new(context: super::ToolContext<'run>) -> Self {
-        Self {
-            context,
-            captured_resident_route: None,
-        }
-    }
-
-    pub(crate) fn with_captured_resident_route(
-        &self,
-        tool_id: crate::ToolId,
-        source_name: String,
-    ) -> Self {
-        let mut captured = self.clone();
-        captured.captured_resident_route = Some(super::CapturedResidentRoute {
-            tool_id,
-            source_name,
-        });
-        captured
-    }
-
-    pub(super) fn captured_resident_name(&self, tool_id: &crate::ToolId) -> Option<&str> {
-        self.captured_resident_route
-            .as_ref()
-            .filter(|route| route.tool_id == *tool_id)
-            .map(|route| route.source_name.as_str())
+        Self { context }
     }
 
     /// Construct the runtime-only context in an integrator test.
@@ -74,51 +54,111 @@ impl<'run> InternalProcessContext<'run> {
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
         self.context.cancellation_token()
     }
-
-    /// Project this internal process body down to the sealed leaf-attempt
-    /// context, for an internal executor whose fallback is a pure
-    /// [`crate::ToolProvider::execute`] body.
-    ///
-    /// This is ADR 0051's protocol and process-engine implementor class. The
-    /// projection is controller-free: the pure fallback gets the same
-    /// journal-incapable surface a recorded leaf attempt gets.
-    ///
-    /// The projection carries no completion key and reports the deferral as
-    /// undeclared on purpose. An internal owner-bound process tool is invoked
-    /// by its process runner, not by the attempt coordinator that reserves
-    /// completion keys, so nothing on this route can park: an internal body
-    /// asking for a key is a mistake, and it is told which declaration is
-    /// missing instead of being handed a key nobody would ever resolve.
-    pub fn __attempt_context(&self) -> crate::AttemptContext<'run> {
-        let scope_id = self
-            .context
-            .effect_controller
-            .scoped()
-            .scope_id()
-            .to_string();
-        let attempt = crate::AttemptContext::from_tool_context(
-            &self.context,
-            scope_id,
-            None,
-            crate::tool_provider::AttemptCompletionSupport::NotDeclared,
-        );
-        match &self.captured_resident_route {
-            Some(route) => attempt
-                .with_captured_resident_route(route.tool_id.clone(), route.source_name.clone()),
-            None => attempt,
-        }
-    }
 }
 
 /// Inputs handed to an internal owner-bound process tool.
 ///
-/// This is ADR 0051's protocol and process-engine implementor class. Runtime
-/// dispatch constructs it only for `ToolActivation::Internal`; model-facing
-/// and leaf-attempt calls cannot obtain its process capabilities.
+/// The immutable manifest couples stable ID and provider-facing name. Runtime
+/// dispatch constructs this view only for explicit internal registrations.
 pub struct InternalProcessToolCall<'a> {
-    pub name: &'a str,
+    manifest: &'a ToolManifest,
     pub args: &'a serde_json::Value,
     pub context: &'a InternalProcessContext<'a>,
+}
+
+impl<'a> InternalProcessToolCall<'a> {
+    /// Construct the call view over one pinned manifest. Only the runtime
+    /// dispatcher builds these; the manifest is the coupling between stable
+    /// ID and provider-facing name.
+    pub fn new(
+        manifest: &'a ToolManifest,
+        args: &'a serde_json::Value,
+        context: &'a InternalProcessContext<'a>,
+    ) -> Self {
+        Self {
+            manifest,
+            args,
+            context,
+        }
+    }
+
+    /// The stable tool ID carried by the pinned manifest.
+    pub fn tool_id(&self) -> &'a ToolId {
+        &self.manifest.id
+    }
+
+    /// The provider-facing tool name carried by the pinned manifest.
+    pub fn name(&self) -> &'a str {
+        &self.manifest.name
+    }
+}
+
+/// Implementation of one explicit internal owner-bound process tool.
+///
+/// This is ADR 0051's protocol and process-engine implementor class. Internal
+/// tools are a distinct execution class from leaf [`crate::ToolProvider`]s:
+/// they execute inside process replay with an
+/// [`InternalProcessContext`], run without a recorded `ToolAttempt` frame, and
+/// return a completed [`ToolOutcomeDone`] — internal bodies cannot defer or
+/// declare leaf intents.
+#[async_trait::async_trait]
+pub trait InternalProcessToolImplementation: Send + Sync + 'static {
+    /// Seal the pending call's arguments for replay. The default is the
+    /// identity prepare, which preserves the call as issued.
+    async fn prepare_tool_call(
+        &self,
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+    }
+
+    /// Run the internal body to completion and return its terminal output.
+    async fn execute(&self, call: InternalProcessToolCall<'_>) -> ToolOutcomeDone;
+}
+
+/// A registered internal process tool: its tool definition plus the explicit
+/// internal implementation that executes it.
+///
+/// Construction normalizes the definition to
+/// [`ToolActivation::Internal`], so the activation derives from the
+/// registration lane rather than from flags on the definition.
+#[derive(Clone)]
+pub struct InternalProcessToolDef {
+    definition: ToolDefinition,
+    implementation: Arc<dyn InternalProcessToolImplementation>,
+}
+
+impl InternalProcessToolDef {
+    /// Pair a tool definition with its internal implementation for protocol
+    /// and process-engine implementors.
+    pub fn new(
+        definition: ToolDefinition,
+        implementation: Arc<dyn InternalProcessToolImplementation>,
+    ) -> Self {
+        Self {
+            definition: definition.with_activation(ToolActivation::Internal),
+            implementation,
+        }
+    }
+
+    pub(crate) fn manifest(&self) -> ToolManifest {
+        self.definition.manifest.clone()
+    }
+
+    pub(crate) fn contract(&self) -> Arc<ToolContract> {
+        Arc::new(self.definition.contract.clone())
+    }
+
+    pub(crate) async fn prepare_tool_call(
+        &self,
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        self.implementation.prepare_tool_call(call).await
+    }
+
+    pub(crate) async fn execute(&self, call: InternalProcessToolCall<'_>) -> ToolOutcomeDone {
+        self.implementation.execute(call).await
+    }
 }
 
 /// Process lifecycle operations available only to an internal durable body.

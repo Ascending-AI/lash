@@ -70,12 +70,19 @@ impl ToolProvider for AttachmentProbeTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        attachment_output(self.sources.clone())
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        attachment_output(self.sources.clone()).into()
     }
+}
 
-    async fn execute_internal(&self, _call: crate::InternalProcessToolCall<'_>) -> ToolOutcome {
-        attachment_output(self.sources.clone())
+struct AttachmentProbeInternal {
+    sources: Vec<crate::AttachmentSource>,
+}
+
+#[async_trait::async_trait]
+impl crate::InternalProcessToolImplementation for AttachmentProbeInternal {
+    async fn execute(&self, _call: crate::InternalProcessToolCall<'_>) -> crate::ToolOutcomeDone {
+        crate::ToolOutcomeDone::from_output(attachment_call_output(self.sources.clone()))
     }
 }
 
@@ -392,19 +399,21 @@ async fn after_tool_attachment_replacement_is_normalized_before_orchestrating_re
 async fn after_tool_attachment_replacement_is_normalized_before_internal_recording() {
     let definition = named_beta_tool("after_hook_internal_attachment_probe")
         .with_activation(crate::ToolActivation::Internal);
-    let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
-        definition: definition.clone(),
-        sources: Vec::new(),
-    });
     let plugins = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
         "after_hook_internal_attachment_probe",
         crate::PluginSpec::new()
-            .with_tool_provider(provider)
+            .with_internal_tool(crate::InternalProcessToolDef::new(
+                definition.clone(),
+                Arc::new(AttachmentProbeInternal {
+                    sources: Vec::new(),
+                }),
+            ))
             .with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
     ))])
     .build_session("root")
     .expect("plugin session");
     let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    context.tool_registry = Some(context.plugins.tool_registry());
     let authorized = deny_probe_attachment(&mut context);
     assert!(
         persistence
@@ -533,11 +542,19 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
 async fn internal_process_tool_output_is_normalized_under_process_ownership() {
     let definition = named_beta_tool("internal_attachment_probe")
         .with_activation(crate::ToolActivation::Internal);
-    let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
-        definition: definition.clone(),
-        sources: vec![inline_attachment(FIRST_BYTES)],
-    });
-    let (context, persistence, _) = durable_attachment_context(test_plugins(provider)).await;
+    let plugins = PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
+        "internal_attachment_probe",
+        crate::PluginSpec::new().with_internal_tool(crate::InternalProcessToolDef::new(
+            definition.clone(),
+            Arc::new(AttachmentProbeInternal {
+                sources: vec![inline_attachment(FIRST_BYTES)],
+            }),
+        )),
+    ))])
+    .build_session("root")
+    .expect("plugin session");
+    let (mut context, persistence, _) = durable_attachment_context(plugins).await;
+    context.tool_registry = Some(context.plugins.tool_registry());
     let _owner = context
         .attachment_store
         .bind_process_scoped(crate::ProcessRef::new(

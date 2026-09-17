@@ -148,17 +148,9 @@ impl lash_core::ToolProvider for RecordingToolProvider {
         self.delegate.attempt_may_defer(tool_id)
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        self.recorder.record_provider_body_invocation(call.name);
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.recorder.record_provider_body_invocation(call.name());
         self.delegate.execute(call).await
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
-        self.recorder.record_provider_body_invocation(call.name);
-        self.delegate.execute_attempt(call).await
     }
 }
 
@@ -209,8 +201,10 @@ impl lash_core::ToolProvider for BatchEnvelopeProbeTools {
         (name == "envelope_probe").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(json!({ "value": call.args["value"].clone() }))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async { lash_core::ToolOutcome::ok(json!({ "value": call.args["value"].clone() })) })
+            .await
+            .into()
     }
 }
 

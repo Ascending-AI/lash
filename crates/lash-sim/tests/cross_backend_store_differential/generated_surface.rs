@@ -231,18 +231,11 @@ impl lash_core::ToolProvider for SurfaceIntentProvider {
         (name == "surface_intent_provider").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        panic!("the cross-backend intent provider must use AttemptContext")
-    }
-
     #[expect(
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let parent_scope = call
             .context
             .child_process_parent_scope()

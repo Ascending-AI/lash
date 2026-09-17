@@ -486,14 +486,7 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
         (name == "pg_public_signal_intent").then(|| Arc::new(public_signal_tool().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        panic!("the PostgreSQL public-caller law must use AttemptContext")
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let parent_scope = call
             .context
             .child_process_parent_scope()
@@ -727,19 +720,23 @@ impl lash_core::ToolProvider for Fig1293EchoTools {
         (name == "fig1293_echo").then(|| Arc::new(fig1293_echo_tool().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        if call.args.get("value") == Some(&serde_json::json!("fail")) {
-            return lash_core::ToolOutcome::err_fmt("fig1293 injected batch failure");
-        }
-        if call.args.get("value") == Some(&serde_json::json!("block"))
-            && FIG1293_BLOCKING_CHILD_RUNS.fetch_add(1, Ordering::SeqCst) == 0
-        {
-            std::future::pending::<()>().await;
-            unreachable!("FIG-1293 blocking child is dropped by cancellation")
-        }
-        lash_core::ToolOutcome::ok(serde_json::json!({
-            "echo": call.args.get("value").cloned().unwrap_or_default(),
-        }))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            if call.args.get("value") == Some(&serde_json::json!("fail")) {
+                return lash_core::ToolOutcome::err_fmt("fig1293 injected batch failure");
+            }
+            if call.args.get("value") == Some(&serde_json::json!("block"))
+                && FIG1293_BLOCKING_CHILD_RUNS.fetch_add(1, Ordering::SeqCst) == 0
+            {
+                std::future::pending::<()>().await;
+                unreachable!("FIG-1293 blocking child is dropped by cancellation")
+            }
+            lash_core::ToolOutcome::ok(serde_json::json!({
+                "echo": call.args.get("value").cloned().unwrap_or_default(),
+            }))
+        })
+        .await
+        .into()
     }
 }
 

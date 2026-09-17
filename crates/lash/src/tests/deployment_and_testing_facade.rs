@@ -79,9 +79,14 @@ async fn testing_facade_run_tool_executes_provider() {
     )
     .await;
 
-    assert!(outcome.is_success());
+    let lash_core::ToolAttemptOutcome::Done { result, intents } = outcome else {
+        panic!("app_lookup must complete inline");
+    };
+    assert!(intents.is_empty());
+    let output = result.into_output();
+    assert!(output.is_success());
     assert_eq!(
-        outcome.value_for_projection(),
+        output.value_for_projection(),
         serde_json::json!({ "ok": true })
     );
 }

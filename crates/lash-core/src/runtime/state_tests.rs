@@ -52,8 +52,8 @@ impl crate::ToolProvider for DynamicSnapshotTools {
             })
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        crate::ToolOutcome::ok(serde_json::json!("ok"))
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolOutcome::ok(serde_json::json!("ok")).into()
     }
 }
 

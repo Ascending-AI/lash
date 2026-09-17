@@ -3,9 +3,7 @@ use super::*;
 #[tokio::test]
 async fn resumed_internal_process_dispatch_hidden_from_catalog_returns_tool_unavailable() {
     let executed = Arc::new(AtomicUsize::new(0));
-    let mut context = exact_dispatch_context(Arc::new(InternalProbeTools {
-        executed: Arc::clone(&executed),
-    }));
+    let mut context = internal_probe_dispatch_context(Arc::clone(&executed));
     let controller = Arc::new(IntentReplayController::new(None));
     context.effect_controller = RuntimeEffectControllerHandle::shared(controller.clone());
     let manifest = crate::tool_dispatch::resolve_internal_manifest_by_id(
@@ -59,10 +57,7 @@ async fn resumed_internal_process_dispatch_hidden_from_catalog_returns_tool_unav
 #[tokio::test]
 async fn normal_dispatch_refuses_internal_activation_by_name_and_id() {
     let executed = Arc::new(AtomicUsize::new(0));
-    let provider: Arc<dyn ToolProvider> = Arc::new(InternalProbeTools {
-        executed: Arc::clone(&executed),
-    });
-    let context = exact_dispatch_context(provider);
+    let context = internal_probe_dispatch_context(Arc::clone(&executed));
 
     let outcome = dispatch_tool_call(
         &context,
@@ -87,9 +82,7 @@ async fn normal_dispatch_refuses_internal_activation_by_name_and_id() {
 #[tokio::test]
 async fn frameless_internal_record_uses_manifest_name_when_prepared_call_is_renamed() {
     let executed = Arc::new(AtomicUsize::new(0));
-    let context = exact_dispatch_context(Arc::new(InternalProbeTools {
-        executed: Arc::clone(&executed),
-    }));
+    let context = internal_probe_dispatch_context(Arc::clone(&executed));
     let prepared = crate::PreparedToolCall::from_parts(
         "internal-call",
         "tool:internal_probe",

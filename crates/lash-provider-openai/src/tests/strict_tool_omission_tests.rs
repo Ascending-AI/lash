@@ -1,7 +1,10 @@
 use super::*;
 
 use async_trait::async_trait;
-use lash::tools::{StaticToolExecute, StaticToolProvider, ToolCall, ToolDefinition, ToolOutcome};
+use lash::tools::{
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
+    ToolOutcome,
+};
 use lash::{LashCore, TurnInput};
 use lash_core::llm::types::{LlmContentBlock, LlmRole};
 use lash_core::{
@@ -86,22 +89,26 @@ struct OmissionProbe {
 
 #[async_trait]
 impl StaticToolExecute for OmissionProbe {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let limit = match lash_tool_support::parse_optional_usize_arg(
-            call.args,
-            "limit",
-            Some(DEFAULT_LIMIT),
-            false,
-            1,
-        ) {
-            Ok(limit) => limit,
-            Err(outcome) => return outcome,
-        };
-        self.seen.lock_recover().push(CapturedCall {
-            args: call.args.clone(),
-            limit,
-        });
-        ToolOutcome::ok(json!({ "limit": limit }))
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            let limit = match lash_tool_support::parse_optional_usize_arg(
+                call.args,
+                "limit",
+                Some(DEFAULT_LIMIT),
+                false,
+                1,
+            ) {
+                Ok(limit) => limit,
+                Err(outcome) => return outcome,
+            };
+            self.seen.lock_recover().push(CapturedCall {
+                args: call.args.clone(),
+                limit,
+            });
+            ToolOutcome::ok(json!({ "limit": limit }))
+        })
+        .await
+        .into()
     }
 }
 

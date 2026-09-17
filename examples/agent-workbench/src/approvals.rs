@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use lash::tools::{
-    PendingCompletion, ToolBinding, ToolCall, ToolContract, ToolDefinition,
+    PendingCompletion, ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDefinition,
     ToolDefinitionBindingExt, ToolManifest, ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -237,21 +237,28 @@ impl ToolProvider for ApprovalToolProvider {
         tool_id == Self::definition().id()
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        if call.name != APPROVAL_TOOL_NAME {
-            return ToolOutcome::err_fmt(format_args!("unknown approval tool `{}`", call.name));
-        }
-        let key = match call.context.completion_key() {
-            Ok(key) => key,
-            Err(error) => return ToolOutcome::err_fmt(error),
-        };
-        if let Err(error) =
-            self.approvals
-                .record(&key, call.args, &SessionId::from(call.context.session_id()))
-        {
-            return ToolOutcome::err_fmt(error);
-        }
-        ToolOutcome::pending(PendingCompletion::new())
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            if call.name() != APPROVAL_TOOL_NAME {
+                return ToolOutcome::err_fmt(format_args!(
+                    "unknown approval tool `{}`",
+                    call.name()
+                ));
+            }
+            let key = match call.context.completion_key() {
+                Ok(key) => key,
+                Err(error) => return ToolOutcome::err_fmt(error),
+            };
+            if let Err(error) =
+                self.approvals
+                    .record(&key, call.args, &SessionId::from(call.context.session_id()))
+            {
+                return ToolOutcome::err_fmt(error);
+            }
+            ToolOutcome::pending(PendingCompletion::new())
+        })
+        .await
+        .into()
     }
 }
 

@@ -60,8 +60,10 @@ impl lash_core::ToolProvider for RuntimeLookupTool {
         (name == "lookup").then(|| Arc::new(runtime_lookup_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(json!({ "ok": true }))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async { lash_core::ToolOutcome::ok(json!({ "ok": true })) })
+            .await
+            .into()
     }
 }
 

@@ -10,8 +10,8 @@ use clap::Parser;
 use lash::provider::{ProviderHandle, ProviderOptions};
 use lash::rlm::RlmTurnBuilderExt as _;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
-    ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
+    ToolDefinition, ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
 };
 use lash::{LashCore, TurnEvent, TurnInput};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
@@ -240,23 +240,30 @@ impl WorkspaceTools {
 
 #[async_trait]
 impl StaticToolExecute for WorkspaceTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let result = match call.name {
-            "workspace_list" => self.list(optional_string(call.args, "path").unwrap_or(".")),
-            "workspace_read" => required_string(call.args, "path").and_then(|path| self.read(path)),
-            "workspace_write" => required_string(call.args, "path").and_then(|path| {
-                required_string(call.args, "content").and_then(|content| self.write(path, content))
-            }),
-            "workspace_exec" => match required_string(call.args, "command") {
-                Ok(command) => self.run(command).await,
-                Err(message) => Err(message),
-            },
-            other => Err(format!("unknown tool `{other}`")),
-        };
-        match result {
-            Ok(value) => ToolOutcome::ok(value),
-            Err(message) => ToolOutcome::err_fmt(message),
-        }
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            let result = match call.name() {
+                "workspace_list" => self.list(optional_string(call.args, "path").unwrap_or(".")),
+                "workspace_read" => {
+                    required_string(call.args, "path").and_then(|path| self.read(path))
+                }
+                "workspace_write" => required_string(call.args, "path").and_then(|path| {
+                    required_string(call.args, "content")
+                        .and_then(|content| self.write(path, content))
+                }),
+                "workspace_exec" => match required_string(call.args, "command") {
+                    Ok(command) => self.run(command).await,
+                    Err(message) => Err(message),
+                },
+                other => Err(format!("unknown tool `{other}`")),
+            };
+            match result {
+                Ok(value) => ToolOutcome::ok(value),
+                Err(message) => ToolOutcome::err_fmt(message),
+            }
+        })
+        .await
+        .into()
     }
 }
 

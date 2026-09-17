@@ -6,6 +6,46 @@ fn mcp_name(server: &str, native_tool: &str) -> String {
     naming::build_prefixed_name(server, native_tool).0
 }
 
+/// Drive a provider through the single `execute` seam by resolving its
+/// manifest for `tool_id` first, then project the attempt outcome to the
+/// plain outcome these assertions inspect. The projection asserts the call
+/// declared no leaf intents.
+async fn execute_by_id<P: ToolProvider>(
+    provider: &P,
+    tool_id: &lash_core::ToolId,
+    args: &Value,
+    context: &lash_core::AttemptContext<'_>,
+) -> ToolOutcome {
+    let manifest = provider
+        .resolve_manifest_by_id(tool_id)
+        .expect("manifest resolves for tool id");
+    execute_with_manifest(provider, &manifest, args, context).await
+}
+
+/// Drive a provider through the single `execute` seam with an already-pinned
+/// manifest, for tools dropped from the catalog that must still reject through
+/// the typed unknown-id path.
+async fn execute_with_manifest<P: ToolProvider>(
+    provider: &P,
+    manifest: &lash_core::ToolManifest,
+    args: &Value,
+    context: &lash_core::AttemptContext<'_>,
+) -> ToolOutcome {
+    match provider
+        .execute(lash_core::ToolCall::new(manifest, args, context))
+        .await
+    {
+        lash_core::ToolAttemptOutcome::Done { result, intents } => {
+            assert!(
+                intents.is_empty(),
+                "test leaf execution declares no intents"
+            );
+            ToolOutcome::from_output(result.into_output())
+        }
+        lash_core::ToolAttemptOutcome::Pending(pending) => ToolOutcome::Pending(Box::new(pending)),
+    }
+}
+
 fn advertised_tool(name: &str) -> rmcp::model::Tool {
     serde_json::from_value(json!({
         "name": name,
@@ -456,9 +496,9 @@ impl lash_core::ToolProvider for NativeAndMcpProvider {
         self.mcp.resolve_contract(name)
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
-        if call.name == self.native.name() {
-            return ToolOutcome::ok(json!("native-ok"));
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() == self.native.name() {
+            return ToolOutcome::ok(json!("native-ok")).into();
         }
         self.mcp.execute(call).await
     }
@@ -542,13 +582,13 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
             .any(|manifest| manifest.name == mcp_name("Docs", "lookup")),
         "the original MCP tool remains in the rebuilt catalog"
     );
-    let native_result = registry
-        .execute_by_id(
-            &native_id,
-            &json!({}),
-            &lash_core::testing::mock_attempt_context(),
-        )
-        .await;
+    let native_result = execute_by_id(
+        &registry,
+        &native_id,
+        &json!({}),
+        &lash_core::testing::mock_attempt_context(),
+    )
+    .await;
     assert_eq!(native_result.value_for_projection(), json!("native-ok"));
 
     let error = attach_result.expect_err("the colliding runtime attach must be rejected");
@@ -741,13 +781,13 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
     .expect("connect list-changing collision server");
 
     let initial = pool.advertised_tools();
-    let dropped_id = initial
+    let dropped_manifest = initial
         .iter()
         .find(|definition| definition.name() == mcp_name("directory", "get-user"))
         .expect("hyphenated tool has its identity-derived name")
         .manifest
-        .id
         .clone();
+    let dropped_id = dropped_manifest.id.clone();
     let survivor_id = initial
         .iter()
         .find(|definition| definition.name() == mcp_name("directory", "get_user"))
@@ -774,9 +814,7 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
         "server": "directory",
         "tool_id": survivor_id.to_string(),
     }));
-    let survivor = deferred
-        .execute_by_id(&survivor_id, &json!({}), &survivor_context)
-        .await;
+    let survivor = execute_by_id(&deferred, &survivor_id, &json!({}), &survivor_context).await;
     assert!(
         survivor.is_success(),
         "survivor grant must remain valid: {survivor:?}"
@@ -788,9 +826,8 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
         "server": "directory",
         "tool_id": dropped_id.to_string(),
     }));
-    let dropped = deferred
-        .execute_by_id(&dropped_id, &json!({}), &dropped_context)
-        .await;
+    let dropped =
+        execute_with_manifest(&deferred, &dropped_manifest, &json!({}), &dropped_context).await;
     assert!(!dropped.is_success(), "dropped tool id must be rejected");
     let lash_core::ToolCallOutcome::Failure(failure) = &dropped.as_output().outcome else {
         panic!("dropped tool must fail through the typed unknown-id path: {dropped:?}");
@@ -897,19 +934,7 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
             "server": "directory",
             "tool_id": call_id.to_string(),
         }));
-        if retain_original {
-            deferred.execute_by_id(&call_id, &json!({}), &context).await
-        } else {
-            match deferred
-                .execute_attempt_by_id(&call_id, &json!({}), &context)
-                .await
-            {
-                lash_core::ToolAttemptOutcome::Done { result, .. } => {
-                    ToolOutcome::from_output(result.into_output())
-                }
-                lash_core::ToolAttemptOutcome::Pending(pending) => ToolOutcome::pending(pending),
-            }
-        }
+        execute_by_id(&deferred, &call_id, &json!({}), &context).await
     });
     resolved.reached.notified().await;
     std::fs::write(&refresh_marker, "refresh").expect("release tools/list_changed notification");

@@ -94,8 +94,8 @@ impl ToolProvider for LookupRuntimeTool {
         (name == "lookup").then(|| Arc::new(runtime_test_tool(name).contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(serde_json::json!("found"))
+    async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        ToolOutcome::ok(serde_json::json!("found")).into()
     }
 }
 

@@ -8,10 +8,10 @@ use async_trait::async_trait;
 use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_core::runtime::{RuntimeTurnPhase, RuntimeTurnPhaseProbe};
 use lash_core::{
-    InputItem, LlmOutputPart, LlmResponse, SessionAppendNode, SessionNodePayload, ToolCall,
-    ToolContract, ToolControl, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider, TurnInput,
-    facade_support::TraceRecord, facade_support::TraceSink, facade_support::TraceSinkError,
-    facade_support::TurnStop,
+    InputItem, LlmOutputPart, LlmResponse, SessionAppendNode, SessionNodePayload,
+    ToolAttemptOutcome, ToolCall, ToolContract, ToolControl, ToolDefinition, ToolManifest,
+    ToolOutcome, ToolProvider, TurnInput, facade_support::TraceRecord, facade_support::TraceSink,
+    facade_support::TraceSinkError, facade_support::TurnStop,
 };
 use lash_sim::oracles::{
     FrameSwitchCommitObservation, FrameSwitchSeedObservation,
@@ -98,8 +98,10 @@ impl ToolProvider for NoTools {
         None
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::err(json!("unknown tool"))
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async { ToolOutcome::err(json!("unknown tool")) })
+            .await
+            .into()
     }
 }
 
@@ -117,14 +119,18 @@ impl ToolProvider for SeedSwitchTool {
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        assert_eq!(call.name, "switch_frame");
-        ToolOutcome::ok(json!({"switched": true})).with_control(ToolControl::SwitchAgentFrame {
-            frame_key: lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
-                .expect("non-empty caller material"),
-            initial_nodes: self.initial_nodes.clone(),
-            task: Some("run seeded follow-on".to_string()),
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            assert_eq!(call.name(), "switch_frame");
+            ToolOutcome::ok(json!({"switched": true})).with_control(ToolControl::SwitchAgentFrame {
+                frame_key: lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
+                    .expect("non-empty caller material"),
+                initial_nodes: self.initial_nodes.clone(),
+                task: Some("run seeded follow-on".to_string()),
+            })
         })
+        .await
+        .into()
     }
 }
 
@@ -625,21 +631,27 @@ impl ToolProvider for BoundedSwitchTools {
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let index = call
-            .name
-            .strip_prefix("terminal_tool_")
-            .and_then(|value| value.parse::<usize>().ok())
-            .expect("bounded switch tool name");
-        ToolOutcome::ok(json!({"switch": index})).with_control(ToolControl::SwitchAgentFrame {
-            frame_key: lash_core::FrameKey::from_caller_material(&format!("bounded-frame-{index}"))
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            let index = call
+                .name()
+                .strip_prefix("terminal_tool_")
+                .and_then(|value| value.parse::<usize>().ok())
+                .expect("bounded switch tool name");
+            ToolOutcome::ok(json!({"switch": index})).with_control(ToolControl::SwitchAgentFrame {
+                frame_key: lash_core::FrameKey::from_caller_material(&format!(
+                    "bounded-frame-{index}"
+                ))
                 .expect("non-empty caller material"),
-            initial_nodes: vec![SessionAppendNode::plugin(
-                "sim.bounded.seed",
-                json!({"index": index}),
-            )],
-            task: Some(format!("continue bounded chain {index}")),
+                initial_nodes: vec![SessionAppendNode::plugin(
+                    "sim.bounded.seed",
+                    json!({"index": index}),
+                )],
+                task: Some(format!("continue bounded chain {index}")),
+            })
         })
+        .await
+        .into()
     }
 }
 

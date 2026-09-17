@@ -209,9 +209,13 @@ impl lash_core::ToolProvider for FrameStateDeferredTools {
         None
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        assert_eq!(call.name, "frame_state_probe");
-        lash_core::ToolOutcome::ok(serde_json::json!("recorded"))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            assert_eq!(call.name(), "frame_state_probe");
+            lash_core::ToolOutcome::ok(serde_json::json!("recorded"))
+        })
+        .await
+        .into()
     }
 }
 
@@ -759,8 +763,10 @@ impl ToolProvider for ContractRecordingTools {
         Some(contract)
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async { lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })) })
+            .await
+            .into()
     }
 }
 
@@ -785,15 +791,19 @@ impl ToolProvider for BlockingAppTools {
         (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        assert_eq!(call.name, "app_lookup");
-        if let Some(tx) = self.entered_tx.lock_recover().take() {
-            let _ = tx.send(());
-        }
-        if let Some(rx) = self.release_rx.lock().await.take() {
-            let _ = rx.await;
-        }
-        lash_core::ToolOutcome::ok(serde_json::json!({ "answer": "ready" }))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            assert_eq!(call.name(), "app_lookup");
+            if let Some(tx) = self.entered_tx.lock_recover().take() {
+                let _ = tx.send(());
+            }
+            if let Some(rx) = self.release_rx.lock().await.take() {
+                let _ = rx.await;
+            }
+            lash_core::ToolOutcome::ok(serde_json::json!({ "answer": "ready" }))
+        })
+        .await
+        .into()
     }
 }
 
@@ -836,29 +846,33 @@ impl ToolProvider for RuntimeBatchTools {
         }
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        match call.name {
-            "first" | "formerly_serial" | "last" => {
-                let start = std::time::Instant::now();
-                let waited = tokio::time::timeout(
-                    std::time::Duration::from_millis(500),
-                    self.barrier.wait(),
-                )
-                .await;
-                let end = std::time::Instant::now();
-                self.windows
-                    .lock_recover()
-                    .push((call.name.to_string(), start, end));
-                match waited {
-                    Ok(_) => lash_core::ToolOutcome::ok(serde_json::json!(call.name)),
-                    Err(_) => lash_core::ToolOutcome::err_fmt(format!(
-                        "{} did not overlap with the rest of the batch",
-                        call.name
-                    )),
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            match call.name() {
+                "first" | "formerly_serial" | "last" => {
+                    let start = std::time::Instant::now();
+                    let waited = tokio::time::timeout(
+                        std::time::Duration::from_millis(500),
+                        self.barrier.wait(),
+                    )
+                    .await;
+                    let end = std::time::Instant::now();
+                    self.windows
+                        .lock_recover()
+                        .push((call.name().to_string(), start, end));
+                    match waited {
+                        Ok(_) => lash_core::ToolOutcome::ok(serde_json::json!(call.name())),
+                        Err(_) => lash_core::ToolOutcome::err_fmt(format!(
+                            "{} did not overlap with the rest of the batch",
+                            call.name()
+                        )),
+                    }
                 }
+                other => lash_core::ToolOutcome::err_fmt(format!("Unknown tool: {other}")),
             }
-            other => lash_core::ToolOutcome::err_fmt(format!("Unknown tool: {other}")),
-        }
+        })
+        .await
+        .into()
     }
 }
 

@@ -473,44 +473,26 @@ impl ToolProvider for MockMailProvider {
         ))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let Some((slug, operation)) = self.route(call.name) else {
-            return ToolOutcome::err_fmt(format_args!("unknown inbox tool `{}`", call.name));
-        };
-        if operation == "send" {
-            // Sending commits a durable row and owes a `mail.received`
-            // emission. Only the leaf attempt signature can pair the two, so
-            // this legacy route refuses rather than committing half of it.
-            return ToolOutcome::err_fmt(format_args!(
-                "inbox tool `{}` requires the leaf AttemptContext signature",
-                call.name
-            ));
-        }
-        let result = match operation {
-            "list" => self.world.op_list(&slug, call.args),
-            "delete" => self.world.op_delete(&slug, call.args),
-            other => Err(format!("unsupported inbox operation `{other}`")),
-        };
-        match result {
-            Ok(value) => ToolOutcome::ok(value),
-            Err(message) => ToolOutcome::err_fmt(message),
-        }
-    }
-
-    async fn execute_attempt(&self, call: lash::tools::ToolCall<'_>) -> ToolAttemptOutcome {
-        let Some((slug, operation)) = self.route(call.name) else {
-            return done(ToolOutcome::err_fmt(format_args!(
-                "unknown inbox tool `{}`",
-                call.name
-            )));
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        let Some((slug, operation)) = self.route(call.name()) else {
+            return ToolOutcome::err_fmt(format_args!("unknown inbox tool `{}`", call.name()))
+                .into();
         };
         if operation != "send" {
             // Reads own no declaration; they are pure attempt bodies and run
             // against the same sealed attempt context.
-            return done(self.execute(call).await);
+            let result = match operation {
+                "list" => self.world.op_list(&slug, call.args),
+                "delete" => self.world.op_delete(&slug, call.args),
+                other => Err(format!("unsupported inbox operation `{other}`")),
+            };
+            return match result {
+                Ok(value) => ToolOutcome::ok(value).into(),
+                Err(message) => ToolOutcome::err_fmt(message).into(),
+            };
         }
         let Some(replay_key) = call.context.replay_key() else {
-            return done(ToolOutcome::err_fmt("mail send requires a replay key"));
+            return ToolOutcome::err_fmt("mail send requires a replay key").into();
         };
         match self.world.send_with_trigger(
             replay_key,
@@ -525,17 +507,8 @@ impl ToolProvider for MockMailProvider {
                 ToolOutcomeDone::ok(receipt),
                 ToolIntents::v3(vec![intent]),
             ),
-            Err(message) => done(ToolOutcome::err_fmt(message)),
+            Err(message) => ToolOutcome::err_fmt(message).into(),
         }
-    }
-}
-
-fn done(result: ToolOutcome) -> ToolAttemptOutcome {
-    match result {
-        ToolOutcome::Done(output) => {
-            ToolAttemptOutcome::done_without_intents(ToolOutcomeDone::from_output(*output))
-        }
-        ToolOutcome::Pending(pending) => ToolAttemptOutcome::pending(*pending),
     }
 }
 
@@ -591,35 +564,38 @@ mod tests {
     /// The route that made the partial effect possible is gone. `send` used to
     /// run on the legacy signature, which commits the row and then emits, so a
     /// failure in between left a durable delivery whose `mail.received`
-    /// occurrence never happened and whose concierge never ran. Sending now
-    /// exists only on the leaf attempt signature, which pairs the row with its
-    /// declaration; the legacy route refuses instead of committing half.
+    /// occurrence never happened and whose concierge never ran. The single
+    /// execution route pairs the row with its declaration; a call without a
+    /// replay key refuses instead of committing half.
     #[tokio::test]
-    async fn send_exists_only_on_the_attempt_route_that_pairs_row_and_emission() {
+    async fn send_without_a_replay_key_refuses_before_committing() {
         let world = MailWorld::new();
         world.add_account("Work").expect("add work");
         let provider = MockMailProvider::new(world.clone());
         let args = json!({ "title": "Contract", "text": "Please review." });
+        let manifest = provider
+            .resolve_manifest("inbox__work__send")
+            .expect("work send manifest resolves");
 
         let refused = provider
-            .execute(ToolCall {
-                name: "inbox__work__send",
-                args: &args,
-                context: &lash::testing::mock_attempt_context(),
-            })
+            .execute(ToolCall::new(
+                &manifest,
+                &args,
+                &lash::testing::mock_attempt_context(),
+            ))
             .await;
-        let ToolOutcome::Done(output) = refused else {
-            panic!("the legacy route must settle")
+        let ToolAttemptOutcome::Done { result, .. } = refused else {
+            panic!("a refused send still settles inline")
         };
-        let message = serde_json::to_string(&output).expect("serialize the refusal");
+        let message = serde_json::to_string(&result.into_output()).expect("serialize the refusal");
         assert!(
-            message.contains("requires the leaf AttemptContext signature"),
-            "the legacy route must refuse rather than commit the row: {message}"
+            message.contains("requires a replay key"),
+            "send without a replay key must refuse rather than commit the row: {message}"
         );
         assert_eq!(
             world.inbox("work").expect("work inbox").len(),
             0,
-            "a refused legacy send commits nothing"
+            "a refused send commits nothing"
         );
     }
 

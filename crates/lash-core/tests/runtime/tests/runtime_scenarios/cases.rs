@@ -510,14 +510,7 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
             .then(|| Arc::new(runtime_scenario_intent_tool().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        panic!("the runtime scenario provider must use AttemptContext")
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let session_id = call.context.session_id().to_string();
         lash_core::ToolAttemptOutcome::done(

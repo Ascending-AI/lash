@@ -21,6 +21,7 @@ impl ToolRegistry {
     ) -> Result<Self, ReconfigureError> {
         Self::from_tool_registrations(
             vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), vec![provider])],
+            Vec::new(),
             orchestrating_tools,
         )
     }
@@ -36,21 +37,39 @@ impl ToolRegistry {
     pub(crate) fn from_tool_provider_sources(
         sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations(sources, Vec::new())
+        Self::from_tool_registrations(sources, Vec::new(), Vec::new())
     }
 
     pub(crate) fn from_tool_registrations(
         sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
+        internal_tools: Vec<crate::InternalProcessToolDef>,
         orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     ) -> Result<Self, ReconfigureError> {
+        let internal_manifests = internal_tools
+            .iter()
+            .map(crate::InternalProcessToolDef::manifest)
+            .collect::<Vec<_>>();
+        validate_unique_manifests(&internal_manifests)?;
         let registry = Self::empty();
         for (source_id, providers) in sources {
             registry.upsert_source(Arc::new(ToolProviderSource::new(source_id, providers)))?;
+        }
+        for definition in internal_tools {
+            registry.upsert_source(Arc::new(InternalProcessToolSource::new(definition)))?;
         }
         for definition in orchestrating_tools {
             registry.upsert_source(Arc::new(OrchestratingToolSource::new(definition)))?;
         }
         Ok(registry)
+    }
+
+    /// Build a registry containing only explicit internal process tool
+    /// definitions, for hosts and tests that need an internal-only registry
+    /// without a leaf provider.
+    pub fn from_internal_tools(
+        definitions: Vec<crate::InternalProcessToolDef>,
+    ) -> Result<Self, ReconfigureError> {
+        Self::from_tool_registrations(Vec::new(), definitions, Vec::new())
     }
 
     pub(crate) fn empty() -> Self {
@@ -389,14 +408,16 @@ impl ToolRegistry {
                     ),
                 )
             };
-            if matches!(source_key, ToolSourceKey::Orchestrating(_))
-                && sources.contains_key(&source_key)
+            if matches!(
+                source_key,
+                ToolSourceKey::Internal(_) | ToolSourceKey::Orchestrating(_)
+            ) && sources.contains_key(&source_key)
             {
                 if self.inputs_changed(write_revision) {
                     continue;
                 }
                 return Err(ReconfigureError::Validation(format!(
-                    "duplicate orchestrating tool source `{source_key}`"
+                    "duplicate tool source `{source_key}`"
                 )));
             }
             sources.insert(source_key.clone(), Arc::clone(&source));

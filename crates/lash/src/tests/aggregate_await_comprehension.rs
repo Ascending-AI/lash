@@ -17,19 +17,23 @@ impl ToolProvider for RetailTools {
         (name == "retail_order").then(|| Arc::new(retail_order_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        let id = call
-            .args
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let status = if id.ends_with('7') {
-            "delivered"
-        } else {
-            "shipped"
-        };
-        lash_core::ToolOutcome::ok(serde_json::json!({ "id": id, "status": status }))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            let id = call
+                .args
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let status = if id.ends_with('7') {
+                "delivered"
+            } else {
+                "shipped"
+            };
+            lash_core::ToolOutcome::ok(serde_json::json!({ "id": id, "status": status }))
+        })
+        .await
+        .into()
     }
 }
 

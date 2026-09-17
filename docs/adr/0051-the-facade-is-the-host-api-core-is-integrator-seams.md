@@ -35,7 +35,15 @@ write against, are:
    `AwaitEventResolver`, and their signature closure.
 3. **Protocol and process-engine implementors** — `ProtocolSessionPlugin`,
    `ProtocolDriverPlugin`, `CodeExecutorPlugin`, `ProcessEngine`, and the other
-   engine extension points, with their closure.
+   engine extension points, with their closure. Tool hosts implement one required
+   `ToolProvider::execute(ToolCall) -> ToolAttemptOutcome` leaf route. Internal
+   process bodies use the explicit `InternalProcessToolImplementation` class;
+   orchestrating bodies use `OrchestratingToolImplementation`. These are three
+   explicit execution capability classes — leaf, internal, orchestrating — and
+   they are distinct registry sources that are never selected by a serialized
+   activation hint or a name/ID fallback. `ToolCall` and
+   `InternalProcessToolCall` each carry one immutable manifest, preserving ID/name
+   coherence, and completed versus pending outcomes remain structurally exclusive.
 4. **Conformance-suite embedders** — everything
    `lash::testing::conformance` exposes, closed over its signatures, so an
    integrator can hold a custom backend to the same executable contract the
@@ -317,3 +325,31 @@ authoritative.
   checker derives that crate set from the resolved dependency graph
   (`cargo metadata`) and reads the claim per sentence, so stating that a caller
   *cannot* migrate — the honest description of the cycle — is not flagged.
+
+### Host migration for the single execution seam (FIG-3354/3355/3356)
+
+The split between `execute` and `execute_attempt` let a provider declare an
+intent-bearing attempt route that a default could silently bypass. The leaf
+route is now exactly one required method; there is no compatibility ladder.
+A tool host migrates in four steps:
+
+1. **Static support.** A fixed tool set implements `StaticToolExecute` and is
+   served through `StaticToolProvider` — or `ToolProvider` directly when the
+   catalog is dynamic — with
+   `execute(ToolCall<'_>) -> ToolAttemptOutcome`. `call.name()` and
+   `call.tool_id()` read the pinned manifest; `ToolCall` is constructed by the
+   dispatcher, never by the host.
+2. **Outcome conversion.** A body that produces a plain `ToolOutcome` returns
+   it with `.into()`; a body that declares intents returns
+   `ToolAttemptOutcome::done(result, intents)` directly, and a deferred body
+   returns `ToolAttemptOutcome::pending(...)`.
+3. **New registration.** Internal process tools register through
+   `ToolRegistrations::internal` / `PluginSpec::with_internal_tool` as an
+   `InternalProcessToolDef` pairing a definition with an
+   `InternalProcessToolImplementation`; orchestrating tools register through
+   `OrchestratingToolDef` with an `OrchestratingToolImplementation`. Neither is
+   a leaf `ToolProvider` with an activation hint.
+4. **Removed projection.** `execute_by_id`, `execute_attempt`,
+   `execute_attempt_by_id`, `execute_internal`, and `execute_internal_by_id`
+   are gone. Callers that held a tool ID resolve the manifest with
+   `resolve_manifest_by_id` and call `execute` once.

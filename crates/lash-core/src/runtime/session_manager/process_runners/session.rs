@@ -686,7 +686,7 @@ mod tests {
             (name == "park_forever").then(|| Arc::new(park_forever_definition().contract()))
         }
 
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
             let _ = self.started.send(()).await;
             std::future::pending::<()>().await;
             unreachable!("the parked tool never completes")
@@ -940,10 +940,10 @@ mod tests {
         fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
             (name == "park_forever").then(|| Arc::new(park_forever_definition().contract()))
         }
-        async fn execute(&self, _: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        async fn execute(&self, _: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
             crate::runtime::process_permit::release_process_execution_permit_while(async {
                 self.0.send(()).await.unwrap();
-                std::future::pending::<crate::ToolOutcome>().await
+                std::future::pending::<crate::ToolAttemptOutcome>().await
             })
             .await
         }

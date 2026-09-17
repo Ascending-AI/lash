@@ -29,9 +29,13 @@ impl ToolProvider for DiscoveryTools {
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
     }
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        self.calls.lock_recover().push(call.name.to_string());
-        lash_core::ToolOutcome::ok(serde_json::json!("hidden-result"))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            self.calls.lock_recover().push(call.name().to_string());
+            lash_core::ToolOutcome::ok(serde_json::json!("hidden-result"))
+        })
+        .await
+        .into()
     }
 }
 

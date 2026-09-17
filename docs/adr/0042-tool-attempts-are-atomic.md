@@ -25,10 +25,20 @@ does not submit a nested `Direct` envelope. This decision depends only on the
 operation's position inside a tool attempt, so inline and workflow-backed tiers
 follow the same path.
 
-The implementation law has two provider shapes:
+The implementation law has one leaf execution seam and two capability classes:
 
-> If you need to await durable work mid-body, you are orchestration — declare
-> process shape. If you only need to cause it, return an intent.
+> A leaf provider implements one `execute(ToolCall) -> ToolAttemptOutcome` route.
+> If you need to await durable work mid-body, register an explicit internal or
+> orchestrating implementation instead; if you only need to cause it, return an
+> intent.
+
+`ToolCall` carries one immutable manifest, so its stable ID and provider-facing
+name remain coherent. The view is not an authorization token: the dispatcher
+retains admission and route authority. Completed output and deferred completion
+are structurally exclusive, and only completed output can carry ordered intents.
+There is no compatibility ladder between plain, attempt, by-ID, and internal
+execution methods.
+
 
 Leaf providers receive `AttemptContext` and execute as one opaque recorded
 attempt. Orchestrating tools are registered through a distinct typed lane as

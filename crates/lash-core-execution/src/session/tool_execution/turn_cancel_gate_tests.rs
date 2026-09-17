@@ -67,7 +67,7 @@ impl crate::ToolProvider for ScalarRetryTool {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
             crate::ToolOutcome::retryable_failure(
                 crate::ToolFailureClass::External,
@@ -75,8 +75,9 @@ impl crate::ToolProvider for ScalarRetryTool {
                 "retry witness failure",
                 Some(1),
             )
+            .into()
         } else {
-            crate::ToolOutcome::ok(serde_json::json!({"ok": true}))
+            crate::ToolOutcome::ok(serde_json::json!({"ok": true})).into()
         }
     }
 }
