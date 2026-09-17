@@ -379,7 +379,7 @@ impl<'module> Linker<'module> {
                     })
                     .collect::<Option<Vec<_>>>()?,
             ),
-            TypeExpr::Union(items) => TypeExpr::Union(
+            TypeExpr::Union(items) => TypeExpr::union(
                 items
                     .iter()
                     .map(|item| self.close_schema_type_expr(item, resolving))
@@ -478,7 +478,7 @@ impl<'module> Linker<'module> {
                     })
                     .collect(),
             ),
-            TypeExpr::Union(items) => TypeExpr::Union(
+            TypeExpr::Union(items) => TypeExpr::union(
                 items
                     .iter()
                     .map(|item| self.resolve_type_aliases_inner(item, seen))

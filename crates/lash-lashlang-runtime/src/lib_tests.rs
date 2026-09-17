@@ -604,7 +604,7 @@ fn tool_catalog_imports_declared_static_schema_types() {
     );
     assert_eq!(
         operation.output_ty,
-        lashlang::TypeExpr::List(Box::new(lashlang::TypeExpr::Union(vec![
+        lashlang::TypeExpr::List(Box::new(lashlang::TypeExpr::union(vec![
             lashlang::TypeExpr::Str,
             lashlang::TypeExpr::Null,
         ])))
@@ -724,7 +724,7 @@ fn representable_type_schema_subset_round_trips() {
         lashlang::TypeExpr::Null,
         lashlang::TypeExpr::Enum(vec!["fast".into(), "safe".into()]),
         lashlang::TypeExpr::List(Box::new(lashlang::TypeExpr::Str)),
-        lashlang::TypeExpr::Union(vec![lashlang::TypeExpr::Str, lashlang::TypeExpr::Null]),
+        lashlang::TypeExpr::union(vec![lashlang::TypeExpr::Str, lashlang::TypeExpr::Null]),
     ];
 
     for expected in types {
@@ -1484,7 +1484,7 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
             "install",
             vec![b::param(
                 "handler",
-                lashlang::TypeExpr::Union(vec![
+                lashlang::TypeExpr::union(vec![
                     b::process_type(
                         vec![b::param("event", lashlang::TypeExpr::Str)],
                         lashlang::TypeExpr::Bool,

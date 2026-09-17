@@ -665,7 +665,7 @@ fn button_pressed_event_type() -> NamedDataType {
         vec![
             TypeField {
                 name: "button".into(),
-                ty: TypeExpr::Union(vec![
+                ty: TypeExpr::union(vec![
                     TypeExpr::Enum(vec!["Red".into()]),
                     TypeExpr::Enum(vec!["Blue".into()]),
                 ]),

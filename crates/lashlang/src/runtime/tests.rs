@@ -427,7 +427,7 @@ fn golden_contract_program() -> Program {
             builders::type_literal(TypeExpr::Object(vec![
                 builders::type_field(
                     "beta_index",
-                    TypeExpr::Union(vec![TypeExpr::Int, TypeExpr::Null]),
+                    TypeExpr::union(vec![TypeExpr::Int, TypeExpr::Null]),
                     false,
                 ),
                 builders::type_field("matches", TypeExpr::List(Box::new(TypeExpr::Dict)), false),

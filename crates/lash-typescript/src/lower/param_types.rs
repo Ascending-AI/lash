@@ -82,5 +82,5 @@ fn union(items: &[TypeAnnotation]) -> Result<TypeExpr, &'static str> {
         return Ok(TypeExpr::Enum(values));
     }
     let variants = items.iter().map(convert).collect::<Result<Vec<_>, _>>()?;
-    Ok(TypeExpr::Union(variants))
+    Ok(TypeExpr::union(variants))
 }

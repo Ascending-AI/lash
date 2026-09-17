@@ -1237,7 +1237,7 @@ mod tests {
         ));
         assert!(is_resolved_type_assignable(
             &empty,
-            &TypeExpr::Union(vec![
+            &TypeExpr::union(vec![
                 TypeExpr::List(Box::new(TypeExpr::Dict)),
                 TypeExpr::Null
             ])

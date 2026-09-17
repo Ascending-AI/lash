@@ -363,7 +363,7 @@ fn resolve_artifact_type(
                 })
                 .collect(),
         ),
-        TypeExpr::Union(items) => TypeExpr::Union(
+        TypeExpr::Union(items) => TypeExpr::union(
             items
                 .iter()
                 .map(|item| resolve_artifact_type(item, aliases, resources, seen))
