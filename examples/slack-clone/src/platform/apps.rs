@@ -123,17 +123,24 @@ pub fn due_events(connection: &Connection, limit: usize) -> Result<Vec<OutboxRow
 }
 
 /// Mark an event delivered.
+///
+/// Guarded on the row still being pending: a second dispatcher that lost the
+/// race must not stamp `delivered_at` onto a row the winner already settled.
 pub fn mark_delivered(connection: &Connection, id: i64) -> Result<()> {
     connection.execute(
         "UPDATE event_outbox
          SET delivered_at = ?2, attempts = attempts + 1, last_error = NULL
-         WHERE id = ?1",
+         WHERE id = ?1 AND delivered_at IS NULL AND abandoned_at IS NULL",
         params![id, now_millis()],
     )?;
     Ok(())
 }
 
 /// Record a failed attempt, scheduling the next one or abandoning the event.
+///
+/// Guarded on the row still being pending, so a second dispatcher that lost the
+/// race cannot stamp `abandoned_at` onto a row the winner already settled. When
+/// the row is already terminal the recorded attempt count is read back instead.
 ///
 /// Returns the new attempt count from the `UPDATE` itself, so the value cannot
 /// disagree with what was written.
@@ -144,25 +151,35 @@ pub fn mark_failed(
     reason: &str,
     backoff_millis: i64,
 ) -> Result<u32> {
-    Ok(connection.query_row(
-        "UPDATE event_outbox
-         SET attempts = attempts + 1,
-             last_error = ?2,
-             last_reason = ?3,
-             next_attempt_at = ?4,
-             abandoned_at = CASE WHEN attempts + 1 > ?5 THEN ?6 ELSE NULL END
-         WHERE id = ?1
-         RETURNING attempts",
-        params![
-            id,
-            error,
-            reason,
-            now_millis() + backoff_millis,
-            MAX_RETRIES,
-            now_millis(),
-        ],
-        |row| row.get(0),
-    )?)
+    let attempts = connection
+        .query_row(
+            "UPDATE event_outbox
+             SET attempts = attempts + 1,
+                 last_error = ?2,
+                 last_reason = ?3,
+                 next_attempt_at = ?4,
+                 abandoned_at = CASE WHEN attempts + 1 > ?5 THEN ?6 ELSE NULL END
+             WHERE id = ?1 AND delivered_at IS NULL AND abandoned_at IS NULL
+             RETURNING attempts",
+            params![
+                id,
+                error,
+                reason,
+                now_millis() + backoff_millis,
+                MAX_RETRIES,
+                now_millis(),
+            ],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match attempts {
+        Some(attempts) => Ok(attempts),
+        None => Ok(connection.query_row(
+            "SELECT attempts FROM event_outbox WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?),
+    }
 }
 
 /// Delivery counters, surfaced on `/healthz` so a runbook or smoke test can see
@@ -180,7 +197,7 @@ pub fn delivery_stats(connection: &Connection) -> Result<DeliveryStats> {
         "SELECT
             COALESCE(SUM(delivered_at IS NULL AND abandoned_at IS NULL), 0),
             COALESCE(SUM(delivered_at IS NOT NULL), 0),
-            COALESCE(SUM(abandoned_at IS NOT NULL), 0)
+            COALESCE(SUM(delivered_at IS NULL AND abandoned_at IS NOT NULL), 0)
          FROM event_outbox",
         [],
         |row| {
