@@ -161,7 +161,7 @@ fn dropping_a_large_binding_shrinks_the_persisted_state() {
 /// A closure-valued binding is gone from the runtime roots, not merely hidden
 /// from the exported view.
 ///
-/// The two used to disagree: `materialize_runtime_globals` dropped the binding
+/// The two used to disagree: the host-view projection dropped the binding
 /// from what a host and a model see while the runtime roots still reached the
 /// closure, so collection could not remove it and the next cell's validation
 /// judged it. The observable form of "the roots match the view" is that the

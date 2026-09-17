@@ -11,6 +11,15 @@ does run while operands are pending. The paragraph that named that as a
 breaking change is rewritten below to say what the boundary actually holds;
 nothing else in this ADR moves, and Lashlang's forest validator is unchanged.
 
+Amended 2026-09-16 (FIG-3302): this ADR said the runtime roots and the
+host-facing view of the globals "agree on what a global means". That is true of
+closures only. For a JavaScript exotic with no detached host shape, and for a
+pending-tool handle, the binding stays in the roots while the view omits it, so
+the two disagree by design. The paragraph below now names the roots as the sole
+owner, states the view's single omission rule once, and records that no
+existence decision may read the view. No wire, heap or validator behaviour
+changes.
+
 ## Context
 
 Lashlang values used to be trees: every binding held its own structure, and a
@@ -126,13 +135,27 @@ something inside the program that compiled it, so a binding that reaches a
 closure is dropped from the runtime roots when an execution installs its result,
 and the closure becomes garbage the next collection reclaims. A snapshot
 therefore carries no closure. Only a VM continuation retains them, because a
-continuation is resumed against the very program it parked in. Materializing
-runtime globals for a host omits an entire binding on the same rule — if a
-closure occurs anywhere below it — so both views agree on what a global means.
+continuation is resumed against the very program it parked in. The host-facing
+view of the globals omits an entire binding on the same rule — if a closure
+occurs anywhere below it — so nothing outlives the roots that were dropped.
 This is a deliberate silent-omission policy: closure-bearing bindings do not
 survive an execution boundary in either view. Direct host-boundary uses such as
 effect arguments, formatting, projection, JSON conversion, and validation fail
 with the typed `FunctionValueAtHostBoundary` error instead.
+
+The runtime roots are the sole owner of a heap-backed state's bindings, and the
+host-facing view is a projection of them, produced by exactly one function and
+one omission rule: a binding is omitted when exporting it is refused (a function
+value or a JavaScript exotic with no detached host shape at any depth) or when
+the exported value carries a pending-tool handle, which names a request slot of
+the execution that minted it. The closure case is the one where the roots drop
+the binding too; for the others the binding stays live and only the view hides
+it, so the two records deliberately disagree about which names exist. Because
+the disagreement is intended, nothing may read the view to decide whether a
+binding exists: every existence test and every reported outcome of a global
+patch reads the roots, and the view is never written to a wire — a decoder
+re-derives it through the same one function, which is what makes
+`decode(encode(state))` equal `state`.
 
 ## Consequences
 

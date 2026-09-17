@@ -1444,3 +1444,192 @@ fn a_restored_real_closure_does_not_reject_a_different_program() {
         .validate_program(&next_program)
         .expect("a restored closure must not reject the next cell's program");
 }
+
+/// The pending-tool handle record a VM mints for an in-flight call.
+///
+/// `access::value_contains_tool_handle` recognizes it by the two fields
+/// `lash_sansio::handle` owns, so this is the shape the host view refuses to
+/// carry across an execution boundary.
+fn pending_tool_handle_record() -> Record {
+    let mut record = Record::new();
+    record.insert(
+        lash_sansio::handle::HANDLE_FIELD.to_string(),
+        Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+    );
+    record.insert(
+        "id".to_string(),
+        Value::String(
+            lash_sansio::handle::HandleId::tool(0x9e37, 1)
+                .as_str()
+                .into(),
+        ),
+    );
+    record
+}
+
+fn pending_tool_handle_object() -> HeapObject {
+    HeapObject::Record(Box::new(pending_tool_handle_record()))
+}
+
+/// Every heap object kind that stays bound in the runtime roots while the host
+/// view omits it: the JavaScript exotics that have no detached host shape, and
+/// a pending-tool handle, which has one and must not travel in it.
+///
+/// Closures are deliberately absent: `install_runtime` drops a closure-rooted
+/// name from the runtime roots too, so the two records still agree about it.
+fn names_the_host_view_omits() -> Vec<(&'static str, HeapObject)> {
+    vec![
+        (
+            "Map",
+            HeapObject::Map(MapObject {
+                entries: Vec::new(),
+            }),
+        ),
+        ("Set", HeapObject::Set(SetObject { values: Vec::new() })),
+        ("Date", HeapObject::Date(DateObject { milliseconds: 1.0 })),
+        ("pending tool handle", pending_tool_handle_object()),
+    ]
+}
+
+/// Installs `object` as the sole runtime root under `name`, the way an
+/// execution installs its result, and returns the state with the rooted value.
+fn state_rooting(name: &str, object: HeapObject) -> (State, Value) {
+    let mut heap = Heap::default();
+    let value = heap.allocate(object).expect("allocate the rooted object");
+    let mut runtime_globals = Record::new();
+    runtime_globals.insert(name.to_string(), value.clone());
+    let mut state = State::new();
+    state
+        .install_runtime(runtime_globals, heap)
+        .expect("install a runtime binding the host view omits");
+    (state, value)
+}
+
+/// The precondition every test below rests on: the host view is a lossy
+/// projection, so a live binding can be absent from it.
+fn assert_binding_is_owned_but_unprojected(state: &State, label: &str, name: &str, value: &Value) {
+    assert_eq!(
+        state.runtime_globals.get(name),
+        Some(value),
+        "{label}: the runtime roots must own the binding"
+    );
+    assert!(
+        state.globals().get(name).is_none(),
+        "{label}: the host view must omit the binding"
+    );
+}
+
+#[test]
+fn a_default_leaves_a_binding_the_host_view_omits_alone() {
+    for (label, object) in names_the_host_view_omits() {
+        let (mut state, value) = state_rooting("kept", object);
+        assert_binding_is_owned_but_unprojected(&state, label, "kept", &value);
+
+        let bound = state
+            .set_default("kept", Value::Number(1.0))
+            .expect("a default over a rooted binding stays within the heap bound");
+
+        assert!(
+            !bound,
+            "{label}: a default must not bind a name the runtime roots already hold"
+        );
+        assert_eq!(
+            state.runtime_globals.get("kept"),
+            Some(&value),
+            "{label}: the live binding must survive the default untouched"
+        );
+    }
+}
+
+#[test]
+fn removing_a_binding_the_host_view_omits_reports_it_removed() {
+    for (label, object) in names_the_host_view_omits() {
+        let (mut state, value) = state_rooting("kept", object);
+        assert_binding_is_owned_but_unprojected(&state, label, "kept", &value);
+
+        assert!(
+            state.remove_global("kept"),
+            "{label}: removing a live binding must report it removed"
+        );
+        assert!(
+            state.runtime_globals.get("kept").is_none(),
+            "{label}: the runtime roots must no longer hold the binding"
+        );
+    }
+}
+
+#[test]
+fn rebinding_a_name_the_host_view_omits_reports_the_previous_binding() {
+    for (label, object) in names_the_host_view_omits() {
+        let (mut state, value) = state_rooting("kept", object);
+        assert_binding_is_owned_but_unprojected(&state, label, "kept", &value);
+
+        let replaced = state
+            .insert_global("kept", Value::Number(1.0))
+            .expect("rebinding a rooted name stays within the heap bound");
+
+        assert!(
+            replaced,
+            "{label}: rebinding must report that a binding was already there"
+        );
+        assert_eq!(
+            state.globals().get("kept"),
+            Some(&Value::Number(1.0)),
+            "{label}: the new binding is host-visible"
+        );
+    }
+}
+
+#[test]
+fn a_state_whose_host_view_omits_a_binding_round_trips_through_the_wire() {
+    for (label, object) in names_the_host_view_omits() {
+        let (state, value) = state_rooting("kept", object);
+        assert_binding_is_owned_but_unprojected(&state, label, "kept", &value);
+
+        let snapshot = state.snapshot();
+        let bytes = snapshot
+            .to_canonical_bytes()
+            .expect("a rooted binding the host view omits encodes");
+        let decoded = Snapshot::from_canonical_bytes(&bytes)
+            .expect("a rooted binding the host view omits decodes");
+
+        assert_eq!(
+            decoded.globals(),
+            snapshot.globals(),
+            "{label}: the decoder must derive the host view by the live rule"
+        );
+        assert_eq!(decoded, snapshot, "{label}: decode(encode(s)) must equal s");
+    }
+}
+
+/// A host may write a name whose value the view cannot carry. The view stays a
+/// projection of the roots rather than growing an entry of its own, so the
+/// state a snapshot restores is still the state that was captured.
+#[test]
+fn a_host_write_the_view_cannot_carry_leaves_the_view_a_projection() {
+    let (mut state, _) = state_rooting("anchor", HeapObject::List(Vec::new()));
+    let replaced = state
+        .insert_global(
+            "pending",
+            Value::Record(Arc::new(pending_tool_handle_record())),
+        )
+        .expect("writing a handle-bearing binding stays within the heap bound");
+
+    assert!(!replaced, "the name was unbound before the write");
+    assert!(
+        state.runtime_globals.get("pending").is_some(),
+        "the runtime roots own the binding the host wrote"
+    );
+    assert!(
+        state.globals().get("pending").is_none(),
+        "the host view omits it by the one projection rule"
+    );
+
+    let snapshot = state.snapshot();
+    let bytes = snapshot
+        .to_canonical_bytes()
+        .expect("a host-written handle-bearing binding encodes");
+    let decoded = Snapshot::from_canonical_bytes(&bytes)
+        .expect("a host-written handle-bearing binding decodes");
+    assert_eq!(decoded, snapshot, "decode(encode(s)) must equal s");
+}

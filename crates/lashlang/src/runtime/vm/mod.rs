@@ -1575,7 +1575,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// contains a function value at any depth.
     pub fn into_globals(mut self) -> Result<Record, RuntimeError> {
         let runtime_globals = self.slots.into_globals(&self.chunk.slot_names)?;
-        super::state::materialize_runtime_globals(&runtime_globals, &mut self.heap)
+        super::state::host_view(&runtime_globals, &mut self.heap)
     }
 
     pub(crate) fn into_state_parts(self) -> Result<(Record, Heap), RuntimeError> {
