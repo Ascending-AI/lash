@@ -717,10 +717,6 @@ pub(super) fn delivered_with_payload(
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test support: fixture construction is infallible by construction"
-)]
 pub(super) fn runtime_completion(
     family: RuntimeCompletionFamily,
     ready_at: u64,
@@ -728,10 +724,6 @@ pub(super) fn runtime_completion(
     runtime_completion_registered_after(family, ready_at, "session-001:ingress")
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test support: fixture construction is infallible by construction"
-)]
 pub(super) fn runtime_completion_registered_after(
     family: RuntimeCompletionFamily,
     ready_at: u64,

@@ -176,8 +176,12 @@ pub(super) async fn register_ready_runtime_completions(
             queue.defer(event);
             continue;
         }
-        let family = runtime_completion_family(event.kind)
-            .expect("split_runtime_completion_events only queues scheduler-owned kinds");
+        let Some(family) = runtime_completion_family(event.kind) else {
+            return Err(FixedScriptRunnerError::Assertion(format!(
+                "queued runtime completion `{}` has no completion family for {:?}",
+                event.boundary_id, event.kind
+            )));
+        };
         let units = runtime_completion_units(&event)?;
         if event.kind == BoundaryKind::Provider {
             let turn_event = event.clone();

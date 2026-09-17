@@ -174,8 +174,8 @@ enum ProcessLifecycle {
     /// Registered and retained: `base` is the record the fold law replays
     /// events onto, `expected` is the independently derived projection.
     Live {
-        base: ProcessRecord,
-        expected: ProcessRecord,
+        base: Box<ProcessRecord>,
+        expected: Box<ProcessRecord>,
     },
     /// Pruned to a tombstone; a later register may reuse the row.
     Tombstoned,
@@ -230,14 +230,14 @@ impl ModelProcess {
 
     fn expected(&self) -> Option<&ProcessRecord> {
         match &self.lifecycle {
-            ProcessLifecycle::Live { expected, .. } => Some(expected),
+            ProcessLifecycle::Live { expected, .. } => Some(expected.as_ref()),
             _ => None,
         }
     }
 
     fn expected_mut(&mut self) -> Option<&mut ProcessRecord> {
         match &mut self.lifecycle {
-            ProcessLifecycle::Live { expected, .. } => Some(expected),
+            ProcessLifecycle::Live { expected, .. } => Some(expected.as_mut()),
             _ => None,
         }
     }
@@ -252,8 +252,8 @@ impl ModelProcess {
     fn install_fresh(&mut self, record: ProcessRecord) {
         *self = Self {
             lifecycle: ProcessLifecycle::Live {
-                base: record.clone(),
-                expected: record,
+                base: Box::new(record.clone()),
+                expected: Box::new(record),
             },
             ..Self::default()
         };
@@ -1407,7 +1407,7 @@ async fn assert_fold_law(
             .processes
             .get(&id)
             .and_then(|process| match &process.lifecycle {
-                ProcessLifecycle::Live { base, .. } => Some(base.clone()),
+                ProcessLifecycle::Live { base, .. } => Some(base.as_ref().clone()),
                 _ => None,
             })
         else {
