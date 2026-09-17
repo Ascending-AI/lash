@@ -483,21 +483,40 @@ impl RenderedPrompt {
 /// of once per LLM iteration.
 pub type BaseRenderCache = OnceLock<RenderedPrompt>;
 
+/// How a `MessageSequence` stores its messages.
+///
+/// `Layered` is the base/delta rope: a session-wide `base` shared by `Arc`
+/// plus the messages this iteration appended. `Owned` is a flat list the
+/// sequence holds outright — the shape every sequence settles into after
+/// `make_mut`/`replace`, and the only shape a deserialized sequence can
+/// have. Layered-with-owned is not representable.
+#[derive(Debug)]
+enum SequenceMode {
+    Layered {
+        base: Arc<Vec<Message>>,
+        delta: Vec<Message>,
+    },
+    Owned(Vec<Message>),
+}
+
 #[derive(Debug)]
 pub struct MessageSequence {
-    base: Arc<Vec<Message>>,
-    delta: Vec<Message>,
-    owned: Option<Vec<Message>>,
+    mode: SequenceMode,
     materialized: OnceLock<Arc<Vec<Message>>>,
     base_rendered: Option<Arc<BaseRenderCache>>,
 }
 
 impl Clone for MessageSequence {
     fn clone(&self) -> Self {
+        let mode = match &self.mode {
+            SequenceMode::Layered { base, delta } => SequenceMode::Layered {
+                base: Arc::clone(base),
+                delta: delta.clone(),
+            },
+            SequenceMode::Owned(owned) => SequenceMode::Owned(owned.clone()),
+        };
         Self {
-            base: Arc::clone(&self.base),
-            delta: self.delta.clone(),
-            owned: self.owned.clone(),
+            mode,
             materialized: OnceLock::new(),
             base_rendered: self.base_rendered.as_ref().map(Arc::clone),
         }
@@ -546,9 +565,7 @@ impl std::ops::Deref for MessageSequence {
 impl MessageSequence {
     pub(crate) fn from_owned(messages: Vec<Message>) -> Self {
         Self {
-            base: Arc::new(Vec::new()),
-            delta: Vec::new(),
-            owned: Some(messages),
+            mode: SequenceMode::Owned(messages),
             materialized: OnceLock::new(),
             base_rendered: None,
         }
@@ -556,9 +573,10 @@ impl MessageSequence {
 
     pub(crate) fn from_base(base: Arc<Vec<Message>>) -> Self {
         Self {
-            base,
-            delta: Vec::new(),
-            owned: None,
+            mode: SequenceMode::Layered {
+                base,
+                delta: Vec::new(),
+            },
             materialized: OnceLock::new(),
             base_rendered: None,
         }
@@ -566,9 +584,7 @@ impl MessageSequence {
 
     pub(crate) fn from_base_and_delta(base: Arc<Vec<Message>>, delta: Vec<Message>) -> Self {
         Self {
-            base,
-            delta,
-            owned: None,
+            mode: SequenceMode::Layered { base, delta },
             materialized: OnceLock::new(),
             base_rendered: None,
         }
@@ -584,9 +600,9 @@ impl MessageSequence {
     }
 
     pub(crate) fn len(&self) -> usize {
-        match &self.owned {
-            Some(owned) => owned.len(),
-            None => self.base.len() + self.delta.len(),
+        match &self.mode {
+            SequenceMode::Owned(owned) => owned.len(),
+            SequenceMode::Layered { base, delta } => base.len() + delta.len(),
         }
     }
 
@@ -605,88 +621,95 @@ impl MessageSequence {
     /// delta diverges from this one's. `None` means "cannot decide cheaply",
     /// so callers fall back to reconciling content.
     pub(crate) fn preserved_extension_delta<'a>(&self, next: &'a Self) -> Option<&'a [Message]> {
-        if self.owned.is_some() || next.owned.is_some() {
+        let (
+            SequenceMode::Layered {
+                base: self_base,
+                delta: self_delta,
+            },
+            SequenceMode::Layered {
+                base: next_base,
+                delta: next_delta,
+            },
+        ) = (&self.mode, &next.mode)
+        else {
+            return None;
+        };
+        if !Arc::ptr_eq(self_base, next_base) {
             return None;
         }
-        if !Arc::ptr_eq(&self.base, &next.base) {
-            return None;
-        }
-        let tail = next.delta.get(self.delta.len()..)?;
-        self.delta
+        let tail = next_delta.get(self_delta.len()..)?;
+        self_delta
             .iter()
-            .zip(next.delta.iter())
+            .zip(next_delta.iter())
             .all(|(current, candidate)| message_content_equal(current, candidate))
             .then_some(tail)
     }
 
     pub(crate) fn iter(&self) -> MessageSequenceIter<'_> {
-        match self.owned.as_ref() {
-            Some(owned) => MessageSequenceIter::Owned(owned.iter()),
-            None => MessageSequenceIter::Split(self.base.iter().chain(self.delta.iter())),
+        match &self.mode {
+            SequenceMode::Owned(owned) => MessageSequenceIter::Owned(owned.iter()),
+            SequenceMode::Layered { base, delta } => {
+                MessageSequenceIter::Split(base.iter().chain(delta.iter()))
+            }
+        }
+    }
+
+    /// The flattened message list as a shared allocation. `Owned` wraps its
+    /// list once; `Layered` reuses `base` when the delta is empty and joins
+    /// base and delta otherwise.
+    fn materialize(&self) -> &Arc<Vec<Message>> {
+        match &self.mode {
+            SequenceMode::Owned(owned) => self.materialized.get_or_init(|| Arc::new(owned.clone())),
+            SequenceMode::Layered { base, delta } if delta.is_empty() => base,
+            SequenceMode::Layered { base, delta } => self.materialized.get_or_init(|| {
+                let mut combined = Vec::with_capacity(base.len() + delta.len());
+                combined.extend(base.iter().cloned());
+                combined.extend(delta.iter().cloned());
+                Arc::new(combined)
+            }),
         }
     }
 
     pub(crate) fn as_slice(&self) -> &[Message] {
-        if let Some(owned) = &self.owned {
-            return owned.as_slice();
+        match &self.mode {
+            SequenceMode::Owned(owned) => owned.as_slice(),
+            SequenceMode::Layered { .. } => self.materialize().as_slice(),
         }
-        if self.delta.is_empty() {
-            return self.base.as_slice();
-        }
-        self.materialized
-            .get_or_init(|| {
-                let mut combined = Vec::with_capacity(self.base.len() + self.delta.len());
-                combined.extend(self.base.iter().cloned());
-                combined.extend(self.delta.iter().cloned());
-                Arc::new(combined)
-            })
-            .as_slice()
     }
 
     pub(crate) fn shared(&self) -> Arc<Vec<Message>> {
-        if let Some(owned) = &self.owned {
-            return Arc::clone(self.materialized.get_or_init(|| Arc::new(owned.clone())));
-        }
-        if self.delta.is_empty() {
-            return Arc::clone(&self.base);
-        }
-        Arc::clone(self.materialized.get_or_init(|| {
-            let mut combined = Vec::with_capacity(self.base.len() + self.delta.len());
-            combined.extend(self.base.iter().cloned());
-            combined.extend(self.delta.iter().cloned());
-            Arc::new(combined)
-        }))
+        Arc::clone(self.materialize())
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the block below assigns `Some` on the only path where `owned` was `None`"
-    )]
     pub fn make_mut(&mut self) -> &mut Vec<Message> {
-        if self.owned.is_none() {
-            let owned = if self.delta.is_empty() {
-                Arc::unwrap_or_clone(Arc::clone(&self.base))
-            } else if let Some(materialized) = self.materialized.get() {
-                Arc::unwrap_or_clone(Arc::clone(materialized))
-            } else {
-                let mut combined = Vec::with_capacity(self.base.len() + self.delta.len());
-                combined.extend(self.base.iter().cloned());
-                combined.extend(self.delta.iter().cloned());
-                combined
-            };
-            self.owned = Some(owned);
-            self.base = Arc::new(Vec::new());
-            self.delta.clear();
+        if matches!(self.mode, SequenceMode::Layered { .. }) {
+            let owned = self.materialize_owned();
+            self.mode = SequenceMode::Owned(owned);
         }
         self.materialized = OnceLock::new();
-        self.owned.as_mut().expect("message sequence owned state")
+        match &mut self.mode {
+            SequenceMode::Owned(owned) => owned,
+            SequenceMode::Layered { .. } => unreachable!("mode was just set to Owned"),
+        }
+    }
+
+    /// The layered sequence's flattened list as an owned `Vec`, reusing the
+    /// materialized cache or the `base` allocation when either already holds
+    /// it exclusively.
+    fn materialize_owned(&self) -> Vec<Message> {
+        match &self.mode {
+            SequenceMode::Owned(owned) => owned.clone(),
+            SequenceMode::Layered { base, delta } if delta.is_empty() => {
+                Arc::unwrap_or_clone(Arc::clone(base))
+            }
+            SequenceMode::Layered { .. } => Arc::unwrap_or_clone(Arc::clone(self.materialize())),
+        }
     }
 
     pub(crate) fn push(&mut self, message: Message) {
-        if let Some(owned) = self.owned.as_mut() {
-            owned.push(message);
-        } else {
-            self.delta.push(message);
+        match &mut self.mode {
+            SequenceMode::Owned(owned) => owned.push(message),
+            SequenceMode::Layered { delta, .. } => delta.push(message),
         }
         self.materialized = OnceLock::new();
     }
@@ -695,36 +718,31 @@ impl MessageSequence {
         if messages.is_empty() {
             return;
         }
-        if let Some(owned) = self.owned.as_mut() {
-            owned.extend(messages);
-        } else {
-            self.delta.extend(messages);
+        match &mut self.mode {
+            SequenceMode::Owned(owned) => owned.extend(messages),
+            SequenceMode::Layered { delta, .. } => delta.extend(messages),
         }
         self.materialized = OnceLock::new();
     }
 
     pub fn replace(&mut self, messages: Vec<Message>) {
-        self.base = Arc::new(Vec::new());
-        self.delta.clear();
-        self.owned = Some(messages);
+        self.mode = SequenceMode::Owned(messages);
         self.materialized = OnceLock::new();
     }
 
     pub(crate) fn render_prompt(&self) -> RenderedPrompt {
-        if let Some(owned) = &self.owned {
-            return render_prompt(owned.as_slice());
-        }
-        if self.base.is_empty() {
-            return render_prompt(self.delta.as_slice());
+        let SequenceMode::Layered { base, delta } = &self.mode else {
+            return render_prompt(self.as_slice());
+        };
+        if base.is_empty() {
+            return render_prompt(delta.as_slice());
         }
         let mut rendered = match &self.base_rendered {
-            Some(cache) => cache
-                .get_or_init(|| render_prompt(self.base.as_slice()))
-                .clone(),
-            None => render_prompt(self.base.as_slice()),
+            Some(cache) => cache.get_or_init(|| render_prompt(base.as_slice())).clone(),
+            None => render_prompt(base.as_slice()),
         };
-        if !self.delta.is_empty() {
-            append_rendered_prompt(&mut rendered, self.delta.as_slice());
+        if !delta.is_empty() {
+            append_rendered_prompt(&mut rendered, delta.as_slice());
         }
         rendered
     }
