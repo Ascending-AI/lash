@@ -16,6 +16,19 @@ use serde::{Deserialize, Serialize};
 #[non_exhaustive]
 pub enum RuntimeErrorCode {
     AttachmentSourcePolicyDenied,
+    /// An artifact write named an owner a permanent retirement fence has
+    /// already closed. Store implementors return this code instead of
+    /// wording the refusal as prose; the destination-owner form of the same
+    /// fence is [`Self::ArtifactDestinationOwnerRetired`].
+    ArtifactOwnerRetired,
+    /// An artifact transfer named a destination owner a permanent retirement
+    /// fence has already closed. Kept as its own code so the retirement
+    /// target is a fact, not a word that must appear in the message.
+    ArtifactDestinationOwnerRetired,
+    /// An artifact transfer found neither the staging owner's edge nor the
+    /// destination owner's edge. Store implementors return this code so the
+    /// caller that staged the bytes can settle the destination edge itself.
+    ArtifactStagingEdgeMissing,
     EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
@@ -372,6 +385,9 @@ impl RuntimeErrorCode {
     pub fn as_str(&self) -> &str {
         match self {
             Self::AttachmentSourcePolicyDenied => "attachment_source_policy_denied",
+            Self::ArtifactOwnerRetired => "artifact_owner_retired",
+            Self::ArtifactDestinationOwnerRetired => "artifact_destination_owner_retired",
+            Self::ArtifactStagingEdgeMissing => "artifact_staging_edge_missing",
             Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
@@ -770,6 +786,9 @@ impl RuntimeErrorCode {
     pub fn from_wire_code(code: &str) -> Self {
         match code {
             "attachment_source_policy_denied" => Self::AttachmentSourcePolicyDenied,
+            "artifact_owner_retired" => Self::ArtifactOwnerRetired,
+            "artifact_destination_owner_retired" => Self::ArtifactDestinationOwnerRetired,
+            "artifact_staging_edge_missing" => Self::ArtifactStagingEdgeMissing,
             "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,

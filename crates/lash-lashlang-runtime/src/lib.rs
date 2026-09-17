@@ -1290,7 +1290,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         self.artifact_store
             .retain_module_artifact(owner, &input.module_ref)
             .await
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+            .map_err(lash_core::PluginError::from)
     }
 
     async fn transfer_start_artifacts(
@@ -1305,7 +1305,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         self.artifact_store
             .transfer_module_artifact(from, to, &input.module_ref)
             .await
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+            .map_err(lash_core::PluginError::from)
     }
 
     async fn release_artifacts(
@@ -1319,7 +1319,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         self.artifact_store
             .release_module_artifact(owner, &input.module_ref)
             .await
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+            .map_err(lash_core::PluginError::from)
     }
 
     async fn retire_artifact_owner(
@@ -1329,7 +1329,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         self.artifact_store
             .retire_module_artifact_owner(owner)
             .await
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+            .map_err(lash_core::PluginError::from)
     }
 }
 

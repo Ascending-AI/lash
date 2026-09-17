@@ -132,9 +132,9 @@ impl Store {
                     |row| row.get::<_, bool>(0),
                 )?;
                 if retired {
-                    return Err(rusqlite::Error::InvalidParameterName(
-                        "artifact owner has been permanently retired".to_string(),
-                    ));
+                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                        StoreError::ArtifactOwnerRetired,
+                    )));
                 }
                 let blob_ref =
                     Self::insert_artifact_blob_conn(tx, descriptor, &bytes, blob_profile)?;
@@ -192,9 +192,9 @@ impl Store {
                     |row| row.get::<_, bool>(0),
                 )?;
                 if retired {
-                    return Err(rusqlite::Error::InvalidParameterName(
-                        "artifact destination owner has been permanently retired".to_string(),
-                    ));
+                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                        StoreError::ArtifactDestinationOwnerRetired,
+                    )));
                 }
                 let inserted = tx.execute(
                     "INSERT INTO artifact_owners
@@ -217,8 +217,10 @@ impl Store {
                         |row| row.get::<_, bool>(0),
                     )?;
                     if !destination_exists {
-                        return Err(rusqlite::Error::InvalidParameterName(format!(
-                            "artifact `{artifact_ref}` is not retained by the staging owner"
+                        return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                            StoreError::ArtifactStagingEdgeMissing {
+                                artifact: format!("artifact `{artifact_ref}`"),
+                            },
                         )));
                     }
                 }
@@ -415,7 +417,7 @@ impl lashlang::LashlangArtifactStore for Store {
             owner.clone(),
         )
         .await
-        .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?;
+        .map_err(lashlang::ArtifactStoreError::from)?;
         self.artifact_cache
             .lock_recover()
             .insert(artifact.module_ref.clone(), Arc::new(artifact.clone()));
@@ -434,7 +436,7 @@ impl lashlang::LashlangArtifactStore for Store {
                 format!("lashlang module artifact `{module_ref}`"),
             )
             .await
-            .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))?
+            .map_err(lashlang::ArtifactStoreError::from)?
             .ok_or_else(|| {
                 lashlang::ArtifactStoreError::Backend(format!(
                     "missing module artifact `{module_ref}`"
@@ -448,7 +450,7 @@ impl lashlang::LashlangArtifactStore for Store {
             owner.clone(),
         )
         .await
-        .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))
+        .map_err(lashlang::ArtifactStoreError::from)
     }
 
     async fn transfer_module_artifact(
@@ -464,7 +466,7 @@ impl lashlang::LashlangArtifactStore for Store {
             to.clone(),
         )
         .await
-        .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))
+        .map_err(lashlang::ArtifactStoreError::from)
     }
 
     async fn release_module_artifact(
@@ -478,7 +480,7 @@ impl lashlang::LashlangArtifactStore for Store {
             owner.clone(),
         )
         .await
-        .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))?;
+        .map_err(lashlang::ArtifactStoreError::from)?;
         self.artifact_cache.lock_recover().remove(module_ref);
         Ok(())
     }
@@ -489,7 +491,7 @@ impl lashlang::LashlangArtifactStore for Store {
     ) -> Result<(), lashlang::ArtifactStoreError> {
         self.retire_artifact_owner(MODULE_ARTIFACT_NAMESPACE, owner.clone())
             .await
-            .map_err(|error| lashlang::ArtifactStoreError::Backend(error.to_string()))?;
+            .map_err(lashlang::ArtifactStoreError::from)?;
         self.artifact_cache.lock_recover().clear();
         Ok(())
     }
@@ -511,7 +513,7 @@ impl lashlang::LashlangArtifactStore for Store {
                 format!("lashlang module artifact `{module_ref}`"),
             )
             .await
-            .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?
+            .map_err(lashlang::ArtifactStoreError::from)?
         else {
             self.artifact_cache.lock_recover().remove(module_ref);
             return Ok(None);
@@ -557,7 +559,7 @@ impl lash_core::ProcessExecutionEnvStore for Store {
             owner.clone(),
         )
         .await
-        .map_err(|err| lash_core::PluginError::Session(err.to_string()))
+        .map_err(lash_core::artifact_store_plugin_error)
     }
 
     async fn transfer_process_execution_env(
@@ -573,7 +575,7 @@ impl lash_core::ProcessExecutionEnvStore for Store {
             to.clone(),
         )
         .await
-        .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+        .map_err(lash_core::artifact_store_plugin_error)
     }
 
     async fn release_process_execution_env(
@@ -587,7 +589,7 @@ impl lash_core::ProcessExecutionEnvStore for Store {
             owner.clone(),
         )
         .await
-        .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+        .map_err(lash_core::artifact_store_plugin_error)
     }
 
     async fn retire_process_execution_env_owner(
@@ -596,7 +598,7 @@ impl lash_core::ProcessExecutionEnvStore for Store {
     ) -> Result<(), lash_core::PluginError> {
         self.retire_artifact_owner(PROCESS_ENV_NAMESPACE, owner.clone())
             .await
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+            .map_err(lash_core::artifact_store_plugin_error)
     }
 
     async fn get_process_execution_env(
@@ -615,7 +617,7 @@ impl lash_core::ProcessExecutionEnvStore for Store {
             format!("process execution env `{artifact_ref}`"),
         )
         .await
-        .map_err(|err| lash_core::PluginError::Session(err.to_string()))
+        .map_err(lash_core::artifact_store_plugin_error)
     }
 }
 
