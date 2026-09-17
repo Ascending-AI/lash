@@ -1,5 +1,5 @@
 use lash_core::ToolDefinition;
-use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
+use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt, object_schema};
 
 pub type BatchResultRow = lash_sansio::BatchResultRow;
 
@@ -59,15 +59,6 @@ fn batch_output_schema() -> serde_json::Value {
         },
         "required": ["results"],
         "additionalProperties": false
-    })
-}
-
-fn object_schema(properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": false,
     })
 }
 

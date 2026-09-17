@@ -15048,9 +15048,7 @@
         "async-trait",
         "lash-internal-core",
         "lash-internal-lashlang-runtime",
-        "serde",
-        "serde_json",
-        "serde_path_to_error"
+        "serde_json"
       ],
       "manifest": "crates/lash-tool-support/Cargo.toml",
       "package": "lash-internal-tool-support",
