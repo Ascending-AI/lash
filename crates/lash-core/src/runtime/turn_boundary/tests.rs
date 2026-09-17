@@ -63,7 +63,8 @@ fn turn_draft_appends_resident_nodes_not_yet_durable() {
         Arc::new(crate::SystemClock),
         "masked-path-regression",
     );
-    let GraphAppend { nodes, .. } = draft.graph_commit();
+    let graph = draft.graph_commit();
+    let nodes = graph.nodes();
     assert_eq!(
         nodes
             .iter()

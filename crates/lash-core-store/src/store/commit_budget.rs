@@ -133,7 +133,7 @@ impl RuntimeCommit {
     }
 
     fn validate_node_budget(&self) -> Result<(), StoreError> {
-        let graph_rows = self.graph.nodes.len();
+        let graph_rows = self.graph.nodes().len();
         let adopted_intent_rows = usize::try_from(self.adopted_intent_rows).unwrap_or(usize::MAX);
         let row_count = graph_rows.saturating_add(adopted_intent_rows);
         match self.commit_budget.nodes {
@@ -264,7 +264,7 @@ impl RuntimeCommit {
             })
         };
         let session_config_bytes = measure_json(serde_json::to_vec(&self.config))?;
-        let graph_delta_bytes = self.graph.nodes.iter().try_fold(
+        let graph_delta_bytes = self.graph.nodes().iter().try_fold(
             0usize,
             |total, node| -> Result<usize, StoreError> {
                 Ok(total.saturating_add(measure_json(serde_json::to_vec(node))?))
@@ -315,7 +315,7 @@ impl RuntimeCommit {
             .saturating_add(agent_frame_bytes)
             .saturating_add(usage_delta_bytes)
             .saturating_add(turn_result_bytes);
-        let graph_rows = self.graph.nodes.len();
+        let graph_rows = self.graph.nodes().len();
         let adopted_intent_rows = usize::try_from(self.adopted_intent_rows).unwrap_or(usize::MAX);
         let total_rows = graph_rows.saturating_add(adopted_intent_rows);
         Ok(RuntimeCommitBudgetMeasurement {
@@ -361,14 +361,13 @@ mod tests {
         };
         let budget = CommitBudget::bounded(1024 * 1024, 2);
         let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
-        commit.graph = crate::GraphAppend {
+        commit.graph = crate::GraphAppend::Extend {
             nodes: (0..=2)
                 .map(|index| crate::SessionNodeRecord {
                     node_id: format!("node-{index}").into(),
                     ..node.clone()
                 })
                 .collect(),
-            leaf_node_id: None,
         };
 
         assert!(matches!(
@@ -431,9 +430,8 @@ mod tests {
                 ),
             },
         };
-        commit.graph = crate::GraphAppend {
+        commit.graph = crate::GraphAppend::Extend {
             nodes: vec![node.clone()],
-            leaf_node_id: Some(node.node_id.clone()),
         };
         let changed_body = vec![0; 129];
         commit.checkpoint.components.insert(

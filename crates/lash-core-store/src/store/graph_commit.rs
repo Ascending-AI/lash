@@ -9,8 +9,8 @@ impl GraphAppend {
         operation: &OperationId,
     ) -> Result<Vec<(NodeId, NodeId)>, StoreError> {
         let mut remapped = std::collections::HashMap::<NodeId, NodeId>::new();
-        let mut mapping = Vec::with_capacity(self.nodes.len());
-        for (ordinal, node) in self.nodes.iter_mut().enumerate() {
+        let mut mapping = Vec::with_capacity(self.nodes().len());
+        for (ordinal, node) in self.nodes_mut().iter_mut().enumerate() {
             if let Some(parent) = node.parent_node_id.as_mut()
                 && let Some(derived_parent) = remapped.get(parent)
             {
@@ -28,16 +28,11 @@ impl GraphAppend {
             remapped.insert(old.clone(), derived.clone());
             mapping.push((old, derived));
         }
-        if let Some(leaf) = self.leaf_node_id.as_mut()
-            && let Some(derived_leaf) = remapped.get(leaf)
-        {
-            *leaf = derived_leaf.clone();
-        }
         Ok(mapping)
     }
 
     pub fn appended_nodes(&self) -> impl Iterator<Item = &crate::SessionNodeRecord> {
-        self.nodes.iter()
+        self.nodes().iter()
     }
 
     #[expect(
@@ -49,7 +44,7 @@ impl GraphAppend {
         resident_graph: &crate::SessionGraph,
     ) -> Option<crate::FrameNodeId> {
         if let Some(frame_node) = self
-            .nodes
+            .nodes()
             .iter()
             .rev()
             .find(|node| matches!(node.payload, crate::SessionNodePayload::FrameOpen { .. }))
@@ -60,8 +55,8 @@ impl GraphAppend {
             );
         }
 
-        let resident_parent_node_id = self.nodes.first().map_or_else(
-            || self.leaf_node_id.as_deref(),
+        let resident_parent_node_id = self.nodes().first().map_or_else(
+            || resident_graph.leaf_node_id.as_deref(),
             |first| first.parent_node_id.as_deref(),
         );
         resident_graph
@@ -73,20 +68,13 @@ impl GraphAppend {
     }
 
     pub fn validate_append_topology(&self) -> Result<(), StoreError> {
-        if let Some(last) = self.nodes.last()
-            && self.leaf_node_id.as_ref() != Some(&last.node_id)
-        {
-            return Err(StoreError::InvalidGraphLeaf {
-                leaf_node_id: self.leaf_node_id.clone(),
-            });
-        }
         let proposed_ids = self
-            .nodes
+            .nodes()
             .iter()
             .map(|node| node.node_id.as_str())
             .collect::<std::collections::HashSet<_>>();
-        let mut earlier_ids = std::collections::HashSet::with_capacity(self.nodes.len());
-        for node in &self.nodes {
+        let mut earlier_ids = std::collections::HashSet::with_capacity(self.nodes().len());
+        for node in self.nodes() {
             if let Some(parent_node_id) = node.parent_node_id.as_deref()
                 && proposed_ids.contains(parent_node_id)
                 && !earlier_ids.contains(parent_node_id)
@@ -99,7 +87,7 @@ impl GraphAppend {
             }
             earlier_ids.insert(node.node_id.as_str());
         }
-        for pair in self.nodes.windows(2) {
+        for pair in self.nodes().windows(2) {
             let expected = Some(pair[0].node_id.clone());
             if pair[1].parent_node_id != expected {
                 return Err(StoreError::InvalidGraphParent {

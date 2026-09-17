@@ -59,7 +59,7 @@ async fn successful_commits_are_counted_after_the_inner_store_accepts_them() {
         &state_with_one_pending_node(&SessionId::from("counted")),
         &[],
     );
-    let expected_node_count = commit.graph.nodes.len();
+    let expected_node_count = commit.graph.nodes().len();
     assert!(expected_node_count > 0, "fixture must commit graph nodes");
 
     SessionCommitStore::commit_runtime_state(&store, commit)

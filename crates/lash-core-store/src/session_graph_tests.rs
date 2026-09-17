@@ -112,39 +112,35 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
         },
     };
 
-    let empty_node_id = GraphAppend {
+    let empty_node_id = GraphAppend::Extend {
         nodes: vec![node("", &resident_leaf)],
-        leaf_node_id: Some(String::new().into()),
     };
     assert!(matches!(
         graph.apply_append(&empty_node_id),
         Err(crate::StoreError::InvalidGraphNodeId { node_id }) if node_id.is_empty()
     ));
 
-    let duplicate = GraphAppend {
+    let duplicate = GraphAppend::Extend {
         nodes: vec![node(&resident_leaf, &resident_leaf)],
-        leaf_node_id: Some(resident_leaf.clone()),
     };
     assert!(matches!(
         graph.apply_append(&duplicate),
         Err(crate::StoreError::NodeIdCollision { node_id }) if node_id == resident_leaf
     ));
 
-    let duplicate_batch = GraphAppend {
+    let duplicate_batch = GraphAppend::Extend {
         nodes: vec![
             node("duplicate-batch", &resident_leaf),
             node("duplicate-batch", "duplicate-batch"),
         ],
-        leaf_node_id: Some("duplicate-batch".into()),
     };
     assert!(matches!(
         graph.apply_append(&duplicate_batch),
         Err(crate::StoreError::NodeIdCollision { node_id }) if node_id == "duplicate-batch"
     ));
 
-    let invalid = GraphAppend {
+    let invalid = GraphAppend::Extend {
         nodes: vec![node("invalid-child", "missing-parent")],
-        leaf_node_id: Some("invalid-child".into()),
     };
     assert!(matches!(
         graph.apply_append(&invalid),

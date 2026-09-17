@@ -351,14 +351,30 @@ pub struct PersistedSessionRead {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct GraphAppend {
-    pub nodes: Vec<crate::SessionNodeRecord>,
-    pub leaf_node_id: Option<crate::NodeId>,
+pub enum GraphAppend {
+    Extend {
+        nodes: Vec<crate::SessionNodeRecord>,
+    },
+    PreserveHead,
 }
 
 impl GraphAppend {
+    pub fn nodes(&self) -> &[crate::SessionNodeRecord] {
+        match self {
+            Self::Extend { nodes } => nodes,
+            Self::PreserveHead => &[],
+        }
+    }
+
+    pub fn nodes_mut(&mut self) -> &mut [crate::SessionNodeRecord] {
+        match self {
+            Self::Extend { nodes } => nodes,
+            Self::PreserveHead => &mut [],
+        }
+    }
+
     pub fn leaf_node_id(&self) -> Option<&crate::NodeId> {
-        self.leaf_node_id.as_ref()
+        self.nodes().last().map(|node| &node.node_id)
     }
 }
 
@@ -542,6 +558,7 @@ impl RuntimeCommit {
             config: _,
             current_frame_node_id: _,
             graph: _,
+            graph_base_leaf_node_id: _,
             checkpoint: _,
             usage_deltas: _,
             failure_evidence,
@@ -575,7 +592,7 @@ impl RuntimeCommit {
     /// frame-open nodes and operation identity for all other nodes.
     pub fn validate_node_derivation(&self) -> Result<(), StoreError> {
         let completed = &self.turn_commit;
-        for (ordinal, node) in self.graph.nodes.iter().enumerate() {
+        for (ordinal, node) in self.graph.nodes().iter().enumerate() {
             let expected = match &node.payload {
                 crate::SessionNodePayload::FrameOpen { frame_key, .. } => crate::NodeId::new(
                     crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str())
@@ -598,8 +615,8 @@ impl RuntimeCommit {
     /// Rejects duplicate node IDs within one append batch before store implementors mutate durable
     /// graph state.
     pub fn validate_append_node_ids_unique(&self) -> Result<(), StoreError> {
-        let mut seen = std::collections::HashSet::with_capacity(self.graph.nodes.len());
-        for node in &self.graph.nodes {
+        let mut seen = std::collections::HashSet::with_capacity(self.graph.nodes().len());
+        for node in self.graph.nodes() {
             if !seen.insert(node.node_id.as_str()) {
                 return Err(StoreError::NodeIdCollision {
                     node_id: node.node_id.clone(),
@@ -718,6 +735,7 @@ impl RuntimeCommit {
             config: persisted_session_config_from_state(state),
             current_frame_node_id,
             graph,
+            graph_base_leaf_node_id: state.session_graph.leaf_node_id.clone(),
             checkpoint: build_checkpoint_from_persisted_state(state)?,
             usage_deltas: usage_deltas.to_vec(),
             failure_evidence: Vec::new(),

@@ -258,15 +258,9 @@ impl TurnGraphEditor {
             .cloned()
             .collect::<Vec<_>>();
         if nodes.is_empty() {
-            GraphAppend {
-                nodes: Vec::new(),
-                leaf_node_id: self.leaf_node_id(),
-            }
+            GraphAppend::PreserveHead
         } else {
-            GraphAppend {
-                nodes,
-                leaf_node_id: self.leaf_node_id(),
-            }
+            GraphAppend::Extend { nodes }
         }
     }
 
@@ -307,9 +301,8 @@ impl TurnGraphEditor {
         match Arc::try_unwrap(self.base_graph) {
             Ok(mut graph) => {
                 graph
-                    .apply_append(&crate::GraphAppend {
+                    .apply_append(&crate::GraphAppend::Extend {
                         nodes: self.appended_nodes,
-                        leaf_node_id,
                     })
                     .unwrap_or_else(|error| {
                         panic!("turn graph editor produced an invalid append: {error}")
@@ -436,10 +429,13 @@ mod tests {
 
         editor.append_active_conversation_messages(&[first]);
         let pending = editor.graph_commit();
-        assert_eq!(pending.nodes.len(), 1);
-        assert_eq!(pending.leaf_node_id, Some(pending.nodes[0].node_id.clone()));
-        editor.mark_node_ids_persisted(pending.nodes.iter().map(|node| node.node_id.clone()));
-        assert!(editor.graph_commit().nodes.is_empty());
+        assert_eq!(pending.nodes().len(), 1);
+        assert_eq!(
+            pending.leaf_node_id().cloned(),
+            Some(pending.nodes()[0].node_id.clone())
+        );
+        editor.mark_node_ids_persisted(pending.nodes().iter().map(|node| node.node_id.clone()));
+        assert!(editor.graph_commit().nodes().is_empty());
 
         let graph = editor.into_session_graph();
         assert_eq!(graph.nodes.len(), 1);
@@ -548,11 +544,11 @@ mod tests {
         let durable = message("durable", "original");
         editor.append_active_conversation_messages(std::slice::from_ref(&durable));
         let pending = editor.graph_commit();
-        editor.mark_node_ids_persisted(pending.nodes.iter().map(|node| node.node_id.clone()));
+        editor.mark_node_ids_persisted(pending.nodes().iter().map(|node| node.node_id.clone()));
 
         editor.project_active_read_state(&[message("durable", "projected")]);
 
-        assert!(editor.graph_commit().nodes.is_empty());
+        assert!(editor.graph_commit().nodes().is_empty());
         assert_eq!(editor.message_sequence()[0].parts[0].content, "projected");
         assert_eq!(
             editor.take_projection_diagnostics(),

@@ -315,16 +315,13 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
     };
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphAppend {
-            nodes: vec![node],
-            leaf_node_id: Some("unframed-root".into()),
-        },
+        crate::GraphAppend::Extend { nodes: vec![node] },
         &[],
     );
     let expected_leaf_node_id = commit
         .graph
-        .leaf_node_id
-        .clone()
+        .leaf_node_id()
+        .cloned()
         .expect("derived unframed leaf");
 
     let error = store

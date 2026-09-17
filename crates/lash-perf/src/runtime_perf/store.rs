@@ -225,7 +225,7 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
         }
         let node_ids = commit
             .graph
-            .nodes
+            .nodes()
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();

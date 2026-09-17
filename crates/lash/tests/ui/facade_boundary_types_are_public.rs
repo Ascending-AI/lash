@@ -81,7 +81,7 @@ impl SessionCommitStore for FacadeStore {
             head_revision: commit.expected_head_revision + 1,
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,
-            committed_leaf_node_id: commit.graph.leaf_node_id.clone(),
+            committed_leaf_node_id: commit.graph.leaf_node_id().cloned(),
             realized_node_timestamps,
             committed_usage_delta_identities: commit
                 .usage_deltas
@@ -408,6 +408,7 @@ fn persistence_types_are_nameable(
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         current_frame_node_id: None,
         graph,
+        graph_base_leaf_node_id: None,
         checkpoint: Default::default(),
         adopted_intent_rows: 0,
         usage_deltas: ledger
@@ -689,13 +690,7 @@ fn main() {
         None,
         None,
     );
-    let _ = persistence_types_are_nameable(
-        GraphAppend {
-            nodes: Vec::new(),
-            leaf_node_id: None,
-        },
-        Vec::new(),
-    );
+    let _ = persistence_types_are_nameable(GraphAppend::PreserveHead, Vec::new());
     let _ = plugin_types_are_nameable();
     let _ = context_compactor_types_are_nameable();
     let _ = direct_response_type_is_nameable;

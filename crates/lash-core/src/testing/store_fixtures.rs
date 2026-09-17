@@ -44,10 +44,7 @@ pub fn append_conformance_event_node(
     };
     state
         .session_graph
-        .apply_append(&crate::GraphAppend {
-            nodes: vec![node],
-            leaf_node_id: Some(crate::NodeId::from(id)),
-        })
+        .apply_append(&crate::GraphAppend::Extend { nodes: vec![node] })
         .expect("append conformance event node");
 }
 

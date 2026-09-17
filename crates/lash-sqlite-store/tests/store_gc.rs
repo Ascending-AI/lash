@@ -389,9 +389,8 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
             usage_disposition: Default::default(),
         };
         let mut commit = RuntimeCommit::persisted_state_for_test(state, &[usage]);
-        commit.graph = GraphAppend {
+        commit.graph = GraphAppend::Extend {
             nodes: vec![node.clone()],
-            leaf_node_id: Some(node.node_id.clone()),
         };
         commit.current_frame_node_id = Some(frame_node_id);
         commit
@@ -455,9 +454,8 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         },
     };
     let mut first_commit = RuntimeCommit::persisted_state_for_test(&first_state, &[]);
-    first_commit.graph = GraphAppend {
+    first_commit.graph = GraphAppend::Extend {
         nodes: vec![node.clone()],
-        leaf_node_id: Some(node.node_id.clone()),
     };
     first_commit.current_frame_node_id = Some(frame_node_id);
     first
@@ -472,15 +470,20 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
 
     let mut second_state = second_state;
     second_state.head_revision = 1;
+    let resident_leaf = second_state.session_graph.leaf_node_id.clone();
     let mut cross_session_leaf = RuntimeCommit::persisted_state_for_test(&second_state, &[]);
-    cross_session_leaf.graph = GraphAppend {
-        nodes: Vec::new(),
-        leaf_node_id: Some(node.node_id),
-    };
-    assert!(matches!(
-        second.commit_runtime_state(cross_session_leaf).await,
-        Err(lash_core::StoreError::InvalidGraphLeaf { .. })
-    ));
+    cross_session_leaf.graph = GraphAppend::PreserveHead;
+    second
+        .commit_runtime_state(cross_session_leaf)
+        .await
+        .expect("a preserve-head append cannot adopt another session's leaf");
+    let head = second
+        .load_session_head_meta()
+        .await
+        .expect("load head after preserve-head append")
+        .expect("session head remains published");
+    assert_eq!(head.leaf_node_id, resident_leaf);
+    assert_ne!(head.leaf_node_id, Some(node.node_id));
 }
 
 #[tokio::test]
@@ -885,7 +888,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         let parent_node_id = child_state.session_graph.leaf_node_id.clone();
         child_state
             .session_graph
-            .apply_append(&lash_core::store::GraphAppend {
+            .apply_append(&lash_core::store::GraphAppend::Extend {
                 nodes: vec![lash_core::SessionNodeRecord {
                     node_id: "orphan-fork-child-node".to_string().into(),
                     parent_node_id,
@@ -900,7 +903,6 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
                         ),
                     },
                 }],
-                leaf_node_id: Some("orphan-fork-child-node".to_string().into()),
             })
             .expect("append child node");
         child

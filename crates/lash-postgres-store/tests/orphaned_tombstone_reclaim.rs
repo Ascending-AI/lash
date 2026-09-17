@@ -177,7 +177,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
         let parent_node_id = child_state.session_graph.leaf_node_id.clone();
         child_state
             .session_graph
-            .apply_append(&lash_core::store::GraphAppend {
+            .apply_append(&lash_core::store::GraphAppend::Extend {
                 nodes: vec![lash_core::SessionNodeRecord {
                     node_id: "orphan-fork-child-node".to_string().into(),
                     parent_node_id,
@@ -192,7 +192,6 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
                         ),
                     },
                 }],
-                leaf_node_id: Some("orphan-fork-child-node".to_string().into()),
             })
             .expect("append child node");
         child

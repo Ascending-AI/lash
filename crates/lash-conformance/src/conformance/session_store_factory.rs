@@ -1765,13 +1765,10 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     };
     let commit = crate::RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphAppend {
-            nodes: vec![child],
-            leaf_node_id: Some("cross-session-child".into()),
-        },
+        crate::GraphAppend::Extend { nodes: vec![child] },
         &[],
     );
-    let child_node_id = commit.graph.nodes[0].node_id.clone();
+    let child_node_id = commit.graph.nodes()[0].node_id.clone();
     let error = second
         .commit_runtime_state(commit)
         .await

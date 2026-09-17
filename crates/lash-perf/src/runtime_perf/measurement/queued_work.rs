@@ -915,10 +915,7 @@ fn queued_work_stress_commit(
     completed_queue_claims: Vec<QueuedWorkCompletion>,
 ) -> RuntimeCommit {
     RuntimeCommit {
-        graph: GraphAppend {
-            nodes: Vec::new(),
-            leaf_node_id: None,
-        },
+        graph: GraphAppend::PreserveHead,
         completed_queue_claims,
         ..RuntimeCommit::persisted_state_for_test(state, &[])
     }

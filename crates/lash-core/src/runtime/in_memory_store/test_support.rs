@@ -317,12 +317,9 @@ impl InMemorySessionStore {
         let meta = meta.as_mut().expect("branch switch requires session head");
         meta.head_revision += 1;
         meta.leaf_node_id = Some(leaf_node_id.clone());
-        self.session_graph
-            .lock_recover()
-            .apply_append(&crate::GraphAppend {
-                nodes: Vec::new(),
-                leaf_node_id: Some(leaf_node_id),
-            })
+        let mut graph = self.session_graph.lock_recover();
+        let nodes = graph.nodes.clone();
+        *graph = crate::SessionGraph::from_nodes(nodes, Some(leaf_node_id))
             .expect("forced active leaf must resolve");
     }
 
@@ -427,7 +424,7 @@ mod tests {
         let commit = RuntimeCommit::persisted_state_for_test(&second_state, &[usage]);
         let occupied_node_id = commit
             .graph
-            .nodes
+            .nodes()
             .first()
             .expect("derived frame node")
             .node_id
@@ -524,14 +521,13 @@ mod tests {
                 crate::CommitBudgetLimit::bounded(2),
             ),
         );
-        commit.graph = GraphAppend {
+        commit.graph = GraphAppend::Extend {
             nodes: (0..=2)
                 .map(|index| crate::SessionNodeRecord {
                     node_id: format!("node-{index}").into(),
                     ..node.clone()
                 })
                 .collect(),
-            leaf_node_id: None,
         };
 
         let error = store

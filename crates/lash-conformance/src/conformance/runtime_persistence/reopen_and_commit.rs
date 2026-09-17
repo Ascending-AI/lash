@@ -795,7 +795,7 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePe
     let frame_key = crate::FrameKey::from_caller_material("realization-guard-frame")
         .expect("non-empty frame material");
     let node_id = crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
-    let graph = crate::GraphAppend {
+    let graph = crate::GraphAppend::Extend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: node_id.to_string().into(),
             parent_node_id: None,
@@ -809,7 +809,6 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePe
                 protocol_turn_options: ProtocolTurnOptions::default(),
             },
         }],
-        leaf_node_id: Some(node_id.to_string().into()),
     };
     let (first, node_id_mapping) =
         RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[])
@@ -829,7 +828,7 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePe
 
     let first_hash = first.turn_commit_hash().expect("first store-computed hash");
     let mut divergent_replay = first;
-    let crate::GraphAppend { nodes, .. } = &mut divergent_replay.graph;
+    let nodes = divergent_replay.graph.nodes_mut();
     nodes[0].parent_node_id = Some("proposal-only-parent".into());
     let divergent_hash = divergent_replay
         .turn_commit_hash()
@@ -867,7 +866,7 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePe
     };
     state.ensure_agent_frame_initialized();
     let operation = crate::OperationId::turn("root", "guard-turn", "final");
-    let graph = crate::GraphAppend {
+    let graph = crate::GraphAppend::Extend {
         nodes: vec![crate::SessionNodeRecord {
             node_id: "rogue-node-id".into(),
             parent_node_id: None,
@@ -877,7 +876,6 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePe
                 body: crate::session_graph::SharedJsonValue::new(serde_json::json!({"ok": true})),
             },
         }],
-        leaf_node_id: Some("rogue-node-id".into()),
     };
     let mut commit = RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[]);
     commit.turn_commit = RuntimeTurnCommitStamp::new(operation);
@@ -947,9 +945,8 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePer
     };
     let mut append = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphAppend {
+        crate::GraphAppend::Extend {
             nodes: vec![replacement],
-            leaf_node_id: Some(colliding_id.to_string().into()),
         },
         &[],
     );
@@ -985,12 +982,11 @@ pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersi
     let duplicate_node_id = caller_frame_node_id(&SessionId::from("root"), "duplicate");
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphAppend {
+        crate::GraphAppend::Extend {
             nodes: vec![
                 sample_session_node(&SessionId::from("root"), "duplicate", None),
                 sample_session_node(&SessionId::from("root"), "duplicate", None),
             ],
-            leaf_node_id: Some(duplicate_node_id.to_string().into()),
         },
         &[],
     );
@@ -1018,83 +1014,82 @@ pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersi
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_unresolvable_leaf(store: Arc<dyn RuntimePersistence>) {
+pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
+    store: Arc<dyn RuntimePersistence>,
+) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    let first = sample_session_node(&SessionId::from("root"), "append-root", None);
+    let second = sample_session_node(
+        &SessionId::from("root"),
+        "append-leaf",
+        Some(first.node_id.as_str()),
+    );
     let commit = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphAppend {
-            nodes: vec![sample_session_node(
-                &SessionId::from("root"),
-                "valid-node",
-                None,
-            )],
-            leaf_node_id: Some("missing-leaf".into()),
+        crate::GraphAppend::Extend {
+            nodes: vec![first, second],
         },
         &[],
     );
-    let err = commit_runtime_state_for_test(&store, commit, "invalid-leaf")
+    let expected_leaf = commit
+        .graph
+        .leaf_node_id()
+        .cloned()
+        .expect("a non-empty append derives its leaf");
+    let receipt = commit_runtime_state_for_test(&store, commit, "derived-leaf")
         .await
-        .expect_err("commit leaf must resolve in the post-commit live graph");
-    assert!(
-        matches!(
-            &err,
-            StoreError::InvalidGraphLeaf {
-                leaf_node_id: Some(leaf)
-            } if leaf == "missing-leaf"
-        ),
-        "unexpected unresolved-leaf error: {err:?}"
+        .expect("a well-formed append commits");
+    assert_eq!(
+        receipt.committed_leaf_node_id.as_ref(),
+        Some(&expected_leaf),
+        "the committed leaf must be the terminal appended node"
     );
-    let valid_node_id = caller_frame_node_id(&SessionId::from("root"), "valid-node");
-    assert!(
-        store
-            .load_node(&valid_node_id)
-            .await
-            .expect("load after leaf rejection")
-            .is_none(),
-        "leaf rejection must abort the whole commit"
-    );
+    let loaded = store
+        .load_session()
+        .await
+        .expect("load after derived-leaf commit")
+        .expect("committed session remains");
+    assert_eq!(loaded.graph.leaf_node_id.as_ref(), Some(&expected_leaf));
 }
 
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_missing_leaf(store: Arc<dyn RuntimePersistence>) {
-    let state = RuntimeSessionState {
+pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn RuntimePersistence>) {
+    let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let missing = RuntimeCommit::persisted_state_with_graph_commit(
+    state.ensure_agent_frame_initialized();
+    let first = store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("seed the live head");
+    let old_leaf = state.session_graph.leaf_node_id.clone();
+    state.apply_persisted_commit_result(first);
+    let preserve = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphAppend {
-            nodes: vec![sample_session_node(
-                &SessionId::from("root"),
-                "node-without-leaf",
-                None,
-            )],
-            leaf_node_id: None,
-        },
+        crate::GraphAppend::PreserveHead,
         &[],
     );
-    let err = commit_runtime_state_for_test(&store, missing, "missing-leaf")
+    let receipt = store
+        .commit_runtime_state(preserve)
         .await
-        .expect_err("a non-empty graph commit requires a resolving leaf");
-    assert!(
-        matches!(&err, StoreError::InvalidGraphLeaf { leaf_node_id: None }),
-        "unexpected missing-leaf error: {err:?}"
+        .expect("a preserve-head append commits without moving the head");
+    assert_eq!(
+        receipt.committed_leaf_node_id, old_leaf,
+        "a preserve-head commit must report the resident leaf"
     );
-    let node_without_leaf_id = caller_frame_node_id(&SessionId::from("root"), "node-without-leaf");
-    assert!(
-        store
-            .load_node(&node_without_leaf_id)
-            .await
-            .expect("load after missing leaf rejection")
-            .is_none(),
-        "missing leaf rejection must abort the whole commit"
-    );
+    let loaded = store
+        .load_session()
+        .await
+        .expect("load after preserve-head commit")
+        .expect("seeded session remains");
+    assert_eq!(loaded.graph.leaf_node_id, old_leaf);
 }
 
 #[expect(
@@ -1115,27 +1110,20 @@ pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence
     state.apply_persisted_commit_result(first);
     let mut move_attempt = RuntimeCommit::persisted_state_with_graph_commit(
         &state,
-        crate::GraphAppend {
-            nodes: Vec::new(),
-            leaf_node_id: None,
-        },
+        crate::GraphAppend::PreserveHead,
         &[],
     );
     move_attempt.current_frame_node_id = old_leaf.clone().map(|frame_node_id| {
         crate::FrameNodeId::new(frame_node_id).expect("test frame identity is non-empty")
     });
-    let error = store
+    store
         .commit_runtime_state(move_attempt)
         .await
-        .expect_err("an empty append must not move the head");
-    assert!(
-        matches!(&error, StoreError::InvalidGraphLeaf { leaf_node_id: None }),
-        "unexpected empty-append error: {error:?}"
-    );
+        .expect("an empty append preserves the resident head");
     let loaded = store
         .load_session()
         .await
-        .expect("load after rejected empty append")
+        .expect("load after preserve-head append")
         .expect("seeded session remains");
     assert_eq!(loaded.graph.leaf_node_id, old_leaf);
 }

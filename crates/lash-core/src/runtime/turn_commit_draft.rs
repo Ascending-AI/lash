@@ -718,7 +718,7 @@ mod tests {
         let pending = state.pending_graph_commit();
         assert_eq!(
             pending
-                .nodes
+                .nodes()
                 .iter()
                 .filter(|node| matches!(node.payload, SessionNodePayload::Plugin { .. }))
                 .count(),
@@ -786,9 +786,9 @@ mod tests {
             false,
         );
         let commit = draft.graph_commit();
-        assert_eq!(commit.nodes.len(), 1);
+        assert_eq!(commit.nodes().len(), 1);
         assert_eq!(
-            commit.nodes[0].parent_node_id.as_deref(),
+            commit.nodes()[0].parent_node_id.as_deref(),
             Some(durable_leaf.as_str())
         );
         assert_eq!(

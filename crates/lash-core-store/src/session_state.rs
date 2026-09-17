@@ -1027,15 +1027,9 @@ impl RuntimeSessionState {
             .cloned()
             .collect::<Vec<_>>();
         if nodes.is_empty() {
-            crate::GraphAppend {
-                nodes: Vec::new(),
-                leaf_node_id: self.session_graph.leaf_node_id.clone(),
-            }
+            crate::GraphAppend::PreserveHead
         } else {
-            crate::GraphAppend {
-                nodes,
-                leaf_node_id: self.session_graph.leaf_node_id.clone(),
-            }
+            crate::GraphAppend::Extend { nodes }
         }
     }
 
