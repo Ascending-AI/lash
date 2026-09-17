@@ -744,7 +744,7 @@ mod tests {
             .into_iter()
             .find(|manifest| manifest.name == "inbox__work__send")
             .expect("work send manifest");
-        let surface = lash_lashlang_runtime::required_tool_lashlang_binding(&manifest)
+        let surface = lash_lashlang_runtime::required_tool_typescript_binding(&manifest)
             .expect("work send binding")
             .executable_for(&manifest.name)
             .expect("work send surface");

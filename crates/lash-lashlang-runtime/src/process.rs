@@ -42,6 +42,12 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 
 /// Version of the durable Lashlang segment-handover envelope.
 ///
+/// v11 drops `signal_send_sequence`: its only producer was deleted with the
+/// signal special forms (FIG-2999), and the ordinal had been round-tripping
+/// dead since, so the envelope was version-gating a field that carried no
+/// meaning. The remaining ordinals move into one [`ReplayOrdinalsState`]
+/// group, so the envelope, the restore path and the boundary snapshot spell
+/// them once.
 /// v10 drops the parent-end action list: child lifecycle is settled from the
 /// registry's scope-keyed parent-end ledger, so a parked segment no longer
 /// carries per-child actions a replay would have to reconcile. v8 was reserved
@@ -59,7 +65,7 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 10;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 11;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -80,14 +86,56 @@ struct LashlangSegmentStateVersionProbe {
     version: Option<u32>,
 }
 
+/// The replay ordinals a segment hands to the next execution of its run, as
+/// they sit on the wire.
+///
+/// One group spelled once: the envelope embeds it flattened,
+/// [`ReplayOrdinals::restore`] lifts it into the run's live counters and
+/// [`ReplayOrdinals::snapshot`] writes it back. A counter spelled at fewer
+/// than all three sites used to compile — `signal_send_sequence` kept
+/// round-tripping for a day after FIG-2999 deleted its only producer.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ReplayOrdinalsState {
+    sleep_sequence: u64,
+    event_sequence: u64,
+    signal_wait_ordinals: BTreeMap<String, u64>,
+}
+
+/// The live counterpart of [`ReplayOrdinalsState`]: the ordinals the running
+/// segment is consuming, held as the counters the host mutates in place.
+struct ReplayOrdinals {
+    sleep_sequence: AtomicU64,
+    event_sequence: AtomicU64,
+    signal_wait_ordinals: tokio::sync::Mutex<BTreeMap<String, u64>>,
+}
+
+impl ReplayOrdinals {
+    fn restore(state: Option<&LashlangSegmentState>) -> Self {
+        let ordinals = state.map(|state| &state.ordinals);
+        Self {
+            sleep_sequence: AtomicU64::new(ordinals.map_or(0, |o| o.sleep_sequence)),
+            event_sequence: AtomicU64::new(ordinals.map_or(0, |o| o.event_sequence)),
+            signal_wait_ordinals: tokio::sync::Mutex::new(
+                ordinals.map_or_else(BTreeMap::new, |o| o.signal_wait_ordinals.clone()),
+            ),
+        }
+    }
+
+    async fn snapshot(&self) -> ReplayOrdinalsState {
+        ReplayOrdinalsState {
+            sleep_sequence: self.sleep_sequence.load(Ordering::Relaxed),
+            event_sequence: self.event_sequence.load(Ordering::Relaxed),
+            signal_wait_ordinals: self.signal_wait_ordinals.lock().await.clone(),
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct LashlangSegmentState {
     version: u32,
     vm: lashlang::VmContinuation,
-    sleep_sequence: u64,
-    event_sequence: u64,
-    signal_send_sequence: u64,
-    signal_wait_ordinals: BTreeMap<String, u64>,
+    #[serde(flatten)]
+    ordinals: ReplayOrdinalsState,
     started_process_ids: Vec<ProcessId>,
     /// Attempt bound resolved from the host config when this run's first
     /// segment began. Carried forward so every segment of the run, and every
@@ -352,18 +400,7 @@ pub async fn run_lashlang_process(
     if let Some(segment_state) = segment_state.as_ref() {
         ctx.restore_started_process_ids(&segment_state.started_process_ids);
     }
-    let sleep_sequence = segment_state
-        .as_ref()
-        .map_or(0, |state| state.sleep_sequence);
-    let event_sequence = segment_state
-        .as_ref()
-        .map_or(0, |state| state.event_sequence);
-    let signal_send_sequence = segment_state
-        .as_ref()
-        .map_or(0, |state| state.signal_send_sequence);
-    let signal_wait_ordinals = segment_state
-        .as_ref()
-        .map_or_else(BTreeMap::new, |state| state.signal_wait_ordinals.clone());
+    let ordinals = ReplayOrdinals::restore(segment_state.as_ref());
     let child_max_attempts =
         resolve_child_max_attempts(segment_state.as_ref(), ctx.engine_child_max_attempts());
     let host = LashlangProcessHost {
@@ -373,10 +410,7 @@ pub async fn run_lashlang_process(
         processes,
         process_id: process_id.clone(),
         lashlang_execution_trace: lashlang_execution_trace.clone(),
-        sleep_sequence: AtomicU64::new(sleep_sequence),
-        event_sequence: AtomicU64::new(event_sequence),
-        signal_send_sequence: AtomicU64::new(signal_send_sequence),
-        signal_wait_ordinals: tokio::sync::Mutex::new(signal_wait_ordinals),
+        ordinals,
         child_max_attempts,
         cancellation: cancellation.clone(),
     };
@@ -504,10 +538,7 @@ async fn execute_lashlang(
                         let segment_state = LashlangSegmentState {
                             version: LASHLANG_SEGMENT_STATE_VERSION,
                             vm: continuation,
-                            sleep_sequence: host.sleep_sequence.load(Ordering::Relaxed),
-                            event_sequence: host.event_sequence.load(Ordering::Relaxed),
-                            signal_send_sequence: host.signal_send_sequence.load(Ordering::Relaxed),
-                            signal_wait_ordinals: host.signal_wait_ordinals.lock().await.clone(),
+                            ordinals: host.ordinals.snapshot().await,
                             started_process_ids: host.ctx.started_process_ids(),
                             child_max_attempts: host.child_max_attempts,
                         };
@@ -548,10 +579,10 @@ struct LashlangProcessHost<'run> {
     processes: lash_core::facade_support::ProcessEngineProcessContext,
     process_id: ProcessId,
     lashlang_execution_trace: LashlangProcessExecutionTrace,
-    sleep_sequence: AtomicU64,
-    event_sequence: AtomicU64,
-    signal_send_sequence: AtomicU64,
-    signal_wait_ordinals: tokio::sync::Mutex<BTreeMap<String, u64>>,
+    /// The replay ordinals this segment is consuming: restored from the
+    /// handover that resumed the run (or zeroed for a first segment) and
+    /// snapshotted into the next boundary's envelope.
+    ordinals: ReplayOrdinals,
     /// Attempt bound stamped onto every child this run starts, resolved once
     /// at the run's first segment and replayed from segment state afterwards.
     child_max_attempts: std::num::NonZeroU32,
@@ -846,7 +877,7 @@ impl LashlangProcessHost<'_> {
             lashlang::ProcessEventKind::Yield => "process.yield",
             lashlang::ProcessEventKind::Wake => "process.wake",
         };
-        let ordinal = self.event_sequence.fetch_add(1, Ordering::Relaxed);
+        let ordinal = self.ordinals.event_sequence.fetch_add(1, Ordering::Relaxed);
         self.ctx
             .append_process_event(
                 lash_core::ProcessEventAppendRequest::new(
@@ -864,7 +895,7 @@ impl LashlangProcessHost<'_> {
 
     async fn sleep(&self, sleep: lashlang::Sleep) -> Result<lashlang::Value, ExecutionHostError> {
         let sleep = process_sleep(sleep.kind, &sleep.value)?;
-        let sequence = self.sleep_sequence.fetch_add(1, Ordering::Relaxed);
+        let sequence = self.ordinals.sleep_sequence.fetch_add(1, Ordering::Relaxed);
         let scope = format!("process:{}", self.process_id);
         self.ctx
             .sleep_process(&scope, sequence, sleep)
@@ -883,8 +914,8 @@ impl LashlangProcessHost<'_> {
                 }
             })?;
         let event_ordinal = {
-            let mut ordinals = self.signal_wait_ordinals.lock().await;
-            let ordinal = ordinals.entry(name.clone()).or_insert(0);
+            let mut wait_ordinals = self.ordinals.signal_wait_ordinals.lock().await;
+            let ordinal = wait_ordinals.entry(name.clone()).or_insert(0);
             *ordinal += 1;
             *ordinal
         };

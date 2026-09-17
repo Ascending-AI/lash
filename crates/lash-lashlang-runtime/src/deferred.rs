@@ -21,7 +21,7 @@ use async_trait::async_trait;
 
 use crate::{
     LashlangHostEnvironment, LashlangSurface, ToolBindingError, lashlang_tool_operation_contract,
-    required_tool_lashlang_executable,
+    required_tool_typescript_executable,
 };
 
 /// A host-authorized tool capability resolved for a deferred call-path. It
@@ -279,7 +279,7 @@ fn fold_grant(
     host_environment: &mut LashlangHostEnvironment,
     grant: &ToolGrant,
 ) -> Result<(), ToolBindingError> {
-    let binding = required_tool_lashlang_executable(&grant.definition.manifest)?;
+    let binding = required_tool_typescript_executable(&grant.definition.manifest)?;
     let contract = lashlang_tool_operation_contract(&grant.definition.contract);
     host_environment.resources.add_module_operation_contract(
         binding.module_path.iter().map(String::as_str),
