@@ -280,18 +280,19 @@ pub mod persistence {
     pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
-        DeliveryPolicy, ForkPoint, ForkSessionReceipt, ForkSessionRequest, InMemorySessionStore,
-        InMemorySessionStoreFactory, LiveReplayOutcome, LiveReplaySubscription,
-        PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-        ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedTurnWork,
-        QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
-        QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy,
-        QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-        QueuedWorkKind, QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
-        SessionCommandPayload, SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory,
+        ActiveTurnIngress, DeliveryPolicy, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
+        InMemorySessionStore, InMemorySessionStoreFactory, LiveReplayOutcome,
+        LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics,
+        PendingTurnInputDraft, ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork,
+        QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+        QueuedWorkBatchPayloads, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
+        QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+        QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload,
+        RuntimeCheckpointComponents, RuntimeSessionState, SessionCommandPayload,
+        SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory,
         TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
         TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
-        TurnInputState, TurnWorkPayload, UnclaimedTurnInputs,
+        TurnInputState, TurnInputStateKind, TurnWorkPayload, UnclaimedTurnInputs,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     /// Store-integrator attachment-manifest contracts and their persisted vocabulary.

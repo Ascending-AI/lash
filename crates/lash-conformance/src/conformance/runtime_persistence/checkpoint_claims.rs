@@ -761,7 +761,10 @@ pub async fn checkpoint_budget_refusal_preserves_active_turn_input(
         vec![input.input_id.as_str()],
         "the input claim must roll back with the refused queued-work claim"
     );
-    assert_eq!(pending[0].input.state, crate::TurnInputState::PendingActive);
+    assert_eq!(
+        pending[0].input.state.kind(),
+        crate::TurnInputStateKind::PendingActive
+    );
 }
 
 /// Prove checkpoint admission probes stay read-only for empty queues and for
@@ -1009,7 +1012,7 @@ pub(super) fn expect_cancelled_pending_input(
     match outcome {
         crate::PendingTurnInputCancelOutcome::Cancelled(input) => {
             assert_eq!(input.input_id, input_id);
-            assert_eq!(input.state, crate::TurnInputState::Cancelled);
+            assert_eq!(input.state.kind(), crate::TurnInputStateKind::Cancelled);
             input
         }
         other => panic!("expected cancelled pending turn input `{input_id}`, got {other:?}"),

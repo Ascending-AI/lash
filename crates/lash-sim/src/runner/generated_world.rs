@@ -366,7 +366,7 @@ impl GeneratedRuntimeWorld {
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         self.queued_inputs
             .insert(event.boundary_id.clone(), acceptance.input_id.to_string());
-        let input_state = acceptance.ingress.initial_state();
+        let input_state = lash_core::TurnInputState::open(acceptance.ingress.clone());
         Ok(json!({
             "session": event.actor_alias,
             "queued_ingress": true,

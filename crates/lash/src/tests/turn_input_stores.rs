@@ -75,7 +75,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
     ) -> std::result::Result<lash_core::PendingTurnInput, lash_core::store::StoreError> {
         let mut seq = self.pending_turn_input_seq.lock_recover();
         *seq += 1;
-        let state = input.ingress.initial_state();
+        let state = lash_core::TurnInputState::open(input.ingress.clone());
         let stored = lash_core::PendingTurnInput {
             input_id: input
                 .input_id
@@ -84,7 +84,6 @@ impl lash_core::TurnInputStore for SnapshotStore {
             session_id: input.session_id,
             enqueue_seq: *seq,
             source_key: input.source_key,
-            ingress: input.ingress,
             state,
             enqueued_at_ms: now_epoch_ms(),
             input: input.input,
@@ -189,8 +188,7 @@ impl lash_core::TurnInputStore for SnapshotStore {
             }) else {
                 break;
             };
-            let mut input = pending.remove(index);
-            input.state = lash_core::TurnInputState::Accepted;
+            let input = pending.remove(index);
             claimed.push(input);
         }
         if claimed.is_empty() {

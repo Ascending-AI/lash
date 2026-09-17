@@ -195,8 +195,8 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         } if turn_id.as_str() == "running-turn"
     ));
     assert_eq!(
-        injected.state,
-        lash::persistence::TurnInputState::PendingActive
+        injected.state.kind(),
+        lash::persistence::TurnInputStateKind::PendingActive
     );
 
     let Json(queued) = enqueue_turn_input(

@@ -109,6 +109,7 @@ impl TurnInputDrive {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TurnId;
 
     #[test]
     fn checkpoint_boundary_wire_values_match_the_persisted_ingress_encoding() {
@@ -123,29 +124,67 @@ mod tests {
 
     #[test]
     fn turn_input_state_wire_round_trips_every_variant() {
-        for state in TurnInputState::ALL.iter().copied() {
-            assert_eq!(TurnInputState::from_wire_str(state.as_str()), Some(state));
+        let active = TurnInputIngress::active_turn(
+            TurnId::from("turn-1"),
+            TurnInputCheckpointBoundary::AfterWork,
+        );
+        let next = TurnInputIngress::next_turn();
+        for kind in TurnInputStateKind::ALL.iter().copied() {
+            // Each name has at least one scope it admits, and decoding that
+            // pair reproduces the name — disagreement stays unrepresentable.
+            let ingress = match kind {
+                TurnInputStateKind::PendingActive
+                | TurnInputStateKind::Accepted
+                | TurnInputStateKind::Cancelled
+                | TurnInputStateKind::Completed => active.clone(),
+                TurnInputStateKind::DeferredNextTurn => next.clone(),
+            };
+            let state = TurnInputState::from_persisted(kind.as_str(), ingress)
+                .expect("scope-legal pair decodes");
+            assert_eq!(state.kind(), kind);
+            assert_eq!(state.as_str(), kind.as_str());
         }
     }
 
     #[test]
-    fn turn_input_state_wire_values_match_the_persisted_ingress_encoding() {
-        assert_eq!(TurnInputState::PendingActive.as_str(), "pending_active");
+    fn turn_input_state_decode_rejects_scope_disagreement() {
+        let active = TurnInputIngress::active_turn(
+            TurnId::from("turn-1"),
+            TurnInputCheckpointBoundary::AfterWork,
+        );
+        let next = TurnInputIngress::next_turn();
         assert_eq!(
-            TurnInputState::DeferredNextTurn.as_str(),
+            TurnInputState::from_persisted("pending_active", next.clone()),
+            None
+        );
+        assert_eq!(
+            TurnInputState::from_persisted("deferred_next_turn", active.clone()),
+            None
+        );
+        assert_eq!(TurnInputState::from_persisted("accepted", next), None);
+    }
+
+    #[test]
+    fn turn_input_state_wire_values_match_the_persisted_ingress_encoding() {
+        assert_eq!(TurnInputStateKind::PendingActive.as_str(), "pending_active");
+        assert_eq!(
+            TurnInputStateKind::DeferredNextTurn.as_str(),
             "deferred_next_turn"
         );
-        assert_eq!(TurnInputState::Accepted.as_str(), "accepted");
-        assert_eq!(TurnInputState::Cancelled.as_str(), "cancelled");
-        assert_eq!(TurnInputState::Completed.as_str(), "completed");
+        assert_eq!(TurnInputStateKind::Accepted.as_str(), "accepted");
+        assert_eq!(TurnInputStateKind::Cancelled.as_str(), "cancelled");
+        assert_eq!(TurnInputStateKind::Completed.as_str(), "completed");
     }
 
     #[test]
     fn turn_input_state_terminality_covers_exactly_settled_states() {
-        for state in TurnInputState::ALL.iter().copied() {
+        for state in TurnInputStateKind::ALL.iter().copied() {
             assert_eq!(
                 state.is_terminal(),
-                matches!(state, TurnInputState::Cancelled | TurnInputState::Completed),
+                matches!(
+                    state,
+                    TurnInputStateKind::Cancelled | TurnInputStateKind::Completed
+                ),
                 "terminality drifted for {state:?}"
             );
         }

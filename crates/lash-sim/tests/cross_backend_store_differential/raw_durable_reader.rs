@@ -65,7 +65,7 @@ impl RawDurableReader {
                             );
                             PendingTurnInputObservation {
                                 input_id: input_id.to_string(),
-                                state,
+                                state: state.kind(),
                                 claim_session_lease_generation,
                             }
                         },
@@ -415,7 +415,7 @@ impl RawDurableReader {
                             );
                             PendingTurnInputObservation {
                                 input_id,
-                                state: TurnInputState::from_wire_str(&state)
+                                state: TurnInputStateKind::from_wire_str(&state)
                                     .expect("decode Postgres pending-input state"),
                                 claim_session_lease_generation: claim_session_lease_generation
                                     .map(|generation| generation as u64),
@@ -759,7 +759,7 @@ pub(super) async fn read_sqlite_durable_state(
                     );
                     PendingTurnInputObservation {
                         input_id,
-                        state: TurnInputState::from_wire_str(&state)
+                        state: TurnInputStateKind::from_wire_str(&state)
                             .expect("decode SQLite pending-input state"),
                         claim_session_lease_generation: claim_session_lease_generation
                             .map(|generation| generation as u64),

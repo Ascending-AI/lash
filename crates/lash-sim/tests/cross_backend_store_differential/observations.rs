@@ -287,7 +287,7 @@ pub(super) enum FreshnessHeadObservation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PendingTurnInputObservation {
     pub(super) input_id: String,
-    pub(super) state: TurnInputState,
+    pub(super) state: TurnInputStateKind,
     pub(super) claim_session_lease_generation: Option<u64>,
 }
 

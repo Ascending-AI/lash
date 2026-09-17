@@ -87,8 +87,8 @@ pub(crate) async fn ensure_turn_input_completion_tx(
 
 /// Whether an unclaimed row is still open for settlement.
 pub(crate) fn unclaimed_turn_input_is_settleable(state: &str) -> bool {
-    !lash_core::TurnInputState::from_wire_str(state)
-        .is_some_and(lash_core::TurnInputState::is_terminal)
+    !lash_core::TurnInputStateKind::from_wire_str(state)
+        .is_some_and(lash_core::TurnInputStateKind::is_terminal)
 }
 
 /// The same terminal set spelled as the body of a SQL `IN (...)` list, so the

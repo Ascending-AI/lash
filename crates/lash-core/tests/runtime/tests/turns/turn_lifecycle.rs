@@ -574,7 +574,7 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
             "the teardown of a turn that cannot commit must re-defer every input it held"
         );
         assert_eq!(
-            row.input.ingress,
+            row.input.ingress(),
             lash_core::TurnInputIngress::NextTurn,
             "the repaired rows must be addressable by the next turn, not by the dead turn id"
         );
