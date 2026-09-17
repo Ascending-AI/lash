@@ -37,15 +37,15 @@ async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_ca
         .resolve_manifest("hidden")
         .expect("authority-hidden tool remains registry-resolvable");
     let outcome = tools
-        .execute_by_id(
-            &manifest.id,
+        .execute(crate::ToolCall::new(
+            &manifest,
             &json!({ "value": "ok" }),
             &crate::testing::mock_attempt_context(),
-        )
+        ))
         .await;
 
     assert!(
-        outcome.is_success(),
+        matches!(outcome, crate::ToolAttemptOutcome::Done { .. }),
         "registry dispatch must not duplicate the catalog authority gate: {outcome:?}"
     );
     assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);

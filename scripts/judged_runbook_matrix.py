@@ -49,20 +49,12 @@ def row(config: dict[str, object], group: str, scenario: str, label: str) -> dic
 
 
 def rows(config: dict[str, object]) -> list[dict[str, str]]:
-    language = config["language"]
-    result = [
-        row(config, "scenarios", scenario, language) for scenario in config["scenarios"]
-    ]
-    result.extend(
-        row(config, "typescript_only", scenario, language)
-        for scenario in config["typescript_only"]
-    )
-    # Scenarios that open no RLM session have no language to pin: one row each,
-    # labelled with the mode.
-    result.extend(
-        row(config, "no_rlm_session_only", scenario, "standard")
-        for scenario in config["no_rlm_session_only"]
-    )
+    result = []
+    for group, policy in config["groups"].items():
+        if not policy["emits"]:
+            continue
+        label = config["language"] if policy["label"] == "language" else policy["label"]
+        result.extend(row(config, group, scenario, label) for scenario in config[group])
     return result
 
 
@@ -76,13 +68,7 @@ def tier_violations(config: dict[str, object]) -> list[str]:
     """
     tiers = config["tiers"]
     problems = []
-    for group in (
-        "scenarios",
-        "typescript_only",
-        "no_rlm_session_only",
-        "scripted_live_model",
-        "deterministic_only",
-    ):
+    for group in config["groups"]:
         for scenario, entry in config[group].items():
             tier = entry.get("tier")
             if tier not in tiers:
@@ -118,24 +104,28 @@ def referent_violations(config: dict[str, object]) -> list[str]:
     second harness needs no change.
     """
     problems = []
-    for scenario in config["deterministic_only"]:
-        if not (ROOT / "runbooks" / scenario / "runbook.md").is_file():
-            problems.append(
-                f"`{scenario}` is listed in `deterministic_only` but "
-                f"runbooks/{scenario}/runbook.md does not exist"
-            )
-    for scenario in config["scripted_live_model"]:
-        for split in range(len(scenario) - 1, 0, -1):
-            if scenario[split] != "-":
-                continue
-            harness, case = scenario[:split], scenario[split + 1 :]
-            if (ROOT / "runbooks" / harness / "cases" / case).is_dir():
-                break
-        else:
-            problems.append(
-                f"`{scenario}` is listed in `scripted_live_model` but names no "
-                f"`runbooks/<harness>/cases/<case>` directory"
-            )
+    for group, policy in config["groups"].items():
+        if policy["emits"]:
+            continue
+        for scenario in config[group]:
+            if policy["referent"] == "runbook":
+                if not (ROOT / "runbooks" / scenario / "runbook.md").is_file():
+                    problems.append(
+                        f"`{scenario}` is listed in `{group}` but "
+                        f"runbooks/{scenario}/runbook.md does not exist"
+                    )
+            elif policy["referent"] == "harness_case":
+                for split in range(len(scenario) - 1, 0, -1):
+                    if scenario[split] != "-":
+                        continue
+                    harness, case = scenario[:split], scenario[split + 1 :]
+                    if (ROOT / "runbooks" / harness / "cases" / case).is_dir():
+                        break
+                else:
+                    problems.append(
+                        f"`{scenario}` is listed in `{group}` but names no "
+                        f"`runbooks/<harness>/cases/<case>` directory"
+                    )
     return problems
 
 
@@ -157,7 +147,9 @@ def deterministic_provider_violations(config: dict[str, object]) -> list[str]:
     either be `deterministic` or say which phases are.
     """
     problems = []
-    for group in ("scenarios", "typescript_only", "no_rlm_session_only"):
+    for group, policy in config["groups"].items():
+        if not policy["emits"]:
+            continue
         for scenario, entry in config[group].items():
             if entry.get("tier") == "deterministic":
                 continue

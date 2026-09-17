@@ -1826,7 +1826,7 @@ async fn fig2837_required_constraint_inspection_reports_live_drift_without_rejec
     scratch
         .apply(
             "ALTER TABLE lash_pending_turn_inputs
-                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none",
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none",
         )
         .await;
     let missing = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
@@ -1836,13 +1836,13 @@ async fn fig2837_required_constraint_inspection_reports_live_drift_without_rejec
         finding,
         RequiredConstraintFinding::Missing { table, name, .. }
             if table == "lash_pending_turn_inputs"
-                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+                && name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
 
     scratch
         .apply(
             "ALTER TABLE lash_pending_turn_inputs
-                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
                  CHECK (claim_id IS NULL OR claim_token IS NOT NULL)",
         )
         .await;
@@ -1853,17 +1853,19 @@ async fn fig2837_required_constraint_inspection_reports_live_drift_without_rejec
         finding,
         RequiredConstraintFinding::Altered { table, name, .. }
             if table == "lash_pending_turn_inputs"
-                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+                && name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
 
     scratch
         .apply(
             "ALTER TABLE lash_pending_turn_inputs
-                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none;
              ALTER TABLE lash_pending_turn_inputs
-                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
-                 CHECK ((claim_id IS NULL AND claim_token IS NULL)
-                     OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)) NOT VALID",
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
+                 CHECK ((claim_id IS NULL AND claim_owner_id IS NULL
+                         AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL)
+                     OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL
+                         AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)) NOT VALID",
         )
         .await;
     let unvalidated = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
@@ -1873,18 +1875,20 @@ async fn fig2837_required_constraint_inspection_reports_live_drift_without_rejec
         finding,
         RequiredConstraintFinding::Unvalidated { table, name }
             if table == "lash_pending_turn_inputs"
-                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+                && name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
 
     if postgres_server_version_num().await >= 180_000 {
         scratch
             .apply(
                 "ALTER TABLE lash_pending_turn_inputs
-                     DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+                     DROP CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none;
                  ALTER TABLE lash_pending_turn_inputs
-                     ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
-                     CHECK ((claim_id IS NULL AND claim_token IS NULL)
-                         OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)) NOT ENFORCED",
+                     ADD CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
+                     CHECK ((claim_id IS NULL AND claim_owner_id IS NULL
+                             AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL)
+                         OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL
+                             AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)) NOT ENFORCED",
             )
             .await;
         let unenforced = PostgresStorage::inspect_required_constraints_for(&scratch.pool)
@@ -1894,7 +1898,7 @@ async fn fig2837_required_constraint_inspection_reports_live_drift_without_rejec
             finding,
             RequiredConstraintFinding::Unenforced { table, name }
                 if table == "lash_pending_turn_inputs"
-                    && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+                    && name == "ck_pending_turn_inputs_claim_identity_all_or_none"
         )));
     }
     scratch.cleanup().await;
@@ -1915,7 +1919,7 @@ async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_iden
              ALTER TABLE lash_pending_turn_inputs
                  DROP CONSTRAINT ck_pending_turn_inputs_state,
                  DROP CONSTRAINT ck_pending_turn_inputs_state_ingress,
-                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none;
              ALTER TABLE lash_pending_turn_inputs
                  ADD CONSTRAINT ck_pending_turn_inputs_state
                      CHECK (\"STATE\" IN (
@@ -1928,7 +1932,7 @@ async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_iden
                          OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
                              AND \"STATE\" IN (
                                  'deferred_next_turn', 'cancelled', 'completed'))),
-                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
                      CHECK ((\"CLAIM_ID\" IS NULL AND claim_token IS NULL)
                          OR (\"CLAIM_ID\" IS NOT NULL AND claim_token IS NOT NULL));
              INSERT INTO lash_pending_turn_inputs (
@@ -1948,7 +1952,7 @@ async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_iden
     for expected_name in [
         "ck_pending_turn_inputs_state",
         "ck_pending_turn_inputs_state_ingress",
-        "ck_pending_turn_inputs_claim_id_token_all_or_none",
+        "ck_pending_turn_inputs_claim_identity_all_or_none",
     ] {
         assert!(
             altered.findings().iter().any(|finding| matches!(
@@ -1967,7 +1971,7 @@ async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_iden
              ALTER TABLE lash_pending_turn_inputs
                  DROP CONSTRAINT ck_pending_turn_inputs_state,
                  DROP CONSTRAINT ck_pending_turn_inputs_state_ingress,
-                 DROP CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none;
+                 DROP CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none;
              ALTER TABLE lash_pending_turn_inputs
                  ADD CONSTRAINT ck_pending_turn_inputs_state
                      CHECK (\"state\" IN (
@@ -1980,9 +1984,11 @@ async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_iden
                          OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
                              AND \"state\" IN (
                                  'deferred_next_turn', 'cancelled', 'completed'))),
-                 ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
-                     CHECK ((\"claim_id\" IS NULL AND claim_token IS NULL)
-                         OR (\"claim_id\" IS NOT NULL AND claim_token IS NOT NULL))",
+                 ADD CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
+                     CHECK ((\"claim_id\" IS NULL AND claim_owner_id IS NULL
+                             AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL)
+                         OR (\"claim_id\" IS NOT NULL AND claim_owner_id IS NOT NULL
+                             AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL))",
         )
         .await;
     let quoted_lowercase = PostgresStorage::inspect_required_constraints_for(&scratch.pool)

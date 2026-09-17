@@ -275,9 +275,11 @@ pub(crate) async fn fork_chat(
         })
         .await?;
     if let Err(error) = state.core().fork_at(node_id, target_chat_id.clone()).await {
-        let _ = state
-            .with_db(move |db| db.delete_chat(&target_chat_id))
-            .await;
+        // Both abort paths run the same compensator: `fork_at` can fail after
+        // the fork's session store exists, and only `discard_pending_chat_fork`
+        // reclaims it. A compensator failure must not mask the fork error the
+        // caller is answered with.
+        let _ = state.discard_pending_chat_fork(&target_chat_id).await;
         return Err(branch_error(error));
     }
     let chat = match state
@@ -1335,14 +1337,14 @@ mod zero_move_turn_tests {
         let notices: Vec<&StreamItem> = emitted
             .iter()
             .filter(
-                |item| matches!(item, StreamItem::Message { message } if message.role == "system"),
+                |item| matches!(item, StreamItem::Message { message } if message.role() == "system"),
             )
             .collect();
         assert_eq!(notices.len(), 1, "one forfeit notice: {emitted:#?}");
         let StreamItem::Message { message } = notices[0] else {
             unreachable!("filtered to messages");
         };
-        assert_eq!(message.text, ZERO_MOVE_FORFEIT);
+        assert_eq!(message.text(), ZERO_MOVE_FORFEIT);
     }
 }
 

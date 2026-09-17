@@ -624,8 +624,8 @@ mod restate_tests {
             .await
             .expect("list messages");
         assert!(
-            messages.iter().any(|message| message.role == "assistant"
-                && message.text.contains("done via Restate E2E")),
+            messages.iter().any(|message| message.role() == "assistant"
+                && message.text().contains("done via Restate E2E")),
             "assistant message was not persisted through Restate workflow; messages={messages:?}; outbox={outbox_events:?}"
         );
 

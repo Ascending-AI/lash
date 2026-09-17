@@ -35,7 +35,7 @@ SET default_table_access_method = heap;
 CREATE TABLE lash_durable_read_fixture.lash_artifact_owner_retirements (
     owner_kind text NOT NULL,
     owner_id text NOT NULL,
-    CONSTRAINT lash_artifact_owner_retirements_owner_kind_check CHECK ((owner_kind = 'execution'::text))
+    CONSTRAINT ck_artifact_owner_retirements_owner_kind CHECK ((owner_kind = 'execution'::text))
 );
 
 
@@ -48,7 +48,7 @@ CREATE TABLE lash_durable_read_fixture.lash_artifact_owners (
     artifact_ref text NOT NULL,
     owner_kind text NOT NULL,
     owner_id text NOT NULL,
-    CONSTRAINT lash_artifact_owners_owner_kind_check CHECK ((owner_kind = ANY (ARRAY['host'::text, 'process'::text, 'execution'::text])))
+    CONSTRAINT ck_artifact_owners_owner_kind CHECK ((owner_kind = ANY (ARRAY['host'::text, 'process'::text, 'execution'::text])))
 );
 
 
@@ -61,9 +61,9 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_condemnations (
     phase text NOT NULL,
     write_token text,
     write_session_id text,
-    CONSTRAINT lash_attachment_condemnations_check CHECK (((write_token IS NULL) = (write_session_id IS NULL))),
-    CONSTRAINT lash_attachment_condemnations_check1 CHECK (((write_token IS NULL) OR (phase = 'condemned'::text))),
-    CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text])))
+    CONSTRAINT ck_attachment_condemnations_phase CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text]))),
+    CONSTRAINT ck_attachment_condemnations_write_token_pairing CHECK (((write_token IS NULL) = (write_session_id IS NULL))),
+    CONSTRAINT ck_attachment_condemnations_write_token_phase CHECK (((write_token IS NULL) OR (phase = 'condemned'::text)))
 );
 
 
@@ -82,8 +82,8 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_manifest (
     owner_kind text,
     owner_id text,
     owner_incarnation bigint,
-    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((((owner_kind IS NULL) AND (owner_id IS NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'turn'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'process'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NOT NULL)))),
-    CONSTRAINT lash_attachment_manifest_owner_kind_check CHECK ((owner_kind = ANY (ARRAY['turn'::text, 'process'::text])))
+    CONSTRAINT ck_attachment_manifest_owner_kind CHECK ((owner_kind = ANY (ARRAY['turn'::text, 'process'::text]))),
+    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((((owner_kind IS NULL) AND (owner_id IS NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'turn'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'process'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NOT NULL))))
 );
 
 
@@ -94,7 +94,7 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_manifest (
 CREATE TABLE lash_durable_read_fixture.lash_await_event_meta (
     singleton boolean DEFAULT true NOT NULL,
     signing_secret bytea NOT NULL,
-    CONSTRAINT lash_await_event_meta_singleton_check CHECK (singleton)
+    CONSTRAINT ck_await_event_meta_singleton CHECK (singleton)
 );
 
 
@@ -178,7 +178,7 @@ CREATE TABLE lash_durable_read_fixture.lash_fork_lineage (
     ancestor_session_id text NOT NULL,
     fork_node_id text NOT NULL,
     fork_generation bigint NOT NULL,
-    CONSTRAINT lash_fork_lineage_fork_generation_check CHECK ((fork_generation >= 0))
+    CONSTRAINT ck_fork_lineage_fork_generation CHECK ((fork_generation >= 0))
 );
 
 
@@ -194,7 +194,7 @@ CREATE TABLE lash_durable_read_fixture.lash_graph_nodes (
     frame_node_id text NOT NULL,
     node_json text NOT NULL,
     tombstoned boolean DEFAULT false NOT NULL,
-    CONSTRAINT lash_graph_nodes_generation_check CHECK ((generation >= 0))
+    CONSTRAINT ck_graph_nodes_generation CHECK ((generation >= 0))
 );
 
 
@@ -252,7 +252,7 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     claim_token text,
     claim_fencing_token bigint DEFAULT 0 NOT NULL,
     claim_session_lease_generation bigint DEFAULT 0 NOT NULL,
-    CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none CHECK ((((claim_id IS NULL) AND (claim_token IS NULL)) OR ((claim_id IS NOT NULL) AND (claim_token IS NOT NULL)))),
+    CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((((claim_id IS NULL) AND (claim_owner_id IS NULL) AND (claim_owner_incarnation_id IS NULL) AND (claim_token IS NULL)) OR ((claim_id IS NOT NULL) AND (claim_owner_id IS NOT NULL) AND (claim_owner_incarnation_id IS NOT NULL) AND (claim_token IS NOT NULL)))),
     CONSTRAINT ck_pending_turn_inputs_state CHECK ((state = ANY (ARRAY['pending_active'::text, 'deferred_next_turn'::text, 'accepted'::text, 'cancelled'::text, 'completed'::text]))),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((((((ingress_json)::jsonb ->> 'scope'::text) = 'active_turn'::text) AND (state = ANY (ARRAY['pending_active'::text, 'accepted'::text, 'cancelled'::text, 'completed'::text]))) OR ((((ingress_json)::jsonb ->> 'scope'::text) = 'next_turn'::text) AND (state = ANY (ARRAY['deferred_next_turn'::text, 'cancelled'::text, 'completed'::text])))))
 );
@@ -296,7 +296,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_change_clock (
     singleton boolean DEFAULT true NOT NULL,
     current_seq bigint NOT NULL,
     tombstone_compaction_horizon bigint DEFAULT 0 NOT NULL,
-    CONSTRAINT lash_process_change_clock_singleton_check CHECK (singleton)
+    CONSTRAINT ck_process_change_clock_singleton CHECK (singleton)
 );
 
 
@@ -501,7 +501,7 @@ CREATE TABLE lash_durable_read_fixture.lash_release_stamp (
     release_version text NOT NULL,
     schema_versions text NOT NULL,
     written_at_epoch_ms bigint NOT NULL,
-    CONSTRAINT lash_release_stamp_singleton_check CHECK (singleton)
+    CONSTRAINT ck_release_stamp_singleton CHECK (singleton)
 );
 
 
@@ -559,7 +559,7 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_turn_commits (
     request_identity_hash text,
     requested_node_count bigint,
     identity_encoding_version integer,
-    CONSTRAINT lash_runtime_turn_commits_check CHECK ((((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)) AND ((requested_node_count IS NULL) OR (request_identity_hash IS NOT NULL))))
+    CONSTRAINT ck_runtime_turn_commits_identity CHECK ((((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)) AND ((requested_node_count IS NULL) OR (request_identity_hash IS NOT NULL))))
 );
 
 
@@ -646,7 +646,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta_pending_observer_intent
     process_id text NOT NULL,
     process_incarnation bigint,
     attribution text NOT NULL,
-    CONSTRAINT lash_session_meta_pending_observer_intents_attribution_check CHECK ((attribution = ANY (ARRAY['host_requested'::text, 'fork_inherited'::text])))
+    CONSTRAINT ck_session_meta_pending_observer_intents_attribution CHECK ((attribution = ANY (ARRAY['host_requested'::text, 'fork_inherited'::text])))
 );
 
 
@@ -746,6 +746,21 @@ CREATE TABLE lash_durable_read_fixture.lash_trigger_subscriptions (
 
 
 --
+-- Name: lash_turn_cancel_affected_inputs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_affected_inputs (
+    session_id text NOT NULL,
+    turn_id text NOT NULL,
+    ordinal bigint NOT NULL,
+    input_id text NOT NULL,
+    disposition text NOT NULL,
+    input_json text NOT NULL,
+    CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK ((disposition = ANY (ARRAY['defer'::text, 'drop'::text])))
+);
+
+
+--
 -- Name: lash_turn_cancel_closure_authorizations; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -780,9 +795,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
     disposition text DEFAULT 'defer'::text NOT NULL,
     mode text DEFAULT 'immediate'::text NOT NULL,
     intent_revision bigint NOT NULL,
-    affected_input_ids text[] DEFAULT '{}'::text[] NOT NULL,
-    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL,
-    CONSTRAINT lash_turn_cancel_requests_intent_revision_check CHECK ((intent_revision >= 1))
+    CONSTRAINT ck_turn_cancel_requests_intent_revision CHECK ((intent_revision >= 1))
 );
 
 
@@ -803,7 +816,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancellation_bindings (
     session_id text NOT NULL,
     binding_id text NOT NULL,
     admitted_scope_json text,
-    CONSTRAINT lash_turn_cancellation_bindings_binding_id_check CHECK ((length(binding_id) > 0))
+    CONSTRAINT ck_turn_cancellation_bindings_binding_id CHECK ((length(binding_id) > 0))
 );
 
 
@@ -1104,7 +1117,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 -- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=99', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=102', 1700000000000);
 
 
 --
@@ -1134,7 +1147,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 99);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 102);
 
 
 --
@@ -1202,6 +1215,12 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_occurrences VALUES ('trigger:
 --
 
 INSERT INTO lash_durable_read_fixture.lash_trigger_subscriptions VALUES ('trigger-subscription:v2:blake3:65d03d5aa96e165d6e48392576cb9dba7e571ae2df15f9947dae596f902e1d74', 'session:durable-read-fixture', 'durable-read-trigger', 'durable-read-trigger-incarnation', 1, 'trigger-definition:v3:blake3:a359a0f8b9619d0aa56a03b9a45ffaaa89c69ad02e3e9f45a7311249b8ee4df3', 'fixture.event', 'fixture-source', 'enabled', NULL, 1700000000000, 1700000000000, '{"subscription_id":"trigger-subscription:v2:blake3:65d03d5aa96e165d6e48392576cb9dba7e571ae2df15f9947dae596f902e1d74","owner_scope":{"type":"session","session_id":"durable-read-fixture"},"subscription_key":"durable-read-trigger","incarnation":"durable-read-trigger-incarnation","revision":1,"definition_fingerprint":"trigger-definition:v3:blake3:a359a0f8b9619d0aa56a03b9a45ffaaa89c69ad02e3e9f45a7311249b8ee4df3","registrant":{"type":"session","session_id":"durable-read-fixture"},"env_ref":"process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738","wake_target":{"session_id":"durable-read-fixture"},"name":"Durable read trigger","source_type":"fixture.event","source_key":"fixture-source","source":{"fixture":"source"},"payload_schema":{"schema":{"additionalProperties":false,"properties":{"value":{"type":"integer"}},"required":["value"],"type":"object"}},"source_capture":{"constructor_path":["fixture","event"],"config_schema":{"schema":{"additionalProperties":false,"properties":{"fixture":{"type":"string"}},"type":"object"}},"route":{"kind":"provider","provider_id":"fixture-provider","route":{"account":"fixture"}}},"target":{"type":"engine","kind":"durable-read-trigger-target","payload":{"fixture":"trigger"}},"target_identity":{"kind":"durable-read-trigger-target","label":"Durable read trigger target","definition":{"engine_kind":"durable-read-trigger-target","definition":{"fixture":"trigger"},"signature":{"signature":"unknown"}}},"event_types":[],"input_template":{"event":{"type":"event"}},"target_label":"Durable read trigger target","lifecycle":{"lifecycle":"enabled"},"created_at_ms":1700000000000,"updated_at_ms":1700000000000}');
+
+
+--
+-- Data for Name: lash_turn_cancel_affected_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
 
 
 --
@@ -1706,6 +1725,22 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_subscriptions
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_subscriptions
     ADD CONSTRAINT lash_trigger_subscriptions_pkey PRIMARY KEY (subscription_id);
+
+
+--
+-- Name: lash_turn_cancel_affected_inputs lash_turn_cancel_affected_input_session_id_turn_id_input_id_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_affected_inputs
+    ADD CONSTRAINT lash_turn_cancel_affected_input_session_id_turn_id_input_id_key UNIQUE (session_id, turn_id, input_id);
+
+
+--
+-- Name: lash_turn_cancel_affected_inputs lash_turn_cancel_affected_inputs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_affected_inputs
+    ADD CONSTRAINT lash_turn_cancel_affected_inputs_pkey PRIMARY KEY (session_id, turn_id, ordinal);
 
 
 --
@@ -2232,6 +2267,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_pending_observer_in
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_deliveries
     ADD CONSTRAINT lash_trigger_deliveries_occurrence_id_fkey FOREIGN KEY (occurrence_id) REFERENCES lash_durable_read_fixture.lash_trigger_occurrences(occurrence_id) ON DELETE CASCADE;
+
+
+--
+-- Name: lash_turn_cancel_affected_inputs lash_turn_cancel_affected_inputs_session_id_turn_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_affected_inputs
+    ADD CONSTRAINT lash_turn_cancel_affected_inputs_session_id_turn_id_fkey FOREIGN KEY (session_id, turn_id) REFERENCES lash_durable_read_fixture.lash_turn_cancel_requests(session_id, turn_id) ON DELETE CASCADE;
 
 
 --

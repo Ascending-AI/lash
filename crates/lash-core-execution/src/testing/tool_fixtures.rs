@@ -59,13 +59,15 @@ impl ToolProvider for FixtureTools {
         (name == FIXTURE_ECHO_TOOL).then(|| Arc::new(fixture_echo_definition().contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        if call.name != FIXTURE_ECHO_TOOL {
-            return ToolOutcome::err_fmt(format_args!("unknown fixture tool: {}", call.name));
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        if call.name() != FIXTURE_ECHO_TOOL {
+            return ToolOutcome::err_fmt(format_args!("unknown fixture tool: {}", call.name()))
+                .into();
         }
         ToolOutcome::ok(serde_json::json!({
             "echo": call.args.get("value").cloned().unwrap_or_default(),
         }))
+        .into()
     }
 }
 
@@ -111,8 +113,12 @@ mod tests {
             &serde_json::json!({ "value": "alpha" }),
         )
         .await;
+        let crate::ToolAttemptOutcome::Done { result, intents } = outcome else {
+            panic!("fixture echo must complete inline");
+        };
+        assert!(intents.is_empty());
         assert_eq!(
-            outcome.as_output().outcome,
+            result.into_output().outcome,
             crate::ToolCallOutcome::Success(crate::ToolValue::untrusted_json(
                 serde_json::json!({ "echo": "alpha" })
             ))
@@ -127,8 +133,12 @@ mod tests {
             &serde_json::json!({ "value": "alpha" }),
         )
         .await;
+        let crate::ToolAttemptOutcome::Done { result, intents } = outcome else {
+            panic!("an unknown tool resolves to a completed failure");
+        };
+        assert!(intents.is_empty());
         assert!(matches!(
-            outcome.as_output().outcome,
+            result.into_output().outcome,
             crate::ToolCallOutcome::Failure(_)
         ));
     }

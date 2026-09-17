@@ -241,7 +241,7 @@ async fn commit_with_attachment_refs(
     if !was_live {
         model.attachment_ids_to_reprobe.insert(attachment.id);
     }
-    shape.attachment_commits += 1;
+    shape[RunShapeCounter::AttachmentCommits] += 1;
     Ok(())
 }
 
@@ -302,7 +302,7 @@ async fn put_attachment_intent(
             model.attachment_ids_to_reprobe.insert(attachment.id);
         }
     }
-    shape.attachment_intent_puts += 1;
+    shape[RunShapeCounter::AttachmentIntentPuts] += 1;
     Ok(())
 }
 
@@ -341,7 +341,7 @@ async fn replay_attachment_commit(
     if after != before {
         return Err("attachment commit replay changed the live root set".to_string());
     }
-    shape.attachment_receipt_replays += 1;
+    shape[RunShapeCounter::AttachmentReceiptReplays] += 1;
     Ok(())
 }
 
@@ -365,7 +365,7 @@ async fn reclaim_attachment_session(
         .delete_session(&session.session_id)
         .await
         .map_err(|error| error.to_string())?;
-    shape.attachment_session_reclaims += 1;
+    shape[RunShapeCounter::AttachmentSessionReclaims] += 1;
     Ok(())
 }
 
@@ -420,7 +420,7 @@ async fn probe_attachment_gc(
             "attachment GC physical survivors differ from the live root set: expected {expected:?}, got {after:?}"
         ));
     }
-    shape.attachment_gc_probes += 1;
+    shape[RunShapeCounter::AttachmentGcProbes] += 1;
     Ok(())
 }
 

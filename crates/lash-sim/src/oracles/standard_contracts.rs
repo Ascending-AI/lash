@@ -116,11 +116,9 @@ pub(super) fn provider_mutation_semantic_fact(
                 .or_else(|| event.payload.get("mutation"))
                 .and_then(Value::as_str)
                 == Some(mutation)
-            && event
-                .payload
-                .pointer("/runtime_completion/completion_family")
-                .and_then(Value::as_str)
-                == Some("provider_script_mutation")
+            && PendingRuntimeBoundary::from_payload(&event.payload).is_some_and(|pending| {
+                pending.completion_family == RuntimeCompletionFamily::ProviderScriptMutation
+            })
             && event
                 .observed
                 .pointer("/provider_parser_matrix/matrix/real_provider_parser_execution")
@@ -239,11 +237,9 @@ pub(super) fn tool_then_same_actor_provider(
                     .get("execution_count")
                     .and_then(Value::as_u64)
                     == Some(1)
-                && event
-                    .payload
-                    .pointer("/runtime_completion/completion_family")
-                    .and_then(Value::as_str)
-                    == Some("tool_return")
+                && PendingRuntimeBoundary::from_payload(&event.payload).is_some_and(|pending| {
+                    pending.completion_family == RuntimeCompletionFamily::ToolReturn
+                })
         })
         .find_map(|tool| {
             successful_provider_events(events)

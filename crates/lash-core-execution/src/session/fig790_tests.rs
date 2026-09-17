@@ -393,8 +393,8 @@ impl crate::ToolProvider for NoopTools {
         None
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        crate::ToolOutcome::err_fmt("not used by the FIG-790 fixture")
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolOutcome::err_fmt("not used by the FIG-790 fixture").into()
     }
 }
 

@@ -138,6 +138,7 @@ impl ToolSurface {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ToolSourceKey {
     Leaf(String),
+    Internal(ToolId),
     Orchestrating(ToolId),
 }
 
@@ -145,6 +146,7 @@ impl std::fmt::Display for ToolSourceKey {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Leaf(source_id) => formatter.write_str(source_id),
+            Self::Internal(tool_id) => write!(formatter, "internal:{tool_id}"),
             Self::Orchestrating(tool_id) => write!(formatter, "orchestrating:{tool_id}"),
         }
     }

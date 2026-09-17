@@ -540,8 +540,16 @@ impl ToolAttemptOutcome {
     pub fn pending(pending: crate::PendingCompletion) -> Self {
         Self::Pending(pending)
     }
+}
 
-    pub(crate) fn from_tool_result(result: crate::ToolOutcome) -> Self {
+/// Lift a plain tool outcome into an attempt outcome at the execution seam.
+/// A completed outcome becomes [`ToolAttemptOutcome::Done`] with no declared
+/// intents; a pending outcome stays [`ToolAttemptOutcome::Pending`] with its
+/// completion payload intact. There is deliberately no conversion in the
+/// other direction: projecting away `Done` intents would silently drop
+/// durable declarations.
+impl From<crate::ToolOutcome> for ToolAttemptOutcome {
+    fn from(result: crate::ToolOutcome) -> Self {
         match result {
             crate::ToolOutcome::Done(output) => Self::done_without_intents(ToolOutcomeDone(output)),
             crate::ToolOutcome::Pending(pending) => Self::Pending(*pending),

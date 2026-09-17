@@ -630,64 +630,48 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
         }
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        match call.name {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        match call.name() {
             "replay_scalar_counter" => {
                 self.scalar_invocations.fetch_add(1, Ordering::SeqCst);
-                lash_core::ToolOutcome::ok(serde_json::json!({ "value": "counted" }))
+                lash_core::ToolAttemptOutcome::done(
+                    lash_core::ToolOutcomeDone::ok(serde_json::json!({ "value": "counted" })),
+                    lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
+                        lash_core::SignalProcessIntent {
+                            session_id: SessionId::from(call.context.session_id()),
+                            process_id: ProcessId::from("restate-recorded-intent-target"),
+                            signal_name: "resume".to_string(),
+                            payload: serde_json::json!({"source": "recorded-scalar-attempt"}),
+                        },
+                    )]),
+                )
             }
             "replay_pending_input" => {
                 let key = match call.context.completion_key() {
                     Ok(key) => key,
-                    Err(err) => return lash_core::ToolOutcome::err_fmt(err),
+                    Err(err) => {
+                        return lash_core::ToolAttemptOutcome::done_without_intents(
+                            lash_core::ToolOutcomeDone::failure(lash_core::ToolFailure::runtime(
+                                lash_core::ToolFailureClass::Internal,
+                                "replay_pending_input_completion_key",
+                                err.to_string(),
+                            )),
+                        );
+                    }
                 };
                 if let Some(tx) = self.completion_key_tx.lock_recover().take() {
                     let _ = tx.send(Ok(key));
                 }
-                lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new())
+                lash_core::ToolAttemptOutcome::pending(lash_core::PendingCompletion::new())
             }
-            other => lash_core::ToolOutcome::err_fmt(format!("unknown replay tool `{other}`")),
+            other => {
+                lash_core::ToolOutcome::err_fmt(format!("unknown replay tool `{other}`")).into()
+            }
         }
     }
 
     fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
         tool_id == Self::pending_definition().id()
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
-        if call.name != "replay_scalar_counter" {
-            let key = match call.context.completion_key() {
-                Ok(key) => key,
-                Err(err) => {
-                    return lash_core::ToolAttemptOutcome::done_without_intents(
-                        lash_core::ToolOutcomeDone::failure(lash_core::ToolFailure::runtime(
-                            lash_core::ToolFailureClass::Internal,
-                            "replay_pending_input_completion_key",
-                            err.to_string(),
-                        )),
-                    );
-                }
-            };
-            if let Some(tx) = self.completion_key_tx.lock_recover().take() {
-                let _ = tx.send(Ok(key));
-            }
-            return lash_core::ToolAttemptOutcome::pending(lash_core::PendingCompletion::new());
-        }
-        self.scalar_invocations.fetch_add(1, Ordering::SeqCst);
-        lash_core::ToolAttemptOutcome::done(
-            lash_core::ToolOutcomeDone::ok(serde_json::json!({ "value": "counted" })),
-            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
-                lash_core::SignalProcessIntent {
-                    session_id: SessionId::from(call.context.session_id()),
-                    process_id: ProcessId::from("restate-recorded-intent-target"),
-                    signal_name: "resume".to_string(),
-                    payload: serde_json::json!({"source": "recorded-scalar-attempt"}),
-                },
-            )]),
-        )
     }
 }
 

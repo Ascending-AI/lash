@@ -229,8 +229,8 @@ impl lash_core::ToolProvider for SchemaChangingTool {
         (name == "schema_changing").then(|| Arc::new(self.definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(serde_json::Value::Null)
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::ok(serde_json::Value::Null).into()
     }
 }
 

@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
-    ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
+    ToolDefinition, ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -162,22 +162,26 @@ impl SharedWorld {
 
 #[async_trait]
 impl StaticToolExecute for SharedWorld {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        if call.name == "submit" {
-            return self.submit(call.args);
-        }
-        match execute_call(
-            &mut self.0.lock().unwrap_or_else(|poison| poison.into_inner()),
-            call,
-        ) {
-            Ok(value) => ToolOutcome::ok(value),
-            Err(message) => ToolOutcome::err_fmt(message),
-        }
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            if call.name() == "submit" {
+                return self.submit(call.args);
+            }
+            match execute_call(
+                &mut self.0.lock().unwrap_or_else(|poison| poison.into_inner()),
+                call,
+            ) {
+                Ok(value) => ToolOutcome::ok(value),
+                Err(message) => ToolOutcome::err_fmt(message),
+            }
+        })
+        .await
+        .into()
     }
 }
 
 pub(crate) fn execute_call(world: &mut World, call: ToolCall<'_>) -> Result<Value, String> {
-    match call.name {
+    match call.name() {
         "weather_lookup" => {
             let city = required_string(call.args, "city")?;
             world
@@ -232,7 +236,7 @@ pub(crate) fn execute_call(world: &mut World, call: ToolCall<'_>) -> Result<Valu
                 .map(|contact| json!(contact))
                 .ok_or_else(|| format!("unknown contact `{id}`"))
         }
-        _ => hard_call(world, call.name, call.args),
+        _ => hard_call(world, call.name(), call.args),
     }
 }
 

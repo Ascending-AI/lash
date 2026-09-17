@@ -69,10 +69,12 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             config = MATRIX.tomllib.load(handle)
         rows = MATRIX.rows(config)
         ordinary = set(config["scenarios"])
-        excluded = (
-            set(config["typescript_only"])
-            | set(config["deterministic_only"])
-            | set(config["no_rlm_session_only"])
+        excluded = set().union(
+            *(
+                set(config[group])
+                for group in config["groups"]
+                if group != "scenarios"
+            )
         )
         discovered = {
             path.parent.name
@@ -106,15 +108,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         listed = [
-            name
-            for key in (
-                "scenarios",
-                "typescript_only",
-                "deterministic_only",
-                "no_rlm_session_only",
-                "scripted_live_model",
-            )
-            for name in config.get(key, {})
+            name for group in config["groups"] for name in config.get(group, {})
         ]
         duplicates = sorted({name for name in listed if listed.count(name) > 1})
         self.assertEqual(duplicates, [], f"the matrix classifies {duplicates} twice")
@@ -160,10 +154,10 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         # those citations stale.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
-        expected = (
-            len(config["scenarios"])
-            + len(config["typescript_only"])
-            + len(config["no_rlm_session_only"])
+        expected = sum(
+            len(config[group])
+            for group, policy in config["groups"].items()
+            if policy["emits"]
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
         self.assertEqual(expected, 36)

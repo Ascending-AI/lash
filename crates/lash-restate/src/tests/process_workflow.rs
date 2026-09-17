@@ -679,17 +679,7 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
         (name == "recovery_echo").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        let _ = call;
-        lash_core::ToolOutcome::err_fmt(
-            "recovery_echo owes a process.wake emission and runs only on the leaf attempt route",
-        )
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let line = call
             .args
             .get("line")
@@ -752,13 +742,17 @@ impl lash_core::ToolProvider for SnapshotRecoveryTool {
         (name == "snapshot_echo").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        let line = call
-            .args
-            .get("line")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        lash_core::ToolOutcome::ok(serde_json::json!({ "echo": format!("snapshot:{line}") }))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            let line = call
+                .args
+                .get("line")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            lash_core::ToolOutcome::ok(serde_json::json!({ "echo": format!("snapshot:{line}") }))
+        })
+        .await
+        .into()
     }
 }
 

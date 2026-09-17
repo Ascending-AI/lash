@@ -184,8 +184,8 @@ mod tests {
                 .map(|tool| Arc::new(tool.contract()))
         }
 
-        async fn execute(&self, call: crate::ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(call.args.clone())
+        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(call.args.clone()).into()
         }
     }
 
@@ -227,8 +227,8 @@ mod tests {
             None
         }
 
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(json!("unreachable"))
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            ToolOutcome::ok(json!("unreachable")).into()
         }
     }
 

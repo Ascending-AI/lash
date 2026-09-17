@@ -114,68 +114,113 @@ struct SessionGraphScenario {
     shape: RunShape,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct RunShape {
-    appends_committed: u64,
-    ancestor_appends_committed: u64,
-    forks_committed: u64,
-    rewinds_committed: u64,
-    pins_committed: u64,
-    unpins_committed: u64,
-    deletes_committed: u64,
-    checkpoint_commits: u64,
-    cold_reloads: u64,
-    reachability_sweeps: u64,
-    vacuum_runs: u64,
-    typed_rejections: u64,
-    bounded_traversals: u64,
+/// The run-shape counter alphabet. `RunShape`, `RunShapeTotals`, the
+/// required-shape table, and the report all derive from this one enum, so a
+/// new counter cannot be counted without being reported.
+#[derive(Clone, Copy, Debug)]
+enum RunShapeCounter {
+    AppendsCommitted,
+    AncestorAppendsCommitted,
+    ForksCommitted,
+    RewindsCommitted,
+    PinsCommitted,
+    UnpinsCommitted,
+    DeletesCommitted,
+    CheckpointCommits,
+    ColdReloads,
+    ReachabilitySweeps,
+    VacuumRuns,
+    TypedRejections,
+    BoundedTraversals,
 }
 
-#[derive(Debug, Default)]
+impl RunShapeCounter {
+    const ALL: &[Self] = &[
+        Self::AppendsCommitted,
+        Self::AncestorAppendsCommitted,
+        Self::ForksCommitted,
+        Self::RewindsCommitted,
+        Self::PinsCommitted,
+        Self::UnpinsCommitted,
+        Self::DeletesCommitted,
+        Self::CheckpointCommits,
+        Self::ColdReloads,
+        Self::ReachabilitySweeps,
+        Self::VacuumRuns,
+        Self::TypedRejections,
+        Self::BoundedTraversals,
+    ];
+    const COUNT: usize = Self::ALL.len();
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::AppendsCommitted => "appends_committed",
+            Self::AncestorAppendsCommitted => "ancestor_appends_committed",
+            Self::ForksCommitted => "forks_committed",
+            Self::RewindsCommitted => "rewinds_committed",
+            Self::PinsCommitted => "pins_committed",
+            Self::UnpinsCommitted => "unpins_committed",
+            Self::DeletesCommitted => "deletes_committed",
+            Self::CheckpointCommits => "checkpoint_commits",
+            Self::ColdReloads => "cold_reloads",
+            Self::ReachabilitySweeps => "reachability_sweeps",
+            Self::VacuumRuns => "vacuum_runs",
+            Self::TypedRejections => "typed_rejections",
+            Self::BoundedTraversals => "bounded_traversals",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RunShape {
+    counts: [u64; RunShapeCounter::COUNT],
+}
+
+impl std::ops::Index<RunShapeCounter> for RunShape {
+    type Output = u64;
+    fn index(&self, counter: RunShapeCounter) -> &u64 {
+        &self.counts[counter as usize]
+    }
+}
+
+impl std::ops::IndexMut<RunShapeCounter> for RunShape {
+    fn index_mut(&mut self, counter: RunShapeCounter) -> &mut u64 {
+        &mut self.counts[counter as usize]
+    }
+}
+
+#[derive(Debug)]
 struct RunShapeTotals {
-    appends_committed: AtomicU64,
-    ancestor_appends_committed: AtomicU64,
-    forks_committed: AtomicU64,
-    rewinds_committed: AtomicU64,
-    pins_committed: AtomicU64,
-    unpins_committed: AtomicU64,
-    deletes_committed: AtomicU64,
-    checkpoint_commits: AtomicU64,
-    cold_reloads: AtomicU64,
-    reachability_sweeps: AtomicU64,
-    vacuum_runs: AtomicU64,
-    typed_rejections: AtomicU64,
-    bounded_traversals: AtomicU64,
+    counts: [AtomicU64; RunShapeCounter::COUNT],
+}
+
+impl Default for RunShapeTotals {
+    fn default() -> Self {
+        Self {
+            counts: std::array::from_fn(|_| AtomicU64::new(0)),
+        }
+    }
 }
 
 impl RunShapeTotals {
     fn add(&self, shape: RunShape) {
-        self.appends_committed
-            .fetch_add(shape.appends_committed, Ordering::Relaxed);
-        self.ancestor_appends_committed
-            .fetch_add(shape.ancestor_appends_committed, Ordering::Relaxed);
-        self.forks_committed
-            .fetch_add(shape.forks_committed, Ordering::Relaxed);
-        self.rewinds_committed
-            .fetch_add(shape.rewinds_committed, Ordering::Relaxed);
-        self.pins_committed
-            .fetch_add(shape.pins_committed, Ordering::Relaxed);
-        self.unpins_committed
-            .fetch_add(shape.unpins_committed, Ordering::Relaxed);
-        self.deletes_committed
-            .fetch_add(shape.deletes_committed, Ordering::Relaxed);
-        self.checkpoint_commits
-            .fetch_add(shape.checkpoint_commits, Ordering::Relaxed);
-        self.cold_reloads
-            .fetch_add(shape.cold_reloads, Ordering::Relaxed);
-        self.reachability_sweeps
-            .fetch_add(shape.reachability_sweeps, Ordering::Relaxed);
-        self.vacuum_runs
-            .fetch_add(shape.vacuum_runs, Ordering::Relaxed);
-        self.typed_rejections
-            .fetch_add(shape.typed_rejections, Ordering::Relaxed);
-        self.bounded_traversals
-            .fetch_add(shape.bounded_traversals, Ordering::Relaxed);
+        for counter in RunShapeCounter::ALL {
+            self.counts[*counter as usize].fetch_add(shape[*counter], Ordering::Relaxed);
+        }
+    }
+
+    fn report(&self) -> String {
+        RunShapeCounter::ALL
+            .iter()
+            .map(|counter| {
+                format!(
+                    "{}={}",
+                    counter.name(),
+                    self.counts[*counter as usize].load(Ordering::Relaxed)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -226,19 +271,20 @@ where
                 let factory = make(case.seed).await;
                 let shape = Box::pin(replay_case(case.seed, factory, &case.operations)).await?;
                 prop_assert!(
-                    shape.ancestor_appends_committed > 0,
+                    shape[RunShapeCounter::AncestorAppendsCommitted] > 0,
                     "generated alphabet starvation: no ancestor-based append committed"
                 );
                 prop_assert!(
-                    shape.forks_committed > 0 && shape.rewinds_committed > 0,
+                    shape[RunShapeCounter::ForksCommitted] > 0
+                        && shape[RunShapeCounter::RewindsCommitted] > 0,
                     "generated alphabet starvation: fork/rewind lifecycle was not reached"
                 );
                 prop_assert!(
-                    shape.typed_rejections >= 5,
+                    shape[RunShapeCounter::TypedRejections] >= 5,
                     "generated alphabet starvation: malformed and stale paths were not rejected"
                 );
                 prop_assert!(
-                    shape.bounded_traversals >= 4,
+                    shape[RunShapeCounter::BoundedTraversals] >= 4,
                     "generated alphabet starvation: malformed traversal shapes were not exercised"
                 );
                 runner_totals.add(shape);
@@ -257,20 +303,8 @@ where
     }
 
     eprintln!(
-        "session-graph run shape ({backend}, cases={cases}): appends_committed={} ancestor_appends_committed={} forks_committed={} rewinds_committed={} pins_committed={} unpins_committed={} deletes_committed={} checkpoint_commits={} cold_reloads={} reachability_sweeps={} vacuum_runs={} typed_rejections={} bounded_traversals={}",
-        totals.appends_committed.load(Ordering::Relaxed),
-        totals.ancestor_appends_committed.load(Ordering::Relaxed),
-        totals.forks_committed.load(Ordering::Relaxed),
-        totals.rewinds_committed.load(Ordering::Relaxed),
-        totals.pins_committed.load(Ordering::Relaxed),
-        totals.unpins_committed.load(Ordering::Relaxed),
-        totals.deletes_committed.load(Ordering::Relaxed),
-        totals.checkpoint_commits.load(Ordering::Relaxed),
-        totals.cold_reloads.load(Ordering::Relaxed),
-        totals.reachability_sweeps.load(Ordering::Relaxed),
-        totals.vacuum_runs.load(Ordering::Relaxed),
-        totals.typed_rejections.load(Ordering::Relaxed),
-        totals.bounded_traversals.load(Ordering::Relaxed),
+        "session-graph run shape ({backend}, cases={cases}): {}",
+        totals.report()
     );
 }
 
@@ -557,7 +591,7 @@ impl SessionGraphScenario {
             if before != after {
                 return Err("branch-liveness: stale-base rejection mutated the session".to_string());
             }
-            self.shape.typed_rejections += 1;
+            self.shape[RunShapeCounter::TypedRejections] += 1;
             return Ok(());
         }
 
@@ -590,9 +624,9 @@ impl SessionGraphScenario {
             );
         }
         self.record_read(slot, &read)?;
-        self.shape.appends_committed += 1;
+        self.shape[RunShapeCounter::AppendsCommitted] += 1;
         if required.is_some() && required.as_ref() != old_path.last() {
-            self.shape.ancestor_appends_committed += 1;
+            self.shape[RunShapeCounter::AncestorAppendsCommitted] += 1;
         }
         Ok(())
     }
@@ -616,14 +650,14 @@ impl SessionGraphScenario {
                 return Err("pin/refcount: successful pin returned the wrong root".to_string());
             }
             self.model.pins.insert(node_id);
-            self.shape.pins_committed += 1;
+            self.shape[RunShapeCounter::PinsCommitted] += 1;
         } else {
             if !matches!(result, Err(crate::StoreError::ForkPointNotRetained { .. })) {
                 return Err(format!(
                     "pin/refcount: unretained past node was accepted: {result:?}"
                 ));
             }
-            self.shape.typed_rejections += 1;
+            self.shape[RunShapeCounter::TypedRejections] += 1;
         }
         Ok(())
     }
@@ -638,7 +672,7 @@ impl SessionGraphScenario {
             .await
             .map_err(|error| error.to_string())?;
         self.model.pins.remove(&node_id);
-        self.shape.unpins_committed += 1;
+        self.shape[RunShapeCounter::UnpinsCommitted] += 1;
         Ok(())
     }
 
@@ -696,7 +730,7 @@ impl SessionGraphScenario {
                     "fork isolation: unretained node was forked: {result:?}"
                 ));
             }
-            self.shape.typed_rejections += 1;
+            self.shape[RunShapeCounter::TypedRejections] += 1;
             return Ok(());
         }
         result.map_err(|error| error.to_string())?;
@@ -728,7 +762,7 @@ impl SessionGraphScenario {
                 head_revision: 0,
             },
         );
-        self.shape.forks_committed += 1;
+        self.shape[RunShapeCounter::ForksCommitted] += 1;
         Ok(())
     }
 
@@ -755,12 +789,12 @@ impl SessionGraphScenario {
                         "rewind: unretained ancestor pin was not typed: {result:?}"
                     ));
                 }
-                self.shape.typed_rejections += 1;
+                self.shape[RunShapeCounter::TypedRejections] += 1;
                 return Ok(());
             }
             result.map_err(|error| error.to_string())?;
             self.model.pins.insert(node_id.clone());
-            self.shape.pins_committed += 1;
+            self.shape[RunShapeCounter::PinsCommitted] += 1;
         }
 
         let old = self.live.remove(&slot).expect("selected session is live");
@@ -812,8 +846,8 @@ impl SessionGraphScenario {
                 head_revision: 0,
             },
         );
-        self.shape.rewinds_committed += 1;
-        self.shape.deletes_committed += 1;
+        self.shape[RunShapeCounter::RewindsCommitted] += 1;
+        self.shape[RunShapeCounter::DeletesCommitted] += 1;
         Ok(())
     }
 
@@ -827,7 +861,7 @@ impl SessionGraphScenario {
             .await
             .map_err(|error| error.to_string())?;
         self.model.sessions.remove(&slot);
-        self.shape.deletes_committed += 1;
+        self.shape[RunShapeCounter::DeletesCommitted] += 1;
         Ok(())
     }
 
@@ -867,7 +901,7 @@ impl SessionGraphScenario {
             .get_mut(&slot)
             .expect("checkpoint model")
             .head_revision += 1;
-        self.shape.checkpoint_commits += 1;
+        self.shape[RunShapeCounter::CheckpointCommits] += 1;
         Ok(())
     }
 
@@ -896,7 +930,7 @@ impl SessionGraphScenario {
             Arc::clone(&reopened),
         );
         self.live.get_mut(&slot).expect("live slot").store = reopened;
-        self.shape.cold_reloads += 1;
+        self.shape[RunShapeCounter::ColdReloads] += 1;
         Ok(())
     }
 
@@ -908,7 +942,7 @@ impl SessionGraphScenario {
                 .map_err(|error| error.to_string())?;
         }
         self.assert_reachability().await?;
-        self.shape.reachability_sweeps += 1;
+        self.shape[RunShapeCounter::ReachabilitySweeps] += 1;
         Ok(())
     }
 
@@ -917,7 +951,7 @@ impl SessionGraphScenario {
             store.vacuum().await.map_err(|error| error.to_string())?;
         }
         self.assert_reachability().await?;
-        self.shape.vacuum_runs += 1;
+        self.shape[RunShapeCounter::VacuumRuns] += 1;
         Ok(())
     }
 
@@ -937,7 +971,7 @@ impl SessionGraphScenario {
             Box::pin(self.append(slot, 1, 0)).await?;
         }
         assert_bounded_resident_rejection(shape % 4)?;
-        self.shape.bounded_traversals += 1;
+        self.shape[RunShapeCounter::BoundedTraversals] += 1;
 
         let before = self.session_snapshot(slot).await?;
         let operation_key = self.next_operation_id("malformed");
@@ -973,7 +1007,7 @@ impl SessionGraphScenario {
         if before != after {
             return Err("malformed graph rejection mutated durable state".to_string());
         }
-        self.shape.typed_rejections += 1;
+        self.shape[RunShapeCounter::TypedRejections] += 1;
         Ok(())
     }
 
@@ -1025,7 +1059,7 @@ impl SessionGraphScenario {
         if before != self.session_snapshot(slot).await? {
             return Err("head-revision CAS rejection mutated durable state".to_string());
         }
-        self.shape.typed_rejections += 1;
+        self.shape[RunShapeCounter::TypedRejections] += 1;
         Ok(())
     }
 

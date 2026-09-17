@@ -241,11 +241,13 @@ async fn submit_error_emits_failure_control_with_reason() {
     }
     .into_leaf_provider();
     let args = json!({"reason": "child cannot finish"});
-    let ToolOutcome::Done(output) =
+    let lash_core::ToolAttemptOutcome::Done { result, intents } =
         lash_core::testing::run_tool(&provider, "submit_error", &args).await
     else {
         panic!("submit_error must finish inline");
     };
+    assert!(intents.is_empty());
+    let output = result.into_output();
     let Some(lash_core::ToolControl::Fail { failure }) = output.control else {
         panic!("submit_error must carry Fail control");
     };

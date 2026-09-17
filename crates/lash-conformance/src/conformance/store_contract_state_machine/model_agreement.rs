@@ -81,7 +81,7 @@ pub(super) async fn assert_model_agreement(
     model: &ReferenceModel,
 ) -> Result<(), String> {
     for (id, expected) in &model.processes {
-        if expected.tombstoned {
+        if expected.is_tombstoned() {
             if matches!(handles.registry.get_process(id).await, Ok(Some(_))) {
                 return Err(format!(
                     "tombstoned process `{id}` unexpectedly became live"
@@ -89,7 +89,7 @@ pub(super) async fn assert_model_agreement(
             }
             continue;
         }
-        let Some(expected_record) = expected.expected_record.clone() else {
+        let Some(expected_record) = expected.expected().cloned() else {
             continue;
         };
         let actual_record = handles

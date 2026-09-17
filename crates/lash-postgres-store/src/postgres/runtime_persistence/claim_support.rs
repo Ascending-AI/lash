@@ -269,8 +269,9 @@ pub(super) async fn claim_ready_queued_work_postgres_tx(
     .await
 }
 
-/// Load one cancellation record from a single PostgreSQL snapshot so payload
-/// retention cannot split request metadata from its affected-input evidence.
+/// Load one cancellation record. Affected-input payloads are receipt
+/// snapshots on `lash_turn_cancel_affected_inputs`, so no cross-table
+/// snapshot isolation is needed to keep the evidence whole.
 pub(super) async fn load_turn_cancel_request_pg(
     pool: &sqlx::PgPool,
     session_id: &SessionId,
@@ -278,11 +279,7 @@ pub(super) async fn load_turn_cancel_request_pg(
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
     let mut connection = acquire_runtime_connection(pool).await?;
     let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    let record = load_turn_cancel_request_in_tx(&mut tx, session_id, turn_id, false, None).await?;
+    let record = load_turn_cancel_request_in_tx(&mut tx, session_id, turn_id, false).await?;
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(record)
 }
@@ -357,68 +354,18 @@ pub(super) async fn load_turn_cancel_intent_snapshot_pg(
     turn_cancel_snapshot_from_row(session_id, turn_id, row)
 }
 
-#[derive(Default)]
-pub struct TurnCancelReadPause {
-    #[cfg(any(test, feature = "testing"))]
-    metadata_read: tokio::sync::Notify,
-    #[cfg(any(test, feature = "testing"))]
-    resume: tokio::sync::Notify,
-}
-
-impl TurnCancelReadPause {
-    async fn after_metadata_read(&self) {
-        #[cfg(any(test, feature = "testing"))]
-        {
-            self.metadata_read.notify_one();
-            self.resume.notified().await;
-        }
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub async fn wait_until_metadata_read(&self) {
-        self.metadata_read.notified().await;
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub fn resume(&self) {
-        self.resume.notify_one();
-    }
-}
-
-#[cfg(any(test, feature = "testing"))]
-pub(super) async fn load_turn_cancel_request_pg_with_pause(
-    pool: &sqlx::PgPool,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-    pause: &TurnCancelReadPause,
-) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
-    let mut connection = acquire_runtime_connection(pool).await?;
-    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    let record =
-        load_turn_cancel_request_in_tx(&mut tx, session_id, turn_id, false, Some(pause)).await?;
-    tx.commit().await.map_err(store_sqlx_error)?;
-    Ok(record)
-}
-
 async fn load_turn_cancel_request_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     turn_id: &TurnId,
     lock_request: bool,
-    pause: Option<&TurnCancelReadPause>,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
     let metadata_sql = if lock_request {
-        "SELECT request_id, origin, reason, disposition, mode,
-                affected_input_ids, affected_dispositions
+        "SELECT request_id, origin, reason, disposition, mode
          FROM lash_turn_cancel_requests
          WHERE session_id = $1 AND turn_id = $2 FOR UPDATE"
     } else {
-        "SELECT request_id, origin, reason, disposition, mode,
-                affected_input_ids, affected_dispositions
+        "SELECT request_id, origin, reason, disposition, mode
          FROM lash_turn_cancel_requests
          WHERE session_id = $1 AND turn_id = $2"
     };
@@ -431,22 +378,11 @@ async fn load_turn_cancel_request_in_tx(
     let Some(row) = row else {
         return Ok(None);
     };
-    validate_turn_cancel_request_arrays(&row)?;
-    if let Some(pause) = pause {
-        pause.after_metadata_read().await;
-    }
     let affected_rows: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT affected.input_id, pending.input_json, affected.disposition
-         FROM lash_turn_cancel_requests request
-         CROSS JOIN LATERAL unnest(
-             request.affected_input_ids,
-             request.affected_dispositions
-         ) WITH ORDINALITY AS affected(input_id, disposition, ordinal)
-         JOIN lash_pending_turn_inputs pending
-           ON pending.session_id = request.session_id
-          AND pending.input_id = affected.input_id
-         WHERE request.session_id = $1 AND request.turn_id = $2
-         ORDER BY affected.ordinal ASC",
+        "SELECT input_id, input_json, disposition
+         FROM lash_turn_cancel_affected_inputs
+         WHERE session_id = $1 AND turn_id = $2
+         ORDER BY ordinal ASC",
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
@@ -461,34 +397,12 @@ pub(super) async fn load_turn_cancel_request_tx(
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
-    load_turn_cancel_request_in_tx(tx, session_id, turn_id, true, None).await
+    load_turn_cancel_request_in_tx(tx, session_id, turn_id, true).await
 }
 
 /// One `lash_turn_cancel_requests` row: request id, origin, reason,
-/// disposition, mode, affected input ids, affected dispositions.
-pub(super) type TurnCancelRequestRow = (
-    String,
-    Option<String>,
-    Option<String>,
-    String,
-    String,
-    Vec<String>,
-    Vec<String>,
-);
-
-fn validate_turn_cancel_request_arrays(row: &TurnCancelRequestRow) -> Result<(), StoreError> {
-    if row.5.len() != row.6.len() {
-        return Err(StoreError::StoredDataCorrupt {
-            record_kind: "TurnCancelRequest",
-            message: format!(
-                "affected input/disposition cardinality differs: {} input ids, {} dispositions",
-                row.5.len(),
-                row.6.len()
-            ),
-        });
-    }
-    Ok(())
-}
+/// disposition, mode.
+pub(super) type TurnCancelRequestRow = (String, Option<String>, Option<String>, String, String);
 
 pub(super) fn turn_cancel_record_from_rows(
     session_id: &SessionId,
@@ -496,33 +410,9 @@ pub(super) fn turn_cancel_record_from_rows(
     row: TurnCancelRequestRow,
     affected_rows: Vec<(String, String, String)>,
 ) -> Result<lash_core::TurnCancelRequestRecord, StoreError> {
-    validate_turn_cancel_request_arrays(&row)?;
-    let (request_id, origin, reason, disposition, mode, affected_input_ids, affected_dispositions) =
-        row;
-    if affected_rows.len() != affected_input_ids.len() {
-        return Err(StoreError::StoredDataCorrupt {
-            record_kind: "TurnCancelRequest",
-            message: format!(
-                "affected payload rows are incomplete: expected ids {affected_input_ids:?}, found {} rows",
-                affected_rows.len()
-            ),
-        });
-    }
+    let (request_id, origin, reason, disposition, mode) = row;
     let mut affected_inputs = Vec::with_capacity(affected_rows.len());
-    for (index, (input_id, input_json, applied_disposition)) in
-        affected_rows.into_iter().enumerate()
-    {
-        if input_id != affected_input_ids[index]
-            || applied_disposition != affected_dispositions[index]
-        {
-            return Err(StoreError::StoredDataCorrupt {
-                record_kind: "TurnCancelRequest",
-                message: format!(
-                    "affected input evidence is misaligned at position {index}: expected id `{}` with disposition `{}`, found id `{input_id}` with disposition `{applied_disposition}`",
-                    affected_input_ids[index], affected_dispositions[index]
-                ),
-            });
-        }
+    for (input_id, input_json, applied_disposition) in affected_rows {
         affected_inputs.push(lash_core::TurnCancelAffectedInput {
             input_id: input_id.into(),
             payload: store_decode_json(&input_json, "turn input")?,
@@ -591,9 +481,10 @@ pub(super) async fn append_turn_cancel_outcome_tx(
     turn_id: &TurnId,
     affected: lash_core::TurnCancelAffectedInput,
 ) -> Result<(), StoreError> {
-    let arrays: Option<(Vec<String>, Vec<String>)> = sqlx::query_as(
-        "SELECT affected_input_ids, affected_dispositions
-         FROM lash_turn_cancel_requests
+    // Lock the request row so concurrent appends serialize on the ordinal
+    // next-val; a missing request leaves no evidence to attach to.
+    let request_exists: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 FROM lash_turn_cancel_requests
          WHERE session_id = $1 AND turn_id = $2 FOR UPDATE",
     )
     .bind(session_id.as_str())
@@ -601,29 +492,22 @@ pub(super) async fn append_turn_cancel_outcome_tx(
     .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    let Some((affected_input_ids, affected_dispositions)) = arrays else {
+    if request_exists.is_none() {
         return Ok(());
-    };
-    if affected_input_ids.len() != affected_dispositions.len() {
-        return Err(StoreError::StoredDataCorrupt {
-            record_kind: "TurnCancelRequest",
-            message: format!(
-                "affected input/disposition cardinality differs: {} input ids, {} dispositions",
-                affected_input_ids.len(),
-                affected_dispositions.len()
-            ),
-        });
     }
     sqlx::query(
-        "UPDATE lash_turn_cancel_requests
-         SET affected_input_ids = array_append(affected_input_ids, $3),
-             affected_dispositions = array_append(affected_dispositions, $4)
-         WHERE session_id = $1 AND turn_id = $2",
+        "INSERT INTO lash_turn_cancel_affected_inputs (
+             session_id, turn_id, ordinal, input_id, disposition, input_json
+         )
+         SELECT $1, $2, COALESCE(MAX(ordinal) + 1, 0), $3, $4, $5
+           FROM lash_turn_cancel_affected_inputs
+          WHERE session_id = $1 AND turn_id = $2",
     )
     .bind(session_id.as_str())
     .bind(turn_id.as_str())
     .bind(&*affected.input_id)
     .bind(turn_cancel_disposition_wire(affected.disposition))
+    .bind(encode_json(&affected.payload)?)
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -814,17 +698,13 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     let deferred_ingress = encode_json(&deferred.ingress())?;
     let mut outcome = lash_core::TurnCancelInputOutcome::default();
     for (input_id, payload) in repairable {
-        sqlx::query(
+        sqlx::query(&format!(
             "UPDATE lash_pending_turn_inputs
          SET state = $3,
              ingress_json = COALESCE($4, ingress_json),
-             claim_id = NULL,
-             claim_owner_id = NULL,
-             claim_owner_incarnation_id = NULL,
-             claim_token = NULL,
-             claim_session_lease_generation = 0
-         WHERE session_id = $1 AND input_id = $2",
-        )
+             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+         WHERE session_id = $1 AND input_id = $2"
+        ))
         .bind(session_id.as_str())
         .bind(&input_id)
         .bind(match disposition {

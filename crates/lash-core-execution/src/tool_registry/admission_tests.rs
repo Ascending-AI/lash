@@ -107,13 +107,26 @@ impl ToolSourceExecutor for AdmissionSourceSnapshot {
         None
     }
 
-    async fn execute(
+    async fn prepare_tool_call(
         &self,
-        tool: &str,
-        _args: &serde_json::Value,
-        _context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        ToolOutcome::ok(json!(self.result.unwrap_or(tool)))
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+    }
+
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Leaf(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl LeafToolSourceExecutor for AdmissionSourceSnapshot {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!(self.result.unwrap_or(call.name()))).into()
+    }
+
+    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
+        false
     }
 }
 
@@ -150,13 +163,26 @@ impl ToolSourceExecutor for MutableAdmissionSource {
         None
     }
 
-    async fn execute(
+    async fn prepare_tool_call(
         &self,
-        tool: &str,
-        _args: &serde_json::Value,
-        _context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        ToolOutcome::ok(json!(tool))
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+    }
+
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Leaf(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl LeafToolSourceExecutor for MutableAdmissionSource {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!(call.name())).into()
+    }
+
+    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
+        false
     }
 }
 
@@ -245,13 +271,26 @@ impl ToolSourceExecutor for RoutedAdmissionSource {
         None
     }
 
-    async fn execute(
+    async fn prepare_tool_call(
         &self,
-        _tool: &str,
-        _args: &serde_json::Value,
-        _context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        ToolOutcome::ok(json!(self.result))
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
+    }
+
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Leaf(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl LeafToolSourceExecutor for RoutedAdmissionSource {
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!(self.result)).into()
+    }
+
+    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
+        false
     }
 }
 
@@ -269,8 +308,35 @@ impl ToolProvider for RoutedProvider {
         None
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(json!(self.result))
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!(self.result)).into()
+    }
+}
+
+/// Execute a leaf call through the registry's single execution seam, resolving
+/// the pinned manifest by id first. The projection asserts the outcome carries
+/// no declared intents before unwrapping the completed result.
+async fn execute_leaf_by_id(
+    registry: &ToolRegistry,
+    tool_id: &ToolId,
+    args: &serde_json::Value,
+    context: &crate::AttemptContext<'_>,
+) -> ToolOutcome {
+    let Some(manifest) = registry.resolve_manifest_by_id(tool_id) else {
+        return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
+    };
+    match registry
+        .execute(ToolCall::new(&manifest, args, context))
+        .await
+    {
+        crate::ToolAttemptOutcome::Done { result, intents } => {
+            assert!(
+                intents.is_empty(),
+                "test leaf executions declare no intents"
+            );
+            ToolOutcome::from_output(result.into_output())
+        }
+        crate::ToolAttemptOutcome::Pending(pending) => ToolOutcome::Pending(Box::new(pending)),
     }
 }
 
@@ -303,7 +369,7 @@ impl ToolProvider for ReentrantDropProvider {
         None
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         unreachable!("drop probe is never executed")
     }
 }
@@ -485,13 +551,13 @@ async fn binding_only_refresh_routes_to_the_new_source_and_fences_stale_work() {
         .upsert_source(Arc::clone(&gate) as Arc<dyn ToolSourceExecutor>)
         .expect("gate source admission");
 
-    let initial = registry
-        .execute_by_id(
-            &ToolId::from("tool:alpha"),
-            &json!({}),
-            &test_attempt_context(),
-        )
-        .await;
+    let initial = execute_leaf_by_id(
+        &registry,
+        &ToolId::from("tool:alpha"),
+        &json!({}),
+        &test_attempt_context(),
+    )
+    .await;
     assert_eq!(initial.value_for_projection(), json!("source-a"));
     let before = registry.export_state();
     let write_revision = registry.inner.read_recover().write_revision;
@@ -522,13 +588,13 @@ async fn binding_only_refresh_routes_to_the_new_source_and_fences_stale_work() {
         write_revision + 1,
         "a private binding update must advance the write fence"
     );
-    let result = registry
-        .execute_by_id(
-            &ToolId::from("tool:alpha"),
-            &json!({}),
-            &test_attempt_context(),
-        )
-        .await;
+    let result = execute_leaf_by_id(
+        &registry,
+        &ToolId::from("tool:alpha"),
+        &json!({}),
+        &test_attempt_context(),
+    )
+    .await;
     assert_eq!(result.value_for_projection(), json!("source-b"));
 }
 
@@ -544,13 +610,13 @@ async fn identical_context_overlay_routes_to_the_context_provider() {
 
     assert_eq!(composed.generation(), before.generation());
     assert_eq!(composed.export_state().entries(), before.entries());
-    let result = composed
-        .execute_by_id(
-            &ToolId::from("tool:alpha"),
-            &json!({}),
-            &test_attempt_context(),
-        )
-        .await;
+    let result = execute_leaf_by_id(
+        &composed,
+        &ToolId::from("tool:alpha"),
+        &json!({}),
+        &test_attempt_context(),
+    )
+    .await;
     assert_eq!(result.value_for_projection(), json!("context"));
 }
 

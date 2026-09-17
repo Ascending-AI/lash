@@ -41,7 +41,7 @@ impl ToolProvider for GrantProbeTools {
         tool_id == self.definition.id() && matches!(self.mode, GrantProbeMode::PendingWithKey)
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         self.observed_execution_bindings
             .lock_recover()
@@ -49,14 +49,15 @@ impl ToolProvider for GrantProbeTools {
         match self.mode {
             GrantProbeMode::PendingWithKey => {
                 call.context.completion_key().expect("completion key");
-                ToolOutcome::pending(crate::PendingCompletion::new())
+                crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new())
             }
             GrantProbeMode::AlwaysRetryable => ToolOutcome::retryable_failure(
                 crate::ToolFailureClass::External,
                 "transient",
                 "transient granted failure",
                 Some(0),
-            ),
+            )
+            .into(),
             GrantProbeMode::InlineAttachment => {
                 ToolOutcome::from_output(crate::ToolCallOutput::success_tool_value(
                     crate::ToolValue::Attachment(crate::AttachmentSource::inline(
@@ -64,6 +65,7 @@ impl ToolProvider for GrantProbeTools {
                         b"granted attachment bytes".to_vec(),
                     )),
                 ))
+                .into()
             }
         }
     }
@@ -88,9 +90,9 @@ impl ToolProvider for RenamedPreparationTools {
         Ok(prepared)
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolOutcome::ok(json!("must not execute"))
+        ToolOutcome::ok(json!("must not execute")).into()
     }
 }
 

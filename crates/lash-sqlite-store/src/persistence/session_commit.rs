@@ -795,7 +795,8 @@ impl SessionCommitStore for Store {
                                 Some(claim) => tx.execute(
                                     &format!(
                                         "UPDATE pending_turn_inputs
-                                         SET {TURN_INPUT_SETTLEMENT_ASSIGNMENTS}
+                                         SET state = ?3,
+                                             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
                                          WHERE session_id = ?1
                                            AND input_id = ?2
                                            AND claim_id = ?4
@@ -812,7 +813,8 @@ impl SessionCommitStore for Store {
                                 None => tx.execute(
                                     &format!(
                                         "UPDATE pending_turn_inputs
-                                         SET {TURN_INPUT_SETTLEMENT_ASSIGNMENTS}
+                                         SET state = ?3,
+                                             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
                                          WHERE session_id = ?1
                                            AND input_id = ?2
                                            AND claim_id IS NULL
@@ -911,15 +913,13 @@ impl SessionCommitStore for Store {
                         let deferred_ingress = encode_json(&deferred.ingress())?;
                         let mut stmt = tx
                             .prepare(
-                                "UPDATE pending_turn_inputs
-                                 SET state = ?3,
-                                     ingress_json = COALESCE(?4, ingress_json),
-                                     claim_id = NULL,
-                                     claim_owner_id = NULL,
-                                     claim_owner_incarnation_id = NULL,
-                                     claim_token = NULL,
-                                     claim_session_lease_generation = 0
-                                 WHERE session_id = ?1 AND input_id = ?2",
+                                &format!(
+                                    "UPDATE pending_turn_inputs
+                                     SET state = ?3,
+                                         ingress_json = COALESCE(?4, ingress_json),
+                                         {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+                                     WHERE session_id = ?1 AND input_id = ?2"
+                                ),
                             )
                             .map_err(sqlite_error)?;
                         for (input_id, payload) in input_ids {

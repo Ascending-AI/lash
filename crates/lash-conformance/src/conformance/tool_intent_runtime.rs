@@ -31,11 +31,7 @@ impl crate::ToolProvider for SignalIntentProvider {
         (name == "conformance_signal_intent").then(|| Arc::new(signal_intent_tool().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        panic!("the signal-intent conformance law must use AttemptContext")
-    }
-
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.context.session_id(), self.session_id);
         crate::ToolAttemptOutcome::done(

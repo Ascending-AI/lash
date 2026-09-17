@@ -395,15 +395,7 @@ async fn scripted_server_round_trips_sampling_elicitation_roots_and_change_notif
         .await
         .expect("connect scripted MCP server");
 
-    let provider = McpToolProvider::new(Arc::clone(factory.pool()));
-    let tool_name = depth_tool_name();
-    let result = provider
-        .execute(lash_core::ToolCall {
-            name: &tool_name,
-            args: &json!({}),
-            context: &lash_core::testing::mock_attempt_context(),
-        })
-        .await;
+    let result = execute_depth_tool(&factory).await;
     assert!(
         result.is_success(),
         "nested client requests complete: {result:?}"
@@ -631,13 +623,22 @@ async fn advertised_url_elicitation_routes_its_completion_notification() {
 
 async fn execute_depth_tool(factory: &McpPluginFactory) -> lash_core::ToolOutcome {
     let tool_name = depth_tool_name();
-    McpToolProvider::new(Arc::clone(factory.pool()))
-        .execute(lash_core::ToolCall {
-            name: &tool_name,
-            args: &json!({}),
-            context: &lash_core::testing::mock_attempt_context(),
-        })
-        .await
+    let provider = McpToolProvider::new(Arc::clone(factory.pool()));
+    let manifest = provider
+        .resolve_manifest(&tool_name)
+        .expect("depth tool manifest resolves");
+    let attempt = provider
+        .execute(lash_core::ToolCall::new(
+            &manifest,
+            &json!({}),
+            &lash_core::testing::mock_attempt_context(),
+        ))
+        .await;
+    let lash_core::ToolAttemptOutcome::Done { result, intents } = attempt else {
+        panic!("resident MCP calls complete inline")
+    };
+    assert!(intents.is_empty());
+    lash_core::ToolOutcome::from_output(result.into_output())
 }
 
 fn scripted_servers(trace: &std::path::Path, scenario: &str) -> BTreeMap<String, McpServerConfig> {

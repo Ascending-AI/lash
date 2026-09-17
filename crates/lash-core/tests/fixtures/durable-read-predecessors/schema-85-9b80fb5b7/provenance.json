@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 85,
+  "source_commit": "9b80fb5b7",
+  "relationship": "FIG-3262 widened-claim-identity fixture bytes immediately before the FIG-3263 affected-input child-table regeneration",
+  "artifacts": {
+    "postgres-expected.json": "be0827f861b936f6013c982b718aa2fa2a47ceb6e65b84e1a998d3bba0ccfee3",
+    "sqlite-expected.json": "7b12c2115da33085633d83f15c6e9f952572b637d3f85d60cdad62a29b06e451"
+  }
+}

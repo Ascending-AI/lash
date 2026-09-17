@@ -13,7 +13,7 @@ impl EventSequenceStep {
             .processes
             .iter()
             .filter_map(|(id, process)| {
-                process.expected_record.as_ref().map(|record| {
+                process.expected().map(|record| {
                     (
                         id.clone(),
                         process.wake_target.clone(),
@@ -64,7 +64,7 @@ impl EventSequenceStep {
         {
             return;
         }
-        if let Some(record) = process.expected_record.as_mut() {
+        if let Some(record) = process.expected_mut() {
             self.advance(record);
         }
     }
@@ -75,7 +75,7 @@ impl EventSequenceStep {
                 && let Some(record) = model
                     .processes
                     .get(&id)
-                    .and_then(|process| process.expected_record.as_ref())
+                    .and_then(|process| process.expected())
                 && record.last_event_sequence > previous_sequence
             {
                 let floor = model.event_sequence_floors.entry((target, id)).or_default();
@@ -160,8 +160,7 @@ mod floor_tests {
         assert_eq!(actual, retained + 1);
         assert_eq!(
             scenario.model.processes[&id]
-                .expected_record
-                .as_ref()
+                .expected()
                 .unwrap()
                 .last_event_sequence,
             actual

@@ -16,11 +16,11 @@ use generated_prefix::generated_prefix;
 use lash_sansio::{ProcessId, SessionId};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
-use run_shape::{RunShape, RunShapeTotals};
+use run_shape::{RunShape, RunShapeCounter, RunShapeTotals};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::Arc;
 const PROCESS_COUNT: u8 = 3;
 const SESSION_COUNT: u8 = 2;
 const DEFAULT_CASES: u32 = 32;
@@ -164,17 +164,32 @@ struct GeneratedCase {
     operations: Vec<StoreContractOp>,
 }
 
+/// The lifecycle of a modeled process: the only three legal combinations of
+/// the old `base`/`expected_record`/`tombstoned` triple.
+#[derive(Clone, Debug, Default)]
+enum ProcessLifecycle {
+    /// Never registered, or only touched by operations that did not spawn it.
+    #[default]
+    Absent,
+    /// Registered and retained: `base` is the record the fold law replays
+    /// events onto, `expected` is the independently derived projection.
+    Live {
+        base: Box<ProcessRecord>,
+        expected: Box<ProcessRecord>,
+    },
+    /// Pruned to a tombstone; a later register may reuse the row.
+    Tombstoned,
+}
+
 #[derive(Clone, Debug, Default)]
 struct ModelProcess {
-    base: Option<ProcessRecord>,
-    expected_record: Option<ProcessRecord>,
+    lifecycle: ProcessLifecycle,
     wake_target: Option<SessionId>,
     observers: BTreeSet<SessionId>,
     lifecycle_replay_keys: BTreeSet<String>,
     current_authority: Option<ProcessExecutionWriteAuthority>,
     superseded_authorities: Vec<ProcessExecutionWriteAuthority>,
     leases: Vec<ProcessLease>,
-    tombstoned: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -205,17 +220,41 @@ impl ReferenceModel {
 }
 
 impl ModelProcess {
+    fn is_tombstoned(&self) -> bool {
+        matches!(self.lifecycle, ProcessLifecycle::Tombstoned)
+    }
+
+    fn is_live(&self) -> bool {
+        matches!(self.lifecycle, ProcessLifecycle::Live { .. })
+    }
+
+    fn expected(&self) -> Option<&ProcessRecord> {
+        match &self.lifecycle {
+            ProcessLifecycle::Live { expected, .. } => Some(expected.as_ref()),
+            _ => None,
+        }
+    }
+
+    fn expected_mut(&mut self) -> Option<&mut ProcessRecord> {
+        match &mut self.lifecycle {
+            ProcessLifecycle::Live { expected, .. } => Some(expected.as_mut()),
+            _ => None,
+        }
+    }
+
     fn reset_to_tombstone(&mut self) {
         *self = Self {
-            tombstoned: true,
+            lifecycle: ProcessLifecycle::Tombstoned,
             ..Self::default()
         };
     }
 
     fn install_fresh(&mut self, record: ProcessRecord) {
         *self = Self {
-            base: Some(record.clone()),
-            expected_record: Some(record),
+            lifecycle: ProcessLifecycle::Live {
+                base: Box::new(record.clone()),
+                expected: Box::new(record),
+            },
             ..Self::default()
         };
     }
@@ -304,11 +343,11 @@ where
                 let handles = make(case.seed, "prop-runtime-session".to_string()).await;
                 let shape = replay_case(handles, &case.operations).await?;
                 prop_assert!(
-                    shape.consumes_committed > 0,
+                    shape[RunShapeCounter::ConsumesCommitted] > 0,
                     "generated alphabet starvation: case committed no wake consumes"
                 );
                 prop_assert!(
-                    shape.out_of_order_states > 0,
+                    shape[RunShapeCounter::OutOfOrderStates] > 0,
                     "generated alphabet starvation: case reached no out-of-order settlement state"
                 );
                 runner_shape_totals.add(shape);
@@ -326,20 +365,8 @@ where
         );
     }
     eprintln!(
-        "store-contract run shape ({backend}, cases={cases}): enqueues_committed={} consumes_committed={} out_of_order_states={} spawns={} terminal_transitions={} tail_terminal_transitions={} tail_prune_ops={} prune_ops_with_effect={} tail_prune_ops_with_effect={}",
-        shape_totals.enqueues_committed.load(Ordering::Relaxed),
-        shape_totals.consumes_committed.load(Ordering::Relaxed),
-        shape_totals.out_of_order_states.load(Ordering::Relaxed),
-        shape_totals.spawns.load(Ordering::Relaxed),
-        shape_totals.terminal_transitions.load(Ordering::Relaxed),
-        shape_totals
-            .tail_terminal_transitions
-            .load(Ordering::Relaxed),
-        shape_totals.tail_prune_ops.load(Ordering::Relaxed),
-        shape_totals.prune_ops_with_effect.load(Ordering::Relaxed),
-        shape_totals
-            .tail_prune_ops_with_effect
-            .load(Ordering::Relaxed),
+        "store-contract run shape ({backend}, cases={cases}): {}",
+        shape_totals.report()
     );
 }
 
@@ -349,26 +376,23 @@ async fn replay_case(
 ) -> Result<RunShape, TestCaseError> {
     let mut scenario = StoreContractScenario::new(handles);
     for (step, operation) in operations.iter().enumerate() {
-        let terminal_transitions_before = scenario.shape.terminal_transitions;
-        let prune_ops_with_effect_before = scenario.shape.prune_ops_with_effect;
+        let terminal_transitions_before = scenario.shape[RunShapeCounter::TerminalTransitions];
+        let prune_ops_with_effect_before = scenario.shape[RunShapeCounter::PruneOpsWithEffect];
         scenario.apply(operation).await.map_err(|reason| {
             TestCaseError::fail(format!("step {step} {operation:?}: {reason}"))
         })?;
         if step >= GENERATED_PREFIX_OPS {
-            scenario.shape.tail_terminal_transitions =
-                scenario.shape.tail_terminal_transitions.saturating_add(
-                    scenario
-                        .shape
-                        .terminal_transitions
+            scenario.shape[RunShapeCounter::TailTerminalTransitions] =
+                scenario.shape[RunShapeCounter::TailTerminalTransitions].saturating_add(
+                    scenario.shape[RunShapeCounter::TerminalTransitions]
                         .saturating_sub(terminal_transitions_before),
                 );
             if matches!(operation, StoreContractOp::Prune { .. }) {
-                scenario.shape.tail_prune_ops = scenario.shape.tail_prune_ops.saturating_add(1);
-                scenario.shape.tail_prune_ops_with_effect =
-                    scenario.shape.tail_prune_ops_with_effect.saturating_add(
-                        scenario
-                            .shape
-                            .prune_ops_with_effect
+                scenario.shape[RunShapeCounter::TailPruneOps] =
+                    scenario.shape[RunShapeCounter::TailPruneOps].saturating_add(1);
+                scenario.shape[RunShapeCounter::TailPruneOpsWithEffect] =
+                    scenario.shape[RunShapeCounter::TailPruneOpsWithEffect].saturating_add(
+                        scenario.shape[RunShapeCounter::PruneOpsWithEffect]
                             .saturating_sub(prune_ops_with_effect_before),
                     );
             }
@@ -608,13 +632,12 @@ async fn apply_operation(
                 // The store permits registry-row reuse after prune. The wake layer separately
                 // rejects an unrecorded sequence at or below its surviving allocation floor.
                 // Keep this generated registry lifecycle to pin the narrower store behavior.
-                if entry.base.is_none() || entry.tombstoned {
+                if !entry.is_live() {
                     entry.install_fresh(record);
                     entry.wake_target = target;
                     model.process_counts.record_spawn();
-                    shape.spawns = shape.spawns.saturating_add(1);
-                } else {
-                    entry.base.get_or_insert(record);
+                    shape[RunShapeCounter::Spawns] =
+                        shape[RunShapeCounter::Spawns].saturating_add(1);
                 }
             }
         }
@@ -638,7 +661,7 @@ async fn apply_operation(
                 if let Some(previous) = entry.current_authority.replace(authority) {
                     entry.superseded_authorities.push(previous);
                 }
-                if let Some(expected) = entry.expected_record.as_mut() {
+                if let Some(expected) = entry.expected_mut() {
                     event_sequences.advance(expected);
                     expected.first_started = Some(Box::new(started));
                 }
@@ -663,7 +686,7 @@ async fn apply_operation(
             )
             .await?;
             if result.is_ok()
-                && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
+                && let Some(expected) = model.process_mut(&id).expected_mut()
             {
                 if expected.wait.as_ref() != Some(&wait_state(&id)) {
                     event_sequences.advance(expected);
@@ -691,7 +714,7 @@ async fn apply_operation(
             )
             .await?;
             if result.is_ok()
-                && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
+                && let Some(expected) = model.process_mut(&id).expected_mut()
             {
                 if expected.wait.take().is_some() {
                     event_sequences.advance(expected);
@@ -714,7 +737,7 @@ async fn apply_operation(
                 .set_external_ref(&id, external_ref.clone())
                 .await
                 .is_ok()
-                && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
+                && let Some(expected) = model.process_mut(&id).expected_mut()
                 && expected.external_ref.is_none()
             {
                 event_sequences.advance(expected);
@@ -766,7 +789,7 @@ async fn apply_operation(
             )
             .await?;
             if let Ok(appended) = result {
-                if let Some(expected) = model.process_mut(&id).expected_record.as_mut() {
+                if let Some(expected) = model.process_mut(&id).expected_mut() {
                     apply_process_event_projection(expected, &appended.event)
                         .map_err(|error| error.to_string())?;
                     expected.last_event_sequence = appended.last_event_sequence;
@@ -799,7 +822,7 @@ async fn apply_operation(
                         ),
                     )
                     .await
-                && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
+                && let Some(expected) = model.process_mut(&id).expected_mut()
             {
                 apply_process_event_projection(expected, &appended.event)
                     .map_err(|error| error.to_string())?;
@@ -824,8 +847,9 @@ async fn apply_operation(
                     .complete_process(&id, output.clone(), authority)
                     .await
                 {
-                    shape.terminal_transitions = shape.terminal_transitions.saturating_add(1);
-                    if let Some(expected) = model.process_mut(&id).expected_record.as_mut() {
+                    shape[RunShapeCounter::TerminalTransitions] =
+                        shape[RunShapeCounter::TerminalTransitions].saturating_add(1);
+                    if let Some(expected) = model.process_mut(&id).expected_mut() {
                         event_sequences.advance(expected);
                         expected.wait = None;
                         let settled = terminal_outcome_under_standing_cancel(
@@ -923,7 +947,7 @@ async fn apply_operation(
             let retained = model
                 .processes
                 .get(&id)
-                .is_some_and(|process| process.expected_record.is_some());
+                .is_some_and(|process| process.expected().is_some());
             let outcome = handles
                 .registry
                 .claim_process_lease(
@@ -1040,7 +1064,8 @@ async fn apply_operation(
             *sequence = sequence
                 .checked_add(1)
                 .expect("generated enqueue sequence must remain in range");
-            shape.enqueues_committed = shape.enqueues_committed.saturating_add(1);
+            shape[RunShapeCounter::EnqueuesCommitted] =
+                shape[RunShapeCounter::EnqueuesCommitted].saturating_add(1);
         }
         StoreContractOp::ConsumeWake {
             selection,
@@ -1061,9 +1086,11 @@ async fn apply_operation(
                     .get_mut(&key)
                     .expect("selected live wake group exists");
                 wakes.remove(&sequence);
-                shape.consumes_committed = shape.consumes_committed.saturating_add(1);
+                shape[RunShapeCounter::ConsumesCommitted] =
+                    shape[RunShapeCounter::ConsumesCommitted].saturating_add(1);
                 if lower_live {
-                    shape.out_of_order_states = shape.out_of_order_states.saturating_add(1);
+                    shape[RunShapeCounter::OutOfOrderStates] =
+                        shape[RunShapeCounter::OutOfOrderStates].saturating_add(1);
                 }
             }
         }
@@ -1084,7 +1111,8 @@ async fn apply_operation(
                 .map_err(|error| error.to_string())?;
             model.process_counts.record_pruned(report.pruned_processes);
             if report.pruned_processes > 0 {
-                shape.prune_ops_with_effect = shape.prune_ops_with_effect.saturating_add(1);
+                shape[RunShapeCounter::PruneOpsWithEffect] =
+                    shape[RunShapeCounter::PruneOpsWithEffect].saturating_add(1);
             }
             for (id, process) in &mut model.processes {
                 let pruned = matches!(
@@ -1097,17 +1125,14 @@ async fn apply_operation(
                     model
                         .wake_deliveries
                         .retain(|_, delivery| delivery.wake.process_id != *id);
-                    if !process.tombstoned
-                        && !process
-                            .expected_record
-                            .as_ref()
-                            .is_some_and(ProcessRecord::is_terminal)
+                    if !process.is_tombstoned()
+                        && !process.expected().is_some_and(ProcessRecord::is_terminal)
                     {
                         return Err(format!(
                             "Prune/tombstone safety: live process `{id}` was pruned"
                         ));
                     }
-                    if !process.tombstoned {
+                    if !process.is_tombstoned() {
                         process.reset_to_tombstone();
                     }
                 }
@@ -1381,7 +1406,10 @@ async fn assert_fold_law(
         let Some(base) = model
             .processes
             .get(&id)
-            .and_then(|process| process.base.clone())
+            .and_then(|process| match &process.lifecycle {
+                ProcessLifecycle::Live { base, .. } => Some(base.as_ref().clone()),
+                _ => None,
+            })
         else {
             continue;
         };

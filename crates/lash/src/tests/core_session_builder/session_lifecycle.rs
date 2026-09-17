@@ -234,8 +234,10 @@ impl lash_core::ToolProvider for CompileSurfaceToolProvider {
             .then(|| Arc::new(compile_surface_tool_definition(&self.tool_name).contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async { lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })) })
+            .await
+            .into()
     }
 }
 

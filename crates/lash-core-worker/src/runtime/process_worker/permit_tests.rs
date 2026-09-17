@@ -117,7 +117,7 @@ async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
             (name == "park_permit").then(|| Arc::new(park_permit_tool_definition().contract()))
         }
 
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
             let _ = self.started.send(()).await;
             // Exactly what awaiting a nested process does: park the run's
             // execution slot for the duration of the wait.

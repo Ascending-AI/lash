@@ -392,28 +392,44 @@ fn queued_work_checks_reject_illegal_vocabulary_and_mixed_claim_correlation() {
 }
 
 #[test]
-fn pending_turn_input_claim_id_and_token_must_be_paired() {
+fn pending_turn_input_claim_identity_must_be_all_or_none() {
     let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");
     connection
         .execute_batch(crate::schema::SCHEMA)
         .expect("apply SQLite schema to CHECK witness");
-    for fields in ["claim_id", "claim_token"] {
+    // Any strict subset of the four-column claim identity must be rejected —
+    // including a claim id/token pair with no owner, the state the widened
+    // CHECK exists to make unrepresentable.
+    for fields in [
+        "claim_id",
+        "claim_owner_id",
+        "claim_owner_incarnation_id",
+        "claim_token",
+        "claim_id, claim_token",
+        "claim_id, claim_owner_id, claim_token",
+        "claim_owner_id, claim_owner_incarnation_id",
+    ] {
+        let values = fields
+            .split(',')
+            .map(|_| "'half'")
+            .collect::<Vec<_>>()
+            .join(", ");
         let error = connection
             .execute(
                 &format!(
                     "INSERT INTO pending_turn_inputs (
                          input_id, session_id, ingress_json, state, input_json,
                          enqueued_at_ms, {fields}
-                     ) VALUES ('input-{fields}', 'session', '{{\"scope\":\"next_turn\"}}',
-                               'deferred_next_turn', '{{}}', 0, 'half')"
+                     ) VALUES ('input', 'session', '{{\"scope\":\"next_turn\"}}',
+                               'deferred_next_turn', '{{}}', 0, {values})"
                 ),
                 [],
             )
-            .expect_err("a half-populated pending-input claim must be rejected");
+            .expect_err("a partially populated pending-input claim must be rejected");
         assert!(
             error
                 .to_string()
-                .contains("ck_pending_turn_inputs_claim_id_token_all_or_none"),
+                .contains("ck_pending_turn_inputs_claim_identity_all_or_none"),
             "SQLite reported the wrong CHECK: {error}"
         );
     }

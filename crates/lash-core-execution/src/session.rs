@@ -637,8 +637,8 @@ mod tool_catalog_cache_tests {
             ))
         }
 
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-            crate::ToolOutcome::ok(serde_json::json!("resident"))
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            crate::ToolOutcome::ok(serde_json::json!("resident")).into()
         }
     }
 
@@ -730,21 +730,15 @@ mod tool_catalog_cache_tests {
             ))
         }
 
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
             self.executions.fetch_add(1, Ordering::SeqCst);
-            crate::ToolOutcome::ok(serde_json::json!(self.label))
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            crate::ToolOutcome::ok(serde_json::json!(format!("attempt_{}", self.label))).into()
         }
 
         fn attempt_may_defer(&self, _tool_id: &crate::ToolId) -> bool {
             self.defer_queries.fetch_add(1, Ordering::SeqCst);
             self.label == "route_a"
-        }
-
-        async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-            self.attempts.fetch_add(1, Ordering::SeqCst);
-            crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::ok(
-                serde_json::json!(format!("attempt_{}", self.label)),
-            ))
         }
     }
 
@@ -767,8 +761,8 @@ mod tool_catalog_cache_tests {
                 .then(|| Arc::new(Self::definition(name).contract()))
         }
 
-        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-            crate::ToolOutcome::ok(serde_json::json!(call.name))
+        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            crate::ToolOutcome::ok(serde_json::json!(call.name())).into()
         }
     }
 
@@ -1060,41 +1054,33 @@ mod tool_catalog_cache_tests {
             })
             .await
             .expect("the old request prepares through provider A");
-        let old_result = old
+        let tool_id = crate::ToolId::from("tool:reassigned");
+        let attempt_context = crate::testing::mock_attempt_context();
+        let old_manifest = old
             .tools()
-            .execute_by_id(
-                &crate::ToolId::from("tool:reassigned"),
+            .resolve_manifest_by_id(&tool_id)
+            .expect("the old surface resolves the reassigned manifest");
+        let old_attempt = old
+            .tools()
+            .execute(crate::ToolCall::new(
+                &old_manifest,
                 &serde_json::json!({ "route_a": "old" }),
-                &crate::testing::mock_attempt_context(),
-            )
+                &attempt_context,
+            ))
             .await;
+        let crate::ToolAttemptOutcome::Done { result, intents } = old_attempt else {
+            panic!("provider A returns a completed attempt")
+        };
+        assert!(intents.is_empty());
         assert_eq!(
-            old_result.value_for_projection(),
-            serde_json::json!("route_a")
+            result.into_output().value_for_projection(),
+            serde_json::json!("attempt_route_a")
         );
         assert_eq!(a_prepares.load(Ordering::SeqCst), 1);
         assert_eq!(b_prepares.load(Ordering::SeqCst), 0);
         assert_eq!(a_executions.load(Ordering::SeqCst), 1);
         assert_eq!(b_executions.load(Ordering::SeqCst), 0);
-        assert!(
-            old.tools()
-                .attempt_may_defer(&crate::ToolId::from("tool:reassigned"))
-        );
-        let old_attempt = old
-            .tools()
-            .execute_attempt_by_id(
-                &crate::ToolId::from("tool:reassigned"),
-                &serde_json::json!({ "route_a": "old" }),
-                &crate::testing::mock_attempt_context(),
-            )
-            .await;
-        let crate::ToolAttemptOutcome::Done { result, .. } = old_attempt else {
-            panic!("provider A returns a completed attempt")
-        };
-        assert_eq!(
-            result.into_output().value_for_projection(),
-            serde_json::json!("attempt_route_a")
-        );
+        assert!(old.tools().attempt_may_defer(&tool_id));
         assert_eq!(a_defer_queries.load(Ordering::SeqCst), 1);
         assert_eq!(b_defer_queries.load(Ordering::SeqCst), 0);
         assert_eq!(a_attempts.load(Ordering::SeqCst), 1);
@@ -1114,42 +1100,31 @@ mod tool_catalog_cache_tests {
             })
             .await
             .expect("the fresh request prepares through provider B");
-        let fresh_result = fresh
+        let fresh_manifest = fresh
             .tools()
-            .execute_by_id(
-                &crate::ToolId::from("tool:reassigned"),
+            .resolve_manifest_by_id(&tool_id)
+            .expect("the fresh surface resolves the reassigned manifest");
+        let fresh_attempt = fresh
+            .tools()
+            .execute(crate::ToolCall::new(
+                &fresh_manifest,
                 &serde_json::json!({ "route_b": "fresh" }),
-                &crate::testing::mock_attempt_context(),
-            )
+                &attempt_context,
+            ))
             .await;
+        let crate::ToolAttemptOutcome::Done { result, intents } = fresh_attempt else {
+            panic!("provider B returns a completed attempt")
+        };
+        assert!(intents.is_empty());
         assert_eq!(
-            fresh_result.value_for_projection(),
-            serde_json::json!("route_b")
+            result.into_output().value_for_projection(),
+            serde_json::json!("attempt_route_b")
         );
         assert_eq!(a_prepares.load(Ordering::SeqCst), 1);
         assert_eq!(b_prepares.load(Ordering::SeqCst), 1);
         assert_eq!(a_executions.load(Ordering::SeqCst), 1);
         assert_eq!(b_executions.load(Ordering::SeqCst), 1);
-        assert!(
-            !fresh
-                .tools()
-                .attempt_may_defer(&crate::ToolId::from("tool:reassigned"))
-        );
-        let fresh_attempt = fresh
-            .tools()
-            .execute_attempt_by_id(
-                &crate::ToolId::from("tool:reassigned"),
-                &serde_json::json!({ "route_b": "fresh" }),
-                &crate::testing::mock_attempt_context(),
-            )
-            .await;
-        let crate::ToolAttemptOutcome::Done { result, .. } = fresh_attempt else {
-            panic!("provider B returns a completed attempt")
-        };
-        assert_eq!(
-            result.into_output().value_for_projection(),
-            serde_json::json!("attempt_route_b")
-        );
+        assert!(!fresh.tools().attempt_may_defer(&tool_id));
         assert_eq!(a_defer_queries.load(Ordering::SeqCst), 1);
         assert_eq!(b_defer_queries.load(Ordering::SeqCst), 1);
         assert_eq!(a_attempts.load(Ordering::SeqCst), 1);

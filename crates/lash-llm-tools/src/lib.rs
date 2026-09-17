@@ -157,12 +157,12 @@ impl LlmToolsProvider {
 
 #[async_trait]
 impl StaticToolExecute for LlmToolsProvider {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let result = match call.name {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let result = match call.name() {
             "llm_query" => self.llm_query(call.args, call.context).await,
-            _ => Err(format!("Unknown tool: {}", call.name)),
+            _ => Err(format!("Unknown tool: {}", call.name())),
         };
-        finalise_tool_result(result)
+        finalise_tool_result(result).into()
     }
 }
 
@@ -326,6 +326,31 @@ mod tests {
     use lash_core::plugin::{PluginError, SessionHandle};
     use lash_core::runtime::RuntimeSessionState;
     use lash_core::{SessionCreateRequest, SessionSnapshot, ToolCall};
+
+    /// Run `llm_query` through the single `execute` seam and project the
+    /// attempt outcome to the plain outcome these assertions inspect,
+    /// asserting the tool declares no leaf intents.
+    async fn run_llm_query(
+        provider: &StaticToolProvider<LlmToolsProvider>,
+        args: &serde_json::Value,
+        context: &lash_core::AttemptContext<'_>,
+    ) -> lash_core::ToolOutcome {
+        let manifest = provider
+            .resolve_manifest("llm_query")
+            .expect("llm_query manifest resolves");
+        match provider
+            .execute(ToolCall::new(&manifest, args, context))
+            .await
+        {
+            lash_core::ToolAttemptOutcome::Done { result, intents } => {
+                assert!(intents.is_empty(), "llm_query declares no intents");
+                lash_core::ToolOutcome::from_output(result.into_output())
+            }
+            lash_core::ToolAttemptOutcome::Pending(pending) => {
+                lash_core::ToolOutcome::Pending(Box::new(pending))
+            }
+        }
+    }
     use lash_sansio::sync::MutexExt;
 
     fn model_spec(model: &str, variant: Option<&str>) -> lash_core::ModelSpec {
@@ -477,13 +502,7 @@ mod tests {
             "inputs": { "log": "failed" },
             "output": { "root_cause": "str", "confidence": "float" }
         });
-        let result = provider
-            .execute(ToolCall {
-                name: "llm_query",
-                args: &args,
-                context: &context,
-            })
-            .await;
+        let result = run_llm_query(&provider, &args, &context).await;
 
         assert!(result.is_success(), "{:?}", result.value_for_projection());
         assert_eq!(
@@ -539,13 +558,7 @@ mod tests {
         let context = direct_completion_attempt_context(manager.clone());
 
         let args = json!({ "task": "answer directly" });
-        let result = provider
-            .execute(ToolCall {
-                name: "llm_query",
-                args: &args,
-                context: &context,
-            })
-            .await;
+        let result = run_llm_query(&provider, &args, &context).await;
 
         assert!(result.is_success(), "{:?}", result.value_for_projection());
         let requests = manager.requests.lock_recover();
@@ -573,13 +586,7 @@ mod tests {
         let context = direct_completion_attempt_context(manager);
 
         let args = json!({ "task": "answer from missing evidence" });
-        let result = provider
-            .execute(ToolCall {
-                name: "llm_query",
-                args: &args,
-                context: &context,
-            })
-            .await;
+        let result = run_llm_query(&provider, &args, &context).await;
 
         assert!(!result.is_success());
         assert_eq!(

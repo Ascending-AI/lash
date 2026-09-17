@@ -56,13 +56,12 @@ pub async fn execute_once<'run>(
     grant: Option<&crate::ToolExecutionGrant>,
 ) -> crate::ToolAttemptOutcome {
     let Some(authority) = AttemptAuthority::resolve(context, &prepared.tool_id, grant) else {
-        return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::failure(
-            crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Unavailable,
-                "tool_unavailable",
-                "Tool is unavailable in this session",
-            ),
-        ));
+        return ToolOutcome::failure(crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Unavailable,
+            "tool_unavailable",
+            "Tool is unavailable in this session",
+        ))
+        .into();
     };
     Box::pin(execute_once_with_authority(
         context,
@@ -80,26 +79,28 @@ async fn execute_once_with_authority<'run>(
     tool_context: ToolContext<'run>,
 ) -> crate::ToolAttemptOutcome {
     match build_attempt_context(context, prepared, &tool_context, authority.grant()).await {
-        Ok(attempt_context) => execute_attempt_body(context, prepared, &attempt_context).await,
-        Err(result) => crate::ToolAttemptOutcome::from_tool_result(result),
+        Ok(attempt_context) => {
+            execute_attempt_body(context, authority.manifest(), prepared, &attempt_context).await
+        }
+        Err(result) => result.into(),
     }
 }
 
 async fn execute_attempt_body(
     context: &ToolDispatchContext<'_>,
+    manifest: &crate::ToolManifest,
     prepared: &PreparedToolCall,
     attempt_context: &crate::AttemptContext<'_>,
 ) -> crate::ToolAttemptOutcome {
-    let body =
-        context
-            .tools
-            .execute_attempt_by_id(&prepared.tool_id, &prepared.args, attempt_context);
+    let body = context.tools.execute(crate::ToolCall::new(
+        manifest,
+        &prepared.args,
+        attempt_context,
+    ));
     std::panic::AssertUnwindSafe(body)
         .catch_unwind()
         .await
-        .unwrap_or_else(|payload| {
-            crate::ToolAttemptOutcome::from_tool_result(tool_panicked(payload))
-        })
+        .unwrap_or_else(|payload| tool_panicked(payload).into())
 }
 
 async fn build_attempt_context<'run>(

@@ -93,32 +93,36 @@ fn contract_from(
 
 struct MockTools;
 
-struct InternalProbeTools {
+struct InternalProbe {
     executed: Arc<AtomicUsize>,
 }
 
 #[async_trait::async_trait]
-impl ToolProvider for InternalProbeTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        manifests(vec![
-            test_tool("internal_probe").with_activation(crate::ToolActivation::Internal),
-        ])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        (name == "internal_probe").then(|| {
-            Arc::new(
-                test_tool("internal_probe")
-                    .with_activation(crate::ToolActivation::Internal)
-                    .contract(),
-            )
-        })
-    }
-
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+impl crate::InternalProcessToolImplementation for InternalProbe {
+    async fn execute(&self, _call: crate::InternalProcessToolCall<'_>) -> crate::ToolOutcomeDone {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolOutcome::ok(json!("internal body ran"))
+        crate::ToolOutcomeDone::ok(json!("internal body ran"))
     }
+}
+
+fn internal_probe_plugins(executed: Arc<AtomicUsize>) -> Arc<PluginSession> {
+    PluginHost::new(vec![Arc::new(StaticPluginFactory::new(
+        "test_tools",
+        crate::PluginSpec::new().with_internal_tool(crate::InternalProcessToolDef::new(
+            test_tool("internal_probe"),
+            Arc::new(InternalProbe { executed }),
+        )),
+    ))])
+    .build_session("root")
+    .expect("plugin session")
+}
+
+/// Internal-lane dispatch resolves its registration through the tool registry,
+/// which the plain leaf-dispatch fixture leaves unset.
+fn internal_probe_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContext<'static> {
+    let mut context = exact_dispatch_context_with_plugins(internal_probe_plugins(executed));
+    context.tool_registry = Some(context.plugins.tool_registry());
+    context
 }
 
 #[derive(Clone)]
@@ -156,15 +160,11 @@ impl ToolProvider for OrderedBatchIntentTools {
         contract_from(self.definitions.clone(), name)
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        panic!("ordered batch intent law uses AttemptContext")
-    }
-
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        if call.name == "intent_batch_first" {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        if call.name() == "intent_batch_first" {
             self.second_attempt_finished.notified().await;
         } else {
-            assert_eq!(call.name, "intent_batch_second");
+            assert_eq!(call.name(), "intent_batch_second");
             self.second_attempt_finished.notify_one();
         }
         let call_id = call
@@ -172,7 +172,7 @@ impl ToolProvider for OrderedBatchIntentTools {
             .tool_call_id()
             .expect("ordered batch calls carry ids");
         crate::ToolAttemptOutcome::done(
-            crate::ToolOutcomeDone::ok(json!({"completed": call.name})),
+            crate::ToolOutcomeDone::ok(json!({"completed": call.name()})),
             crate::ToolIntents::v3(
                 [0, 1]
                     .into_iter()
@@ -207,11 +207,7 @@ impl ToolProvider for BlockingAttemptIntentTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        panic!("pre-result cancellation law uses AttemptContext")
-    }
-
-    async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.entered.notify_one();
         std::future::pending().await
     }
@@ -227,11 +223,7 @@ impl ToolProvider for FixedAttemptIntentTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        panic!("fixed intent law uses AttemptContext")
-    }
-
-    async fn execute_attempt(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         crate::ToolAttemptOutcome::done(
             crate::ToolOutcomeDone::ok(json!({"provider": "recorded"})),
@@ -479,11 +471,7 @@ impl ToolProvider for RetryingIntentTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        panic!("retry intent law uses AttemptContext")
-    }
-
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let attempt = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let intents = crate::ToolIntents::v3(vec![crate::ToolIntent::EmitProcessEvent(
             crate::EmitProcessEventIntent {
@@ -519,11 +507,7 @@ impl ToolProvider for AttemptIntentTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        panic!("the legacy ToolContext entrypoint must not run for an AttemptContext provider")
-    }
-
-    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.context.session_id(), "session");
         assert_eq!(call.context.tool_call_id(), Some("attempt-intents-call"));
@@ -652,8 +636,8 @@ impl ToolProvider for MockTools {
         contract_from(vec![test_tool("alpha"), beta_tool()], name)
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        match call.name {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        (match call.name() {
             "alpha" => ToolOutcome::ok(json!("alpha")),
             "beta" => {
                 if call.args.get("value").and_then(|value| value.as_str()) == Some("fail") {
@@ -665,7 +649,8 @@ impl ToolProvider for MockTools {
                 }
             }
             other => ToolOutcome::err_fmt(format!("Unknown tool: {other}")),
-        }
+        })
+        .into()
     }
 }
 
@@ -712,9 +697,9 @@ impl ToolProvider for PendingProbeTools {
             )
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
-        match self.mode {
+        (match self.mode {
             PendingProbeMode::MissingKey => ToolOutcome::pending(crate::PendingCompletion::new()),
             PendingProbeMode::PendingWithKey => {
                 call.context.completion_key().expect("completion key");
@@ -741,7 +726,8 @@ impl ToolProvider for PendingProbeTools {
                 ))
             }
             PendingProbeMode::Done => ToolOutcome::ok(json!({ "done": true })),
-        }
+        })
+        .into()
     }
 }
 
@@ -755,13 +741,14 @@ impl ToolProvider for ParallelProbeTools {
         contract_from(vec![test_tool("probe_a"), test_tool("probe_b")], name)
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.started.fetch_add(1, Ordering::SeqCst);
         let waited = timeout(Duration::from_millis(100), self.barrier.wait()).await;
-        match waited {
-            Ok(_) => ToolOutcome::ok(json!(call.name)),
-            Err(_) => ToolOutcome::err_fmt(format!("{} did not overlap with peer", call.name)),
-        }
+        (match waited {
+            Ok(_) => ToolOutcome::ok(json!(call.name())),
+            Err(_) => ToolOutcome::err_fmt(format!("{} did not overlap with peer", call.name())),
+        })
+        .into()
     }
 }
 
@@ -780,9 +767,9 @@ impl ToolProvider for StrictMcpTools {
             .then(|| Arc::new(strict_mcp_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolOutcome::ok(json!({ "executed": true }))
+        ToolOutcome::ok(json!({ "executed": true })).into()
     }
 }
 
@@ -816,8 +803,8 @@ impl ToolProvider for ProjectionPolicyTools {
         (name == "seedy").then(|| Arc::new(projection_policy_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(json!("ok"))
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::ok(json!("ok")).into()
     }
 }
 
@@ -1078,9 +1065,9 @@ impl ToolProvider for CountingContractTools {
         (name == "beta").then(|| Arc::new(beta_tool().contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolOutcome::ok(json!("ok"))
+        ToolOutcome::ok(json!("ok")).into()
     }
 }
 
@@ -1105,14 +1092,14 @@ impl ToolProvider for ExactDispatchTools {
             .then(|| Arc::new(named_beta_tool("host_only").contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
         if let Some(bindings) = &self.observed_execution_bindings {
             bindings
                 .lock_recover()
                 .push(call.context.tool_execution_binding().clone());
         }
-        ToolOutcome::ok(json!("host"))
+        ToolOutcome::ok(json!("host")).into()
     }
 }
 
@@ -1127,9 +1114,9 @@ impl ToolProvider for HiddenDispatchTools {
         (name == "hidden").then(|| Arc::new(named_beta_tool("hidden").contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolOutcome::ok(json!("hidden"))
+        ToolOutcome::ok(json!("hidden")).into()
     }
 }
 
@@ -1143,7 +1130,7 @@ impl ToolProvider for RetryProbeTools {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.observed_attempts.lock_recover().push((
             call.context.attempt_number(),
             call.context.max_attempts(),
@@ -1151,10 +1138,10 @@ impl ToolProvider for RetryProbeTools {
         ));
         let attempt_index = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if self.cancel_on_first {
-            return ToolOutcome::cancelled("cancelled");
+            return ToolOutcome::cancelled("cancelled").into();
         }
         if attempt_index >= self.successes_after {
-            return ToolOutcome::ok(json!({ "attempt": attempt_index }));
+            return ToolOutcome::ok(json!({ "attempt": attempt_index })).into();
         }
         ToolOutcome::retryable_failure(
             crate::ToolFailureClass::External,
@@ -1162,6 +1149,7 @@ impl ToolProvider for RetryProbeTools {
             "transient failure",
             self.retry_after_ms,
         )
+        .into()
     }
 }
 

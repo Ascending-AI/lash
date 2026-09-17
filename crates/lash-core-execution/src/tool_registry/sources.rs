@@ -1,5 +1,56 @@
 use super::*;
 
+pub(super) struct InternalProcessToolSource {
+    definition: crate::InternalProcessToolDef,
+}
+
+impl InternalProcessToolSource {
+    pub(super) fn new(definition: crate::InternalProcessToolDef) -> Self {
+        Self { definition }
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolSourceExecutor for InternalProcessToolSource {
+    fn id(&self) -> &str {
+        "internal"
+    }
+
+    fn snapshot_execution_source(
+        &self,
+        _known_resident_ids: &BTreeSet<ToolId>,
+    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
+        Ok(Arc::new(Self::new(self.definition.clone())))
+    }
+
+    fn source_key(&self) -> ToolSourceKey {
+        ToolSourceKey::Internal(self.definition.manifest().id)
+    }
+
+    fn registration_kind(&self) -> ToolRegistrationKind {
+        ToolRegistrationKind::Leaf
+    }
+
+    fn advertised_tools(&self) -> Vec<ToolManifest> {
+        vec![self.definition.manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+        (self.definition.manifest().name == name).then(|| self.definition.contract())
+    }
+
+    async fn prepare_tool_call(
+        &self,
+        call: ToolPrepareCall<'_>,
+    ) -> Result<PreparedToolCall, ToolOutcome> {
+        self.definition.prepare_tool_call(call).await
+    }
+
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Internal(&self.definition)
+    }
+}
+
 pub(super) struct OrchestratingToolSource {
     definition: crate::tool_provider::orchestration::OrchestratingToolDef,
 }
@@ -41,32 +92,15 @@ impl ToolSourceExecutor for OrchestratingToolSource {
         (self.definition.manifest().name == name).then(|| self.definition.contract())
     }
 
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Orchestrating(&self.definition)
+    }
+
     async fn prepare_tool_call(
         &self,
         call: ToolPrepareCall<'_>,
     ) -> Result<PreparedToolCall, ToolOutcome> {
         self.definition.prepare_tool_call(call).await
-    }
-
-    async fn execute(
-        &self,
-        _tool: &str,
-        _args: &serde_json::Value,
-        _context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        ToolOutcome::err_fmt("orchestrating tools require direct OrchestrationContext dispatch")
-    }
-
-    async fn execute_orchestrating(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> ToolOutcome {
-        if self.definition.manifest().id != *tool_id {
-            return ToolOutcome::err_fmt(format_args!("Unknown orchestrating tool id: {tool_id}"));
-        }
-        self.definition.execute(args, context).await
     }
 }
 
@@ -232,7 +266,9 @@ impl ToolProviderSource {
             return Some((manifest.clone(), *provider_idx));
         }
         for (provider_idx, provider) in self.providers.iter().enumerate() {
-            if let Some(manifest) = provider.resolve_manifest_by_id(id) {
+            if let Some(manifest) = provider.resolve_manifest_by_id(id)
+                && manifest.id == *id
+            {
                 self.tools
                     .write_recover()
                     .insert(manifest.clone(), provider_idx);
@@ -312,71 +348,24 @@ impl ToolSourceExecutor for ToolProviderSource {
         self.providers[provider_idx].prepare_tool_call(call).await
     }
 
-    async fn execute(
-        &self,
-        tool: &str,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let Some(provider_idx) = self.provider_index_for(tool) else {
-            return ToolOutcome::err_fmt(format_args!("Unknown tool: {tool}"));
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Leaf(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl LeafToolSourceExecutor for ToolProviderSource {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        let Some(provider_idx) = self.provider_index_for_id(call.tool_id()) else {
+            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {}", call.tool_id()))
+                .into();
         };
-        self.providers[provider_idx]
-            .execute(ToolCall {
-                name: tool,
-                args,
-                context,
-            })
-            .await
+        self.providers[provider_idx].execute(call).await
     }
 
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.provider_index_for_id(tool_id)
             .is_some_and(|index| self.providers[index].attempt_may_defer(tool_id))
-    }
-
-    async fn execute_attempt_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptOutcome {
-        let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
-            return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(
-                format_args!("Unknown tool id: {tool_id}"),
-            ));
-        };
-        self.providers[provider_idx]
-            .execute_attempt_by_id(tool_id, args, context)
-            .await
-    }
-
-    async fn execute_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
-            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
-        };
-        self.providers[provider_idx]
-            .execute_by_id(tool_id, args, context)
-            .await
-    }
-
-    async fn execute_internal_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::InternalProcessContext<'_>,
-    ) -> ToolOutcome {
-        let Some(provider_idx) = self.provider_index_for_id(tool_id) else {
-            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
-        };
-        self.providers[provider_idx]
-            .execute_internal_by_id(tool_id, args, context)
-            .await
     }
 }
 
@@ -485,78 +474,27 @@ impl ToolSourceExecutor for PinnedToolProviderSource {
         route.provider.prepare_tool_call(call).await
     }
 
-    async fn execute(
-        &self,
-        tool: &str,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let Some(route) = self.route_by_name(tool) else {
-            return ToolOutcome::err_fmt(format_args!("Unknown tool: {tool}"));
+    fn execution(&self) -> ToolSourceExecution<'_> {
+        ToolSourceExecution::Leaf(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl LeafToolSourceExecutor for PinnedToolProviderSource {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        let Some(route) = self.route(call.tool_id()) else {
+            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {}", call.tool_id()))
+                .into();
         };
-        route
-            .provider
-            .execute(ToolCall {
-                name: &route.manifest.name,
-                args,
-                context,
-            })
-            .await
+        // The provider sees the pinned route manifest, not the caller's view:
+        // a curated model-facing alias must not reach the provider-facing name.
+        let provider_call = ToolCall::new(&route.manifest, call.args, call.context);
+        route.provider.execute(provider_call).await
     }
 
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {
         self.route(tool_id)
             .is_some_and(|route| route.provider.attempt_may_defer(tool_id))
-    }
-
-    async fn execute_attempt_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptOutcome {
-        let Some(route) = self.route(tool_id) else {
-            return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(
-                format_args!("Unknown tool id: {tool_id}"),
-            ));
-        };
-        let captured =
-            context.with_captured_resident_route(tool_id.clone(), route.manifest.name.clone());
-        route
-            .provider
-            .execute_attempt_by_id(tool_id, args, &captured)
-            .await
-    }
-
-    async fn execute_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let Some(route) = self.route(tool_id) else {
-            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
-        };
-        let captured =
-            context.with_captured_resident_route(tool_id.clone(), route.manifest.name.clone());
-        route.provider.execute_by_id(tool_id, args, &captured).await
-    }
-
-    async fn execute_internal_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::InternalProcessContext<'_>,
-    ) -> ToolOutcome {
-        let Some(route) = self.route(tool_id) else {
-            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
-        };
-        let captured =
-            context.with_captured_resident_route(tool_id.clone(), route.manifest.name.clone());
-        route
-            .provider
-            .execute_internal_by_id(tool_id, args, &captured)
-            .await
     }
 }
 

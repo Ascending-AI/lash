@@ -38,6 +38,37 @@ async fn assert_check_rejects(connection: &mut PgConnection, statement: &str, co
         .expect("release illegal-vocabulary savepoint");
 }
 
+async fn assert_integrity_rejects(
+    connection: &mut PgConnection,
+    statement: &str,
+    kind: impl Fn(&dyn sqlx::error::DatabaseError) -> bool,
+    what: &str,
+) {
+    sqlx::query("SAVEPOINT integrity_violation")
+        .execute(&mut *connection)
+        .await
+        .expect("create integrity-violation savepoint");
+    let error = sqlx::query(statement)
+        .execute(&mut *connection)
+        .await
+        .expect_err("an impossible durable shape must violate the schema");
+    let database_error = error
+        .as_database_error()
+        .unwrap_or_else(|| panic!("{what}: expected a database error, got {error}"));
+    assert!(
+        kind(database_error),
+        "{what}: Postgres reported the wrong violation: {database_error}"
+    );
+    sqlx::query("ROLLBACK TO SAVEPOINT integrity_violation")
+        .execute(&mut *connection)
+        .await
+        .expect("recover from expected integrity violation");
+    sqlx::query("RELEASE SAVEPOINT integrity_violation")
+        .execute(&mut *connection)
+        .await
+        .expect("release integrity-violation savepoint");
+}
+
 #[tokio::test]
 async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when_configured() {
     let Some(url) = database_url() else {
@@ -123,17 +154,32 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     )
     .await;
 
-    for field in ["claim_id", "claim_token"] {
+    // Any strict subset of the four-column claim identity must be rejected —
+    // including a claim id/token pair with no owner.
+    for fields in [
+        "claim_id",
+        "claim_owner_id",
+        "claim_owner_incarnation_id",
+        "claim_token",
+        "claim_id, claim_token",
+        "claim_id, claim_owner_id, claim_token",
+        "claim_owner_id, claim_owner_incarnation_id",
+    ] {
+        let values = fields
+            .split(',')
+            .map(|_| "'half'")
+            .collect::<Vec<_>>()
+            .join(", ");
         assert_check_rejects(
             &mut connection,
             &format!(
                 "INSERT INTO lash_pending_turn_inputs (
                      input_id, session_id, ingress_json, state, input_json,
-                     enqueued_at_ms, {field}
-                 ) VALUES ('pending-{field}', 'session', '{{\"scope\":\"next_turn\"}}',
-                           'deferred_next_turn', '{{}}', 0, 'half')"
+                     enqueued_at_ms, {fields}
+                 ) VALUES ('pending', 'session', '{{\"scope\":\"next_turn\"}}',
+                           'deferred_next_turn', '{{}}', 0, {values})"
             ),
-            "ck_pending_turn_inputs_claim_id_token_all_or_none",
+            "ck_pending_turn_inputs_claim_identity_all_or_none",
         )
         .await;
     }
@@ -364,6 +410,52 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
              created_at_ms, updated_at_ms
          ) VALUES ('scope', 'bad-effect-status', 'hash', '{}', 'cancelled', 0, 0)",
         "ck_runtime_effect_replay_status",
+    )
+    .await;
+
+    // The cancellation receipt's affected-input evidence is structural: the
+    // states the parallel-array shape made representable are all rejected.
+    sqlx::query(
+        "INSERT INTO lash_turn_cancel_requests (session_id, turn_id, request_id, intent_revision)
+         VALUES ('session', 'turn', 'request', 1)",
+    )
+    .execute(&mut connection)
+    .await
+    .expect("insert cancel request parent row");
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_turn_cancel_affected_inputs (
+             session_id, turn_id, ordinal, input_id, disposition, input_json
+         ) VALUES ('session', 'turn', 0, 'input', 'retry', '{}')",
+        "ck_turn_cancel_affected_inputs_disposition",
+    )
+    .await;
+    assert_integrity_rejects(
+        &mut connection,
+        "INSERT INTO lash_turn_cancel_affected_inputs (
+             session_id, turn_id, ordinal, input_id, disposition, input_json
+         ) VALUES ('session', 'turn', 0, 'input', 'defer', '{}'),
+                  ('session', 'turn', 1, 'input', 'drop', '{}')",
+        |error| error.kind() == sqlx::error::ErrorKind::UniqueViolation,
+        "duplicate affected input id",
+    )
+    .await;
+    assert_integrity_rejects(
+        &mut connection,
+        "INSERT INTO lash_turn_cancel_affected_inputs (
+             session_id, turn_id, ordinal, input_id, disposition, input_json
+         ) VALUES ('no-request', 'turn', 0, 'input', 'defer', '{}')",
+        |error| error.kind() == sqlx::error::ErrorKind::ForeignKeyViolation,
+        "affected evidence without a request",
+    )
+    .await;
+    assert_integrity_rejects(
+        &mut connection,
+        "INSERT INTO lash_turn_cancel_affected_inputs (
+             session_id, turn_id, ordinal, input_id, disposition
+         ) VALUES ('session', 'turn', 0, 'input', 'defer')",
+        |error| error.kind() == sqlx::error::ErrorKind::NotNullViolation,
+        "affected evidence without the payload snapshot",
     )
     .await;
 

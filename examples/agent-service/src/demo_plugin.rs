@@ -7,8 +7,8 @@ use lash::{
     plugins::{PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin},
     prompt::PromptContribution,
     tools::{
-        StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
-        ToolDefinitionBindingExt, ToolOutcome,
+        StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
+        ToolDefinition, ToolDefinitionBindingExt, ToolOutcome,
     },
 };
 use serde_json::json;
@@ -89,24 +89,32 @@ struct DemoTools {
 
 #[async_trait]
 impl StaticToolExecute for DemoTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        match call.name {
-            "read_board" => match load_chat_board_for_tool(&self.db, call.context.session_id()) {
-                Ok(board) => ToolOutcome::ok(board_snapshot(&board)),
-                Err(err) => ToolOutcome::err_fmt(err),
-            },
-            "play_move" => {
-                let Some(cell) = call.args.get("cell").and_then(|value| value.as_u64()) else {
-                    return ToolOutcome::err_fmt("missing integer cell");
-                };
-                match apply_agent_move_for_tool(&self.db, call.context.session_id(), cell as usize)
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            match call.name() {
+                "read_board" => match load_chat_board_for_tool(&self.db, call.context.session_id())
                 {
-                    Ok(output) => ToolOutcome::ok(output),
+                    Ok(board) => ToolOutcome::ok(board_snapshot(&board)),
                     Err(err) => ToolOutcome::err_fmt(err),
+                },
+                "play_move" => {
+                    let Some(cell) = call.args.get("cell").and_then(|value| value.as_u64()) else {
+                        return ToolOutcome::err_fmt("missing integer cell");
+                    };
+                    match apply_agent_move_for_tool(
+                        &self.db,
+                        call.context.session_id(),
+                        cell as usize,
+                    ) {
+                        Ok(output) => ToolOutcome::ok(output),
+                        Err(err) => ToolOutcome::err_fmt(err),
+                    }
                 }
+                other => ToolOutcome::err_fmt(format!("unknown demo tool `{other}`")),
             }
-            other => ToolOutcome::err_fmt(format!("unknown demo tool `{other}`")),
-        }
+        })
+        .await
+        .into()
     }
 }
 

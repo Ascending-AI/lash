@@ -364,7 +364,18 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // encoding -- so component 95 is rejected and recreated rather than migrated:
 // the resolved duration cannot be turned back into the deadline the guest
 // asked for.
-const SCHEMA_VERSION: i32 = 99;
+// Version 100 names the formerly-anonymous CHECKs (FIG-3261) so the
+// required-constraints gate can see them. Constraint names change the stored
+// DDL, so component-99 catalogs are rejected and recreated.
+// Version 101 widens the pending-input claim CHECK to the whole four-column
+// identity (FIG-3262): a claim id/token pair with no owner was representable.
+// Component-100 catalogs are rejected and recreated.
+// Version 102 moves a cancellation's affected-input evidence off the two
+// parallel TEXT[] columns into the lash_turn_cancel_affected_inputs child
+// table, where the payload is a snapshot and (request, input id) uniqueness
+// is structural (FIG-3263). Component-101 catalogs are rejected and
+// recreated.
+const SCHEMA_VERSION: i32 = 102;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -1,6 +1,6 @@
 use lash_sqlite_store::{SESSION_SCHEMA_VERSION, Store};
 
-const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 67;
+const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 69;
 
 #[tokio::test]
 async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
@@ -72,7 +72,7 @@ async fn sqlite_41_graph_sequence_shape_is_rejected_without_migration() {
     assert_eq!(
         error,
         format!(
-            "Error(\"Unsupported lash durable core schema: this binary supports schema version 68, but the database reports version 41. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md. This store was last written by lash release {}.\")",
+            "Error(\"Unsupported lash durable core schema: this binary supports schema version 70, but the database reports version 41. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md. This store was last written by lash release {}.\")",
             env!("CARGO_PKG_VERSION")
         )
     );

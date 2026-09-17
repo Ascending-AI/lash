@@ -14,8 +14,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lash_core::{
-    InternalProcessToolCall, ToolCall, ToolContract, ToolDefinition, ToolId, ToolManifest,
-    ToolOutcome, ToolPrepareCall, ToolPrepareContext, ToolProvider, sansio::PendingToolCall,
+    ToolCall, ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider, sansio::PendingToolCall,
 };
 
 /// Per-call execution behavior for a [`StaticToolProvider`].
@@ -26,34 +26,9 @@ use lash_core::{
 /// [`StaticToolProvider::new`]; this trait supplies only the dynamic behavior.
 #[async_trait::async_trait]
 pub trait StaticToolExecute: Send + Sync + 'static {
-    /// Execute a resolved tool call. Dispatch on `call.name` when serving more
-    /// than one tool.
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome;
-
-    /// Execute a tool resolved as an internal owner-bound process body.
-    ///
-    /// This is ADR 0051's protocol and process-engine implementor class.
-    async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolOutcome {
-        let attempt_context = call.context.__attempt_context();
-        self.execute(ToolCall {
-            name: call.name,
-            args: call.args,
-            context: &attempt_context,
-        })
-        .await
-    }
-
-    /// Execute the fixed tool as a recorded leaf attempt that may declare
-    /// typed intents. Defaults to the pure [`execute`](Self::execute) body,
-    /// which receives the same sealed attempt context.
-    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        match self.execute(call).await {
-            ToolOutcome::Done(output) => lash_core::ToolAttemptOutcome::done_without_intents(
-                lash_core::ToolOutcomeDone::from_output(*output),
-            ),
-            ToolOutcome::Pending(pending) => lash_core::ToolAttemptOutcome::pending(*pending),
-        }
-    }
+    /// Execute a resolved tool call. Dispatch on `call.name()` when serving
+    /// more than one tool.
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome;
 
     /// Declare that a tool may return `Pending` from its recorded attempt.
     ///
@@ -158,16 +133,8 @@ impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
             .await
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.executor.execute(call).await
-    }
-
-    async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolOutcome {
-        self.executor.execute_internal(call).await
-    }
-
-    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        self.executor.execute_attempt(call).await
     }
 
     fn attempt_may_defer(&self, tool_id: &ToolId) -> bool {

@@ -252,7 +252,9 @@ mod tests {
             .await
             .expect("persisted messages");
         assert!(
-            messages.iter().any(|message| message.kind == "code_block"),
+            messages
+                .iter()
+                .any(|message| message.kind() == "code_block"),
             "fanout should also deliver the turn to the persistence sink: {messages:#?}"
         );
     }

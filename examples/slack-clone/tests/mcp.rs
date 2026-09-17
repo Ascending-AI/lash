@@ -12,7 +12,8 @@ use axum::{Json, Router};
 use lash::direct::LlmOutputPart;
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash::tools::{
-    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
+    ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
+    ToolProvider,
 };
 use lash::{ModelSpec, TurnInput};
 use lash_plugin_mcp::{McpServerConfig, TimeoutDisconnectPolicy};
@@ -658,8 +659,10 @@ impl ToolProvider for CollidingTool {
         (name == WORKSPACE_STATS_TOOL.as_str()).then(|| Arc::new(collision_definition().contract()))
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::ok(json!({ "wrong": true }))
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async { ToolOutcome::ok(json!({ "wrong": true })) })
+            .await
+            .into()
     }
 }
 

@@ -36,7 +36,7 @@ impl lash_core::ToolProvider for TokenWatchingTool {
         EchoTool.resolve_contract(name)
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.executions.fetch_add(1, Ordering::SeqCst);
         self.entered.notify_one();
         let token = call
@@ -907,16 +907,20 @@ impl lash_core::ToolProvider for RetryOnceTool {
         (name == "retry_once").then(|| Arc::new(retry_once_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-            return lash_core::ToolOutcome::retryable_failure(
-                lash_core::ToolFailureClass::External,
-                "transient",
-                "transient failure",
-                Some(RETRY_AFTER_MS),
-            );
-        }
-        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                return lash_core::ToolOutcome::retryable_failure(
+                    lash_core::ToolFailureClass::External,
+                    "transient",
+                    "transient failure",
+                    Some(RETRY_AFTER_MS),
+                );
+            }
+            lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
+        })
+        .await
+        .into()
     }
 }
 

@@ -33,14 +33,12 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                 });
             }
             conn.execute(
-                "UPDATE pending_turn_inputs
-                 SET state = ?3,
-                     claim_id = NULL,
-                     claim_owner_id = NULL,
-                     claim_owner_incarnation_id = NULL,
-                     claim_token = NULL,
-                     claim_session_lease_generation = 0
-                 WHERE session_id = ?1 AND input_id = ?2",
+                &format!(
+                    "UPDATE pending_turn_inputs
+                     SET state = ?3,
+                         {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+                     WHERE session_id = ?1 AND input_id = ?2"
+                ),
                 params![
                     row.session_id.as_str(),
                     row.input_id.as_str(),
@@ -1003,17 +1001,13 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
     let deferred = lash_core::TurnInputState::DeferredNextTurn;
     let deferred_ingress = encode_json(&deferred.ingress())?;
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "UPDATE pending_turn_inputs
-             SET state = ?3,
-                 ingress_json = COALESCE(?4, ingress_json),
-                 claim_id = NULL,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_token = NULL,
-                 claim_session_lease_generation = 0
-             WHERE session_id = ?1 AND input_id = ?2",
-        )
+                 SET state = ?3,
+                     ingress_json = COALESCE(?4, ingress_json),
+                     {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+                 WHERE session_id = ?1 AND input_id = ?2"
+        ))
         .map_err(sqlite_error)?;
     let mut outcome = lash_core::TurnCancelInputOutcome::default();
     for (input_id, payload) in repairable {

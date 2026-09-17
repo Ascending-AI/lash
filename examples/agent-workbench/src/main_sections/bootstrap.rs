@@ -432,6 +432,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             authorization: WorkbenchAuthorization::allow_all(),
             approvals,
         };
+        reconcile_decided_approvals(&state).await;
         emit_workbench_trace(
             &state.trace_sink,
             None,

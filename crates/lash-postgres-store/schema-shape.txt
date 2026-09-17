@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 99
+version 102
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -427,6 +427,16 @@ table lash_trigger_subscriptions
   column updated_at_ms bigint not-null
   unique (owner_scope, subscription_key)
   primary-key (subscription_id)
+table lash_turn_cancel_affected_inputs
+  column disposition text not-null
+  column input_id text not-null
+  column input_json text not-null
+  column ordinal bigint not-null
+  column session_id text not-null
+  column turn_id text not-null
+  unique (session_id, turn_id, input_id)
+  primary-key (session_id, turn_id, ordinal)
+  foreign-key (session_id, turn_id) references lash_turn_cancel_requests (session_id, turn_id) on delete cascade
 table lash_turn_cancel_closure_authorizations
   column authorization_json text not-null
   column session_id text not-null
@@ -483,8 +493,6 @@ table lash_turn_cancel_closure_participants
     shape /oneOf/tag:type=string:%22turn%22/type object
   primary-key (scope_id, participant_id)
 table lash_turn_cancel_requests
-  column affected_dispositions text[] not-null default
-  column affected_input_ids text[] not-null default
   column disposition text not-null default
   column intent_revision bigint not-null
   column mode text not-null default

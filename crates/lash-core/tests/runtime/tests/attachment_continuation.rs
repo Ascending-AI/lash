@@ -30,23 +30,29 @@ impl lash_core::ToolProvider for AttachmentResultTool {
             .then(|| Arc::new(attachment_result_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        let attachment_ref = call
-            .context
-            .attachments()
-            .put(
-                self.bytes.to_vec(),
-                lash_core::AttachmentCreateMeta::new(
-                    lash_core::MediaType::parse(self.media_type).expect("test MIME"),
-                    None,
-                    Some(self.label.to_string()),
-                ),
-            )
-            .await
-            .expect("store tool attachment");
-        lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
-            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(attachment_ref)),
-        ))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            let attachment_ref = call
+                .context
+                .attachments()
+                .put(
+                    self.bytes.to_vec(),
+                    lash_core::AttachmentCreateMeta::new(
+                        lash_core::MediaType::parse(self.media_type).expect("test MIME"),
+                        None,
+                        Some(self.label.to_string()),
+                    ),
+                )
+                .await
+                .expect("store tool attachment");
+            lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
+                lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
+                    attachment_ref,
+                )),
+            ))
+        })
+        .await
+        .into()
     }
 }
 
