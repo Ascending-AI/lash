@@ -17,7 +17,7 @@ mod process_runners;
 mod turns;
 mod usage;
 
-pub use direct::DirectCompletionClient;
+pub use crate::direct_completion_client::DirectCompletionClient;
 pub(in crate::runtime) use usage::ChildUsageEventRelay;
 pub(in crate::runtime::session_manager) use usage::{
     ChannelEventSink, LiveChildUsageForwarder, subtract_usage,
@@ -371,7 +371,7 @@ impl RuntimeSessionServices {
         effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
         turn_id: Option<TurnId>,
     ) -> DirectCompletionClient<'run> {
-        DirectCompletionClient::runtime(Arc::clone(self), effect_controller, turn_id)
+        DirectCompletionClient::runtime(self.clone(), effect_controller, turn_id)
     }
 
     /// The host's durable home for the named process-definition registry

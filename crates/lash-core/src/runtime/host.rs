@@ -250,7 +250,23 @@ impl RuntimeHostConfig {
         self.process_engines = self.process_engines.with_registration(registration);
         self
     }
+}
 
+impl crate::plugin::ProcessEngineContributionTarget for RuntimeHostConfig {
+    fn process_engine_trace_context(&self) -> &TraceContext {
+        &self.tracing.trace_context
+    }
+
+    fn install_contributed_process_engine(
+        &mut self,
+        registration: crate::ProcessEngineRegistration,
+    ) -> Result<(), crate::PluginError> {
+        self.process_engines = self.process_engines.clone().try_with_engine(registration)?;
+        Ok(())
+    }
+}
+
+impl RuntimeHostConfig {
     /// Replace the lease timing capability governing every durable lease and
     /// claim this runtime takes.
     pub fn with_lease_timings(mut self, lease_timings: crate::LeaseTimings) -> Self {

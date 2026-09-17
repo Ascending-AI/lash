@@ -1,6 +1,4 @@
 use crate::ClockWallTime;
-use crate::facade_support::RuntimeSessionStateFacadeOps;
-use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -49,7 +47,6 @@ use crate::LlmRequest as CoreLlmRequest;
 use crate::ProcessRegistry;
 use crate::RuntimeError;
 use crate::provider::ProviderHandle;
-use crate::runtime::{RuntimeStreamEvent, RuntimeTurnDriver};
 use crate::sansio::LlmCallError;
 use control::{RemoteLocalExecutionRequest, ScopedEffectControllerInner};
 
@@ -212,30 +209,6 @@ pub struct ProcessLocalExecution {
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
 }
 
-#[allow(private_interfaces)]
-pub(crate) struct TurnEffectStateUpdate {
-    pub(crate) policy: crate::RuntimeSessionPolicy,
-    pub(crate) llm_stream_summaries: HashMap<usize, crate::runtime::LlmStreamSummary>,
-    pub(crate) reasoning_publication: crate::runtime::ReasoningPublicationState,
-    pub(crate) next_llm_ordinal: usize,
-    pub(crate) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
-    pub(crate) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
-    pub(crate) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
-    /// FIG-3157: work the local execution withheld from a terminal
-    /// checkpoint delivery. It travels back on every outcome, failed ones
-    /// included, so a checkpoint that never delivered can hand it back.
-    pub(crate) withheld_terminal_work: crate::runtime::logical_turn::WithheldTerminalWork,
-}
-
-pub(super) struct LocalTurnEffectRunner {
-    driver: RuntimeTurnDriver<'static>,
-    protocol_iteration: usize,
-    messages: crate::MessageSequence,
-    event_tx: mpsc::Sender<RuntimeStreamEvent>,
-    cancellation: CancellationToken,
-    update: Arc<std::sync::Mutex<Option<TurnEffectStateUpdate>>>,
-}
-
 pub(super) struct LocalDirectEffectRunner {
     provider: ProviderHandle,
     charge_safety: crate::ChargeSafetyPolicy,
@@ -259,7 +232,7 @@ struct RemoteEffectRunner {
 }
 
 #[async_trait::async_trait]
-trait RuntimeEffectLocalRunner: Send {
+pub(crate) trait RuntimeEffectLocalRunner: Send {
     fn uses_task_boundary(&self, _command: &RuntimeEffectCommand) -> bool {
         false
     }
@@ -620,78 +593,14 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         Self::language_runtime_value_with(run)
     }
 
-    pub(in crate::runtime) fn turn(
-        driver: &mut RuntimeTurnDriver<'_>,
-        machine: &crate::TurnMachine,
-        event_tx: mpsc::Sender<RuntimeStreamEvent>,
-        cancellation: CancellationToken,
-        scoped_effect_controller: ScopedEffectController<'static>,
-    ) -> (
-        RuntimeEffectLocalExecutor<'static>,
-        Arc<std::sync::Mutex<Option<TurnEffectStateUpdate>>>,
-    ) {
-        let replay_trace = super::RuntimeEffectReplayTrace::for_divergence(
-            driver.host.core.tracing.trace_sink.as_ref(),
-            driver.host.core.tracing.trace_context.clone(),
-            driver.trace_context(machine.protocol_iteration()),
-            Arc::clone(&driver.host.core.clock),
-        );
-        let update = Arc::new(std::sync::Mutex::new(None));
-        let owned_driver = RuntimeTurnDriver {
-            session: driver.session.clone_for_effect(),
-            policy: driver.policy.clone(),
-            host: driver.host.clone(),
-            scoped_effect_controller,
-            session_id: driver.session_id.clone(),
-            turn_id: driver.turn_id.clone(),
-            turn_index: driver.turn_index,
-            turn_pipeline: crate::runtime::TurnBoundary::from_state_with_clock(
-                driver.turn_pipeline.state().clone(),
-                Arc::clone(&driver.host.core.clock),
-                driver.turn_pipeline.state().turn_scope(&driver.turn_id),
-                driver.host.core.durability.commit_budget,
-            ),
-            latest_prompt_usage: driver.latest_prompt_usage.clone(),
-            llm_stream_summaries: driver.llm_stream_summaries.clone(),
-            reasoning_publication: driver.reasoning_publication.clone(),
-            llm_calls: Vec::new(),
-            failure_evidence: Vec::new(),
-            next_llm_ordinal: driver.next_llm_ordinal,
-            session_services: Arc::clone(&driver.session_services),
-            protocol_turn_options: driver.protocol_turn_options.clone(),
-            protocol_extension: driver.protocol_extension.clone(),
-            turn_context: driver.turn_context.clone(),
-            turn_causes: driver.turn_causes.clone(),
-            pending_queue_claims: driver.pending_queue_claims.clone(),
-            pending_turn_input_claims: driver.pending_turn_input_claims.clone(),
-            pending_checkpoint_turn_input_claim: driver.pending_checkpoint_turn_input_claim.clone(),
-            // Work this executor withholds from a terminal checkpoint travels
-            // back on the journalled claim set, not on the driver copy.
-            withheld_terminal_work: Default::default(),
-            checkpoint_messages: driver.checkpoint_messages.clone(),
-            session_execution_lease: driver.session_execution_lease.clone(),
-            runtime_lease_owner: driver.runtime_lease_owner.clone(),
-            turn_phase_probe: driver.turn_phase_probe.clone(),
-            turn_control: Arc::clone(&driver.turn_control),
-            observes_durable_cancel_after_llm: driver.observes_durable_cancel_after_llm,
-            protocol_reply: Default::default(),
-        };
-        (
-            RuntimeEffectLocalExecutor {
-                state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
-                    LocalTurnEffectRunner {
-                        driver: owned_driver,
-                        protocol_iteration: machine.protocol_iteration(),
-                        messages: machine.message_sequence(),
-                        event_tx,
-                        cancellation,
-                        update: Arc::clone(&update),
-                    },
-                ))),
-                replay_trace,
-            },
-            update,
-        )
+    pub(crate) fn owned_runner(
+        runner: Box<dyn RuntimeEffectLocalRunner + Send + 'static>,
+        replay_trace: Option<super::RuntimeEffectReplayTrace>,
+    ) -> Self {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)),
+            replay_trace,
+        }
     }
 
     pub(in crate::runtime) fn direct(
@@ -1207,126 +1116,6 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
 }
 
 #[async_trait::async_trait]
-impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
-    fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {
-        matches!(
-            command,
-            RuntimeEffectCommand::LlmCall { .. }
-                | RuntimeEffectCommand::AssistantResponseHooks { .. }
-                | RuntimeEffectCommand::ToolBatch { .. }
-                | RuntimeEffectCommand::ExecCode { .. }
-        )
-    }
-
-    async fn execute(
-        self: Box<Self>,
-        envelope: RuntimeEffectEnvelope,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let mut runner = *self;
-        let result = match envelope.command {
-            RuntimeEffectCommand::LlmCall { request } => {
-                let (result, text_streamed, call_record) = runner
-                    .driver
-                    .run_llm_call(
-                        Arc::new((*request).into_request(None, None)),
-                        runner.protocol_iteration,
-                        envelope.invocation.into_runtime_invocation(),
-                        &runner.event_tx,
-                        &runner.cancellation,
-                    )
-                    .await;
-                Ok(RuntimeEffectOutcome::LlmCall {
-                    result: Box::new(result),
-                    text_streamed,
-                    call_record,
-                })
-            }
-            RuntimeEffectCommand::AssistantResponseHooks { response } => runner
-                .driver
-                .run_assistant_response_hooks(*response)
-                .await
-                .map(
-                    |(response, events)| RuntimeEffectOutcome::AssistantResponseHooks {
-                        response: Box::new(response),
-                        events,
-                    },
-                ),
-            RuntimeEffectCommand::ToolBatch { batch } => Box::pin(runner.driver.run_tool_batch(
-                batch,
-                envelope.invocation.into_runtime_invocation(),
-                &runner.event_tx,
-                &runner.cancellation,
-            ))
-            .await
-            .map(|outcome| RuntimeEffectOutcome::ToolBatch {
-                launches: outcome.launches,
-                triggers: outcome.triggers,
-                settlement_order: outcome.settlement_order,
-            }),
-            RuntimeEffectCommand::ExecCode { language, code } => {
-                let result = runner
-                    .driver
-                    .run_exec_code(
-                        language,
-                        &code,
-                        runner.messages.clone(),
-                        runner.protocol_iteration,
-                        envelope.invocation.into_runtime_invocation(),
-                        &runner.event_tx,
-                        &runner.cancellation,
-                    )
-                    .await?;
-                Ok(RuntimeEffectOutcome::ExecCode {
-                    result: Box::new(result),
-                })
-            }
-            RuntimeEffectCommand::Checkpoint { checkpoint } => Ok(runner
-                .driver
-                .execute_checkpoint_locally(
-                    runner.messages.clone(),
-                    runner.protocol_iteration,
-                    checkpoint,
-                    &runner.event_tx,
-                )
-                .await),
-            RuntimeEffectCommand::SyncExecutionEnvironment {
-                update_machine_config,
-            } => Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
-                result: runner
-                    .driver
-                    .refresh_execution_environment(runner.messages.clone(), update_machine_config)
-                    .await
-                    .map_err(|err| err.to_string()),
-            }),
-            RuntimeEffectCommand::Sleep { spec } => {
-                let clock = runner.driver.host.core.clock.as_ref();
-                let duration_ms = sleep_duration(spec, clock.timestamp_ms());
-                sleep_with_cancellation(duration_ms, &runner.cancellation, clock).await?;
-                Ok(RuntimeEffectOutcome::Sleep)
-            }
-            command => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                format!(
-                    "local turn executor cannot execute {} command",
-                    command.kind().as_str()
-                ),
-            )),
-        };
-        *runner.update.lock_recover() = Some(TurnEffectStateUpdate {
-            policy: runner.driver.policy,
-            llm_stream_summaries: runner.driver.llm_stream_summaries,
-            reasoning_publication: runner.driver.reasoning_publication,
-            next_llm_ordinal: runner.driver.next_llm_ordinal,
-            pending_queue_claims: runner.driver.pending_queue_claims,
-            pending_turn_input_claims: runner.driver.pending_turn_input_claims,
-            pending_checkpoint_turn_input_claim: runner.driver.pending_checkpoint_turn_input_claim,
-            withheld_terminal_work: runner.driver.withheld_terminal_work,
-        });
-        result
-    }
-}
-
-#[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for LocalDirectEffectRunner {
     fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {
         matches!(command, RuntimeEffectCommand::Direct { .. })
@@ -1454,14 +1243,14 @@ async fn execute_local_sleep(
     }
 }
 
-fn sleep_duration(spec: crate::SleepSpec, now_ms: u64) -> u64 {
+pub(crate) fn sleep_duration(spec: crate::SleepSpec, now_ms: u64) -> u64 {
     match spec {
         crate::SleepSpec::For { duration_ms } => duration_ms,
         crate::SleepSpec::Until { deadline_ms } => deadline_ms.saturating_sub(now_ms),
     }
 }
 
-async fn sleep_with_cancellation(
+pub(crate) async fn sleep_with_cancellation(
     duration_ms: u64,
     cancellation: &CancellationToken,
     clock: &dyn crate::Clock,

@@ -55,7 +55,7 @@ pub use validation::{
     validate_replayed_effect_envelope,
 };
 
-pub(crate) use executor::{EffectControllerTaskRequest, ProcessRunner, TurnEffectStateUpdate};
+pub(crate) use executor::{EffectControllerTaskRequest, ProcessRunner};
 pub use executor::{EffectTaskController, drive_effect_controller_task};
 pub use executor::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub(crate) use outcome::{

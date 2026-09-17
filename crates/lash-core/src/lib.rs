@@ -22,6 +22,7 @@ pub use lash_core_store::chronological;
 pub use lash_core_store::impl_noop_attachment_manifest;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 pub mod direct;
+mod direct_completion_client;
 pub(crate) use lash_core_ids::identity_json;
 pub use lash_core_llm::llm;
 pub(crate) use lash_core_llm::model;

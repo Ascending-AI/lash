@@ -7,6 +7,14 @@ use lash_sansio::sync::MutexExt;
 
 use super::*;
 
+pub trait ProcessEngineContributionTarget {
+    fn process_engine_trace_context(&self) -> &lash_trace::TraceContext;
+    fn install_contributed_process_engine(
+        &mut self,
+        registration: crate::ProcessEngineRegistration,
+    ) -> Result<(), crate::PluginError>;
+}
+
 #[derive(Clone)]
 pub struct PluginHost {
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
@@ -140,12 +148,12 @@ impl PluginHost {
     /// out-of-band wiring: engine construction that needs the fully-built plugin
     /// host's extensions runs here, after the host is built. The trace context
     /// handed to factories is the one already on `runtime_host`.
-    pub fn install_process_engine_contributions(
+    pub fn install_process_engine_contributions<T: ProcessEngineContributionTarget>(
         &self,
-        mut runtime_host: crate::runtime::RuntimeHostConfig,
+        mut runtime_host: T,
         process_lifecycle_available: bool,
-    ) -> Result<crate::runtime::RuntimeHostConfig, PluginError> {
-        let trace_context = runtime_host.tracing.trace_context.clone();
+    ) -> Result<T, PluginError> {
+        let trace_context = runtime_host.process_engine_trace_context().clone();
         let ctx = super::ProcessEngineContributionContext::new(
             &self.extensions,
             &trace_context,
@@ -153,10 +161,7 @@ impl PluginHost {
         );
         for factory in self.factories() {
             for engine in factory.process_engine_contributions(&ctx)? {
-                runtime_host.process_engines = runtime_host
-                    .process_engines
-                    .clone()
-                    .try_with_engine(engine)?;
+                runtime_host.install_contributed_process_engine(engine)?;
             }
         }
         Ok(runtime_host)

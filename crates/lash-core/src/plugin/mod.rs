@@ -86,7 +86,8 @@ pub use runtime_host::{
     SessionTurnRequest, SwitchAgentFrameRequest,
 };
 pub use runtime_impl::{
-    PluginHost, RecordedSessionConfig, SessionAuthorityContext, SessionCreationConfig,
+    PluginHost, ProcessEngineContributionTarget, RecordedSessionConfig, SessionAuthorityContext,
+    SessionCreationConfig,
 };
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use services::NoopSessionManager;
