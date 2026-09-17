@@ -13,6 +13,8 @@ use lash_core::{
 };
 
 use crate::config::McpServerConfig;
+#[cfg(test)]
+use crate::config::{McpStdioTransport, McpTransport};
 use crate::error::McpError;
 use crate::host::{
     McpElicitationHandler, McpElicitationService, McpHostServices, McpRootsProvider,
@@ -455,11 +457,7 @@ mod tests {
         let mut servers = BTreeMap::new();
         servers.insert(
             "docs".to_string(),
-            McpServerConfig::Stdio {
-                command: "sh".to_string(),
-                args: vec!["-c".to_string(), script],
-                env,
-                cwd: None,
+            McpServerConfig {
                 startup_timeout_ms: 10_000,
                 call_policy: crate::McpCallPolicy {
                     call_timeout_ms: 10_000,
@@ -467,6 +465,12 @@ mod tests {
                 },
                 shutdown_policy: Default::default(),
                 binary_content_attachments: false,
+                transport: McpTransport::Stdio(McpStdioTransport {
+                    command: "sh".to_string(),
+                    args: vec!["-c".to_string(), script],
+                    env,
+                    cwd: None,
+                }),
             },
         );
 
@@ -613,15 +617,7 @@ mod tests {
             .to_string();
         let servers = BTreeMap::from([(
             "lifecycle".to_string(),
-            McpServerConfig::Stdio {
-                command: "sh".to_string(),
-                args: vec!["-c".to_string(), script],
-                env: BTreeMap::from([
-                    ("PID_FILE".to_string(), pid_file.display().to_string()),
-                    ("RESP1".to_string(), initialize.to_string()),
-                    ("RESP2".to_string(), list.to_string()),
-                ]),
-                cwd: None,
+            McpServerConfig {
                 startup_timeout_ms: 5_000,
                 call_policy: crate::McpCallPolicy {
                     call_timeout_ms: 5_000,
@@ -629,6 +625,16 @@ mod tests {
                 },
                 shutdown_policy: Default::default(),
                 binary_content_attachments: false,
+                transport: McpTransport::Stdio(McpStdioTransport {
+                    command: "sh".to_string(),
+                    args: vec!["-c".to_string(), script],
+                    env: BTreeMap::from([
+                        ("PID_FILE".to_string(), pid_file.display().to_string()),
+                        ("RESP1".to_string(), initialize.to_string()),
+                        ("RESP2".to_string(), list.to_string()),
+                    ]),
+                    cwd: None,
+                }),
             },
         )]);
         let factory = McpPluginFactory::new(servers)

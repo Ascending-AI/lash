@@ -37,13 +37,13 @@ async fn publication_refuses_a_forced_cross_server_collision_atomically() {
     let first = McpEntry::new_with_publication_state(
         Arc::clone(&pool.publication_state),
         "abcdefghijklmno-one".to_string(),
-        McpServerConfig::stdio("sh", Vec::new()),
+        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
     );
     let second = McpEntry::new_with_publication_state(
         Arc::clone(&pool.publication_state),
         "abcdefghijklmno-two".to_string(),
-        McpServerConfig::stdio("sh", Vec::new()),
+        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
     );
     pool.install(first.server_name.clone(), Arc::clone(&first))
@@ -100,7 +100,7 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
     let old = McpEntry::new_with_publication_state(
         Arc::clone(&pool.publication_state),
         server_name.to_string(),
-        McpServerConfig::stdio("sh", Vec::new()),
+        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
     );
     pool.install(old.server_name.clone(), Arc::clone(&old))
@@ -111,7 +111,7 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
     let replacement = McpEntry::new_with_publication_state(
         Arc::clone(&pool.publication_state),
         server_name.to_string(),
-        McpServerConfig::stdio("sh", Vec::new()),
+        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
     );
     let removed = pool
@@ -141,7 +141,7 @@ async fn replacement_publication_survives_old_cleanup_and_refuses_stale_actor() 
     let contender = McpEntry::new_with_publication_state(
         Arc::clone(&pool.publication_state),
         "abcdefghijklmno-two".to_string(),
-        McpServerConfig::stdio("sh", Vec::new()),
+        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
     );
     pool.install(contender.server_name.clone(), Arc::clone(&contender))
@@ -168,13 +168,13 @@ async fn advertised_tools_snapshot_never_combines_colliding_catalog_generations(
     let first = McpEntry::new_with_publication_state(
         Arc::clone(&pool.publication_state),
         "abcdefghijklmno-one".to_string(),
-        McpServerConfig::stdio("sh", Vec::new()),
+        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
     );
     let second = McpEntry::new_with_publication_state(
         Arc::clone(&pool.publication_state),
         "abcdefghijklmno-two".to_string(),
-        McpServerConfig::stdio("sh", Vec::new()),
+        McpServerConfig::stdio(McpStdioTransport::new("sh", Vec::new())),
         McpHostServices::default(),
     );
     pool.install(first.server_name.clone(), Arc::clone(&first))
@@ -333,12 +333,7 @@ async fn connect_tolerates_unreachable_server() {
     let mut servers = BTreeMap::new();
     servers.insert(
         "down".to_string(),
-        McpServerConfig::Stdio {
-            // Spawns, says nothing, exits — the handshake fails fast.
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), "exit 1".to_string()],
-            env: BTreeMap::new(),
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 1_000,
             call_policy: McpCallPolicy {
                 call_timeout_ms: 1_000,
@@ -346,6 +341,12 @@ async fn connect_tolerates_unreachable_server() {
             },
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), "exit 1".to_string()],
+                env: BTreeMap::new(),
+                cwd: None,
+            }),
         },
     );
 
@@ -415,11 +416,17 @@ async fn connect_rejects_server_names_with_the_same_normalized_prefix() {
     let servers = BTreeMap::from([
         (
             "Foo".to_string(),
-            McpServerConfig::stdio("sh", vec!["-c".to_string(), "exit 1".to_string()]),
+            McpServerConfig::stdio(McpStdioTransport::new(
+                "sh",
+                vec!["-c".to_string(), "exit 1".to_string()],
+            )),
         ),
         (
             "foo".to_string(),
-            McpServerConfig::stdio("sh", vec!["-c".to_string(), "exit 1".to_string()]),
+            McpServerConfig::stdio(McpStdioTransport::new(
+                "sh",
+                vec!["-c".to_string(), "exit 1".to_string()],
+            )),
         ),
     ]);
 
@@ -486,23 +493,25 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
             }]
         }
     });
-    let config = || McpServerConfig::Stdio {
-        command: "sh".to_string(),
-        args: vec![
-            "-c".to_string(),
-            "read -r _; printf '%s\\n' \"$INITIALIZE\"; read -r _; \
-             read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null"
-                .to_string(),
-        ],
-        env: BTreeMap::from([
-            ("INITIALIZE".to_string(), initialize.to_string()),
-            ("LIST".to_string(), list.to_string()),
-        ]),
-        cwd: None,
+    let config = || McpServerConfig {
         startup_timeout_ms: 2_000,
         call_policy: McpCallPolicy::default(),
         shutdown_policy: Default::default(),
         binary_content_attachments: false,
+        transport: McpTransport::Stdio(McpStdioTransport {
+            command: "sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                "read -r _; printf '%s\\n' \"$INITIALIZE\"; read -r _; \
+             read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null"
+                    .to_string(),
+            ],
+            env: BTreeMap::from([
+                ("INITIALIZE".to_string(), initialize.to_string()),
+                ("LIST".to_string(), list.to_string()),
+            ]),
+            cwd: None,
+        }),
     };
     let pool = McpConnectionPool::connect(BTreeMap::from([("Docs".to_string(), config())]))
         .await
@@ -571,26 +580,28 @@ async fn eager_connects_start_in_parallel() {
         }
     });
     let list = json!({ "jsonrpc": "2.0", "id": 1, "result": { "tools": [] } });
-    let config = |own: &std::path::Path, other: &std::path::Path| McpServerConfig::Stdio {
-        command: "sh".to_string(),
-        args: vec![
-            "-c".to_string(),
-            ": > \"$OWN\"; while [ ! -e \"$OTHER\" ]; do sleep 0.01; done; \
-             read -r _; printf '%s\\n' \"$INITIALIZE\"; read -r _; \
-             read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null"
-                .to_string(),
-        ],
-        env: BTreeMap::from([
-            ("OWN".to_string(), own.display().to_string()),
-            ("OTHER".to_string(), other.display().to_string()),
-            ("INITIALIZE".to_string(), initialize.to_string()),
-            ("LIST".to_string(), list.to_string()),
-        ]),
-        cwd: None,
+    let config = |own: &std::path::Path, other: &std::path::Path| McpServerConfig {
         startup_timeout_ms: 1_000,
         call_policy: McpCallPolicy::default(),
         shutdown_policy: Default::default(),
         binary_content_attachments: false,
+        transport: McpTransport::Stdio(McpStdioTransport {
+            command: "sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                ": > \"$OWN\"; while [ ! -e \"$OTHER\" ]; do sleep 0.01; done; \
+             read -r _; printf '%s\\n' \"$INITIALIZE\"; read -r _; \
+             read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null"
+                    .to_string(),
+            ],
+            env: BTreeMap::from([
+                ("OWN".to_string(), own.display().to_string()),
+                ("OTHER".to_string(), other.display().to_string()),
+                ("INITIALIZE".to_string(), initialize.to_string()),
+                ("LIST".to_string(), list.to_string()),
+            ]),
+            cwd: None,
+        }),
     };
     let pool = McpConnectionPool::connect(BTreeMap::from([
         ("alpha".to_string(), config(&alpha_marker, &bravo_marker)),
@@ -636,20 +647,22 @@ async fn tools_list_changed_refreshes_the_live_catalog() {
         read -r _; printf '%s\\n' \"$SECOND_LIST\"; cat >/dev/null";
     let pool = McpConnectionPool::connect(BTreeMap::from([(
         "live".to_string(),
-        McpServerConfig::Stdio {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), script.to_string()],
-            env: BTreeMap::from([
-                ("INITIALIZE".to_string(), initialize.to_string()),
-                ("FIRST_LIST".to_string(), first_list.to_string()),
-                ("SECOND_LIST".to_string(), second_list.to_string()),
-                ("NOTIFICATION".to_string(), notification.to_string()),
-            ]),
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 2_000,
             call_policy: McpCallPolicy::default(),
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script.to_string()],
+                env: BTreeMap::from([
+                    ("INITIALIZE".to_string(), initialize.to_string()),
+                    ("FIRST_LIST".to_string(), first_list.to_string()),
+                    ("SECOND_LIST".to_string(), second_list.to_string()),
+                    ("NOTIFICATION".to_string(), notification.to_string()),
+                ]),
+                cwd: None,
+            }),
         },
     )]))
     .await
@@ -716,25 +729,27 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
         read -r _; printf '%s\\n' \"$SURVIVOR_CALL\"; cat >/dev/null";
     let pool = McpConnectionPool::connect(BTreeMap::from([(
         "directory".to_string(),
-        McpServerConfig::Stdio {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), script.to_string()],
-            env: BTreeMap::from([
-                ("INITIALIZE".to_string(), initialize.to_string()),
-                ("FIRST_LIST".to_string(), first_list.to_string()),
-                ("REFRESHED_LIST".to_string(), refreshed_list.to_string()),
-                (
-                    "REFRESH_MARKER".to_string(),
-                    refresh_marker.display().to_string(),
-                ),
-                ("NOTIFICATION".to_string(), notification.to_string()),
-                ("SURVIVOR_CALL".to_string(), survivor_call.to_string()),
-            ]),
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 2_000,
             call_policy: McpCallPolicy::default(),
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script.to_string()],
+                env: BTreeMap::from([
+                    ("INITIALIZE".to_string(), initialize.to_string()),
+                    ("FIRST_LIST".to_string(), first_list.to_string()),
+                    ("REFRESHED_LIST".to_string(), refreshed_list.to_string()),
+                    (
+                        "REFRESH_MARKER".to_string(),
+                        refresh_marker.display().to_string(),
+                    ),
+                    ("NOTIFICATION".to_string(), notification.to_string()),
+                    ("SURVIVOR_CALL".to_string(), survivor_call.to_string()),
+                ]),
+                cwd: None,
+            }),
         },
     )]))
     .await
@@ -856,26 +871,28 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
         *) printf '%s\\n' \"$HYPHEN_CALL\";; esac; cat >/dev/null";
     let pool = McpConnectionPool::connect(BTreeMap::from([(
         "directory".to_string(),
-        McpServerConfig::Stdio {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), script.to_string()],
-            env: BTreeMap::from([
-                ("INITIALIZE".to_string(), initialize.to_string()),
-                ("FIRST_LIST".to_string(), first_list.to_string()),
-                ("REFRESHED_LIST".to_string(), refreshed_list.to_string()),
-                (
-                    "REFRESH_MARKER".to_string(),
-                    refresh_marker.display().to_string(),
-                ),
-                ("NOTIFICATION".to_string(), notification.to_string()),
-                ("HYPHEN_CALL".to_string(), hyphen_call.to_string()),
-                ("UNDERSCORE_CALL".to_string(), underscore_call.to_string()),
-            ]),
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 2_000,
             call_policy: McpCallPolicy::default(),
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script.to_string()],
+                env: BTreeMap::from([
+                    ("INITIALIZE".to_string(), initialize.to_string()),
+                    ("FIRST_LIST".to_string(), first_list.to_string()),
+                    ("REFRESHED_LIST".to_string(), refreshed_list.to_string()),
+                    (
+                        "REFRESH_MARKER".to_string(),
+                        refresh_marker.display().to_string(),
+                    ),
+                    ("NOTIFICATION".to_string(), notification.to_string()),
+                    ("HYPHEN_CALL".to_string(), hyphen_call.to_string()),
+                    ("UNDERSCORE_CALL".to_string(), underscore_call.to_string()),
+                ]),
+                cwd: None,
+            }),
         },
     )]))
     .await
@@ -980,7 +997,10 @@ async fn attach_registers_an_outage_and_retries_like_initial_connect() {
     let pool = Arc::new(McpConnectionPool::empty());
     pool.attach(
         "down".to_string(),
-        McpServerConfig::stdio("sh", vec!["-c".to_string(), "exit 1".to_string()]),
+        McpServerConfig::stdio(McpStdioTransport::new(
+            "sh",
+            vec!["-c".to_string(), "exit 1".to_string()],
+        )),
     )
     .await
     .expect("startup outage is registered rather than rejected");
@@ -1011,15 +1031,17 @@ async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
     let list = json!({ "jsonrpc": "2.0", "id": 1, "result": { "tools": [] } });
     let handshake = "read -r _; printf '%s\\n' \"$INITIALIZE\"; \
                      read -r _; read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null";
-    let config = |script: String, env: BTreeMap<String, String>| McpServerConfig::Stdio {
-        command: "sh".to_string(),
-        args: vec!["-c".to_string(), script],
-        env,
-        cwd: None,
+    let config = |script: String, env: BTreeMap<String, String>| McpServerConfig {
         startup_timeout_ms: 2_000,
         call_policy: McpCallPolicy::default(),
         shutdown_policy: Default::default(),
         binary_content_attachments: false,
+        transport: McpTransport::Stdio(McpStdioTransport {
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            env,
+            cwd: None,
+        }),
     };
     let common_env = || {
         BTreeMap::from([
@@ -1146,21 +1168,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
         *) printf '%s\\n' \"$UNDERSCORE_CALL\";; esac";
     let servers = BTreeMap::from([(
         "directory".to_string(),
-        McpServerConfig::Stdio {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), script.to_string()],
-            env: BTreeMap::from([
-                ("INITIALIZE".to_string(), initialize.to_string()),
-                ("FIRST_LIST".to_string(), first_list.to_string()),
-                ("RESPAWN_LIST".to_string(), respawn_list.to_string()),
-                ("HYPHEN_CALL".to_string(), hyphen_call.to_string()),
-                ("UNDERSCORE_CALL".to_string(), underscore_call.to_string()),
-                (
-                    "RESPAWN_MARKER".to_string(),
-                    respawn_marker.display().to_string(),
-                ),
-            ]),
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 10_000,
             call_policy: McpCallPolicy {
                 call_timeout_ms: 2_000,
@@ -1168,6 +1176,22 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
             },
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script.to_string()],
+                env: BTreeMap::from([
+                    ("INITIALIZE".to_string(), initialize.to_string()),
+                    ("FIRST_LIST".to_string(), first_list.to_string()),
+                    ("RESPAWN_LIST".to_string(), respawn_list.to_string()),
+                    ("HYPHEN_CALL".to_string(), hyphen_call.to_string()),
+                    ("UNDERSCORE_CALL".to_string(), underscore_call.to_string()),
+                    (
+                        "RESPAWN_MARKER".to_string(),
+                        respawn_marker.display().to_string(),
+                    ),
+                ]),
+                cwd: None,
+            }),
         },
     )]);
     let pool = McpConnectionPool::connect(servers)
@@ -1268,22 +1292,7 @@ async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
         .to_string();
     let servers = BTreeMap::from([(
         "race".to_string(),
-        McpServerConfig::Stdio {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), script],
-            env: BTreeMap::from([
-                (
-                    "ATTEMPT_FILE".to_string(),
-                    attempt_file.display().to_string(),
-                ),
-                ("PID_FILE".to_string(), pid_file.display().to_string()),
-                (
-                    "DISCOVERY_FILE".to_string(),
-                    discovery_file.display().to_string(),
-                ),
-                ("RESP1".to_string(), initialize.to_string()),
-            ]),
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 10_000,
             call_policy: McpCallPolicy {
                 call_timeout_ms: 10_000,
@@ -1291,6 +1300,23 @@ async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
             },
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script],
+                env: BTreeMap::from([
+                    (
+                        "ATTEMPT_FILE".to_string(),
+                        attempt_file.display().to_string(),
+                    ),
+                    ("PID_FILE".to_string(), pid_file.display().to_string()),
+                    (
+                        "DISCOVERY_FILE".to_string(),
+                        discovery_file.display().to_string(),
+                    ),
+                    ("RESP1".to_string(), initialize.to_string()),
+                ]),
+                cwd: None,
+            }),
         },
     )]);
     let pool = McpConnectionPool::connect(servers)
@@ -1337,11 +1363,7 @@ async fn shutdown_all_wakes_actor_sleeping_until_keepalive() {
     let pool = Arc::new(McpConnectionPool::empty());
     let entry = McpEntry::new(
         "keepalive".to_string(),
-        McpServerConfig::Stdio {
-            command: "unused".to_string(),
-            args: Vec::new(),
-            env: BTreeMap::new(),
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 1_000,
             call_policy: McpCallPolicy {
                 liveness_probe_interval_ms: 60_000,
@@ -1349,6 +1371,12 @@ async fn shutdown_all_wakes_actor_sleeping_until_keepalive() {
             },
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "unused".to_string(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                cwd: None,
+            }),
         },
         McpHostServices::default(),
     );
@@ -1407,11 +1435,7 @@ async fn pool_reconnects_after_transport_death() {
     let mut servers = BTreeMap::new();
     servers.insert(
         "flaky".to_string(),
-        McpServerConfig::Stdio {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), script],
-            env,
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 10_000,
             call_policy: McpCallPolicy {
                 call_timeout_ms: 2_000,
@@ -1420,6 +1444,12 @@ async fn pool_reconnects_after_transport_death() {
             },
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script],
+                env,
+                cwd: None,
+            }),
         },
     );
 
@@ -1499,14 +1529,7 @@ async fn call_timeout_is_a_typed_retryable_failure() {
         .to_string();
     let servers = BTreeMap::from([(
         "slow".to_string(),
-        McpServerConfig::Stdio {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), script],
-            env: BTreeMap::from([
-                ("RESP1".to_string(), initialize.to_string()),
-                ("RESP2".to_string(), list.to_string()),
-            ]),
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 1_000,
             call_policy: McpCallPolicy {
                 call_timeout_ms: 50,
@@ -1516,6 +1539,15 @@ async fn call_timeout_is_a_typed_retryable_failure() {
             },
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script],
+                env: BTreeMap::from([
+                    ("RESP1".to_string(), initialize.to_string()),
+                    ("RESP2".to_string(), list.to_string()),
+                ]),
+                cwd: None,
+            }),
         },
     )]);
     let pool = McpConnectionPool::connect(servers)
@@ -1570,11 +1602,7 @@ async fn discovery_hang_surfaces_startup_timeout() {
     let mut env = BTreeMap::new();
     env.insert("RESP1".to_string(), initialize.to_string());
 
-    let config = McpServerConfig::Stdio {
-        command: "sh".to_string(),
-        args: vec!["-c".to_string(), script],
-        env,
-        cwd: None,
+    let config = McpServerConfig {
         startup_timeout_ms: 750,
         call_policy: McpCallPolicy {
             call_timeout_ms: 10_000,
@@ -1582,6 +1610,12 @@ async fn discovery_hang_surfaces_startup_timeout() {
         },
         shutdown_policy: Default::default(),
         binary_content_attachments: false,
+        transport: McpTransport::Stdio(McpStdioTransport {
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            env,
+            cwd: None,
+        }),
     };
 
     let entry = McpEntry::new("hangs".to_string(), config, McpHostServices::default());
@@ -1655,11 +1689,7 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
     let mut servers = BTreeMap::new();
     servers.insert(
         "svc".to_string(),
-        McpServerConfig::Stdio {
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), script],
-            env,
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 10_000,
             call_policy: McpCallPolicy {
                 call_timeout_ms: 5_000,
@@ -1667,6 +1697,12 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
             },
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), script],
+                env,
+                cwd: None,
+            }),
         },
     );
 

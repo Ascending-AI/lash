@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use crate::{
     McpCallPolicy, McpElicitationHandler, McpElicitationRequest, McpPluginFactory,
     McpRootsProvider, McpRootsRequest, McpSamplingHandler, McpSamplingRequest, McpServerConfig,
-    McpToolProvider, McpUrlElicitationComplete,
+    McpStdioTransport, McpToolProvider, McpTransport, McpUrlElicitationComplete,
 };
 
 const SCRIPTED_SERVER: &str = r#"
@@ -643,18 +643,7 @@ async fn execute_depth_tool(factory: &McpPluginFactory) -> lash_core::ToolOutcom
 fn scripted_servers(trace: &std::path::Path, scenario: &str) -> BTreeMap<String, McpServerConfig> {
     BTreeMap::from([(
         "depth".to_string(),
-        McpServerConfig::Stdio {
-            command: "python3".to_string(),
-            args: vec![
-                "-u".to_string(),
-                "-c".to_string(),
-                SCRIPTED_SERVER.to_string(),
-            ],
-            env: BTreeMap::from([
-                ("TRACE_FILE".to_string(), trace.display().to_string()),
-                ("SCENARIO".to_string(), scenario.to_string()),
-            ]),
-            cwd: None,
+        McpServerConfig {
             startup_timeout_ms: 10_000,
             call_policy: McpCallPolicy {
                 call_timeout_ms: 10_000,
@@ -662,6 +651,19 @@ fn scripted_servers(trace: &std::path::Path, scenario: &str) -> BTreeMap<String,
             },
             shutdown_policy: Default::default(),
             binary_content_attachments: false,
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "python3".to_string(),
+                args: vec![
+                    "-u".to_string(),
+                    "-c".to_string(),
+                    SCRIPTED_SERVER.to_string(),
+                ],
+                env: BTreeMap::from([
+                    ("TRACE_FILE".to_string(), trace.display().to_string()),
+                    ("SCENARIO".to_string(), scenario.to_string()),
+                ]),
+                cwd: None,
+            }),
         },
     )])
 }
