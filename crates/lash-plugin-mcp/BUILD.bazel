@@ -156,6 +156,26 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
+    name = "lash-plugin-mcp__fv_40e40d28",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_plugin_mcp",
+    declared_features = [
+        "default",
+        "lashlang",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-plugin-mcp",
+    package_name = "lash-internal-plugin-mcp",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
     name = "lash-plugin-mcp__fv_547ce538",
     build_script = None,
     crate_features = [
@@ -244,5 +264,27 @@ lash_rust_feature_test(
         "manual",
     ],
     variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_c0c15c11", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_ba25a930", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_130a2fa1", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_f7f2f8cc", "//crates/lashlang": "//crates/lashlang:lashlang__fv_266676af"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-plugin-mcp__unit_test__fv_40e40d28",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_plugin_mcp",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "lashlang",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-plugin-mcp",
+    package_name = "lash-internal-plugin-mcp",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_1eb0f09e", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_c3457871"},
     version = "0.0.0-dev",
 )

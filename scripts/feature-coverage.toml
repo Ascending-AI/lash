@@ -297,6 +297,7 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-protocol-standard", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
   ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-plugin-mcp", "--no-default-features", "--locked"],
   ["cargo", "test", "-p", "lash-internal-plugin-mcp", "--features", "lashlang", "--locked"],
   ["cargo", "check", "-p", "lash-internal-plugin-process-controls", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-plugin-process-controls", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
