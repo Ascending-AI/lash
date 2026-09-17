@@ -447,7 +447,7 @@ pub(super) fn output_then_failing_rlm_prose_provider(
                     ));
                     return Err(
                         LlmTransportError::new("deterministic rate limit")
-                            .with_status(429)
+                            .with_http_status(429)
                             .with_output_started(true),
                     );
                 }

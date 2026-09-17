@@ -8,6 +8,10 @@ use crate::llm::types::{
 };
 use crate::{GenerationOptions, NonNegativeFiniteF64};
 
+fn code_of(error: &LlmTransportError) -> String {
+    error.code.as_ref().expect("typed failure code").to_string()
+}
+
 /// Marker `max_output_tokens` value `MutatingProvider` writes into its own
 /// options while completing, so a test can prove the handle kept the mutated
 /// provider instead of a pre-call clone.
@@ -123,8 +127,8 @@ impl Provider for ContradictoryPartialFailureProvider {
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new("original partial provider failure")
             .with_kind(ProviderFailureKind::Stream)
-            .with_status(502)
-            .with_code("original_partial_code")
+            .with_http_status(502)
+            .with_provider_code("original_partial_code")
             .with_raw("original raw provider evidence")
             .with_headers([("x-request-id", "original-request")])
             .with_request_body("original request body")
@@ -257,7 +261,7 @@ impl Provider for PartialStreamFailureProvider {
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         Err(LlmTransportError::new("stream truncated")
             .with_kind(ProviderFailureKind::Stream)
-            .with_code("stream_ended_before_terminal")
+            .with_provider_code("stream_ended_before_terminal")
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(LlmResponse {
                 parts: vec![LlmOutputPart::Text {
@@ -314,7 +318,7 @@ impl Provider for CountedPartialStreamFailureProvider {
         self.attempts.fetch_add(1, Ordering::SeqCst);
         Err(LlmTransportError::new("stream truncated")
             .with_kind(ProviderFailureKind::Stream)
-            .with_code("stream_ended_before_terminal")
+            .with_provider_code("stream_ended_before_terminal")
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(LlmResponse {
                 parts: vec![LlmOutputPart::Text {
@@ -592,7 +596,7 @@ impl Provider for StatusFailingProvider {
                 413 => "Request too large: attachment exceeds upload limit",
                 _ => "upstream unavailable",
             };
-            let mut failure = LlmTransportError::new(message).with_status(self.status);
+            let mut failure = LlmTransportError::new(message).with_http_status(self.status);
             if self.status == 413 {
                 failure = failure
                     .with_kind(ProviderFailureKind::Validation)
@@ -846,10 +850,7 @@ async fn invalid_endpoint_failure_records_a_real_no_response_attempt() {
         .await
         .expect_err("endpoint userinfo is rejected before transport");
 
-    assert_eq!(
-        failure.error.code.as_deref(),
-        Some("invalid_provider_endpoint")
-    );
+    assert_eq!(code_of(&failure.error), "adapter:invalid_provider_endpoint");
     assert_eq!(failure.call_record.attempts.len(), 1);
     assert_eq!(
         failure.call_record.attempts[0].outcome,
@@ -865,7 +866,7 @@ async fn invalid_endpoint_failure_records_a_real_no_response_attempt() {
 fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
     let failure = LlmTransportError::new("internal task failed: cancelled")
         .with_kind(ProviderFailureKind::Unknown)
-        .with_code("task_join_failed")
+        .with_adapter_code(TurnFailureCode::TaskJoinFailed)
         .with_retry_verdict(TransportRetryVerdict::NotRetryable);
     let record = synthetic_terminal_call_record(
         7,
@@ -888,8 +889,8 @@ fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
         record.attempts[0]
             .error
             .as_ref()
-            .and_then(|error| error.provider_code.as_deref()),
-        Some("task_join_failed")
+            .and_then(|error| error.adapter_code.as_ref()),
+        Some(&TurnFailureCode::TaskJoinFailed)
     );
 }
 
@@ -905,8 +906,8 @@ async fn provider_handle_rejects_instead_of_recertifying_foreign_stamped_output(
         .expect_err("foreign-stamped output is a provider contract violation");
 
     assert_eq!(
-        failure.error.code.as_deref(),
-        Some("provider_replay_origin_conflict")
+        code_of(&failure.error),
+        "adapter:provider_replay_origin_conflict"
     );
     assert!(!failure.error.is_retryable());
     assert!(failure.error.message.contains("gateway-a.example"));
@@ -925,8 +926,8 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
         .expect_err("foreign-stamped partial output is a provider contract violation");
 
     assert_eq!(
-        failure.error.code.as_deref(),
-        Some("provider_replay_origin_conflict")
+        code_of(&failure.error),
+        "adapter:provider_replay_origin_conflict"
     );
     assert_eq!(failure.error.kind, ProviderFailureKind::Validation);
     assert!(!failure.error.is_retryable());
@@ -936,7 +937,7 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
             .message
             .contains("original partial provider failure")
     );
-    assert_eq!(failure.error.status, Some(502));
+    assert_eq!(failure.error.http_status, Some(502));
     assert_eq!(
         failure.error.raw.as_deref().map(String::as_str),
         Some("original raw provider evidence")
@@ -1415,8 +1416,8 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
     assert_eq!(
-        failure.code.as_deref(),
-        Some("unsafe_retry_after_output_started")
+        code_of(&failure),
+        "refusal:unsafe_retry_after_output_started"
     );
     assert!(!failure.is_retryable());
     assert_eq!(
@@ -1501,7 +1502,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
         .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
             retry_after: Some(Duration::from_secs(1)),
         })
-        .with_status(429);
+        .with_http_status(429);
     let rejected = DefaultProviderFailureClassifier.classify(rejected);
     assert_eq!(
         automatic_retry_class(
@@ -1516,7 +1517,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
     // generation never started, so they must not authorize another purchase.
     for status in [408, 409, 425, 500, 502, 503, 504] {
         let failure = DefaultProviderFailureClassifier
-            .classify(LlmTransportError::new("ambiguous rejection").with_status(status));
+            .classify(LlmTransportError::new("ambiguous rejection").with_http_status(status));
         assert_eq!(
             automatic_retry_class(
                 &failure,
@@ -1528,7 +1529,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
         );
     }
     let retry_after_absent = DefaultProviderFailureClassifier
-        .classify(LlmTransportError::new("throttled").with_status(429));
+        .classify(LlmTransportError::new("throttled").with_http_status(429));
     assert_eq!(
         automatic_retry_class(
             &retry_after_absent,
@@ -1603,7 +1604,7 @@ fn forbidden_is_terminal_even_with_retry_after_and_status_noise() {
         .with_kind(ProviderFailureKind::Quota)
         .with_terminal_reason(LlmTerminalReason::ContentFilter)
         .with_retry_verdict(TransportRetryVerdict::Forbidden)
-        .with_status(429)
+        .with_http_status(429)
         .with_headers([("retry-after", "1")]);
 
     assert_eq!(
@@ -2162,7 +2163,8 @@ async fn provider_handle_throttle_without_retry_after_uses_counted_backoff_retry
 
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(err.kind, ProviderFailureKind::Quota);
-    assert_eq!(err.code.as_deref(), Some("429"));
+    assert_eq!(err.code, None);
+    assert_eq!(err.http_status, Some(429));
     assert!(err.is_retryable());
 }
 
@@ -2192,7 +2194,8 @@ async fn provider_handle_throttle_with_malformed_retry_after_uses_counted_backof
 
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(err.kind, ProviderFailureKind::Quota);
-    assert_eq!(err.code.as_deref(), Some("429"));
+    assert_eq!(err.code, None);
+    assert_eq!(err.http_status, Some(429));
     assert!(err.is_retryable());
 }
 
@@ -2225,8 +2228,8 @@ async fn provider_handle_server_error_with_retry_after_is_not_retried() {
     assert!(!err.is_retryable());
     assert_eq!(err.kind, ProviderFailureKind::Http);
     assert_eq!(
-        err.code.as_deref(),
-        Some("unsafe_retry_after_response_observed")
+        code_of(&err),
+        "refusal:unsafe_retry_after_response_observed"
     );
 }
 
@@ -2254,7 +2257,8 @@ async fn provider_handle_attachment_413_remains_plain_non_retryable_validation()
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
     assert_eq!(error.kind, ProviderFailureKind::Validation);
     assert!(!error.is_retryable());
-    assert_eq!(error.code.as_deref(), Some("413"));
+    assert_eq!(error.code, None);
+    assert_eq!(error.http_status, Some(413));
     assert_eq!(error.terminal_reason, LlmTerminalReason::ProviderError);
     assert_eq!(
         error.message,
@@ -2267,7 +2271,7 @@ fn default_failure_classifier_classifies_429_as_retryable_throttle() {
     let classifier = DefaultProviderFailureClassifier;
     let failure = classifier.classify(
         LlmTransportError::new("Rate limit reached for requests")
-            .with_status(429)
+            .with_http_status(429)
             .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
                 retry_after: Some(Duration::from_secs(7)),
             }),
@@ -2285,7 +2289,7 @@ fn default_failure_classifier_keeps_quota_exhaustion_non_retryable() {
         "usage_limit_reached",
         "usage_not_included in your plan",
     ] {
-        let failure = classifier.classify(LlmTransportError::new(message).with_status(429));
+        let failure = classifier.classify(LlmTransportError::new(message).with_http_status(429));
         assert_eq!(failure.kind, ProviderFailureKind::Quota);
         assert!(!failure.is_retryable());
     }
@@ -2304,7 +2308,7 @@ fn default_failure_classifier_keeps_rate_throttling_retryable() {
         "Resource has been exhausted (e.g. check quota).",
         "429 RESOURCE_EXHAUSTED: Quota exceeded for aiplatform.googleapis.com",
     ] {
-        let failure = classifier.classify(LlmTransportError::new(message).with_status(429));
+        let failure = classifier.classify(LlmTransportError::new(message).with_http_status(429));
         assert_eq!(
             failure.kind,
             ProviderFailureKind::Quota,
@@ -2346,7 +2350,7 @@ fn default_failure_classifier_uses_context_overflow_text_for_unclassified_failur
         let failure = classifier.classify(
             LlmTransportError::new(message)
                 .with_kind(ProviderFailureKind::Http)
-                .with_status(400),
+                .with_http_status(400),
         );
         assert_eq!(failure.kind, ProviderFailureKind::Validation);
         assert_eq!(
@@ -2367,7 +2371,7 @@ fn generic_anthropic_and_google_http_overflow_envelopes_use_the_text_fallback() 
         let failure = classifier.classify(
             LlmTransportError::new("provider request failed with 400")
                 .with_kind(ProviderFailureKind::Http)
-                .with_status(400)
+                .with_http_status(400)
                 .with_raw(raw),
         );
 
@@ -2415,7 +2419,7 @@ fn default_failure_classifier_makes_structured_validation_forbidden_without_scra
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
-            .with_code("invalid_request_error")
+            .with_provider_code("invalid_request_error")
             .with_raw(
                 r#"{"error":{"message":"The user wrote: context length is a useful phrase"}}"#,
             )
@@ -2425,7 +2429,7 @@ fn default_failure_classifier_makes_structured_validation_forbidden_without_scra
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert_eq!(failure.retry_verdict, TransportRetryVerdict::Forbidden);
     assert!(!failure.is_retryable());
-    assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
+    assert_eq!(code_of(&failure), "provider:invalid_request_error");
     assert_eq!(
         failure.terminal_reason,
         crate::LlmTerminalReason::ProviderError
@@ -2437,13 +2441,13 @@ fn default_failure_classifier_does_not_override_structured_hard_quota_echo() {
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
-            .with_code("invalid_request_error")
+            .with_provider_code("invalid_request_error")
             .with_raw(r#"{"echo":"insufficient_quota"}"#),
     );
 
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert!(!failure.is_retryable());
-    assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
+    assert_eq!(code_of(&failure), "provider:invalid_request_error");
 }
 
 #[test]
@@ -2451,7 +2455,7 @@ fn default_failure_classifier_does_not_override_structured_content_filter_echo()
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
-            .with_code("invalid_request_error")
+            .with_provider_code("invalid_request_error")
             .with_raw(r#"{"echo":"the user asked about safety"}"#),
     );
 
@@ -2463,13 +2467,13 @@ fn default_failure_classifier_does_not_override_structured_unsupported_model_ech
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
-            .with_code("invalid_request_error")
+            .with_provider_code("invalid_request_error")
             .with_raw(r#"{"echo":"the example model does not exist"}"#),
     );
 
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert!(!failure.is_retryable());
-    assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
+    assert_eq!(code_of(&failure), "provider:invalid_request_error");
 }
 
 #[test]
@@ -2481,7 +2485,7 @@ fn default_failure_classifier_marks_content_filter() {
         "safety filter tripped",
         "sensitive content refused",
     ] {
-        let failure = classifier.classify(LlmTransportError::new(message).with_status(400));
+        let failure = classifier.classify(LlmTransportError::new(message).with_http_status(400));
         assert_eq!(
             failure.terminal_reason,
             crate::LlmTerminalReason::ContentFilter
@@ -2498,7 +2502,7 @@ fn default_failure_classifier_does_not_treat_rate_limits_as_context_overflow() {
         "throttling because token rate exceeded",
         "insufficient_quota",
     ] {
-        let failure = classifier.classify(LlmTransportError::new(message).with_status(429));
+        let failure = classifier.classify(LlmTransportError::new(message).with_http_status(429));
         assert_ne!(
             failure.terminal_reason,
             crate::LlmTerminalReason::ContextOverflow

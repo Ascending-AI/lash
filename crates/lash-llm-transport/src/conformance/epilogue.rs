@@ -39,7 +39,7 @@ where
                 let error =
                     result.expect_err("HTTP failure must precede terminal and content checks");
                 assert_eq!(
-                    error.status,
+                    error.http_status,
                     Some(503),
                     "upstream HTTP evidence must survive the epilogue"
                 );

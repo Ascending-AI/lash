@@ -75,7 +75,7 @@ pub use session::{
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource};
 pub use session_model::{
-    AcceptedInjectedTurnInput, BaseRenderCache, ConversationRecord, ErrorEnvelope,
+    AcceptedInjectedTurnInput, BaseRenderCache, ConversationRecord, ErrorEnvelope, FailureCode,
     MAIN_AGENT_INTRO, Message, MessageRole, MessageSequence, NoProgressBudget, Part,
     PartAttachment, PartKind, PromptBuiltin, PromptLayer, PromptSlot, PromptSlotLayer,
     PromptTemplate, PromptTemplateEntry, PromptTemplateSection, ProtocolEvent, PruneState,

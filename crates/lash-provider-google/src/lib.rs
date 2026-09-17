@@ -234,8 +234,8 @@ mod tests {
             .await
             .expect_err("strict Google route requires finishReason");
         assert_eq!(
-            error.code.as_deref(),
-            Some("stream_ended_before_finish_reason")
+            error.code.as_ref().map(|code| code.to_string()),
+            Some("adapter:stream_ended_before_finish_reason".to_string())
         );
         let partial = error.partial_response.as_deref().expect("partial response");
         assert_eq!(partial.full_text(), "legacy");

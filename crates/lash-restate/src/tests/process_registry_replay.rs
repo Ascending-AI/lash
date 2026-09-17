@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::TurnFailureCode;
 
 use lashlang::LashlangArtifactStore as _;
 use lashlang::testing::ast_builders as b;
@@ -979,7 +980,7 @@ impl HttpTransport for CeilingCancelWatchTransport {
         Err(
             LlmTransportError::new("cancel watch attach ceiling elapsed")
                 .with_kind(lash_core::ProviderFailureKind::Timeout)
-                .with_code("timeout")
+                .with_adapter_code(TurnFailureCode::Timeout)
                 .with_retry_verdict(
                     lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
                 ),

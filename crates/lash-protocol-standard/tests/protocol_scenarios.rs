@@ -630,7 +630,9 @@ fn llm_error(message: &str) -> LlmCallError {
         retryable: false,
         kind: lash_core::ProviderFailureKind::Unknown,
         raw: None,
-        code: Some("test_provider_error".to_string()),
+        code: Some(lash_sansio::FailureCode::Provider(
+            "test_provider_error".to_string(),
+        )),
         terminal_reason: LlmTerminalReason::ProviderError,
         request_body: None,
         partial_response: None,

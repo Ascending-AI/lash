@@ -848,7 +848,7 @@ pub(super) fn disconnect_error(
 pub(super) fn timeout_error(message: Option<String>) -> LlmTransportError {
     LlmTransportError::new(message.unwrap_or_else(|| "scripted provider timeout".to_string()))
         .with_kind(ProviderFailureKind::Timeout)
-        .with_code("timeout")
+        .with_adapter_code(TurnFailureCode::Timeout)
         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
 }
 
@@ -944,11 +944,13 @@ fn parse_path(path: &str) -> Result<Vec<PathSegment>, LlmTransportError> {
 pub(super) fn script_validation_error(message: String) -> LlmTransportError {
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Validation)
-        .with_code("provider_wire_script")
+        .with_adapter_code(TurnFailureCode::Other("provider_wire_script".to_string()))
 }
 
 fn script_match_error(message: String) -> LlmTransportError {
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Validation)
-        .with_code("provider_wire_script_mismatch")
+        .with_adapter_code(TurnFailureCode::Other(
+            "provider_wire_script_mismatch".to_string(),
+        ))
 }

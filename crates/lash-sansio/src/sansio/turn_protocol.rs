@@ -147,7 +147,7 @@ pub enum LogEvent {
         message: String,
         retryable: bool,
         raw: Option<String>,
-        code: Option<String>,
+        code: Option<crate::session_model::FailureCode>,
         terminal_reason: LlmTerminalReason,
     },
 }
@@ -287,7 +287,9 @@ pub struct LlmCallError {
     /// carry `ProviderFailureKind::Unknown`; missing or future kinds are refused.
     pub kind: crate::llm::types::ProviderFailureKind,
     pub raw: Option<String>,
-    pub code: Option<String>,
+    /// Namespaced failure code: `provider` spellings are provider-owned, while
+    /// `adapter` and `refusal` spellings are Lash-authored.
+    pub code: Option<crate::session_model::FailureCode>,
     pub terminal_reason: LlmTerminalReason,
     pub request_body: Option<String>,
     /// Output and usage observed before the failed stream ended. Partial tool

@@ -57,7 +57,10 @@ async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
         .expect("join idle WebSocket completion")
         .expect_err("idle before response start must time out");
 
-    assert_eq!(error.code.as_deref(), Some("websocket_idle_timeout"));
+    assert_eq!(
+        error.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:websocket_idle_timeout".to_string())
+    );
     assert!(
         events.lock_recover().is_empty(),
         "no stream event may commit before the first response frame"
@@ -113,7 +116,10 @@ async fn codex_scripted_websocket_idle_after_output_is_terminal_error() {
         .await
         .expect_err("idle after output");
 
-    assert_eq!(err.code.as_deref(), Some("websocket_idle_timeout"));
+    assert_eq!(
+        err.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:websocket_idle_timeout".to_string())
+    );
     assert_eq!(http.captured_len(), 0);
     assert_eq!(ws.captured().len(), 1);
 }

@@ -130,7 +130,7 @@ async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() {
             assert!(request.provider_trace.is_none());
             Err(LlmTransportError::new("original provider failure")
                 .with_kind(lash_core::ProviderFailureKind::Validation)
-                .with_code("original_provider_code"))
+                .with_provider_code("original_provider_code"))
         })
         .build();
     let mut runtime = runtime_with_foreign_replay(provider, Vec::new(), &trace_path).await;
@@ -151,7 +151,7 @@ async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() {
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
-            if error.code.as_deref() == Some("original_provider_code")
+            if error.code.as_deref() == Some("provider:original_provider_code")
     )));
 }
 
@@ -212,7 +212,7 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
-            if error.code.as_deref() == Some("provider_replay_origin_conflict")
+            if error.code.as_deref() == Some("adapter:provider_replay_origin_conflict")
     )));
     assert!(
         !events
@@ -276,7 +276,7 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
-            if error.code.as_deref() == Some("cancelled")
+            if error.code.as_deref() == Some("adapter:cancelled")
     )));
 }
 
@@ -292,8 +292,8 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             Err(LlmTransportError::new("confirm2 original provider failure")
                 .with_kind(lash_core::ProviderFailureKind::Stream)
-                .with_code("confirm2_original_code")
-                .with_status(502)
+                .with_provider_code("confirm2_original_code")
+                .with_http_status(502)
                 .with_raw("confirm2 original raw provider evidence")
                 .with_partial_response(LlmResponse {
                     parts: vec![LlmOutputPart::Reasoning {
@@ -376,7 +376,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
-            if error.code.as_deref() == Some("provider_replay_origin_conflict")
+            if error.code.as_deref() == Some("adapter:provider_replay_origin_conflict")
     )));
 }
 
@@ -394,8 +394,8 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             Err(LlmTransportError::new("tail transport failure")
                 .with_kind(lash_core::ProviderFailureKind::Stream)
-                .with_code("tail_transport_failure")
-                .with_status(502)
+                .with_provider_code("tail_transport_failure")
+                .with_http_status(502)
                 .with_raw("tail raw evidence"))
         })
         .build();

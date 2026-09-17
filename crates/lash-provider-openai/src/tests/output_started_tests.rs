@@ -658,8 +658,8 @@ async fn assert_streamed_output_stops_retry(first: &'static str) {
 
     assert_eq!(transport.calls(), 1, "output must not be re-bought");
     assert_eq!(
-        failure.code.as_deref(),
-        Some("unsafe_retry_after_output_started")
+        failure.code.as_ref().map(|code| code.to_string()),
+        Some("refusal:unsafe_retry_after_output_started".to_string())
     );
 }
 

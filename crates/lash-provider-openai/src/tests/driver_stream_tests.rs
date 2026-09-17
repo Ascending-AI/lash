@@ -401,7 +401,10 @@ async fn slow_stream_start_uses_response_start_timeout_classification() {
         .expect_err("slow response start must fail at the start timeout");
 
     assert_eq!(error.kind, ProviderFailureKind::Timeout);
-    assert_eq!(error.code.as_deref(), Some("timeout"));
+    assert_eq!(
+        error.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:timeout".to_string())
+    );
     assert_eq!(
         error.message,
         "OpenAI-compatible chat response start timed out"
@@ -433,7 +436,10 @@ async fn slow_mid_stream_uses_chunk_timeout_classification() {
         .expect_err("slow mid-stream response must fail at the chunk timeout");
 
     assert_eq!(error.kind, ProviderFailureKind::Timeout);
-    assert_eq!(error.code.as_deref(), Some("timeout"));
+    assert_eq!(
+        error.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:timeout".to_string())
+    );
     assert_eq!(
         error.message,
         "OpenAI-compatible chat stream chunk timed out"
@@ -797,8 +803,8 @@ async fn responses_resume_event_without_sequence_number_fails_closed() {
         .expect_err("a resume event without a sequence number is unsafe");
 
     assert_eq!(
-        failure.code.as_deref(),
-        Some("responses_resume_event_missing_sequence")
+        failure.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:responses_resume_event_missing_sequence".to_string())
     );
     assert_eq!(transport.requests().len(), 2, "creation then resume");
     assert_eq!(transport.requests()[1].method, LlmHttpMethod::Get);
@@ -849,8 +855,8 @@ async fn responses_resume_response_without_event_stream_fails_closed() {
         .expect_err("a resume response must be an event stream");
 
     assert_eq!(
-        failure.code.as_deref(),
-        Some("responses_resume_not_streaming")
+        failure.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:responses_resume_not_streaming".to_string())
     );
     assert_eq!(transport.requests().len(), 2, "creation then resume");
     assert_eq!(transport.requests()[1].method, LlmHttpMethod::Get);
@@ -893,8 +899,8 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
 
     assert_eq!(transport.requests().len(), 1, "resume path is unreachable");
     assert_eq!(
-        failure.code.as_deref(),
-        Some("unsafe_retry_after_output_started")
+        failure.code.as_ref().map(|code| code.to_string()),
+        Some("refusal:unsafe_retry_after_output_started".to_string())
     );
 
     let no_sequence_transport = AbortingSseTransport::new(vec![

@@ -29,6 +29,7 @@ use lash_core::{
     ProviderFailureKind, facade_support::LlmTransportError, llm::transport::TransportRetryVerdict,
 };
 use lash_sansio::llm::types::{LlmEventSender, LlmStreamEvent, LlmUsage};
+use lash_sansio::session_model::TurnFailureCode;
 
 use std::time::Duration;
 use tokio::time::Instant;
@@ -198,21 +199,21 @@ impl SseBuffer {
 fn event_limit_error() -> LlmTransportError {
     LlmTransportError::new("SSE event exceeded the configured byte limit")
         .with_kind(ProviderFailureKind::Stream)
-        .with_code("sse_event_too_large")
+        .with_adapter_code(TurnFailureCode::SseEventTooLarge)
         .with_retry_verdict(TransportRetryVerdict::NotRetryable)
 }
 
 fn total_limit_error() -> LlmTransportError {
     LlmTransportError::new("SSE response exceeded the configured total byte limit")
         .with_kind(ProviderFailureKind::Stream)
-        .with_code("sse_response_too_large")
+        .with_adapter_code(TurnFailureCode::SseResponseTooLarge)
         .with_retry_verdict(TransportRetryVerdict::NotRetryable)
 }
 
 fn timeout_error(message: &str) -> LlmTransportError {
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Timeout)
-        .with_code("timeout")
+        .with_adapter_code(TurnFailureCode::Timeout)
         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
 }
 
@@ -458,7 +459,10 @@ mod tests {
 
         let err = result.expect_err("stream read should time out");
         assert_eq!(err.kind, ProviderFailureKind::Timeout);
-        assert_eq!(err.code.as_deref(), Some("timeout"));
+        assert_eq!(
+            err.code.as_ref().map(|code| code.to_string()),
+            Some("adapter:timeout".to_string())
+        );
         assert_eq!(err.message, "stream chunk timed out");
         assert!(err.is_retryable());
     }
@@ -497,7 +501,10 @@ mod tests {
 
         let err = result.expect_err("absolute request deadline must win");
         assert_eq!(err.kind, ProviderFailureKind::Timeout);
-        assert_eq!(err.code.as_deref(), Some("timeout"));
+        assert_eq!(
+            err.code.as_ref().map(|code| code.to_string()),
+            Some("adapter:timeout".to_string())
+        );
         assert_eq!(err.message, "request timed out");
         assert!(err.is_retryable());
     }
@@ -510,7 +517,10 @@ mod tests {
             .expect_err("unterminated input must be capped");
 
         assert_eq!(err.kind, ProviderFailureKind::Stream);
-        assert_eq!(err.code.as_deref(), Some("sse_event_too_large"));
+        assert_eq!(
+            err.code.as_ref().map(|code| code.to_string()),
+            Some("adapter:sse_event_too_large".to_string())
+        );
         assert!(!err.is_retryable());
     }
 
@@ -522,7 +532,10 @@ mod tests {
             .expect_err("assembled event data must be capped");
 
         assert_eq!(err.kind, ProviderFailureKind::Stream);
-        assert_eq!(err.code.as_deref(), Some("sse_event_too_large"));
+        assert_eq!(
+            err.code.as_ref().map(|code| code.to_string()),
+            Some("adapter:sse_event_too_large".to_string())
+        );
         assert!(!err.is_retryable());
     }
 
@@ -534,7 +547,10 @@ mod tests {
             .expect_err("total response input must be capped");
 
         assert_eq!(err.kind, ProviderFailureKind::Stream);
-        assert_eq!(err.code.as_deref(), Some("sse_response_too_large"));
+        assert_eq!(
+            err.code.as_ref().map(|code| code.to_string()),
+            Some("adapter:sse_response_too_large".to_string())
+        );
         assert!(!err.is_retryable());
     }
 }

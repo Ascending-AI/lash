@@ -550,8 +550,8 @@ async fn run_matrix_row(
             .expect_err("mid-stream served-model variance must fail");
             assert_eq!(error.error.kind, ProviderFailureKind::Stream, "{dialect}");
             assert_eq!(
-                error.error.code.as_deref(),
-                Some("stream_evidence_identity_conflict"),
+                error.error.code.as_ref().map(|code| code.to_string()),
+                Some("adapter:stream_evidence_identity_conflict".to_string()),
                 "{dialect}"
             );
             assert_eq!(error.call_record.attempts.len(), 1, "{dialect}");
@@ -1204,7 +1204,7 @@ fn assert_failed_identity(dialect: &str, error: &ProviderCompletionError, cell: 
             "{dialect}"
         );
     } else {
-        assert_eq!(error.error.status, Some(400), "{dialect}");
+        assert_eq!(error.error.http_status, Some(400), "{dialect}");
         assert_eq!(
             evidence.provider_request_id.as_deref(),
             Some("matrix-failed-request"),
