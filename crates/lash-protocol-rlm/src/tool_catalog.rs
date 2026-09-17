@@ -1,15 +1,13 @@
 use lash_core::plugin::{PluginError, ToolCatalogContext};
 use lash_core::{ToolActivation, ToolCatalog, facade_support::ToolCatalogContribution};
-use lash_lashlang_runtime::{
-    required_tool_lashlang_executable, required_tool_typescript_executable,
-};
+use lash_lashlang_runtime::required_tool_typescript_executable;
 
 use crate::dialect::{TOOL_PROSE_TOKENS, TypescriptDialect, dialect_identity_markers};
 
 /// RLM catalog assembly. The catalog is a flat callable set: every member is
-/// rendered as a full prompt doc under its Lashlang call-path. RLM contributes
-/// no removals; it validates that each member carries explicit `lashlang.tool`
-/// and `typescript.tool` bindings so either dialect can call it by module path,
+/// rendered as a full prompt doc under its call-path. RLM contributes
+/// no removals; it validates that each member carries an explicit
+/// `typescript.tool` binding so a cell can call it by module path,
 /// and that no member's model-facing prose spells a dialect out literally.
 pub(crate) fn rlm_tool_catalog(
     ctx: ToolCatalogContext,
@@ -27,7 +25,7 @@ pub(crate) fn rlm_tool_catalog(
 /// This used to render every doc under the Lashlang path unconditionally, so a
 /// TypeScript session was handed a tool list it could not call: the typed
 /// declarations in its execution section said one thing and the doc block said
-/// another. Registration already requires both bindings on every non-internal
+/// another. Registration already requires the binding on every non-internal
 /// tool, so the dialect's path is always available.
 #[expect(
     clippy::expect_used,
@@ -435,8 +433,6 @@ fn validate_rlm_language_bindings(ctx: &ToolCatalogContext) -> Result<(), Plugin
         if tool.activation == ToolActivation::Internal {
             continue;
         }
-        required_tool_lashlang_executable(tool)
-            .map_err(|err| PluginError::Registration(err.to_string()))?;
         let typescript = required_tool_typescript_executable(tool)
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         // Being a catalog member is being advertised, and the TypeScript
@@ -627,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn rlm_catalog_rejects_members_without_lashlang_binding() {
+    fn rlm_catalog_rejects_members_without_tool_binding() {
         let missing = ToolDefinition::raw(
             "tool:test/update_plan",
             "update_plan",
@@ -651,13 +647,13 @@ mod tests {
 
         assert!(
             err.to_string()
-                .contains("missing an explicit `lashlang.tool` binding"),
+                .contains("missing an explicit `typescript.tool` binding"),
             "{err}"
         );
     }
 
     #[test]
-    fn rlm_catalog_ignores_internal_members_without_lashlang_bindings() {
+    fn rlm_catalog_ignores_internal_members_without_tool_bindings() {
         let internal = ToolDefinition::raw(
             "tool:test/internal_runner",
             "internal_runner",
@@ -727,9 +723,12 @@ mod tests {
         }
     }
 
+    /// The retired `lashlang.tool` key is not a reader alias: a manifest that
+    /// carries only it has no binding at all, and registration must say so
+    /// rather than silently accepting the dead key (FIG-3273).
     #[test]
-    fn rlm_catalog_rejects_members_without_typescript_binding() {
-        let mut missing = ToolDefinition::raw(
+    fn rlm_catalog_rejects_members_with_only_retired_binding_key() {
+        let mut retired_only = ToolDefinition::raw(
             "tool:test/update_plan",
             "update_plan",
             "Update plan",
@@ -737,15 +736,20 @@ mod tests {
             json!({ "type": "string" }),
         )
         .with_tool_binding(ToolBinding::new(["plan"], "update"));
-        missing
+        let binding = retired_only
             .manifest
             .bindings
-            .remove(lash_lashlang_runtime::TYPESCRIPT_TOOL_BINDING_KEY);
+            .remove(lash_lashlang_runtime::TYPESCRIPT_TOOL_BINDING_KEY)
+            .expect("with_tool_binding wrote the canonical key");
+        retired_only
+            .manifest
+            .bindings
+            .insert("lashlang.tool".to_string(), binding);
 
         let err = rlm_tool_catalog(
             ToolCatalogContext {
                 session_id: SessionId::from("session"),
-                tools: vec![missing.manifest()],
+                tools: vec![retired_only.manifest()],
                 resolve_contract: None,
                 tool_access: lash_core::SessionToolAccess::default(),
                 subagent: None,
@@ -753,7 +757,7 @@ mod tests {
             },
             &typescript_test_dialect(),
         )
-        .expect_err("missing TypeScript binding should fail RLM registration");
+        .expect_err("a manifest carrying only `lashlang.tool` must fail RLM registration");
 
         assert!(
             err.to_string()

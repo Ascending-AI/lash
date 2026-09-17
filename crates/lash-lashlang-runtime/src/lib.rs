@@ -30,7 +30,9 @@ pub use lashlang::{
 };
 
 pub const LASHLANG_ENGINE_KIND: &str = "lashlang";
-pub const LASHLANG_TOOL_BINDING_KEY: &str = "lashlang.tool";
+/// The one manifest key a tool binding lives under. A `lashlang.tool` twin
+/// used to be written beside it for the retired surface dialect (FIG-3021);
+/// readers now share this key, so a manifest has exactly one binding truth.
 pub const TYPESCRIPT_TOOL_BINDING_KEY: &str = "typescript.tool";
 pub const LASHLANG_SURFACE_EXTENSION_ID: &str = "lashlang.surface";
 
@@ -132,7 +134,7 @@ impl ToolBinding {
     pub fn required_for_remote(
         manifest: &lash_core::ToolManifest,
     ) -> Result<ResolvedToolBinding, ToolBindingError> {
-        required_tool_lashlang_executable(manifest)
+        required_tool_typescript_executable(manifest)
     }
 
     pub fn required_executable_for_remote(
@@ -205,59 +207,38 @@ fn validate_lashlang_identifier(
     Ok(())
 }
 
-pub fn required_tool_lashlang_binding(
+pub fn required_tool_typescript_binding(
     manifest: &lash_core::ToolManifest,
 ) -> Result<ToolBinding, ToolBindingError> {
     ToolManifestBindingExt::tool_binding(manifest)?.ok_or_else(|| {
         ToolBindingError::MissingBinding {
             tool: manifest.name.clone(),
-            binding_key: LASHLANG_TOOL_BINDING_KEY,
+            binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
         }
     })
-}
-
-pub fn required_tool_lashlang_executable(
-    manifest: &lash_core::ToolManifest,
-) -> Result<ResolvedToolBinding, ToolBindingError> {
-    required_tool_lashlang_binding(manifest)?.executable_for(&manifest.name)
 }
 
 pub fn required_tool_typescript_executable(
     manifest: &lash_core::ToolManifest,
 ) -> Result<ResolvedToolBinding, ToolBindingError> {
-    let binding = manifest
-        .bindings
-        .get(TYPESCRIPT_TOOL_BINDING_KEY)
-        .cloned()
-        .map(serde_json::from_value::<ToolBinding>)
-        .transpose()
-        .map_err(|source| ToolBindingError::MalformedPayload {
-            tool: manifest.name.clone(),
-            binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
-            source,
-        })?
-        .ok_or_else(|| ToolBindingError::MissingBinding {
-            tool: manifest.name.clone(),
-            binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
-        })?;
-    binding.executable_for(&manifest.name)
+    required_tool_typescript_binding(manifest)?.executable_for(&manifest.name)
 }
 
 pub trait ToolManifestBindingExt {
-    /// Read the binding stored under the `lashlang.tool` wire key.
+    /// Read the binding stored under the `typescript.tool` wire key.
     fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError>;
 }
 
 impl ToolManifestBindingExt for lash_core::ToolManifest {
     fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError> {
         self.bindings
-            .get(LASHLANG_TOOL_BINDING_KEY)
+            .get(TYPESCRIPT_TOOL_BINDING_KEY)
             .cloned()
             .map(serde_json::from_value)
             .transpose()
             .map_err(|source| ToolBindingError::MalformedPayload {
                 tool: self.name.clone(),
-                binding_key: LASHLANG_TOOL_BINDING_KEY,
+                binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
                 source,
             })
     }
@@ -273,15 +254,9 @@ impl ToolDefinitionBindingExt for lash_core::ToolDefinition {
         reason = "ToolBinding is a module-owned struct of strings and maps, so serialization into the manifest's JSON bindings map can only fail if the type is widened, which the site's message asserts"
     )]
     fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
-        let value =
-            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON");
-        self.manifest
-            .bindings
-            .insert(LASHLANG_TOOL_BINDING_KEY.to_string(), value);
         self.manifest.bindings.insert(
             TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
-            serde_json::to_value(tool_binding)
-                .expect("typescript tool binding must serialize to JSON"),
+            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON"),
         );
         self
     }
@@ -298,27 +273,22 @@ impl RemoteToolGrantBindingExt for lash_remote_protocol::RemoteToolGrant {
         reason = "ToolBinding is a module-owned struct of strings and maps, so serialization into the remote grant's binding map can only fail if the type is widened, which the site's message asserts"
     )]
     fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
-        let value =
-            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON");
-        self.bindings
-            .insert(LASHLANG_TOOL_BINDING_KEY.to_string(), value);
         self.bindings.insert(
             TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
-            serde_json::to_value(tool_binding)
-                .expect("typescript tool binding must serialize to JSON"),
+            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON"),
         );
         self
     }
 
     fn tool_binding(&self) -> Result<Option<ToolBinding>, ToolBindingError> {
         self.bindings
-            .get(LASHLANG_TOOL_BINDING_KEY)
+            .get(TYPESCRIPT_TOOL_BINDING_KEY)
             .cloned()
             .map(serde_json::from_value)
             .transpose()
             .map_err(|source| ToolBindingError::MalformedPayload {
                 tool: self.name.clone(),
-                binding_key: LASHLANG_TOOL_BINDING_KEY,
+                binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
                 source,
             })
     }
@@ -427,7 +397,7 @@ fn filtered_tool_catalog(
     }
     let mut filtered = catalog.clone();
     filtered.tools.retain(|entry| {
-        let Ok(binding) = required_tool_lashlang_executable(&entry.manifest) else {
+        let Ok(binding) = required_tool_typescript_executable(&entry.manifest) else {
             // Preserve ordinary validation for malformed unrelated entries.
             return true;
         };
@@ -486,12 +456,12 @@ pub fn lashlang_resources_from_tool_catalog(
         if entry.manifest.activation == lash_core::ToolActivation::Internal {
             continue;
         }
-        let lashlang_binding = required_tool_lashlang_executable(&entry.manifest)?;
+        let binding = required_tool_typescript_executable(&entry.manifest)?;
         let contract = lashlang_tool_operation_contract(&entry.contract);
         host_catalog.add_module_operation_contract(
-            lashlang_binding.module_path.iter().map(String::as_str),
-            lashlang_binding.authority_type.clone(),
-            lashlang_binding.operation.clone(),
+            binding.module_path.iter().map(String::as_str),
+            binding.authority_type.clone(),
+            binding.operation.clone(),
             entry.manifest.id.to_string(),
             &contract,
         )?;

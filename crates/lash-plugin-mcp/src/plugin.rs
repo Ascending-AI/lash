@@ -503,7 +503,11 @@ mod tests {
         // therefore a legitimate configuration, not a failure. What this crate
         // owes is that when a binding IS recorded it is the right one, so
         // assert the content rather than the presence or absence.
-        if let Some(recorded) = defs[0].manifest.bindings.get("lashlang.tool") {
+        if let Some(recorded) = defs[0]
+            .manifest
+            .bindings
+            .get(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY)
+        {
             assert_eq!(
                 recorded.get("module_path"),
                 Some(&serde_json::json!(["docs"])),

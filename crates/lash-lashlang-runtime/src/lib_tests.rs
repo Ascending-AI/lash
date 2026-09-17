@@ -467,20 +467,20 @@ fn missing_tool_binding_is_not_fabricated() {
         serde_json::Value::Null,
     );
 
-    let err = required_tool_lashlang_executable(&tool.manifest)
+    let err = required_tool_typescript_executable(&tool.manifest)
         .expect_err("missing explicit binding should fail");
 
     assert!(matches!(
         err,
         ToolBindingError::MissingBinding {
             tool,
-            binding_key: LASHLANG_TOOL_BINDING_KEY,
+            binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
         } if tool == "read_file"
     ));
 }
 
 #[test]
-fn explicit_tool_binding_attaches_lashlang_and_typescript_metadata() {
+fn explicit_tool_binding_attaches_exactly_one_manifest_key() {
     let tool = lash_core::ToolDefinition::raw(
         "tool:test/read_file",
         "read_file",
@@ -495,24 +495,24 @@ fn explicit_tool_binding_attaches_lashlang_and_typescript_metadata() {
     );
 
     let binding =
-        required_tool_lashlang_executable(&tool.manifest).expect("explicit binding resolves");
-    let typescript =
-        required_tool_typescript_executable(&tool.manifest).expect("TypeScript binding resolves");
+        required_tool_typescript_executable(&tool.manifest).expect("explicit binding resolves");
 
     assert_eq!(binding.module_path, vec!["fs"]);
     assert_eq!(binding.operation, "read");
     assert_eq!(binding.authority_type, "Filesystem");
     assert_eq!(binding.aliases, vec!["cat"]);
-    assert_eq!(typescript, binding);
-    assert!(
-        tool.manifest
-            .bindings
-            .contains_key(TYPESCRIPT_TOOL_BINDING_KEY)
+    assert_eq!(
+        tool.manifest.bindings.keys().collect::<Vec<_>>(),
+        vec![TYPESCRIPT_TOOL_BINDING_KEY],
+        "one tool binding lives under one manifest key"
     );
 }
 
 #[test]
-fn pre_rename_manifest_binding_payload_round_trips_identically() {
+fn legacy_two_key_manifest_still_reads_and_rewrites_to_one_key() {
+    // Manifests written before the keys were unified carried the same payload
+    // under both `lashlang.tool` and `typescript.tool`. The reader follows the
+    // canonical key; rewriting collapses the map to it.
     let legacy_bindings = serde_json::json!({
         "lashlang.tool": {
             "module_path": ["workspace", "files"],
@@ -553,7 +553,9 @@ fn pre_rename_manifest_binding_payload_round_trips_identically() {
 
     assert_eq!(
         serde_json::to_value(&rewritten.manifest.bindings).expect("rewritten bindings encode"),
-        legacy_bindings
+        serde_json::json!({
+            "typescript.tool": legacy_bindings["typescript.tool"]
+        })
     );
 }
 
@@ -745,7 +747,7 @@ fn dotted_operation_names_are_rejected() {
     )
     .with_tool_binding(ToolBinding::new(["tools"], "update.plan"));
 
-    let err = required_tool_lashlang_executable(&tool.manifest)
+    let err = required_tool_typescript_executable(&tool.manifest)
         .expect_err("dotted operation cannot compile as one Lashlang operation");
 
     assert!(matches!(
@@ -769,7 +771,7 @@ fn empty_operation_names_render_as_empty_invalid_identifiers() {
     )
     .with_tool_binding(ToolBinding::new(["tools"], ""));
 
-    let err = required_tool_lashlang_executable(&tool.manifest)
+    let err = required_tool_typescript_executable(&tool.manifest)
         .expect_err("an empty operation name cannot compile as a Lashlang operation");
 
     assert_eq!(
@@ -779,7 +781,7 @@ fn empty_operation_names_render_as_empty_invalid_identifiers() {
 }
 
 #[test]
-fn manifest_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
+fn manifest_tool_binding_accessor_reports_absent_valid_and_malformed() {
     let mut manifest = lash_core::ToolDefinition::raw(
         "tool:test/read_file",
         "read_file",
@@ -791,7 +793,7 @@ fn manifest_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
     assert_eq!(manifest.tool_binding().expect("absent binding"), None);
 
     manifest.bindings.insert(
-        LASHLANG_TOOL_BINDING_KEY.to_string(),
+        TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
         serde_json::json!({
             "module_path": ["fs"],
             "operation": "read"
@@ -805,14 +807,14 @@ fn manifest_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
     assert_eq!(binding.operation.as_deref(), Some("read"));
 
     manifest.bindings.insert(
-        LASHLANG_TOOL_BINDING_KEY.to_string(),
+        TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
         serde_json::json!({ "module_path": "fs" }),
     );
     assert!(manifest.tool_binding().is_err());
 }
 
 #[test]
-fn remote_grant_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
+fn remote_grant_tool_binding_accessor_reports_absent_valid_and_malformed() {
     let grant = remote_tool_grant("read_file");
     assert_eq!(grant.tool_binding().expect("absent binding"), None);
 
@@ -826,7 +828,7 @@ fn remote_grant_lashlang_binding_accessor_reports_absent_valid_and_malformed() {
 
     let mut malformed = grant;
     malformed.bindings.insert(
-        LASHLANG_TOOL_BINDING_KEY.to_string(),
+        TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
         serde_json::json!({ "module_path": "fs" }),
     );
     assert!(malformed.tool_binding().is_err());
@@ -1027,7 +1029,7 @@ process scan(root: str) -> str {
         serde_json::Value::Null,
     );
     malformed_tool.manifest.bindings.insert(
-        LASHLANG_TOOL_BINDING_KEY.to_string(),
+        TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
         serde_json::json!({"not": "a tool binding"}),
     );
     let invalid_host_catalog = Arc::new(lash_core::ToolCatalog::from_tool_definitions(vec![

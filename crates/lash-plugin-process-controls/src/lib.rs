@@ -442,7 +442,7 @@ mod tests {
                 definition
                     .manifest
                     .bindings
-                    .contains_key(lash_tool_support::LASHLANG_TOOL_BINDING_KEY),
+                    .contains_key(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY),
                 lash_tool_support::LASHLANG_BINDINGS_ENABLED,
                 "{} had Lashlang binding state inconsistent with lash-tool-support",
                 definition.name()
@@ -460,7 +460,7 @@ mod tests {
         assert!(definitions.iter().all(|tool| {
             tool.manifest
                 .bindings
-                .contains_key(lash_tool_support::LASHLANG_TOOL_BINDING_KEY)
+                .contains_key(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY)
         }));
     }
 

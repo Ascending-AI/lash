@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 mod static_provider;
 #[cfg(feature = "lashlang")]
-pub use lash_lashlang_runtime::{LASHLANG_TOOL_BINDING_KEY, ToolBinding};
+pub use lash_lashlang_runtime::{TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding};
 pub use static_provider::{StaticToolExecute, StaticToolProvider};
 
 /// Whether the resolved dependency graph installs Lashlang tool bindings.
@@ -19,7 +19,7 @@ pub const LASHLANG_BINDINGS_ENABLED: bool = false;
 
 /// Canonical manifest key used by Lashlang tool bindings.
 #[cfg(not(feature = "lashlang"))]
-pub const LASHLANG_TOOL_BINDING_KEY: &str = "lashlang.tool";
+pub const TYPESCRIPT_TOOL_BINDING_KEY: &str = "typescript.tool";
 
 #[cfg(not(feature = "lashlang"))]
 #[derive(Clone, Debug, Default)]
