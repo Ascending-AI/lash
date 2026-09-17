@@ -119,7 +119,7 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
         finding,
         RequiredConstraintFinding::Missing { table, name, .. }
             if table == "pending_turn_inputs"
-                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+                && name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
 
     let altered_path = directory.path().join("altered.db");
@@ -129,7 +129,7 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
             "CREATE TABLE pending_turn_inputs (
                 claim_id TEXT,
                 claim_token TEXT,
-                CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
                     CHECK (claim_id IS NULL OR claim_token IS NOT NULL)
             );",
         )
@@ -141,7 +141,7 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
         finding,
         RequiredConstraintFinding::Altered { table, name, .. }
             if table == "pending_turn_inputs"
-                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+                && name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
 
     let unrelated_path = directory.path().join("unrelated-grammar.db");
@@ -150,10 +150,14 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
         .execute_batch(
             "CREATE TABLE pending_turn_inputs (
                 claim_id TEXT,
+                claim_owner_id TEXT,
+                claim_owner_incarnation_id TEXT,
                 claim_token TEXT,
-                CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
-                    CHECK ((claim_id IS NULL AND claim_token IS NULL)
-                        OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
+                CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
+                    CHECK ((claim_id IS NULL AND claim_owner_id IS NULL
+                            AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL)
+                        OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL
+                            AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
                 CONSTRAINT ck_host_extra CHECK (printf('%q', claim_id) GLOB '*')
             );",
         )
@@ -164,7 +168,7 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
     assert!(!unrelated.findings().iter().any(|finding| matches!(
         finding,
         RequiredConstraintFinding::Altered { name, .. }
-            if name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+            if name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
 }
 

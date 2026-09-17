@@ -108,16 +108,21 @@ pub(crate) async fn complete_turn_input_claims_tx(
     let unclaimed_settlement_statement = format!(
         "UPDATE lash_pending_turn_inputs
                      SET state = $3,
-                         claim_id = NULL,
-                         claim_owner_id = NULL,
-                         claim_owner_incarnation_id = NULL,
-                         claim_token = NULL,
-                         claim_session_lease_generation = 0
+                         {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
                      WHERE session_id = $1
                        AND input_id = $2
                        AND claim_id IS NULL
                        AND state NOT IN ({terminal_states})",
         terminal_states = super::turn_input_settlement::unclaimed_turn_input_terminal_states_sql()
+    );
+    let claimed_settlement_statement = format!(
+        "UPDATE lash_pending_turn_inputs
+         SET state = $3,
+             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+         WHERE session_id = $1
+           AND input_id = $2
+           AND claim_id = $4
+           AND claim_token = $5"
     );
     for completed in completed_claims {
         for input_id in &completed.input_ids {
@@ -125,24 +130,12 @@ pub(crate) async fn complete_turn_input_claims_tx(
             // fields are an optional predicate strengthener, and either way
             // exactly one row must change (ADR 0069 §5).
             let settlement = match completed.claim.as_ref() {
-                Some(claim) => sqlx::query(
-                    "UPDATE lash_pending_turn_inputs
-                     SET state = $3,
-                         claim_id = NULL,
-                         claim_owner_id = NULL,
-                         claim_owner_incarnation_id = NULL,
-                         claim_token = NULL,
-                         claim_session_lease_generation = 0
-                     WHERE session_id = $1
-                       AND input_id = $2
-                       AND claim_id = $4
-                       AND claim_token = $5",
-                )
-                .bind(completed.session_id.as_str())
-                .bind(input_id.as_str())
-                .bind(lash_core::TurnInputStateKind::Completed.as_str())
-                .bind(&claim.claim_id)
-                .bind(&claim.lease_token),
+                Some(claim) => sqlx::query(&claimed_settlement_statement)
+                    .bind(completed.session_id.as_str())
+                    .bind(input_id.as_str())
+                    .bind(lash_core::TurnInputStateKind::Completed.as_str())
+                    .bind(&claim.claim_id)
+                    .bind(&claim.lease_token),
                 None => sqlx::query(&unclaimed_settlement_statement)
                     .bind(completed.session_id.as_str())
                     .bind(input_id.as_str())

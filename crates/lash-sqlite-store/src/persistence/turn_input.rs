@@ -797,21 +797,19 @@ impl TurnInputStore for Store {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    "UPDATE pending_turn_inputs
-                     SET state = CASE
-                             WHEN state = ?4 THEN
-                                 CASE json_extract(ingress_json, '$.scope')
-                                     WHEN 'active_turn' THEN ?5
-                                     ELSE ?6
-                                 END
-                             ELSE state
-                         END,
-                         claim_id = NULL,
-                         claim_owner_id = NULL,
-                         claim_owner_incarnation_id = NULL,
-                         claim_token = NULL,
-                         claim_session_lease_generation = 0
-                     WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3",
+                    &format!(
+                        "UPDATE pending_turn_inputs
+                         SET state = CASE
+                                 WHEN state = ?4 THEN
+                                     CASE json_extract(ingress_json, '$.scope')
+                                         WHEN 'active_turn' THEN ?5
+                                         ELSE ?6
+                                     END
+                                 ELSE state
+                             END,
+                             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+                         WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3"
+                    ),
                     params![
                         session_id.as_str(),
                         claim_id.as_str(),
@@ -999,11 +997,7 @@ fn abandon_turn_input_claims_statement(
                          END
                      ELSE state
                  END,
-                 claim_id = NULL,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_token = NULL,
-                 claim_session_lease_generation = 0
+                 {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
              WHERE (session_id, claim_id, claim_token) IN ("
     );
     let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(claims.len() * 3);
