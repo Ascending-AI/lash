@@ -125,13 +125,13 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "pending_turn_inputs",
-            "ck_pending_turn_inputs_claim_id_token_all_or_none",
-            "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+            "ck_pending_turn_inputs_claim_identity_all_or_none",
+            "(claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)",
         ),
         rendered(
             "lash_pending_turn_inputs",
-            "ck_pending_turn_inputs_claim_id_token_all_or_none",
-            "(claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)",
+            "ck_pending_turn_inputs_claim_identity_all_or_none",
+            "(claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)",
         ),
     ),
     expected_constraint(

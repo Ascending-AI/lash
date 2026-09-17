@@ -35,6 +35,9 @@ const RETIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const DEPARTING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-83-04b02aef6/postgres-expected.json",
 ];
+const PASSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-84-9a8b048f3/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -173,7 +176,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 100);
+    assert_eq!(PostgresStorage::schema_version(), 101);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -341,6 +344,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state,
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_state_ingress,
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_claim_id_token_all_or_none,
+             DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_claim_identity_all_or_none,
              ADD CONSTRAINT ck_pending_turn_inputs_state
                  CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted',
                                   'cancelled', 'completed')),
@@ -349,9 +353,11 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
                          AND state IN ('pending_active', 'accepted', 'cancelled', 'completed'))
                      OR ((ingress_json::jsonb ->> 'scope') = 'next_turn'
                          AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
-             ADD CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
-                 CHECK ((claim_id IS NULL AND claim_token IS NULL)
-                     OR (claim_id IS NOT NULL AND claim_token IS NOT NULL));
+             ADD CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
+                 CHECK ((claim_id IS NULL AND claim_owner_id IS NULL
+                         AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL)
+                     OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL
+                         AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL));
          ALTER TABLE lash_runtime_turn_commits
              DROP CONSTRAINT IF EXISTS lash_runtime_turn_commits_append_identity_all_or_none,
              ADD CONSTRAINT lash_runtime_turn_commits_append_identity_all_or_none

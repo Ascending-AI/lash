@@ -373,7 +373,7 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     claim_session_lease_generation INTEGER NOT NULL DEFAULT 0,
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
-    CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
+    CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
     UNIQUE (session_id, source_key)
         ON CONFLICT IGNORE
 );
@@ -719,7 +719,11 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `ck_<table>_<concern>` name so the required-constraints gate can see it.
 /// Constraint names change the stored DDL text, so a pre-69 database is
 /// rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 69;
+/// Version 70 widens `ck_pending_turn_inputs_claim_identity_all_or_none` to
+/// the whole four-column claim identity (FIG-3262): a claim id/token pair
+/// with no owner was representable. A pre-70 database is rejected at open and
+/// recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 70;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (

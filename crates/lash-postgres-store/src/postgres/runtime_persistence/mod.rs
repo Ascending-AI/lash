@@ -84,6 +84,15 @@ macro_rules! transaction_epoch_sql {
 
 const PENDING_TURN_INPUT_COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingress_json, state, input_json, enqueued_at_ms, claim_id, claim_fencing_token, claim_owner_id, claim_owner_incarnation_id, claim_token, claim_session_lease_generation";
 
+/// Releasing a claim clears the whole four-column identity family in one
+/// motion; `ck_pending_turn_inputs_claim_identity_all_or_none` makes that
+/// all-or-none shape load-bearing, so every release path shares this spelling.
+pub(crate) const TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS: &str = "claim_id = NULL,
+    claim_owner_id = NULL,
+    claim_owner_incarnation_id = NULL,
+    claim_token = NULL,
+    claim_session_lease_generation = 0";
+
 const POSTGRES_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE: &str = concat!(
     "session_id = $1
        AND available_at_ms <= ",

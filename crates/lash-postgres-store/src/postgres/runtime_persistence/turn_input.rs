@@ -744,7 +744,7 @@ impl TurnInputStore for PostgresSessionStore {
         claim: &lash_core::TurnInputClaim,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
-        sqlx::query(
+        sqlx::query(&format!(
             "UPDATE lash_pending_turn_inputs
              SET state = CASE
                      WHEN state = $4 THEN
@@ -754,13 +754,9 @@ impl TurnInputStore for PostgresSessionStore {
                          END
                      ELSE state
                  END,
-                 claim_id = NULL,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_token = NULL,
-                 claim_session_lease_generation = 0
-             WHERE session_id = $1 AND claim_id = $2 AND claim_token = $3",
-        )
+                 {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+             WHERE session_id = $1 AND claim_id = $2 AND claim_token = $3"
+        ))
         .bind(claim.session_id.as_str())
         .bind(&claim.claim_id)
         .bind(&claim.lease_token)
@@ -811,16 +807,9 @@ impl TurnInputStore for PostgresSessionStore {
             query.push("CASE ingress_json::jsonb ->> 'scope' WHEN 'active_turn' THEN ");
             query.push(pending_active).push(" ELSE ");
             query.push(deferred_next_turn).push(" END");
-            query.push(
-                "     ELSE state
-                     END,
-                     claim_id = NULL,
-                     claim_owner_id = NULL,
-                     claim_owner_incarnation_id = NULL,
-                     claim_token = NULL,
-                     claim_session_lease_generation = 0
-                 WHERE (session_id, claim_id, claim_token) IN ",
-            );
+            query.push("     ELSE state\n                     END,\n                     ");
+            query.push(TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS);
+            query.push("\n                 WHERE (session_id, claim_id, claim_token) IN ");
             query.push_tuples(claims.iter(), |mut row, claim| {
                 row.push_bind(claim.session_id.as_str())
                     .push_bind(&claim.claim_id)

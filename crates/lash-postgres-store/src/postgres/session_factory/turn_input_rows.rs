@@ -5,6 +5,7 @@
 //! parent's glob re-export.
 
 use super::*;
+use crate::runtime_persistence::TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS;
 
 #[derive(Clone, Debug)]
 pub(crate) struct PendingTurnInputRow {
@@ -201,16 +202,12 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                     claim: pending_turn_input_claim_diagnostics_from_row(&row),
                 });
             }
-            sqlx::query(
+            sqlx::query(&format!(
                 "UPDATE lash_pending_turn_inputs
                  SET state = $3,
-                     claim_id = NULL,
-                     claim_owner_id = NULL,
-                     claim_owner_incarnation_id = NULL,
-                     claim_token = NULL,
-                     claim_session_lease_generation = 0
-                 WHERE session_id = $1 AND input_id = $2",
-            )
+                     {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+                 WHERE session_id = $1 AND input_id = $2"
+            ))
             .bind(row.session_id.as_str())
             .bind(row.input_id.as_str())
             .bind(lash_core::TurnInputStateKind::Cancelled.as_str())

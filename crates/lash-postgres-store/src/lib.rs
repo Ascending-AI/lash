@@ -367,7 +367,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 100 names the formerly-anonymous CHECKs (FIG-3261) so the
 // required-constraints gate can see them. Constraint names change the stored
 // DDL, so component-99 catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 100;
+// Version 101 widens the pending-input claim CHECK to the whole four-column
+// identity (FIG-3262): a claim id/token pair with no owner was representable.
+// Component-100 catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 101;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

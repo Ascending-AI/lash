@@ -814,17 +814,13 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     let deferred_ingress = encode_json(&deferred.ingress())?;
     let mut outcome = lash_core::TurnCancelInputOutcome::default();
     for (input_id, payload) in repairable {
-        sqlx::query(
+        sqlx::query(&format!(
             "UPDATE lash_pending_turn_inputs
          SET state = $3,
              ingress_json = COALESCE($4, ingress_json),
-             claim_id = NULL,
-             claim_owner_id = NULL,
-             claim_owner_incarnation_id = NULL,
-             claim_token = NULL,
-             claim_session_lease_generation = 0
-         WHERE session_id = $1 AND input_id = $2",
-        )
+             {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+         WHERE session_id = $1 AND input_id = $2"
+        ))
         .bind(session_id.as_str())
         .bind(&input_id)
         .bind(match disposition {
