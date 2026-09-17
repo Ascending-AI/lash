@@ -1168,7 +1168,7 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
             turn_id: TurnId::from(format!("{QUEUED_TURN_ID_PREFIX}{}", uuid::Uuid::new_v4())),
             session_id: session_id.clone(),
             reason: request.reason,
-            batch_ids: Vec::new(),
+            scope: restate::QueuedTurnScope::All,
             drain_id: None,
         };
         let cleanup = ActiveTurnSubmissionGuard::queued_turn(

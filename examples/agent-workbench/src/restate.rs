@@ -61,42 +61,8 @@ pub(crate) struct WorkbenchTurnWorkflowRequest {
     pub attachment_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct WorkbenchQueuedTurnWorkflowRequest {
-    pub turn_id: TurnId,
-    pub session_id: SessionId,
-    pub reason: String,
-    #[serde(default)]
-    pub batch_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub drain_id: Option<String>,
-}
-
-impl WorkbenchQueuedTurnWorkflowRequest {
-    pub(crate) fn queued_turn(&self, session: &lash::LashSession) -> lash::QueuedTurnBuilder {
-        debug_assert!(self.batch_ids.is_empty());
-        session.queued_turn().drain_id(
-            self.drain_id
-                .clone()
-                .unwrap_or_else(|| self.turn_id.clone().to_string()),
-        )
-    }
-
-    pub(crate) fn selected_queued_turn(
-        &self,
-        session: &lash::LashSession,
-    ) -> lash::SelectedQueuedTurnBuilder {
-        debug_assert!(!self.batch_ids.is_empty());
-        session
-            .queued_turn()
-            .batch_ids(self.batch_ids.iter().cloned())
-            .drain_id(
-                self.drain_id
-                    .clone()
-                    .unwrap_or_else(|| self.turn_id.clone().to_string()),
-            )
-    }
-}
+mod queued_turn_request;
+pub(crate) use queued_turn_request::{QueuedTurnScope, WorkbenchQueuedTurnWorkflowRequest};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchButtonTriggerWorkflowRequest {
@@ -1135,10 +1101,7 @@ async fn run_queued_turn(
         "restate.queued_turn",
     )
     .await?;
-    let turn_output_turn_id = request
-        .drain_id
-        .clone()
-        .unwrap_or_else(|| request.turn_id.clone().to_string());
+    let turn_output_turn_id = request.drain_id();
     let session = state
         .open_session(&request.session_id, "restate.queued_turn")
         .await
@@ -1158,20 +1121,21 @@ async fn run_queued_turn(
             "model": serde_json::to_value(&selected_model).unwrap_or(Value::Null),
         }),
     );
-    let output = if request.batch_ids.is_empty() {
-        request
+    let output = match &request.scope {
+        QueuedTurnScope::All => request
             .queued_turn(&session)
             .stream_to_with_effects(&ui_events, controller)
             .await
             .map_err(AppError::runtime)?
-            .ran()
-    } else {
-        request
-            .selected_queued_turn(&session)
-            .stream_to_with_effects(&ui_events, controller)
-            .await
-            .map_err(AppError::runtime)?
-            .turn
+            .ran(),
+        QueuedTurnScope::Selected { batch_ids } => {
+            request
+                .selected_queued_turn(&session, batch_ids)
+                .stream_to_with_effects(&ui_events, controller)
+                .await
+                .map_err(AppError::runtime)?
+                .turn
+        }
     };
     let Some(output) = output else {
         state.trace_for_session(

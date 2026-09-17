@@ -88,7 +88,11 @@ CREATE TABLE IF NOT EXISTS event_outbox (
     last_error      TEXT,
     -- Slack's `x-slack-retry-reason` reports why the *previous* attempt failed,
     -- so the reason has to outlive the attempt that produced it.
-    last_reason     TEXT
+    last_reason     TEXT,
+    -- Terminal state is one fact: pending, delivered, or abandoned. The writers
+    -- guard on both columns being NULL, so a both-set row is only reachable on a
+    -- database file created before this CHECK existed.
+    CHECK (delivered_at IS NULL OR abandoned_at IS NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_event_outbox_ready
     ON event_outbox(delivered_at, abandoned_at, next_attempt_at);

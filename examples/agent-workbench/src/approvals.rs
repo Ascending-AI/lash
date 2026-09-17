@@ -34,6 +34,44 @@ pub(crate) struct PendingApproval {
     pub age_ms: i64,
 }
 
+/// The operator's decision on a pending approval.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ApprovalDecision {
+    Approved,
+    Denied,
+}
+
+impl ApprovalDecision {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Denied => "denied",
+        }
+    }
+
+    fn from_stored(stored: &str) -> Option<Self> {
+        match stored {
+            "approved" => Some(Self::Approved),
+            "denied" => Some(Self::Denied),
+            _ => None,
+        }
+    }
+}
+
+/// A ledger row whose operator decision was recorded. The wait it resolves
+/// can still be outstanding — the ledger write and the completion resolve are
+/// two writes — so decided rows feed the idempotent repair in
+/// `decide_approval` and the boot reconcile.
+#[derive(Clone, Debug)]
+pub(crate) struct DecidedApproval {
+    pub key: String,
+    pub completion_key: lash::AwaitEventKey,
+    pub decision: ApprovalDecision,
+    pub tool: String,
+    pub arguments: Value,
+    pub requesting_session: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ApprovalError {
     #[error("approval ledger lock is poisoned")]
@@ -67,8 +105,13 @@ impl WorkbenchApprovals {
                arguments_json TEXT NOT NULL,
                session_id TEXT NOT NULL,
                requested_at_ms INTEGER NOT NULL,
-               decision TEXT,
-               decided_at_ms INTEGER
+               decision TEXT CHECK (decision IS NULL OR decision IN ('approved', 'denied')),
+               decided_at_ms INTEGER,
+               -- The pair is one atomic fact: a decision exists only together
+               -- with the timestamp it was made at. The CHECK exists on
+               -- databases created under this schema; `mark_decided` writes
+               -- both columns in one statement either way.
+               CHECK ((decision IS NULL) = (decided_at_ms IS NULL))
              );",
         )?;
         Ok(Self {
@@ -166,7 +209,7 @@ impl WorkbenchApprovals {
     pub(crate) fn mark_decided(
         &self,
         key_id: &str,
-        decision: &'static str,
+        decision: ApprovalDecision,
     ) -> Result<(), ApprovalError> {
         let connection = self
             .connection
@@ -176,12 +219,62 @@ impl WorkbenchApprovals {
             "UPDATE approval_waits
              SET decision = ?2, decided_at_ms = ?3
              WHERE key_id = ?1 AND decision IS NULL",
-            params![key_id, decision, chrono::Utc::now().timestamp_millis()],
+            params![
+                key_id,
+                decision.as_str(),
+                chrono::Utc::now().timestamp_millis()
+            ],
         )?;
         if changed == 0 {
             return Err(ApprovalError::NotPending(key_id.to_string()));
         }
         Ok(())
+    }
+
+    /// Rows whose decision was written. A crash between `mark_decided` and the
+    /// completion resolve leaves a decided row over an outstanding wait;
+    /// callers re-resolve these idempotently.
+    pub(crate) fn decided(&self) -> Result<Vec<DecidedApproval>, ApprovalError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| ApprovalError::Poisoned)?;
+        let mut statement = connection.prepare(
+            "SELECT key_id, completion_key_json, decision, tool_name,
+                    arguments_json, session_id
+             FROM approval_waits
+             WHERE decision IS NOT NULL
+             ORDER BY requested_at_ms, key_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let key_id: String = row.get(0)?;
+            let completion_key_json: String = row.get(1)?;
+            let decision_stored: String = row.get(2)?;
+            let arguments_json: String = row.get(4)?;
+            let corrupt = |error: serde_json::Error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            };
+            let decision = ApprovalDecision::from_stored(&decision_stored).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    2,
+                    rusqlite::types::Type::Text,
+                    format!("unknown approval decision `{decision_stored}`").into(),
+                )
+            })?;
+            Ok(DecidedApproval {
+                key: key_id,
+                completion_key: serde_json::from_str(&completion_key_json).map_err(corrupt)?,
+                decision,
+                tool: row.get(3)?,
+                arguments: serde_json::from_str(&arguments_json).map_err(corrupt)?,
+                requesting_session: row.get(5)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 }
 
@@ -262,12 +355,22 @@ impl ToolProvider for ApprovalToolProvider {
     }
 }
 
+/// The wait resolution a recorded decision derives: identical for the live
+/// route and for repair passes over decided rows.
+pub(crate) fn resolution_for(decision: ApprovalDecision, arguments: &Value) -> lash::Resolution {
+    match decision {
+        ApprovalDecision::Approved => lash::Resolution::Ok(json!({
+            "status": "applied",
+            "target": arguments.get("target").cloned().unwrap_or(Value::Null),
+            "change": arguments.get("change").cloned().unwrap_or(Value::Null),
+        })),
+        ApprovalDecision::Denied => denial_resolution(),
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn approval_resolution(approval: &PendingApproval) -> lash::Resolution {
-    lash::Resolution::Ok(json!({
-        "status": "applied",
-        "target": approval.arguments.get("target").cloned().unwrap_or(Value::Null),
-        "change": approval.arguments.get("change").cloned().unwrap_or(Value::Null),
-    }))
+    resolution_for(ApprovalDecision::Approved, &approval.arguments)
 }
 
 pub(crate) fn denial_resolution() -> lash::Resolution {
@@ -306,6 +409,41 @@ mod tests {
         assert_eq!(pending[0].key, "approval-key-1");
         assert_eq!(pending[0].requesting_session, "approval-session");
         assert_eq!(reopened.completion_key("approval-key-1").unwrap(), key);
+    }
+
+    /// FIG-3293: `decision`/`decided_at_ms` are one atomic fact — neither half
+    /// may be written without the other, and the decision vocabulary is closed.
+    #[test]
+    fn decision_pair_is_constrained() {
+        let approvals = WorkbenchApprovals::in_memory().expect("in-memory ledger");
+        let connection = approvals.connection.lock().expect("ledger lock");
+        connection
+            .execute(
+                "INSERT INTO approval_waits (
+                   key_id, completion_key_json, tool_name, arguments_json,
+                   session_id, requested_at_ms, decision, decided_at_ms
+                 ) VALUES ('k1', '{}', 'tool', '{}', 's', 0, 'approved', NULL)",
+                [],
+            )
+            .expect_err("a decision without its timestamp must be rejected");
+        connection
+            .execute(
+                "INSERT INTO approval_waits (
+                   key_id, completion_key_json, tool_name, arguments_json,
+                   session_id, requested_at_ms, decision, decided_at_ms
+                 ) VALUES ('k2', '{}', 'tool', '{}', 's', 0, NULL, 1)",
+                [],
+            )
+            .expect_err("a timestamp without its decision must be rejected");
+        connection
+            .execute(
+                "INSERT INTO approval_waits (
+                   key_id, completion_key_json, tool_name, arguments_json,
+                   session_id, requested_at_ms, decision, decided_at_ms
+                 ) VALUES ('k3', '{}', 'tool', '{}', 's', 0, 'shrugged', 1)",
+                [],
+            )
+            .expect_err("a decision outside the vocabulary must be rejected");
     }
 
     #[test]

@@ -428,11 +428,13 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             turn_id: TurnId::from("workbench-targeted-later"),
             session_id: session_id.clone(),
             reason: "test_targeted_later".to_string(),
-            batch_ids: vec![later.batch_id.to_string()],
+            scope: restate::QueuedTurnScope::Selected {
+                batch_ids: vec![later.batch_id.to_string()],
+            },
             drain_id: Some("workbench-targeted-later-drain".to_string()),
         };
         let later_output = later_request
-            .selected_queued_turn(&session)
+            .selected_queued_turn(&session, &[later.batch_id.to_string()])
             .run()
             .await
             .expect("run only later workbench batch")
@@ -682,12 +684,14 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             turn_id: TurnId::from("workbench-stale-selection"),
             session_id: session_id.clone(),
             reason: "test_stale_selection".to_string(),
-            batch_ids: vec![later.batch_id.to_string()],
+            scope: restate::QueuedTurnScope::Selected {
+                batch_ids: vec![later.batch_id.to_string()],
+            },
             drain_id: Some("workbench-stale-selection-drain".to_string()),
         };
         assert!(
             stale_selection
-                .selected_queued_turn(&session)
+                .selected_queued_turn(&session, &[later.batch_id.to_string()])
                 .run()
                 .await
                 .expect("a selection naming an already-drained batch is a no-op, not an error")
@@ -712,12 +716,14 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             turn_id: TurnId::from("workbench-targeted-earlier"),
             session_id: session_id.clone(),
             reason: "test_targeted_earlier".to_string(),
-            batch_ids: vec![earlier.batch_id.to_string()],
+            scope: restate::QueuedTurnScope::Selected {
+                batch_ids: vec![earlier.batch_id.to_string()],
+            },
             drain_id: Some("workbench-targeted-earlier-drain".to_string()),
         };
         assert!(
             earlier_request
-                .selected_queued_turn(&session)
+                .selected_queued_turn(&session, &[earlier.batch_id.to_string()])
                 .run()
                 .await
                 .expect("run earlier workbench batch after later")
@@ -768,7 +774,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             turn_id: TurnId::from("workbench-drain-all"),
             session_id: session_id.clone(),
             reason: "test_drain_all".to_string(),
-            batch_ids: Vec::new(),
+            scope: restate::QueuedTurnScope::All,
             drain_id: Some("workbench-drain-all-idempotency".to_string()),
         }
         .queued_turn(&session)
@@ -920,7 +926,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             turn_id: TurnId::from(turn_id.to_string()),
             session_id: session_id.clone(),
             reason: "test_wake_single_reply".to_string(),
-            batch_ids: Vec::new(),
+            scope: restate::QueuedTurnScope::All,
             drain_id: Some(format!("{turn_id}-drain")),
         }
         .queued_turn(&session)
@@ -1295,7 +1301,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             turn_id: TurnId::from(wake_turn_id.to_string()),
             session_id: session_id.clone(),
             reason: "test_wake_keeps_previous".to_string(),
-            batch_ids: Vec::new(),
+            scope: restate::QueuedTurnScope::All,
             drain_id: Some(format!("{wake_turn_id}-drain")),
         }
         .queued_turn(&session)

@@ -26,11 +26,106 @@ pub(crate) struct ChatSummary {
 pub(crate) struct ChatMessage {
     pub(crate) id: i64,
     pub(crate) chat_id: String,
-    pub(crate) kind: String,
-    pub(crate) role: String,
-    pub(crate) text: String,
-    pub(crate) payload: Option<serde_json::Value>,
+    #[serde(flatten)]
+    pub(crate) body: ChatMessageBody,
     pub(crate) created_at: String,
+}
+
+#[cfg(test)]
+impl ChatMessage {
+    pub(crate) fn kind(&self) -> &'static str {
+        self.body.kind()
+    }
+
+    pub(crate) fn role(&self) -> &str {
+        self.body.role()
+    }
+
+    /// The row's `text` column. Its meaning is the body's, which the `kind`
+    /// tag selects: message body, reasoning body, tool name, or language.
+    pub(crate) fn text(&self) -> &str {
+        self.body.text()
+    }
+
+    pub(crate) fn payload(&self) -> Option<&serde_json::Value> {
+        self.body.payload()
+    }
+}
+
+/// A transcript row's body, internally tagged by `kind`.
+///
+/// `role` is stored only for `Message`, the one kind where the caller chooses
+/// it; the other kinds derive theirs. The serialized form is the historical
+/// flat `{kind, role, text, payload}` object, so the wire shape is unchanged.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum ChatMessageBody {
+    Message {
+        role: String,
+        text: String,
+        #[serde(default)]
+        payload: Option<serde_json::Value>,
+    },
+    Reasoning {
+        text: String,
+    },
+    ToolCall {
+        #[serde(rename = "text")]
+        name: String,
+        payload: serde_json::Value,
+    },
+    CodeBlock {
+        #[serde(rename = "text")]
+        language: String,
+        payload: serde_json::Value,
+    },
+}
+
+impl ChatMessageBody {
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::Message { .. } => "message",
+            Self::Reasoning { .. } => "reasoning",
+            Self::ToolCall { .. } => "tool_call",
+            Self::CodeBlock { .. } => "code_block",
+        }
+    }
+
+    pub(crate) fn role(&self) -> &str {
+        match self {
+            Self::Message { role, .. } => role,
+            Self::Reasoning { .. } | Self::CodeBlock { .. } => "assistant",
+            Self::ToolCall { .. } => "tool",
+        }
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        match self {
+            Self::Message { text, .. } | Self::Reasoning { text } => text,
+            Self::ToolCall { name, .. } => name,
+            Self::CodeBlock { language, .. } => language,
+        }
+    }
+
+    pub(crate) fn payload(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::Message { payload, .. } => payload.as_ref(),
+            Self::Reasoning { .. } => None,
+            Self::ToolCall { payload, .. } | Self::CodeBlock { payload, .. } => Some(payload),
+        }
+    }
+}
+
+impl Serialize for ChatMessageBody {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap as _;
+        let mut map = serializer.serialize_map(Some(4))?;
+        map.serialize_entry("kind", self.kind())?;
+        map.serialize_entry("role", self.role())?;
+        map.serialize_entry("text", self.text())?;
+        map.serialize_entry("payload", &self.payload())?;
+        map.end()
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -80,11 +175,20 @@ impl AppDb {
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-                kind TEXT NOT NULL DEFAULT 'message',
+                kind TEXT NOT NULL DEFAULT 'message'
+                    CHECK (kind IN ('message', 'reasoning', 'tool_call', 'code_block')),
                 role TEXT NOT NULL,
                 text TEXT NOT NULL,
                 payload TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                -- `role` is a function of `kind` for every kind except
+                -- 'message', and each kind fixes whether it uses `payload`.
+                -- These CHECKs only exist on database files created after the
+                -- constraint; the row mapper derives the same facts on read.
+                CHECK (kind = 'message' OR role = CASE kind
+                    WHEN 'tool_call' THEN 'tool' ELSE 'assistant' END),
+                CHECK (kind != 'reasoning' OR payload IS NULL),
+                CHECK (kind NOT IN ('tool_call', 'code_block') OR payload IS NOT NULL)
             );
             CREATE INDEX IF NOT EXISTS idx_messages_chat_id_id
                 ON messages(chat_id, id);
@@ -518,10 +622,11 @@ impl AppDb {
         Ok(ChatMessage {
             id,
             chat_id: chat_id.to_string(),
-            kind: "message".to_string(),
-            role: role.to_string(),
-            text: text.to_string(),
-            payload,
+            body: ChatMessageBody::Message {
+                role: role.to_string(),
+                text: text.to_string(),
+                payload,
+            },
             created_at,
         })
     }
@@ -541,10 +646,9 @@ impl AppDb {
         Ok(ChatMessage {
             id,
             chat_id: chat_id.to_string(),
-            kind: "reasoning".to_string(),
-            role: "assistant".to_string(),
-            text: text.to_string(),
-            payload: None,
+            body: ChatMessageBody::Reasoning {
+                text: text.to_string(),
+            },
             created_at,
         })
     }
@@ -578,10 +682,10 @@ impl AppDb {
         Ok(ChatMessage {
             id,
             chat_id: chat_id.to_string(),
-            kind: "tool_call".to_string(),
-            role: "tool".to_string(),
-            text: tool_name,
-            payload: Some(payload),
+            body: ChatMessageBody::ToolCall {
+                name: tool_name,
+                payload,
+            },
             created_at,
         })
     }
@@ -650,10 +754,7 @@ impl AppDb {
         Ok(ChatMessage {
             id,
             chat_id: chat_id.to_string(),
-            kind: "code_block".to_string(),
-            role: "assistant".to_string(),
-            text: language,
-            payload: Some(payload),
+            body: ChatMessageBody::CodeBlock { language, payload },
             created_at,
         })
     }
@@ -787,10 +888,12 @@ fn chat_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSummar
 
 fn chat_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
     let kind: String = row.get(2)?;
+    let role: String = row.get(3)?;
+    let text: String = row.get(4)?;
     let payload: Option<String> = row.get(5)?;
     let mut payload = payload
         .map(|value| {
-            serde_json::from_str(&value).map_err(|error| {
+            serde_json::from_str::<serde_json::Value>(&value).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
                     5,
                     rusqlite::types::Type::Text,
@@ -804,13 +907,36 @@ fn chat_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessag
     {
         normalize_legacy_tool_result(payload);
     }
+    let body = match kind.as_str() {
+        // 'message' is the only kind whose role is caller-chosen; every other
+        // kind's role is derived from the tag, so the stored column is not
+        // read for them.
+        "message" => ChatMessageBody::Message {
+            role,
+            text,
+            payload,
+        },
+        "reasoning" => ChatMessageBody::Reasoning { text },
+        "tool_call" => ChatMessageBody::ToolCall {
+            name: text,
+            payload: payload.unwrap_or_default(),
+        },
+        "code_block" => ChatMessageBody::CodeBlock {
+            language: text,
+            payload: payload.unwrap_or_default(),
+        },
+        _ => {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                2,
+                rusqlite::types::Type::Text,
+                format!("unknown message kind `{kind}`").into(),
+            ));
+        }
+    };
     Ok(ChatMessage {
         id: row.get(0)?,
         chat_id: row.get(1)?,
-        kind,
-        role: row.get(3)?,
-        text: row.get(4)?,
-        payload,
+        body,
         created_at: row.get(6)?,
     })
 }
@@ -986,7 +1112,7 @@ mod tests {
         let messages = db.list_messages(&chat.id).expect("replay transcript");
 
         assert_eq!(
-            messages[0].payload.as_ref().expect("tool payload")["output"]["outcome"]["payload"],
+            messages[0].payload().expect("tool payload")["output"]["outcome"]["payload"],
             json!({ "accepted": true, "move": { "cell": 4 } })
         );
     }
@@ -1101,7 +1227,7 @@ mod tests {
         assert_eq!(branch.model_variant.as_deref(), Some("low"));
         let messages = db.list_messages("branch").expect("branch messages");
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].text, "before");
+        assert_eq!(messages[0].text(), "before");
         assert_eq!(db.chat_board("branch").expect("branch board"), pinned_board);
 
         let sibling = db
@@ -1166,18 +1292,18 @@ mod tests {
             .list_messages(&source.id)
             .expect("list source messages")
             .into_iter()
-            .find(|message| message.kind == "code_block")
+            .find(|message| message.kind() == "code_block")
             .expect("source code block");
         let branch_code_block = db
             .list_messages("branch")
             .expect("list branch messages")
             .into_iter()
-            .find(|message| message.kind == "code_block")
+            .find(|message| message.kind() == "code_block")
             .expect("branch code block");
 
-        assert_eq!(branch_code_block.payload, source_code_block.payload);
+        assert_eq!(branch_code_block.payload(), source_code_block.payload());
         assert_eq!(
-            branch_code_block.payload.expect("code block payload")["tool_call_ids"],
+            branch_code_block.payload().expect("code block payload")["tool_call_ids"],
             json!(["move-1"])
         );
     }
