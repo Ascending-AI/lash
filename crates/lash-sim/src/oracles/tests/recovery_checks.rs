@@ -570,9 +570,14 @@ fn boundary_kind_name_matches_serde_serialization() {
         let serialized = serde_json::to_string(&kind).expect("serialization failed");
         let expected_name = serialized.trim_matches('"');
         assert_eq!(
-            kind.name(),
+            kind.to_string(),
             expected_name,
-            "BoundaryKind::name() for {kind:?} must match its serde-serialized snake_case string"
+            "BoundaryKind Display for {kind:?} must match its serde-serialized snake_case string"
+        );
+        assert_eq!(
+            expected_name.parse::<BoundaryKind>().expect("parse failed"),
+            kind,
+            "BoundaryKind FromStr must round-trip {kind:?} through its serde name"
         );
     }
 }

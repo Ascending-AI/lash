@@ -27,26 +27,23 @@ pub enum BoundaryKind {
     LeaseTime,
 }
 
-impl BoundaryKind {
-    pub const fn name(&self) -> &'static str {
-        match self {
-            BoundaryKind::Ingress => "ingress",
-            BoundaryKind::QueuedIngress => "queued_ingress",
-            BoundaryKind::Provider => "provider",
-            BoundaryKind::ProviderEvent => "provider_event",
-            BoundaryKind::Tool => "tool",
-            BoundaryKind::ExecCode => "exec_code",
-            BoundaryKind::DurableEffect => "durable_effect",
-            BoundaryKind::ProcessWake => "process_wake",
-            BoundaryKind::ProcessLifecycle => "process_lifecycle",
-            BoundaryKind::Worker => "worker",
-            BoundaryKind::Observer => "observer",
-            BoundaryKind::Cancellation => "cancellation",
-            BoundaryKind::Trigger => "trigger",
-            BoundaryKind::BackendFailure => "backend_failure",
-            BoundaryKind::ProviderMutation => "provider_mutation",
-            BoundaryKind::LeaseTime => "lease_time",
+/// The one name mapping is the serde derive above: `Display` and `FromStr`
+/// round-trip through it, so a new kind cannot gain a serialized name without
+/// the spelled name following it everywhere.
+impl std::fmt::Display for BoundaryKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match serde_json::to_value(self) {
+            Ok(Value::String(name)) => f.write_str(&name),
+            _ => unreachable!("unit variants serialize to their renamed string"),
         }
+    }
+}
+
+impl std::str::FromStr for BoundaryKind {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_value(Value::String(s.to_string()))
     }
 }
 
@@ -509,7 +506,7 @@ impl BoundaryScheduler {
         candidates.sort_by(|(_, left), (_, right)| {
             left.actor_alias
                 .cmp(&right.actor_alias)
-                .then_with(|| left.kind.name().cmp(right.kind.name()))
+                .then_with(|| left.kind.to_string().cmp(&right.kind.to_string()))
                 .then_with(|| left.boundary_id.cmp(&right.boundary_id))
         });
         let candidate_count_at_tick = candidates.len();

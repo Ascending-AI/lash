@@ -264,7 +264,7 @@ pub fn minimize_trace(
             best = candidate;
         }
         operation_family_reductions.push(OperationFamilyReduction {
-            boundary_kind: kind.name().to_string(),
+            boundary_kind: kind.to_string(),
             original_family_event_count,
             accepted,
             event_count_after_attempt: best.events.len(),
@@ -899,22 +899,8 @@ fn rewrite_cancellations_for_removed_queued_inputs(
 }
 
 fn fixture_boundary_kind(kind: &str) -> Result<BoundaryKind, MinimizeError> {
-    match kind {
-        "provider" => Ok(BoundaryKind::Provider),
-        "provider_event" => Ok(BoundaryKind::ProviderEvent),
-        "queued_ingress" => Ok(BoundaryKind::QueuedIngress),
-        "provider_mutation" => Ok(BoundaryKind::ProviderMutation),
-        "cancellation" => Ok(BoundaryKind::Cancellation),
-        "exec_code" => Ok(BoundaryKind::ExecCode),
-        "backend_failure" => Ok(BoundaryKind::BackendFailure),
-        "process_wake" => Ok(BoundaryKind::ProcessWake),
-        "process_lifecycle" => Ok(BoundaryKind::ProcessLifecycle),
-        "trigger" => Ok(BoundaryKind::Trigger),
-        "worker" => Ok(BoundaryKind::Worker),
-        other => Err(MinimizeError::Fixture(format!(
-            "unsupported fixture boundary kind `{other}`"
-        ))),
-    }
+    kind.parse()
+        .map_err(|_| MinimizeError::Fixture(format!("unsupported fixture boundary kind `{kind}`")))
 }
 
 #[cfg(test)]
