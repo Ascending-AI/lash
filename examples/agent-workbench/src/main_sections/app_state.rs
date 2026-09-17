@@ -1233,8 +1233,9 @@ pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
 pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> WorkItem {
     let kind = item.kind().to_string();
     let label = item.label().to_string();
+    let state = item.state();
     let mut process = work_process_from_observed(item.process);
-    process.status_label = work_item_status_label(item.state, process.status_label);
+    process.status_label = work_item_status_label(state, process.status_label);
     WorkItem {
         process,
         events: item
@@ -1242,7 +1243,7 @@ pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> 
             .into_iter()
             .map(work_event_from_observed)
             .collect(),
-        state: item.state,
+        state,
         kind,
         label,
     }
