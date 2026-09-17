@@ -464,6 +464,21 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-core/src/triggers/router.rs:TRIGGER_DEFINITION_FAMILY_VERSION": (
         "sha256:fb3d470b763cbd828e7df0bde4fd205be0d7cd077de30acd08d25c7b3ad2b73e"
     ),
+    # FIG-3306 (live): the parked driver states' `error` / `terminal_finish`
+    # field pair folded into `#[serde(flatten)] outcome: ParkedCellOutcome`
+    # (protocol/state.rs, native/state.rs). ParkedCellOutcome writes the same
+    # two keys with the same null-key emission the raw Option fields produced,
+    # and refuses to decode a record carrying both -- a state the old pair
+    # admitted but no writer ever produced. The trajectory-entry and
+    # parked-state serialization tests confirm the stored bytes are identical,
+    # so RLM_SNAPSHOT_VERSION stays 21 and NATIVE_DRIVER_STATE_VERSION stays 2.
+    # Any further guarded-shape drift re-fails the gate.
+    "crates/lash-protocol-rlm/src/executor/snapshot.rs:RLM_SNAPSHOT_VERSION": (
+        "sha256:5077dcfc2a842813eca8b45088eb267164f49d268be559edc1a92002ec23ef8e"
+    ),
+    "crates/lash-protocol-rlm/src/native/state.rs:NATIVE_DRIVER_STATE_VERSION": (
+        "sha256:5fba57c12525c184666bfd36859f770e35d754113e0d94b9e6c971f7fea3b03b"
+    ),
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

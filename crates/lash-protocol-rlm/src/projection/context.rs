@@ -152,7 +152,11 @@ fn completed_turn_internal_indices(
                     assistant_content_indices.push(entry.index);
                 }
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                    terminal_step = step.final_output.is_some().then_some(entry.index);
+                    terminal_step = step
+                        .outcome
+                        .terminal_value()
+                        .is_some()
+                        .then_some(entry.index);
                 }
                 _ => {}
             },
@@ -486,8 +490,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: None,
-            final_output: None,
+            outcome: lash_rlm_types::CellOutcome::Running,
         };
         let events = [lash_core::SessionHistoryRecord::Protocol(
             rlm_protocol_event(RlmProtocolEvent::RlmTrajectoryEntry(entry)),
@@ -730,8 +733,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: None,
-            final_output: Some(serde_json::json!({ "answer": 42 })),
+            outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!({ "answer": 42 })),
         };
         let retained = RlmTrajectoryEntry {
             id: "retained".to_string(),
@@ -741,8 +743,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: None,
-            final_output: None,
+            outcome: lash_rlm_types::CellOutcome::Running,
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(
@@ -811,8 +812,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: Some("unknown name".to_string()),
-            final_output: None,
+            outcome: lash_rlm_types::CellOutcome::Failed("unknown name".to_string()),
         };
         let terminal = RlmTrajectoryEntry {
             id: "terminal".to_string(),
@@ -822,8 +822,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: None,
-            final_output: Some(serde_json::json!("done")),
+            outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done")),
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(
@@ -866,8 +865,9 @@ mod tests {
         assert_eq!(projection.len(), 3);
         assert!(matches!(
             &projection.history()[1],
-            RlmHistoryItem::LashlangStep { id, error, .. }
-                if id == "intermediate" && error.as_deref() == Some("unknown name")
+            RlmHistoryItem::LashlangStep { id, outcome, .. }
+                if id == "intermediate"
+                    && outcome.error().map(String::as_str) == Some("unknown name")
         ));
         assert!(matches!(
             &projection.history()[2],
