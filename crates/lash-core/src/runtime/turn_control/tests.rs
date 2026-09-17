@@ -661,6 +661,51 @@ async fn escalation_cannot_substitute_the_accepted_undelivered_policy() {
 }
 
 #[tokio::test]
+async fn escalation_promise_persists_no_undelivered_policy() {
+    let host = Arc::new(NativeEffectHost::default());
+    let address = address("escalation-payload-shape");
+    let store = native_fixture_store(&host);
+    let driver =
+        TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store.clone());
+    driver
+        .request_cancel(
+            request(address.clone(), "accepted-after-step")
+                .undelivered(TurnCancelDisposition::Drop)
+                .mode(TurnCancelMode::AfterStep),
+        )
+        .await
+        .unwrap();
+    let escalated = driver
+        .request_cancel(
+            request(address.clone(), "timing-escalation")
+                .undelivered(TurnCancelDisposition::Drop)
+                .mode(TurnCancelMode::Immediate),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(escalated.outcome, TurnCancelOutcome::Escalated(_)));
+
+    // The durable payload is the escalation promise's whole contract: it names
+    // the request that won escalation and nothing about the accepted
+    // undelivered-input disposition, which lives only on the base gate.
+    let key = escalation_key(host.as_ref(), &address).await.unwrap();
+    let Some(crate::Resolution::Ok(payload)) = host.peek_await_event(&key).await.unwrap() else {
+        panic!("the escalation promise resolved with the winning request");
+    };
+    assert_eq!(payload["state"], "cancel_requested");
+    let cancellation = payload["cancellation"].as_object().unwrap();
+    assert_eq!(cancellation["request_id"], "timing-escalation");
+    assert!(
+        !cancellation.contains_key("undelivered"),
+        "the escalation payload must not carry a second undelivered copy: {payload}"
+    );
+    assert!(
+        !cancellation.contains_key("honoured_after_step"),
+        "the escalation payload carries no honoured-step field: {payload}"
+    );
+}
+
+#[tokio::test]
 async fn orphan_recovery_uses_only_the_existing_gate_terminal() {
     let host = Arc::new(NativeEffectHost::default());
     let cancel_address = address("orphan-cancel-winner");
