@@ -817,7 +817,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             f"target/confidence/stages/{stage}/**"
             for stage in ("harnesses", "generated-${{ matrix.shard }}", "minimizer", "backends",
                            "coverage", "mutation-core", "mutation-sim",
-                           "mutation-packages-${{ matrix.package }}")
+                           "mutation-packages-${{ matrix.package }}-${{ matrix.shard }}")
         )
         self.assertCountEqual(consumed_paths, expected_consumed_paths)
 
@@ -1242,6 +1242,223 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             ).group(1)
         )
         self.assertGreaterEqual(mutation_sim_cap, 23 + 49 * 2.03)
+
+    def test_mutation_packages_legs_fit_their_job_cap(self) -> None:
+        """Run 35117123483 cancelled three package legs at the 100-minute cap.
+
+        A cancelled leg writes no verdict at all, and the mutant spaces are
+        far wider than one job can sweep (protocol-rlm alone listed 1,641
+        mutants), so the matrix fans each package out into legs that each
+        judge a bounded slice. The slice index rotates with the run number so
+        successive runs sweep the space instead of re-judging one prefix.
+        """
+        gate = GATE.read_text(encoding="utf-8")
+        stage = (ROOT / "scripts/ci/confidence-stage.sh").read_text(encoding="utf-8")
+        confidence = yaml.safe_load(CONFIDENCE_WORKFLOW.read_text())
+        job = confidence["jobs"]["confidence-mutation-packages"]
+
+        # Every leg is bounded: the stage opts in, the matrix hands each leg a
+        # shard coordinate, and the run number rotates the judged slice.
+        self.assertIn("LASH_MUTATION_PACKAGES_BOUNDED=1", stage)
+        run_step = next(
+            s for s in job["steps"] if s.get("name") == "Run mutation-packages"
+        )
+        self.assertEqual(
+            "${{ matrix.shard }}/${{ matrix.shards }}",
+            run_step["env"]["LASH_MUTATION_PACKAGES_SHARD"],
+        )
+        self.assertEqual(
+            "${{ github.run_number }}", run_step["env"]["LASH_MUTATION_RUN_INDEX"]
+        )
+
+        # The matrix fans each package into a contiguous 1..legs set of legs.
+        expected_legs = {
+            "lash-internal-core": 2,
+            "lash-internal-lashlang": 4,
+            "lash-internal-protocol-rlm": 4,
+            "lash-internal-protocol-standard": 1,
+            "lash-internal-sqlite-store": 3,
+            "lash-internal-postgres-store": 4,
+        }
+        rows = job["strategy"]["matrix"]["include"]
+        self.assertEqual(sorted(expected_legs), sorted({r["package"] for r in rows}))
+        for package, leg_count in expected_legs.items():
+            legs = [r for r in rows if r["package"] == package]
+            self.assertEqual(
+                list(range(1, leg_count + 1)),
+                sorted(r["shard"] for r in legs),
+                f"{package} legs are not a contiguous 1..{leg_count} set",
+            )
+            self.assertTrue(
+                all(r["shards"] == leg_count for r in legs),
+                f"{package} legs disagree on the leg count",
+            )
+        self.assertIs(False, job["strategy"]["fail-fast"])
+
+        # Legs are distinguishable in job names, out dirs and artifact names,
+        # so one leg's evidence can never overwrite or impersonate another's.
+        upload = next(s for s in job["steps"] if "upload-artifact@" in s.get("uses", ""))
+        self.assertIn("${{ matrix.package }}-${{ matrix.shard }}", upload["with"]["name"])
+        self.assertIn("${{ matrix.package }}-${{ matrix.shard }}", upload["with"]["path"])
+        self.assertIn(
+            "${{ matrix.package }}-${{ matrix.shard }}",
+            run_step["env"]["LASH_CONFIDENCE_OUT_DIR"],
+        )
+        self.assertIn("${{ matrix.package }}-${{ matrix.shard }}", job["name"])
+
+        # The gate counts the space with `cargo mutants --list`, derives the
+        # slice from the leg coordinate plus the run index, and hands it to
+        # cargo-mutants as --shard in both passes.
+        shard_fn = shell_function_body(gate, "mutation_packages_shard")
+        self.assertIn("--list", shard_fn)
+        self.assertIn("LASH_MUTATION_PACKAGES_SHARD", shard_fn)
+        self.assertIn("LASH_MUTATION_RUN_INDEX", shard_fn)
+        for function in ("run_mutation_smoke", "run_mutation_full"):
+            body = shell_function_body(gate, function)
+            self.assertIn('mutation_packages_shard "$package"', body)
+            self.assertIn("--shard", body)
+            self.assertIn('${LASH_MUTATION_PACKAGES_BOUNDED:-0}', body)
+        self.assertIn(
+            "LASH_MUTATION_SMOKE_SHARD", shell_function_body(gate, "run_mutation_smoke")
+        )
+        self.assertIn(
+            "LASH_MUTATION_FULL_SHARD", shell_function_body(gate, "run_mutation_full")
+        )
+        self.assertIn("LASH_MUTATION_PACKAGES_SHARD must be", gate)
+        self.assertIn(
+            "mutation-shard.json", shell_function_body(gate, "run_mutants_recorded")
+        )
+
+        # Budget arithmetic: fixed cost + smoke slice + full slice must fit
+        # the job cap read out of the workflow, at the per-mutant wall clock
+        # run 35117123483 measured at --jobs 2 (smoke at the 180 s cap, full
+        # at the 600 s cap; each slice also pays the unmutated baseline).
+        cap = job["timeout-minutes"]
+        smoke_budget = shell_int_constant(gate, "MUTATION_PACKAGES_SMOKE_MUTANTS")
+        full_budgets = shell_assoc_array(gate, "MUTATION_PACKAGES_FULL_MUTANTS")
+        shell_int_constant(gate, "MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT")
+        self.assertEqual(sorted(expected_legs), sorted(full_budgets))
+        smoke_minutes_per_mutant = {
+            "lash-internal-core": 2.5,
+            "lash-internal-lashlang": 0.8,
+            "lash-internal-protocol-rlm": 1.3,
+            "lash-internal-protocol-standard": 0.2,
+            "lash-internal-sqlite-store": 1.5,
+            "lash-internal-postgres-store": 1.0,
+        }
+        full_minutes_per_mutant = {
+            "lash-internal-core": 4.0,
+            "lash-internal-lashlang": 0.8,
+            "lash-internal-protocol-rlm": 1.3,
+            "lash-internal-protocol-standard": 0.2,
+            "lash-internal-sqlite-store": 1.5,
+            "lash-internal-postgres-store": 4.0,
+        }
+        for package in expected_legs:
+            with self.subTest(package=package):
+                leg_minutes = (
+                    25
+                    + smoke_budget * smoke_minutes_per_mutant[package]
+                    + 8
+                    + int(full_budgets[package]) * full_minutes_per_mutant[package]
+                    + 12
+                )
+                self.assertLessEqual(
+                    leg_minutes,
+                    cap,
+                    f"{package}: {leg_minutes:.0f}-minute leg does not fit "
+                    f"the {cap}-minute cap",
+                )
+
+    def test_mutation_packages_bounded_leg_rotates_slices(self) -> None:
+        """The leg coordinate plus the run index must pick distinct slices."""
+        gate = GATE.read_text(encoding="utf-8")
+        shard_fn = shell_function_definition(gate, "mutation_packages_shard")
+        smoke_fn = shell_function_definition(gate, "run_mutation_smoke")
+        full_fn = shell_function_definition(gate, "run_mutation_full")
+        harness = f"""\
+set -euo pipefail
+{shard_fn}
+{smoke_fn}
+{full_fn}
+area_mutation_file_args=()
+MUTATION_PACKAGES_SMOKE_MUTANTS=12
+declare -A MUTATION_PACKAGES_FULL_MUTANTS=([pkg-x]="5")
+MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=4
+selected_packages=(pkg-x)
+out_dir="$1"
+mutation_jobs=2
+step() {{ :; }}
+require_tool() {{ :; }}
+cargo() {{
+  if [[ "$*" == *--list* ]]; then seq 1 23; return 0; fi
+}}
+run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
+run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
+"""
+        # 23 mutants at budgets 12 (smoke, denom 2) and 5 (full, denom 5).
+        # Two legs plus the run index walk consecutive slices of each space.
+        cases = [
+            # (run, leg spec) -> (smoke shard, full shard)
+            (1, "1/2", "1/2", "1/5"),
+            (1, "2/2", "2/2", "2/5"),
+            (2, "1/2", "1/2", "3/5"),
+            (2, "2/2", "2/2", "4/5"),
+            (3, "1/2", "1/2", "5/5"),
+        ]
+        for run_index, leg, smoke_shard, full_shard in cases:
+            with self.subTest(run=run_index, leg=leg):
+                env = dict(
+                    os.environ,
+                    LASH_MUTATION_PACKAGES_BOUNDED="1",
+                    LASH_MUTATION_PACKAGES_SHARD=leg,
+                    LASH_MUTATION_RUN_INDEX=str(run_index),
+                )
+                result = subprocess.run(
+                    ["bash", "-c", harness + "\nrun_mutation_smoke\nrun_mutation_full", "t", "/tmp/x"],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn(f"--shard {smoke_shard} ", result.stdout)
+                self.assertIn(f"--shard {full_shard} ", result.stdout)
+
+        # Without the bound flag the full pass stays an unsharded sweep and
+        # the smoke canary keeps its historical 1/64 slice; explicit shard
+        # selectors still win for local reproduction.
+        env = dict(os.environ)
+        for name in (
+            "LASH_MUTATION_PACKAGES_BOUNDED",
+            "LASH_MUTATION_PACKAGES_SHARD",
+            "LASH_MUTATION_RUN_INDEX",
+            "LASH_MUTATION_SMOKE_SHARD",
+            "LASH_MUTATION_FULL_SHARD",
+        ):
+            env.pop(name, None)
+        result = subprocess.run(
+            ["bash", "-c", harness + "\nrun_mutation_smoke\nrun_mutation_full", "t", "/tmp/x"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--shard 1/64 ", result.stdout)
+        full_line = next(
+            line for line in result.stdout.splitlines() if "full mutation" in line
+        )
+        self.assertNotIn("--shard", full_line)
+
+        env["LASH_MUTATION_PACKAGES_BOUNDED"] = "1"
+        env["LASH_MUTATION_FULL_SHARD"] = "3/7"
+        result = subprocess.run(
+            ["bash", "-c", harness + "\nrun_mutation_full", "t", "/tmp/x"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--shard 3/7 ", result.stdout)
 
     def test_lane_composition_is_declared_once_per_path(self) -> None:
         """Four hand-written copies of the same composition is three too many.
