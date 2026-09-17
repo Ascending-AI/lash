@@ -437,35 +437,33 @@ pub fn scheduler_owned_runtime_completions(events: &[DeliveredBoundary]) -> Orac
                     ),
                 );
             }
-            let family = completion
-                .get("completion_family")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let units = completion
-                .get("completion_units")
-                .and_then(Value::as_array)
-                .map_or(0, Vec::len);
-            let ready_at = completion
-                .get("ready_at")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let registered_after = completion
-                .get("registered_after")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            if family.is_empty()
-                || units == 0
-                || ready_at != event.at
-                || registered_after.is_empty()
+            let detail = match serde_json::from_value::<PendingRuntimeBoundary>(completion.clone())
             {
-                return OracleVerdict::failed(
-                    SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
-                    format!(
-                        "runtime completion `{}` for {kind:?} had incomplete pending evidence: family=`{family}` units={units} ready_at={ready_at} registered_after=`{registered_after}`",
-                        event.boundary_id
-                    ),
-                );
-            }
+                Ok(pending)
+                    if !pending.completion_units.is_empty()
+                        && pending.ready_at == event.at
+                        && !pending.registered_after.is_empty() =>
+                {
+                    continue;
+                }
+                Ok(pending) => format!(
+                    "family=`{:?}` units={} ready_at={} registered_after=`{}`",
+                    pending.completion_family,
+                    pending.completion_units.len(),
+                    pending.ready_at,
+                    pending.registered_after
+                ),
+                Err(error) => {
+                    format!("evidence did not deserialize as PendingRuntimeBoundary: {error}")
+                }
+            };
+            return OracleVerdict::failed(
+                SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
+                format!(
+                    "runtime completion `{}` for {kind:?} had incomplete pending evidence: {detail}",
+                    event.boundary_id
+                ),
+            );
         }
         if !saw_kind {
             missing.push(format!("{kind:?}"));

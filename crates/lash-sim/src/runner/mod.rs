@@ -67,8 +67,8 @@ use crate::runtime_providers::{
     runtime_scripts_for_texts as runtime_provider_scripts_for_texts, suspend_roundtrip_scripts,
 };
 use crate::scheduler::{
-    BoundaryDeliveryLog, BoundaryEvent, BoundaryKind, BoundaryScheduler, RuntimeCompletionQueue,
-    RuntimeCompletionUnit,
+    BoundaryDeliveryLog, BoundaryEvent, BoundaryKind, BoundaryScheduler, RuntimeCompletionFamily,
+    RuntimeCompletionQueue, RuntimeCompletionUnit,
 };
 use crate::sqlite_replay::SqliteReplayError;
 use crate::stack_policy::{

@@ -1,4 +1,5 @@
 use super::*;
+use crate::scheduler::PendingRuntimeBoundary;
 use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat};
 use lash_sansio::SessionId;
@@ -2139,29 +2140,27 @@ fn provider_runtime_completion_registration_does_not_schedule_turn_completion_im
     assert_eq!(ready.len(), 1);
     let event = ready.into_iter().next().expect("provider ready");
     let units = runtime_completion_units(&event).expect("provider completion units");
-    let (_pending, completion_event) =
-        queue.register_pending_event(event, &registered_after, "provider_turn_completion", units);
+    let (_pending, completion_event) = queue.register_pending_event(
+        event,
+        &registered_after,
+        RuntimeCompletionFamily::ProviderTurnCompletion,
+        units,
+    );
 
     assert_eq!(queue.registered_len(), 1);
     assert_eq!(queue.pending_ids(), vec!["session-001:provider:002"]);
     assert_eq!(completion_event.boundary_id, "session-001:provider:001");
-    assert!(completion_event.payload.get("runtime_completion").is_some());
+    let evidence = PendingRuntimeBoundary::from_payload(&completion_event.payload)
+        .expect("registered completion carries typed pending evidence");
     assert_eq!(
-        completion_event
-            .payload
-            .pointer("/runtime_completion/completion_family")
-            .and_then(Value::as_str),
-        Some("provider_turn_completion")
+        evidence.completion_family,
+        RuntimeCompletionFamily::ProviderTurnCompletion
     );
     assert!(
-        completion_event
-            .payload
-            .pointer("/runtime_completion/completion_units")
-            .and_then(Value::as_array)
-            .is_some_and(|units| units.iter().any(|unit| unit
-                .get("unit")
-                .and_then(Value::as_str)
-                .is_some_and(|name| name.contains("provider:"))))
+        evidence
+            .completion_units
+            .iter()
+            .any(|unit| unit.unit.contains("provider:"))
     );
 }
 
@@ -2288,8 +2287,14 @@ fn runtime_completion_process_wake_and_observer_readiness_and_units() {
         "observer is ready once turn 1 completes"
     );
 
-    assert_eq!(runtime_completion_family(&wake), "process_wake");
-    assert_eq!(runtime_completion_family(&observer), "observer_snapshot");
+    assert_eq!(
+        runtime_completion_family(wake.kind),
+        Some(RuntimeCompletionFamily::ProcessWake)
+    );
+    assert_eq!(
+        runtime_completion_family(observer.kind),
+        Some(RuntimeCompletionFamily::ObserverSnapshot)
+    );
 
     let wake_units = runtime_completion_units(&wake).expect("wake units");
     assert_eq!(wake_units.len(), 1);

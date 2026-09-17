@@ -615,7 +615,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001:provider:001",
             "session-001",
             BoundaryKind::Provider,
-            json!({"runtime_completion": runtime_completion("provider_turn_completion", 0)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 0)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -623,7 +623,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001:cancellation:001",
             "session-001",
             BoundaryKind::Cancellation,
-            json!({"runtime_completion": runtime_completion("queued_input_cancellation", 1)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::QueuedInputCancellation, 1)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -631,7 +631,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001:backend-failure:001",
             "session-001",
             BoundaryKind::BackendFailure,
-            json!({"runtime_completion": runtime_completion("backend_retry_or_failure", 2)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 2)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -639,7 +639,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001:provider-mutation:001",
             "session-001",
             BoundaryKind::ProviderMutation,
-            json!({"runtime_completion": runtime_completion("provider_script_mutation", 3)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderScriptMutation, 3)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -647,7 +647,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001:tool:001",
             "session-001",
             BoundaryKind::Tool,
-            json!({"runtime_completion": runtime_completion("tool_return", 4)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ToolReturn, 4)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -655,7 +655,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001:exec-code:001",
             "session-001",
             BoundaryKind::ExecCode,
-            json!({"runtime_completion": runtime_completion("exec_result", 5)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ExecResult, 5)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -663,7 +663,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001:durable:001",
             "session-001",
             BoundaryKind::DurableEffect,
-            json!({"runtime_completion": runtime_completion("durable_effect_completion", 6)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 6)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -671,7 +671,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "worker-001:worker:001",
             "worker-001",
             BoundaryKind::Worker,
-            json!({"runtime_completion": runtime_completion("worker_lease_completion", 7)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 7)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -679,7 +679,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001:process-wake:001",
             "session-001",
             BoundaryKind::ProcessWake,
-            json!({"runtime_completion": runtime_completion("process_wake", 8)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 8)}),
             json!({}),
         ),
         delivered_with_payload(
@@ -687,7 +687,7 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_ten_kinds_present()
             "session-001:observer:001",
             "session-001",
             BoundaryKind::Observer,
-            json!({"runtime_completion": runtime_completion("observer_snapshot", 9)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ObserverSnapshot, 9)}),
             json!({}),
         ),
     ];
@@ -711,7 +711,7 @@ fn scheduler_owned_runtime_completion_oracle_fails_when_kind_is_missing() {
                 &format!("boundary:{seq}"),
                 "session-001",
                 kind,
-                json!({"runtime_completion": runtime_completion("some_family", seq)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, seq)}),
                 json!({}),
             ));
             seq += 1;
@@ -734,7 +734,7 @@ fn standard_provider_error_oracle_requires_ordered_failure_and_parser_matrix() {
         "session-001:provider-mutation:001",
         "session-001",
         BoundaryKind::ProviderMutation,
-        json!({"runtime_completion": runtime_completion("provider_script_mutation", 2)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderScriptMutation, 2)}),
         provider_mutation_observed("malformed_sse_chunk"),
     );
     let provider = delivered_with_payload(
@@ -742,7 +742,7 @@ fn standard_provider_error_oracle_requires_ordered_failure_and_parser_matrix() {
         "session-001:provider:001",
         "session-001",
         BoundaryKind::Provider,
-        json!({"runtime_completion": runtime_completion("provider_turn_completion", 1)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 1)}),
         json!({"provider_output": "answer"}),
     );
     let failure_equal_sequence = delivered_with_payload(
@@ -750,7 +750,7 @@ fn standard_provider_error_oracle_requires_ordered_failure_and_parser_matrix() {
         "session-001:backend-failure:001",
         "session-001",
         BoundaryKind::BackendFailure,
-        json!({"runtime_completion": runtime_completion("backend_retry_or_failure", 1)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 1)}),
         json!({"backend_failure": true}),
     );
     let verdict = mini_standard_provider_error_without_checkpoint(&[
@@ -784,7 +784,7 @@ fn standard_provider_error_oracle_requires_ordered_failure_and_parser_matrix() {
         "session-001:tool:001",
         "session-001",
         BoundaryKind::Tool,
-        json!({"runtime_completion": runtime_completion("tool_return", 0)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ToolReturn, 0)}),
         json!({"tool_output": "not a provider failure"}),
     );
     let verdict = mini_standard_provider_error_without_checkpoint(&[
@@ -799,7 +799,7 @@ fn standard_provider_error_oracle_requires_ordered_failure_and_parser_matrix() {
         "session-001:backend-failure:001",
         "session-001",
         BoundaryKind::BackendFailure,
-        json!({"runtime_completion": runtime_completion("backend_retry_or_failure", 0)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 0)}),
         json!({"backend_failure": true}),
     );
     let verdict =
@@ -811,7 +811,7 @@ fn standard_provider_error_oracle_requires_ordered_failure_and_parser_matrix() {
         "session-001:provider:002",
         "session-001",
         BoundaryKind::Provider,
-        json!({"runtime_completion": runtime_completion("provider_turn_completion", 2)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 2)}),
         json!({"provider_output": "answer"}),
     );
     let late_failure = delivered_with_payload(
@@ -819,7 +819,7 @@ fn standard_provider_error_oracle_requires_ordered_failure_and_parser_matrix() {
         "session-001:backend-failure:002",
         "session-001",
         BoundaryKind::BackendFailure,
-        json!({"runtime_completion": runtime_completion("backend_retry_or_failure", 3)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 3)}),
         json!({"backend_failure": true}),
     );
     let verdict = mini_standard_provider_error_without_checkpoint(&[
@@ -834,7 +834,7 @@ fn standard_provider_error_oracle_requires_ordered_failure_and_parser_matrix() {
         "session-001:backend-failure:003",
         "session-001",
         BoundaryKind::BackendFailure,
-        json!({"runtime_completion": runtime_completion("backend_retry_or_failure", 0)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::BackendRetryOrFailure, 0)}),
         json!({"backend_failure": true}),
     );
     let verdict = mini_standard_provider_error_without_checkpoint(&[
@@ -853,7 +853,7 @@ fn rlm_mini_oracle_rejects_exec_without_runtime_effect_outcome() {
             "session-001:exec:001",
             "session-001",
             BoundaryKind::ExecCode,
-            json!({"runtime_completion": runtime_completion("exec_result", 0)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ExecResult, 0)}),
             json!({
                 "exec_output": "cell ran",
                 "execution_count": 1
@@ -864,7 +864,7 @@ fn rlm_mini_oracle_rejects_exec_without_runtime_effect_outcome() {
             "session-001:provider:001",
             "session-001",
             BoundaryKind::Provider,
-            json!({"runtime_completion": runtime_completion("provider_turn_completion", 1)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 1)}),
             json!({"provider_output": "continued"}),
         ),
     ];
@@ -883,7 +883,7 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
         "session-001:exec:001",
         "session-001",
         BoundaryKind::ExecCode,
-        json!({"runtime_completion": runtime_completion("exec_result", 1)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ExecResult, 1)}),
         json!({
             "exec_output": "cell ran",
             "runtime_effect_outcome": {"type": "exec_code"},
@@ -898,7 +898,7 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
                 "session-001:provider:001",
                 "session-001",
                 BoundaryKind::Provider,
-                json!({"runtime_completion": runtime_completion("provider_turn_completion", 1)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 1)}),
                 json!({"provider_output": "continued"}),
             ),
         ),
@@ -909,7 +909,7 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
                 "session-002:provider:001",
                 "session-002",
                 BoundaryKind::Provider,
-                json!({"runtime_completion": runtime_completion("provider_turn_completion", 2)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 2)}),
                 json!({"provider_output": "continued"}),
             ),
         ),
@@ -920,7 +920,7 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
                 "session-001:tool:001",
                 "session-001",
                 BoundaryKind::Tool,
-                json!({"runtime_completion": runtime_completion("tool_return", 2)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ToolReturn, 2)}),
                 json!({"tool_output": "continued"}),
             ),
         ),
@@ -935,7 +935,7 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
         "session-001:provider:001",
         "session-001",
         BoundaryKind::Provider,
-        json!({"runtime_completion": runtime_completion("provider_turn_completion", 2)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 2)}),
         json!({"provider_output": "continued"}),
     );
     let verdict = mini_rlm_lashlang_cell_exec_continues(&[exec, continued]);
@@ -951,7 +951,7 @@ fn agent_mini_oracle_rejects_process_wake_without_join_session() {
             "session-001:process-wake:001",
             "session-001",
             BoundaryKind::ProcessWake,
-            json!({"runtime_completion": runtime_completion("process_wake", 0)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 0)}),
             json!({
                 "process_wake": true,
                 "runtime_process_wake": {
@@ -968,7 +968,7 @@ fn agent_mini_oracle_rejects_process_wake_without_join_session() {
             "worker-001:stale-completion",
             "worker-001",
             BoundaryKind::Worker,
-            json!({"runtime_completion": runtime_completion("worker_lease_completion", 1)}),
+            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 1)}),
             json!({"session": "session-001"}),
         ),
     ];
@@ -992,7 +992,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
         "session-001:durable:001:replay",
         "session-001",
         BoundaryKind::DurableEffect,
-        json!({"runtime_completion": runtime_completion("durable_effect_completion", 0)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 0)}),
         json!({"replayed": true, "runtime_effect": {}}),
     );
     let process_wake = delivered_with_payload(
@@ -1000,7 +1000,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
         "session-001:process-wake:001",
         "session-001",
         BoundaryKind::ProcessWake,
-        json!({"runtime_completion": runtime_completion("process_wake", 1)}),
+        json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 1)}),
         json!({
             "session": "session-001",
             "runtime_process_wake": {
@@ -1042,7 +1042,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
                     "session-001:tool:001",
                     "session-001",
                     BoundaryKind::Tool,
-                    json!({"runtime_completion": runtime_completion("tool_return", 0)}),
+                    json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ToolReturn, 0)}),
                     json!({"replayed": true, "runtime_effect": {}}),
                 ),
                 process_wake.clone(),
@@ -1057,7 +1057,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
                     "session-001:durable:001:first",
                     "session-001",
                     BoundaryKind::DurableEffect,
-                    json!({"runtime_completion": runtime_completion("durable_effect_completion", 0)}),
+                    json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::DurableEffectCompletion, 0)}),
                     json!({"replayed": false, "runtime_effect": {}}),
                 ),
                 process_wake.clone(),
@@ -1079,7 +1079,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
                 "session-001:process-wake:002",
                 "session-001",
                 BoundaryKind::ProcessWake,
-                json!({"runtime_completion": runtime_completion("process_wake", 3)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 3)}),
                 json!({"session": "session-001"}),
             ),
             delivered_with_payload(
@@ -1087,7 +1087,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
                 "worker-001:lease:002",
                 "worker-001",
                 BoundaryKind::Worker,
-                json!({"runtime_completion": runtime_completion("worker_lease_completion", 4)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 4)}),
                 json!({"session": "session-001"}),
             ),
         ],
@@ -1106,7 +1106,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
                 "session-001:process-wake:003",
                 "session-001",
                 BoundaryKind::ProcessWake,
-                json!({"runtime_completion": runtime_completion("process_wake", 6)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 6)}),
                 json!({"session": "session-001"}),
             ),
             delivered_with_payload(
@@ -1114,7 +1114,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
                 "worker-001:lease:003",
                 "worker-001",
                 BoundaryKind::Worker,
-                json!({"runtime_completion": runtime_completion("worker_lease_completion", 5)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 5)}),
                 json!({"session": "session-001"}),
             ),
         ],
@@ -1129,7 +1129,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
                 "session-001:process-wake:004",
                 "session-001",
                 BoundaryKind::ProcessWake,
-                json!({"runtime_completion": runtime_completion("process_wake", 7)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProcessWake, 7)}),
                 json!({"session": "session-001"}),
             ),
             delivered_with_payload(
@@ -1137,7 +1137,7 @@ fn agent_durable_input_mini_oracle_requires_all_resolution_evidence() {
                 "worker-001:lease:004",
                 "worker-001",
                 BoundaryKind::Worker,
-                json!({"runtime_completion": runtime_completion("worker_lease_completion", 7)}),
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::WorkerLeaseCompletion, 7)}),
                 json!({"session": "session-001"}),
             ),
         ],

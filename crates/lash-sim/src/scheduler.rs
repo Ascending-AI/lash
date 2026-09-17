@@ -253,6 +253,21 @@ impl RuntimeCompletionUnit {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeCompletionFamily {
+    ProviderTurnCompletion,
+    QueuedInputCancellation,
+    BackendRetryOrFailure,
+    ProviderScriptMutation,
+    ToolReturn,
+    ExecResult,
+    DurableEffectCompletion,
+    WorkerLeaseCompletion,
+    ProcessWake,
+    ObserverSnapshot,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PendingRuntimeBoundary {
     pub schema: String,
@@ -260,7 +275,7 @@ pub struct PendingRuntimeBoundary {
     pub boundary_id: String,
     pub actor_alias: String,
     pub kind: BoundaryKind,
-    pub completion_family: String,
+    pub completion_family: RuntimeCompletionFamily,
     pub original_scheduled_at: u64,
     pub ready_at: u64,
     pub registered_after: String,
@@ -268,10 +283,17 @@ pub struct PendingRuntimeBoundary {
     pub completion_units: Vec<RuntimeCompletionUnit>,
 }
 
+impl PendingRuntimeBoundary {
+    /// Read the scheduler-owned pending evidence carried by a delivered
+    /// completion's payload; absent or malformed evidence reports `None`.
+    pub fn from_payload(payload: &Value) -> Option<Self> {
+        serde_json::from_value(payload.get("runtime_completion")?.clone()).ok()
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RuntimeCompletionQueue {
     pending: Vec<BoundaryEvent>,
-    registered_ids: BTreeSet<String>,
     completed_ids: BTreeSet<String>,
     registrations: Vec<PendingRuntimeBoundary>,
 }
@@ -280,7 +302,6 @@ impl RuntimeCompletionQueue {
     pub fn new(events: impl IntoIterator<Item = BoundaryEvent>) -> Self {
         Self {
             pending: events.into_iter().collect(),
-            registered_ids: BTreeSet::new(),
             completed_ids: BTreeSet::new(),
             registrations: Vec::new(),
         }
@@ -295,7 +316,7 @@ impl RuntimeCompletionQueue {
     }
 
     pub fn registered_len(&self) -> usize {
-        self.registered_ids.len()
+        self.registrations.len()
     }
 
     pub fn completed_len(&self) -> usize {
@@ -340,7 +361,7 @@ impl RuntimeCompletionQueue {
         scheduler: &mut BoundaryScheduler,
         event: BoundaryEvent,
         registered_after: &DeliveredBoundary,
-        completion_family: impl Into<String>,
+        completion_family: RuntimeCompletionFamily,
         completion_units: Vec<RuntimeCompletionUnit>,
     ) -> PendingRuntimeBoundary {
         let (pending, event) = self.register_pending_event(
@@ -361,7 +382,7 @@ impl RuntimeCompletionQueue {
         &mut self,
         mut event: BoundaryEvent,
         registered_after: &DeliveredBoundary,
-        completion_family: impl Into<String>,
+        completion_family: RuntimeCompletionFamily,
         completion_units: Vec<RuntimeCompletionUnit>,
     ) -> (PendingRuntimeBoundary, BoundaryEvent) {
         let original_scheduled_at = event.at;
@@ -373,7 +394,7 @@ impl RuntimeCompletionQueue {
             boundary_id: event.boundary_id.clone(),
             actor_alias: event.actor_alias.clone(),
             kind: event.kind,
-            completion_family: completion_family.into(),
+            completion_family,
             original_scheduled_at,
             ready_at,
             registered_after: registered_after.boundary_id.clone(),
@@ -387,7 +408,6 @@ impl RuntimeCompletionQueue {
                 .expect("pending runtime boundary evidence is serializable"),
         );
         event.payload = Value::Object(payload_object);
-        self.registered_ids.insert(event.boundary_id.clone());
         self.registrations.push(pending.clone());
         (pending, event)
     }
@@ -669,7 +689,7 @@ mod tests {
             &mut scheduler,
             ready.into_iter().next().expect("ready event"),
             &registered_after,
-            "queued_input_cancellation",
+            RuntimeCompletionFamily::QueuedInputCancellation,
             vec![RuntimeCompletionUnit::new(
                 "runtime:cancel_pending_turn_input",
                 2,
@@ -689,21 +709,13 @@ mod tests {
             .deliver_next(json!({"cancelled": true}))
             .expect("registered completion");
         assert_eq!(delivered.at, 11);
-        assert!(delivered.payload.get("runtime_completion").is_some());
+        let delivered_pending = PendingRuntimeBoundary::from_payload(&delivered.payload)
+            .expect("registered completion carries typed pending evidence");
         assert_eq!(
-            delivered
-                .payload
-                .pointer("/runtime_completion/completion_family")
-                .and_then(Value::as_str),
-            Some("queued_input_cancellation")
+            delivered_pending.completion_family,
+            RuntimeCompletionFamily::QueuedInputCancellation
         );
-        assert_eq!(
-            delivered
-                .payload
-                .pointer("/runtime_completion/ready_at")
-                .and_then(Value::as_u64),
-            Some(11)
-        );
+        assert_eq!(delivered_pending.ready_at, 11);
     }
 
     #[test]
@@ -750,7 +762,7 @@ mod tests {
                 &mut scheduler,
                 event,
                 &registered_after,
-                "runtime_completion",
+                RuntimeCompletionFamily::ToolReturn,
                 vec![RuntimeCompletionUnit::new("runtime:unit", 6)],
             );
         }
