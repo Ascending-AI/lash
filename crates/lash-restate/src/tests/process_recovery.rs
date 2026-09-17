@@ -82,7 +82,7 @@ impl lash_core::ToolProvider for InvalidLashlangBindingTool {
         (name == "invalid_lashlang_binding").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         unreachable!("the malformed binding must fail before tool execution")
     }
 }
@@ -1080,14 +1080,18 @@ impl lash_core::ToolProvider for CountingProcessTool {
         (name == "recovery_count").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        let executed = self.executions.fetch_add(1, Ordering::SeqCst) + 1;
-        let line = call
-            .args
-            .get("line")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        lash_core::ToolOutcome::ok(serde_json::json!({ "executed": executed, "line": line }))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            let executed = self.executions.fetch_add(1, Ordering::SeqCst) + 1;
+            let line = call
+                .args
+                .get("line")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            lash_core::ToolOutcome::ok(serde_json::json!({ "executed": executed, "line": line }))
+        })
+        .await
+        .into()
     }
 }
 

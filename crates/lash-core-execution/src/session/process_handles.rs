@@ -655,10 +655,11 @@ mod tests {
             ))
         }
 
-        async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
+        async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
             ToolOutcome::ok(serde_json::json!({
                 "payload": call.context.prepared_payload().clone(),
             }))
+            .into()
         }
     }
 

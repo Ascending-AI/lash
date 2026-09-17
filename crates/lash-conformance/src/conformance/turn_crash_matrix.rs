@@ -1508,7 +1508,7 @@ impl crate::ToolProvider for TraceTool {
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         if let Some(marker) = &self.marker {
             use std::io::Write as _;
             let mut file = std::fs::OpenOptions::new()
@@ -1528,7 +1528,7 @@ impl crate::ToolProvider for TraceTool {
         {
             self.control.stop_here().await;
         }
-        crate::ToolOutcome::ok(serde_json::json!({"effect":"executed"}))
+        crate::ToolOutcome::ok(serde_json::json!({"effect":"executed"})).into()
     }
 }
 

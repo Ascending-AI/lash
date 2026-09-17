@@ -1273,28 +1273,38 @@ impl lash_core::ToolProvider for FrameRotatingDynamicTool {
             .then(|| Arc::new(rotating_tool_definition(name).contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        match call.name {
-            "rotate_surface" => {
-                self.rotated.store(true, Ordering::SeqCst);
-                lash_core::ToolOutcome::ok(json!({ "rotated": true })).with_control(
-                    lash_core::ToolControl::SwitchAgentFrame {
-                        frame_key: lash_core::FrameKey::from_caller_material("live-surface-frame")
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            match call.name() {
+                "rotate_surface" => {
+                    self.rotated.store(true, Ordering::SeqCst);
+                    lash_core::ToolOutcome::ok(json!({ "rotated": true })).with_control(
+                        lash_core::ToolControl::SwitchAgentFrame {
+                            frame_key: lash_core::FrameKey::from_caller_material(
+                                "live-surface-frame",
+                            )
                             .expect("non-empty caller material"),
-                        initial_nodes: Vec::new(),
-                        task: Some("call the newly available tool".to_string()),
-                    },
+                            initial_nodes: Vec::new(),
+                            task: Some("call the newly available tool".to_string()),
+                        },
+                    )
+                }
+                "new_after_rotation" => lash_core::ToolOutcome::ok(
+                    json!({ "called": call.name() }),
                 )
-            }
-            "new_after_rotation" => lash_core::ToolOutcome::ok(json!({ "called": call.name }))
                 .with_control(lash_core::ToolControl::Finish {
                     value: lash_core::ToolValue::untrusted_json(json!("new tool executed")),
                 }),
-            "curated_before_rotation" | "hidden_after_rotation" => {
-                lash_core::ToolOutcome::ok(json!({ "called": call.name }))
+                "curated_before_rotation" | "hidden_after_rotation" => {
+                    lash_core::ToolOutcome::ok(json!({ "called": call.name() }))
+                }
+                name => {
+                    lash_core::ToolOutcome::err_fmt(format_args!("unknown rotating tool `{name}`"))
+                }
             }
-            name => lash_core::ToolOutcome::err_fmt(format_args!("unknown rotating tool `{name}`")),
-        }
+        })
+        .await
+        .into()
     }
 }
 
@@ -1591,14 +1601,7 @@ impl lash_core::ToolProvider for CasSurvivorIntentTools {
         (name == "cas_survivor_intent").then(|| Arc::new(cas_survivor_intent_tool().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        panic!("the lease/CAS survivor law must use AttemptContext")
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({"intent": "committed"})),

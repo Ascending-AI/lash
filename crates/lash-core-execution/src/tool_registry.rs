@@ -14,10 +14,14 @@ use self::facade_ops::ToolRegistryFacadeOps;
 use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
 
 mod state;
+pub(crate) use state::{
+    LeafToolSourceExecutor, ToolSourceCapture, ToolSourceExecution, ToolSourceExecutor,
+};
 pub use state::{PLUGIN_TOOL_SOURCE_ID, ToolSourceHandle, ToolState, ToolStateEntry};
-pub(crate) use state::{ToolSourceCapture, ToolSourceExecutor};
 mod sources;
-use sources::{OrchestratingToolSource, ToolBinding, ToolProviderSource};
+use sources::{
+    InternalProcessToolSource, OrchestratingToolSource, ToolBinding, ToolProviderSource,
+};
 mod registry_types;
 pub use registry_types::{ReconfigureError, ToolRegistry, ToolRestoreReport};
 pub(crate) use registry_types::{ToolRegistrationKind, ToolSourceKey};

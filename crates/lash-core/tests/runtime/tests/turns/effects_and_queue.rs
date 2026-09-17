@@ -2349,7 +2349,7 @@ impl lash_core::ToolProvider for CountingEchoTool {
         EchoTool.resolve_contract(name)
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.executions.fetch_add(1, Ordering::SeqCst);
         EchoTool.execute(call).await
     }

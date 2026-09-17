@@ -21,9 +21,12 @@ impl ToolProvider for CountingFirstPartyProvider {
         self.inner.resolve_contract(name)
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolOutcome {
-        self.executions.fetch_add(1, Ordering::SeqCst);
-        self.inner.execute(call).await
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            self.inner.execute(call).await
+        })
+        .await
     }
 }
 

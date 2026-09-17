@@ -32,15 +32,19 @@ impl lash_core::ToolProvider for PolicyDeniedToolProvider {
             .then(|| Arc::new(approval_request_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::failure(lash_core::ToolFailure {
-            class: lash_core::ToolFailureClass::PermissionDenied,
-            code: "approval_denied".to_string(),
-            message: "approval was denied".to_string(),
-            source: lash_core::ToolFailureSource::Policy,
-            retry: lash_core::ToolRetryStatus::Never,
-            raw: None,
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            lash_core::ToolOutcome::failure(lash_core::ToolFailure {
+                class: lash_core::ToolFailureClass::PermissionDenied,
+                code: "approval_denied".to_string(),
+                message: "approval was denied".to_string(),
+                source: lash_core::ToolFailureSource::Policy,
+                retry: lash_core::ToolRetryStatus::Never,
+                raw: None,
+            })
         })
+        .await
+        .into()
     }
 }
 

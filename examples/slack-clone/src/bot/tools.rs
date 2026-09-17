@@ -87,15 +87,16 @@ struct WorkspaceTools {
 
 #[async_trait]
 impl StaticToolExecute for WorkspaceTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        match call.name {
+    async fn execute(&self, call: ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        (match call.name() {
             LIST_CHANNELS => self.list_channels().await,
             CHANNEL_HISTORY => match serde_json::from_value(call.args.clone()) {
                 Ok(args) => self.channel_history(args).await,
                 Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
             },
             other => ToolOutcome::err_fmt(format_args!("unknown tool: {other}")),
-        }
+        })
+        .into()
     }
 }
 

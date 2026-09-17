@@ -79,7 +79,7 @@ impl crate::ToolProvider for RetryingProcessTool {
         (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         if self
             .attempts
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
@@ -91,8 +91,9 @@ impl crate::ToolProvider for RetryingProcessTool {
                 "retry once",
                 Some(1),
             )
+            .into()
         } else {
-            crate::ToolOutcome::ok(serde_json::json!({"ok": true}))
+            crate::ToolOutcome::ok(serde_json::json!({"ok": true})).into()
         }
     }
 }
@@ -137,8 +138,8 @@ impl crate::ToolProvider for ReassignableProcessTool {
         (name == "process_route").then(|| Arc::new(self.definition().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        crate::ToolOutcome::ok(serde_json::json!(self.label))
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolOutcome::ok(serde_json::json!(self.label)).into()
     }
 }
 
@@ -159,19 +160,28 @@ async fn execute_process_dispatch(
     let dispatch = run_context.dispatch();
     let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch)).build();
     let attempt = crate::AttemptContext::__for_testing(&tool_context, "process-route");
+    let manifest = dispatch
+        .tools
+        .resolve_manifest_by_id(&crate::ToolId::from("tool:process-route"))
+        .expect("process route manifest resolves");
     let outcome = dispatch
         .tools
-        .execute_by_id(
-            &crate::ToolId::from("tool:process-route"),
+        .execute(crate::ToolCall::new(
+            &manifest,
             &serde_json::json!({}),
             &attempt,
-        )
+        ))
         .await;
     drop(attempt);
     drop(tool_context);
     drop(dispatch);
     run_context.shutdown().await;
-    outcome.value_for_projection()
+    match outcome {
+        crate::ToolAttemptOutcome::Done { result, .. } => {
+            result.into_output().value_for_projection()
+        }
+        crate::ToolAttemptOutcome::Pending(_) => serde_json::Value::Null,
+    }
 }
 
 #[async_trait::async_trait]
@@ -188,12 +198,12 @@ impl crate::ToolProvider for PendingProcessTool {
         tool_id == self.definition.id()
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let _ = call
             .context
             .completion_key()
             .expect("the process witness receives its pre-derived completion key");
-        crate::ToolOutcome::pending(crate::PendingCompletion::default())
+        crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::default())
     }
 }
 

@@ -14,7 +14,8 @@ use lash::plugins::{
 };
 use lash::provider::LlmResponse;
 use lash::tools::{
-    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
+    ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
+    ToolProvider,
 };
 use lash::{LashCore, PluginBinding};
 use serde_json::json;
@@ -127,21 +128,25 @@ impl ToolProvider for TestTools {
         ))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        assert_eq!(call.name, "typed_probe");
-        let input = match call.context.decode_prepared_payload::<serde_json::Value>() {
-            Ok(input) => input,
-            Err(err) => {
-                return ToolOutcome::err_fmt(format!("missing prepared typed input: {err}"));
-            }
-        };
-        let label = input
-            .get("label")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        self.seen.lock_recover().push(label.clone());
-        ToolOutcome::ok(json!({ "label": label }))
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            assert_eq!(call.name(), "typed_probe");
+            let input = match call.context.decode_prepared_payload::<serde_json::Value>() {
+                Ok(input) => input,
+                Err(err) => {
+                    return ToolOutcome::err_fmt(format!("missing prepared typed input: {err}"));
+                }
+            };
+            let label = input
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            self.seen.lock_recover().push(label.clone());
+            ToolOutcome::ok(json!({ "label": label }))
+        })
+        .await
+        .into()
     }
 }
 

@@ -676,18 +676,19 @@ impl lash_core::ToolProvider for PendingToolProvider {
         tool_id == pending_tool_definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        if call.name != "app_lookup" {
-            return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name));
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() != "app_lookup" {
+            return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name()))
+                .into();
         }
         let key = match call.context.completion_key() {
             Ok(key) => key,
-            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
         };
         if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(key);
         }
-        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new())
+        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new()).into()
     }
 }
 
@@ -773,15 +774,16 @@ impl lash_core::ToolProvider for SuspendToolProvider {
         tool_id == self.definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        if call.name != self.tool_name {
-            return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name));
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() != self.tool_name {
+            return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name()))
+                .into();
         }
         let key = match call.context.completion_key() {
             Ok(key) => key,
-            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
         };
         *self.key_slot.lock().await = Some(key);
-        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new())
+        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new()).into()
     }
 }

@@ -573,8 +573,8 @@ mod tests {
                 .then(|| Arc::new(granted_tool_definition().contract()))
         }
 
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-            crate::ToolOutcome::ok(serde_json::json!("granted leaf"))
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            crate::ToolOutcome::ok(serde_json::json!("granted leaf")).into()
         }
     }
 
@@ -610,9 +610,12 @@ mod tests {
             crate::facade_support::OrchestratingToolDef::new(Arc::new(OrchestrationProbe {
                 executions: Arc::clone(&executions),
             }));
-        let registry =
-            crate::ToolRegistry::from_tool_registrations(Vec::new(), vec![orchestrating])
-                .expect("orchestration probe registry");
+        let registry = crate::ToolRegistry::from_tool_registrations(
+            Vec::new(),
+            Vec::new(),
+            vec![orchestrating],
+        )
+        .expect("orchestration probe registry");
         let plugins = crate::plugin::PluginHost::empty()
             .build_session("granted-call-session")
             .expect("plugin session");
@@ -1007,8 +1010,8 @@ mod tests {
             (name == "batch_failure").then(|| Arc::new(batch_failure_tool().contract()))
         }
 
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-            crate::ToolOutcome::ok(serde_json::json!("not reached"))
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            crate::ToolOutcome::ok(serde_json::json!("not reached")).into()
         }
     }
 

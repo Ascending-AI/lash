@@ -79,25 +79,29 @@ impl lash_core::ToolProvider for DynamicToolSurface {
             .map(|tool| Arc::new(tool.definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        let Some(tool) = self.tool(call.name) else {
-            return lash_core::ToolOutcome::err_fmt(format_args!(
-                "dynamic tool `{}` is not live",
-                call.name
-            ));
-        };
-        let result = lash_core::ToolOutcome::ok(json!({
-            "id": tool.id,
-            "name": tool.name,
-            "description": tool.description,
-        }));
-        if tool.finish_on_execute {
-            result.with_control(lash_core::ToolControl::Finish {
-                value: lash_core::ToolValue::untrusted_json(json!(tool.id)),
-            })
-        } else {
-            result
-        }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            let Some(tool) = self.tool(call.name()) else {
+                return lash_core::ToolOutcome::err_fmt(format_args!(
+                    "dynamic tool `{}` is not live",
+                    call.name()
+                ));
+            };
+            let result = lash_core::ToolOutcome::ok(json!({
+                "id": tool.id,
+                "name": tool.name,
+                "description": tool.description,
+            }));
+            if tool.finish_on_execute {
+                result.with_control(lash_core::ToolControl::Finish {
+                    value: lash_core::ToolValue::untrusted_json(json!(tool.id)),
+                })
+            } else {
+                result
+            }
+        })
+        .await
+        .into()
     }
 }
 
@@ -1289,14 +1293,35 @@ fn registry(runtime: &LashRuntime) -> Arc<lash_core::ToolRegistry> {
         .tool_registry()
 }
 
-async fn assert_executes_by_id(runtime: &LashRuntime, id: &str) {
-    let result = registry(runtime)
-        .execute_by_id(
-            &lash_core::ToolId::from(id),
+async fn execute_by_id(runtime: &LashRuntime, id: &str) -> lash_core::ToolOutcome {
+    let tools = registry(runtime);
+    let tool_id = lash_core::ToolId::from(id);
+    let Some(manifest) = tools.resolve_manifest_by_id(&tool_id) else {
+        return lash_core::ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
+    };
+    match tools
+        .execute(lash_core::ToolCall::new(
+            &manifest,
             &json!({}),
             &lash_core::testing::mock_attempt_context(),
-        )
-        .await;
+        ))
+        .await
+    {
+        lash_core::ToolAttemptOutcome::Done { result, intents } => {
+            assert!(
+                intents.is_empty(),
+                "test leaf execution declares no intents"
+            );
+            lash_core::ToolOutcome::from_output(result.into_output())
+        }
+        lash_core::ToolAttemptOutcome::Pending(pending) => {
+            lash_core::ToolOutcome::Pending(Box::new(pending))
+        }
+    }
+}
+
+async fn assert_executes_by_id(runtime: &LashRuntime, id: &str) {
+    let result = execute_by_id(runtime, id).await;
     assert!(
         result.is_success(),
         "tool `{id}` should execute: {result:?}"
@@ -1304,13 +1329,7 @@ async fn assert_executes_by_id(runtime: &LashRuntime, id: &str) {
 }
 
 async fn assert_rejected_by_id(runtime: &LashRuntime, id: &str) {
-    let result = registry(runtime)
-        .execute_by_id(
-            &lash_core::ToolId::from(id),
-            &json!({}),
-            &lash_core::testing::mock_attempt_context(),
-        )
-        .await;
+    let result = execute_by_id(runtime, id).await;
     assert!(
         !result.is_success(),
         "tool `{id}` must not execute: {result:?}"

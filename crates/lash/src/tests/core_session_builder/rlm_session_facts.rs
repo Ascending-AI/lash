@@ -57,8 +57,10 @@ impl lash_core::ToolProvider for RefreshableDialectTool {
         (definition.manifest.name == name).then(|| Arc::new(definition.contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async { lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })) })
+            .await
+            .into()
     }
 }
 

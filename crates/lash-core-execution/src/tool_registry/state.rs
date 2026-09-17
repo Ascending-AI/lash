@@ -56,6 +56,18 @@ impl ToolSourceCapture for FrozenToolSourceCapture {
     }
 }
 
+pub(crate) enum ToolSourceExecution<'a> {
+    Leaf(&'a dyn LeafToolSourceExecutor),
+    Internal(&'a crate::InternalProcessToolDef),
+    Orchestrating(&'a crate::tool_provider::orchestration::OrchestratingToolDef),
+}
+
+#[async_trait::async_trait]
+pub(crate) trait LeafToolSourceExecutor: Send + Sync {
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome;
+    fn attempt_may_defer(&self, tool_id: &ToolId) -> bool;
+}
+
 #[async_trait::async_trait]
 pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     fn id(&self) -> &str;
@@ -100,51 +112,8 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
     ) -> Result<PreparedToolCall, ToolOutcome> {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
-    async fn execute(
-        &self,
-        tool: &str,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome;
-    async fn execute_orchestrating(
-        &self,
-        _tool_id: &ToolId,
-        _args: &serde_json::Value,
-        _context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> ToolOutcome {
-        ToolOutcome::err_fmt("leaf tools cannot execute in the orchestrating registration lane")
-    }
-    fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
-        false
-    }
-    async fn execute_attempt_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> crate::ToolAttemptOutcome {
-        crate::ToolAttemptOutcome::from_tool_result(
-            self.execute_by_id(tool_id, args, context).await,
-        )
-    }
-    async fn execute_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-            return ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool_id}"));
-        };
-        self.execute(&manifest.name, args, context).await
-    }
-    async fn execute_internal_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &crate::InternalProcessContext<'_>,
-    ) -> ToolOutcome {
-        self.execute_by_id(tool_id, args, &context.__attempt_context())
-            .await
-    }
+    /// The typed execution capability this source provides. Leaf sources
+    /// expose a [`LeafToolSourceExecutor`]; internal and orchestrating sources
+    /// expose only their typed definitions, never a leaf body.
+    fn execution(&self) -> ToolSourceExecution<'_>;
 }

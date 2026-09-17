@@ -545,8 +545,7 @@ pub fn mock_tool_context_with_execution_binding(
 /// Build the sealed leaf-attempt context every recorded tool body receives.
 ///
 /// Tool bodies take [`crate::AttemptContext`], never [`crate::ToolContext`], so
-/// this is the context a unit test hands a provider's `execute` or
-/// `execute_attempt`.
+/// this is the context a unit test hands a provider's `execute`.
 pub fn mock_attempt_context() -> crate::AttemptContext<'static> {
     mock_attempt_context_from(&mock_tool_context())
 }
@@ -673,11 +672,12 @@ impl crate::ToolProvider for EmptyToolProvider {
         None
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         crate::ToolOutcome::err(serde_json::json!(format!(
             "test tool provider has no tool `{}`",
-            call.name
+            call.name()
         )))
+        .into()
     }
 }
 
@@ -1611,18 +1611,24 @@ pub fn effect_backed_process_service(
 /// the provider's `execute`. Use this for unit tests that don't need to
 /// inspect host interactions; call `mock_tool_context()` directly and
 /// construct `ToolCall` manually for more involved scenarios.
-pub async fn run_tool<P>(tool: &P, name: &str, args: &serde_json::Value) -> crate::ToolOutcome
+///
+/// The full [`crate::ToolAttemptOutcome`] is returned so tests can assert on
+/// declared intents rather than losing them to a projection.
+pub async fn run_tool<P>(
+    tool: &P,
+    name: &str,
+    args: &serde_json::Value,
+) -> crate::ToolAttemptOutcome
 where
     P: crate::ToolProvider + ?Sized,
 {
     let host = mock_tool_context();
     let context = mock_attempt_context_from(&host);
-    tool.execute(crate::ToolCall {
-        name,
-        args,
-        context: &context,
-    })
-    .await
+    let Some(manifest) = tool.resolve_manifest(name) else {
+        return crate::ToolOutcome::err_fmt(format!("unknown tool: {name}")).into();
+    };
+    tool.execute(crate::ToolCall::new(&manifest, args, &context))
+        .await
 }
 
 /// Build an empty `AssembledTurn` whose assistant text is `summary`.

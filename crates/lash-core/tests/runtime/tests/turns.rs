@@ -455,23 +455,27 @@ impl lash_core::ToolProvider for AttachmentPutTool {
         (name == "attachment_put").then(|| Arc::new(attachment_put_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        let reference = call
-            .context
-            .attachments()
-            .put(
-                b"turn-owned-tool-attachment".to_vec(),
-                lash_core::AttachmentCreateMeta::new(
-                    lash_core::MediaType::parse("image/png").unwrap(),
-                    Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
-                    Some("turn-owned.png".to_string()),
-                ),
-            )
-            .await
-            .expect("tool attachment put");
-        lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
-            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(reference)),
-        ))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            let reference = call
+                .context
+                .attachments()
+                .put(
+                    b"turn-owned-tool-attachment".to_vec(),
+                    lash_core::AttachmentCreateMeta::new(
+                        lash_core::MediaType::parse("image/png").unwrap(),
+                        Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
+                        Some("turn-owned.png".to_string()),
+                    ),
+                )
+                .await
+                .expect("tool attachment put");
+            lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
+                lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(reference)),
+            ))
+        })
+        .await
+        .into()
     }
 }
 

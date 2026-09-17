@@ -53,11 +53,15 @@ struct CountingEchoTool {
 
 #[async_trait]
 impl StaticToolExecute for CountingEchoTool {
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        if self.executed.fetch_add(1, Ordering::SeqCst) + 1 == 256 {
-            self.all_executed.notify_one();
-        }
-        ToolOutcome::ok(json!({"value": "ok"}))
+    async fn execute(&self, _call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            if self.executed.fetch_add(1, Ordering::SeqCst) + 1 == 256 {
+                self.all_executed.notify_one();
+            }
+            ToolOutcome::ok(json!({"value": "ok"}))
+        })
+        .await
+        .into()
     }
 }
 

@@ -211,8 +211,8 @@ impl ToolProvider for BenchmarkEchoTool {
         tool_id == benchmark_async_tool_definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
-        match call.name {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
+        (match call.name() {
             "benchmark_echo" => execute_benchmark_echo(call).await,
             "benchmark_slow" => execute_benchmark_slow(call).await,
             "benchmark_async" => {
@@ -224,8 +224,9 @@ impl ToolProvider for BenchmarkEchoTool {
                 )
                 .await
             }
-            _ => ToolOutcome::err_fmt(format_args!("Unknown benchmark tool: {}", call.name)),
-        }
+            _ => ToolOutcome::err_fmt(format_args!("Unknown benchmark tool: {}", call.name())),
+        })
+        .into()
     }
 }
 
@@ -243,16 +244,17 @@ impl ToolProvider for BenchmarkObliqueTools {
             .map(|definition| Arc::new(definition.contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
-        match call.name {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
+        (match call.name() {
             "oblique_search" => execute_oblique_search(call).await,
             "oblique_judge_candidates" => execute_oblique_judge_candidates(call).await,
             "oblique_list_async_handles" => execute_oblique_list_async_handles(call).await,
             _ => ToolOutcome::err_fmt(format_args!(
                 "Unknown benchmark oblique tool: {}",
-                call.name
+                call.name()
             )),
-        }
+        })
+        .into()
     }
 }
 
@@ -269,35 +271,22 @@ impl ToolProvider for BenchmarkWorkbenchMailTool {
         benchmark_mail_tool_definition_for(name).map(|definition| Arc::new(definition.contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
-        let Some((account, operation)) = benchmark_mail_route(call.name) else {
-            return ToolOutcome::err_fmt(format_args!(
-                "Unknown benchmark workbench mail tool: {}",
-                call.name
-            ));
-        };
-        match operation {
-            "send" => ToolOutcome::err_fmt(
-                "benchmark mail send requires the leaf attempt signature that declares its emission",
-            ),
-            "list" => ToolOutcome::ok(serde_json::json!({
-                "account": account,
-                "messages": [],
-            })),
-            _ => ToolOutcome::err_fmt(format_args!("unsupported mail operation `{operation}`")),
-        }
-    }
-
-    async fn execute_attempt(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
-        let Some((account, operation)) = benchmark_mail_route(call.name) else {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
+        let Some((account, operation)) = benchmark_mail_route(call.name()) else {
             return done_without_intents(ToolOutcome::err_fmt(format_args!(
                 "Unknown benchmark workbench mail tool: {}",
-                call.name
+                call.name()
             )));
         };
         match operation {
             "send" => execute_benchmark_mail_send(call, account),
-            _ => done_without_intents(self.execute(call).await),
+            "list" => done_without_intents(ToolOutcome::ok(serde_json::json!({
+                "account": account,
+                "messages": [],
+            }))),
+            _ => done_without_intents(ToolOutcome::err_fmt(format_args!(
+                "unsupported mail operation `{operation}`"
+            ))),
         }
     }
 }
@@ -906,16 +895,18 @@ impl ToolProvider for BenchmarkLargeToolCatalog {
         self.cache.contracts.get(name).cloned()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
-        if !GMAIL_LIKE_TOOL_NAMES.contains(&call.name) {
-            return ToolOutcome::err_fmt(format_args!("Unknown benchmark tool: {}", call.name));
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> ToolAttemptOutcome {
+        if !GMAIL_LIKE_TOOL_NAMES.contains(&call.name()) {
+            return ToolOutcome::err_fmt(format_args!("Unknown benchmark tool: {}", call.name()))
+                .into();
         }
         tokio::task::yield_now().await;
         ToolOutcome::ok(serde_json::json!({
-            "tool": call.name,
+            "tool": call.name(),
             "ok": true,
             "echo": call.args,
         }))
+        .into()
     }
 }
 

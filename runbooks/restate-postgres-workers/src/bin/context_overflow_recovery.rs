@@ -35,8 +35,8 @@ use lash::SessionId;
 use lash::persistence::SessionStoreFactory;
 use lash::plugins::{PluginRegistrar, PluginSessionContext, SessionPlugin};
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
-    ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
+    ToolDefinition, ToolDefinitionBindingExt, ToolOutcome, ToolProvider,
 };
 use serde_json::{Value, json};
 
@@ -591,11 +591,15 @@ struct OversizedTools {
 
 #[async_trait]
 impl StaticToolExecute for OversizedTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let report = "lash-context-overflow-recovery-report "
-            .repeat(OVERSIZED_BYTES / "lash-context-overflow-recovery-report ".len());
-        self.tool_bytes.store(report.len(), Ordering::SeqCst);
-        let _ = call;
-        ToolOutcome::ok(json!({ "report": report }))
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            let report = "lash-context-overflow-recovery-report "
+                .repeat(OVERSIZED_BYTES / "lash-context-overflow-recovery-report ".len());
+            self.tool_bytes.store(report.len(), Ordering::SeqCst);
+            let _ = call;
+            ToolOutcome::ok(json!({ "report": report }))
+        })
+        .await
+        .into()
     }
 }

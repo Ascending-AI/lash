@@ -254,12 +254,16 @@ impl lash_core::ToolProvider for BindingRecordingDeferredProvider {
         None
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        self.executions.fetch_add(1, Ordering::SeqCst);
-        self.observed_bindings
-            .lock_recover()
-            .push(call.context.tool_execution_binding().clone());
-        lash_core::ToolOutcome::ok(serde_json::json!("deferred ok"))
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            self.observed_bindings
+                .lock_recover()
+                .push(call.context.tool_execution_binding().clone());
+            lash_core::ToolOutcome::ok(serde_json::json!("deferred ok"))
+        })
+        .await
+        .into()
     }
 }
 
@@ -1565,11 +1569,8 @@ impl lash_core::ToolProvider for TypeScriptProcessInspectionToolProvider {
         ProcessControlToolProvider.attempt_may_defer(tool_id)
     }
 
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
-        if call.name == "status_inspect" || call.name == "tool:status_inspect" {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() == "status_inspect" || call.name() == "tool:status_inspect" {
             *self.inspected_process_id.lock().unwrap() = call
                 .args
                 .get("process_id")
@@ -1579,21 +1580,7 @@ impl lash_core::ToolProvider for TypeScriptProcessInspectionToolProvider {
                 lash_core::ToolOutcomeDone::ok(serde_json::json!("inspected-ok")),
             );
         }
-        ProcessControlToolProvider.execute_attempt(call).await
-    }
-
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        if call.name == "status_inspect" || call.name == "tool:status_inspect" {
-            let pid = call
-                .args
-                .get("process_id")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            *self.inspected_process_id.lock().unwrap() = pid;
-            lash_core::ToolOutcome::ok(serde_json::json!("inspected-ok"))
-        } else {
-            lash_core::ToolOutcome::err(serde_json::json!(format!("unknown tool `{}`", call.name)))
-        }
+        ProcessControlToolProvider.execute(call).await
     }
 }
 
@@ -1641,18 +1628,8 @@ impl lash_core::ToolProvider for ProcessControlToolProvider {
         tool_id.as_str() == "tool:await_process"
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::err(serde_json::json!(format!(
-            "process control tool `{}` needs the attempt signature",
-            call.name
-        )))
-    }
-
-    async fn execute_attempt(
-        &self,
-        call: lash_core::ToolCall<'_>,
-    ) -> lash_core::ToolAttemptOutcome {
-        match call.name {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        match call.name() {
             "start_process" => {
                 lash_plugin_process_controls::execute_process_start_tool_call(
                     call.context,

@@ -363,10 +363,10 @@ fn tool_context_with_provider<'run>(
         .build()
 }
 
-/// A provider that implements only the pure `execute` body — no
-/// `execute_attempt` override, and no way to ask for one. The structural law
-/// is that its body still runs against `AttemptContext`, so no journal-capable
-/// route exists for it to reach in the first place.
+/// A provider that implements only the pure `execute` body — the trait offers
+/// no second leaf route to override. The structural law is that its body
+/// still runs against `AttemptContext`, so no journal-capable route exists for
+/// it to reach in the first place.
 struct PureLeafProbeProvider {
     execute_calls: AtomicUsize,
 }
@@ -399,9 +399,9 @@ impl lash_core::ToolProvider for PureLeafProbeProvider {
         (name == "attempt_atomicity").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.execute_calls.fetch_add(1, Ordering::SeqCst);
-        assert_eq!(call.name, "attempt_atomicity");
+        assert_eq!(call.name(), "attempt_atomicity");
         // The sealed attempt projection, not the journal-capable `ToolContext`.
         assert_eq!(call.context.session_id(), SESSION);
         assert_eq!(call.context.tool_call_id(), Some(CALL_ID));
@@ -426,7 +426,7 @@ impl lash_core::ToolProvider for PureLeafProbeProvider {
             "the refusal must name the missing declaration: {}",
             refusal.message
         );
-        lash_core::ToolOutcome::ok(serde_json::json!("pure execute ran"))
+        lash_core::ToolOutcome::ok(serde_json::json!("pure execute ran")).into()
     }
 }
 
@@ -484,8 +484,8 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
     );
 }
 
-/// A provider with no `execute_attempt` override still runs its pure `execute`
-/// body inside the recorded attempt, against `AttemptContext`. There is no
+/// A provider still runs its single `execute` body inside the recorded
+/// attempt, against `AttemptContext`. There is no
 /// per-tool opt-in and no legacy `ToolContext` route left to fall back to, so
 /// the attempt opens and closes with zero controller crossings.
 #[tokio::test]
@@ -1446,7 +1446,7 @@ impl lash_core::ToolProvider for RawClientDirectProvider {
         (name == "attempt_atomicity").then(|| Arc::new(Self::definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.execute_calls.fetch_add(1, Ordering::SeqCst);
         let context = call.context;
         let completion = context
@@ -1461,7 +1461,7 @@ impl lash_core::ToolProvider for RawClientDirectProvider {
             .await
             .expect("raw-client direct completion");
         assert_eq!(completion.text, DIRECT_TEXT);
-        lash_core::ToolOutcome::ok(serde_json::json!("raw client ran"))
+        lash_core::ToolOutcome::ok(serde_json::json!("raw client ran")).into()
     }
 }
 

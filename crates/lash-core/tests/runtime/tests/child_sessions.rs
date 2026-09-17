@@ -166,7 +166,7 @@ impl lash_core::ToolProvider for AttachmentWritingTool {
             .then(|| Arc::new(attachment_writing_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let reference = match call
             .context
             .attachments()
@@ -181,9 +181,9 @@ impl lash_core::ToolProvider for AttachmentWritingTool {
             .await
         {
             Ok(reference) => reference,
-            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
         };
-        lash_core::ToolOutcome::ok(json!({ "attachment_id": reference.id }))
+        lash_core::ToolOutcome::ok(json!({ "attachment_id": reference.id })).into()
     }
 }
 
@@ -1150,10 +1150,9 @@ impl lash_core::ToolProvider for ParkedTool {
         (name == "park_forever").then(|| Arc::new(parked_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let _ = self.started.send(()).await;
-        std::future::pending::<()>().await;
-        unreachable!("the parked tool never completes")
+        std::future::pending::<lash_core::ToolAttemptOutcome>().await
     }
 }
 

@@ -174,8 +174,8 @@ impl ToolProvider for DiscoveryRefusalTools {
         }
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        match call.name {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (match call.name() {
             "tools.search" => {
                 self.admitted_executions.fetch_add(1, Ordering::SeqCst);
                 ToolOutcome::ok(serde_json::json!("admitted"))
@@ -185,7 +185,8 @@ impl ToolProvider for DiscoveryRefusalTools {
                 ToolOutcome::ok(serde_json::json!("must not run"))
             }
             name => panic!("unexpected discovery test tool: {name}"),
-        }
+        })
+        .into()
     }
 }
 

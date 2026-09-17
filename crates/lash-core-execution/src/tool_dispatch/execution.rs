@@ -216,22 +216,30 @@ pub async fn execute_internal_process_tool<'run>(
     let args = prepared.args.clone();
     let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
     let internal_context = crate::InternalProcessContext::new(tool_context);
-    let result = std::panic::AssertUnwindSafe(context.tools.execute_internal_by_id(
-        &prepared.tool_id,
-        &prepared.args,
-        &internal_context,
+    let Some(manifest) = context.tools.resolve_manifest_by_id(&prepared.tool_id) else {
+        return unavailable_prepared_tool_outcome(context, prepared).await;
+    };
+    let Some(registry) = context.tool_registry.as_ref() else {
+        return unavailable_prepared_tool_outcome(context, prepared).await;
+    };
+    let result = match std::panic::AssertUnwindSafe(registry.execute_internal_process_tool(
+        crate::InternalProcessToolCall::new(&manifest, &prepared.args, &internal_context),
     ))
     .catch_unwind()
     .await
-    .unwrap_or_else(|payload| {
-        let message = crate::panic_containment::payload_message(payload.as_ref());
-        crate::panic_containment::enforce_loudness(payload);
-        ToolOutcome::failure(crate::ToolFailure::runtime(
-            ToolFailureClass::Internal,
-            "tool_panicked",
-            message,
-        ))
-    });
+    {
+        Ok(Ok(result)) => ToolOutcome::from_output(result.into_output()),
+        Ok(Err(result)) => result,
+        Err(payload) => {
+            let message = crate::panic_containment::payload_message(payload.as_ref());
+            crate::panic_containment::enforce_loudness(payload);
+            ToolOutcome::failure(crate::ToolFailure::runtime(
+                ToolFailureClass::Internal,
+                "tool_panicked",
+                message,
+            ))
+        }
+    };
     let duration_ms = context.clock.now().duration_since(started).as_millis() as u64;
     let result = finalize_tool_result_with_execution_context(
         context,

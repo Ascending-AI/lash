@@ -1302,8 +1302,10 @@ impl ToolProvider for AppTools {
         (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async { lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })) })
+            .await
+            .into()
     }
 }
 
@@ -1321,8 +1323,10 @@ impl ToolProvider for FailingAppTools {
         (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::err_fmt("lookup failed but Lashlang recovered")
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async { lash_core::ToolOutcome::err_fmt("lookup failed but Lashlang recovered") })
+            .await
+            .into()
     }
 }
 
@@ -1352,16 +1356,20 @@ impl ToolProvider for PendingAppTools {
         tool_id == app_tool_definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        assert_eq!(call.name, "app_lookup");
-        let key = match call.context.completion_key() {
-            Ok(key) => key,
-            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
-        };
-        if let Some(tx) = self.key_tx.lock_recover().take() {
-            let _ = tx.send(key);
-        }
-        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new())
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            assert_eq!(call.name(), "app_lookup");
+            let key = match call.context.completion_key() {
+                Ok(key) => key,
+                Err(err) => return lash_core::ToolOutcome::err_fmt(err),
+            };
+            if let Some(tx) = self.key_tx.lock_recover().take() {
+                let _ = tx.send(key);
+            }
+            lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new())
+        })
+        .await
+        .into()
     }
 }
 
@@ -1386,11 +1394,11 @@ impl ToolProvider for RetryingDirectTools {
         (name == "retrying_direct").then(|| Arc::new(retrying_direct_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        assert_eq!(call.name, "retrying_direct");
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        assert_eq!(call.name(), "retrying_direct");
         let model = match call.context.sessions().model().await {
             Ok(model) => model,
-            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
         };
         let completion = match call
             .context
@@ -1408,7 +1416,7 @@ impl ToolProvider for RetryingDirectTools {
             .await
         {
             Ok(completion) => completion,
-            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
         };
         if call.context.attempt_number() == 1 {
             return lash_core::ToolOutcome::failure(lash_core::ToolFailure::safe_retry(
@@ -1416,9 +1424,10 @@ impl ToolProvider for RetryingDirectTools {
                 "retrying_direct_first_attempt",
                 "retry the complete atomic attempt",
                 Some(0),
-            ));
+            ))
+            .into();
         }
-        lash_core::ToolOutcome::ok(serde_json::json!(completion.text))
+        lash_core::ToolOutcome::ok(serde_json::json!(completion.text)).into()
     }
 }
 
@@ -1476,38 +1485,42 @@ impl ToolProvider for DurableInputTools {
         tool_id == durable_input_tool_definition().id()
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        assert_eq!(call.name, "mock_input_request");
-        let question = call
-            .args
-            .get("question")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("answer")
-            .to_string();
-        let key = match call.context.completion_key() {
-            Ok(key) => key,
-            Err(err) => {
-                self.send_key_result(Err(err.to_string()));
-                return lash_core::ToolOutcome::err_fmt(err);
-            }
-        };
-        self.attempt_count.fetch_add(1, Ordering::SeqCst);
-        // The attempt body cannot append process events. It declares the
-        // announcement instead, and the runtime appends it when the call parks.
-        let announcement = lash_core::PendingAnnouncement::new(
-            "process.yield",
-            serde_json::json!({
-                "type": "work.input_request.opened",
-                "request_id": "request-1",
-                "question": question,
-                "await_key_id": key.key_id,
-            }),
-            "mock-input-request:request-1",
-        );
-        self.send_key_result(Ok(key));
-        lash_core::ToolOutcome::pending(
-            lash_core::PendingCompletion::new().announcing(announcement),
-        )
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            assert_eq!(call.name(), "mock_input_request");
+            let question = call
+                .args
+                .get("question")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("answer")
+                .to_string();
+            let key = match call.context.completion_key() {
+                Ok(key) => key,
+                Err(err) => {
+                    self.send_key_result(Err(err.to_string()));
+                    return lash_core::ToolOutcome::err_fmt(err);
+                }
+            };
+            self.attempt_count.fetch_add(1, Ordering::SeqCst);
+            // The attempt body cannot append process events. It declares the
+            // announcement instead, and the runtime appends it when the call parks.
+            let announcement = lash_core::PendingAnnouncement::new(
+                "process.yield",
+                serde_json::json!({
+                    "type": "work.input_request.opened",
+                    "request_id": "request-1",
+                    "question": question,
+                    "await_key_id": key.key_id,
+                }),
+                "mock-input-request:request-1",
+            );
+            self.send_key_result(Ok(key));
+            lash_core::ToolOutcome::pending(
+                lash_core::PendingCompletion::new().announcing(announcement),
+            )
+        })
+        .await
+        .into()
     }
 }
 
@@ -1552,22 +1565,26 @@ impl ToolProvider for AgentFrameSwitchTools {
         (name == "switch_frame").then(|| Arc::new(agent_frame_switch_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        assert_eq!(call.name, "switch_frame");
-        let task = call
-            .args
-            .get("task")
-            .and_then(serde_json::Value::as_str)
-            .expect("task arg")
-            .to_string();
-        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })).with_control(
-            lash_core::ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("durable-follow-frame")
-                    .expect("non-empty caller material"),
-                initial_nodes: Vec::new(),
-                task: Some(task),
-            },
-        )
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            assert_eq!(call.name(), "switch_frame");
+            let task = call
+                .args
+                .get("task")
+                .and_then(serde_json::Value::as_str)
+                .expect("task arg")
+                .to_string();
+            lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })).with_control(
+                lash_core::ToolControl::SwitchAgentFrame {
+                    frame_key: lash_core::FrameKey::from_caller_material("durable-follow-frame")
+                        .expect("non-empty caller material"),
+                    initial_nodes: Vec::new(),
+                    task: Some(task),
+                },
+            )
+        })
+        .await
+        .into()
     }
 }
 
@@ -1617,8 +1634,12 @@ impl ToolProvider for LongTextTools {
         (name == "app_lookup").then(|| Arc::new(long_text_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
-        lash_core::ToolOutcome::ok(serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789"))
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            lash_core::ToolOutcome::ok(serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789"))
+        })
+        .await
+        .into()
     }
 }
 

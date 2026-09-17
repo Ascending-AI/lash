@@ -213,7 +213,10 @@ pub mod tools {
         facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
         facade_support::ToolTriggerClient, turn_outcome_from_tool_control,
     };
-    pub use lash_core::{InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall};
+    pub use lash_core::{
+        InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
+        InternalProcessToolDef, InternalProcessToolImplementation,
+    };
     /// Tool-execution request batches, replies, and child-process observation hooks.
     pub use lash_core::{
         PreparedToolBatch, PreparedToolBatchCall, ToolChildExecutionTraceHook,

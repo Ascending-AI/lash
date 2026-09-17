@@ -29,6 +29,7 @@ pub use direct_completion::ToolDirectCompletionClient;
 pub use dispatch::ToolDispatchClient;
 pub use process::{
     ExternalLaunchAudit, InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
+    InternalProcessToolDef, InternalProcessToolImplementation,
 };
 pub use process_events::ToolProcessEventClient;
 pub use session::{ToolSessionAdmin, ToolSessionModel};
@@ -107,13 +108,6 @@ impl AttemptProcessReads {
     }
 }
 
-// Execution-only binding installed by an immutable resident-source snapshot.
-#[derive(Clone)]
-struct CapturedResidentRoute {
-    tool_id: ToolId,
-    source_name: String,
-}
-
 /// Runtime-only route selected by the dispatcher for one authorized call.
 ///
 /// The route is deliberately private to the core so provider authors observe
@@ -172,7 +166,6 @@ pub struct AttemptContext<'run> {
     completion_key: Option<crate::AwaitEventKey>,
     completion_support: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    captured_resident_route: Option<CapturedResidentRoute>,
     tool_execution_route: ToolExecutionRoute,
 }
 
@@ -270,28 +263,8 @@ impl<'run> AttemptContext<'run> {
             completion_key,
             completion_support,
             phase_probe,
-            captured_resident_route: None,
             tool_execution_route: context.tool_execution_route.clone(),
         }
-    }
-    pub(crate) fn with_captured_resident_route(
-        &self,
-        tool_id: ToolId,
-        source_name: String,
-    ) -> Self {
-        let mut captured = self.clone();
-        captured.captured_resident_route = Some(CapturedResidentRoute {
-            tool_id,
-            source_name,
-        });
-        captured
-    }
-
-    fn captured_resident_name(&self, tool_id: &ToolId) -> Option<&str> {
-        self.captured_resident_route
-            .as_ref()
-            .filter(|route| route.tool_id == *tool_id)
-            .map(|route| route.source_name.as_str())
     }
 
     pub(crate) fn execution_route(&self) -> &ToolExecutionRoute {
@@ -1443,28 +1416,48 @@ pub struct ToolPrepareCall<'a> {
     pub context: &'a ToolPrepareContext,
 }
 
-/// Per-call inputs handed to [`ToolProvider::execute`] and
-/// [`ToolProvider::execute_attempt`].
+/// Per-call inputs handed to [`ToolProvider::execute`].
 ///
-/// Every leaf tool body runs inside one recorded attempt, so the only context
-/// a leaf call can carry is the sealed, controller-free [`AttemptContext`].
-/// Journal-capable work is unreachable from here by construction: declare a
-/// [`crate::ToolIntent`] instead, or move the work into a process step.
-///
-/// Fields are `pub` because `ToolCall` is a transient borrow; consumers
-/// typically destructure (`let ToolCall { name, args, .. } = call`). The
-/// stable surface lives on [`AttemptContext`] (sealed) and the runtime's
-/// dispatcher, which constructs `ToolCall` values.
+/// The immutable manifest couples the stable tool ID and provider-facing name.
+/// Dispatch owns authorization and route selection; this view is not an
+/// authorization token.
 pub struct ToolCall<'a> {
-    pub name: &'a str,
+    manifest: &'a ToolManifest,
     pub args: &'a serde_json::Value,
     pub context: &'a AttemptContext<'a>,
 }
 
-/// Trait for providing tools to the sandbox. Implement this per-project.
+impl<'a> ToolCall<'a> {
+    /// Construct the call view over one pinned manifest. Only the runtime
+    /// dispatcher builds these; the manifest is the coupling between stable
+    /// ID and provider-facing name.
+    pub fn new(
+        manifest: &'a ToolManifest,
+        args: &'a serde_json::Value,
+        context: &'a AttemptContext<'a>,
+    ) -> Self {
+        Self {
+            manifest,
+            args,
+            context,
+        }
+    }
+
+    /// The stable tool ID carried by the pinned manifest.
+    pub fn tool_id(&self) -> &'a ToolId {
+        &self.manifest.id
+    }
+
+    /// The provider-facing tool name carried by the pinned manifest.
+    pub fn name(&self) -> &'a str {
+        &self.manifest.name
+    }
+}
+
+/// Trait for providing leaf tools to the sandbox. Implement this per-project.
 ///
 /// Implementations supply cheap [`ToolManifest`]s, lazily resolved
-/// [`ToolContract`]s, and a single
+/// [`ToolContract`]s, and a single required
 /// [`execute`](Self::execute) method that handles every call. Tools that
 /// need session state read it from `call.context`.
 ///
@@ -1495,182 +1488,15 @@ pub trait ToolProvider: Send + Sync + 'static {
     ) -> Result<PreparedToolCall, ToolOutcome> {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome;
-    /// Execute an owner-bound internal process body.
-    ///
-    /// This is ADR 0051's protocol and process-engine implementor class. The
-    /// default preserves pure implementations by projecting the process body
-    /// down to the attempt-shaped leaf signature; durable process capabilities
-    /// are exposed only to providers that explicitly override this
-    /// internal-only route.
-    async fn execute_internal(&self, call: InternalProcessToolCall<'_>) -> ToolOutcome {
-        let attempt_context = call.context.__attempt_context();
-        self.execute(ToolCall {
-            name: call.name,
-            args: call.args,
-            context: &attempt_context,
-        })
-        .await
-    }
-    /// Whether this leaf tool may return deferred completion. The coordinator
-    /// reserves a completion key only for tools that declare this capability.
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome;
     fn attempt_may_defer(&self, _tool_id: &ToolId) -> bool {
         false
-    }
-    /// Execute a recorded leaf attempt that may declare typed intents.
-    ///
-    /// Defaults to the pure [`execute`](Self::execute) body: both signatures
-    /// receive the same sealed [`AttemptContext`], and this route adds only the
-    /// ability to return declared intents alongside the result.
-    async fn execute_attempt(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        crate::ToolAttemptOutcome::from_tool_result(self.execute(call).await)
-    }
-    async fn execute_attempt_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &AttemptContext<'_>,
-    ) -> crate::ToolAttemptOutcome {
-        let source_name = match context.captured_resident_name(tool_id) {
-            Some(name) => name,
-            None => {
-                let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-                    return crate::ToolAttemptOutcome::from_tool_result(ToolOutcome::err_fmt(
-                        format!("Unknown tool id: {tool_id}"),
-                    ));
-                };
-                return self
-                    .execute_attempt(ToolCall {
-                        name: &manifest.name,
-                        args,
-                        context,
-                    })
-                    .await;
-            }
-        };
-        self.execute_attempt(ToolCall {
-            name: source_name,
-            args,
-            context,
-        })
-        .await
-    }
-    async fn execute_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let source_name = match context.captured_resident_name(tool_id) {
-            Some(name) => name,
-            None => {
-                let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-                    return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
-                };
-                return self
-                    .execute(ToolCall {
-                        name: &manifest.name,
-                        args,
-                        context,
-                    })
-                    .await;
-            }
-        };
-        self.execute(ToolCall {
-            name: source_name,
-            args,
-            context,
-        })
-        .await
-    }
-
-    /// Resolve and execute an owner-bound internal process tool by stable id.
-    ///
-    /// This is ADR 0051's protocol and process-engine implementor class.
-    async fn execute_internal_by_id(
-        &self,
-        tool_id: &ToolId,
-        args: &serde_json::Value,
-        context: &InternalProcessContext<'_>,
-    ) -> ToolOutcome {
-        let source_name = match context.captured_resident_name(tool_id) {
-            Some(name) => name,
-            None => {
-                let Some(manifest) = self.resolve_manifest_by_id(tool_id) else {
-                    return ToolOutcome::err_fmt(format!("Unknown tool id: {tool_id}"));
-                };
-                return self
-                    .execute_internal(InternalProcessToolCall {
-                        name: &manifest.name,
-                        args,
-                        context,
-                    })
-                    .await;
-            }
-        };
-        self.execute_internal(InternalProcessToolCall {
-            name: source_name,
-            args,
-            context,
-        })
-        .await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct TwoRouteDefaultProvider;
-
-    #[async_trait::async_trait]
-    impl ToolProvider for TwoRouteDefaultProvider {
-        fn tool_manifests(&self) -> Vec<ToolManifest> {
-            Vec::new()
-        }
-
-        fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-            let name = match id.as_str() {
-                "tool:first" => "first",
-                "tool:second" => "second",
-                _ => return None,
-            };
-            Some(
-                ToolDefinition::raw(
-                    id.as_str(),
-                    name,
-                    "captured route isolation witness",
-                    ToolDefinition::default_input_schema(),
-                    serde_json::json!({ "type": "string" }),
-                )
-                .manifest(),
-            )
-        }
-
-        fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
-            None
-        }
-
-        async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-            ToolOutcome::ok(serde_json::json!(call.name))
-        }
-    }
-
-    #[tokio::test]
-    async fn captured_resident_route_does_not_bind_an_unrelated_tool_id() {
-        let context = crate::testing::mock_attempt_context()
-            .with_captured_resident_route(ToolId::from("tool:first"), "captured-first".to_string());
-
-        let result = TwoRouteDefaultProvider
-            .execute_by_id(
-                &ToolId::from("tool:second"),
-                &serde_json::json!({}),
-                &context,
-            )
-            .await;
-
-        assert_eq!(result.value_for_projection(), serde_json::json!("second"));
-    }
 
     struct DurableControllerWithoutCompletionKeySupport;
 

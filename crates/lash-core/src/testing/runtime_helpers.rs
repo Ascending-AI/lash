@@ -388,8 +388,8 @@ impl crate::ToolProvider for EmptyTools {
         None
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        crate::ToolOutcome::err(serde_json::json!("Unknown tool"))
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolOutcome::err(serde_json::json!("Unknown tool")).into()
     }
 }
 
@@ -678,8 +678,8 @@ impl crate::ToolProvider for EchoTool {
         (name == "echo_tool").then(|| Arc::new(echo_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        assert_eq!(call.name, "echo_tool");
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        assert_eq!(call.name(), "echo_tool");
         let value = call
             .args
             .get("value")
@@ -688,6 +688,7 @@ impl crate::ToolProvider for EchoTool {
         crate::ToolOutcome::ok(serde_json::json!({
             "payload": format!("raw:{value}")
         }))
+        .into()
     }
 }
 
@@ -710,8 +711,8 @@ impl crate::ToolProvider for TerminalControlTool {
             .map(|index| Arc::new(terminal_tool_definition(index).contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        self.result_for(call.name)
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        self.result_for(call.name()).into()
     }
 }
 
@@ -753,22 +754,22 @@ impl crate::ToolProvider for SlowTool {
         (name == "slow_tool").then(|| Arc::new(slow_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
         let observed = Arc::clone(&self.observed_cancel);
         if let Some(token) = call.context.cancellation_token() {
             let token = token.clone();
             tokio::select! {
                 _ = token.cancelled() => {
                     observed.store(true, Ordering::SeqCst);
-                    crate::ToolOutcome::cancelled("cancelled")
+                    crate::ToolOutcome::cancelled("cancelled").into()
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {
-                    crate::ToolOutcome::ok(serde_json::json!({"status": "completed"}))
+                    crate::ToolOutcome::ok(serde_json::json!({"status": "completed"})).into()
                 }
             }
         } else {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-            crate::ToolOutcome::ok(serde_json::json!({"status": "completed"}))
+            crate::ToolOutcome::ok(serde_json::json!({"status": "completed"})).into()
         }
     }
 }
@@ -795,8 +796,8 @@ impl crate::ToolProvider for MemoryProbeTool {
         (name == "memory_probe").then(|| Arc::new(memory_probe_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
-        crate::ToolOutcome::ok(json!("ok"))
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolOutcome::ok(json!("ok")).into()
     }
 }
 

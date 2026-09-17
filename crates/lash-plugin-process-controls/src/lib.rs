@@ -82,44 +82,37 @@ struct SessionProcessAdminTools {
 
 #[async_trait::async_trait]
 impl StaticToolExecute for SessionProcessAdminTools {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::err_fmt(format_args!(
-            "process tool `{}` requires the leaf AttemptContext signature",
-            call.name
-        ))
-    }
-
     /// `await_process` parks, so the runtime pre-derives the completion key its
     /// recorded attempt reads. Nothing else in this plugin defers.
     fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
         tool_id.as_str() == "tool:await_process"
     }
 
-    async fn execute_attempt(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name == "await_process" {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() == "await_process" {
             return execute_process_await_tool_call(call.context, call.args);
         }
-        if call.name == "start_process" {
+        if call.name() == "start_process" {
             return execute_process_start_tool_call(call.context, call.args).await;
         }
-        if call.name == "signal_process" {
+        if call.name() == "signal_process" {
             return execute_process_signal_tool_call(call.context, call.args);
         }
-        if call.name == "emit_process_event" {
+        if call.name() == "emit_process_event" {
             return execute_process_emit_tool_call(call.context, call.args);
         }
-        if call.name == "register_process" {
+        if call.name() == "register_process" {
             return execute_process_register_tool_call(call.context, call.args);
         }
-        if call.name == "list_process_handles" {
+        if call.name() == "list_process_handles" {
             return done_without_intents(
                 execute_process_list_tool_call(call.context, call.args).await,
             );
         }
-        if call.name != "cancel_process" || !self.include_cancel_process {
+        if call.name() != "cancel_process" || !self.include_cancel_process {
             return done_without_intents(ToolOutcome::err_fmt(format_args!(
                 "Unknown leaf process tool: {}",
-                call.name
+                call.name()
             )));
         }
         let Some(process_id) = cancel_target(call.args) else {
@@ -416,6 +409,14 @@ pub fn process_handle_view_schema() -> Value {
 mod tests {
     use super::*;
 
+    fn manifest_for(_tools: &SessionProcessAdminTools, name: &str) -> lash_core::ToolManifest {
+        processes_tool_definitions(true)
+            .into_iter()
+            .find(|definition| definition.name() == name)
+            .expect("process-controls manifest resolves")
+            .manifest()
+    }
+
     #[test]
     fn tool_definitions_expose_processes_tools() {
         let definitions = processes_tool_definitions(true);
@@ -524,11 +525,11 @@ mod tests {
             "process-controls-intent-scope",
         );
         let result = tools
-            .execute_attempt(ToolCall {
-                name: "cancel_process",
-                args: &serde_json::json!({ "handle": handle_json("handle-process", 2) }),
-                context: &context,
-            })
+            .execute(ToolCall::new(
+                &manifest_for(&tools, "cancel_process"),
+                &serde_json::json!({ "handle": handle_json("handle-process", 2) }),
+                &context,
+            ))
             .await;
         let lash_core::ToolAttemptOutcome::Done { intents, .. } = result else {
             panic!("cancel is not a deferring tool");
@@ -558,11 +559,11 @@ mod tests {
             "process-controls-intent-scope",
         );
         let result = tools
-            .execute_attempt(ToolCall {
-                name: "cancel_process",
-                args: &serde_json::json!({"process_id": "literal-process"}),
-                context: &context,
-            })
+            .execute(ToolCall::new(
+                &manifest_for(&tools, "cancel_process"),
+                &serde_json::json!({"process_id": "literal-process"}),
+                &context,
+            ))
             .await;
         let lash_core::ToolAttemptOutcome::Done { result, intents } = result else {
             panic!("processes.cancel must complete with an intent")
@@ -619,11 +620,11 @@ mod tests {
         let tool_context = lash_core::testing::mock_tool_context();
         let context = parked_attempt_context(&tool_context);
         let outcome = tools
-            .execute_attempt(ToolCall {
-                name: "await_process",
-                args: &serde_json::json!({ "handle": handle_json("proc-1", 3) }),
-                context: &context,
-            })
+            .execute(ToolCall::new(
+                &manifest_for(&tools, "await_process"),
+                &serde_json::json!({ "handle": handle_json("proc-1", 3) }),
+                &context,
+            ))
             .await;
         let lash_core::ToolAttemptOutcome::Pending(pending) = outcome else {
             panic!("processes.await must park instead of answering inline")
@@ -662,11 +663,11 @@ mod tests {
             ),
         ] {
             let outcome = tools
-                .execute_attempt(ToolCall {
-                    name: "await_process",
-                    args: &args,
-                    context: &context,
-                })
+                .execute(ToolCall::new(
+                    &manifest_for(&tools, "await_process"),
+                    &args,
+                    &context,
+                ))
                 .await;
             assert!(
                 matches!(outcome, lash_core::ToolAttemptOutcome::Done { .. }),

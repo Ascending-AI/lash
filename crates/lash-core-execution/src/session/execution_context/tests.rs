@@ -50,8 +50,8 @@ impl ToolProvider for NoopTools {
         None
     }
 
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
-        ToolOutcome::err_fmt("not used")
+    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        ToolOutcome::err_fmt("not used").into()
     }
 }
 
