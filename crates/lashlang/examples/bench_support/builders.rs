@@ -33,9 +33,7 @@ pub fn module(declarations: Vec<Declaration>, expressions: Vec<Expr>) -> Program
     Program {
         declarations,
         main: Expr::Block(expressions),
-        declaration_spans: Vec::new(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     }
 }
 

@@ -4,7 +4,7 @@
 //! `format_link_diagnostic` and `format_runtime_diagnostic` print
 //! `--> line N, column M`, the source line and a caret only when the error
 //! carries a span, and every span they can reach comes out of the lowered
-//! program's `expression_source_spans`. The excerpt is cut from the source
+//! program's `spans` table. The excerpt is cut from the source
 //! text the caller hands the renderer, which for a TypeScript cell is the
 //! TypeScript the model wrote — so the assertions below pin the TypeScript
 //! line, column and caret run, not a printed lashlang form.

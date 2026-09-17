@@ -187,7 +187,7 @@ impl<'module> Linker<'module> {
         let path = self
             .expression_paths
             .get(&(original as *const Expr as usize))
-            .cloned()
+            .map(AstPath::legacy_steps)
             .unwrap_or_default();
         crate::lifted_process_identity(&literal.body, &path)
     }

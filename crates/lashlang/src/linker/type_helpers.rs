@@ -709,7 +709,7 @@ pub(super) fn expr_has_label_annotation(expr: &Expr) -> bool {
 }
 
 /// The path of the first label annotation under `expr`, addressed the way
-/// `Program::expression_source_spans` addresses expressions: one child index
+/// `Program::spans` addresses expressions: one child index
 /// per level, outermost first.
 ///
 /// Called on `Program::main` — a block of root statements — the leading index

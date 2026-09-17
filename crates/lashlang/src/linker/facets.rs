@@ -15,7 +15,7 @@ pub fn analyze_workflow_program(
         let Declaration::Process(process) = declaration else {
             continue;
         };
-        let mut scope = Scope::new(true, program.declaration_spans.get(index).copied());
+        let mut scope = Scope::new(true, declaration_span(program, index));
         scope.expected_return = process.return_ty.clone();
         for param in &process.params {
             scope.bind(param.name.as_str(), linker.binding_for_type(&param.ty));
@@ -129,8 +129,8 @@ impl<'module> Linker<'module> {
             let Declaration::Process(process) = declaration else {
                 continue;
             };
-            if let Ok(output) = self
-                .infer_process_output(process, self.program.declaration_spans.get(index).copied())
+            if let Ok(output) =
+                self.infer_process_output(process, declaration_span(self.program, index))
             {
                 self.process_types.insert(
                     process.name.to_string(),
@@ -330,78 +330,73 @@ fn collect_expected_slots(
     }
 }
 
-pub(super) fn expression_spans_by_pointer(program: &Program) -> BTreeMap<usize, Span> {
-    let spans_by_path = program
-        .expression_source_spans
-        .iter()
-        .map(|source_span| (source_span.path.clone(), source_span.span))
-        .collect::<BTreeMap<_, _>>();
-    let mut spans = BTreeMap::new();
-    collect_expression_spans_by_pointer(&program.main, &mut Vec::new(), &spans_by_path, &mut spans);
-    spans
+/// The span recorded for `program.declarations[index]` itself.
+pub(super) fn declaration_span(program: &Program, index: usize) -> Option<Span> {
+    let index = u32::try_from(index).ok()?;
+    program
+        .spans
+        .get(&AstPath::declaration(index, Vec::new()))
+        .copied()
 }
 
+/// One walk over every expression in the program — `main` plus each
+/// declaration body — returning the node's [`AstPath`] and its recorded
+/// source span, both keyed by node pointer.
 #[expect(
     clippy::expect_used,
-    reason = "an AST child index of a source file far below u32::MAX fits, per the message"
+    reason = "declaration and AST child indexes fit u32, per each message"
 )]
-fn collect_expression_spans_by_pointer(
-    expr: &Expr,
-    path: &mut Vec<u32>,
-    spans_by_path: &BTreeMap<Vec<u32>, Span>,
-    spans: &mut BTreeMap<usize, Span>,
-) {
-    if let Some(span) = spans_by_path.get(path.as_slice()).copied() {
-        spans.insert(expr as *const Expr as usize, span);
-    }
-    for (index, child) in expr.children().enumerate() {
-        path.push(index.try_into().expect("AST child index fits u32"));
-        collect_expression_spans_by_pointer(child, path, spans_by_path, spans);
-        path.pop();
-    }
-}
-
-/// The AST path of every expression in the program, keyed by node pointer.
-///
-/// `main`-rooted paths are the `children()` index chain, matching the
-/// `expression_source_spans` vocabulary. A declaration body's path is prefixed
-/// with `u32::MAX` and the declaration index: no real child index is that
-/// large, so a process literal inside a process body can never collide with a
-/// `main` path when a lifted declaration's name is derived.
-/// Note: the declaration index and child indexes are enumerated in-memory
-/// AST positions, all far below `u32::MAX`, as each site's message states.
-#[expect(
-    clippy::expect_used,
-    reason = "declaration and AST child indexes fit u32"
-)]
-pub(super) fn expression_paths_by_pointer(program: &Program) -> BTreeMap<usize, Vec<u32>> {
+pub(super) fn program_node_maps(
+    program: &Program,
+) -> (BTreeMap<usize, AstPath>, BTreeMap<usize, Span>) {
     let mut paths = BTreeMap::new();
-    collect_expression_paths(&program.main, &mut Vec::new(), &mut paths);
+    let mut spans = BTreeMap::new();
+    collect_program_nodes(
+        &program.main,
+        AstRoot::Main,
+        &mut Vec::new(),
+        &program.spans,
+        &mut paths,
+        &mut spans,
+    );
     for (index, declaration) in program.declarations.iter().enumerate() {
         let body = match declaration {
             Declaration::Process(process) => &process.body,
             Declaration::Function(function) => &function.body,
             Declaration::Type(_) => continue,
         };
-        let mut prefix = vec![
-            u32::MAX,
-            index.try_into().expect("declaration index fits u32"),
-        ];
-        collect_expression_paths(body, &mut prefix, &mut paths);
+        collect_program_nodes(
+            body,
+            AstRoot::Declaration(index.try_into().expect("declaration index fits u32")),
+            &mut Vec::new(),
+            &program.spans,
+            &mut paths,
+            &mut spans,
+        );
     }
-    paths
+    (paths, spans)
 }
 
 #[expect(clippy::expect_used, reason = "AST child index fits u32")]
-fn collect_expression_paths(
+fn collect_program_nodes(
     expr: &Expr,
-    path: &mut Vec<u32>,
-    paths: &mut BTreeMap<usize, Vec<u32>>,
+    root: AstRoot,
+    steps: &mut Vec<u32>,
+    program_spans: &BTreeMap<AstPath, Span>,
+    paths: &mut BTreeMap<usize, AstPath>,
+    spans: &mut BTreeMap<usize, Span>,
 ) {
-    paths.insert(expr as *const Expr as usize, path.clone());
+    let path = AstPath {
+        root,
+        steps: steps.clone(),
+    };
+    if let Some(span) = program_spans.get(&path).copied() {
+        spans.insert(expr as *const Expr as usize, span);
+    }
+    paths.insert(expr as *const Expr as usize, path);
     for (index, child) in expr.children().enumerate() {
-        path.push(index.try_into().expect("AST child index fits u32"));
-        collect_expression_paths(child, path, paths);
-        path.pop();
+        steps.push(index.try_into().expect("AST child index fits u32"));
+        collect_program_nodes(child, root, steps, program_spans, paths, spans);
+        steps.pop();
     }
 }

@@ -139,17 +139,10 @@ fn lower_with_ambient_kind(
         .collect::<Vec<_>>();
     root_global_initializers.extend(expressions);
     let main = LashExpr::Block(root_global_initializers);
-    let expression_source_spans = super::spans::source_spans(&main, &lowerer.span_notes);
+    let spans = super::spans::source_spans(&main, &lowerer.span_notes);
     Ok(LashProgram {
         declarations: lowerer.declarations,
         main,
-        declaration_spans: lowerer.declaration_spans,
-        // Left empty deliberately: this table is the linker's per-root-statement
-        // fallback, and lowering only knows a statement's position when one of
-        // its expressions carries a source span. A placeholder here would put a
-        // caret on line 1 of a statement whose position is unknown, which is
-        // worse than the message-only rendering the fallback already gives.
-        expression_spans: Vec::new(),
-        expression_source_spans,
+        spans,
     })
 }

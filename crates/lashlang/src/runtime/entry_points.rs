@@ -80,9 +80,7 @@ pub fn compile_process(
     let process_program = Program {
         declarations: program.declarations.clone(),
         main: process.body.clone(),
-        declaration_spans: program.declaration_spans.clone(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     };
     compile_ast(&process_program).map_err(|error| RuntimeError::ValidationFailed {
         reason: error.to_string(),
@@ -103,9 +101,7 @@ pub fn compile_linked_process(
     let process_program = Program {
         declarations: linked_program.declarations.clone(),
         main: process.body.clone(),
-        declaration_spans: linked_program.declaration_spans.clone(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     };
     let process_ref = linked
         .artifact
@@ -148,9 +144,7 @@ pub fn compile_module_artifact_process(
     let process_program = Program {
         declarations: artifact.canonical_ir.declarations.clone(),
         main: process.body.clone(),
-        declaration_spans: artifact.canonical_ir.declaration_spans.clone(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     };
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,

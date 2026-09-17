@@ -103,7 +103,6 @@ struct Lowerer {
     continue_epilogues: Vec<Option<LashExpr>>,
     process_depth: usize,
     declarations: Vec<Declaration>,
-    declaration_spans: Vec<lashlang::Span>,
     /// One note per lowered TypeScript expression that carries a source span,
     /// in lowering (post-)order. Resolved against the finished program by
     /// `spans::source_spans`.

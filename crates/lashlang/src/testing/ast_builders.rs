@@ -17,10 +17,10 @@
 #![allow(dead_code)]
 
 use crate::ast::{
-    AssignPathStep, AssignTarget, AstString, BinaryOp, CatchClause, Declaration, Expr,
-    ExpressionSourceSpan, FunctionDecl, FunctionExpr, FunctionParam, LabelMetadata,
-    ListComprehensionClause, ProcessDecl, ProcessParam, ProcessSignalDecl, ProcessSignature,
-    ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
+    AssignPathStep, AssignTarget, AstPath, AstString, BinaryOp, CatchClause, Declaration, Expr,
+    FunctionDecl, FunctionExpr, FunctionParam, LabelMetadata, ListComprehensionClause, ProcessDecl,
+    ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessType, Program, ResourceRefExpr,
+    TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
 };
 use crate::span::Span;
 
@@ -38,9 +38,7 @@ pub fn module(declarations: Vec<Declaration>, expressions: Vec<Expr>) -> Program
     Program {
         declarations,
         main: Expr::Block(expressions),
-        declaration_spans: Vec::new(),
-        expression_spans: Vec::new(),
-        expression_source_spans: Vec::new(),
+        spans: Default::default(),
     }
 }
 
@@ -58,46 +56,55 @@ pub fn module(declarations: Vec<Declaration>, expressions: Vec<Expr>) -> Program
 /// rendering therefore state the table outright instead of borrowing one from a
 /// front-end, which is also what keeps them honest when FIG-3065 is fixed.
 pub fn with_source_spans(mut program: Program, entries: &[(&[u32], usize, usize)]) -> Program {
-    program.expression_source_spans = entries
-        .iter()
-        .map(|(path, start, end)| ExpressionSourceSpan {
-            path: path.to_vec(),
-            span: Span {
-                start: *start,
-                end: *end,
-            },
-        })
-        .collect();
+    program
+        .spans
+        .extend(entries.iter().map(|(path, start, end)| {
+            (
+                AstPath::main(path.to_vec()),
+                Span {
+                    start: *start,
+                    end: *end,
+                },
+            )
+        }));
     program
 }
 
-/// Attaches the per-top-level-expression span vector a linker diagnostic reads.
+/// Attaches per-top-level-expression spans a linker diagnostic reads.
 ///
-/// Parallel to `program.main`'s block expressions, in order. See
-/// `with_source_spans` for why these tables are stated rather than parsed.
-pub fn with_expression_spans(mut program: Program, spans: &[(usize, usize)]) -> Program {
-    program.expression_spans = spans
-        .iter()
-        .map(|(start, end)| Span {
-            start: *start,
-            end: *end,
-        })
-        .collect();
-    program
-}
-
-/// Attaches the per-declaration span vector a linker diagnostic reads.
-///
-/// Parallel to `program.declarations`, in order. See `with_source_spans` for
+/// Addressed as `AstPath::main([i])`, in order. See `with_source_spans` for
 /// why these tables are stated rather than parsed.
+pub fn with_expression_spans(mut program: Program, spans: &[(usize, usize)]) -> Program {
+    program
+        .spans
+        .extend(spans.iter().enumerate().map(|(index, (start, end))| {
+            (
+                AstPath::main(vec![index as u32]),
+                Span {
+                    start: *start,
+                    end: *end,
+                },
+            )
+        }));
+    program
+}
+
+/// Attaches per-declaration spans a linker diagnostic reads.
+///
+/// Addressed as `AstPath::declaration(i, [])`, in declaration order. See
+/// `with_source_spans` for why these tables are stated rather than parsed.
 pub fn with_declaration_spans(mut program: Program, spans: &[(usize, usize)]) -> Program {
-    program.declaration_spans = spans
-        .iter()
-        .map(|(start, end)| Span {
-            start: *start,
-            end: *end,
-        })
-        .collect();
+    program
+        .spans
+        .extend(spans.iter().enumerate().map(|(index, (start, end))| {
+            (
+                AstPath::declaration(index as u32, Vec::new()),
+                Span {
+                    start: *start,
+                    end: *end,
+                },
+            )
+        }));
     program
 }
 

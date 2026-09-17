@@ -1,6 +1,7 @@
 use compact_str::CompactString;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::span::Span;
@@ -12,12 +13,103 @@ pub struct Program {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declarations: Vec<Declaration>,
     pub main: Expr,
+    /// Source spans for the program's nodes, addressed by [`AstPath`]. A
+    /// declaration's own span lives at `AstPath::declaration(i, [])`; absence
+    /// is "no span", so no sentinel ever doubles as offset zero.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "span_table"
+    )]
+    pub spans: BTreeMap<AstPath, Span>,
+}
+
+/// Which tree an [`AstPath`] walks down: `Program::main`, or one entry of
+/// `Program::declarations`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AstRoot {
+    Main,
+    Declaration(u32),
+}
+
+/// A node's address in a `Program`: the root it hangs from plus the
+/// `Expr::children()` index chain that reaches it.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct AstPath {
+    pub root: AstRoot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub declaration_spans: Vec<Span>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub expression_spans: Vec<Span>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub expression_source_spans: Vec<ExpressionSourceSpan>,
+    pub steps: Vec<u32>,
+}
+
+impl AstPath {
+    /// The node `steps` below `Program::main` (`[]` addresses `main` itself).
+    pub fn main(steps: impl Into<Vec<u32>>) -> Self {
+        Self {
+            root: AstRoot::Main,
+            steps: steps.into(),
+        }
+    }
+
+    /// The node `steps` below the body of `Program::declarations[index]`
+    /// (`[]` addresses the declaration itself).
+    pub fn declaration(index: u32, steps: impl Into<Vec<u32>>) -> Self {
+        Self {
+            root: AstRoot::Declaration(index),
+            steps: steps.into(),
+        }
+    }
+
+    /// The flat encoding the lifted-process name hash predates this type on:
+    /// `main` paths are the bare steps; declaration paths are prefixed with
+    /// `u32::MAX` and the declaration index. Kept for that hash only — a
+    /// durable identity input that must not change.
+    pub(crate) fn legacy_steps(&self) -> Vec<u32> {
+        match self.root {
+            AstRoot::Main => self.steps.clone(),
+            AstRoot::Declaration(index) => {
+                let mut steps = Vec::with_capacity(self.steps.len() + 2);
+                steps.push(u32::MAX);
+                steps.push(index);
+                steps.extend_from_slice(&self.steps);
+                steps
+            }
+        }
+    }
+}
+
+/// `Program::spans` serializes as a list of entries: a `BTreeMap`'s struct
+/// key is not a JSON object key, and `ModuleArtifact` encodes `Program` as
+/// JSON. Iteration order is already key order, so the form stays canonical.
+mod span_table {
+    use super::{AstPath, Span};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    #[derive(Serialize, Deserialize)]
+    struct SpanEntry {
+        path: AstPath,
+        span: Span,
+    }
+
+    pub(super) fn serialize<S: Serializer>(
+        spans: &BTreeMap<AstPath, Span>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(spans.iter().map(|(path, span)| SpanEntry {
+            path: path.clone(),
+            span: *span,
+        }))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<AstPath, Span>, D::Error> {
+        Ok(Vec::<SpanEntry>::deserialize(deserializer)?
+            .into_iter()
+            .map(|entry| (entry.path, entry.span))
+            .collect())
+    }
 }
 
 /// The nesting limit an AST must satisfy, whether it came from source or was
@@ -269,9 +361,7 @@ impl Program {
         Self {
             declarations: Vec::new(),
             main: Expr::Block(expressions),
-            declaration_spans: Vec::new(),
-            expression_spans: Vec::new(),
-            expression_source_spans: Vec::new(),
+            spans: BTreeMap::new(),
         }
     }
 
@@ -289,12 +379,6 @@ impl PartialEq for Program {
     fn eq(&self, other: &Self) -> bool {
         self.declarations == other.declarations && self.main == other.main
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExpressionSourceSpan {
-    pub path: Vec<u32>,
-    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
