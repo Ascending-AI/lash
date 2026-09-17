@@ -260,6 +260,14 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+    # FIG-3239: ResponseTextMeta.phase retyped Option<String> ->
+    # Option<ResponsePhase>. Serde and the commit-identity preimage emit the
+    # same two wire strings ('commentary'/'final_answer'), so both guarded
+    # bytes are identical; APPEND_REQUEST_IDENTITY_ENCODING_VERSION stays 4
+    # and SESSION_NODE_BODY_SCHEMA_VERSION stays 14.
+    'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:ee852463dcf8c7c8434554eeff8e847055fa3244aec8a25acc4a90c0fcbe3e1f',
+    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:3b61169b1d807e9c468856385c2f3af0aca1f02c55bb37a043b0f0296fe0acf8',
+
     # FIG-2784 pass 1 (#1502): `push_causal_ref` in commit_identity.rs gained a
     # two-line doc comment and `#[expect(clippy::expect_used, ...)]` under the
     # workspace-wide expect/unwrap denial. A lint attribute and prose; no
