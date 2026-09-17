@@ -17,7 +17,7 @@
 /// effect journal they sit beside the effects that resolve them.
 pub(crate) const AWAIT_EVENT_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS await_event_meta (
-    singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
+    singleton       INTEGER PRIMARY KEY CONSTRAINT ck_await_event_meta_singleton CHECK (singleton = 1),
     signing_secret  BLOB NOT NULL
 );
 
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS await_event_waits (
     scope_json      TEXT NOT NULL,
     wait_json       TEXT NOT NULL,
     session_id      TEXT,
-    turn_control    INTEGER NOT NULL CHECK (turn_control IN (0, 1)),
+    turn_control    INTEGER NOT NULL CONSTRAINT ck_await_event_waits_turn_control CHECK (turn_control IN (0, 1)),
     terminal_json   TEXT,
     created_at_ms   INTEGER NOT NULL,
     resolved_at_ms  INTEGER
@@ -60,6 +60,6 @@ pub(crate) const SCOPE_RETIREMENT_TABLE: &str = "
 CREATE TABLE IF NOT EXISTS effect_scope_retirements (
     scope_id        TEXT PRIMARY KEY,
     retired_at_ms   INTEGER NOT NULL,
-    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
+    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_effect_scope_retirements_artifact_cleanup_completed CHECK (artifact_cleanup_completed IN (0, 1))
 );
 ";

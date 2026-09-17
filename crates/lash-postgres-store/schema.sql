@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS lash_graph_nodes (
     session_id TEXT NOT NULL,
     node_id TEXT PRIMARY KEY,
     parent_node_id TEXT,
-    generation BIGINT NOT NULL CHECK (generation >= 0),
+    generation BIGINT NOT NULL CONSTRAINT ck_graph_nodes_generation CHECK (generation >= 0),
     frame_node_id TEXT NOT NULL,
     node_json TEXT NOT NULL,
     tombstoned BOOLEAN NOT NULL DEFAULT FALSE,
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS lash_fork_lineage (
     session_id TEXT NOT NULL,
     ancestor_session_id TEXT NOT NULL,
     fork_node_id TEXT NOT NULL,
-    fork_generation BIGINT NOT NULL CHECK (fork_generation >= 0),
+    fork_generation BIGINT NOT NULL CONSTRAINT ck_fork_lineage_fork_generation CHECK (fork_generation >= 0),
     PRIMARY KEY (session_id, ancestor_session_id)
 );
 
@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS lash_session_meta_pending_observer_intents (
     process_index BIGINT NOT NULL,
     process_id TEXT NOT NULL,
     process_incarnation BIGINT,
-    attribution TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited')),
+    attribution TEXT NOT NULL CONSTRAINT ck_session_meta_pending_observer_intents_attribution CHECK (attribution IN ('host_requested', 'fork_inherited')),
     PRIMARY KEY (session_id, process_id),
     UNIQUE (session_id, process_index),
     FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
@@ -182,10 +182,7 @@ CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits (
     -- Identity families: all-NULL is a plain commit; hash+version+count is an
     -- append identity; hash+version without a count is a semantic-boundary
     -- identity (FIG-2480). A count without a hash is representable nowhere.
-    CHECK (
-        (request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
-        AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL)
-    )
+    CONSTRAINT ck_runtime_turn_commits_identity CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS lash_turn_cancel_requests (
@@ -196,7 +193,7 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancel_requests (
     reason TEXT,
     disposition TEXT NOT NULL DEFAULT 'defer',
     mode TEXT NOT NULL DEFAULT 'immediate',
-    intent_revision BIGINT NOT NULL CHECK (intent_revision >= 1),
+    intent_revision BIGINT NOT NULL CONSTRAINT ck_turn_cancel_requests_intent_revision CHECK (intent_revision >= 1),
     affected_input_ids TEXT[] NOT NULL DEFAULT '{}',
     affected_dispositions TEXT[] NOT NULL DEFAULT '{}',
     PRIMARY KEY (session_id, turn_id)
@@ -204,7 +201,7 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancel_requests (
 
 CREATE TABLE IF NOT EXISTS lash_turn_cancellation_bindings (
     session_id TEXT PRIMARY KEY,
-    binding_id TEXT NOT NULL CHECK (length(binding_id) > 0),
+    binding_id TEXT NOT NULL CONSTRAINT ck_turn_cancellation_bindings_binding_id CHECK (length(binding_id) > 0),
     admitted_scope_json TEXT
 );
 
@@ -314,7 +311,7 @@ CREATE TABLE IF NOT EXISTS lash_attachment_manifest (
     -- put. Adoption of a digest requires some row to carry it.
     written_at_ms BIGINT,
     committed_at_ms BIGINT,
-    owner_kind TEXT CHECK (owner_kind IN ('turn', 'process')),
+    owner_kind TEXT CONSTRAINT ck_attachment_manifest_owner_kind CHECK (owner_kind IN ('turn', 'process')),
     owner_id TEXT,
     owner_incarnation BIGINT,
     CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)),
@@ -334,18 +331,18 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_manifest_written
 -- timestampless: the protocol is CAS transitions only, never an expiry.
 CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
     attachment_id TEXT PRIMARY KEY,
-    phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting')),
+    phase TEXT NOT NULL CONSTRAINT ck_attachment_condemnations_phase CHECK (phase IN ('condemned', 'deleting')),
     write_token TEXT,
     write_session_id TEXT,
-    CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
-    CHECK (write_token IS NULL OR phase = 'condemned')
+    CONSTRAINT ck_attachment_condemnations_write_token_pairing CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
+    CONSTRAINT ck_attachment_condemnations_write_token_phase CHECK (write_token IS NULL OR phase = 'condemned')
 );
 
 CREATE TABLE IF NOT EXISTS lash_process_change_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     current_seq BIGINT NOT NULL,
     tombstone_compaction_horizon BIGINT NOT NULL DEFAULT 0,
-    CHECK (singleton)
+    CONSTRAINT ck_process_change_clock_singleton CHECK (singleton)
 );
 -- Opaque process identifiers use byte order on every host locale. The primary
 -- key, live-worklist index, MAX, and keyset bounds inherit this collation.
@@ -595,7 +592,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_scope
 CREATE TABLE IF NOT EXISTS lash_await_event_meta (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     signing_secret BYTEA NOT NULL,
-    CHECK (singleton)
+    CONSTRAINT ck_await_event_meta_singleton CHECK (singleton)
 );
 
 CREATE TABLE IF NOT EXISTS lash_await_event_waits (
@@ -734,7 +731,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 CREATE TABLE IF NOT EXISTS lash_artifact_owners (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    owner_kind TEXT NOT NULL CHECK (owner_kind IN ('host', 'process', 'execution')),
+    owner_kind TEXT NOT NULL CONSTRAINT ck_artifact_owners_owner_kind CHECK (owner_kind IN ('host', 'process', 'execution')),
     owner_id TEXT NOT NULL,
     PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lashlang_artifacts(namespace, artifact_ref) ON DELETE CASCADE
@@ -742,7 +739,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_owners (
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_owners_owner
     ON lash_artifact_owners(owner_kind, owner_id);
 CREATE TABLE IF NOT EXISTS lash_artifact_owner_retirements (
-    owner_kind TEXT NOT NULL CHECK (owner_kind = 'execution'),
+    owner_kind TEXT NOT NULL CONSTRAINT ck_artifact_owner_retirements_owner_kind CHECK (owner_kind = 'execution'),
     owner_id TEXT NOT NULL,
     PRIMARY KEY (owner_kind, owner_id)
 );
@@ -758,7 +755,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
     release_version TEXT NOT NULL,
     schema_versions TEXT NOT NULL,
     written_at_epoch_ms BIGINT NOT NULL,
-    CHECK (singleton)
+    CONSTRAINT ck_release_stamp_singleton CHECK (singleton)
 );
 
 -- Seed rows. Every open mode requires all three: the component version stamp,
@@ -766,7 +763,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 99)
+VALUES ('lash-postgres-store', 100)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

@@ -60,7 +60,11 @@ pub async fn inspect_required_constraints_at(
 
     let mut expected = Vec::new();
     for constraint in EXPECTED_CONSTRAINTS {
-        if sqlite_database(constraint.sqlite_database) == database {
+        if constraint
+            .sqlite_databases
+            .iter()
+            .any(|component| sqlite_database(*component) == database)
+        {
             expected.push(constraint.sqlite);
         }
     }
