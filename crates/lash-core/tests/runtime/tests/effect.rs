@@ -1736,7 +1736,7 @@ fn lint_runtime_effect_executor_has_no_legacy_future_api() {
         .into_iter()
         .chain([
             manifest_dir.join("src/runtime/turn_driver.rs"),
-            manifest_dir.join("src/runtime/session_manager/direct.rs"),
+            manifest_dir.join("../lash-core-execution/src/direct.rs"),
         ])
         .collect::<Vec<_>>();
     let legacy_future_type = ["Effect", "Future"].concat();
@@ -1764,12 +1764,12 @@ fn lint_runtime_effect_controller_cutover_has_no_legacy_host_request_or_fallback
         .chain(turn_loop_module_sources(&manifest_dir))
         .chain([
             manifest_dir.join("src/runtime/turn_driver.rs"),
-            manifest_dir.join("src/runtime/session_manager/direct.rs"),
-            manifest_dir.join("src/tool_dispatch.rs"),
+            manifest_dir.join("../lash-core-execution/src/direct.rs"),
+            manifest_dir.join("../lash-core-execution/src/tool_dispatch.rs"),
             manifest_dir.join("src/runtime/assembly.rs"),
             manifest_dir.join("src/runtime/mod.rs"),
             manifest_dir.join("src/runtime/turn_loop.rs"),
-            manifest_dir.join("src/runtime/process/model.rs"),
+            manifest_dir.join("../lash-core-execution/src/runtime/process/model.rs"),
             manifest_dir.join("src/runtime/session_manager/process_runners/control.rs"),
         ])
         .collect::<Vec<_>>();

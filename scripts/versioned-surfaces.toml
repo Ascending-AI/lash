@@ -243,12 +243,12 @@ symbols = [
 
 [[surface]]
 constant = "PROCESS_REGISTRATION_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/runtime/process/validation.rs"
+constant_path = "crates/lash-core-execution/src/runtime/process/validation.rs"
 description = "stable process-registration definition fingerprint"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/process/validation.rs"]
+paths = ["crates/lash-core-execution/src/runtime/process/validation.rs"]
 symbols = [
   "process_registration_fingerprint_preimage",
   "project_registration_output_contract",
@@ -261,17 +261,17 @@ symbols = [
 
 [[surface]]
 constant = "TRIGGER_COMMAND_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/triggers.rs"
+constant_path = "crates/lash-core-execution/src/triggers.rs"
 description = "stable trigger-command fingerprint"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/triggers.rs"]
+paths = ["crates/lash-core-execution/src/triggers.rs"]
 symbols = ["trigger_command_preimage"]
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/triggers/router.rs"]
+paths = ["crates/lash-core-execution/src/triggers/router.rs"]
 symbols = [
   "project_trigger_owner",
   "project_trigger_actor",
@@ -285,27 +285,27 @@ symbols = [
 
 [[surface]]
 constant = "TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/triggers.rs"
+constant_path = "crates/lash-core-execution/src/triggers.rs"
 description = "stable trigger operation-receipt address"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/triggers.rs"]
+paths = ["crates/lash-core-execution/src/triggers.rs"]
 symbols = ["trigger_operation_receipt_preimage"]
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/triggers/router.rs"]
+paths = ["crates/lash-core-execution/src/triggers/router.rs"]
 symbols = ["project_trigger_owner"]
 
 [[surface]]
 constant = "TRIGGER_DEFINITION_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/triggers/router.rs"
+constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 description = "stable trigger-subscription definition fingerprint"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/triggers/router.rs"]
+paths = ["crates/lash-core-execution/src/triggers/router.rs"]
 symbols = [
   "trigger_subscription_definition_preimage",
   "project_trigger_owner",
@@ -319,52 +319,52 @@ symbols = [
 
 [[surface]]
 constant = "TRIGGER_LOOKUP_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/triggers/router.rs"
+constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 description = "stable trigger subscription lookup address"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/triggers/router.rs"]
+paths = ["crates/lash-core-execution/src/triggers/router.rs"]
 symbols = ["trigger_subscription_address_preimage", "project_trigger_owner"]
 
 [[surface]]
 constant = "TRIGGER_SOURCE_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/triggers/router.rs"
+constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 description = "stable default trigger-source key"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/triggers/router.rs"]
+paths = ["crates/lash-core-execution/src/triggers/router.rs"]
 symbols = ["trigger_source_preimage", "project_trigger_payload_leaf"]
 
 [[surface]]
 constant = "TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/triggers/router.rs"
+constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 description = "stable trigger-delivery process identity"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/triggers/router.rs"]
+paths = ["crates/lash-core-execution/src/triggers/router.rs"]
 symbols = ["trigger_delivery_process_preimage"]
 
 [[surface]]
 constant = "DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/triggers/router.rs"
+constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 description = "stable derived trigger-subscription key"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/triggers/router.rs"]
+paths = ["crates/lash-core-execution/src/triggers/router.rs"]
 symbols = ["derived_trigger_subscription_key"]
 
 [[surface]]
 constant = "DIRECT_EFFECT_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/runtime/causal.rs"
+constant_path = "crates/lash-core-execution/src/runtime/causal.rs"
 description = "stable direct-effect replay key and discriminator"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/causal.rs"]
+paths = ["crates/lash-core-execution/src/runtime/causal.rs"]
 symbols = [
   "direct_effect_replay_preimage",
   "direct_request_discriminator",
@@ -393,32 +393,32 @@ symbols = ["promise_key_preimage", "sign_material"]
 
 [[surface]]
 constant = "PROCESS_CANCELLATION_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/runtime/process/events.rs"
+constant_path = "crates/lash-core-execution/src/runtime/process/events.rs"
 description = "stable process-cancellation replay address"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/process/events.rs"]
+paths = ["crates/lash-core-execution/src/runtime/process/events.rs"]
 symbols = ["cancellation_replay_preimage"]
 
 [[surface]]
 constant = "PROCESS_WAKE_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/runtime/process/wake.rs"
+constant_path = "crates/lash-core-execution/src/runtime/process/wake.rs"
 description = "stable process-wake identity"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/process/wake.rs"]
+paths = ["crates/lash-core-execution/src/runtime/process/wake.rs"]
 symbols = ["process_wake_identity_preimage"]
 
 [[surface]]
 constant = "TOOL_BATCH_FAMILY_VERSION"
-constant_path = "crates/lash-core/src/session/tool_execution.rs"
+constant_path = "crates/lash-core-execution/src/session/tool_execution.rs"
 description = "stable tool-invocation batch identity"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/session/tool_execution.rs"]
+paths = ["crates/lash-core-execution/src/session/tool_execution.rs"]
 symbols = ["tool_invocation_batch_preimage"]
 
 [[surface]]
@@ -443,17 +443,17 @@ symbols = ["ProductEvent", "ProductEventHistory", "PersistedProductEventLog"]
 
 [[surface]]
 constant = "PROCESS_LEASE_SCHEMA_VERSION"
-constant_path = "crates/lash-core/src/runtime/process/model/lease.rs"
+constant_path = "crates/lash-core-execution/src/runtime/process/model/lease.rs"
 description = "persisted ProcessLease wire record"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/process/model/lease.rs"]
+paths = ["crates/lash-core-execution/src/runtime/process/model/lease.rs"]
 symbols = ["ProcessLease"]
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core/src/runtime/process/lease_serde.rs"]
+paths = ["crates/lash-core-execution/src/runtime/process/lease_serde.rs"]
 symbols = [
   "ProcessLeaseField",
   "visit_seq",
@@ -896,7 +896,7 @@ symbols = ["LashlangSegmentState"]
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
-paths = ["crates/lash-core/src/runtime/process/engine.rs"]
+paths = ["crates/lash-core-execution/src/runtime/process/engine.rs"]
 must_cover = ["SegmentHandover", "PersistedSegmentHandover"]
 
 [[surface]]

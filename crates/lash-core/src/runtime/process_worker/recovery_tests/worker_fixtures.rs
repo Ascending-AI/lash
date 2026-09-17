@@ -179,7 +179,9 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     .await
     .expect("persist process env");
     let mut config = DurableProcessWorkerConfig::new(
-        Arc::new(PluginHost::new(Vec::new())),
+        Arc::new(PluginHost::new(
+            crate::testing::test_standard_protocol_factories(),
+        )),
         runtime_host,
         Arc::new(TestSessionStoreFactory),
         crate::WorkerProcessWork::External(process_work),
@@ -235,7 +237,9 @@ pub(super) async fn worker_with_session_store_factory(
     .await
     .expect("persist process env");
     let config = DurableProcessWorkerConfig::new(
-        Arc::new(PluginHost::new(Vec::new())),
+        Arc::new(PluginHost::new(
+            crate::testing::test_standard_protocol_factories(),
+        )),
         runtime_host,
         factory,
         crate::WorkerProcessWork::External(process_work),
@@ -335,7 +339,9 @@ pub(super) fn native_worker_with_trigger_store(
     let (process_env_store, _) = crate::testing::process_execution_env_fixture();
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(Vec::new())),
+            Arc::new(PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
             RuntimeHostConfig::in_memory(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
@@ -371,7 +377,9 @@ pub(super) fn reentrant_worker_with_trigger_store(
     let (process_env_store, _) = crate::testing::process_execution_env_fixture();
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(Vec::new())),
+            Arc::new(PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
             RuntimeHostConfig::in_memory(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),

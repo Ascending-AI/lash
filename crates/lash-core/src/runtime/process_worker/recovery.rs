@@ -291,36 +291,7 @@ impl DurableProcessWorker {
     /// it was before faults were typed.
     pub(super) async fn emit_worker_fault(&self, fault: ProcessWorkerFault) {
         let Some(sink) = self.config.process_event_sink.as_ref() else {
-            match &fault {
-                ProcessWorkerFault::RecoveryBackendError {
-                    process_id,
-                    operation,
-                    error,
-                } => tracing::error!(
-                    target: "lash_core::process_recovery",
-                    event = "process_worker.fault",
-                    fault = "recovery_backend_error",
-                    process_id = %process_id,
-                    operation = operation.label(),
-                    error = %error,
-                    "process worker recovery backend error (no process event sink wired)"
-                ),
-                ProcessWorkerFault::RecoveryRunFailed { process_id, error } => tracing::error!(
-                    target: "lash_core::process_recovery",
-                    event = "process_worker.fault",
-                    fault = "recovery_run_failed",
-                    process_id = %process_id,
-                    error = %error,
-                    "process worker recovery run failed (no process event sink wired)"
-                ),
-                ProcessWorkerFault::WorklistScanIncomplete { error } => tracing::error!(
-                    target: "lash_core::process_recovery",
-                    event = "process_worker.fault",
-                    fault = "worklist_scan_incomplete",
-                    error = %error,
-                    "process worklist scan incomplete (no process event sink wired)"
-                ),
-            }
+            fault.trace_without_sink();
             return;
         };
         sink.emit_worker_fault(&fault).await;
@@ -337,24 +308,10 @@ impl DurableProcessWorker {
     ) {
         match outcome {
             ProcessRecoveryOutcome::Committed | ProcessRecoveryOutcome::LeftToOwner => {}
-            ProcessRecoveryOutcome::Deferred(
-                ProcessRecoveryAttemptOutcome::Busy
-                | ProcessRecoveryAttemptOutcome::Absent
-                | ProcessRecoveryAttemptOutcome::AlreadyApplied { .. }
-                | ProcessRecoveryAttemptOutcome::SettledByPeer { .. }
-                | ProcessRecoveryAttemptOutcome::LeaseLost { .. }
-                | ProcessRecoveryAttemptOutcome::ExternallyOwned,
-            ) => {}
-            ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::BackendError {
-                operation,
-                error,
-            }) => {
-                self.emit_worker_fault(ProcessWorkerFault::RecoveryBackendError {
-                    process_id: ProcessId::from(process_id.to_string()),
-                    operation,
-                    error,
-                })
-                .await;
+            ProcessRecoveryOutcome::Deferred(disposition) => {
+                if let Some(fault) = disposition.into_worker_fault(process_id) {
+                    self.emit_worker_fault(fault).await;
+                }
             }
             ProcessRecoveryOutcome::RunFailed(error) => {
                 self.emit_worker_fault(ProcessWorkerFault::RecoveryRunFailed {

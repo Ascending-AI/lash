@@ -184,6 +184,65 @@ REGISTRATION_BASELINES = {
     "crates/lash-core-store/src/store/state_version.rs:CURRENT_SESSION_STATE_VERSION": (
         "sha256:5fb0524a0d534905c775abf9c0051cc48a4e5d844f61fa1be003e3fd3901549c"
     ),
+    # FIG-3331: the execution kernel was carved out of lash-core into the new
+    # lash-internal-core-execution crate (crates/lash-core/src/... ->
+    # crates/lash-core-execution/src/...) and the promise-semantics module into
+    # lash-internal-core-effect; versioned-surfaces.toml follows each file, so
+    # every key below reads to the check as brand new even though its
+    # merge-base value sits under the old path. Same reading as FIG-3042 step
+    # 4, taken per file against the merge-base copy: validation.rs, triggers.rs,
+    # wake.rs, model/lease.rs and lease_serde.rs are byte-identical; router.rs,
+    # causal.rs, tool_execution.rs and promise_semantics.rs differ only in
+    # `pub(crate)`/`pub(super)` -> `pub` on items lash-core still calls; and
+    # events.rs already re-exported PROCESS_WAKE_DELIVERY_FORMAT_VERSION (3)
+    # from the store crate at the merge-base. No struct, field, variant, derive
+    # input, serde attribute, preimage byte expression, tag or constant value
+    # changed, so each constant keeps its merge-base value. The old-path
+    # entries above and in IDENTIFIER_RENAME_BASELINES stay as dead-but-honest
+    # history; these pin a STATE, and any further guarded-shape drift on these
+    # surfaces re-fails the gate.
+    "crates/lash-core-execution/src/runtime/process/validation.rs:PROCESS_REGISTRATION_FAMILY_VERSION": (
+        "sha256:e036dc51092b29632b22fd1d8b074653f26b44bf4267135ceb22bc1708997f5c"
+    ),
+    "crates/lash-core-execution/src/triggers.rs:TRIGGER_COMMAND_FAMILY_VERSION": (
+        "sha256:d706bc427b47f782da904ac5d899fceb6418646ce591955b14813c2fb565e480"
+    ),
+    "crates/lash-core-execution/src/triggers.rs:TRIGGER_OPERATION_ADDRESS_FAMILY_VERSION": (
+        "sha256:8a0f11f6e192b8e6fb85b3999babf817810a99777a0f3056c2f0cf27caf913fe"
+    ),
+    "crates/lash-core-execution/src/triggers/router.rs:TRIGGER_DEFINITION_FAMILY_VERSION": (
+        "sha256:e9570d29cdb119af5ec68a51f1f97d39abe1b4712e7f86996e4be2e5197c7d25"
+    ),
+    "crates/lash-core-execution/src/triggers/router.rs:TRIGGER_LOOKUP_FAMILY_VERSION": (
+        "sha256:fdfd5e0edfe519224ee9f9a9b72a6672b8266b4e027395f7edf773c35622cfa7"
+    ),
+    "crates/lash-core-execution/src/triggers/router.rs:TRIGGER_SOURCE_FAMILY_VERSION": (
+        "sha256:52f81238ef0a160fb8aeb58fa497d58e4985405ae5f611dd661915f54d2504d8"
+    ),
+    "crates/lash-core-execution/src/triggers/router.rs:TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION": (
+        "sha256:7116dbf4722d84fd3e9dd350bcfb5413284b81746782ee5203413e19588fe16c"
+    ),
+    "crates/lash-core-execution/src/triggers/router.rs:DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION": (
+        "sha256:f5bdd39a3ada472b6c4f4fde81ddb10e2b60a0f213c8244f70391c7af82c8da2"
+    ),
+    "crates/lash-core-execution/src/runtime/causal.rs:DIRECT_EFFECT_FAMILY_VERSION": (
+        "sha256:6f221155d7f3a3156c1ad45bc1c4518739177c49569967019ccbf6c5295cbd40"
+    ),
+    "crates/lash-core-effect/src/promise_semantics.rs:AWAIT_EVENT_FAMILY_VERSION": (
+        "sha256:7eb7f84a9dd6b5ca219959f9c3efc43fc236c0f95591a84a69e64eb07c501cd8"
+    ),
+    "crates/lash-core-execution/src/runtime/process/events.rs:PROCESS_CANCELLATION_FAMILY_VERSION": (
+        "sha256:d287175f35bf44bfdb0efa7259fc2bec3487c75552cf604c12139b467dd1e098"
+    ),
+    "crates/lash-core-execution/src/runtime/process/wake.rs:PROCESS_WAKE_FAMILY_VERSION": (
+        "sha256:ee19d6ca4f27c6e57f897ad821e09e78269d1ae1521874d5a06a6405828139af"
+    ),
+    "crates/lash-core-execution/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION": (
+        "sha256:509ac3693782c0b9bbc41dc2a2f44976c9ec0532ba508d6c23a42809244debe1"
+    ),
+    "crates/lash-core-execution/src/runtime/process/model/lease.rs:PROCESS_LEASE_SCHEMA_VERSION": (
+        "sha256:5ba0ecd22f3c782cd1b68121ca8772b6a2833ed48a54440dc3a614604ebb2dd0"
+    ),
 }
 
 # Burned one-time proofs that a change moved Rust identifiers across a guarded
@@ -420,8 +479,16 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-core/src/store/mod.rs:SESSION_HEAD_META_SCHEMA_VERSION": (
         "sha256:816c0af2f5f70cdeeb31d3fad2b954bd4309f687e7dec72ce084a4e514a30c73"
     ),
+    # FIG-3331 (live): the guarded crates/lash-core/src/runtime/process/engine.rs
+    # moved verbatim to crates/lash-core-execution/src/runtime/process/engine.rs
+    # (the guard path follows it); the only textual change is four inherent
+    # constructors/converters widened from pub(crate) to pub for lash-core's
+    # callers. SegmentHandover and PersistedSegmentHandover kept every field,
+    # derive and serde attribute, so the persisted handover JSON is
+    # byte-identical and LASHLANG_SEGMENT_STATE_VERSION stays 10. (Superseded
+    # state: sha256:69b5d38f6c363f2cde541aa4500f5f31618b888826b44a4aa35cfe23a946bd1d.)
     "crates/lash-lashlang-runtime/src/process.rs:LASHLANG_SEGMENT_STATE_VERSION": (
-        "sha256:69b5d38f6c363f2cde541aa4500f5f31618b888826b44a4aa35cfe23a946bd1d"
+        "sha256:de22cf26bbe1982db85773d4606b10a1323e3e4fdabb4dd3b044cf740d475709"
     ),
     # FIG-2865: the canonical projected encoding moved out of state/wire.rs
     # into runtime/projected_wire.rs, which is now inside the snapshot guard's

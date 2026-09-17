@@ -17,17 +17,17 @@
 pub use async_trait::async_trait;
 
 pub use crate::runtime::concrete_turn_cancellation_authority;
+pub use lash_core_execution::direct;
+pub(crate) use lash_core_execution::direct_completion_client;
+pub use lash_core_execution::impl_store_replay_await_event_resolver;
+pub(crate) use lash_core_execution::model_clamp;
+pub(crate) use lash_core_ids::operational_metrics;
+pub use lash_core_llm::llm;
+pub(crate) use lash_core_llm::model;
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
 pub use lash_core_store::impl_noop_attachment_manifest;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
-pub mod direct;
-mod direct_completion_client;
-pub(crate) use lash_core_ids::identity_json;
-pub use lash_core_llm::llm;
-pub(crate) use lash_core_llm::model;
-mod model_clamp;
-pub(crate) use lash_core_ids::operational_metrics;
 pub(crate) use model_clamp::ModelGenerationClamp;
 /// Panic containment for runtime-owned work.
 ///
@@ -39,12 +39,12 @@ pub mod panic_containment {
     };
     pub use lash_core_ids::panic_containment::{is_loud, set_loud};
 }
+pub use lash_core_execution::plugin;
+pub(crate) use lash_core_execution::plugin_stack;
+pub use lash_core_execution::process_registry;
+pub(crate) use lash_core_execution::protocol_build;
 #[cfg(feature = "perf-witness")]
 pub use lash_core_ids::perf_witness;
-pub mod plugin;
-mod plugin_stack;
-pub mod process_registry;
-mod protocol_build;
 /// Provider components for pluggable LLM backends.
 ///
 /// The module lives in `lash-core-llm`; this facade re-exports its public
@@ -54,21 +54,19 @@ pub mod provider {
     pub use lash_core_llm::provider::*;
 }
 pub mod runtime;
-pub mod session;
+pub use lash_core_execution::session;
+pub use lash_core_execution::session_model;
 pub use lash_core_store::session_graph;
-pub mod session_model;
 /// Stable hashing primitives, re-exported from `lash-core-ids`. The helpers
 /// stay crate-internal; the module itself is public under `testing` exactly as
 /// it was before the carve-out.
 #[cfg(feature = "testing")]
 pub mod stable_hash {
     pub use lash_core_ids::stable_hash::sha256_hex;
-    pub(crate) use lash_core_ids::stable_hash::{blake3_hex, stable_json_string};
 }
+pub use lash_core_execution::store;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_ids::stable_hash;
-pub(crate) use lash_core_ids::stable_identity;
-pub mod store;
 pub use lash_core_ids::task;
 pub use lash_core_store::store_backend_support;
 /// Standard-lock poison recovery traits used across Lash hosts and runtimes.
@@ -76,24 +74,24 @@ pub mod sync {
     pub use lash_sansio::sync::*;
 }
 #[cfg(any(test, feature = "testing"))]
-pub mod test_support;
+pub use lash_core_execution::test_support;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_ids::test_watchdog;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
-pub mod tool_dispatch;
-mod tool_intent;
+pub use lash_core_execution::tool_dispatch;
+pub(crate) use lash_core_execution::tool_intent;
 #[cfg(feature = "testing")]
-pub mod tool_provider;
+pub use lash_core_execution::tool_provider;
 #[cfg(not(feature = "testing"))]
-mod tool_provider;
-pub mod tool_registry;
-mod tool_result;
+pub(crate) use lash_core_execution::tool_provider;
+pub use lash_core_execution::tool_registry;
+pub(crate) use lash_core_execution::tool_result;
 #[cfg(feature = "testing")]
-pub mod trace;
+pub use lash_core_execution::trace;
 #[cfg(not(feature = "testing"))]
-mod trace;
-pub mod triggers;
+pub(crate) use lash_core_execution::trace;
+pub use lash_core_execution::triggers;
 
 pub mod facade_support {
     pub use crate::runtime::effect::bind_store_turn_control_authority;
@@ -556,16 +554,8 @@ pub(crate) use facade_support::*;
 // twelve had test-only consumers, so their public path is `test_support` and
 // only their crate-internal short path lives here: `test_support` is
 // feature-gated and `crate::X` has to resolve in every build.
-pub(crate) use crate::attachments::{
-    AttachmentProducer, AttachmentSourcePolicy, OpenAttachmentSourcePolicy,
-};
-pub(crate) use crate::plugin::{
-    RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
-    SessionObserverIntent, SessionObserverIntentAttribution,
-};
-#[cfg(any(test, feature = "testing"))]
-pub(crate) use crate::runtime::UnavailableProcessService;
-pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
+pub(crate) use crate::attachments::{AttachmentProducer, AttachmentSourcePolicy};
+pub(crate) use crate::plugin::RuntimeServices;
 
 pub mod sansio {
     pub(crate) use lash_sansio::sansio::LogEvent;
@@ -583,6 +573,7 @@ pub use attachments::{
     AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
     EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
+pub use lash_core_execution::turn_outcome_from_tool_control;
 pub use lash_sansio::llm::types::{
     AttachmentSource, AttemptOutcome, AttemptRecord, AttemptUsageDisposition, ChargeSafetyDecision,
     ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
@@ -615,57 +606,11 @@ pub(crate) use lash_sansio::{
     prompt_template_fingerprint, prompt_text_fingerprint, resolve_prompt_layers,
     visible_response_parts,
 };
+pub use protocol_build::ProtocolBuildInput;
 pub use tool_provider::{
     ToolAttachmentClient, ToolDirectCompletionClient, ToolDispatchClient, ToolProcessEventClient,
     ToolSessionAdmin, ToolSessionModel,
 };
-/// Project a successful tool control into its terminal turn outcome.
-///
-/// Agent-frame seeds are typed at their serde boundary, so a terminal outcome
-/// can never advertise nodes that the commit materializer would have to drop.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors use this shared projection to preserve the
-/// host's terminal-outcome semantics.
-pub fn turn_outcome_from_tool_control(
-    tool_name: &str,
-    control: &ToolControl,
-) -> Option<TurnOutcome> {
-    match control {
-        ToolControl::SwitchAgentFrame {
-            frame_key,
-            initial_nodes,
-            task: Some(task),
-        } if !task.trim().is_empty() => Some(TurnOutcome::AgentFrameSwitch {
-            frame_key: frame_key.clone(),
-            task: task.clone(),
-            initial_nodes: initial_nodes.clone(),
-        }),
-        ToolControl::Finish { value } => Some(TurnOutcome::Finished(TurnFinish::ToolValue {
-            tool_name: tool_name.to_string(),
-            value: tool_value_for_projection(value),
-        })),
-        ToolControl::Fail { failure } => Some(TurnOutcome::Stopped(TurnStop::ToolError {
-            tool_name: tool_name.to_string(),
-            value: tool_failure_for_projection(failure),
-        })),
-        ToolControl::SwitchAgentFrame { .. } => None,
-    }
-}
-
-fn tool_value_for_projection(value: &ToolValue) -> serde_json::Value {
-    ToolCallOutput::success_tool_value(value.clone()).value_for_projection()
-}
-
-fn tool_failure_for_projection(failure: &ToolFailure) -> serde_json::Value {
-    let mut projected = failure.to_json_value();
-    if let Some(raw) = failure.raw.as_ref() {
-        projected["raw"] = tool_value_for_projection(raw);
-    }
-    projected
-}
-pub use protocol_build::ProtocolBuildInput;
 pub use tool_registry::{ToolRegistry, ToolState};
 pub use tool_result::{
     CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,
@@ -684,98 +629,11 @@ pub use triggers::{
 };
 
 pub(crate) mod facade_ops {}
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-/// Durable protocol-driver state owned by protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors persist this envelope while the facade owns
-/// orchestration and lifecycle policy.
-pub struct ProtocolDriverState {
-    pub plugin_id: String,
-    pub payload: serde_json::Value,
-}
-
-impl ProtocolDriverState {
-    /// Wraps one plugin's durable driver payload for protocol-engine implementors persisting
-    /// turn-machine state across suspension.
-    pub fn new(plugin_id: impl Into<String>, payload: serde_json::Value) -> Self {
-        Self {
-            plugin_id: plugin_id.into(),
-            payload,
-        }
-    }
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct HostTurnProtocol;
-
-impl lash_sansio::TurnProtocol for HostTurnProtocol {
-    type Event = crate::session_model::ProtocolEvent;
-    type Termination = ProtocolTurnOptions;
-    type DriverState = ProtocolDriverState;
-}
-
-/// Host-specialized effect vocabulary for protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors drive these effects; applications use the facade.
-pub type Effect = lash_sansio::Effect<HostTurnProtocol>;
-/// Host-specialized driver action for protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors return these actions; applications use the facade.
-pub type DriverAction = lash_sansio::DriverAction<HostTurnProtocol>;
-/// Borrowed host driver context for protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors inspect this view while advancing a turn.
-pub type DriverContextView<'a> = lash_sansio::DriverContextView<'a, HostTurnProtocol>;
-/// Host driver configuration consumed by protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors configure their driver through this type.
-pub type TurnDriverConfig = lash_sansio::TurnDriverConfig<HostTurnProtocol>;
-/// Host driver preamble produced by protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors use this while preparing a turn.
-pub type TurnDriverPreamble = lash_sansio::TurnDriverPreamble<HostTurnProtocol>;
-/// Host projector context for protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors use this context to project protocol state.
-pub type ProjectorContext<'a> = lash_sansio::ProjectorContext<'a, HostTurnProtocol>;
-/// Prepared host turn machine handed to protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors complete preparation before driving the machine.
-pub type PreparedTurnMachine = lash_sansio::PreparedTurnMachine<HostTurnProtocol>;
-/// Host-specialized input for Sans-I/O protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors accept this typed boundary input.
-pub type SansIoTurnInput = lash_sansio::SansIoTurnInput<HostTurnProtocol>;
-/// Host-specialized state machine for protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors drive this machine; applications use the facade.
-pub type TurnMachine = lash_sansio::TurnMachine<HostTurnProtocol>;
-/// Host turn-machine configuration for protocol-engine implementors.
-///
-/// # Integrator class
-///
-/// Protocol-engine implementors construct this configuration at their boundary.
-pub type TurnMachineConfig = lash_sansio::TurnMachineConfig<HostTurnProtocol>;
+pub use lash_core_execution::{
+    DriverAction, DriverContextView, Effect, HostTurnProtocol, PreparedTurnMachine,
+    ProjectorContext, ProtocolDriverState, SansIoTurnInput, TurnDriverConfig, TurnDriverPreamble,
+    TurnMachine, TurnMachineConfig,
+};
 pub use lash_sansio::{TurnFailureCode, TurnFailureKind};
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
@@ -813,8 +671,7 @@ pub use provider::{
     ReasoningRetentionValidationError, ReasoningSelection, SamplingCapability, StreamTermination,
 };
 pub(crate) use provider::{
-    EmptyProviderResolver, ProviderBinding, ProviderCompletion, ProviderCompletionError,
-    ProviderResolutionError, RuntimeProviderResolver,
+    ProviderBinding, ProviderCompletion, ProviderCompletionError, RuntimeProviderResolver,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ConformanceProcessRegistry;
@@ -824,7 +681,6 @@ pub use runtime::ProcessRegistryTestSupport;
 pub use runtime::TestLocalProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::TestProcessRegistryWriteExt;
-pub(crate) use runtime::default_queued_drain_policy;
 pub use runtime::drive_with_event_pump;
 
 // This block includes the effect / process-control types consumed by external
@@ -927,7 +783,6 @@ pub(crate) use runtime::{
     publish_process_execution_env, require_event_replay, settle_started_process_engine_artifacts,
     settle_started_process_execution_env,
 };
-pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 pub(crate) use session_model::plugin_runtime_protocol_event;
 
 pub(crate) use session::RuntimeExecutionProcessEventContext;
@@ -993,6 +848,14 @@ mod attachments_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocol_driver_state_matches_host_protocol_state() {
+        let state: <HostTurnProtocol as lash_sansio::TurnProtocol>::DriverState =
+            ProtocolDriverState::new("state-owner", serde_json::json!({"version": 1}));
+        assert_eq!(state.plugin_id, "state-owner");
+        assert_eq!(state.payload, serde_json::json!({"version": 1}));
+    }
 
     #[test]
     fn invalid_agent_frame_seed_is_rejected_at_the_serde_boundary() {
@@ -1117,9 +980,9 @@ mod tests {
         let removed_host = ["Runtime", "Session", "Host"].concat();
         let sources = [
             include_str!("runtime/session_manager/mod.rs"),
-            include_str!("plugin/runtime_host.rs"),
-            include_str!("tool_dispatch/context.rs"),
-            include_str!("tool_provider.rs"),
+            lash_core_execution::core_internal::PLUGIN_RUNTIME_HOST_SOURCE,
+            lash_core_execution::core_internal::TOOL_DISPATCH_CONTEXT_SOURCE,
+            lash_core_execution::core_internal::TOOL_PROVIDER_SOURCE,
         ];
 
         for source in sources {

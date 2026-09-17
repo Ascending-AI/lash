@@ -1,0 +1,237 @@
+use crate::SessionId;
+use std::sync::{Arc, Mutex};
+
+use lash_sansio::sync::MutexExt;
+use tokio::sync::mpsc;
+
+use crate::plugin::{
+    PluginSession, SessionGraphService, SessionLifecycleService, SessionStateService,
+};
+use crate::{
+    PreparedToolCall, SessionStreamEvent, ToolCallRecord, ToolCatalog, ToolFailure,
+    ToolFailureClass, ToolOutcome, ToolProvider,
+};
+
+#[derive(Clone, Default)]
+pub struct CheckpointMessageBuffer {
+    queue: Arc<Mutex<Vec<crate::PluginMessage>>>,
+}
+
+impl CheckpointMessageBuffer {
+    pub(crate) fn enqueue(&self, messages: Vec<crate::PluginMessage>) {
+        let mut queue = self.queue.lock_recover();
+        queue.extend(messages);
+    }
+
+    pub fn drain(&self) -> Vec<crate::PluginMessage> {
+        let mut queue = self.queue.lock_recover();
+        queue.drain(..).collect()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ToolTriggerEffectOutcome {
+    pub source_type: String,
+    pub source_key: String,
+    pub occurrence_id: String,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+    pub idempotency_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<serde_json::Value>,
+    pub deliveries: Vec<crate::TriggerDeliveryEmitReceipt>,
+}
+
+#[derive(Clone, Default)]
+pub struct ToolTriggerOutcomeBuffer {
+    queue: Arc<Mutex<Vec<ToolTriggerEffectOutcome>>>,
+}
+
+impl ToolTriggerOutcomeBuffer {
+    pub(crate) fn enqueue(&self, outcome: ToolTriggerEffectOutcome) {
+        let mut queue = self.queue.lock_recover();
+        queue.push(outcome);
+    }
+
+    pub(crate) fn drain(&self) -> Vec<ToolTriggerEffectOutcome> {
+        let mut queue = self.queue.lock_recover();
+        queue.drain(..).collect()
+    }
+}
+
+#[derive(Clone)]
+pub struct ToolDispatchContext<'run> {
+    pub plugins: Arc<PluginSession>,
+    pub tools: Arc<dyn ToolProvider>,
+    pub tool_registry: Option<Arc<crate::ToolRegistry>>,
+    pub tool_catalog: Arc<ToolCatalog>,
+    pub sessions: Arc<dyn SessionStateService>,
+    pub session_lifecycle: Arc<dyn SessionLifecycleService>,
+    pub session_graph: Arc<dyn SessionGraphService>,
+    pub processes: Arc<dyn crate::ProcessService>,
+    pub trigger_router: Option<crate::TriggerRouter>,
+    /// Durable home for the named process-definition registry (FIG-2995).
+    /// Unset only in fixtures that exercise no registration intent.
+    pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
+    /// The engines a definition registration resolves against.
+    pub process_engines: crate::ProcessEngineRegistry,
+    pub effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+    pub direct_completions: crate::DirectCompletionClient<'run>,
+    pub parent_invocation: Option<crate::RuntimeInvocation>,
+    pub execution_env_spec: crate::ProcessExecutionEnvSpec,
+    pub session_id: SessionId,
+    pub agent_frame_id: crate::FrameNodeId,
+    pub event_tx: mpsc::Sender<SessionStreamEvent>,
+    pub checkpoint_messages: CheckpointMessageBuffer,
+    pub trigger_outcomes: ToolTriggerOutcomeBuffer,
+    pub attachment_store: Arc<crate::SessionAttachmentStore>,
+    pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
+    pub turn_context: crate::TurnContext,
+    pub clock: Arc<dyn crate::Clock>,
+}
+
+impl ToolDispatchContext<'_> {
+    pub fn is_orchestrating_tool(&self, tool_id: &crate::ToolId) -> bool {
+        self.tool_registry
+            .as_deref()
+            .is_some_and(|registry| registry.is_orchestrating_tool(tool_id))
+    }
+
+    pub(crate) fn attempt_may_defer(
+        &self,
+        tool_id: &crate::ToolId,
+        grant: Option<&crate::ToolExecutionGrant>,
+    ) -> bool {
+        // A registry's pinned catalog deliberately omits out-of-catalog grant
+        // routes. Only the live source named by the grant can declare deferral;
+        // an unresolved route must not borrow the answer from a same-id catalog
+        // tool. Direct non-registry providers retain their ordinary lookup.
+        if let Some(grant) = grant
+            && let Some(registry) = self.tool_registry.as_deref()
+        {
+            return registry.attempt_may_defer_for_grant(tool_id, grant.source_id.as_deref());
+        }
+        self.tools.attempt_may_defer(tool_id)
+    }
+
+    /// Attribution available without a causal parent comes only from the
+    /// admitted execution scope. `CurrentSession` also hosts process and
+    /// runtime-operation work, so its descriptive session id is not provenance
+    /// for those sessionless scopes.
+    pub(crate) fn parentless_attribution(&self) -> crate::RuntimeAttribution {
+        self.effect_controller
+            .scoped()
+            .execution_scope()
+            .session_id()
+            .map(crate::RuntimeAttribution::for_session)
+            .unwrap_or_else(crate::RuntimeAttribution::none)
+    }
+}
+
+impl<'run> ToolDispatchContext<'run> {
+    pub fn process_scope(&self) -> crate::ProcessOpScope<'_> {
+        crate::ProcessOpScope::new(self.effect_controller.scoped())
+            .with_parent_invocation(self.parent_invocation.clone())
+            .with_agent_frame_id(Some(self.agent_frame_id.clone()))
+    }
+
+    pub(crate) fn to_static(&self) -> Option<ToolDispatchContext<'static>> {
+        Some(ToolDispatchContext {
+            plugins: Arc::clone(&self.plugins),
+            tools: Arc::clone(&self.tools),
+            tool_registry: self.tool_registry.clone(),
+            tool_catalog: Arc::clone(&self.tool_catalog),
+            sessions: Arc::clone(&self.sessions),
+            session_lifecycle: Arc::clone(&self.session_lifecycle),
+            session_graph: Arc::clone(&self.session_graph),
+            processes: Arc::clone(&self.processes),
+            trigger_router: self.trigger_router.clone(),
+            process_definitions: self.process_definitions.clone(),
+            process_engines: self.process_engines.clone(),
+            effect_controller: self.effect_controller.to_static()?,
+            direct_completions: self.direct_completions.to_static()?,
+            parent_invocation: self.parent_invocation.clone(),
+            execution_env_spec: self.execution_env_spec.clone(),
+            session_id: self.session_id.clone(),
+            agent_frame_id: self.agent_frame_id.clone(),
+            event_tx: self.event_tx.clone(),
+            checkpoint_messages: self.checkpoint_messages.clone(),
+            trigger_outcomes: self.trigger_outcomes.clone(),
+            attachment_store: Arc::clone(&self.attachment_store),
+            attachment_source_policy: Arc::clone(&self.attachment_source_policy),
+            turn_context: self.turn_context.clone(),
+            clock: Arc::clone(&self.clock),
+        })
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ToolDispatchOutcome {
+    pub record: ToolCallRecord,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<lash_trace::TraceRetryAttempt>,
+    #[serde(default, skip_serializing_if = "crate::ToolIntents::is_empty")]
+    pub intents: crate::ToolIntents,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PendingToolDispatchOutcome {
+    pub tool_name: String,
+    pub args: serde_json::Value,
+    pub key: crate::AwaitEventKey,
+    pub pending: crate::PendingCompletion,
+    pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<lash_trace::TraceRetryAttempt>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ToolCallLaunch {
+    Done(Box<ToolDispatchOutcome>),
+    Pending(Box<PendingToolDispatchOutcome>),
+    ControllerAborted(crate::RuntimeEffectControllerError),
+}
+
+pub enum ToolPreparationOutcome {
+    Prepared(Box<PreparedToolCall>),
+    Completed(Box<ToolDispatchOutcome>),
+}
+
+pub(super) fn completed_preparation(outcome: ToolDispatchOutcome) -> ToolPreparationOutcome {
+    ToolPreparationOutcome::Completed(Box::new(outcome))
+}
+pub(super) fn outcome(
+    tool_name: String,
+    args: serde_json::Value,
+    result: super::retry::NormalizedToolOutput,
+    duration_ms: u64,
+) -> ToolDispatchOutcome {
+    let record = ToolCallRecord {
+        call_id: None,
+        tool: tool_name,
+        args,
+        output: result.into_output(),
+        duration_ms,
+    };
+    ToolDispatchOutcome {
+        record,
+        attempts: Vec::new(),
+        intents: crate::ToolIntents::default(),
+        intent_outcomes: Vec::new(),
+    }
+}
+
+pub(super) fn launch_done(outcome: ToolDispatchOutcome) -> ToolCallLaunch {
+    ToolCallLaunch::Done(Box::new(outcome))
+}
+
+pub(super) fn runtime_failure(
+    class: ToolFailureClass,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> ToolOutcome {
+    ToolOutcome::failure(ToolFailure::runtime(class, code, message))
+}

@@ -1299,7 +1299,9 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
         let watched =
             crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(Vec::new())),
+            Arc::new(PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
             runtime_host,
             Arc::new(SegmentBoundarySessionStoreFactory),
             crate::WorkerProcessWork::SelfNative(watched),
@@ -1499,7 +1501,9 @@ async fn snapshot_recovery_fixture(
         let watched =
             crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(Vec::new())),
+            Arc::new(PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
             runtime_host,
             Arc::new(TestSessionStoreFactory),
             crate::WorkerProcessWork::SelfNative(watched),

@@ -205,7 +205,9 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
     let worker = DurableProcessWorker::new({
         let watched = crate::watch_process_registry(Arc::new(TestLocalProcessRegistry::default()));
         DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(Vec::new())),
+            Arc::new(PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
             runtime_host,
             factory,
             crate::WorkerProcessWork::SelfNative(watched),
@@ -296,7 +298,9 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
         let watched =
             crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(Vec::new())),
+            Arc::new(PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
             runtime_host,
             factory.clone() as Arc<dyn SessionStoreFactory>,
             crate::WorkerProcessWork::SelfNative(watched),
@@ -414,7 +418,9 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
         let watched =
             crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(Vec::new())),
+            Arc::new(PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
             runtime_host,
             factory.clone() as Arc<dyn SessionStoreFactory>,
             crate::WorkerProcessWork::SelfNative(watched),

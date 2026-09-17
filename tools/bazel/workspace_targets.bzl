@@ -4,6 +4,8 @@ WORKSPACE_COMPILE_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:lash-core-execution",
+    "//crates/lash-core-execution:lash-core-execution__unit_test",
     "//crates/lash-core-ids:lash-core-ids",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm",
@@ -192,6 +194,8 @@ WORKSPACE_CLIPPY_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:lash-core-execution",
+    "//crates/lash-core-execution:lash-core-execution__unit_test",
     "//crates/lash-core-ids:lash-core-ids",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm",
@@ -377,6 +381,7 @@ WORKSPACE_CLIPPY_TARGETS = [
 WORKSPACE_RUST_SOURCE_TARGETS = [
     "//crates/lash-conformance:rust_sources",
     "//crates/lash-core-effect:rust_sources",
+    "//crates/lash-core-execution:rust_sources",
     "//crates/lash-core-ids:rust_sources",
     "//crates/lash-core-llm:rust_sources",
     "//crates/lash-core-memory:rust_sources",
@@ -424,6 +429,7 @@ WORKSPACE_RUST_SOURCE_TARGETS = [
 WORKSPACE_BAZEL_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:lash-core-execution__unit_test",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-memory:lash-core-memory__unit_test",
@@ -526,6 +532,7 @@ WORKSPACE_BAZEL_TEST_TARGETS = [
 WORKSPACE_DEV_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:lash-core-execution__unit_test",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-memory:lash-core-memory__unit_test",
@@ -649,6 +656,7 @@ WORKSPACE_CARGO_TEST_TARGETS = [
 WORKSPACE_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect__unit_test",
+    "//crates/lash-core-execution:lash-core-execution__unit_test",
     "//crates/lash-core-ids:lash-core-ids__unit_test",
     "//crates/lash-core-llm:lash-core-llm__unit_test",
     "//crates/lash-core-memory:lash-core-memory__unit_test",
