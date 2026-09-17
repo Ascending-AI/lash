@@ -23,74 +23,9 @@ pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverit
 pub use lash_core::{TurnFailureCode, TurnFailureKind};
 
 pub(crate) mod queued_drain;
-mod selected_drain;
 
-use lash_core::QueuedWorkClaimRefusal;
-pub(crate) use queued_drain::{EmptyQueuedDrainReason, QueuedTurnDrain};
-use selected_drain::{queued_turn_drain, selected_drain_outcome, selected_drain_refusal_cause};
-
-/// How one distinct requested batch ID satisfied a successful selected drain.
-///
-/// Missing rows are idempotent success. A present row that cannot join the
-/// exact composition causes a pre-execution refusal, not a satisfaction value.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SelectedQueuedWorkBatchSatisfaction {
-    /// This invocation claimed and executed the durable row.
-    ClaimedNow {
-        /// Requested durable batch ID.
-        batch_id: lash_core::BatchId,
-    },
-    /// No durable row remained, so the idempotent request was already done.
-    AlreadySatisfied {
-        /// Requested durable batch ID.
-        batch_id: lash_core::BatchId,
-    },
-}
-
-/// Successful result of an exact, host-selected queued-work drain.
-///
-/// Every distinct requested ID was either executed now or had no remaining
-/// durable row. A present ID that cannot join the exact claim returns
-/// [`EmbedError::SelectedQueuedWorkDrainRefused`]
-/// before selected execution.
-#[derive(Clone, Debug)]
-pub struct SelectedQueuedWorkDrainOutcome<T> {
-    /// Executed turn, absent only for a fully satisfied drain with no selected turn.
-    pub turn: Option<T>,
-    /// One entry per distinct requested ID, ordered by first occurrence.
-    pub satisfied: Vec<SelectedQueuedWorkBatchSatisfaction>,
-}
-
-impl<T> SelectedQueuedWorkDrainOutcome<T> {
-    /// Reports whether this successful drain settled every requested ID without
-    /// executing a selected turn.
-    ///
-    /// Refusals are errors, so `true` means every distinct ID was satisfied
-    /// without a selected turn (or the selection was empty), never unclaimable.
-    pub fn settled_without_selected_turn(&self) -> bool {
-        self.turn.is_none()
-    }
-
-    /// Reports whether this successful drain executed a newly claimed turn.
-    ///
-    /// `false` has the same fully-satisfied meaning as
-    /// [`Self::settled_without_selected_turn`].
-    pub fn executed_selected_turn(&self) -> bool {
-        self.turn.is_some()
-    }
-
-    /// Returns the turn or panics with `message` when the successful drain was
-    /// fully satisfied without one.
-    #[track_caller]
-    #[expect(
-        clippy::expect_used,
-        reason = "this is the panicking accessor itself: callers opt into the panic by \
-                  choosing `expect` over `turn()`, exactly as with `Option::expect`"
-    )]
-    pub fn expect(self, message: &str) -> T {
-        self.turn.expect(message)
-    }
-}
+use lash_core::facade_support::SelectedQueuedWorkDrainOutcome;
+pub(crate) use queued_drain::QueuedTurnDrain;
 
 /// The two internal event sinks threaded through the turn-execution helpers.
 ///
@@ -1154,7 +1089,7 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
     .with_local_cancel_origin_hint(cancel_origin_hint);
     let drain = writer.stream_next_queued_work(opts).await?;
     runtime.publish_from(&writer);
-    Ok(queued_turn_drain(drain))
+    Ok(drain)
 }
 
 pub(crate) async fn stream_selected_queued_prepared_turn(
@@ -1207,9 +1142,7 @@ pub(crate) async fn stream_selected_queued_prepared_assembled(
             return Err(error.into());
         }
         Err(CoreSelectedQueuedWorkDrainError::Refused { cause }) => {
-            return Err(EmbedError::SelectedQueuedWorkDrainRefused {
-                cause: selected_drain_refusal_cause(cause),
-            });
+            return Err(EmbedError::SelectedQueuedWorkDrainRefused { cause });
         }
         // Future drain errors still fail the turn without claiming a known refusal cause.
         Err(error) => {
@@ -1221,7 +1154,7 @@ pub(crate) async fn stream_selected_queued_prepared_assembled(
         }
     };
     runtime.publish_from(&writer);
-    Ok(selected_drain_outcome(outcome))
+    Ok(outcome)
 }
 
 fn turn_options<'a>(

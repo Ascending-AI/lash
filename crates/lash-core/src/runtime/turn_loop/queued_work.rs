@@ -49,6 +49,17 @@ pub enum EmptyQueuedDrainReason {
     ClaimRefused(crate::QueuedWorkClaimRefusal),
 }
 
+impl EmptyQueuedDrainReason {
+    /// The stable snake_case spelling, for host logs and metrics labels.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExecutionLaneBusy => "execution_lane_busy",
+            Self::NoDurableQueue => "no_durable_queue",
+            Self::ClaimRefused(refusal) => refusal.as_str(),
+        }
+    }
+}
+
 /// One automatic queued-turn drain: the turn it ran, or why it ran none.
 #[derive(Clone, Debug)]
 pub enum QueuedTurnDrain<T> {
@@ -60,14 +71,29 @@ pub enum QueuedTurnDrain<T> {
 
 impl<T> QueuedTurnDrain<T> {
     /// The turn this drain ran, discarding the empty reason.
-    ///
-    /// Only the crate's own suites need this: host code reads the drain itself,
-    /// so a scenario that only asks whether a turn ran lives behind `testing`.
-    #[cfg(any(test, feature = "testing"))]
     pub fn ran(self) -> Option<T> {
         match self {
             Self::Ran(turn) => Some(turn),
             Self::Empty(_) => None,
+        }
+    }
+
+    /// Transforms the turn, preserving the empty reason.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> QueuedTurnDrain<U> {
+        match self {
+            Self::Ran(turn) => QueuedTurnDrain::Ran(f(turn)),
+            Self::Empty(reason) => QueuedTurnDrain::Empty(reason),
+        }
+    }
+
+    /// Returns the turn this drain ran, or panics with `message`.
+    #[track_caller]
+    pub fn expect(self, message: &str) -> T {
+        match self {
+            Self::Ran(turn) => turn,
+            Self::Empty(reason) => {
+                panic!("{message}: queued drain ran no turn ({})", reason.as_str())
+            }
         }
     }
 }
