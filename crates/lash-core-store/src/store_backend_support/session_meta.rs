@@ -388,6 +388,15 @@ impl SessionMetaCodec {
                 if stored.cause.decode(self)?.is_some() {
                     return Err(self.corrupt("root relation carries a causal payload"));
                 }
+                if stored.parent_session_id.is_some()
+                    || stored.source_session_id.is_some()
+                    || stored.source_node_id.is_some()
+                    || stored.observer_inheritance_kind.is_some()
+                {
+                    return Err(
+                        self.corrupt("root relation carries an out-of-family payload column")
+                    );
+                }
                 SessionRelation::Root
             }
             "child" => {
@@ -395,6 +404,14 @@ impl SessionMetaCodec {
                     &stored.fork_inheritance_processes,
                     "fork inheritance processes",
                 )?;
+                if stored.source_session_id.is_some()
+                    || stored.source_node_id.is_some()
+                    || stored.observer_inheritance_kind.is_some()
+                {
+                    return Err(
+                        self.corrupt("child relation carries an out-of-family payload column")
+                    );
+                }
                 SessionRelation::Child {
                     parent_session_id: self
                         .required(stored.parent_session_id, "parent_session_id")?,
@@ -404,6 +421,11 @@ impl SessionMetaCodec {
             "fork" => {
                 if stored.cause.decode(self)?.is_some() {
                     return Err(self.corrupt("fork relation carries a causal payload"));
+                }
+                if stored.parent_session_id.is_some() {
+                    return Err(
+                        self.corrupt("fork relation carries an out-of-family payload column")
+                    );
                 }
                 let observer_inheritance = match stored.observer_inheritance_kind.as_deref() {
                     Some("all") => ObserverInheritance::All,
@@ -708,6 +730,59 @@ mod identity_tests {
                 .to_string()
                 .contains("fork relation carries a causal payload")
         );
+    }
+
+    #[test]
+    fn relations_refuse_out_of_family_payload_columns() {
+        let codec = SessionMetaCodec::new("test integer");
+        let stored = |relation_kind: &str| StoredRelation {
+            session_id: SessionId::from("session"),
+            relation_kind: relation_kind.to_string(),
+            parent_session_id: None,
+            cause: CausalColumns::default(),
+            source_session_id: None,
+            source_node_id: None,
+            observer_inheritance_kind: None,
+            pending_observer_intents: Vec::new(),
+            fork_inheritance_processes: Vec::new(),
+        };
+
+        let mut root = stored("root");
+        root.parent_session_id = Some(SessionId::from("stray-parent"));
+        let error = codec
+            .decode(root)
+            .expect_err("a stray parent on a root relation must fail closed");
+        assert!(error.to_string().contains("out-of-family payload"));
+
+        let mut child = stored("child");
+        child.parent_session_id = Some(SessionId::from("parent"));
+        child.source_session_id = Some(SessionId::from("stray-source"));
+        let error = codec
+            .decode(child)
+            .expect_err("a stray fork-source on a child relation must fail closed");
+        assert!(error.to_string().contains("out-of-family payload"));
+
+        let mut fork = stored("fork");
+        fork.source_session_id = Some(SessionId::from("source"));
+        fork.source_node_id = Some("source-node".to_string());
+        fork.observer_inheritance_kind = Some("none".to_string());
+        fork.parent_session_id = Some(SessionId::from("stray-parent"));
+        let error = codec
+            .decode(fork)
+            .expect_err("a stray parent on a fork relation must fail closed");
+        assert!(error.to_string().contains("out-of-family payload"));
+
+        codec
+            .decode(stored("root"))
+            .expect("a clean root relation decodes");
+        let mut child = stored("child");
+        child.parent_session_id = Some(SessionId::from("parent"));
+        codec.decode(child).expect("a clean child relation decodes");
+        let mut fork = stored("fork");
+        fork.source_session_id = Some(SessionId::from("source"));
+        fork.source_node_id = Some("source-node".to_string());
+        fork.observer_inheritance_kind = Some("none".to_string());
+        codec.decode(fork).expect("a clean fork relation decodes");
     }
 
     #[test]
