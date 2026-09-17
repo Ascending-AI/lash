@@ -139,10 +139,11 @@ pub(crate) struct RuntimePerfScenarioMetadata {
     pub(crate) scenario_harness: ScenarioHarnessKind,
     pub(crate) harness_rationale: &'static str,
     pub(crate) correctness_coverage_ids: &'static [&'static str],
+    pub(crate) default: bool,
 }
 
 macro_rules! runtime_perf_metadata {
-    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal) => {
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal $(, $default:literal)?) => {
         runtime_perf_metadata!(
             $scenario,
             $name,
@@ -152,9 +153,10 @@ macro_rules! runtime_perf_metadata {
             Ephemeral,
             StableDurableTurn,
             []
+            $(, $default)?
         )
     };
-    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, [$($coverage_id:literal),* $(,)?]) => {
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, [$($coverage_id:literal),* $(,)?] $(, $default:literal)?) => {
         runtime_perf_metadata!(
             $scenario,
             $name,
@@ -164,9 +166,10 @@ macro_rules! runtime_perf_metadata {
             Ephemeral,
             StableDurableTurn,
             [$($coverage_id),*]
+            $(, $default)?
         )
     };
-    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident) => {
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident $(, $default:literal)?) => {
         runtime_perf_metadata!(
             $scenario,
             $name,
@@ -176,9 +179,10 @@ macro_rules! runtime_perf_metadata {
             $durability,
             StableDurableTurn,
             []
+            $(, $default)?
         )
     };
-    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident) => {
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident $(, $default:literal)?) => {
         runtime_perf_metadata!(
             $scenario,
             $name,
@@ -188,9 +192,10 @@ macro_rules! runtime_perf_metadata {
             $durability,
             $phase_contract,
             []
+            $(, $default)?
         )
     };
-    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident, [$($coverage_id:literal),* $(,)?]) => {
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident, [$($coverage_id:literal),* $(,)?] $(, $default:literal)?) => {
         RuntimePerfScenarioMetadata {
             scenario: RuntimePerfScenario::$scenario,
             name: $name,
@@ -200,7 +205,14 @@ macro_rules! runtime_perf_metadata {
             scenario_harness: ScenarioHarnessKind::$harness,
             harness_rationale: $rationale,
             correctness_coverage_ids: &[$($coverage_id),*],
+            default: runtime_perf_metadata!(@default_flag $($default)?),
         }
+    };
+    (@default_flag) => {
+        true
+    };
+    (@default_flag $default:literal) => {
+        $default
     };
 }
 
@@ -343,14 +355,16 @@ impl RuntimePerfScenario {
             "rlm_tool_catalog_cold",
             Rlm,
             RlmProtocolScenario,
-            "Measures cold tool-catalog reconstruction inside the measured RLM turn."
+            "Measures cold tool-catalog reconstruction inside the measured RLM turn.",
+            false
         ),
         runtime_perf_metadata!(
             RlmToolCatalogWarm,
             "rlm_tool_catalog_warm",
             Rlm,
             RlmProtocolScenario,
-            "Measures the warm RLM turn after the tool catalog has been reconstructed."
+            "Measures the warm RLM turn after the tool catalog has been reconstructed.",
+            false
         ),
         runtime_perf_metadata!(
             RlmObliqueStackMix,
@@ -522,7 +536,8 @@ impl RuntimePerfScenario {
             "store_hardening_hot_paths",
             Standard,
             RuntimeScenario,
-            "Measures hardening-era store operations below protocol and facade ownership on the in-memory floor and real SQLite/PostgreSQL backends."
+            "Measures hardening-era store operations below protocol and facade ownership on the in-memory floor and real SQLite/PostgreSQL backends.",
+            false
         ),
         runtime_perf_metadata!(
             DurableStandardToolTurnSqlite,
@@ -530,7 +545,8 @@ impl RuntimePerfScenario {
             Standard,
             RuntimeScenario,
             "Measures a complete Standard tool turn through the runtime against the decorated SQLite persistence boundary.",
-            Durable
+            Durable,
+            false
         ),
         runtime_perf_metadata!(
             DurableStandardToolTurnPostgres,
@@ -538,7 +554,8 @@ impl RuntimePerfScenario {
             Standard,
             RuntimeScenario,
             "Measures a complete Standard tool turn through the runtime against the decorated PostgreSQL persistence boundary.",
-            Durable
+            Durable,
+            false
         ),
         runtime_perf_metadata!(
             DurableRlmCheckpointTurnSqlite,
@@ -546,7 +563,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Measures a complete RLM checkpoint-producing turn through the runtime against the decorated SQLite persistence boundary.",
-            Durable
+            Durable,
+            false
         ),
         runtime_perf_metadata!(
             DurableRlmCheckpointTurnPostgres,
@@ -554,7 +572,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Measures a complete RLM checkpoint-producing turn through the runtime against the decorated PostgreSQL persistence boundary.",
-            Durable
+            Durable,
+            false
         ),
         runtime_perf_metadata!(
             DurableAgentChildTurnSqlite,
@@ -562,7 +581,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Measures a complete parent and child agent turn through the runtime against the decorated SQLite persistence boundary.",
-            Durable
+            Durable,
+            false
         ),
         runtime_perf_metadata!(
             DurableAgentChildTurnPostgres,
@@ -570,7 +590,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Measures a complete parent and child agent turn through the runtime against the decorated PostgreSQL persistence boundary.",
-            Durable
+            Durable,
+            false
         ),
         runtime_perf_metadata!(
             DurableCheckpointCurveSqlite,
@@ -579,7 +600,8 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against SQLite. The fixed transcript/message/graph/component center point is CLI-configurable.",
             Durable,
-            CheckpointCurve
+            CheckpointCurve,
+            false
         ),
         runtime_perf_metadata!(
             DurableCheckpointCurvePostgres,
@@ -588,7 +610,8 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against PostgreSQL. The fixed transcript/message/graph/component center point is CLI-configurable.",
             Durable,
-            CheckpointCurve
+            CheckpointCurve,
+            false
         ),
         runtime_perf_metadata!(
             DurableQueuedWorkContentionSqlite,
@@ -597,7 +620,8 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared SQLite backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
             Durable,
-            QueuedWorkContention
+            QueuedWorkContention,
+            false
         ),
         runtime_perf_metadata!(
             DurableQueuedWorkContentionPostgres,
@@ -606,35 +630,40 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared PostgreSQL backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
             Durable,
-            QueuedWorkContention
+            QueuedWorkContention,
+            false
         ),
         runtime_perf_metadata!(
             WriterContention2Workers,
             "writer_contention_2_workers",
             Standard,
             RuntimeScenario,
-            "Measures signed same-facade contended-minus-baseline latency against a two-worker many-session control; second-turn history depth is a known confound."
+            "Measures signed same-facade contended-minus-baseline latency against a two-worker many-session control; second-turn history depth is a known confound.",
+            false
         ),
         runtime_perf_metadata!(
             WriterContention8Workers,
             "writer_contention_8_workers",
             Standard,
             RuntimeScenario,
-            "Measures signed same-facade contended-minus-baseline latency against an eight-worker many-session control; second-turn history depth is a known confound."
+            "Measures signed same-facade contended-minus-baseline latency against an eight-worker many-session control; second-turn history depth is a known confound.",
+            false
         ),
         runtime_perf_metadata!(
             AsyncProcessSettlement2Children,
             "async_process_settlement_2_children",
             Rlm,
             AgentScenario,
-            "Measures two gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return."
+            "Measures two gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return.",
+            false
         ),
         runtime_perf_metadata!(
             AsyncProcessSettlement8Children,
             "async_process_settlement_8_children",
             Rlm,
             AgentScenario,
-            "Measures eight gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return."
+            "Measures eight gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return.",
+            false
         ),
         runtime_perf_metadata!(
             HighTrafficLoadSqlite,
@@ -643,7 +672,8 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared SQLite persistence.",
             Durable,
-            HighTraffic
+            HighTraffic,
+            false
         ),
         runtime_perf_metadata!(
             HighTrafficLoadPostgres,
@@ -652,7 +682,8 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared PostgreSQL persistence.",
             Durable,
-            HighTraffic
+            HighTraffic,
+            false
         ),
         runtime_perf_metadata!(
             HighTrafficKneeSqlite,
@@ -661,7 +692,8 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
             Durable,
-            HighTraffic
+            HighTraffic,
+            false
         ),
         runtime_perf_metadata!(
             HighTrafficKneePostgres,
@@ -670,13 +702,15 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Searches mixed-session saturation steps below protocol and facade ownership against an isolated PostgreSQL database per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
             Durable,
-            HighTraffic
+            HighTraffic,
+            false
         ),
     ];
     pub(crate) const KNOWN: [Self; 59] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
-    pub(crate) const DEFAULTS: [Self; 38] = runtime_perf_default_scenarios();
+    pub(crate) const DEFAULTS: [Self; RUNTIME_PERF_DEFAULT_COUNT] =
+        runtime_perf_default_scenarios();
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
         Self::METADATA
@@ -864,45 +898,49 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 59] {
     ]
 }
 
-const fn runtime_perf_default_scenarios() -> [RuntimePerfScenario; 38] {
-    [
-        RuntimePerfScenario::METADATA[0].scenario,
-        RuntimePerfScenario::METADATA[1].scenario,
-        RuntimePerfScenario::METADATA[2].scenario,
-        RuntimePerfScenario::METADATA[3].scenario,
-        RuntimePerfScenario::METADATA[4].scenario,
-        RuntimePerfScenario::METADATA[5].scenario,
-        RuntimePerfScenario::METADATA[6].scenario,
-        RuntimePerfScenario::METADATA[7].scenario,
-        RuntimePerfScenario::METADATA[8].scenario,
-        RuntimePerfScenario::METADATA[9].scenario,
-        RuntimePerfScenario::METADATA[10].scenario,
-        RuntimePerfScenario::METADATA[11].scenario,
-        RuntimePerfScenario::METADATA[12].scenario,
-        RuntimePerfScenario::METADATA[13].scenario,
-        RuntimePerfScenario::METADATA[14].scenario,
-        RuntimePerfScenario::METADATA[17].scenario,
-        RuntimePerfScenario::METADATA[18].scenario,
-        RuntimePerfScenario::METADATA[19].scenario,
-        RuntimePerfScenario::METADATA[20].scenario,
-        RuntimePerfScenario::METADATA[21].scenario,
-        RuntimePerfScenario::METADATA[22].scenario,
-        RuntimePerfScenario::METADATA[23].scenario,
-        RuntimePerfScenario::METADATA[24].scenario,
-        RuntimePerfScenario::METADATA[25].scenario,
-        RuntimePerfScenario::METADATA[26].scenario,
-        RuntimePerfScenario::METADATA[27].scenario,
-        RuntimePerfScenario::METADATA[28].scenario,
-        RuntimePerfScenario::METADATA[29].scenario,
-        RuntimePerfScenario::METADATA[30].scenario,
-        RuntimePerfScenario::METADATA[31].scenario,
-        RuntimePerfScenario::METADATA[32].scenario,
-        RuntimePerfScenario::METADATA[33].scenario,
-        RuntimePerfScenario::METADATA[34].scenario,
-        RuntimePerfScenario::METADATA[35].scenario,
-        RuntimePerfScenario::METADATA[36].scenario,
-        RuntimePerfScenario::METADATA[37].scenario,
-        RuntimePerfScenario::METADATA[38].scenario,
-        RuntimePerfScenario::METADATA[39].scenario,
-    ]
+const fn runtime_perf_default_count() -> usize {
+    let mut count = 0;
+    let mut index = 0;
+    while index < RuntimePerfScenario::METADATA.len() {
+        if RuntimePerfScenario::METADATA[index].default {
+            count += 1;
+        }
+        index += 1;
+    }
+    count
+}
+
+const RUNTIME_PERF_DEFAULT_COUNT: usize = runtime_perf_default_count();
+
+const fn runtime_perf_default_scenarios() -> [RuntimePerfScenario; RUNTIME_PERF_DEFAULT_COUNT] {
+    let mut defaults = [RuntimePerfScenario::METADATA[0].scenario; RUNTIME_PERF_DEFAULT_COUNT];
+    let mut index = 0;
+    let mut next = 0;
+    while index < RuntimePerfScenario::METADATA.len() {
+        if RuntimePerfScenario::METADATA[index].default {
+            defaults[next] = RuntimePerfScenario::METADATA[index].scenario;
+            next += 1;
+        }
+        index += 1;
+    }
+    assert!(
+        next == RUNTIME_PERF_DEFAULT_COUNT,
+        "runtime perf default scenarios must fill the derived count"
+    );
+    defaults
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_scenarios_are_derived_from_metadata_flags() {
+        let derived: Vec<RuntimePerfScenario> = RuntimePerfScenario::METADATA
+            .iter()
+            .filter(|metadata| metadata.default)
+            .map(|metadata| metadata.scenario)
+            .collect();
+        assert_eq!(RuntimePerfScenario::DEFAULTS.as_slice(), derived.as_slice());
+    }
 }
