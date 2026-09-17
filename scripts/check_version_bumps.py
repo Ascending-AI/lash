@@ -528,6 +528,12 @@ STACKED_VERSION_BASELINES = {
     "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
         "sha256:d236866bcbb30109b344def73cefbd18912955ad79e8426b8a1a070343c431d2"
     ),
+    # Schema generation 99 is the one bump the wholehog schema cluster
+    # reserved on the lowest branch; FIG-2885 lands the session_meta family
+    # CHECKs on an upper branch under this pinned final shape.
+    "crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION": (
+        "sha256:847eda650db5c2496bb98e8fdc86d19847e3d6b9b9ad13805e5fca2234ace549"
+    ),
 }
 
 

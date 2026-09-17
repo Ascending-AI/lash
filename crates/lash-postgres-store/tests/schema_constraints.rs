@@ -192,31 +192,76 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind, caused_by_kind)
-         VALUES ('bad-cause', 'child', 'timer')",
+        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+                                        caused_by_kind)
+         VALUES ('bad-cause', 'child', 'parent', 'timer')",
         "ck_session_meta_caused_by_kind",
     )
     .await;
     sqlx::query(
-        "INSERT INTO lash_session_meta (session_id, relation_kind, caused_by_kind)
-         VALUES ('effect-address-cause', 'child', 'effect_address')",
+        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+                                        caused_by_kind, caused_by_effect_id)
+         VALUES ('effect-address-cause', 'child', 'parent', 'effect_address', '{}')",
     )
     .execute(&mut connection)
     .await
     .expect("current effect-address discriminator is admitted");
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind, caused_by_kind)
-         VALUES ('legacy-effect-cause', 'child', 'effect')",
+        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+                                        caused_by_kind)
+         VALUES ('legacy-effect-cause', 'child', 'parent', 'effect')",
         "ck_session_meta_caused_by_kind",
     )
     .await;
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_session_meta (
-             session_id, relation_kind, observer_inheritance_kind
-         ) VALUES ('bad-inheritance', 'fork', 'selected')",
+             session_id, relation_kind, source_session_id, source_node_id,
+             observer_inheritance_kind
+         ) VALUES ('bad-inheritance', 'fork', 'source', 'source-node', 'selected')",
         "ck_session_meta_observer_inheritance_kind",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_session_meta (session_id, relation_kind)
+         VALUES ('childless-child', 'child')",
+        "ck_session_meta_relation_family",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, caused_by_kind,
+                                        caused_by_session_id, caused_by_turn_id)
+         VALUES ('caused-root', 'root', 'turn', 'cause-session', 'cause-turn')",
+        "ck_session_meta_relation_family",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+                                        caused_by_kind)
+         VALUES ('bare-discriminator', 'child', 'parent', 'turn')",
+        "ck_session_meta_caused_by_family",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+                                        caused_by_kind, caused_by_session_id,
+                                        caused_by_turn_id, caused_by_node_id)
+         VALUES ('crossed-family', 'child', 'parent', 'turn', 'cause-session',
+                 'cause-turn', 'stray-node')",
+        "ck_session_meta_caused_by_family",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+                                        caused_by_session_id)
+         VALUES ('kindless-payload', 'child', 'parent', 'cause-session')",
+        "ck_session_meta_caused_by_family",
     )
     .await;
 
