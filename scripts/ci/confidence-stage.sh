@@ -52,6 +52,12 @@ case "$LASH_CONFIDENCE_STAGE" in
       *) echo 'Unknown full mutation package' >&2; exit 2 ;;
     esac
     selected_packages=("$LASH_CONFIDENCE_PACKAGE")
+    # Each leg is one job inside the 100-minute cap; the mutant space cannot
+    # be swept whole, so the stage judges bounded slices (sized by
+    # MUTATION_PACKAGES_* in scripts/confidence-gate.sh). The workflow's
+    # matrix legs hand their coordinate down as LASH_MUTATION_PACKAGES_SHARD
+    # and the slice index rotates across runs via LASH_MUTATION_RUN_INDEX.
+    LASH_MUTATION_PACKAGES_BOUNDED=1
     run_mutation_smoke
     run_mutation_full
     finalize_mutation_gate
