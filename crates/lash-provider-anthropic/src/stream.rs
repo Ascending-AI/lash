@@ -5,73 +5,91 @@
 
 use crate::support::*;
 
-#[derive(Clone, Debug, Default)]
-pub(crate) struct StreamBlock {
-    pub(crate) kind: BlockKind,
-    /// Accumulated visible text (for text/thinking blocks).
-    pub(crate) text: String,
-    /// `signature_delta` payload preserved for thinking blocks so we can
-    /// replay them intact on the next turn. Empty for other block types.
-    pub(crate) thinking_signature: String,
-    /// Streaming buffer for tool_use input JSON.
-    pub(crate) input_buffer: String,
-    /// tool_use metadata.
-    pub(crate) tool_call_id: String,
-    pub(crate) tool_name: String,
-    /// Initial input payload from `content_block_start` for tool_use.
-    pub(crate) tool_initial_input: Value,
-    /// Flags redacted thinking blocks; signature carries opaque payload.
-    pub(crate) redacted: bool,
+/// One `content_block_*` slot, keyed by the block type announced at
+/// `content_block_start`. Each variant carries only the state its deltas can
+/// legally write; a delta that does not match the slot's kind is a stream
+/// error. `Unknown` keeps a slot for block types we do not model so later
+/// indexes still align.
+#[derive(Clone, Debug)]
+pub(crate) enum StreamBlock {
+    Text {
+        /// Accumulated visible text.
+        text: String,
+    },
+    Thinking {
+        text: String,
+        /// `signature_delta` payload preserved so the block replays intact on
+        /// the next turn.
+        signature: String,
+    },
+    /// `signature` carries the opaque `data` payload announced at block start;
+    /// `text` holds the fixed redacted placeholder.
+    RedactedThinking {
+        text: String,
+        signature: String,
+    },
+    ToolUse {
+        /// Streaming buffer for `input_json_delta` partial JSON.
+        input_buffer: String,
+        call_id: String,
+        name: String,
+        /// Initial `input` payload from `content_block_start`.
+        initial_input: Value,
+    },
+    Unknown,
 }
 
 impl StreamBlock {
     fn tool_call_part(&self) -> Option<LlmOutputPart> {
-        if self.kind != BlockKind::ToolUse || self.tool_name.is_empty() {
+        let Self::ToolUse {
+            input_buffer,
+            call_id,
+            name,
+            initial_input,
+        } = self
+        else {
+            return None;
+        };
+        if name.is_empty() {
             return None;
         }
-        let input_json = if !self.input_buffer.is_empty() {
-            self.input_buffer.clone()
-        } else if self.tool_initial_input.is_object() {
-            serde_json::to_string(&self.tool_initial_input).unwrap_or_else(|_| "{}".to_string())
+        let input_json = if !input_buffer.is_empty() {
+            input_buffer.clone()
+        } else if initial_input.is_object() {
+            serde_json::to_string(initial_input).unwrap_or_else(|_| "{}".to_string())
         } else {
             "{}".to_string()
         };
         Some(LlmOutputPart::ToolCall {
-            call_id: self.tool_call_id.clone(),
-            tool_name: self.tool_name.clone(),
+            call_id: call_id.clone(),
+            tool_name: name.clone(),
             input_json,
             replay: None,
         })
     }
 
     fn reasoning_part(&self) -> Option<LlmOutputPart> {
-        if self.kind != BlockKind::Thinking
-            || (self.text.is_empty() && self.thinking_signature.is_empty())
-        {
+        let (text, signature, redacted) = match self {
+            Self::Thinking { text, signature } => (text, signature, false),
+            Self::RedactedThinking { text, signature } => (text, signature, true),
+            _ => return None,
+        };
+        if text.is_empty() && signature.is_empty() {
             return None;
         }
-        let replay = (!self.thinking_signature.is_empty()).then(|| ProviderReasoningReplay {
+        let replay = (!signature.is_empty()).then(|| ProviderReasoningReplay {
             item_id: None,
             encrypted_content: None,
-            signature: Some(self.thinking_signature.clone()),
-            redacted: self.redacted,
+            signature: Some(signature.clone()),
+            redacted,
             summary: Vec::new(),
             origin: None,
         });
         Some(LlmOutputPart::Reasoning {
-            text: self.text.clone(),
+            text: text.clone(),
             replay,
         })
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) enum BlockKind {
-    #[default]
-    Unknown,
-    Text,
-    Thinking,
-    ToolUse,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -242,7 +260,7 @@ impl AnthropicProvider {
             "content_block_start" => {
                 let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 while state.blocks.len() <= index {
-                    state.blocks.push(StreamBlock::default());
+                    state.blocks.push(StreamBlock::Unknown);
                 }
                 let block_meta = event.get("content_block").cloned().unwrap_or_default();
                 let block_type = block_meta
@@ -252,33 +270,44 @@ impl AnthropicProvider {
                 let slot = &mut state.blocks[index];
                 match block_type {
                     "text" => {
-                        slot.kind = BlockKind::Text;
+                        *slot = StreamBlock::Text {
+                            text: String::new(),
+                        };
                     }
                     "thinking" => {
-                        slot.kind = BlockKind::Thinking;
+                        *slot = StreamBlock::Thinking {
+                            text: String::new(),
+                            signature: String::new(),
+                        };
                     }
                     "redacted_thinking" => {
-                        slot.kind = BlockKind::Thinking;
-                        slot.redacted = true;
-                        if let Some(data) = block_meta.get("data").and_then(|v| v.as_str()) {
-                            slot.thinking_signature = data.to_string();
-                        }
-                        slot.text = "[Reasoning redacted]".to_string();
+                        *slot = StreamBlock::RedactedThinking {
+                            text: "[Reasoning redacted]".to_string(),
+                            signature: block_meta
+                                .get("data")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                        };
                     }
                     "tool_use" => {
-                        slot.kind = BlockKind::ToolUse;
-                        if let Some(id) = block_meta.get("id").and_then(|v| v.as_str()) {
-                            slot.tool_call_id = id.to_string();
-                        }
-                        if let Some(name) = block_meta.get("name").and_then(|v| v.as_str()) {
-                            slot.tool_name = name.to_string();
-                        }
-                        if let Some(input) = block_meta.get("input") {
-                            slot.tool_initial_input = input.clone();
-                        }
+                        *slot = StreamBlock::ToolUse {
+                            input_buffer: String::new(),
+                            call_id: block_meta
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            name: block_meta
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            initial_input: block_meta.get("input").cloned().unwrap_or(Value::Null),
+                        };
                     }
                     _ => {
-                        slot.kind = BlockKind::Unknown;
+                        *slot = StreamBlock::Unknown;
                     }
                 }
             }
@@ -290,20 +319,24 @@ impl AnthropicProvider {
                 let delta = event.get("delta").cloned().unwrap_or_default();
                 let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let slot = &mut state.blocks[index];
-                match delta_type {
-                    "text_delta" => {
+                match (delta_type, slot) {
+                    ("text_delta", StreamBlock::Text { text }) => {
                         let piece = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
                         if !piece.is_empty() {
-                            slot.text.push_str(piece);
+                            text.push_str(piece);
                             if let Some(tx) = stream_events {
                                 tx.send(LlmStreamEvent::Delta(piece.to_string()));
                             }
                         }
                     }
-                    "thinking_delta" => {
+                    (
+                        "thinking_delta",
+                        StreamBlock::Thinking { text, .. }
+                        | StreamBlock::RedactedThinking { text, .. },
+                    ) => {
                         let piece = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
                         if !piece.is_empty() {
-                            slot.text.push_str(piece);
+                            text.push_str(piece);
                             if let Some(tx) = stream_events
                                 && expose_thinking
                             {
@@ -311,23 +344,42 @@ impl AnthropicProvider {
                             }
                         }
                     }
-                    "signature_delta" => {
+                    (
+                        "signature_delta",
+                        StreamBlock::Thinking { signature, .. }
+                        | StreamBlock::RedactedThinking { signature, .. },
+                    ) => {
                         let piece = delta
                             .get("signature")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
                         if !piece.is_empty() {
-                            slot.thinking_signature.push_str(piece);
+                            signature.push_str(piece);
                         }
                     }
-                    "input_json_delta" => {
+                    ("input_json_delta", StreamBlock::ToolUse { input_buffer, .. }) => {
                         let piece = delta
                             .get("partial_json")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
                         if !piece.is_empty() {
-                            slot.input_buffer.push_str(piece);
+                            input_buffer.push_str(piece);
                         }
+                    }
+                    (
+                        "text_delta" | "thinking_delta" | "signature_delta" | "input_json_delta",
+                        StreamBlock::Unknown,
+                    ) => {}
+                    (
+                        "text_delta" | "thinking_delta" | "signature_delta" | "input_json_delta",
+                        _,
+                    ) => {
+                        return Err(LlmTransportError::new(format!(
+                            "Anthropic stream delta `{delta_type}` does not match content block {index}"
+                        ))
+                        .with_raw(raw.to_string())
+                        .with_kind(ProviderFailureKind::Stream)
+                        .with_retry_verdict(TransportRetryVerdict::NotRetryable));
                     }
                     _ => {}
                 }
@@ -416,26 +468,26 @@ impl AnthropicProvider {
         let mut parts: Vec<LlmOutputPart> = Vec::new();
         let stop_reason = state.stop_reason.clone();
         for block in state.blocks {
-            match block.kind {
-                BlockKind::Text => {
-                    if !block.text.is_empty() {
+            match block {
+                StreamBlock::Text { text } => {
+                    if !text.is_empty() {
                         parts.push(LlmOutputPart::Text {
-                            text: block.text,
+                            text,
                             response_meta: None,
                         });
                     }
                 }
-                BlockKind::Thinking => {
+                block @ (StreamBlock::Thinking { .. } | StreamBlock::RedactedThinking { .. }) => {
                     if let Some(part) = block.reasoning_part() {
                         parts.push(part);
                     }
                 }
-                BlockKind::ToolUse => {
+                block @ StreamBlock::ToolUse { .. } => {
                     if let Some(part) = block.tool_call_part() {
                         parts.push(part);
                     }
                 }
-                BlockKind::Unknown => {}
+                StreamBlock::Unknown => {}
             }
         }
         let terminal_reason = match stop_reason.as_deref() {
