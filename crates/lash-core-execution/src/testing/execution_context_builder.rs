@@ -42,6 +42,12 @@ pub struct BuiltTestExecutionContext<'run> {
     pub runtime_parent_invocation: Option<crate::RuntimeInvocation>,
 }
 
+impl<'run> Default for TestExecutionContextBuilder<'run> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'run> TestExecutionContextBuilder<'run> {
     pub fn new() -> Self {
         Self {

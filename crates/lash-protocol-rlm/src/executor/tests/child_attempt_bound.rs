@@ -271,14 +271,14 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
     );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
-    let worker = lash_core::facade_support::DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 lash_core::testing::test_code_protocol_factories(),
             )),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )

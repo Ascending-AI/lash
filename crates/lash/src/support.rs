@@ -10,8 +10,7 @@ pub(crate) use lash_core::{
     LiveReplayStore, MessageRole, NativeProcessWork, NativeQueuedWork, NativeSubstrateConfig,
     NoQueuedWork, ProcessExecutionEnvStore, ProcessHandleView, ProcessWorkSubstrate,
     ProcessWorkWiring, QueuedWorkSubstrate, SessionListFilter, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionSummary, SessionWorkTarget, WorkerProcessWork,
-    facade_support::DurableProcessWorker, facade_support::DurableProcessWorkerConfig,
+    SessionStoreCreateRequest, SessionSummary, SessionWorkTarget,
     facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,
     facade_support::PluginHost, facade_support::PluginSpec, facade_support::PluginStack,
     facade_support::QueuedWorkRunHandle, facade_support::QueuedWorkRunRequest,
@@ -19,6 +18,9 @@ pub(crate) use lash_core::{
     facade_support::RuntimeHostConfig, facade_support::RuntimeObservation,
     facade_support::SessionSpec, facade_support::WorkerSlotSupplier,
 };
+#[cfg(test)]
+pub(crate) use lash_core_worker::DurableProcessWorkerConfig;
+pub(crate) use lash_core_worker::{DurableProcessWorker, WorkerProcessWork};
 pub(crate) use tokio::sync::mpsc;
 pub(crate) use tokio::task::JoinHandle;
 pub(crate) use tokio_util::sync::CancellationToken;

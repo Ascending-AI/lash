@@ -251,11 +251,8 @@ pub mod facade_support {
     pub use crate::runtime::AssembledTurn;
     pub use crate::runtime::AssistantOutput;
     pub use crate::runtime::CanonicalRuntimeEffectEnvelope;
-    pub use crate::runtime::DEFAULT_PROCESS_EXECUTION_CONCURRENCY;
     pub use crate::runtime::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY;
     pub use crate::runtime::DirectCompletionClient;
-    pub use crate::runtime::DurableProcessWorker;
-    pub use crate::runtime::DurableProcessWorkerConfig;
     pub use crate::runtime::EmbeddedRuntimeHost;
     pub use crate::runtime::EventSink;
     pub use crate::runtime::InMemoryLiveReplayStore;
@@ -276,19 +273,11 @@ pub mod facade_support {
     pub use crate::runtime::OutputState;
     pub use crate::runtime::PROCESS_LEASE_SCHEMA_VERSION;
     pub use crate::runtime::ParkedSession;
-    pub use crate::runtime::ProcessAdmissionDeferred;
-    pub use crate::runtime::ProcessAdmissionIntake;
-    pub use crate::runtime::ProcessAdmissionReport;
     pub use crate::runtime::ProcessChangeHub;
-    pub use crate::runtime::ProcessDrainDeferred;
-    pub use crate::runtime::ProcessDrainReport;
     pub use crate::runtime::ProcessEngineProcessContext;
     pub use crate::runtime::ProcessEngineRegistry;
     pub use crate::runtime::ProcessEventAppendPlan;
     pub use crate::runtime::ProcessEventSink;
-    pub use crate::runtime::ProcessExecutionConcurrencyError;
-    pub use crate::runtime::ProcessRecoveryAttemptOutcome;
-    pub use crate::runtime::ProcessRecoveryOperation;
     pub use crate::runtime::ProcessRuntimeHost;
     pub use crate::runtime::ProcessStartPlan;
     pub use crate::runtime::ProcessTerminalSemantics;
@@ -300,7 +289,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessWakeDeliveryRequest;
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
-    pub use crate::runtime::ProcessWorkerFault;
     pub use crate::runtime::QueuedDrainCandidate;
     pub use crate::runtime::QueuedDrainPolicy;
     pub use crate::runtime::QueuedDrainRequest;
@@ -391,6 +379,14 @@ pub mod facade_support {
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
     pub use crate::runtime::{process_signal_await_key, process_signal_wait_key};
+    pub use lash_core_execution::runtime::process::ProcessAdmissionDeferred;
+    pub use lash_core_execution::runtime::process::ProcessAdmissionIntake;
+    pub use lash_core_execution::runtime::process::ProcessAdmissionReport;
+    pub use lash_core_execution::runtime::process::ProcessDrainDeferred;
+    pub use lash_core_execution::runtime::process::ProcessDrainReport;
+    pub use lash_core_execution::runtime::process::ProcessRecoveryAttemptOutcome;
+    pub use lash_core_execution::runtime::process::ProcessRecoveryOperation;
+    pub use lash_core_execution::runtime::process::ProcessWorkerFault;
     pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::turn_input_vocabulary::facade_ops::TurnContextFacadeOps;
@@ -764,9 +760,8 @@ pub use runtime::{
     TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, UnreportedLedgerAttempt,
     UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerProcessWork,
-    WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
-    ensure_process_lease_schema_version,
+    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind,
+    WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy, ensure_process_lease_schema_version,
 };
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 #[allow(unused_imports)]
@@ -842,6 +837,20 @@ pub use tool_provider::{
     ToolChildProcessStarted, ToolContext, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext,
     ToolProvider,
 };
+#[doc(hidden)]
+pub mod core_internal {
+    pub use crate::runtime::process_permit::{
+        DEFAULT_PROCESS_EXECUTION_CONCURRENCY, ensure_process_execution_permit,
+        inherit_process_execution_permit, scope_process_execution_permit,
+        scope_queued_work_execution_permit,
+    };
+    pub use crate::runtime::session_manager::RuntimeSessionServices;
+    pub use lash_core_ids::worker_capacity::{
+        DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
+        WorkerSlotSupplier,
+    };
+}
+
 #[cfg(test)]
 mod attachments_tests;
 

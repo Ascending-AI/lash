@@ -792,7 +792,7 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) process_cancel_peek_cursor: AtomicUsize,
     pub(super) process_cancel_peek_failures: AtomicUsize,
     pub(super) events: Arc<RecordingContext>,
-    pub(super) process_worker: Mutex<Option<DurableProcessWorker>>,
+    pub(super) process_worker: Mutex<Option<lash_core_worker::DurableProcessWorker>>,
     pub(super) defer_process_workflows: AtomicBool,
     pub(super) replay_process_workflow_starts_from_journal: AtomicBool,
     pub(super) live_process_workflow_starts: AtomicUsize,

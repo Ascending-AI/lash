@@ -42,10 +42,11 @@ use lash_core::{
     ProcessQuery as _, ProcessRegistry, Resolution, ResolveOutcome, RuntimeAttribution,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectInvocation,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
-    SessionExecutionLeaseStore, TurnInputStore, facade_support::DurableProcessWorker,
-    facade_support::TurnAddress, facade_support::TurnAttach,
+    SessionExecutionLeaseStore, TurnInputStore, facade_support::TurnAddress,
+    facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
+use lash_core_worker::DurableProcessWorker;
 use lash_http_transport::HttpRequest;
 use lash_http_transport::{HttpResponse, HttpResponseBody, HttpTransport, LlmTransportError};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};

@@ -946,14 +946,14 @@ async fn fig1293_runtime(
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
-    let worker = lash_core::facade_support::DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 factories.clone(),
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched.clone()),
+            lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ),

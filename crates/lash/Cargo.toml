@@ -28,6 +28,7 @@ lash-sansio = { workspace = true, features = ["schema-validation"] }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 lash-core = { workspace = true }
+lash-core-worker = { workspace = true }
 lash-lashlang-runtime = { workspace = true, optional = true }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-tool-support = { workspace = true }

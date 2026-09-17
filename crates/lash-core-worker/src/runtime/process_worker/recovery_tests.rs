@@ -6,12 +6,12 @@ use std::time::Duration;
 
 use super::*;
 use crate::TestProcessRegistryWriteExt;
-use crate::runtime::tests::trace_capture::{CapturedFieldKind, EventCapture, capturing};
 use crate::{
     AbandonRequest, AttachmentStore, LeaseOwnerIdentity, ProcessExecutionEnvRef, ProcessInput,
     ProcessListFilter, ProcessRegistration, ProcessStarted, ProcessStatus,
     TestLocalProcessRegistry, TriggerStore,
 };
+use lash_core::testing::trace_capture::{CapturedFieldKind, EventCapture, capturing};
 
 mod attachment_owner_tests;
 mod drain_report_tests;
@@ -1288,7 +1288,7 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
     let policy = test_session_policy();
     let env_spec =
         crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone());
-    let env_ref = crate::publish_process_execution_env(
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         runtime_host.durability.process_env_store.as_ref(),
         &crate::ArtifactOwner::host("boundary-recovery-test"),
         &env_spec,
@@ -1422,7 +1422,7 @@ async fn snapshot_recovery_fixture(
         })),
     );
     let policy = test_session_policy();
-    let env_ref = crate::publish_process_execution_env(
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         runtime_host.durability.process_env_store.as_ref(),
         &crate::ArtifactOwner::host("snapshot-recovery-test"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),

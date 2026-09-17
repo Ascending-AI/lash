@@ -1122,8 +1122,8 @@ async fn run_seed_probe_inner(
     // parks the runner away from the child.
     let worker_registry = Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>;
     let watched = lash_core::facade_support::watch_process_registry(worker_registry);
-    let worker = lash_core::facade_support::DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::from_plugin_factories(
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
             factories,
             {
                 let mut config = RuntimeHostConfig::in_memory(
@@ -1141,7 +1141,7 @@ async fn run_seed_probe_inner(
                 config
             },
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched.clone()),
+            lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )

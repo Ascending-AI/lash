@@ -232,7 +232,7 @@ impl QueuedWorkRunHandle for ParkAwareRunHandle {
         match request.session_id.as_deref() {
             Some("session-parked") => {
                 self.first_parked.notify_one();
-                crate::runtime::process_worker::release_process_execution_permit_while(async {
+                crate::runtime::process_permit::release_process_execution_permit_while(async {
                     self.resume_first
                         .acquire()
                         .await

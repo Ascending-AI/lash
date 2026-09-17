@@ -2037,14 +2037,14 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
     );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
-    let worker = lash_core::facade_support::DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 lash_core::testing::test_code_protocol_factories(),
             )),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
@@ -2191,14 +2191,14 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
     );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
-    let worker = lash_core::facade_support::DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 lash_core::testing::test_code_protocol_factories(),
             )),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
@@ -2337,14 +2337,14 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
     );
     let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
-    let _worker = lash_core::facade_support::DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+    let _worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 lash_core::testing::test_code_protocol_factories(),
             )),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )

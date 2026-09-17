@@ -138,9 +138,9 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
         );
         nested_host.durability.attachment_store = Arc::clone(&attachment_store);
         let mut nested_runtime =
-            crate::runtime::tests::helpers::runtime_with_plugins_and_tools_and_host(
+            lash_core::testing::runtime_helpers::runtime_with_plugins_and_tools_and_host(
                 Vec::new(),
-                Arc::new(crate::runtime::tests::helpers::EmptyTools),
+                Arc::new(lash_core::testing::runtime_helpers::EmptyTools),
                 provider,
                 crate::EmbeddedRuntimeHost::new(nested_host),
             )
@@ -150,7 +150,7 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
                 crate::TurnInput::text("run nested turn"),
                 crate::TurnOptions::new(
                     CancellationToken::new(),
-                    crate::runtime::tests::helpers::named_turn_scope(
+                    lash_core::testing::runtime_helpers::named_turn_scope(
                         &SessionId::from("root"),
                         &TurnId::from("nested-engine-turn"),
                     ),
@@ -287,7 +287,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
             .expect("valid model spec"),
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
-    let env_ref = crate::publish_process_execution_env(
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         runtime_host.durability.process_env_store.as_ref(),
         &crate::ArtifactOwner::host("attachment-owner-test"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
@@ -407,7 +407,7 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
             .expect("valid model spec"),
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
-    let env_ref = crate::publish_process_execution_env(
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         runtime_host.durability.process_env_store.as_ref(),
         &crate::ArtifactOwner::host("attachment-owner-reincarnation-test"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),

@@ -15,58 +15,46 @@ use self::registration::registration_from_record;
 
 mod drain;
 mod parent_end;
-use lash_core_ids::execution_permit as permit;
 mod recovery;
 mod registration;
 #[path = "../native_substrate/worklist.rs"]
 mod worklist;
 
-pub use permit::release_process_execution_permit_while;
-
-/// The runtime-operation scope under which the worker starts a trigger
-/// delivery whose process row was never registered. It exists only to admit
-/// that one process, so the process's retention pass retires it alongside the
-/// process journal (FIG-2500).
-pub fn trigger_delivery_reconcile_scope(process_id: &ProcessId) -> crate::ExecutionScope {
-    crate::ExecutionScope::runtime_operation(format!("trigger-delivery-reconcile:{process_id}"))
-}
-#[cfg(test)]
-use permit::{PROCESS_EXECUTION_PERMIT, ProcessExecutionPermit};
-pub(crate) use permit::{ensure_process_execution_permit, inherit_process_execution_permit};
-pub(super) use permit::{scope_process_execution_permit, scope_queued_work_execution_permit};
-
 use self::recovery::ProcessRecoveryOutcome;
+#[cfg(test)]
+use crate::{
+    PROCESS_EXECUTION_PERMIT, ProcessExecutionPermit, ensure_process_execution_permit,
+    inherit_process_execution_permit, release_process_execution_permit_while,
+};
 
 pub use self::recovery::{
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
     ProcessDrainReport, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
     ProcessWorkerFault,
 };
+pub use crate::DEFAULT_PROCESS_EXECUTION_CONCURRENCY;
 
-use super::effect::ProcessRunner;
-use super::session_manager::RuntimeSessionServices;
-use super::worker_capacity::{
-    DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
-    WorkerSlotSupplier as _,
-};
-use super::{EmbeddedRuntimeBuilder, RuntimeHostConfig};
 use crate::InMemorySessionStore;
+use crate::RuntimeHostConfig;
+use crate::runtime::EmbeddedRuntimeBuilder;
 use crate::{
     AbandonEvidence, AbandonWriter, LashRuntime, PluginError, PluginFactory, PluginHost,
     PluginStack, ProcessAwaitOutput, ProcessExecutionContext, ProcessInput, ProcessLease,
     ProcessRecord, ProcessRegistration, ProcessRegistry, RecoveryContract, SessionStoreFactory,
 };
-
-/// Default maximum number of processes one [`DurableProcessWorker`] executes
-/// natively at once.
-pub const DEFAULT_PROCESS_EXECUTION_CONCURRENCY: usize = 64;
+use lash_core::core_internal::RuntimeSessionServices;
+use lash_core::core_internal::{
+    DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
+    WorkerSlotSupplier as _,
+};
+use lash_core_execution::runtime::effect::ProcessRunner;
 
 /// Validated per-worker native process execution concurrency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ProcessExecutionConcurrency(usize);
 
 impl ProcessExecutionConcurrency {
-    const DEFAULT: Self = Self(DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
+    const DEFAULT: Self = Self(crate::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
 
     fn new(concurrency: usize) -> Result<Self, ProcessExecutionConcurrencyError> {
         if !(1..=Semaphore::MAX_PERMITS).contains(&concurrency) {
@@ -658,7 +646,7 @@ impl DurableProcessWorker {
         {
             runtime.set_turn_phase_probe(probe);
         }
-        let manager = RuntimeSessionServices::new(&runtime, true, None, None).map_err(|err| {
+        let manager = RuntimeSessionServices::for_worker(&runtime, true).map_err(|err| {
             PluginError::Session(format!(
                 "failed to build runtime env for process `{}`: {err}",
                 registration.id
@@ -821,7 +809,7 @@ impl DurableProcessWorker {
                     let process_id = record.id.clone();
                     // Install the execution budget only at the native worker
                     // boundary, never in the shared process-segment path.
-                    let outcome = Box::pin(scope_process_execution_permit(
+                    let outcome = Box::pin(crate::core_internal::scope_process_execution_permit(
                         Arc::clone(&worker.execution_scheduler.slots),
                         permit,
                         Arc::clone(&worker.execution_scheduler.changed),
@@ -934,7 +922,9 @@ impl DurableProcessWorker {
                     .runtime_host
                     .control
                     .effect_host
-                    .scoped_static(trigger_delivery_reconcile_scope(&delivery.process_id))
+                    .scoped_static(lash_core::runtime::trigger_delivery_reconcile_scope(
+                        &delivery.process_id,
+                    ))
                     .map_err(|err| PluginError::Session(err.to_string()))?
                 else {
                     return Err(PluginError::Session(
@@ -1596,7 +1586,7 @@ impl DurableProcessWorker {
                 registration.id
             )));
         };
-        let env = crate::load_process_execution_env(
+        let env = crate::runtime::load_process_execution_env(
             self.config
                 .runtime_host
                 .durability

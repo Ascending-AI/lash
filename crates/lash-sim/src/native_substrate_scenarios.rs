@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::facade_support::{
-    CommitBudget, DurableProcessWorker, DurableProcessWorkerConfig, InMemorySessionStoreFactory,
-    PluginHost, ProcessAdmissionIntake, ProcessEngineRegistry, ProcessRecoveryOperation,
-    ProcessWorkerFault, QueuedWorkBatchingConfig, RuntimeHostConfig, watch_process_registry,
+    CommitBudget, InMemorySessionStoreFactory, PluginHost, ProcessAdmissionIntake,
+    ProcessEngineRegistry, ProcessRecoveryOperation, ProcessWorkerFault, QueuedWorkBatchingConfig,
+    RuntimeHostConfig, watch_process_registry,
 };
 use lash_core::sync::MutexExt as _;
 use lash_core::{
@@ -21,8 +21,9 @@ use lash_core::{
     ProcessEngine, ProcessEngineRunContext, ProcessInfraError, ProcessInput, ProcessLease,
     ProcessLeaseClaimOutcome, ProcessRegistration, ProcessRegistry, ProcessRunOutcome,
     ProcessStatus, ProcessWorkSubstrate, RecoveryContract, SessionPolicy, TestLocalProcessRegistry,
-    ToolCallOutput, TurnBudget, WorkCadencePolicy, WorkerProcessWork, WorkerSweepPolicy,
+    ToolCallOutput, TurnBudget, WorkCadencePolicy, WorkerSweepPolicy,
 };
+use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use serde_json::{Value, json};
 
 use crate::scheduler::{BoundaryEvent, BoundaryKind, BoundaryScheduler, DeliveredBoundary};

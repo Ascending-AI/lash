@@ -344,8 +344,6 @@ async fn sqlite_prompt_probe_store(
     lash_sqlite_store::SqliteSessionStoreFactory,
     Arc<dyn lash_core::RuntimePersistence>,
 ) {
-    use lash_core::SessionStoreFactory as _;
-
     let dir = tempfile::tempdir().expect("SQLite prompt probe directory");
     let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path());
     let mut policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);

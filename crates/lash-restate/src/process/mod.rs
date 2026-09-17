@@ -18,12 +18,13 @@ use lash_core::{
     PluginError, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessExecutionContext,
     ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
     ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring, RecoveryContract, Resolution,
-    RuntimeError, RuntimeErrorCode, ScopedEffectController, facade_support::DurableProcessWorker,
+    RuntimeError, RuntimeErrorCode, ScopedEffectController,
     facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionReport,
     facade_support::ProcessEventSink, facade_support::ProcessRecoveryAttemptOutcome,
     facade_support::ProcessRecoveryOperation, facade_support::ProcessWorkerFault,
     facade_support::watch_process_registry_with_sink,
 };
+use lash_core_worker::DurableProcessWorker;
 use restate_sdk::context::ContextPromises;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use serde::Serialize;

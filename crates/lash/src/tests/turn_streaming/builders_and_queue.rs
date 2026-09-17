@@ -758,8 +758,6 @@ pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("oversized-queued-row").open().await?;
     {
-        use crate::persistence::SessionStoreFactory as _;
-
         let store = store_factory
             .create_store(&crate::persistence::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),

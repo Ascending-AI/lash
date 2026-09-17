@@ -1329,19 +1329,18 @@ pub(super) async fn process_deployment_driver_and_workflow_share_registry() {
     );
     let process_work = deployment.process_work();
 
-    let worker =
-        DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::facade_support::PluginHost::empty()),
-            lash_core::facade_support::RuntimeHostConfig::in_memory(
-                lash_core::CommitBudget::bounded(1024 * 1024, 512),
-                lash_core::QueuedWorkBatchingConfig::new(1),
-            ),
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::External(process_work),
-            Arc::new(lash_core::NoQueuedWork::new()),
-            lash_core::testing::runtime_lease_owner(),
-        ))
-        .expect("valid test native substrate config");
+    let worker = DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
+        Arc::new(lash_core::facade_support::PluginHost::empty()),
+        lash_core::facade_support::RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        ),
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        lash_core_worker::WorkerProcessWork::External(process_work),
+        Arc::new(lash_core::NoQueuedWork::new()),
+        lash_core::testing::runtime_lease_owner(),
+    ))
+    .expect("valid test native substrate config");
     let service = deployment.workflow(worker).serve();
     let discovery = discover_service(&service);
     let endpoint = Endpoint::builder().bind(service).build();

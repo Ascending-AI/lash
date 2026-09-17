@@ -178,7 +178,7 @@ impl QueuedWorkTaskDriver {
                     let _completion = completion;
                     match (permit, scheduler.slots.as_ref()) {
                         (Some(permit), Some(slots)) => {
-                            crate::runtime::process_worker::scope_queued_work_execution_permit(
+                            crate::runtime::process_permit::scope_queued_work_execution_permit(
                                 Arc::clone(slots),
                                 permit,
                                 Arc::clone(&scheduler.changed),
@@ -447,7 +447,7 @@ impl QueuedWorkTaskDriver {
     }
 
     async fn wait_for_retry(&self, retry_after: Duration) -> bool {
-        let backoff = crate::runtime::process_worker::release_process_execution_permit_while(
+        let backoff = crate::runtime::process_permit::release_process_execution_permit_while(
             tokio::time::sleep(retry_after),
         );
         tokio::pin!(backoff);

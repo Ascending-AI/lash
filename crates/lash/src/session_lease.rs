@@ -190,8 +190,6 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use lash_core::SessionStoreFactory as _;
-
     const SESSION_ID: &str = "session-lease-clock-domain";
     const STORE_NOW_MS: u64 = 5_000;
 

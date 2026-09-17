@@ -426,6 +426,14 @@ impl RuntimeSessionServices {
         )
     }
 
+    #[doc(hidden)]
+    pub fn for_worker(
+        runtime: &LashRuntime,
+        persist_usage_to_store: bool,
+    ) -> Result<Self, PluginOperationInvokeError> {
+        Self::new(runtime, persist_usage_to_store, None, None)
+    }
+
     /// Turn-scoped services: usage stays in the shared ledger and graph
     /// appends ride `turn_graph_appends`, both committed once by the turn.
     pub(super) fn for_turn(

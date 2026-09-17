@@ -49,10 +49,14 @@ mod observation;
 use lash_core_execution::runtime::process;
 #[cfg(test)]
 mod plugin_namespace_tests;
-mod process_worker;
+#[doc(hidden)]
+pub mod process_permit;
 use lash_core_store::queued_drain_policy;
 pub use native_substrate::bounded_multiplicative_jitter;
-pub use process_worker::release_process_execution_permit_while;
+pub(crate) use process_permit::DEFAULT_PROCESS_EXECUTION_CONCURRENCY;
+pub use process_permit::{
+    release_process_execution_permit_while, trigger_delivery_reconcile_scope,
+};
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
@@ -317,13 +321,6 @@ pub use process::{
     ConformanceProcessRegistry, PROCESS_REFUSAL_FIXTURE_PROCESS_ID, ProcessRegistryTestSupport,
     TestLocalProcessRegistry, TestProcessRegistryWriteExt, accepted_process_registration,
     refused_process_registrations,
-};
-pub use process_worker::{
-    DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,
-    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
-    ProcessDrainReport, ProcessExecutionConcurrencyError, ProcessRecoveryAttemptOutcome,
-    ProcessRecoveryOperation, ProcessWorkerFault, WorkerProcessWork,
-    trigger_delivery_reconcile_scope,
 };
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{

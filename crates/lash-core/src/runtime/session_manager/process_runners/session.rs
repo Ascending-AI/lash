@@ -100,7 +100,7 @@ impl RuntimeSessionServices {
             // Dropping the managed-turn future aborts its inherited task-local
             // execution before this outer process reacquires the shared slot.
             drop(turn);
-            crate::runtime::process_worker::ensure_process_execution_permit().await;
+            crate::runtime::process_permit::ensure_process_execution_permit().await;
             self.reclaim_cancelled_child_session(&registration.id, &child_session_id)
                 .await?;
             return Ok(cancelled_session_turn_output());
@@ -639,7 +639,7 @@ mod tests {
             (name == "park_forever").then(|| Arc::new(park_forever_definition().contract()))
         }
         async fn execute(&self, _: crate::ToolCall<'_>) -> crate::ToolOutcome {
-            crate::runtime::process_worker::release_process_execution_permit_while(async {
+            crate::runtime::process_permit::release_process_execution_permit_while(async {
                 self.0.send(()).await.unwrap();
                 std::future::pending::<crate::ToolOutcome>().await
             })
@@ -653,7 +653,7 @@ mod tests {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
         let supplier = Arc::new(PermitSlots(semaphore.clone()));
         let permit = supplier.reserve_slot(WorkerSlotKind::Process).await;
-        Box::pin(crate::runtime::process_worker::scope_process_execution_permit(
+        Box::pin(crate::runtime::process_permit::scope_process_execution_permit(
             supplier,
             permit,
             Arc::new(tokio::sync::Notify::new()),

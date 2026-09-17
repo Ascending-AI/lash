@@ -2,7 +2,7 @@
 
 use super::*;
 #[cfg(test)]
-use crate::{Clock, SessionStoreFactory};
+use crate::Clock;
 use pretty_assertions::assert_eq;
 
 #[expect(

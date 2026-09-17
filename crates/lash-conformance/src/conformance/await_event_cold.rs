@@ -4,7 +4,6 @@
 //! same substrate. The suite deliberately never shares an `Arc` between roles.
 
 use super::*;
-use crate::SessionStoreFactory;
 use lash_core::testing::conformance_support::ActiveTurnControl;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;

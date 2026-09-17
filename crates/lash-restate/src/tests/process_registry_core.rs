@@ -96,13 +96,13 @@ pub(super) async fn fig1293_public_migrated_tools_redrive_with_literal_restate_o
     let plugin_factories = fig1293_migrated_tool_factories();
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     context.install_process_worker(
-        DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
+        DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 plugin_factories.clone(),
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ))
@@ -822,13 +822,13 @@ finish(await handle);
         .expect("register the recorded-intent signal target");
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     let process_worker =
-        DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
+        DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 plugin_factories.clone(),
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            lash_core::WorkerProcessWork::SelfNative(watched),
+            lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ))

@@ -171,7 +171,7 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
         runtime_host = runtime_host.with_lease_timings(lease_timings);
     }
     let policy = test_session_policy();
-    let env_ref = crate::publish_process_execution_env(
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         runtime_host.durability.process_env_store.as_ref(),
         &crate::ArtifactOwner::host("worker-fixture"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),
@@ -229,7 +229,7 @@ pub(super) async fn worker_with_session_store_factory(
     runtime_host.process_engines = crate::ProcessEngineRegistry::new()
         .with_registration(crate::ProcessEngineRegistration::accepting(engine));
     let policy = test_session_policy();
-    let env_ref = crate::publish_process_execution_env(
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         runtime_host.durability.process_env_store.as_ref(),
         &crate::ArtifactOwner::host("parent-end-redrive-fixture"),
         &crate::ProcessExecutionEnvSpec::new(crate::PluginOptions::default(), policy.clone()),

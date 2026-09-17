@@ -99,7 +99,7 @@ async fn resuming_after_a_dropped_permit_release_reacquires_the_slot() {
 /// holding no permit, overrunning the worker's execution concurrency.
 #[tokio::test]
 async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
-    use crate::runtime::tests::helpers::{
+    use lash_core::testing::runtime_helpers::{
         MockCall, mock_provider, named_turn_scope, runtime_with_plugins_and_tools,
     };
 

@@ -26,6 +26,7 @@ chrono = { workspace = true }
 fastrand = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
 lash-core = { workspace = true, features = ["testing"] }
+lash-core-worker = { workspace = true, features = ["testing"] }
 lash-llm-transport = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-plugin-process-controls = { workspace = true }

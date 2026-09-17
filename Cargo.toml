@@ -10,6 +10,7 @@ members = [
     "crates/lash-core-effect",
     "crates/lash-core-memory",
     "crates/lash-core-execution",
+    "crates/lash-core-worker",
     "crates/lash-core",
     "crates/lash-conformance",
     "crates/lash-lashlang-runtime",
@@ -56,6 +57,7 @@ default-members = [
     "crates/lash-core-effect",
     "crates/lash-core-memory",
     "crates/lash-core-execution",
+    "crates/lash-core-worker",
     "crates/lash-core",
     "crates/lash-remote-protocol",
     "crates/lash",
@@ -262,6 +264,7 @@ lash-core-store = { package = "lash-internal-core-store", path = "crates/lash-co
 lash-core-effect = { package = "lash-internal-core-effect", path = "crates/lash-core-effect", version = "=0.0.0-dev" }
 lash-core-memory = { package = "lash-internal-core-memory", path = "crates/lash-core-memory", version = "=0.0.0-dev" }
 lash-core-execution = { package = "lash-internal-core-execution", path = "crates/lash-core-execution", version = "=0.0.0-dev" }
+lash-core-worker = { package = "lash-internal-core-worker", path = "crates/lash-core-worker", version = "=0.0.0-dev" }
 lash-http-transport = { package = "lash-internal-http-transport", path = "crates/lash-http-transport", version = "=0.0.0-dev" }
 lash-llm-tools = { package = "lash-internal-llm-tools", path = "crates/lash-llm-tools", version = "=0.0.0-dev" }
 lash-llm-transport = { package = "lash-internal-llm-transport", path = "crates/lash-llm-transport", version = "=0.0.0-dev" }
