@@ -298,173 +298,158 @@ impl McpCallPolicy {
     }
 }
 
-/// Connection configuration for one MCP server. Tag (`transport`) selects
-/// the wire transport; per-variant fields configure that transport.
+/// Connection configuration for one MCP server. Shared policy fields live on
+/// the struct once; `transport` carries the `transport` tag plus the fields
+/// that transport understands. The serialized shape is unchanged: every field
+/// still sits flat at the server level.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "transport", rename_all = "snake_case")]
-pub enum McpServerConfig {
-    /// Spawn a child process and speak JSON-RPC over stdio.
-    Stdio {
-        command: String,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        args: Vec<String>,
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        env: BTreeMap<String, String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        cwd: Option<PathBuf>,
-        #[serde(
-            default = "default_startup_timeout_ms",
-            skip_serializing_if = "is_default_startup_timeout_ms"
-        )]
-        startup_timeout_ms: u64,
-        #[serde(flatten)]
-        call_policy: McpCallPolicy,
-        /// Graceful-close and forced-reap timing for this server.
-        #[serde(flatten)]
-        shutdown_policy: McpShutdownPolicy,
-        /// Persist non-image MCP binary content as model attachments.
-        #[serde(default, skip_serializing_if = "is_false")]
-        binary_content_attachments: bool,
-    },
-    /// Newer MCP spec HTTP/JSON streaming transport.
-    ///
-    /// `headers` are static values installed when the transport connects.
-    /// Lash does not enable rmcp's `auth` feature and does not perform OAuth,
-    /// token acquisition, or token refresh.
-    StreamableHttp {
-        url: String,
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        headers: BTreeMap<String, String>,
-        #[serde(
-            default = "default_startup_timeout_ms",
-            skip_serializing_if = "is_default_startup_timeout_ms"
-        )]
-        startup_timeout_ms: u64,
-        #[serde(flatten)]
-        call_policy: McpCallPolicy,
-        /// Graceful-close and forced-reap timing for this server.
-        #[serde(flatten)]
-        shutdown_policy: McpShutdownPolicy,
-        /// Persist non-image MCP binary content as model attachments.
-        #[serde(default, skip_serializing_if = "is_false")]
-        binary_content_attachments: bool,
-    },
+pub struct McpServerConfig {
+    #[serde(
+        default = "default_startup_timeout_ms",
+        skip_serializing_if = "is_default_startup_timeout_ms"
+    )]
+    pub startup_timeout_ms: u64,
+    #[serde(flatten)]
+    pub call_policy: McpCallPolicy,
+    /// Graceful-close and forced-reap timing for this server.
+    #[serde(flatten)]
+    pub shutdown_policy: McpShutdownPolicy,
+    /// Persist non-image MCP binary content as model attachments.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub binary_content_attachments: bool,
+    #[serde(flatten)]
+    pub transport: McpTransport,
 }
 
-impl McpServerConfig {
-    /// Convenience constructor for stdio servers.
-    pub fn stdio(command: impl Into<String>, args: Vec<String>) -> Self {
-        Self::Stdio {
+/// Wire transport for one MCP server, selected by the `transport` tag.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "transport", rename_all = "snake_case")]
+pub enum McpTransport {
+    /// Spawn a child process and speak JSON-RPC over stdio.
+    Stdio(McpStdioTransport),
+    /// Newer MCP spec HTTP/JSON streaming transport.
+    StreamableHttp(McpStreamableHttpTransport),
+}
+
+/// Stdio transport: spawn `command` and speak JSON-RPC over its pipes.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpStdioTransport {
+    pub command: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+}
+
+impl McpStdioTransport {
+    /// Constructor for a stdio transport spawning `command` with `args`.
+    pub fn new(command: impl Into<String>, args: Vec<String>) -> Self {
+        Self {
             command: command.into(),
             args,
             env: BTreeMap::new(),
             cwd: None,
-            startup_timeout_ms: default_startup_timeout_ms(),
-            call_policy: McpCallPolicy::default(),
-            shutdown_policy: McpShutdownPolicy::default(),
-            binary_content_attachments: false,
         }
     }
 
-    /// Convenience constructor for streamable-HTTP servers.
-    pub fn streamable_http(url: impl Into<String>) -> Self {
-        Self::StreamableHttp {
-            url: url.into(),
-            headers: BTreeMap::new(),
-            startup_timeout_ms: default_startup_timeout_ms(),
-            call_policy: McpCallPolicy::default(),
-            shutdown_policy: McpShutdownPolicy::default(),
-            binary_content_attachments: false,
-        }
-    }
-
-    /// Set static HTTP headers for a streamable-HTTP server.
-    ///
-    /// These values are reused unchanged on reconnect. This is suitable for
-    /// fixed API keys and host-managed tokens, but it does not enable OAuth or
-    /// token refresh; rmcp's `auth` feature is not enabled by this crate.
-    ///
-    /// # Panics
-    ///
-    /// Panics when called on a stdio configuration.
-    pub fn with_headers<K, V>(mut self, headers: impl IntoIterator<Item = (K, V)>) -> Self
-    where
-        K: Into<String>,
-        V: Into<String>,
-    {
-        let Self::StreamableHttp {
-            headers: configured,
-            ..
-        } = &mut self
-        else {
-            panic!("MCP HTTP headers can only be configured for streamable-HTTP servers");
-        };
-        *configured = headers
-            .into_iter()
-            .map(|(name, value)| (name.into(), value.into()))
-            .collect();
-        self
-    }
-
-    /// Set environment variables for a stdio server child process.
-    ///
-    /// # Panics
-    ///
-    /// Panics when called on a streamable-HTTP configuration.
+    /// Set environment variables for the stdio child process.
     pub fn with_env<K, V>(mut self, env: impl IntoIterator<Item = (K, V)>) -> Self
     where
         K: Into<String>,
         V: Into<String>,
     {
-        let Self::Stdio {
-            env: configured, ..
-        } = &mut self
-        else {
-            panic!("MCP child environment can only be configured for stdio servers");
-        };
-        *configured = env
+        self.env = env
             .into_iter()
             .map(|(name, value)| (name.into(), value.into()))
             .collect();
         self
     }
 
-    /// Set startup, idle call, and total call timeouts for either transport.
+    /// Set the working directory for the stdio child process.
+    pub fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
+}
+
+/// Streamable-HTTP transport.
+///
+/// `headers` are static values installed when the transport connects.
+/// Lash does not enable rmcp's `auth` feature and does not perform OAuth,
+/// token acquisition, or token refresh.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpStreamableHttpTransport {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
+}
+
+impl McpStreamableHttpTransport {
+    /// Constructor for a streamable-HTTP transport targeting `url`.
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            headers: BTreeMap::new(),
+        }
+    }
+
+    /// Set static HTTP headers for the transport.
+    ///
+    /// These values are reused unchanged on reconnect. This is suitable for
+    /// fixed API keys and host-managed tokens, but it does not enable OAuth or
+    /// token refresh; rmcp's `auth` feature is not enabled by this crate.
+    pub fn with_headers<K, V>(mut self, headers: impl IntoIterator<Item = (K, V)>) -> Self
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        self.headers = headers
+            .into_iter()
+            .map(|(name, value)| (name.into(), value.into()))
+            .collect();
+        self
+    }
+}
+
+impl McpServerConfig {
+    /// Constructor for a server with the given transport and default policy.
+    pub fn new(transport: McpTransport) -> Self {
+        Self {
+            startup_timeout_ms: default_startup_timeout_ms(),
+            call_policy: McpCallPolicy::default(),
+            shutdown_policy: McpShutdownPolicy::default(),
+            binary_content_attachments: false,
+            transport,
+        }
+    }
+
+    /// Convenience constructor for stdio servers.
+    pub fn stdio(transport: McpStdioTransport) -> Self {
+        Self::new(McpTransport::Stdio(transport))
+    }
+
+    /// Convenience constructor for streamable-HTTP servers.
+    pub fn streamable_http(transport: McpStreamableHttpTransport) -> Self {
+        Self::new(McpTransport::StreamableHttp(transport))
+    }
+
+    /// Set startup, idle call, and total call timeouts.
     pub fn with_timeouts(
         mut self,
         startup_timeout: Duration,
         call_timeout: Duration,
         call_max_total_timeout: Duration,
     ) -> Self {
-        let startup_timeout_ms = duration_millis(startup_timeout);
-        match &mut self {
-            Self::Stdio {
-                startup_timeout_ms: configured,
-                call_policy,
-                ..
-            }
-            | Self::StreamableHttp {
-                startup_timeout_ms: configured,
-                call_policy,
-                ..
-            } => {
-                *configured = startup_timeout_ms;
-                call_policy.call_timeout_ms = duration_millis(call_timeout);
-                call_policy.call_max_total_timeout_ms = duration_millis(call_max_total_timeout);
-            }
-        }
+        self.startup_timeout_ms = duration_millis(startup_timeout);
+        self.call_policy.call_timeout_ms = duration_millis(call_timeout);
+        self.call_policy.call_max_total_timeout_ms = duration_millis(call_max_total_timeout);
         self
     }
 
     pub fn startup_timeout(&self) -> Duration {
-        Duration::from_millis(match self {
-            Self::Stdio {
-                startup_timeout_ms, ..
-            }
-            | Self::StreamableHttp {
-                startup_timeout_ms, ..
-            } => *startup_timeout_ms,
-        })
+        Duration::from_millis(self.startup_timeout_ms)
     }
 
     pub fn call_timeout(&self) -> Duration {
@@ -509,65 +494,27 @@ impl McpServerConfig {
 
     /// Return the timeout, liveness, and reconnect policy for this server.
     pub fn call_policy(&self) -> &McpCallPolicy {
-        match self {
-            Self::Stdio { call_policy, .. } | Self::StreamableHttp { call_policy, .. } => {
-                call_policy
-            }
-        }
+        &self.call_policy
     }
 
     /// Return the graceful-close and forced-reap timing for this server.
     pub fn shutdown_policy(&self) -> &McpShutdownPolicy {
-        match self {
-            Self::Stdio {
-                shutdown_policy, ..
-            }
-            | Self::StreamableHttp {
-                shutdown_policy, ..
-            } => shutdown_policy,
-        }
+        &self.shutdown_policy
     }
 
     /// Set the graceful-close and forced-reap timing for this server.
     pub fn with_shutdown_policy(mut self, shutdown_policy: McpShutdownPolicy) -> Self {
-        match &mut self {
-            Self::Stdio {
-                shutdown_policy: configured,
-                ..
-            }
-            | Self::StreamableHttp {
-                shutdown_policy: configured,
-                ..
-            } => *configured = shutdown_policy,
-        }
+        self.shutdown_policy = shutdown_policy;
         self
     }
 
     pub fn with_binary_content_attachments(mut self, enabled: bool) -> Self {
-        match &mut self {
-            Self::Stdio {
-                binary_content_attachments,
-                ..
-            }
-            | Self::StreamableHttp {
-                binary_content_attachments,
-                ..
-            } => *binary_content_attachments = enabled,
-        }
+        self.binary_content_attachments = enabled;
         self
     }
 
     pub(crate) fn binary_content_attachments(&self) -> bool {
-        match self {
-            Self::Stdio {
-                binary_content_attachments,
-                ..
-            }
-            | Self::StreamableHttp {
-                binary_content_attachments,
-                ..
-            } => *binary_content_attachments,
-        }
+        self.binary_content_attachments
     }
 
     pub(crate) fn validate(&self, server_name: &str) -> Result<(), McpError> {
@@ -597,13 +544,15 @@ impl McpServerConfig {
                 "MCP server `{server_name}` call_max_total_timeout_ms must be greater than call_timeout_ms"
             )));
         }
-        match self {
-            Self::Stdio { command, .. } if command.trim().is_empty() => Err(McpError::Config(
-                format!("MCP server `{server_name}` command cannot be empty"),
-            )),
-            Self::StreamableHttp { url, .. } if url.trim().is_empty() => Err(McpError::Config(
-                format!("MCP server `{server_name}` URL cannot be empty"),
-            )),
+        match &self.transport {
+            McpTransport::Stdio(transport) if transport.command.trim().is_empty() => {
+                Err(McpError::Config(format!(
+                    "MCP server `{server_name}` command cannot be empty"
+                )))
+            }
+            McpTransport::StreamableHttp(transport) if transport.url.trim().is_empty() => Err(
+                McpError::Config(format!("MCP server `{server_name}` URL cannot be empty")),
+            ),
             _ => Ok(()),
         }
     }
@@ -624,7 +573,7 @@ mod tests {
 
     #[test]
     fn binary_attachment_opt_in_is_explicit_and_defaults_off() {
-        let default = McpServerConfig::stdio("mcp-server", Vec::new());
+        let default = McpServerConfig::stdio(McpStdioTransport::new("mcp-server", Vec::new()));
         assert!(!default.binary_content_attachments());
         let json = serde_json::to_value(&default).unwrap();
         assert!(json.get("binary_content_attachments").is_none());
@@ -639,29 +588,33 @@ mod tests {
 
     #[test]
     fn transport_builders_cover_headers_env_and_timeouts() {
-        let http = McpServerConfig::streamable_http("https://mcp.example.test")
-            .with_headers([("Authorization", "Bearer static")])
-            .with_timeouts(
-                Duration::from_secs(1),
-                Duration::from_secs(2),
-                Duration::from_secs(3),
-            );
-        let McpServerConfig::StreamableHttp {
-            headers,
-            startup_timeout_ms,
-            call_policy,
-            ..
-        } = http
-        else {
-            panic!("streamable constructor changed transport")
-        };
-        assert_eq!(headers["Authorization"], "Bearer static");
-        assert_eq!(startup_timeout_ms, 1_000);
-        assert_eq!(call_policy.call_timeout_ms, 2_000);
-        assert_eq!(call_policy.call_max_total_timeout_ms, 3_000);
+        let http = McpServerConfig::streamable_http(
+            McpStreamableHttpTransport::new("https://mcp.example.test")
+                .with_headers([("Authorization", "Bearer static")]),
+        )
+        .with_timeouts(
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(3),
+        );
+        assert_eq!(
+            http.transport,
+            McpTransport::StreamableHttp(McpStreamableHttpTransport {
+                url: "https://mcp.example.test".to_string(),
+                headers: BTreeMap::from([(
+                    "Authorization".to_string(),
+                    "Bearer static".to_string()
+                )]),
+            })
+        );
+        assert_eq!(http.startup_timeout_ms, 1_000);
+        assert_eq!(http.call_policy.call_timeout_ms, 2_000);
+        assert_eq!(http.call_policy.call_max_total_timeout_ms, 3_000);
 
-        let stdio = McpServerConfig::stdio("server", Vec::new()).with_env([("TOKEN", "static")]);
-        let McpServerConfig::Stdio { env, .. } = stdio else {
+        let stdio = McpServerConfig::stdio(
+            McpStdioTransport::new("server", Vec::new()).with_env([("TOKEN", "static")]),
+        );
+        let McpTransport::Stdio(McpStdioTransport { env, .. }) = &stdio.transport else {
             panic!("stdio constructor changed transport")
         };
         assert_eq!(env["TOKEN"], "static");
@@ -745,13 +698,13 @@ mod tests {
         let stdio: McpServerConfig =
             serde_json::from_value(serde_json::json!({"transport": "stdio", "command": "srv"}))
                 .expect("stdio config must deserialize");
-        assert!(matches!(stdio, McpServerConfig::Stdio { .. }));
+        assert!(matches!(stdio.transport, McpTransport::Stdio(_)));
 
         let http: McpServerConfig = serde_json::from_value(
             serde_json::json!({"transport": "streamable_http", "url": "http://localhost:1/mcp"}),
         )
         .expect("streamable_http config must deserialize");
-        assert!(matches!(http, McpServerConfig::StreamableHttp { .. }));
+        assert!(matches!(http.transport, McpTransport::StreamableHttp(_)));
 
         for transport in ["sse", "http", "websocket"] {
             let err = serde_json::from_value::<McpServerConfig>(

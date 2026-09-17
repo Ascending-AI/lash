@@ -203,10 +203,11 @@ impl Mock {
     ) -> (Arc<McpConnectionPool>, Self) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mut config = mock_config(root, options);
-        let McpServerConfig::Stdio { args, env, .. } = &mut config else {
+        let McpTransport::Stdio(transport) = &mut config.transport else {
             unreachable!()
         };
-        *args = vec!["-u".into(), "-c".into(), SERVER.into()];
+        transport.args = vec!["-u".into(), "-c".into(), SERVER.into()];
+        let env = &mut transport.env;
         env.insert(
             "CONTROL_PORT".into(),
             listener.local_addr().unwrap().port().to_string(),

@@ -16,7 +16,7 @@ use rmcp::transport::streamable_http_client::{
 };
 use tokio::time::Instant;
 
-use crate::config::McpServerConfig;
+use crate::config::{McpServerConfig, McpTransport};
 use crate::error::McpError;
 use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
 
@@ -66,14 +66,12 @@ pub(crate) fn connect_service(
     let client_handler = LashMcpClientHandler::new(server_name, host_services)
         .with_tool_list_changed_handler(tool_list_changed);
 
-    match config {
-        McpServerConfig::Stdio {
-            command,
-            args,
-            env,
-            cwd,
-            ..
-        } => {
+    match &config.transport {
+        McpTransport::Stdio(transport) => {
+            let command = &transport.command;
+            let args = &transport.args;
+            let env = &transport.env;
+            let cwd = &transport.cwd;
             let mut cmd = std::process::Command::new(command);
             cmd.args(args);
             if let Some(cwd) = cwd {
@@ -122,7 +120,9 @@ pub(crate) fn connect_service(
                 stdio_child: Some(stdio_child),
             })
         }
-        McpServerConfig::StreamableHttp { url, headers, .. } => {
+        McpTransport::StreamableHttp(transport) => {
+            let url = &transport.url;
+            let headers = &transport.headers;
             active_pid.store(0, Ordering::SeqCst);
             let custom_headers = build_http_headers(server_name, headers)?;
             let config = StreamableHttpClientTransportConfig::with_uri(url.as_str())
