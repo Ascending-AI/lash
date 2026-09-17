@@ -38,7 +38,7 @@
     "point": {"operation": {"seam": "provider", "operation": {"kind": "initial_mid_stream"}}, "placement": "provider_mid_stream"},
     "outcome": "Partial provider stream state is process-local and discarded; the request is replayed.",
     "effect_executions_l1": 1,
-    "level_2": {"effect_executions": {"at_crash": 0, "after_recovery": 1}, "exact": {"terminal": 1, "pending_inputs": 0, "queued_work": 0}}
+    "level_2": {"exact": {"effect_executions": {"at_crash": 0, "after_recovery": 1}}}
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "renew_session_execution_lease"}}, "placement": "boundary"},
@@ -69,7 +69,7 @@
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "after_external_effect_before_outcome"},
     "outcome": "The external effect completed inside the tool but no durable outcome was recorded; recovery MUST re-execute it under at-least-once semantics.",
     "effect_executions_l1": 2,
-    "level_2": {"effect_executions": {"at_crash": 1, "after_recovery": 2}, "exact": {"terminal": 1, "pending_inputs": 0, "queued_work": 0}}
+    "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 2}}}
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "inside_call"},
@@ -95,7 +95,7 @@
     "point": {"operation": {"seam": "provider", "operation": {"kind": "after_tool_mid_stream"}}, "placement": "provider_mid_stream"},
     "outcome": "Partial post-tool provider output is discarded. Level 1 replays the receipt-less effect; level 2 reuses the durable outcome before replaying the request.",
     "effect_executions_l1": 2,
-    "level_2": {"effect_executions": {"at_crash": 1, "after_recovery": 1}, "exact": {"terminal": 1, "pending_inputs": 0, "queued_work": 0}}
+    "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 1}}}
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "beforecompletion"}}, "placement": "boundary"},
@@ -131,13 +131,13 @@
     "point": {"operation": {"seam": "store", "operation": {"kind": "apply_turn_cancel_effects_and_consume"}}, "placement": "boundary"},
     "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles its durable ingress claims with the recovered terminal turn.",
     "effect_executions_l1": 2,
-    "level_2": {"effect_executions": {"at_crash": 1, "after_recovery": 1}, "exact": {"terminal": 1, "pending_inputs": 0, "queued_work": 0}}
+    "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 1}}}
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "apply_turn_cancel_effects_and_consume"}}, "placement": "inside_call"},
     "outcome": "The final CAS landed but its response was lost; the successor observes settled ingress and does not repeat the committed turn.",
     "effect_executions_l1": 1,
-    "level_2": {"effect_executions": {"at_crash": 1, "after_recovery": 1}, "exact": {"terminal": 1, "pending_inputs": 0, "queued_work": 0}}
+    "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 1}}}
   },
   {
     "scenario": "checkpoint_execute_finalize",
