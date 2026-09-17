@@ -29,6 +29,9 @@ const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const CURRENT_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-79-171f490d0eb3/postgres-expected.json",
 ];
+const IMMEDIATE_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-80-00043d08af10/postgres-expected.json",
+];
 const NEWEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-77-e102f2b9f861/postgres-expected.json",
 ];
@@ -389,24 +392,21 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("recreate the trigger subscription catalog from the authoritative DDL");
-    // The enclosing catalog uses the current causal discriminator vocabulary;
+    // The enclosing catalog uses the current session-metadata constraints;
     // only the deliberately obsolete checkpoint component remains historical.
-    let causal_constraint =
-        lash_core::store_backend_support::required_constraints::EXPECTED_CONSTRAINTS
-            .iter()
-            .map(|constraint| constraint.postgres)
-            .find(|constraint| constraint.name == "ck_session_meta_caused_by_kind")
-            .expect("registered session causal discriminator constraint");
-    sqlx::raw_sql(&format!(
-        "ALTER TABLE {} DROP CONSTRAINT {}, ADD CONSTRAINT {} CHECK ({})",
-        causal_constraint.table,
-        causal_constraint.name,
-        causal_constraint.name,
-        causal_constraint.expression,
-    ))
-    .execute(&pool)
-    .await
-    .expect("refresh refusal fixture causal vocabulary from the current schema contract");
+    for constraint in lash_core::store_backend_support::required_constraints::EXPECTED_CONSTRAINTS
+        .iter()
+        .map(|constraint| constraint.postgres)
+        .filter(|constraint| constraint.table == "lash_session_meta")
+    {
+        sqlx::raw_sql(&format!(
+            "ALTER TABLE {} DROP CONSTRAINT IF EXISTS {}, ADD CONSTRAINT {} CHECK ({})",
+            constraint.table, constraint.name, constraint.name, constraint.expression,
+        ))
+        .execute(&pool)
+        .await
+        .expect("refresh refusal fixture session-meta contract from the current schema");
+    }
     sqlx::query(
         "UPDATE lash_schema_versions
             SET version = $1

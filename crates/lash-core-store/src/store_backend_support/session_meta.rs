@@ -101,20 +101,94 @@ impl CausalColumns {
         columns
     }
 
+    /// The payload columns each `caused_by_kind` may populate — the same sets
+    /// `ck_session_meta_caused_by_family` enforces in both backends' DDL.
+    fn family_columns(kind: &str) -> Option<&'static [&'static str]> {
+        Some(match kind {
+            "turn" => &["caused_by_session_id", "caused_by_turn_id"],
+            "effect_address" => &["caused_by_effect_id"],
+            "tool_call" => &["caused_by_session_id", "caused_by_call_id"],
+            "process" => &["caused_by_process_id"],
+            "process_event" => &["caused_by_process_id", "caused_by_process_event_sequence"],
+            "trigger_occurrence" => &[
+                "caused_by_occurrence_id",
+                "caused_by_subscription_id",
+                "caused_by_subscription_incarnation",
+                "caused_by_subscription_revision",
+            ],
+            "session_node" => &["caused_by_session_id", "caused_by_node_id"],
+            _ => return None,
+        })
+    }
+
+    /// The populated payload columns, named by their stored column.
+    fn populated_fields(&self) -> Vec<&'static str> {
+        let mut fields = Vec::new();
+        if self.session_id.is_some() {
+            fields.push("caused_by_session_id");
+        }
+        if self.turn_id.is_some() {
+            fields.push("caused_by_turn_id");
+        }
+        if self.effect_id.is_some() {
+            fields.push("caused_by_effect_id");
+        }
+        if self.call_id.is_some() {
+            fields.push("caused_by_call_id");
+        }
+        if self.process_id.is_some() {
+            fields.push("caused_by_process_id");
+        }
+        if self.process_event_sequence.is_some() {
+            fields.push("caused_by_process_event_sequence");
+        }
+        if self.occurrence_id.is_some() {
+            fields.push("caused_by_occurrence_id");
+        }
+        if self.subscription_id.is_some() {
+            fields.push("caused_by_subscription_id");
+        }
+        if self.subscription_incarnation.is_some() {
+            fields.push("caused_by_subscription_incarnation");
+        }
+        if self.subscription_revision.is_some() {
+            fields.push("caused_by_subscription_revision");
+        }
+        if self.node_id.is_some() {
+            fields.push("caused_by_node_id");
+        }
+        fields
+    }
+
     fn decode(self, codec: SessionMetaCodec) -> Result<Option<CausalRef>, StoreError> {
         let Some(kind) = self.kind.as_deref() else {
+            if let Some(field) = self.populated_fields().first() {
+                return Err(codec.corrupt(format!(
+                    "causal payload column `{field}` is populated without caused_by_kind"
+                )));
+            }
             return Ok(None);
         };
+        if kind == "effect" {
+            return Err(codec.corrupt(
+                "effect_identity_format_cutover: a session relation with legacy session/effect causal identity cannot be reopened",
+            ));
+        }
+        let Some(family) = Self::family_columns(kind) else {
+            return Err(codec.corrupt(format!("unknown caused_by_kind `{kind}`")));
+        };
+        for field in self.populated_fields() {
+            if !family.contains(&field) {
+                return Err(
+                    codec.corrupt(format!("caused_by_kind `{kind}` cannot carry `{field}`"))
+                );
+            }
+        }
         let cause = match kind {
             "turn" => CausalRef::Turn {
                 session_id: codec.required(self.session_id, "caused_by_session_id")?,
                 turn_id: codec.required(self.turn_id, "caused_by_turn_id")?,
             },
-            "effect" => {
-                return Err(codec.corrupt(
-                    "effect_identity_format_cutover: a session relation with legacy session/effect causal identity cannot be reopened",
-                ));
-            }
             "effect_address" => {
                 let encoded = codec.required(self.effect_id, "caused_by_effect_address")?;
                 let address: crate::EffectAddress =
@@ -311,6 +385,9 @@ impl SessionMetaCodec {
                     &stored.fork_inheritance_processes,
                     "fork inheritance processes",
                 )?;
+                if stored.cause.decode(self)?.is_some() {
+                    return Err(self.corrupt("root relation carries a causal payload"));
+                }
                 SessionRelation::Root
             }
             "child" => {
@@ -325,6 +402,9 @@ impl SessionMetaCodec {
                 }
             }
             "fork" => {
+                if stored.cause.decode(self)?.is_some() {
+                    return Err(self.corrupt("fork relation carries a causal payload"));
+                }
                 let observer_inheritance = match stored.observer_inheritance_kind.as_deref() {
                     Some("all") => ObserverInheritance::All,
                     Some("none") => ObserverInheritance::None,
@@ -547,6 +627,113 @@ mod identity_tests {
                 .decode(codec)
                 .expect("current effect address decodes"),
             Some(CausalRef::Effect { address })
+        );
+    }
+
+    #[test]
+    fn causal_columns_refuse_payloads_outside_their_family() {
+        let codec = SessionMetaCodec::new("test integer");
+
+        let kindless = CausalColumns {
+            session_id: Some(SessionId::from("cause-session")),
+            ..CausalColumns::default()
+        };
+        let error = kindless
+            .decode(codec)
+            .expect_err("payload without caused_by_kind must fail closed");
+        assert!(error.to_string().contains("without caused_by_kind"));
+
+        let unknown = CausalColumns {
+            kind: Some("timer".to_string()),
+            ..CausalColumns::default()
+        };
+        let error = unknown
+            .decode(codec)
+            .expect_err("unknown caused_by_kind must fail closed");
+        assert!(error.to_string().contains("unknown caused_by_kind"));
+
+        let crossed = CausalColumns {
+            kind: Some("turn".to_string()),
+            session_id: Some(SessionId::from("cause-session")),
+            turn_id: Some(TurnId::from("cause-turn")),
+            node_id: Some("stray-node".to_string()),
+            ..CausalColumns::default()
+        };
+        let error = crossed
+            .decode(codec)
+            .expect_err("out-of-family payload column must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot carry `caused_by_node_id`")
+        );
+    }
+
+    #[test]
+    fn non_child_relations_refuse_causal_payloads() {
+        let codec = SessionMetaCodec::new("test integer");
+        let cause = CausalColumns::encode(Some(&CausalRef::Turn {
+            session_id: SessionId::from("cause-session"),
+            turn_id: TurnId::from("cause-turn"),
+        }));
+        let stored = |relation_kind: &str| StoredRelation {
+            session_id: SessionId::from("session"),
+            relation_kind: relation_kind.to_string(),
+            parent_session_id: None,
+            cause: CausalColumns {
+                kind: cause.kind.clone(),
+                session_id: cause.session_id.clone(),
+                turn_id: cause.turn_id.clone(),
+                ..CausalColumns::default()
+            },
+            source_session_id: Some(SessionId::from("source-session")),
+            source_node_id: Some("source-node".to_string()),
+            observer_inheritance_kind: Some("none".to_string()),
+            pending_observer_intents: Vec::new(),
+            fork_inheritance_processes: Vec::new(),
+        };
+        let error = codec
+            .decode(stored("root"))
+            .expect_err("caused root relation must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("root relation carries a causal payload")
+        );
+        let error = codec
+            .decode(stored("fork"))
+            .expect_err("caused fork relation must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("fork relation carries a causal payload")
+        );
+    }
+
+    #[test]
+    fn causal_u64_text_columns_round_trip_the_full_range() {
+        let codec = SessionMetaCodec::new("test integer");
+        let cause = CausalRef::ProcessEvent {
+            process_id: ProcessId::from("process"),
+            sequence: u64::MAX,
+        };
+        assert_eq!(
+            CausalColumns::encode(Some(&cause))
+                .decode(codec)
+                .expect("u64::MAX process event sequence decodes"),
+            Some(cause)
+        );
+        let cause = CausalRef::TriggerOccurrence {
+            occurrence_id: "occurrence".to_string(),
+            subscription_id: None,
+            subscription_incarnation: None,
+            subscription_revision: Some(u64::MAX),
+        };
+        assert_eq!(
+            CausalColumns::encode(Some(&cause))
+                .decode(codec)
+                .expect("u64::MAX subscription revision decodes"),
+            Some(cause)
         );
     }
 }
