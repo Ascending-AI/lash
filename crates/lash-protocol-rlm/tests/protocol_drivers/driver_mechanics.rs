@@ -1145,8 +1145,22 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             },
         ]
     );
-    let (_, checkpoint) = find_checkpoint(&effects).expect("after-work checkpoint");
-    assert_eq!(checkpoint, CheckpointKind::AfterWork);
+    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("terminal checkpoint");
+    // A cancelled call record is an uncatchable host terminal: the run it was
+    // dispatched for is over, so the turn checkpoints BeforeCompletion and
+    // settles cancelled instead of re-prompting the model.
+    assert_eq!(checkpoint, CheckpointKind::BeforeCompletion);
+    restored.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: lash_sansio::CheckpointDelivery::default(),
+    });
+    let settled = drain_effects(&mut restored);
+    assert!(matches!(
+        find_turn_outcome(&settled),
+        Some(lash_sansio::TurnOutcome::Stopped(
+            lash_sansio::TurnStop::Cancelled { .. }
+        ))
+    ));
 }
 
 // === FIG-1407: the no-progress budget ===
