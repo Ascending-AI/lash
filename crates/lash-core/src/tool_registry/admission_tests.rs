@@ -494,7 +494,7 @@ async fn binding_only_refresh_routes_to_the_new_source_and_fences_stale_work() {
         .await;
     assert_eq!(initial.value_for_projection(), json!("source-a"));
     let before = registry.export_state();
-    let state_revision = registry.inner.read_recover().state_revision;
+    let write_revision = registry.inner.read_recover().write_revision;
     gate.arm();
     let stale_refresh = {
         let registry = registry.clone();
@@ -507,7 +507,7 @@ async fn binding_only_refresh_routes_to_the_new_source_and_fences_stale_work() {
     registry
         .refresh_sources()
         .expect("binding-only source refresh");
-    let refreshed_state_revision = registry.inner.read_recover().state_revision;
+    let refreshed_write_revision = registry.inner.read_recover().write_revision;
 
     release.wait();
     stale_refresh
@@ -518,9 +518,9 @@ async fn binding_only_refresh_routes_to_the_new_source_and_fences_stale_work() {
     assert_eq!(registry.generation(), before.generation());
     assert_eq!(registry.export_state().entries(), before.entries());
     assert_eq!(
-        refreshed_state_revision,
-        state_revision + 1,
-        "a private binding update must advance the private freshness revision"
+        refreshed_write_revision,
+        write_revision + 1,
+        "a private binding update must advance the write fence"
     );
     let result = registry
         .execute_by_id(
@@ -732,7 +732,7 @@ fn generation_overflow_leaves_source_and_surface_unmodified() {
 }
 
 #[test]
-fn source_revision_overflow_leaves_source_and_surface_unmodified() {
+fn write_revision_overflow_leaves_source_and_surface_unmodified() {
     let registry = ToolRegistry::empty();
     registry
         .upsert_source(Arc::new(MutableAdmissionSource::ungated(
@@ -740,7 +740,7 @@ fn source_revision_overflow_leaves_source_and_surface_unmodified() {
             Arc::new(Mutex::new(vec!["existing".to_string()])),
         )))
         .expect("baseline source admission");
-    registry.inner.write_recover().source_revision = u64::MAX;
+    registry.inner.write_recover().write_revision = u64::MAX;
     let before = registry.export_state();
     let generation = registry.generation();
 
@@ -749,10 +749,10 @@ fn source_revision_overflow_leaves_source_and_surface_unmodified() {
             "overflow",
             Arc::new(Mutex::new(vec!["overflow".to_string()])),
         )))
-        .expect_err("source revision overflow must refuse admission");
+        .expect_err("write revision overflow must refuse admission");
 
     assert!(
-        matches!(error, ReconfigureError::Validation(message) if message.contains("source revision overflow"))
+        matches!(error, ReconfigureError::Validation(message) if message.contains("write revision overflow"))
     );
     let authority = registry.inner.read_recover();
     assert_eq!(authority.sources.len(), 1);
@@ -761,14 +761,14 @@ fn source_revision_overflow_leaves_source_and_surface_unmodified() {
             .sources
             .contains_key(&ToolSourceKey::Leaf("existing".to_string()))
     );
-    assert_eq!(authority.source_revision, u64::MAX);
+    assert_eq!(authority.write_revision, u64::MAX);
     drop(authority);
     assert_eq!(registry.export_state().entries(), before.entries());
     assert_eq!(registry.generation(), generation);
 }
 
 #[test]
-fn state_revision_overflow_leaves_restored_surface_unmodified() {
+fn write_revision_overflow_leaves_restored_surface_unmodified() {
     let names = Arc::new(Mutex::new(vec!["alpha".to_string()]));
     let registry = ToolRegistry::empty();
     registry
@@ -780,16 +780,161 @@ fn state_revision_overflow_leaves_restored_surface_unmodified() {
     restored
         .set_membership(&ToolId::from("tool:alpha"), false)
         .expect("edit restored curation");
-    registry.inner.write_recover().state_revision = u64::MAX;
+    registry.inner.write_recover().write_revision = u64::MAX;
 
     let error = registry
         .restore_state(restored)
-        .expect_err("state revision overflow must refuse restore");
+        .expect_err("write revision overflow must refuse restore");
 
     assert!(
-        matches!(error, ReconfigureError::Validation(message) if message.contains("state revision overflow"))
+        matches!(error, ReconfigureError::Validation(message) if message.contains("write revision overflow"))
     );
     assert_eq!(registry.export_state().entries(), before.entries());
     assert_eq!(registry.generation(), generation);
-    assert_eq!(registry.inner.read_recover().state_revision, u64::MAX);
+    assert_eq!(registry.inner.read_recover().write_revision, u64::MAX);
+}
+
+/// Every mutator must advance the single write fence exactly once per write —
+/// including writes that leave the admitted surface and generation untouched.
+/// `generation` is the public surface identity and is deliberately *not* part
+/// of this fence.
+#[test]
+fn every_mutator_advances_the_write_fence_once_per_write() {
+    fn write_revision(registry: &ToolRegistry) -> u64 {
+        registry.inner.read_recover().write_revision
+    }
+
+    let registry = ToolRegistry::empty();
+    assert_eq!(write_revision(&registry), 0);
+
+    // Source admission writes the source map and the surface.
+    registry
+        .upsert_source(Arc::new(MutableAdmissionSource::ungated(
+            "first",
+            Arc::new(Mutex::new(vec!["alpha".to_string()])),
+        )))
+        .expect("first source admission");
+    let mut observed = write_revision(&registry);
+    assert_eq!(observed, 1);
+
+    // Re-admitting an identical source still writes the source map even
+    // though the admitted surface and generation do not move.
+    let generation = registry.generation();
+    registry
+        .upsert_source(Arc::new(MutableAdmissionSource::ungated(
+            "first",
+            Arc::new(Mutex::new(vec!["alpha".to_string()])),
+        )))
+        .expect("identical re-admission");
+    let next = write_revision(&registry);
+    assert_eq!(next, observed + 1);
+    assert_eq!(registry.generation(), generation);
+    observed = next;
+
+    // A generation-matched apply writes the surface.
+    registry
+        .apply_state(registry.export_state())
+        .expect("apply_state at the current generation");
+    let next = write_revision(&registry);
+    assert_eq!(next, observed + 1);
+    observed = next;
+
+    // Restoring the identical snapshot still writes state even though the
+    // surface and generation stay put.
+    let generation = registry.generation();
+    registry
+        .restore_state(registry.export_state())
+        .expect("identical restore");
+    let next = write_revision(&registry);
+    assert_eq!(next, observed + 1);
+    assert_eq!(registry.generation(), generation);
+
+    // Removing a source that bound no tools changes only the source map.
+    registry
+        .upsert_source(Arc::new(MutableAdmissionSource::ungated(
+            "empty",
+            Arc::new(Mutex::new(vec![])),
+        )))
+        .expect("empty source admission");
+    let observed = write_revision(&registry);
+    let generation = registry.generation();
+    registry
+        .remove_source_id("empty")
+        .expect("remove the empty source");
+    let next = write_revision(&registry);
+    assert_eq!(next, observed + 1);
+    assert_eq!(
+        registry.generation(),
+        generation,
+        "no surface entries moved"
+    );
+
+    // Pinning copies the fence position and the overlay upsert commits once
+    // on the pinned registry.
+    let pinned = registry
+        .pin_session_surface(true, vec![])
+        .expect("pinned session surface");
+    assert_eq!(write_revision(&pinned), write_revision(&registry) + 1);
+}
+
+/// `add_tool_provider` performs two writes — the live-source id bump and the
+/// source admission — and each must move the fence.
+#[test]
+fn add_tool_provider_advances_the_fence_once_per_write() {
+    let registry = ToolRegistry::empty();
+    facade_ops::ToolRegistryFacadeOps::add_tool_provider(
+        &registry,
+        Arc::new(RoutedProvider { result: "late" }),
+    )
+    .expect("provider admission");
+    assert_eq!(registry.inner.read_recover().write_revision, 2);
+}
+
+/// `refresh_and_pin_sources` captures the source map outside the write guard;
+/// the single write fence must force the retry that re-reads a source
+/// admitted while the capture was in flight, or the pinned registry would
+/// silently lose it.
+#[test]
+fn refresh_cannot_lose_a_source_admitted_mid_capture() {
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let gate = Arc::new(MutableAdmissionSource::unarmed_gate(
+        "gated",
+        Arc::new(Mutex::new(vec!["alpha".to_string()])),
+        Arc::clone(&entered),
+        Arc::clone(&release),
+    ));
+    let registry = ToolRegistry::empty();
+    registry
+        .upsert_source(Arc::clone(&gate) as Arc<dyn ToolSourceExecutor>)
+        .expect("gate source admission");
+    gate.arm();
+
+    let refresher = {
+        let registry = registry.clone();
+        std::thread::spawn(move || registry.refresh_and_pin_sources())
+    };
+    entered.wait();
+    registry
+        .upsert_source(Arc::new(MutableAdmissionSource::ungated(
+            "late",
+            Arc::new(Mutex::new(vec!["beta".to_string()])),
+        )))
+        .expect("mid-capture admission lands");
+    release.wait();
+    let pinned = refresher
+        .join()
+        .expect("refresh thread")
+        .expect("refresh retries the moved fence");
+    let authority = pinned.inner.read_recover();
+    assert!(
+        authority
+            .sources
+            .contains_key(&ToolSourceKey::Leaf("late".to_string())),
+        "the pinned registry must carry the source admitted mid-capture"
+    );
+    assert!(
+        authority.state.surface.get_by_name("beta").is_some(),
+        "the pinned surface must admit the late source's tool"
+    );
 }

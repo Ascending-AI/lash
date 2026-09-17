@@ -56,8 +56,7 @@ impl ToolRegistry {
     pub(crate) fn empty() -> Self {
         Self {
             inner: Arc::new(RwLock::new(ToolRegistryInner {
-                source_revision: 0,
-                state_revision: 0,
+                write_revision: 0,
                 sources: BTreeMap::new(),
                 granted_sources: None,
                 state: ToolRegistryState {
@@ -92,11 +91,10 @@ impl ToolRegistry {
 
     pub(crate) fn apply_state(&self, next: ToolState) -> Result<u64, ReconfigureError> {
         loop {
-            let (source_revision, state_revision, current_generation, sources) = {
+            let (write_revision, current_generation, sources) = {
                 let authority = self.inner.read_recover();
                 (
-                    authority.source_revision,
-                    authority.state_revision,
+                    authority.write_revision,
                     authority.state.generation,
                     authority.sources.clone(),
                 )
@@ -116,40 +114,22 @@ impl ToolRegistry {
             ) {
                 Ok(rebound) => rebound,
                 Err(error) => {
-                    let inner = self.inner.read_recover();
-                    if inner.source_revision != source_revision
-                        || inner.state_revision != state_revision
-                    {
+                    if self.inputs_changed(write_revision) {
                         continue;
-                    }
-                    if inner.state.generation != next.generation {
-                        return Err(ReconfigureError::GenerationMismatch {
-                            expected: next.generation,
-                            actual: inner.state.generation,
-                        });
                     }
                     return Err(error);
                 }
             };
 
             let mut authority = self.inner.write_recover();
-            if authority.source_revision != source_revision
-                || authority.state_revision != state_revision
-            {
+            if authority.write_revision != write_revision {
                 continue;
             }
-            if authority.state.generation != next.generation {
-                return Err(ReconfigureError::GenerationMismatch {
-                    expected: next.generation,
-                    actual: authority.state.generation,
-                });
-            }
             let generation = reconciled_generation(authority.state.generation, true)?;
-            let next_state_revision = checked_state_revision(authority.state_revision)?;
+            authority.commit()?;
             authority.state.surface = rebound.surface;
             authority.state.surface.debug_assert_invariant();
             authority.state.generation = generation;
-            authority.state_revision = next_state_revision;
             return Ok(generation);
         }
     }
@@ -183,14 +163,9 @@ impl ToolRegistry {
         snapshot: ToolState,
     ) -> Result<ToolRestoreReport, ReconfigureError> {
         loop {
-            let (source_revision, state_revision, state_generation, sources) = {
+            let (write_revision, sources) = {
                 let authority = self.inner.read_recover();
-                (
-                    authority.source_revision,
-                    authority.state_revision,
-                    authority.state.generation,
-                    authority.sources.clone(),
-                )
+                (authority.write_revision, authority.sources.clone())
             };
             let rebound = match reconcile_tool_state_entries(
                 snapshot.entries(),
@@ -200,11 +175,7 @@ impl ToolRegistry {
             ) {
                 Ok(rebound) => rebound,
                 Err(error) => {
-                    if self.reconciliation_inputs_changed(
-                        source_revision,
-                        state_revision,
-                        state_generation,
-                    ) {
+                    if self.inputs_changed(write_revision) {
                         continue;
                     }
                     return Err(error);
@@ -212,18 +183,14 @@ impl ToolRegistry {
             };
 
             let mut authority = self.inner.write_recover();
-            if authority.source_revision != source_revision
-                || authority.state_revision != state_revision
-                || authority.state.generation != state_generation
-            {
+            if authority.write_revision != write_revision {
                 continue;
             }
             let generation = reconciled_generation(snapshot.generation(), rebound.changed)?;
-            let next_state_revision = checked_state_revision(authority.state_revision)?;
+            authority.commit()?;
             authority.state.surface = rebound.surface;
             authority.state.surface.debug_assert_invariant();
             authority.state.generation = generation;
-            authority.state_revision = next_state_revision;
             return Ok(ToolRestoreReport {
                 generation,
                 orphaned: rebound.orphaned,
@@ -275,7 +242,6 @@ impl ToolRegistry {
         if !authority.sources.contains_key(&source_key) {
             return Err(ReconfigureError::UnknownSource(source_id.to_string()));
         }
-        let source_revision = checked_source_revision(authority.source_revision)?;
         let mut surface = authority.state.surface.clone();
         let previous = export_tool_state_entries(&surface);
         let removed_ids = surface
@@ -303,20 +269,16 @@ impl ToolRegistry {
         let private_changed = surface != authority.state.surface;
         debug_assert!(!public_changed || private_changed);
         let generation = reconciled_generation(authority.state.generation, public_changed)?;
-        let state_revision = private_changed
-            .then(|| checked_state_revision(authority.state_revision))
-            .transpose()?;
 
+        authority.commit()?;
         let retired = authority.sources.remove(&source_key);
         let retired_granted = authority
             .granted_sources
             .as_mut()
             .and_then(|sources| sources.remove(&source_key));
-        authority.source_revision = source_revision;
-        if let Some(state_revision) = state_revision {
+        if private_changed {
             authority.state.surface = surface;
             authority.state.generation = generation;
-            authority.state_revision = state_revision;
         }
         drop(authority);
         drop(retired);
@@ -342,13 +304,9 @@ impl ToolRegistry {
         validate_unique_manifests(&manifests)?;
 
         loop {
-            let (source_revision, state_revision, mut next_state) = {
+            let (write_revision, mut next_state) = {
                 let authority = self.inner.read_recover();
-                (
-                    authority.source_revision,
-                    authority.state_revision,
-                    authority.state.clone(),
-                )
+                (authority.write_revision, authority.state.clone())
             };
             let rebuilt = (|| {
                 let curated = next_state
@@ -381,11 +339,7 @@ impl ToolRegistry {
             let public_changed = match rebuilt {
                 Ok(changed) => changed,
                 Err(error) => {
-                    if self.reconciliation_inputs_changed(
-                        source_revision,
-                        state_revision,
-                        next_state.generation,
-                    ) {
+                    if self.inputs_changed(write_revision) {
                         continue;
                     }
                     return Err(error);
@@ -393,19 +347,13 @@ impl ToolRegistry {
             };
 
             let mut authority = self.inner.write_recover();
-            if authority.source_revision != source_revision
-                || authority.state_revision != state_revision
-                || authority.state.generation != next_state.generation
-            {
+            if authority.write_revision != write_revision {
                 continue;
             }
-            let next_source_revision = checked_source_revision(authority.source_revision)?;
             let private_changed = authority.state.surface != next_state.surface;
             debug_assert!(!public_changed || private_changed);
             let generation = reconciled_generation(authority.state.generation, public_changed)?;
-            let next_state_revision = private_changed
-                .then(|| checked_state_revision(authority.state_revision))
-                .transpose()?;
+            authority.commit()?;
             let retired = authority
                 .sources
                 .insert(source_key.clone(), Arc::clone(&source));
@@ -413,11 +361,9 @@ impl ToolRegistry {
                 .granted_sources
                 .as_mut()
                 .and_then(|sources| sources.insert(source_key.clone(), Arc::clone(&live_source)));
-            authority.source_revision = next_source_revision;
-            if let Some(next_state_revision) = next_state_revision {
+            if private_changed {
                 authority.state.surface = next_state.surface;
                 authority.state.generation = generation;
-                authority.state_revision = next_state_revision;
             }
             drop(authority);
             drop(retired);
@@ -432,11 +378,10 @@ impl ToolRegistry {
     ) -> Result<u64, ReconfigureError> {
         let source_key = source.source_key();
         loop {
-            let (source_revision, state_revision, mut sources, snapshot) = {
+            let (write_revision, mut sources, snapshot) = {
                 let authority = self.inner.read_recover();
                 (
-                    authority.source_revision,
-                    authority.state_revision,
+                    authority.write_revision,
                     authority.sources.clone(),
                     ToolState::new(
                         authority.state.generation,
@@ -447,11 +392,7 @@ impl ToolRegistry {
             if matches!(source_key, ToolSourceKey::Orchestrating(_))
                 && sources.contains_key(&source_key)
             {
-                if self.reconciliation_inputs_changed(
-                    source_revision,
-                    state_revision,
-                    snapshot.generation,
-                ) {
+                if self.inputs_changed(write_revision) {
                     continue;
                 }
                 return Err(ReconfigureError::Validation(format!(
@@ -467,11 +408,7 @@ impl ToolRegistry {
             ) {
                 Ok(reconciled) => reconciled,
                 Err(error) => {
-                    if self.reconciliation_inputs_changed(
-                        source_revision,
-                        state_revision,
-                        snapshot.generation,
-                    ) {
+                    if self.inputs_changed(write_revision) {
                         continue;
                     }
                     return Err(error);
@@ -479,28 +416,20 @@ impl ToolRegistry {
             };
 
             let mut authority = self.inner.write_recover();
-            if authority.source_revision != source_revision
-                || authority.state_revision != state_revision
-                || authority.state.generation != snapshot.generation
-            {
+            if authority.write_revision != write_revision {
                 continue;
             }
-            let next_source_revision = checked_source_revision(authority.source_revision)?;
             let private_changed = authority.state.surface != reconciled.surface;
             debug_assert!(!reconciled.changed || private_changed);
             let generation = reconciled_generation(authority.state.generation, reconciled.changed)?;
-            let next_state_revision = private_changed
-                .then(|| checked_state_revision(authority.state_revision))
-                .transpose()?;
+            authority.commit()?;
             let retired = authority
                 .sources
                 .insert(source_key.clone(), Arc::clone(&source));
-            authority.source_revision = next_source_revision;
-            if let Some(next_state_revision) = next_state_revision {
+            if private_changed {
                 authority.state.surface = reconciled.surface;
                 authority.state.surface.debug_assert_invariant();
                 authority.state.generation = generation;
-                authority.state_revision = next_state_revision;
             }
             drop(authority);
             drop(retired);
@@ -517,11 +446,10 @@ impl ToolRegistry {
         // advertisements and their resident routes are captured together;
         // dispatch lookup on the returned registry reads only that snapshot.
         loop {
-            let (source_revision, state_revision, live_sources, snapshot) = {
+            let (write_revision, live_sources, snapshot) = {
                 let authority = self.inner.read_recover();
                 (
-                    authority.source_revision,
-                    authority.state_revision,
+                    authority.write_revision,
                     authority
                         .granted_sources
                         .as_ref()
@@ -540,11 +468,7 @@ impl ToolRegistry {
             let captures = match captures {
                 Ok(captures) => captures,
                 Err(error) => {
-                    if self.reconciliation_inputs_changed(
-                        source_revision,
-                        state_revision,
-                        snapshot.generation,
-                    ) {
+                    if self.inputs_changed(write_revision) {
                         continue;
                     }
                     return Err(error);
@@ -568,11 +492,7 @@ impl ToolRegistry {
             let sources = match sources {
                 Ok(sources) => sources,
                 Err(error) => {
-                    if self.reconciliation_inputs_changed(
-                        source_revision,
-                        state_revision,
-                        snapshot.generation,
-                    ) {
+                    if self.inputs_changed(write_revision) {
                         continue;
                     }
                     return Err(error);
@@ -586,11 +506,7 @@ impl ToolRegistry {
             ) {
                 Ok(reconciled) => reconciled,
                 Err(error) => {
-                    if self.reconciliation_inputs_changed(
-                        source_revision,
-                        state_revision,
-                        snapshot.generation,
-                    ) {
+                    if self.inputs_changed(write_revision) {
                         continue;
                     }
                     return Err(error);
@@ -598,30 +514,24 @@ impl ToolRegistry {
             };
 
             let mut authority = self.inner.write_recover();
-            if authority.source_revision != source_revision
-                || authority.state_revision != state_revision
-                || authority.state.generation != snapshot.generation
-            {
+            if authority.write_revision != write_revision {
                 continue;
             }
             let private_changed = authority.state.surface != reconciled.surface;
             debug_assert!(!reconciled.changed || private_changed);
             let generation = reconciled_generation(authority.state.generation, reconciled.changed)?;
             if private_changed {
-                let next_state_revision = checked_state_revision(authority.state_revision)?;
+                authority.commit()?;
                 authority.state.surface = reconciled.surface;
                 authority.state.surface.debug_assert_invariant();
                 authority.state.generation = generation;
-                authority.state_revision = next_state_revision;
             }
-            let pinned_source_revision = authority.source_revision;
-            let pinned_state_revision = authority.state_revision;
+            let pinned_revision = authority.write_revision;
             let pinned_state = authority.state.clone();
             drop(authority);
             return Ok(Self {
                 inner: Arc::new(RwLock::new(ToolRegistryInner {
-                    source_revision: pinned_source_revision,
-                    state_revision: pinned_state_revision,
+                    write_revision: pinned_revision,
                     sources,
                     granted_sources: Some(live_sources),
                     state: pinned_state,
@@ -630,16 +540,12 @@ impl ToolRegistry {
         }
     }
 
-    fn reconciliation_inputs_changed(
-        &self,
-        source_revision: u64,
-        state_revision: u64,
-        generation: u64,
-    ) -> bool {
-        let inner = self.inner.read_recover();
-        inner.source_revision != source_revision
-            || inner.state_revision != state_revision
-            || inner.state.generation != generation
+    /// Reports whether the registry moved since `write_revision` was observed.
+    /// One counter covers every mutation — source map, granted sources, and
+    /// private state alike — because [`ToolRegistryInner::commit`] is the only
+    /// bump site.
+    fn inputs_changed(&self, write_revision: u64) -> bool {
+        self.inner.read_recover().write_revision != write_revision
     }
 
     pub(crate) fn fork_with_state(&self, snapshot: ToolState) -> Result<Self, ReconfigureError> {
@@ -653,8 +559,7 @@ impl ToolRegistry {
         let generation = reconciled_generation(snapshot.generation.max(1), rebound.changed)?;
         Ok(Self {
             inner: Arc::new(RwLock::new(ToolRegistryInner {
-                source_revision: 0,
-                state_revision: 0,
+                write_revision: 0,
                 sources,
                 granted_sources: None,
                 state: ToolRegistryState {
@@ -665,18 +570,6 @@ impl ToolRegistry {
             })),
         })
     }
-}
-
-fn checked_source_revision(source_revision: u64) -> Result<u64, ReconfigureError> {
-    source_revision.checked_add(1).ok_or_else(|| {
-        ReconfigureError::Validation("tool registry source revision overflow".to_string())
-    })
-}
-
-pub(super) fn checked_state_revision(state_revision: u64) -> Result<u64, ReconfigureError> {
-    state_revision.checked_add(1).ok_or_else(|| {
-        ReconfigureError::Validation("tool registry state revision overflow".to_string())
-    })
 }
 
 fn reconciled_generation(generation: u64, changed: bool) -> Result<u64, ReconfigureError> {
