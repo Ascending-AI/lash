@@ -22,7 +22,7 @@ pub(super) struct HeldLeaseIdentity {
 /// all-or-none. Release zeroes the timing columns exactly like the durable
 /// `= 0` writes, so a released row reports its own fields rather than a
 /// fabricated value.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct InMemorySessionExecutionLease {
     pub(super) holder: Option<HeldLeaseIdentity>,
     pub(super) fencing_token: u64,
@@ -39,18 +39,6 @@ pub(super) struct HeldLeaseFields<'a> {
     pub(super) claimed_at_epoch_ms: u64,
     pub(super) lease_term_ms: u64,
     pub(super) expires_at_epoch_ms: u64,
-}
-
-impl Default for InMemorySessionExecutionLease {
-    fn default() -> Self {
-        Self {
-            holder: None,
-            fencing_token: 0,
-            claimed_at_epoch_ms: 0,
-            lease_term_ms: 0,
-            expires_at_epoch_ms: 0,
-        }
-    }
 }
 
 impl InMemorySessionExecutionLease {
