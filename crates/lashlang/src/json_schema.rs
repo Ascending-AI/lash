@@ -463,32 +463,22 @@ fn import_enum(values: &Value) -> TypeExpr {
     union_type(variants)
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the match on unique.len() above establishes exactly one variant"
-)]
 fn union_type(variants: Vec<TypeExpr>) -> TypeExpr {
-    let mut flattened = Vec::new();
-    for variant in variants {
-        match variant {
-            TypeExpr::Any => return TypeExpr::Any,
-            TypeExpr::Union(nested) => flattened.extend(nested),
-            variant => flattened.push(variant),
-        }
+    // `anyOf` containing `Any` widens to `Any` outright; only top-level
+    // variants are checked, matching the flatten-below behavior a nested
+    // union's `Any` has (it stays a member).
+    if variants
+        .iter()
+        .any(|variant| matches!(variant, TypeExpr::Any))
+    {
+        return TypeExpr::Any;
     }
-    let mut unique = Vec::new();
-    for variant in flattened {
-        if !unique.contains(&variant) {
-            unique.push(variant);
-        }
-    }
-    match unique.len() {
+    match crate::UnionMembers::deduplicated(variants) {
+        Ok(members) => TypeExpr::Union(members),
         // Unlike the linker's empty-list element union, this is the
         // JSON-Schema importer domain: an empty `anyOf` widens to `Any`.
         // The divergence is intentional and pinned separately (FIG-1878).
-        0 => TypeExpr::Any,
-        1 => unique.pop().expect("single union variant"),
-        _ => TypeExpr::Union(unique),
+        Err(unique) => unique.into_iter().next().unwrap_or(TypeExpr::Any),
     }
 }
 
@@ -580,7 +570,7 @@ mod tests {
         );
         assert_eq!(
             import_schema(&json!({ "enum": ["ready", null] })),
-            TypeExpr::Union(vec![TypeExpr::Enum(vec!["ready".into()]), TypeExpr::Null])
+            TypeExpr::union(vec![TypeExpr::Enum(vec!["ready".into()]), TypeExpr::Null])
         );
     }
 
@@ -588,13 +578,13 @@ mod tests {
     fn imports_nullable_type_arrays_and_union_keywords() {
         assert_eq!(
             import_schema(&json!({ "type": ["string", "null"] })),
-            TypeExpr::Union(vec![TypeExpr::Str, TypeExpr::Null])
+            TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Null])
         );
         for keyword in ["anyOf", "oneOf"] {
             let schema = json!({ (keyword): [{ "type": "integer" }, { "type": "null" }] });
             assert_eq!(
                 import_schema(&schema),
-                TypeExpr::Union(vec![TypeExpr::Int, TypeExpr::Null])
+                TypeExpr::union(vec![TypeExpr::Int, TypeExpr::Null])
             );
         }
     }

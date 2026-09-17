@@ -33,8 +33,8 @@ pub use ast::{
     LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl,
     ProcessLiteralExpr, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessSignatureError,
     ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
-    check_ast_nesting_depth, fold_expr_children, format_type_expr, lifted_process_identity,
-    validate_ast, walk_expr,
+    UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
+    lifted_process_identity, validate_ast, walk_expr,
 };
 
 /// Names of every source Lashlang builtin, in registry order.

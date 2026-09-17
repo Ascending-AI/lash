@@ -647,7 +647,7 @@ fn linked_module_accepts_button_trigger_source_constructor() {
                 vec![
                     TypeField {
                         name: "button".into(),
-                        ty: TypeExpr::Union(vec![
+                        ty: TypeExpr::union(vec![
                             TypeExpr::Enum(vec!["Red".into()]),
                             TypeExpr::Enum(vec!["Blue".into()]),
                         ]),

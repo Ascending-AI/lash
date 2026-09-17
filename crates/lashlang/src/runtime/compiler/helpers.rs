@@ -452,7 +452,7 @@ mod tests {
                 ty: TypeExpr::Int,
                 optional: false,
             }]),
-            TypeExpr::Union(vec![TypeExpr::Str, TypeExpr::Null]),
+            TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Null]),
             TypeExpr::Process(crate::ProcessType::known(
                 crate::ProcessSignature::try_new(Vec::new(), TypeExpr::Str).unwrap(),
             )),

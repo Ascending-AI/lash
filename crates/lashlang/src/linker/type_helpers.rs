@@ -256,27 +256,13 @@ pub(super) fn direct_call_input_field<'a>(args: &'a [Expr], input_field: &str) -
 }
 
 pub(super) fn union_type(items: Vec<TypeExpr>) -> TypeExpr {
-    let mut flattened = Vec::new();
-    for item in items {
-        match item {
-            TypeExpr::Union(items) => flattened.extend(items),
-            other => flattened.push(other),
-        }
-    }
-    let mut unique = Vec::new();
-    for item in flattened {
-        if !unique.contains(&item) {
-            unique.push(item);
-        }
-    }
-    match unique.as_slice() {
+    match crate::UnionMembers::deduplicated(items) {
+        Ok(members) => TypeExpr::Union(members),
         // `lower_list` reaches this path for an empty list. Its element type
         // is therefore the empty-list sentinel `Null`; the JSON-Schema
         // importer deliberately differs because it normalizes a different
         // domain (FIG-1878).
-        [] => TypeExpr::Null,
-        [one] => one.clone(),
-        _ => TypeExpr::Union(unique),
+        Err(unique) => unique.into_iter().next().unwrap_or(TypeExpr::Null),
     }
 }
 

@@ -1163,9 +1163,119 @@ pub enum TypeExpr {
     Process(ProcessType),
     TriggerHandle(Box<TypeExpr>),
     /// Union of alternative type shapes, e.g. `str | int | null`.
-    /// Always has two or more variants; single-variant parses collapse
-    /// to the underlying `TypeExpr` in the parser.
-    Union(Vec<TypeExpr>),
+    Union(UnionMembers),
+}
+
+/// The members of a [`TypeExpr::Union`]: two or more by construction.
+///
+/// A union of one is that member and a union of zero is meaningless, so
+/// those states are unrepresentable instead of carried as a degenerate
+/// `Union` the artifact encoding would count and write. Build one through
+/// [`UnionMembers::new`] when the members are already normalized, or
+/// [`UnionMembers::deduplicated`] to flatten nested unions and drop
+/// duplicates first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnionMembers(Vec<TypeExpr>);
+
+impl UnionMembers {
+    /// Wraps `members` when it holds at least two type expressions.
+    pub fn new(members: Vec<TypeExpr>) -> Option<Self> {
+        (members.len() >= 2).then_some(Self(members))
+    }
+
+    /// Flattens nested unions and drops duplicate members (first-seen
+    /// order). `Err` hands back the normalized remainder — zero or one
+    /// member — for the caller's collapse rule.
+    pub fn deduplicated(members: Vec<TypeExpr>) -> Result<Self, Vec<TypeExpr>> {
+        let mut flattened = Vec::new();
+        for member in members {
+            match member {
+                TypeExpr::Union(nested) => flattened.extend(nested),
+                member => flattened.push(member),
+            }
+        }
+        let mut unique: Vec<TypeExpr> = Vec::new();
+        for member in flattened {
+            if !unique.contains(&member) {
+                unique.push(member);
+            }
+        }
+        if unique.len() >= 2 {
+            Ok(Self(unique))
+        } else {
+            Err(unique)
+        }
+    }
+
+    /// Maps each member. The result still holds at least two because the
+    /// map preserves member count.
+    pub fn map(&self, f: impl Fn(&TypeExpr) -> TypeExpr) -> Self {
+        Self(self.0.iter().map(f).collect())
+    }
+
+    pub fn as_slice(&self) -> &[TypeExpr] {
+        &self.0
+    }
+
+    pub fn into_vec(self) -> Vec<TypeExpr> {
+        self.0
+    }
+}
+
+impl std::ops::Deref for UnionMembers {
+    type Target = [TypeExpr];
+
+    fn deref(&self) -> &[TypeExpr] {
+        &self.0
+    }
+}
+
+impl IntoIterator for UnionMembers {
+    type Item = TypeExpr;
+    type IntoIter = std::vec::IntoIter<TypeExpr>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a UnionMembers {
+    type Item = &'a TypeExpr;
+    type IntoIter = std::slice::Iter<'a, TypeExpr>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+/// Members serialize as the same bare sequence `Union(Vec<TypeExpr>)`
+/// wrote; decoding re-validates the two-member floor.
+impl Serialize for UnionMembers {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for UnionMembers {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let members = Vec::<TypeExpr>::deserialize(deserializer)?;
+        Self::new(members)
+            .ok_or_else(|| serde::de::Error::custom("a union type needs at least two members"))
+    }
+}
+
+impl TypeExpr {
+    /// Builds a union from member candidates: nested unions flatten and
+    /// duplicates drop. With fewer than two distinct members remaining
+    /// this collapses — one member to itself, none to `Null`, the empty
+    /// union (domains that widen instead, like the JSON-Schema importer,
+    /// keep their own policy).
+    pub fn union(members: Vec<TypeExpr>) -> TypeExpr {
+        match UnionMembers::deduplicated(members) {
+            Ok(members) => TypeExpr::Union(members),
+            Err(rest) => rest.into_iter().next().unwrap_or(TypeExpr::Null),
+        }
+    }
 }
 
 /// A checked, ordered process-call signature.

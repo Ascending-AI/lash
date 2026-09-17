@@ -627,7 +627,7 @@ fn button_trigger_event_type() -> lashlang::NamedDataType {
         vec![
             lashlang::TypeField {
                 name: "button".into(),
-                ty: lashlang::TypeExpr::Union(vec![
+                ty: lashlang::TypeExpr::union(vec![
                     lashlang::TypeExpr::Enum(vec!["Red".into()]),
                     lashlang::TypeExpr::Enum(vec!["Blue".into()]),
                 ]),
