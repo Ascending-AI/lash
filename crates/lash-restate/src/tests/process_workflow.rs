@@ -696,7 +696,7 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let Some(process_id) = call.context.runtime_process_id() else {
+        let Some(process_id) = call.context.enclosing_process() else {
             return lash_core::ToolAttemptOutcome::done_without_intents(
                 lash_core::ToolOutcomeDone::from_output(lash_core::ToolCallOutput::failure(
                     lash_core::ToolFailure::runtime(

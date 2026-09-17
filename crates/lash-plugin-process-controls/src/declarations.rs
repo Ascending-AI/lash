@@ -416,7 +416,7 @@ pub fn execute_process_emit_tool_call(
     context: &AttemptContext<'_>,
     args: &Value,
 ) -> ToolAttemptOutcome {
-    let Some(process_id) = context.runtime_process_id() else {
+    let Some(process_id) = context.enclosing_process() else {
         return refuse(
             "emit_process_event appends to the process it runs inside, and this call is not \
              running inside a durable process",

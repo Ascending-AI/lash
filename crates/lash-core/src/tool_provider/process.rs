@@ -57,7 +57,7 @@ impl<'run> InternalProcessContext<'run> {
 
     /// Read the durable process id assigned to this internal body.
     pub fn process_id(&self) -> Option<&str> {
-        self.context.async_process_id()
+        self.context.enclosing_process()
     }
 
     /// Access owner-bound process lifecycle operations.
