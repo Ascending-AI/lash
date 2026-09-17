@@ -19,43 +19,61 @@ pub(super) enum EffectDeliveryStatus {
     Delivered,
 }
 
+/// The delivery bookkeeping of the effect a waiting variant is holding:
+/// the one spelling of the effect's id plus whether the machine has handed
+/// the effect to the host. Serialized transparently as the bare id, so the
+/// checkpoint spells it under the variant's `effect_id` key exactly as the
+/// id field it replaced; the flag is runtime-only and a restored
+/// checkpoint always re-delivers.
+#[derive(Clone, Copy, Debug, Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub(super) struct EffectDelivery {
+    pub(super) id: EffectId,
+    #[serde(skip)]
+    pub(super) status: EffectDeliveryStatus,
+}
+
+impl EffectDelivery {
+    pub(super) fn pending(id: EffectId) -> Self {
+        Self {
+            id,
+            status: EffectDeliveryStatus::Pending,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, serde::Deserialize)]
 pub(super) enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
     PreparingProtocol,
     WaitingExecutionEnvironment {
-        effect_id: EffectId,
+        #[serde(rename = "effect_id")]
+        delivery: EffectDelivery,
         update_machine_config: bool,
-        #[serde(skip)]
-        delivery: EffectDeliveryStatus,
     },
     PrepareIteration,
     WaitingLlm {
-        effect_id: EffectId,
+        #[serde(rename = "effect_id")]
+        delivery: EffectDelivery,
         request: Arc<LlmRequest>,
         driver_state: Option<M::DriverState>,
-        #[serde(skip)]
-        delivery: EffectDeliveryStatus,
     },
     WaitingTools {
-        effect_id: EffectId,
+        #[serde(rename = "effect_id")]
+        delivery: EffectDelivery,
         calls: Vec<PendingToolCall>,
-        #[serde(skip)]
-        delivery: EffectDeliveryStatus,
     },
     WaitingExec {
-        effect_id: EffectId,
+        #[serde(rename = "effect_id")]
+        delivery: EffectDelivery,
         language: String,
         code: String,
         driver_state: M::DriverState,
-        #[serde(skip)]
-        delivery: EffectDeliveryStatus,
     },
     WaitingCheckpoint {
-        effect_id: EffectId,
+        #[serde(rename = "effect_id")]
+        delivery: EffectDelivery,
         checkpoint: CheckpointKind,
         on_empty: CheckpointResumeAction,
-        #[serde(skip)]
-        delivery: EffectDeliveryStatus,
     },
     Finished,
 }
@@ -150,58 +168,45 @@ impl<M: TurnProtocol> Clone for MachineState<M> {
         match self {
             Self::PreparingProtocol => Self::PreparingProtocol,
             Self::WaitingExecutionEnvironment {
-                effect_id,
-                update_machine_config,
                 delivery,
+                update_machine_config,
             } => Self::WaitingExecutionEnvironment {
-                effect_id: *effect_id,
-                update_machine_config: *update_machine_config,
                 delivery: *delivery,
+                update_machine_config: *update_machine_config,
             },
             Self::PrepareIteration => Self::PrepareIteration,
             Self::WaitingLlm {
-                effect_id,
+                delivery,
                 request,
                 driver_state,
-                delivery,
             } => Self::WaitingLlm {
-                effect_id: *effect_id,
+                delivery: *delivery,
                 request: Arc::clone(request),
                 driver_state: driver_state.clone(),
-                delivery: *delivery,
             },
-            Self::WaitingTools {
-                effect_id,
-                calls,
-                delivery,
-            } => Self::WaitingTools {
-                effect_id: *effect_id,
-                calls: calls.clone(),
+            Self::WaitingTools { delivery, calls } => Self::WaitingTools {
                 delivery: *delivery,
+                calls: calls.clone(),
             },
             Self::WaitingExec {
-                effect_id,
+                delivery,
                 language,
                 code,
                 driver_state,
-                delivery,
             } => Self::WaitingExec {
-                effect_id: *effect_id,
+                delivery: *delivery,
                 language: language.clone(),
                 code: code.clone(),
                 driver_state: driver_state.clone(),
-                delivery: *delivery,
             },
             Self::WaitingCheckpoint {
-                effect_id,
+                delivery,
                 checkpoint,
                 on_empty,
-                delivery,
             } => Self::WaitingCheckpoint {
-                effect_id: *effect_id,
+                delivery: *delivery,
                 checkpoint: *checkpoint,
                 on_empty: on_empty.clone(),
-                delivery: *delivery,
             },
             Self::Finished => Self::Finished,
         }
@@ -216,7 +221,7 @@ impl<M: TurnProtocol> MachineState<M> {
             | Self::WaitingTools { delivery, .. }
             | Self::WaitingExec { delivery, .. }
             | Self::WaitingCheckpoint { delivery, .. } => {
-                *delivery = EffectDeliveryStatus::Pending;
+                delivery.status = EffectDeliveryStatus::Pending;
             }
             Self::PreparingProtocol | Self::PrepareIteration | Self::Finished => {}
         }
@@ -225,62 +230,54 @@ impl<M: TurnProtocol> MachineState<M> {
     pub(super) fn poll_outstanding_effect(&mut self) -> Option<Effect<M>> {
         match self {
             Self::WaitingExecutionEnvironment {
-                effect_id,
-                update_machine_config,
                 delivery,
-            } if *delivery == EffectDeliveryStatus::Pending => {
-                *delivery = EffectDeliveryStatus::Delivered;
+                update_machine_config,
+            } if delivery.status == EffectDeliveryStatus::Pending => {
+                delivery.status = EffectDeliveryStatus::Delivered;
                 Some(Effect::SyncExecutionEnvironment {
-                    id: *effect_id,
+                    id: delivery.id,
                     update_machine_config: *update_machine_config,
                 })
             }
             Self::WaitingLlm {
-                effect_id,
-                request,
-                delivery,
-                ..
-            } if *delivery == EffectDeliveryStatus::Pending => {
-                *delivery = EffectDeliveryStatus::Delivered;
+                delivery, request, ..
+            } if delivery.status == EffectDeliveryStatus::Pending => {
+                delivery.status = EffectDeliveryStatus::Delivered;
                 Some(Effect::LlmCall {
-                    id: *effect_id,
+                    id: delivery.id,
                     request: Arc::clone(request),
                 })
             }
-            Self::WaitingTools {
-                effect_id,
-                calls,
-                delivery,
-            } if *delivery == EffectDeliveryStatus::Pending => {
-                *delivery = EffectDeliveryStatus::Delivered;
+            Self::WaitingTools { delivery, calls }
+                if delivery.status == EffectDeliveryStatus::Pending =>
+            {
+                delivery.status = EffectDeliveryStatus::Delivered;
                 Some(Effect::ToolCalls {
-                    id: *effect_id,
+                    id: delivery.id,
                     calls: calls.clone(),
                 })
             }
             Self::WaitingExec {
-                effect_id,
+                delivery,
                 language,
                 code,
-                delivery,
                 ..
-            } if *delivery == EffectDeliveryStatus::Pending => {
-                *delivery = EffectDeliveryStatus::Delivered;
+            } if delivery.status == EffectDeliveryStatus::Pending => {
+                delivery.status = EffectDeliveryStatus::Delivered;
                 Some(Effect::ExecCode {
-                    id: *effect_id,
+                    id: delivery.id,
                     language: language.clone(),
                     code: code.clone(),
                 })
             }
             Self::WaitingCheckpoint {
-                effect_id,
-                checkpoint,
                 delivery,
+                checkpoint,
                 ..
-            } if *delivery == EffectDeliveryStatus::Pending => {
-                *delivery = EffectDeliveryStatus::Delivered;
+            } if delivery.status == EffectDeliveryStatus::Pending => {
+                delivery.status = EffectDeliveryStatus::Delivered;
                 Some(Effect::Checkpoint {
-                    id: *effect_id,
+                    id: delivery.id,
                     checkpoint: *checkpoint,
                 })
             }

@@ -250,9 +250,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
         if self.config.sync_execution_environment {
             let id = self.next_id();
             self.state = MachineState::WaitingExecutionEnvironment {
-                effect_id: id,
+                delivery: EffectDelivery::pending(id),
                 update_machine_config: false,
-                delivery: EffectDeliveryStatus::Pending,
             };
             return;
         }
@@ -279,9 +278,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
         {
             let id = self.next_id();
             self.state = MachineState::WaitingExecutionEnvironment {
-                effect_id: id,
+                delivery: EffectDelivery::pending(id),
                 update_machine_config: true,
-                delivery: EffectDeliveryStatus::Pending,
             };
             return;
         }
@@ -313,30 +311,27 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
         let id = self.next_id();
         self.state = MachineState::WaitingLlm {
-            effect_id: id,
+            delivery: EffectDelivery::pending(id),
             request,
             driver_state,
-            delivery: EffectDeliveryStatus::Pending,
         };
     }
 
     fn start_tool_calls(&mut self, calls: Vec<PendingToolCall>) {
         let effect_id = self.next_id();
         self.state = MachineState::WaitingTools {
-            effect_id,
+            delivery: EffectDelivery::pending(effect_id),
             calls,
-            delivery: EffectDeliveryStatus::Pending,
         };
     }
 
     fn start_exec(&mut self, language: String, code: String, driver_state: M::DriverState) {
         let effect_id = self.next_id();
         self.state = MachineState::WaitingExec {
-            effect_id,
+            delivery: EffectDelivery::pending(effect_id),
             language,
             code,
             driver_state,
-            delivery: EffectDeliveryStatus::Pending,
         };
     }
 
@@ -463,10 +458,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn request_checkpoint(&mut self, checkpoint: CheckpointKind, on_empty: CheckpointResumeAction) {
         let id = self.next_id();
         self.state = MachineState::WaitingCheckpoint {
-            effect_id: id,
+            delivery: EffectDelivery::pending(id),
             checkpoint,
             on_empty,
-            delivery: EffectDeliveryStatus::Pending,
         };
     }
 
@@ -475,23 +469,21 @@ impl<M: TurnProtocol> TurnMachine<M> {
         id: EffectId,
         result: Result<Option<ExecutionEnvironmentSync>, String>,
     ) {
-        let (waiting_id, waiting_update_machine_config, delivery) =
+        let (delivery, update_machine_config) =
             match std::mem::replace(&mut self.state, MachineState::Finished) {
                 MachineState::WaitingExecutionEnvironment {
-                    effect_id,
-                    update_machine_config,
                     delivery,
-                } => (effect_id, update_machine_config, delivery),
+                    update_machine_config,
+                } => (delivery, update_machine_config),
                 other => {
                     self.state = other;
                     return;
                 }
             };
-        if waiting_id != id {
+        if delivery.id != id {
             self.state = MachineState::WaitingExecutionEnvironment {
-                effect_id: waiting_id,
-                update_machine_config: waiting_update_machine_config,
                 delivery,
+                update_machine_config,
             };
             return;
         }
@@ -576,25 +568,23 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     fn handle_checkpoint(&mut self, id: EffectId, delivery: CheckpointDelivery) {
-        let (effect_id, checkpoint, on_empty, effect_delivery) =
+        let (effect_delivery, checkpoint, on_empty) =
             match std::mem::replace(&mut self.state, MachineState::Finished) {
                 MachineState::WaitingCheckpoint {
-                    effect_id,
+                    delivery,
                     checkpoint,
                     on_empty,
-                    delivery,
-                } => (effect_id, checkpoint, on_empty, delivery),
+                } => (delivery, checkpoint, on_empty),
                 other => {
                     self.state = other;
                     return;
                 }
             };
-        if effect_id != id {
+        if effect_delivery.id != id {
             self.state = MachineState::WaitingCheckpoint {
-                effect_id,
+                delivery: effect_delivery,
                 checkpoint,
                 on_empty,
-                delivery: effect_delivery,
             };
             return;
         }
@@ -641,11 +631,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn take_waiting_llm_state(&mut self, id: EffectId) -> Option<WaitingLlmState<M>> {
         match std::mem::replace(&mut self.state, MachineState::Finished) {
             MachineState::WaitingLlm {
-                effect_id,
+                delivery,
                 request,
                 driver_state,
-                ..
-            } if effect_id == id => Some(WaitingLlmState {
+            } if delivery.id == id => Some(WaitingLlmState {
                 request,
                 driver_state,
             }),
@@ -888,25 +877,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     fn handle_tool_results(&mut self, id: EffectId, completed: Vec<CompletedToolCall>) {
-        let (waiting_effect_id, waiting_calls, delivery) =
-            match std::mem::replace(&mut self.state, MachineState::Finished) {
-                MachineState::WaitingTools {
-                    effect_id,
-                    calls,
-                    delivery,
-                } => (effect_id, calls, delivery),
-                other => {
-                    self.state = other;
-                    return;
-                }
-            };
+        let (delivery, calls) = match std::mem::replace(&mut self.state, MachineState::Finished) {
+            MachineState::WaitingTools { delivery, calls } => (delivery, calls),
+            other => {
+                self.state = other;
+                return;
+            }
+        };
 
-        if waiting_effect_id != id {
-            self.state = MachineState::WaitingTools {
-                effect_id: waiting_effect_id,
-                calls: waiting_calls,
-                delivery,
-            };
+        if delivery.id != id {
+            self.state = MachineState::WaitingTools { delivery, calls };
             return;
         }
 
@@ -931,11 +911,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn take_waiting_exec_state(&mut self, id: EffectId) -> Option<WaitingExecState<M>> {
         match std::mem::replace(&mut self.state, MachineState::Finished) {
             MachineState::WaitingExec {
-                effect_id,
-                code: _,
+                delivery,
                 driver_state,
                 ..
-            } if effect_id == id => Some(WaitingExecState { driver_state }),
+            } if delivery.id == id => Some(WaitingExecState { driver_state }),
             other => {
                 self.state = other;
                 None
