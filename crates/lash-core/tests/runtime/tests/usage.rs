@@ -133,7 +133,16 @@ fn live_usage_merge_propagates_saturation_into_the_report() {
 
     let report = SessionUsageReport::from_entries_with_saturation(&entries, saturated);
     assert!(report.saturated);
-    assert_eq!(report.by_source_model[0].usage.usage.input_tokens, i64::MAX);
+    assert_eq!(
+        report
+            .by_source_model
+            .values()
+            .next()
+            .expect("one keyed row")
+            .usage
+            .input_tokens,
+        i64::MAX
+    );
 }
 
 fn usage(input_tokens: i64, output_tokens: i64) -> TokenUsage {
@@ -248,11 +257,20 @@ fn usage_report_derives_outstanding_holes_from_unreported_and_reconciled_rows() 
     assert_eq!(report.usage.reconciled_attempts, 1);
     assert_eq!(report.by_source["turn"].unreported_attempts, 1);
     assert_eq!(report.by_model["m"].reconciled_attempts, 1);
-    assert_eq!(
-        report.by_source_model.len(),
-        3,
-        "rows stay distinct per disposition"
-    );
+    let row = report
+        .by_source_model
+        .get(&("turn".to_string(), "m".to_string()))
+        .expect("one folded row per (source, model) key");
+    assert_eq!(row.usage, usage(130, 37));
+    assert_eq!(row.unreported_attempts, 1);
+    assert_eq!(row.reconciled_attempts, 1);
+    let encoded_report = serde_json::to_value(&report).expect("encode report");
+    let rows = encoded_report["by_source_model"]
+        .as_array()
+        .expect("the wire shape stays a row array");
+    assert_eq!(rows.len(), 1, "the wire array carries one folded row");
+    assert_eq!(rows[0]["source"], "turn");
+    assert_eq!(rows[0]["model"], "m");
     let encoded = serde_json::to_value(&report.usage).expect("encode totals");
     assert_eq!(encoded["unreported_attempts"], 1);
     assert_eq!(encoded["reconciled_attempts"], 1);

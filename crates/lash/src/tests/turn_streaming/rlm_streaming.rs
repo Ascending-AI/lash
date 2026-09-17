@@ -736,10 +736,11 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
         let row = report
             .by_source_model
             .iter()
-            .find(|row| row.source == "turn")
+            .find(|((source, _), _)| source == "turn")
+            .map(|(_, totals)| totals)
             .expect("unreported turn row is written even at zero usage");
-        assert_eq!(row.usage.unreported_attempts, 1);
-        assert_eq!(row.usage.usage, lash_core::TokenUsage::default());
+        assert_eq!(row.unreported_attempts, 1);
+        assert_eq!(row.usage, lash_core::TokenUsage::default());
         let unreported = session.unreported_usage_attempts().await;
         assert_eq!(unreported.len(), 1);
         assert_eq!(unreported[0].call_id, result.result.llm_calls[0].call_id.0);
