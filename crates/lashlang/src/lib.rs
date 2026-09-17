@@ -43,7 +43,7 @@ pub fn builtin_names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
 }
 pub use compile::{
     ModuleCompileDiagnostic, ModuleCompileError, ModuleCompileOutput, ModuleCompileRequest,
-    ModuleCompileStage, compile_module,
+    compile_module,
 };
 pub use identity::{ProcessDefinitionIdentity, ProcessDefinitionIdentityError};
 pub use introspection::{
