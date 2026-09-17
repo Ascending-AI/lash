@@ -193,31 +193,105 @@ impl ResidentCheckpointComponent {
         *self = Self::Unchanged { descriptor, body };
     }
 
-    /// Releases the tool and plugin snapshot payloads of an unchanged
-    /// component. A changed body is the pending commit's only copy and stays.
-    pub(super) fn release_typed_snapshot(&mut self) {
-        if let Self::Unchanged { body, .. } = self {
-            match body {
-                ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
-                ResidentCheckpointComponentBody::PluginState { snapshot, .. } => *snapshot = None,
-                ResidentCheckpointComponentBody::ExecutionState(_)
-                | ResidentCheckpointComponentBody::Opaque(_) => {}
+    /// Releases the tool and plugin snapshot payloads. A changed typed body
+    /// was the pending write's only copy; with the write discarded the
+    /// component demotes to the durable ref it superseded, and reports whether
+    /// anything durable remains to track. Accepted execution bodies are the
+    /// storeless restore's source and stay.
+    pub(super) fn release_typed_snapshot(&mut self) -> bool {
+        let released = match self {
+            Self::Unchanged { body, .. } => {
+                match body {
+                    ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
+                    ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
+                        *snapshot = None
+                    }
+                    ResidentCheckpointComponentBody::ExecutionState(_)
+                    | ResidentCheckpointComponentBody::Opaque(_) => {}
+                }
+                return true;
             }
+            Self::Changed { descriptor, body } => {
+                let released = match body {
+                    PendingCheckpointComponentBody::ToolState { generation, .. } => {
+                        ResidentCheckpointComponentBody::ToolState {
+                            snapshot: None,
+                            generation: *generation,
+                        }
+                    }
+                    PendingCheckpointComponentBody::PluginState { generations, .. } => {
+                        ResidentCheckpointComponentBody::PluginState {
+                            snapshot: None,
+                            generations: std::mem::take(generations),
+                        }
+                    }
+                    PendingCheckpointComponentBody::ExecutionState(_)
+                    | PendingCheckpointComponentBody::Opaque(_) => return true,
+                };
+                (descriptor, released)
+            }
+        };
+        match released.0.take() {
+            Some(descriptor) => {
+                *self = Self::Unchanged {
+                    descriptor,
+                    body: released.1,
+                };
+                true
+            }
+            None => false,
         }
     }
 
     /// Releases every resident payload of an unchanged component: once the
     /// durable ref is authoritative, the encoded bytes are a second resident
-    /// copy. A changed body has not committed yet and is the retry's only
-    /// source, so it stays.
-    pub(super) fn release_body(&mut self) {
-        if let Self::Unchanged { body, .. } = self {
-            match body {
-                ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
-                ResidentCheckpointComponentBody::PluginState { snapshot, .. } => *snapshot = None,
-                ResidentCheckpointComponentBody::ExecutionState(payload)
-                | ResidentCheckpointComponentBody::Opaque(payload) => *payload = None,
+    /// copy. A changed body has not committed yet; a discarded pending write
+    /// demotes to the durable ref it superseded, except a changed opaque leaf,
+    /// which is the retry's only source and stays.
+    pub(super) fn release_body(&mut self) -> bool {
+        let released = match self {
+            Self::Unchanged { body, .. } => {
+                match body {
+                    ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
+                    ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
+                        *snapshot = None
+                    }
+                    ResidentCheckpointComponentBody::ExecutionState(payload)
+                    | ResidentCheckpointComponentBody::Opaque(payload) => *payload = None,
+                }
+                return true;
             }
+            Self::Changed { descriptor, body } => {
+                let released = match body {
+                    PendingCheckpointComponentBody::ToolState { generation, .. } => {
+                        ResidentCheckpointComponentBody::ToolState {
+                            snapshot: None,
+                            generation: *generation,
+                        }
+                    }
+                    PendingCheckpointComponentBody::PluginState { generations, .. } => {
+                        ResidentCheckpointComponentBody::PluginState {
+                            snapshot: None,
+                            generations: std::mem::take(generations),
+                        }
+                    }
+                    PendingCheckpointComponentBody::ExecutionState(_) => {
+                        ResidentCheckpointComponentBody::ExecutionState(None)
+                    }
+                    PendingCheckpointComponentBody::Opaque(_) => return true,
+                };
+                (descriptor, released)
+            }
+        };
+        match released.0.take() {
+            Some(descriptor) => {
+                *self = Self::Unchanged {
+                    descriptor,
+                    body: released.1,
+                };
+                true
+            }
+            None => false,
         }
     }
 }

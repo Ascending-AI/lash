@@ -587,9 +587,8 @@ impl RuntimeCheckpointComponents {
         if retention == AcceptedExecutionRetention::Resident
             && self.execution_state_snapshot().is_some()
         {
-            for component in self.entries.values_mut() {
-                component.release_typed_snapshot();
-            }
+            self.entries
+                .retain(|_, component| component.release_typed_snapshot());
             return;
         }
         // This is the sole writer of the privileged `DiscardedPostCommit`
@@ -604,9 +603,7 @@ impl RuntimeCheckpointComponents {
             (_, true) => ExecutionStateBodyResidency::DiscardedPostCommit,
             (_, false) => ExecutionStateBodyResidency::CommitResultMismatch,
         };
-        for component in self.entries.values_mut() {
-            component.release_body();
-        }
+        self.entries.retain(|_, component| component.release_body());
     }
 
     fn adopt_manifest(&mut self, manifest: &crate::store::SessionCheckpoint) {

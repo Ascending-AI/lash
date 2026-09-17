@@ -200,8 +200,8 @@ fn storeless_body_release_keeps_the_accepted_execution_for_restore() {
     state.set_tool_state_snapshot(Some(crate::ToolState::default()));
     state.discard_runtime_snapshots_retaining_accepted_execution();
     assert!(
-        state.tool_state_snapshot().is_some(),
-        "an uncommitted tool snapshot is the pending commit's only copy and survives the release"
+        state.tool_state_snapshot().is_none(),
+        "tool and plugin snapshots are released like every other committed body"
     );
     let accepted = state
         .execution_state_hydration()
