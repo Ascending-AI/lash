@@ -7,7 +7,13 @@ use lash_sansio::TurnId;
 use lash_sansio::{EffectAddress, ExecutionScope};
 use std::collections::BTreeSet;
 
-const SQLITE_SCHEMA_SOURCE: &str = include_str!("../../lash-sqlite-store/src/schema.rs");
+// schema_fragments.rs carries the table sets shared between databases; the
+// declarations are parsed out of the concatenated source so a table moved into
+// a fragment still counts as declared (FIG-3260).
+const SQLITE_SCHEMA_SOURCE: &str = concat!(
+    include_str!("../../lash-sqlite-store/src/schema.rs"),
+    include_str!("../../lash-sqlite-store/src/schema_fragments.rs"),
+);
 const POSTGRES_SCHEMA_SOURCE: &str = include_str!("../../lash-postgres-store/schema.sql");
 const POSTGRES_SCHEMA_SHAPE: &str = include_str!("../../lash-postgres-store/schema-shape.txt");
 

@@ -113,8 +113,11 @@ description = "SQLite session-store tables, columns, constraints, and unique ind
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-sqlite-store/src/schema.rs"]
-symbols = ["SCHEMA"]
+paths = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+]
+symbols = ["SCHEMA", "AWAIT_EVENT_TABLES"]
 elide = "sql_idempotent_index"
 
 [[surface]]
@@ -124,8 +127,11 @@ description = "SQLite process-registry tables, columns, constraints, and unique 
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-sqlite-store/src/schema.rs"]
-symbols = ["PROCESS_SCHEMA"]
+paths = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+]
+symbols = ["PROCESS_SCHEMA", "SCOPE_RETIREMENT_TABLE"]
 elide = "sql_idempotent_index"
 
 [[surface]]
@@ -146,8 +152,11 @@ description = "SQLite runtime-effect and await-event tables, columns, constraint
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-sqlite-store/src/schema.rs"]
-symbols = ["EFFECT_SCHEMA"]
+paths = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+]
+symbols = ["EFFECT_SCHEMA", "AWAIT_EVENT_TABLES", "SCOPE_RETIREMENT_TABLE"]
 elide = "sql_idempotent_index"
 
 [[surface]]

@@ -5,7 +5,12 @@
 
 use std::collections::BTreeSet;
 
-const SQLITE_SCHEMA: &str = include_str!("../../lash-sqlite-store/src/schema.rs");
+// Fragment-carried tables live in schema_fragments.rs (FIG-3260), so the
+// census scrapes both files.
+const SQLITE_SCHEMA: &str = concat!(
+    include_str!("../../lash-sqlite-store/src/schema_fragments.rs"),
+    include_str!("../../lash-sqlite-store/src/schema.rs"),
+);
 const POSTGRES_SCHEMA: &str = include_str!("../../lash-postgres-store/schema.sql");
 
 #[derive(Clone, Copy, Debug)]

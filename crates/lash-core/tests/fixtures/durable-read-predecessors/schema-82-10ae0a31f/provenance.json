@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 82,
+  "source_commit": "10ae0a31f",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-3260 fragment-extraction regeneration",
+  "artifacts": {
+    "postgres-expected.json": "15beca0784205e08986090237c358f604159ddc8c40771978bc93ba85976f922",
+    "sqlite-expected.json": "b34120e797a54e120561f9f0b8b3814d22e1779149536575c222323d3cfde611"
+  }
+}
