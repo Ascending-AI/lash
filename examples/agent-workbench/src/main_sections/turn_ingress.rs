@@ -106,7 +106,7 @@ pub(crate) async fn admit_turn_input(
         .await
         .map_err(|error| state.session_admission_error(session_id, surface, error))?;
     reject_if_active_turn_settled(state, &acceptance).await?;
-    let accepted_state = acceptance.ingress.initial_state();
+    let accepted_state = lash::persistence::TurnInputState::open(acceptance.ingress.clone());
     let receipt = TurnInputReceipt {
         accepted: true,
         input_id: acceptance.input_id.to_string(),

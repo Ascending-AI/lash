@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use lash::persistence::{
     AttachmentReclamationPolicy, AttachmentStore, EmptyRootSetPolicy, PendingTurnInputDraft,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, TurnInputIngress,
-    TurnInputState,
+    TurnInputStateKind,
 };
 use lash::{TurnBudget, TurnInput, runtime::SessionPolicy};
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteSessionStoreFactory, Store};
@@ -127,7 +127,7 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
         )
         .await
         .expect("re-enqueue after vacuum");
-    assert_ne!(replay.state, TurnInputState::Cancelled);
+    assert_ne!(replay.state.kind(), TurnInputStateKind::Cancelled);
 }
 
 #[tokio::test]

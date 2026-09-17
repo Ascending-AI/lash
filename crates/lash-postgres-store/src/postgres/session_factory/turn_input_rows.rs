@@ -12,7 +12,6 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) input_id: String,
     session_id: SessionId,
     source_key: Option<String>,
-    ingress_json: String,
     state: lash_core::TurnInputState,
     input_json: String,
     enqueued_at_ms: u64,
@@ -24,14 +23,17 @@ pub(crate) struct PendingTurnInputRow {
 }
 
 pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, StoreError> {
-    let state = lash_core::TurnInputState::from_wire_str(row.get::<String, _>("state").as_str())
-        .ok_or_else(|| StoreError::Backend("invalid pending turn-input state".to_string()))?;
+    let ingress_json: String = row.get("ingress_json");
+    let ingress: lash_core::TurnInputIngress =
+        store_decode_json(&ingress_json, "turn-input ingress")?;
+    let state =
+        lash_core::TurnInputState::from_persisted(row.get::<String, _>("state").as_str(), ingress)
+            .ok_or_else(|| StoreError::Backend("invalid pending turn-input state".to_string()))?;
     Ok(PendingTurnInputRow {
         enqueue_seq: u64_from_sql("PendingTurnInput", "enqueue_seq", row.get("enqueue_seq"))?,
         input_id: row.get("input_id"),
         session_id: SessionId::from(row.get::<String, _>("session_id")),
         source_key: row.get("source_key"),
-        ingress_json: row.get("ingress_json"),
         state,
         input_json: row.get("input_json"),
         enqueued_at_ms: u64_from_sql(
@@ -66,7 +68,6 @@ pub(crate) fn pending_turn_input_from_row(
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
-        ingress: store_decode_json(&row.ingress_json, "turn-input ingress")?,
         state: row.state,
         enqueued_at_ms: row.enqueued_at_ms,
         input: store_decode_json(&row.input_json, "turn input")?,
@@ -157,7 +158,7 @@ fn pending_turn_input_claim_diagnostics_from_row(
     row.claim_token
         .is_some()
         .then(|| lash_core::PendingTurnInputClaimDiagnostics {
-            state: row.state,
+            state: row.state.clone(),
             claim_id: row.claim_id.clone(),
             claim_owner: row.claim_owner.clone(),
             claim_session_lease_generation: row
@@ -174,16 +175,16 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
     now_epoch_ms: u64,
 ) -> Result<lash_core::PendingTurnInputCancelOutcome, StoreError> {
     let mut input = pending_turn_input_from_row(row.clone())?;
-    match input.state {
-        lash_core::TurnInputState::Cancelled => Ok(
+    match input.state.kind() {
+        lash_core::TurnInputStateKind::Cancelled => Ok(
             lash_core::PendingTurnInputCancelOutcome::AlreadyCancelled(input),
         ),
-        lash_core::TurnInputState::Completed => Ok(
+        lash_core::TurnInputStateKind::Completed => Ok(
             lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted(input),
         ),
-        lash_core::TurnInputState::PendingActive
-        | lash_core::TurnInputState::DeferredNextTurn
-        | lash_core::TurnInputState::Accepted => {
+        lash_core::TurnInputStateKind::PendingActive
+        | lash_core::TurnInputStateKind::DeferredNextTurn
+        | lash_core::TurnInputStateKind::Accepted => {
             // A claim is live only while the session-execution-lease generation it
             // pins still holds the session lease (ADR 0029).
             let live_claim = row.claim_token.is_some()
@@ -212,11 +213,11 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
             )
             .bind(row.session_id.as_str())
             .bind(row.input_id.as_str())
-            .bind(lash_core::TurnInputState::Cancelled.as_str())
+            .bind(lash_core::TurnInputStateKind::Cancelled.as_str())
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-            input.state = lash_core::TurnInputState::Cancelled;
+            input.state = lash_core::TurnInputState::Cancelled(input.state.ingress());
             Ok(lash_core::PendingTurnInputCancelOutcome::Cancelled(input))
         }
     }

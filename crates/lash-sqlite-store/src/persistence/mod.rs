@@ -153,8 +153,8 @@ const TURN_INPUT_SETTLEMENT_ASSIGNMENTS: &str = "state = ?3,
 
 /// Whether an unclaimed row is still open for settlement.
 fn unclaimed_turn_input_is_settleable(state: &str) -> bool {
-    !lash_core::TurnInputState::from_wire_str(state)
-        .is_some_and(lash_core::TurnInputState::is_terminal)
+    !lash_core::TurnInputStateKind::from_wire_str(state)
+        .is_some_and(lash_core::TurnInputStateKind::is_terminal)
 }
 
 /// The same terminal set spelled as the body of a SQL `IN (...)` list, so the

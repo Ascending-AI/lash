@@ -1755,7 +1755,7 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     .expect("deferred late input");
     assert_eq!(pending.len(), 1);
     assert!(matches!(
-        pending[0].input.ingress,
+        pending[0].input.ingress(),
         lash_core::TurnInputIngress::NextTurn
     ));
     assert_eq!(

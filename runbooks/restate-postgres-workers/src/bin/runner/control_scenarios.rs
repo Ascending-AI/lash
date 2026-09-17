@@ -409,7 +409,7 @@ async fn assert_late_cancel_is_noop(
         .await
         .context("list active inputs before late request")?
         .into_iter()
-        .filter(|input| input.input.ingress.active_turn_id() == Some(&address.turn_id))
+        .filter(|input| input.input.ingress().active_turn_id() == Some(&address.turn_id))
         .count();
     anyhow::ensure!(
         active_before == 0,
@@ -450,7 +450,7 @@ async fn assert_late_cancel_is_noop(
         .await
         .context("list active inputs after late request")?
         .into_iter()
-        .filter(|input| input.input.ingress.active_turn_id() == Some(&address.turn_id))
+        .filter(|input| input.input.ingress().active_turn_id() == Some(&address.turn_id))
         .count();
     anyhow::ensure!(
         active_after == 0,
@@ -1000,8 +1000,8 @@ pub(super) async fn assert_recovered_turn_converged(
     )
     .bind(session_id)
     .bind(accepted_input_id)
-    .bind(lash::persistence::TurnInputState::Completed.as_str())
-    .bind(lash::persistence::TurnInputState::Cancelled.as_str())
+    .bind(lash::persistence::TurnInputStateKind::Completed.as_str())
+    .bind(lash::persistence::TurnInputStateKind::Cancelled.as_str())
     .fetch_one(pool)
     .await
     .context("count unsettled pending turn inputs for the recovered acceptance")?;

@@ -842,11 +842,10 @@ mod claim_authority_tests {
             session_id: SessionId::from("fig905"),
             enqueue_seq: 1,
             source_key: None,
-            ingress: crate::TurnInputIngress::active_turn(
-                "fig905-turn",
-                crate::TurnInputCheckpointBoundary::AfterWork,
-            ),
-            state: crate::TurnInputState::Accepted,
+            state: crate::TurnInputState::Accepted(crate::ActiveTurnIngress {
+                turn_id: "fig905-turn".into(),
+                min_boundary: crate::TurnInputCheckpointBoundary::AfterWork,
+            }),
             enqueued_at_ms: 0,
             input: crate::TurnInput::text("fig905 input"),
         }

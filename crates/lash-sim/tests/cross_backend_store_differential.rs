@@ -33,7 +33,7 @@ use lash_core::{
     RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta, SessionNodePayload,
     SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
     TokenLedgerEntry, TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputClaim,
-    TurnInputIngress, TurnInputState, facade_support::InMemorySessionStore,
+    TurnInputIngress, TurnInputStateKind, facade_support::InMemorySessionStore,
     facade_support::InMemorySessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;

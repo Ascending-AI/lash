@@ -109,8 +109,8 @@ pub(crate) use lash_core_store::turn_input_vocabulary::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
     PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, TurnInputApplication,
-    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputIngress,
-    TurnInputState,
+    TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputState,
+    TurnInputStateKind,
 };
 #[cfg(any(test, feature = "testing"))]
 #[allow(unused_imports)]

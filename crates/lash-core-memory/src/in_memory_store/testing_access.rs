@@ -163,7 +163,7 @@ impl InMemorySessionStore {
                 (
                     entry.input.input_id.clone(),
                     entry.input.enqueue_seq,
-                    entry.input.state,
+                    entry.input.state.clone(),
                     entry.claim.id(),
                     entry.claim.fencing_token,
                     entry.claim.diagnostic_generation(),

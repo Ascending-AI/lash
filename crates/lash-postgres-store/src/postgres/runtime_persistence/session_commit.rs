@@ -798,7 +798,7 @@ impl SessionCommitStore for PostgresSessionStore {
                  FOR UPDATE"
             ))
             .bind(commit.session_id.as_str())
-            .bind(lash_core::TurnInputState::PendingActive.as_str())
+            .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
             .fetch_all(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -806,7 +806,7 @@ impl SessionCommitStore for PostgresSessionStore {
             for row in rows {
                 let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
                 if input
-                    .ingress
+                    .state
                     .active_turn_id()
                     .is_some_and(|active| active == turn_id)
                 {
@@ -829,16 +829,16 @@ impl SessionCommitStore for PostgresSessionStore {
                 .bind(&*input_id)
                 .bind(match disposition {
                     lash_core::TurnCancelDisposition::Defer => {
-                        lash_core::TurnInputState::DeferredNextTurn.as_str()
+                        lash_core::TurnInputStateKind::DeferredNextTurn.as_str()
                     }
                     lash_core::TurnCancelDisposition::Drop => {
-                        lash_core::TurnInputState::Cancelled.as_str()
+                        lash_core::TurnInputStateKind::Cancelled.as_str()
                     }
                 })
                 .bind(match disposition {
-                    lash_core::TurnCancelDisposition::Defer => {
-                        Some(encode_json(&lash_core::TurnInputIngress::NextTurn)?)
-                    }
+                    lash_core::TurnCancelDisposition::Defer => Some(encode_json(
+                        &lash_core::TurnInputState::DeferredNextTurn.ingress(),
+                    )?),
                     lash_core::TurnCancelDisposition::Drop => None,
                 })
                 .execute(&mut *tx)

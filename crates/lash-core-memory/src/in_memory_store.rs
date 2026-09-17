@@ -786,15 +786,12 @@ impl InMemorySessionStore {
                             checkpoint,
                         } => {
                             matches!(
-                                entry.input.state,
-                                crate::TurnInputState::PendingActive
-                                    | crate::TurnInputState::Accepted
-                            ) && entry
-                                .input
-                                .ingress
-                                .active_turn_id()
-                                .is_some_and(|active| active == turn_id.as_str())
-                                && entry.input.ingress.admits_checkpoint(*checkpoint)
+                                &entry.input.state,
+                                crate::TurnInputState::PendingActive(scope)
+                                    | crate::TurnInputState::Accepted(scope)
+                                    if scope.turn_id == *turn_id
+                                        && scope.min_boundary.admits(*checkpoint)
+                            )
                         }
                         crate::TurnInputClaimMode::NextTurn => {
                             entry.input.state.is_next_turn_pending()
@@ -824,8 +821,10 @@ impl InMemorySessionStore {
         let mut inputs = Vec::new();
         for index in selected_indices {
             let entry = &mut pending[index];
-            if matches!(mode, crate::TurnInputClaimMode::ActiveTurn { .. }) {
-                entry.input.state = crate::TurnInputState::Accepted;
+            if matches!(mode, crate::TurnInputClaimMode::ActiveTurn { .. })
+                && let Some(accepted) = entry.input.state.accepted()
+            {
+                entry.input.state = accepted;
             }
             inputs.push(entry.input.clone());
         }
@@ -857,16 +856,13 @@ impl InMemorySessionStore {
             && self.pending_turn_inputs.lock_recover().iter().any(|entry| {
                 entry.input.session_id == session_id
                     && matches!(
-                        entry.input.state,
-                        crate::TurnInputState::PendingActive | crate::TurnInputState::Accepted
+                        &entry.input.state,
+                        crate::TurnInputState::PendingActive(scope)
+                            | crate::TurnInputState::Accepted(scope)
+                            if scope.turn_id == *turn_id
+                                && scope.min_boundary.admits(checkpoint)
                     )
                     && (entry.claim.claimable_by(generation))
-                    && entry
-                        .input
-                        .ingress
-                        .active_turn_id()
-                        .is_some_and(|active| active == turn_id)
-                    && entry.input.ingress.admits_checkpoint(checkpoint)
             });
         if has_turn_input || max_batches == 0 {
             return Ok(has_turn_input);
