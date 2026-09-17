@@ -353,9 +353,7 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
         }
         let mut state = self.envs.lock_recover();
         if state.retired_owners.contains(owner) {
-            return Err(crate::PluginError::Session(
-                ARTIFACT_OWNER_RETIRED_MESSAGE.to_string(),
-            ));
+            return Err(artifact_owner_retired_error());
         }
         if let Some(existing) = state.bytes.get(env_ref.as_str())
             && existing != bytes
@@ -389,14 +387,12 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
             {
                 return Ok(());
             }
-            return Err(crate::PluginError::Session(format!(
-                "process execution environment `{env_ref}` is not retained by the staging owner"
+            return Err(artifact_staging_edge_missing_error(format!(
+                "process execution environment `{env_ref}`"
             )));
         }
         if state.retired_owners.contains(to) {
-            return Err(crate::PluginError::Session(
-                "artifact destination owner has been permanently retired".to_string(),
-            ));
+            return Err(artifact_destination_owner_retired_error());
         }
         state
             .owners
@@ -471,26 +467,93 @@ impl ProcessExecutionEnvStore for InMemoryProcessExecutionEnvStore {
     }
 }
 
-/// Message every artifact store reports when a write targets an owner that a permanent retirement
-/// fence has already closed.
+/// Display text of the typed refusal every artifact store returns when a write
+/// targets an owner that a permanent retirement fence has already closed.
+///
+/// This is the human-facing message only; classification is by
+/// [`crate::RuntimeErrorCode::ArtifactOwnerRetired`] (or
+/// `ArtifactDestinationOwnerRetired` for a transfer's destination), never by
+/// matching this text.
 pub const ARTIFACT_OWNER_RETIRED_MESSAGE: &str = "artifact owner has been permanently retired";
 
-/// Reports whether `error` is an artifact store refusing a write because the owner was permanently
-/// retired, as opposed to any other store failure.
-///
-/// Callers that stage an artifact before the effect that owns it is journaled use this to tell
-/// "this turn already ran and fenced the staging owner" apart from a real store fault.
-pub fn artifact_owner_is_permanently_retired(error: &crate::PluginError) -> bool {
-    matches!(
-        error,
-        crate::PluginError::Session(message) if message.contains(ARTIFACT_OWNER_RETIRED_MESSAGE)
-    )
-}
+/// Display text of the typed refusal every artifact store returns when a
+/// transfer's destination owner is already fenced by permanent retirement.
+pub const ARTIFACT_DESTINATION_OWNER_RETIRED_MESSAGE: &str =
+    "artifact destination owner has been permanently retired";
 
-/// Message fragment every artifact store reports when a transfer finds neither
-/// the staging owner's edge nor the destination owner's edge.
+/// Sentence frame every artifact store reports when a transfer finds neither
+/// the staging owner's edge nor the destination owner's edge. Producers name
+/// the artifact in their own words; classification is by
+/// [`crate::RuntimeErrorCode::ArtifactStagingEdgeMissing`], never by matching
+/// this text.
 pub const ARTIFACT_STAGING_OWNER_EDGE_MISSING_MESSAGE: &str =
     "is not retained by the staging owner";
+
+/// Mint the typed refusal an artifact store returns when a write targets an
+/// owner a permanent retirement fence has already closed.
+pub fn artifact_owner_retired_error() -> crate::PluginError {
+    crate::PluginError::Runtime(crate::RuntimeError::new(
+        crate::RuntimeErrorCode::ArtifactOwnerRetired,
+        ARTIFACT_OWNER_RETIRED_MESSAGE,
+    ))
+}
+
+/// Mint the typed refusal an artifact store returns when a transfer names a
+/// destination owner a permanent retirement fence has already closed.
+pub fn artifact_destination_owner_retired_error() -> crate::PluginError {
+    crate::PluginError::Runtime(crate::RuntimeError::new(
+        crate::RuntimeErrorCode::ArtifactDestinationOwnerRetired,
+        ARTIFACT_DESTINATION_OWNER_RETIRED_MESSAGE,
+    ))
+}
+
+/// Mint the typed refusal an artifact store returns when a transfer finds
+/// neither the staging owner's edge nor the destination owner's edge.
+/// `artifact` is the producer's noun phrase, e.g.
+/// `process execution environment \`env-…\``.
+pub fn artifact_staging_edge_missing_error(artifact: impl Into<String>) -> crate::PluginError {
+    let artifact = artifact.into();
+    crate::PluginError::Runtime(crate::RuntimeError::new(
+        crate::RuntimeErrorCode::ArtifactStagingEdgeMissing,
+        format!("{artifact} {ARTIFACT_STAGING_OWNER_EDGE_MISSING_MESSAGE}"),
+    ))
+}
+
+/// Map a store refusal raised by an artifact-owner write to the session-facing
+/// plugin error, keeping the typed retirement reasons as runtime codes rather
+/// than prose. Every other store failure stays a session error.
+pub fn artifact_store_plugin_error(error: crate::StoreError) -> crate::PluginError {
+    match error {
+        crate::StoreError::ArtifactOwnerRetired => artifact_owner_retired_error(),
+        crate::StoreError::ArtifactDestinationOwnerRetired => {
+            artifact_destination_owner_retired_error()
+        }
+        crate::StoreError::ArtifactStagingEdgeMissing { artifact } => {
+            artifact_staging_edge_missing_error(artifact)
+        }
+        other => crate::PluginError::Session(other.to_string()),
+    }
+}
+
+/// Reports whether `error` is an artifact store refusing a write because an
+/// owner it named — the write's owner or a transfer's destination — was
+/// permanently retired, as opposed to any other store failure.
+///
+/// Callers that stage an artifact before the effect that owns it is journaled
+/// use this to tell "this turn already ran and fenced the staging owner" apart
+/// from a real store fault.
+pub fn artifact_owner_is_permanently_retired(error: &crate::PluginError) -> bool {
+    let code = match error {
+        crate::PluginError::Runtime(error) => &error.code,
+        crate::PluginError::RuntimeEffectController(error) => &error.code,
+        _ => return false,
+    };
+    matches!(
+        code,
+        crate::RuntimeErrorCode::ArtifactOwnerRetired
+            | crate::RuntimeErrorCode::ArtifactDestinationOwnerRetired
+    )
+}
 
 /// Reports whether `error` is an artifact store refusing a transfer because the
 /// staging owner no longer retains the artifact, as opposed to any other store
@@ -504,11 +567,12 @@ pub const ARTIFACT_STAGING_OWNER_EDGE_MISSING_MESSAGE: &str =
 /// is correct — the caller that still holds the staged bytes is the one that can
 /// settle the destination edge (FIG-3090).
 pub fn artifact_staging_owner_edge_is_missing(error: &crate::PluginError) -> bool {
-    matches!(
-        error,
-        crate::PluginError::Session(message)
-            if message.contains(ARTIFACT_STAGING_OWNER_EDGE_MISSING_MESSAGE)
-    )
+    let code = match error {
+        crate::PluginError::Runtime(error) => &error.code,
+        crate::PluginError::RuntimeEffectController(error) => &error.code,
+        _ => return false,
+    };
+    matches!(code, crate::RuntimeErrorCode::ArtifactStagingEdgeMissing)
 }
 
 /// Settle one staged process execution environment onto the owner of the process

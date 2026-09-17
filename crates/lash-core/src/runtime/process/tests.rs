@@ -1050,3 +1050,100 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
         shared_events
     );
 }
+
+/// Artifact-owner retirement is a typed refusal, not a prose sentinel: the
+/// classifiers answer from the runtime error code, so a session error that
+/// merely quotes the message is not a retirement.
+#[test]
+fn artifact_owner_retirement_classifies_by_code_not_message() {
+    let retired = artifact_owner_retired_error();
+    assert!(artifact_owner_is_permanently_retired(&retired));
+    assert!(!retired.is_retryable());
+    assert!(!retired.is_terminal());
+
+    // The destination form of the same fence is the same classification.
+    let destination = artifact_destination_owner_retired_error();
+    assert!(artifact_owner_is_permanently_retired(&destination));
+
+    let quoted = crate::PluginError::Session(
+        "backend refused: artifact owner has been permanently retired".to_string(),
+    );
+    assert!(
+        !artifact_owner_is_permanently_retired(&quoted),
+        "prose that quotes the sentinel is not a typed retirement"
+    );
+
+    let missing = artifact_staging_edge_missing_error("process execution environment `env`");
+    assert!(artifact_staging_owner_edge_is_missing(&missing));
+    assert!(
+        !artifact_owner_is_permanently_retired(&missing),
+        "a missing edge is not a retirement"
+    );
+    let quoted_edge = crate::PluginError::Session(
+        "outer failure: inner is not retained by the staging owner".to_string(),
+    );
+    assert!(
+        !artifact_staging_owner_edge_is_missing(&quoted_edge),
+        "prose that quotes the fragment is not a typed staging-edge miss"
+    );
+}
+
+/// The in-memory store's refusals carry the typed reasons, so every caller
+/// downstream of `ProcessExecutionEnvStore` classifies by code.
+#[tokio::test]
+async fn in_memory_env_store_reports_typed_retirement_and_edge_refusals() {
+    let store = InMemoryProcessExecutionEnvStore::new();
+    let spec = ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
+    let env_ref = spec.stable_ref().expect("stable env ref");
+    let bytes = spec.to_store_bytes().expect("encode env spec");
+    let staged = ArtifactOwner::process_start(&ProcessId::from("env-typed-staged"));
+    let retired_destination =
+        ArtifactOwner::process_start(&ProcessId::from("env-typed-destination"));
+
+    store
+        .retire_process_execution_env_owner(&retired_destination)
+        .await
+        .expect("retire destination owner");
+    store
+        .publish_process_execution_env(&staged, &env_ref, &bytes)
+        .await
+        .expect("stage env");
+
+    let destination_error = store
+        .transfer_process_execution_env(&staged, &retired_destination, &env_ref)
+        .await
+        .expect_err("a retired destination owner refuses the transfer");
+    assert!(
+        artifact_owner_is_permanently_retired(&destination_error),
+        "destination retirement classifies as owner retirement: {destination_error}"
+    );
+
+    let missing_edge = store
+        .transfer_process_execution_env(
+            &ArtifactOwner::process_start(&ProcessId::from("env-typed-absent")),
+            &ArtifactOwner::process_start(&ProcessId::from("env-typed-other")),
+            &env_ref,
+        )
+        .await
+        .expect_err("a transfer with neither edge refuses");
+    assert!(
+        artifact_staging_owner_edge_is_missing(&missing_edge),
+        "missing staging edge classifies by code: {missing_edge}"
+    );
+
+    store
+        .retire_process_execution_env_owner(&staged)
+        .await
+        .expect("retire staged owner");
+    let retired_error = store
+        .publish_process_execution_env(&staged, &env_ref, &bytes)
+        .await
+        .expect_err("a retired staging owner refuses publication");
+    assert!(
+        artifact_owner_is_permanently_retired(&retired_error),
+        "staged-owner retirement classifies by code: {retired_error}"
+    );
+}

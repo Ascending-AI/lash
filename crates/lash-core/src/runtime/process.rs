@@ -64,10 +64,12 @@ pub use model::{
     ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartDeclaration,
     ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus,
     ProcessStatusFilter, ProcessTombstone, RecoveryContract, SessionId, SessionScope,
-    SessionScopeId, StoreRealization, WaitKind, WaitState, artifact_owner_is_permanently_retired,
-    artifact_staging_owner_edge_is_missing, ensure_process_lease_schema_version,
-    load_process_execution_env, process_runtime_session_ids, publish_process_execution_env,
-    settle_started_process_execution_env,
+    SessionScopeId, StoreRealization, WaitKind, WaitState,
+    artifact_destination_owner_retired_error, artifact_owner_is_permanently_retired,
+    artifact_owner_retired_error, artifact_staging_edge_missing_error,
+    artifact_staging_owner_edge_is_missing, artifact_store_plugin_error,
+    ensure_process_lease_schema_version, load_process_execution_env, process_runtime_session_ids,
+    publish_process_execution_env, settle_started_process_execution_env,
 };
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState,

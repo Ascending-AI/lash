@@ -599,6 +599,20 @@ pub enum StoreError {
         /// Backend codec diagnostic describing the malformed payload.
         message: String,
     },
+    /// An artifact write named an owner a permanent retirement fence has
+    /// already closed. Carried typed so the plugin boundary classifies the
+    /// refusal by code rather than by message text.
+    #[error("artifact owner has been permanently retired")]
+    ArtifactOwnerRetired,
+    /// An artifact transfer named a destination owner a permanent retirement
+    /// fence has already closed.
+    #[error("artifact destination owner has been permanently retired")]
+    ArtifactDestinationOwnerRetired,
+    /// An artifact transfer found neither the staging owner's edge nor the
+    /// destination owner's edge; `artifact` is the producer's noun phrase for
+    /// the artifact, e.g. `artifact \`env-…\`` or `module artifact \`mod-…\``.
+    #[error("{artifact} is not retained by the staging owner")]
+    ArtifactStagingEdgeMissing { artifact: String },
     /// The storage substrate failed an operation before a trustworthy value
     /// could be returned.
     #[error("{backend} storage failure: {message}")]
@@ -727,6 +741,9 @@ impl StoreError {
             Self::RecordEncodingFailed { .. } => "RecordEncodingFailed",
             Self::ExecutionStateBodiesReleased => "ExecutionStateBodiesReleased",
             Self::StoredDataCorrupt { .. } => "StoredDataCorrupt",
+            Self::ArtifactOwnerRetired => "ArtifactOwnerRetired",
+            Self::ArtifactDestinationOwnerRetired => "ArtifactDestinationOwnerRetired",
+            Self::ArtifactStagingEdgeMissing { .. } => "ArtifactStagingEdgeMissing",
             Self::StorageFailure { .. } => "StorageFailure",
             Self::Backend(_) => "Backend",
         }

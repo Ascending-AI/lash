@@ -261,6 +261,9 @@ fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
         | RuntimeErrorCode::SessionHeadRefresh
         | RuntimeErrorCode::SqliteAwaitEventNotify
         | RuntimeErrorCode::TurnControlWaitCancelled
+        | RuntimeErrorCode::ArtifactOwnerRetired
+        | RuntimeErrorCode::ArtifactDestinationOwnerRetired
+        | RuntimeErrorCode::ArtifactStagingEdgeMissing
         | RuntimeErrorCode::ForeignCode(_) => ExpectedClassification::Unknown,
     }
 }
@@ -269,6 +272,9 @@ fn expected_classification(code: &RuntimeErrorCode) -> ExpectedClassification {
 fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     let first_party_codes = [
         RuntimeErrorCode::AttachmentSourcePolicyDenied,
+        RuntimeErrorCode::ArtifactOwnerRetired,
+        RuntimeErrorCode::ArtifactDestinationOwnerRetired,
+        RuntimeErrorCode::ArtifactStagingEdgeMissing,
         RuntimeErrorCode::EffectPanicked,
         RuntimeErrorCode::MissingExecutionScopeId,
         RuntimeErrorCode::ExecutionScopeTurnIdMismatch,

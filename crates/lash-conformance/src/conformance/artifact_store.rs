@@ -136,12 +136,25 @@ pub async fn process_env_transfer_and_fence(store: Arc<dyn crate::ProcessExecuti
         .retire_process_execution_env_owner(&staged)
         .await
         .expect("retire staging owner");
+    let retired_error = store
+        .publish_process_execution_env(&staged, &env_ref, &bytes)
+        .await
+        .expect_err("retirement must fence a late publication");
     assert!(
-        store
-            .publish_process_execution_env(&staged, &env_ref, &bytes)
-            .await
-            .is_err(),
-        "retirement must fence a late publication"
+        lash_core::runtime::artifact_owner_is_permanently_retired(&retired_error),
+        "the fence refusal carries the typed retirement reason, got {retired_error}"
+    );
+    let missing_edge_error = store
+        .transfer_process_execution_env(
+            &execution_owner("env-transfer-never-staged"),
+            &process,
+            &crate::ProcessExecutionEnvRef::new("process-env:env-transfer-never-staged"),
+        )
+        .await
+        .expect_err("a transfer with neither edge present must fail");
+    assert!(
+        lash_core::runtime::artifact_staging_owner_edge_is_missing(&missing_edge_error),
+        "the missing-edge refusal carries the typed reason, got {missing_edge_error}"
     );
     store
         .release_process_execution_env(&process, &env_ref)

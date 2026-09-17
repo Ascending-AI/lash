@@ -469,8 +469,49 @@ pub enum ArtifactStoreError {
     Encode(String),
     #[error("failed to decode lashlang artifact: {0}")]
     Decode(String),
+    /// The write named an owner a permanent retirement fence has already
+    /// closed. Typed so callers classify by variant, not by message text.
+    #[error("artifact owner has been permanently retired")]
+    OwnerRetired,
+    /// A transfer named a destination owner a permanent retirement fence has
+    /// already closed.
+    #[error("artifact destination owner has been permanently retired")]
+    DestinationOwnerRetired,
+    /// A transfer found neither the staging owner's edge nor the destination
+    /// owner's edge. `artifact` is the producer's noun phrase for the
+    /// artifact, e.g. `module artifact \`mod-…\``.
+    #[error("{artifact} is not retained by the staging owner")]
+    StagingEdgeMissing { artifact: String },
     #[error("artifact store backend error: {0}")]
     Backend(String),
+}
+
+impl From<lash_core::StoreError> for ArtifactStoreError {
+    fn from(error: lash_core::StoreError) -> Self {
+        match error {
+            lash_core::StoreError::ArtifactOwnerRetired => Self::OwnerRetired,
+            lash_core::StoreError::ArtifactDestinationOwnerRetired => Self::DestinationOwnerRetired,
+            lash_core::StoreError::ArtifactStagingEdgeMissing { artifact } => {
+                Self::StagingEdgeMissing { artifact }
+            }
+            other => Self::Backend(other.to_string()),
+        }
+    }
+}
+
+impl From<ArtifactStoreError> for lash_core::PluginError {
+    fn from(error: ArtifactStoreError) -> Self {
+        match error {
+            ArtifactStoreError::OwnerRetired => lash_core::artifact_owner_retired_error(),
+            ArtifactStoreError::DestinationOwnerRetired => {
+                lash_core::artifact_destination_owner_retired_error()
+            }
+            ArtifactStoreError::StagingEdgeMissing { artifact } => {
+                lash_core::artifact_staging_edge_missing_error(artifact)
+            }
+            other => lash_core::PluginError::Session(other.to_string()),
+        }
+    }
 }
 
 impl From<ModuleArtifactError> for ArtifactStoreError {
@@ -640,9 +681,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
         }
         let mut state = self.state.lock_recover();
         if state.retired_owners.contains(owner) {
-            return Err(ArtifactStoreError::Backend(
-                "artifact owner has been permanently retired".to_string(),
-            ));
+            return Err(ArtifactStoreError::OwnerRetired);
         }
         if let Some(existing) = state.modules.get(&artifact.module_ref)
             && existing.as_ref() != artifact
@@ -669,9 +708,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
         if state.retired_owners.contains(owner) {
-            return Err(ArtifactStoreError::Backend(
-                "artifact owner has been permanently retired".to_string(),
-            ));
+            return Err(ArtifactStoreError::OwnerRetired);
         }
         if !state.modules.contains_key(module_ref) {
             return Err(ArtifactStoreError::Backend(format!(
@@ -690,18 +727,16 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
         if state.retired_owners.contains(to) {
-            return Err(ArtifactStoreError::Backend(
-                "artifact destination owner has been permanently retired".to_string(),
-            ));
+            return Err(ArtifactStoreError::DestinationOwnerRetired);
         }
         let from_edge = (module_ref.clone(), from.clone());
         if !state.owners.contains(&from_edge) {
             if state.owners.contains(&(module_ref.clone(), to.clone())) {
                 return Ok(());
             }
-            return Err(ArtifactStoreError::Backend(format!(
-                "module artifact `{module_ref}` is not retained by the staging owner"
-            )));
+            return Err(ArtifactStoreError::StagingEdgeMissing {
+                artifact: format!("module artifact `{module_ref}`"),
+            });
         }
         state.owners.insert((module_ref.clone(), to.clone()));
         state.owners.remove(&from_edge);

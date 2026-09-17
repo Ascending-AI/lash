@@ -909,6 +909,8 @@ pub use runtime::{
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerProcessWork,
     WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
+    artifact_destination_owner_retired_error, artifact_owner_retired_error,
+    artifact_staging_edge_missing_error, artifact_store_plugin_error,
     ensure_process_lease_schema_version,
 };
 pub(crate) use runtime::{
