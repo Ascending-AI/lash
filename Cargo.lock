@@ -2615,9 +2615,7 @@ dependencies = [
  "async-trait",
  "lash-internal-core",
  "lash-internal-lashlang-runtime",
- "serde",
  "serde_json",
- "serde_path_to_error",
 ]
 
 [[package]]
