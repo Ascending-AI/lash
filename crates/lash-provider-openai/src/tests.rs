@@ -1626,7 +1626,7 @@ fn assistant_text_preserves_response_meta() {
             response_meta: Some(ResponseTextMeta {
                 id: Some("msg_1".to_string()),
                 status: Some("completed".to_string()),
-                phase: Some("final_answer".to_string()),
+                phase: Some(ResponsePhase::FinalAnswer),
                 origin: Some(provider.route_identity("openai/gpt-5.4")),
                 ..ResponseTextMeta::default()
             }),
@@ -1907,7 +1907,7 @@ fn stream_parser_captures_text_reasoning_tool_and_phase() {
                 ..
             }),
             ..
-        } if phase == "commentary"
+        } if *phase == ResponsePhase::Commentary
     ));
     assert!(matches!(
         &parts[2],

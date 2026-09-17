@@ -572,14 +572,14 @@ fn output_limit_retry_emits_the_guarded_projection_with_no_empty_parts() {
                 LlmOutputPart::Text {
                     text: "internal commentary the user never sees".to_string(),
                     response_meta: Some(lash_sansio::llm::types::ResponseTextMeta {
-                        phase: Some("commentary".to_string()),
+                        phase: Some(lash_sansio::llm::types::ResponsePhase::Commentary),
                         ..Default::default()
                     }),
                 },
                 LlmOutputPart::Text {
                     text: "the truncated answer".to_string(),
                     response_meta: Some(lash_sansio::llm::types::ResponseTextMeta {
-                        phase: Some("final_answer".to_string()),
+                        phase: Some(lash_sansio::llm::types::ResponsePhase::FinalAnswer),
                         ..Default::default()
                     }),
                 },

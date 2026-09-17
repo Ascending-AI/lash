@@ -1,5 +1,6 @@
 use super::tests::{CountingEffectController, runtime_test_tool};
 use super::*;
+use lash_core::llm::types::ResponsePhase;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Debug)]
@@ -57,7 +58,7 @@ impl lash_core::facade_support::Provider for ProviderPartPersistenceProvider {
                 response_meta: Some(ResponseTextMeta {
                     id: Some("message-1".to_string()),
                     status: Some("completed".to_string()),
-                    phase: Some("final_answer".to_string()),
+                    phase: Some(ResponsePhase::FinalAnswer),
                     provider_payload: Some("opaque-text".to_string()),
                     ..ResponseTextMeta::default()
                 }),
@@ -251,7 +252,7 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
     let expected_response_meta = ResponseTextMeta {
         id: Some("message-1".to_string()),
         status: Some("completed".to_string()),
-        phase: Some("final_answer".to_string()),
+        phase: Some(ResponsePhase::FinalAnswer),
         provider_payload: Some("opaque-text".to_string()),
         origin: Some(lash_core::ProviderRouteIdentity::new(
             "stub",

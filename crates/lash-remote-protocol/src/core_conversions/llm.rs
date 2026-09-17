@@ -1007,7 +1007,7 @@ impl From<core_llm::ResponseTextMeta> for RemoteResponseTextMeta {
         Self {
             id,
             status,
-            phase,
+            phase: phase.map(|phase| phase.as_str().to_string()),
             provider_payload,
             origin: origin.map(Into::into),
         }
@@ -1026,7 +1026,9 @@ impl From<RemoteResponseTextMeta> for core_llm::ResponseTextMeta {
         Self {
             id,
             status,
-            phase,
+            phase: phase
+                .as_deref()
+                .and_then(core_llm::ResponsePhase::from_provider_wire),
             provider_payload,
             origin: origin.map(Into::into),
             ..Default::default()

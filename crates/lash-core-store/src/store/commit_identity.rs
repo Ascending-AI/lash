@@ -611,10 +611,13 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part, encoding_version: u32) {
             legacy_origin_provider,
             legacy_origin_model,
         } = response;
-        for value in [id, status, phase, provider_payload] {
-            push_optional(encoded, value.as_ref(), |encoded, value| {
-                push_string(encoded, value)
-            });
+        for value in [
+            id.as_deref(),
+            status.as_deref(),
+            (*phase).map(|phase| phase.as_str()),
+            provider_payload.as_deref(),
+        ] {
+            push_optional(encoded, value, |encoded, value| push_string(encoded, value));
         }
         if encoding_version == LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
             // ResponseTextMeta carried provider/model before the unified

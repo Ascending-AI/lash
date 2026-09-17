@@ -6,7 +6,7 @@ use super::*;
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{
     LlmJsonSchema, LlmMessage, LlmOutputPart, LlmProviderTraceSender, LlmRequestScope, LlmResponse,
-    LlmRole, LlmTerminalReason, LlmToolChoice, LlmToolSpec, ResponseTextMeta,
+    LlmRole, LlmTerminalReason, LlmToolChoice, LlmToolSpec, ResponsePhase, ResponseTextMeta,
 };
 use lash_core::provider::{
     CacheRetention, ModelCapability, Provider, ProviderHandle, ProviderOptions,
@@ -156,7 +156,7 @@ fn assistant_message_with_meta(
             response_meta: Some(ResponseTextMeta {
                 id: Some(message_id.to_string()),
                 status: Some("completed".to_string()),
-                phase: Some("final_answer".to_string()),
+                phase: Some(ResponsePhase::FinalAnswer),
                 origin: Some(route.clone()),
                 ..ResponseTextMeta::default()
             }),
@@ -340,7 +340,7 @@ fn raw_codex_builder_strips_unstamped_and_foreign_replay_fields() {
                 response_meta: Some(ResponseTextMeta {
                     id: Some("unstamped-response-id".to_string()),
                     status: Some("completed".to_string()),
-                    phase: Some("final_answer".to_string()),
+                    phase: Some(ResponsePhase::FinalAnswer),
                     ..ResponseTextMeta::default()
                 }),
                 cache_breakpoint: false,
@@ -549,7 +549,7 @@ fn codex_request_history_preserves_assistant_message_metadata() {
             response_meta: Some(ResponseTextMeta {
                 id: Some("msg_1".to_string()),
                 status: Some("completed".to_string()),
-                phase: Some("final_answer".to_string()),
+                phase: Some(ResponsePhase::FinalAnswer),
                 origin: Some(provider.route_identity("gpt-5.4")),
                 ..ResponseTextMeta::default()
             }),
@@ -597,7 +597,7 @@ fn codex_cached_continuation_sends_delta_after_prior_request_and_response_items(
                 response_meta: Some(ResponseTextMeta {
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
-                    phase: Some("final_answer".to_string()),
+                    phase: Some(ResponsePhase::FinalAnswer),
                     origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
@@ -1027,7 +1027,7 @@ async fn codex_scripted_websocket_cached_follow_up_omits_previous_assistant_outp
                 response_meta: Some(ResponseTextMeta {
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
-                    phase: Some("final_answer".to_string()),
+                    phase: Some(ResponsePhase::FinalAnswer),
                     origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
@@ -1197,7 +1197,7 @@ async fn codex_scripted_websocket_same_session_different_frame_does_not_reuse_co
                 response_meta: Some(ResponseTextMeta {
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
-                    phase: Some("final_answer".to_string()),
+                    phase: Some(ResponsePhase::FinalAnswer),
                     origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
@@ -1277,7 +1277,7 @@ async fn codex_scripted_websocket_stale_previous_response_retries_full_context_o
                 response_meta: Some(ResponseTextMeta {
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
-                    phase: Some("final_answer".to_string()),
+                    phase: Some(ResponsePhase::FinalAnswer),
                     origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
@@ -1345,7 +1345,7 @@ async fn codex_stale_continuation_after_allocation_only_event_still_recovers() {
                 response_meta: Some(ResponseTextMeta {
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
-                    phase: Some("final_answer".to_string()),
+                    phase: Some(ResponsePhase::FinalAnswer),
                     origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
@@ -1401,7 +1401,7 @@ async fn codex_scripted_websocket_dead_reused_socket_reconnects_full_context() {
                 response_meta: Some(ResponseTextMeta {
                     id: Some("msg_1".to_string()),
                     status: Some("completed".to_string()),
-                    phase: Some("final_answer".to_string()),
+                    phase: Some(ResponsePhase::FinalAnswer),
                     origin: Some(provider.route_identity("gpt-5.4")),
                     ..ResponseTextMeta::default()
                 }),
@@ -2052,7 +2052,7 @@ fn codex_stream_assembles_single_message_item_once() {
             response_meta: Some(ResponseTextMeta {
                 id: Some("msg_1".to_string()),
                 status: Some("completed".to_string()),
-                phase: Some("commentary".to_string()),
+                phase: Some(ResponsePhase::Commentary),
                 ..ResponseTextMeta::default()
             }),
         }

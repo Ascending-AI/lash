@@ -224,7 +224,7 @@ fn raw_responses_builder_drops_unstamped_response_item_identity_and_phase() {
             response_meta: Some(lash_core::llm::types::ResponseTextMeta {
                 id: Some("foreign-response-item".to_string()),
                 status: Some("in_progress".to_string()),
-                phase: Some("analysis".to_string()),
+                phase: Some(ResponsePhase::Commentary),
                 provider_payload: Some("foreign-response-payload".to_string()),
                 origin: None,
                 ..Default::default()
@@ -240,7 +240,7 @@ fn raw_responses_builder_drops_unstamped_response_item_identity_and_phase() {
     assert!(wire.contains("portable answer"));
     assert!(!wire.contains("foreign-response-item"));
     assert!(!wire.contains("in_progress"));
-    assert!(!wire.contains("analysis"));
+    assert!(!wire.contains("commentary"));
     assert!(!wire.contains("foreign-response-payload"));
 }
 

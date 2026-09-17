@@ -29,7 +29,7 @@ use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, Transpor
 use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest,
     LlmResponse, LlmRole, LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
-    ResponseTextMeta,
+    ResponsePhase, ResponseTextMeta,
 };
 use lash_core::{
     SchemaContract, facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
@@ -291,7 +291,7 @@ fn flush_pending_content(
         });
         item["content"] = Value::Array(content);
         if let Some(phase) = meta.phase.as_ref() {
-            item["phase"] = json!(phase);
+            item["phase"] = json!(phase.as_str());
         }
         input.push(item);
         return;
@@ -737,7 +737,7 @@ pub fn response_text_meta_from_message_item(item: &Value) -> ResponseTextMeta {
         phase: item
             .get("phase")
             .and_then(|v| v.as_str())
-            .map(str::to_string),
+            .and_then(ResponsePhase::from_provider_wire),
         ..ResponseTextMeta::default()
     }
 }
@@ -765,7 +765,8 @@ pub fn extract_text(value: &Value) -> String {
                 && item
                     .get("phase")
                     .and_then(|v| v.as_str())
-                    .is_some_and(|phase| phase.eq_ignore_ascii_case("final_answer"))
+                    .and_then(ResponsePhase::from_provider_wire)
+                    .is_some_and(|phase| phase == ResponsePhase::FinalAnswer)
                 && !message_text_from_item(item).is_empty()
         })
     {

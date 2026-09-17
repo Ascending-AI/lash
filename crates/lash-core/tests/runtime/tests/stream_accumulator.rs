@@ -194,7 +194,7 @@ fn stream_accumulator_full_text_prefers_final_answer_over_commentary() {
         Some(lash_sansio::llm::types::ResponseTextMeta {
             id: Some("msg_commentary".to_string()),
             status: Some("completed".to_string()),
-            phase: Some("commentary".to_string()),
+            phase: Some(lash_sansio::llm::types::ResponsePhase::Commentary),
             ..Default::default()
         }),
     );
@@ -203,7 +203,7 @@ fn stream_accumulator_full_text_prefers_final_answer_over_commentary() {
         Some(lash_sansio::llm::types::ResponseTextMeta {
             id: Some("msg_final".to_string()),
             status: Some("completed".to_string()),
-            phase: Some("final_answer".to_string()),
+            phase: Some(lash_sansio::llm::types::ResponsePhase::FinalAnswer),
             ..Default::default()
         }),
     );
