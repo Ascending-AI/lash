@@ -666,6 +666,115 @@ try {
     );
 }
 
+/// FIG-2975: a child that ends its task with `submit_error` reaches the
+/// parent, its own process record and its terminal process event carrying the
+/// exact reason it wrote — not a generic substitute for it.
+#[tokio::test]
+async fn submitted_child_failure_reason_reaches_parent_record_and_terminal_event() {
+    const REASON: &str = "missing shard amber";
+    let probe = run_seed_probe_inner_dispatch_with(
+        typescript_block(
+            r#"
+try {
+  const result = await agents.spawn({
+    capability: "default",
+    task: "Fail with a distinctive reason.",
+    output: { len: "int" }
+  });
+  finish({ ok: true, result });
+} catch (error) {
+  finish({ ok: false, error: error.message });
+}"#,
+        ),
+        typescript_block(r#"await task.fail({ reason: "missing shard amber" });"#),
+        TurnInput::text("carry the child's own failure reason to the parent"),
+        Arc::new(StaticCapability::new("default", SessionSpec::inherit())),
+    )
+    .await;
+
+    // 1. The parent's spawn result.
+    let lash_core::facade_support::TurnOutcome::Finished(
+        lash_core::facade_support::TurnFinish::FinalValue { value },
+    ) = &probe.outcome
+    else {
+        panic!(
+            "the failing child must reach the parent's catch block: {:?}",
+            probe.outcome
+        );
+    };
+    assert_eq!(
+        value["ok"],
+        json!(false),
+        "unexpected parent result: {value}"
+    );
+    assert_eq!(
+        value["error"],
+        json!(REASON),
+        "the parent's spawn result must carry the child's own reason: {value}"
+    );
+
+    // 2. The child's process record, as a polling host observes it.
+    let child = probe.observed_subagent_process().await;
+    assert_eq!(child.lifecycle, lash_core::ProcessStatus::Failed);
+    assert_eq!(child.error.as_deref(), Some(REASON));
+    assert_eq!(
+        child.error_code,
+        Some(lash_core::ObservedProcessFailure::Failed {
+            class: lash_core::ToolFailureClass::Execution,
+            code: "process_session_turn_tool_error".to_string(),
+        }),
+        "the record's typed classification must name the child's stop, not a shared code"
+    );
+
+    // 3. The terminal process event.
+    let events = lash_core::ProcessEventLog::events_after(
+        probe.process_registry.as_ref(),
+        &child.process_id,
+        0,
+    )
+    .await
+    .expect("load the child's process lifecycle events");
+    let mut terminals = events
+        .iter()
+        .filter(|event| event.semantics.terminal.is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        terminals.len(),
+        1,
+        "expected one terminal event for {}: {events:?}",
+        child.process_id
+    );
+    let terminal_event = terminals.remove(0);
+    assert_eq!(terminal_event.event_type, "process.failed");
+    let terminal = terminal_event
+        .semantics
+        .terminal
+        .as_ref()
+        .expect("filtered on terminal semantics");
+    assert_eq!(terminal.status, lash_core::ProcessStatus::Failed);
+    let lash_core::ProcessAwaitOutput::Settled { output } = &terminal.outcome else {
+        panic!("the child settled with a terminal outcome: {terminal_event:?}");
+    };
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("the child's terminal event must record a failure: {terminal_event:?}");
+    };
+    assert_eq!(failure.message, REASON);
+    assert_eq!(failure.code, "process_session_turn_tool_error");
+    // The encoded `submit_error` call stays available for diagnosis without
+    // displacing the one field a parent model reads.
+    let raw = failure
+        .raw
+        .as_ref()
+        .map(lash_core::ToolValue::to_json_value)
+        .expect("bounded diagnostics ride `raw`");
+    assert!(
+        raw["stop"]
+            .as_str()
+            .is_some_and(|stop| stop.contains("subagent_submit_error") && stop.contains(REASON)),
+        "the child's original submit_error call must survive in `raw`: {raw}"
+    );
+}
+
 #[tokio::test]
 async fn rlm_spawn_is_visible_through_parent_session_process_observer() {
     let probe = run_seed_probe_inner_dispatch(
@@ -1215,6 +1324,32 @@ impl SeedProbe {
         self.child_prompt
             .as_deref()
             .unwrap_or_else(|| panic!("child prompt was not captured; outcome={:?}", self.outcome))
+    }
+
+    /// The one subagent process this probe's parent spawned, as a polling
+    /// host observes it.
+    async fn observed_subagent_process(&self) -> lash_core::facade_support::ObservedProcess {
+        let observer = lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(
+            &self.process_registry,
+        )
+            as Arc<dyn lash_core::ProcessRegistry>);
+        let observed = observer
+            .list(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            })
+            .await
+            .expect("list observed processes");
+        let mut subagents = observed
+            .into_iter()
+            .filter(|process| process.kind() == "subagent")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            subagents.len(),
+            1,
+            "expected exactly one subagent process: {subagents:?}"
+        );
+        subagents.remove(0)
     }
 
     async fn assert_process_visibility(&self, kind: &str, label: &str) {
