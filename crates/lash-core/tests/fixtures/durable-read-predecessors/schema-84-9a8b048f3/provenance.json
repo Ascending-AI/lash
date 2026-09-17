@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 84,
+  "source_commit": "9a8b048f3",
+  "relationship": "FIG-3261 named-CHECK fixture bytes immediately before the FIG-3262 claim-identity regeneration",
+  "artifacts": {
+    "postgres-expected.json": "70f7700a1523a72132644ae0309ec6952f6b3a264f2a6295a3a8c9a35ccaa4e5",
+    "sqlite-expected.json": "0676700ce19205128234b7cd9153e0b12f9a95a378506b63016837233ea72e18"
+  }
+}

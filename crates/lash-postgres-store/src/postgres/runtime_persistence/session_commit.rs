@@ -814,17 +814,13 @@ impl SessionCommitStore for PostgresSessionStore {
                 }
             }
             for (input_id, payload) in inputs {
-                sqlx::query(
+                sqlx::query(&format!(
                     "UPDATE lash_pending_turn_inputs
                      SET state = $3,
                          ingress_json = COALESCE($4, ingress_json),
-                         claim_id = NULL,
-                         claim_owner_id = NULL,
-                         claim_owner_incarnation_id = NULL,
-                         claim_token = NULL,
-                         claim_session_lease_generation = 0
-                     WHERE session_id = $1 AND input_id = $2",
-                )
+                         {TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS}
+                     WHERE session_id = $1 AND input_id = $2"
+                ))
                 .bind(commit.session_id.as_str())
                 .bind(&*input_id)
                 .bind(match disposition {
