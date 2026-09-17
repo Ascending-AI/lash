@@ -12,7 +12,8 @@ mod recovery;
 
 pub(crate) use recovery::{
     OverflowRecoveryState, emit_recovery_trace, history_recovery_records,
-    overflow_recovery_after_turn, recovery_record_kind, run_overflow_recovery,
+    overflow_recovery_after_turn, recovery_record_kind, recovery_record_payload,
+    run_overflow_recovery,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -456,7 +457,7 @@ pub(crate) fn prepare_compaction_request(
     // (FIG-3107). Durable history keeps every record; only the summarizer's
     // read state drops them, and the prefix a cut point hands the ordinary
     // compaction policy cannot resurrect a marker its terminal record closed.
-    prefix_messages.retain(|message| recovery_record_kind(message).is_none());
+    prefix_messages.retain(|message| recovery_record_payload(message).is_none());
     strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
     snapshot.set_execution_state_snapshot(None);
     snapshot.last_prompt_usage = None;
@@ -685,9 +686,11 @@ impl TurnContextTransform for RollingTurnTransform {
         // before any rolling-pressure decision. The durable marker plus the
         // terminal records say whether recovery is pending; a completed or
         // exhausted record below the marker closes it.
-        let recovery_state =
-            OverflowRecoveryState::derive(history_recovery_records(ctx.state.messages()));
-        if recovery_state.pending {
+        let recovery_state = OverflowRecoveryState::derive(
+            history_recovery_records(ctx.state.messages())
+                .map_err(|error| ContextError::Session(error.to_string()))?,
+        );
+        if recovery_state.pending() {
             let current_request = {
                 let messages_now = input.messages.make_mut();
                 latest_user_index(messages_now)
