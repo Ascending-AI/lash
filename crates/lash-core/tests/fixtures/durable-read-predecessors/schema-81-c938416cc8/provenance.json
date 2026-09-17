@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 81,
+  "source_commit": "c938416cc8",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-2885 session_meta family-constraint regeneration",
+  "artifacts": {
+    "postgres-expected.json": "363d02e6fb31e28c6445ed13d19268bf6beefab8ed02b7331f8c17352e8f1241",
+    "sqlite-expected.json": "5ad3a85a004498a7b209fba49a9e2737d182af88ba13d4a970207912636a42b2"
+  }
+}
