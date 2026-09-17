@@ -1162,7 +1162,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 22"));
+    assert!(message.contains("supports schema version 23"));
     assert!(message.contains("database reports version 8"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
@@ -1171,8 +1171,13 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
 
 #[tokio::test]
 async fn sqlite_effect_controller_rejects_retained_generation_21_schema_before_serving() {
+    // Generation 21 is the pre-SleepSpec-cutover journal this fixture retains;
+    // the boundary has since moved, and every stale stamp is refused alike.
     const RETAINED_PRIOR_EFFECT_GENERATION: i32 = 21;
-    assert_eq!(RETAINED_PRIOR_EFFECT_GENERATION + 1, 22);
+    assert!(
+        i64::from(RETAINED_PRIOR_EFFECT_GENERATION)
+            < lash_sqlite_store::SqliteDatabase::EffectReplay.expected_version()
+    );
 
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("retained-generation-21-effects.db");
@@ -1190,7 +1195,7 @@ async fn sqlite_effect_controller_rejects_retained_generation_21_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 22"));
+    assert!(message.contains("supports schema version 23"));
     assert!(message.contains("database reports version 21"));
 }
 

@@ -9,6 +9,7 @@
 //! 15-second `busy_timeout` (see `conn.rs`).
 
 use super::*;
+use crate::schema_fragments::{AWAIT_EVENT_TABLES, SCOPE_RETIREMENT_TABLE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StoreBacking {
@@ -20,6 +21,9 @@ pub(crate) enum StoreBacking {
 struct SqliteDatabaseDefinition {
     name: &'static str,
     schema: &'static str,
+    /// Shared table sets this database also carries; see
+    /// [`SqliteDatabase::fragments`].
+    fragments: &'static [&'static str],
     version: i32,
 }
 
@@ -46,21 +50,25 @@ impl SqliteDatabase {
             Self::DurableCore => SqliteDatabaseDefinition {
                 name: "durable core",
                 schema: SCHEMA,
+                fragments: &[AWAIT_EVENT_TABLES],
                 version: SCHEMA_VERSION,
             },
             Self::ProcessRegistry => SqliteDatabaseDefinition {
                 name: "process registry",
                 schema: PROCESS_SCHEMA,
+                fragments: &[SCOPE_RETIREMENT_TABLE],
                 version: PROCESS_SCHEMA_VERSION,
             },
             Self::Triggers => SqliteDatabaseDefinition {
                 name: "trigger store",
                 schema: TRIGGER_SCHEMA,
+                fragments: &[],
                 version: TRIGGER_SCHEMA_VERSION,
             },
             Self::EffectReplay => SqliteDatabaseDefinition {
                 name: "effect replay",
                 schema: EFFECT_SCHEMA,
+                fragments: &[AWAIT_EVENT_TABLES, SCOPE_RETIREMENT_TABLE],
                 version: EFFECT_SCHEMA_VERSION,
             },
         }
@@ -82,6 +90,12 @@ impl SqliteDatabase {
     /// The operator-facing name used in reports and refusal messages.
     pub fn name(self) -> &'static str {
         self.definition().name
+    }
+
+    /// Shared DDL fragments applied after `schema` inside the same
+    /// initialization transaction; see [`crate::schema_fragments`].
+    fn fragments(self) -> &'static [&'static str] {
+        self.definition().fragments
     }
 }
 
@@ -439,32 +453,8 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
 
--- Cancellation-only durable promises for Native sessions. These tables live
--- in durable core so reopening the session recovers the same authority without
--- migrating unrelated Native effects into the effect journal.
-CREATE TABLE IF NOT EXISTS await_event_meta (
-    singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
-    signing_secret  BLOB NOT NULL
-);
-INSERT INTO await_event_meta (singleton, signing_secret)
-VALUES (1, randomblob(32))
-ON CONFLICT(singleton) DO NOTHING;
-CREATE TABLE IF NOT EXISTS await_event_waits (
-    key_id          TEXT PRIMARY KEY,
-    scope_json      TEXT NOT NULL,
-    wait_json       TEXT NOT NULL,
-    session_id      TEXT,
-    turn_control    INTEGER NOT NULL CHECK (turn_control IN (0, 1)),
-    terminal_json   TEXT,
-    created_at_ms   INTEGER NOT NULL,
-    resolved_at_ms  INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_await_event_waits_session
-    ON await_event_waits(session_id);
-CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
-    session_id      TEXT PRIMARY KEY,
-    revoked_at_ms   INTEGER NOT NULL
-);
+-- The await-event tables this database shares with the effect journal are
+-- applied from the shared AWAIT_EVENT_TABLES fragment.
 
 -- The named process-definition registry (FIG-2995, ADR 0095): owner scope,
 -- name, revision, pinned definition fingerprint, lifecycle tombstone and
@@ -714,7 +704,12 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `CausalRef` field whose full range exceeds SQLite's signed INTEGER, and the
 /// cross-backend differential round-trips u64::MAX through them. A pre-67
 /// database lacks the family guards, so it is rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 67;
+/// Bumped to 68 for FIG-3260: the await-event tables moved out of this string
+/// into the shared `AWAIT_EVENT_TABLES` fragment so the declaration exists
+/// once for both carrying databases. The applied DDL is statement-identical,
+/// but the guarded `SCHEMA` text changed, so a pre-68 database is rejected at
+/// open and recreated like any other schema change.
+pub(crate) const SCHEMA_VERSION: i32 = 68;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -794,17 +789,8 @@ CREATE INDEX IF NOT EXISTS idx_processes_status
 CREATE INDEX IF NOT EXISTS idx_processes_live_worklist
     ON processes(process_id) WHERE status IN ('running', 'waiting');
 
--- Permanent by design: process ids are single-use, so a retired process
--- scope's fence must outlive every prune and every restart. Kept in this
--- file, beside the process rows, so a registration deletes the fence and
--- inserts the row in one single-file commit and a retirement's fence insert
--- is its one commit point (FIG-2499, ADR 0049). Keyed by the scope's journal
--- identity, the same key the bound effect journal's rows carry.
-CREATE TABLE IF NOT EXISTS effect_scope_retirements (
-    scope_id        TEXT PRIMARY KEY,
-    retired_at_ms   INTEGER NOT NULL,
-    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
-);
+-- The scope-retirement fence this database shares with the effect journal is
+-- applied from the shared SCOPE_RETIREMENT_TABLE fragment.
 
 CREATE INDEX IF NOT EXISTS idx_processes_change_seq
     ON processes(change_seq);
@@ -1052,7 +1038,12 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// pending-cancel list reads one column through one partial index instead of
 /// decoding every record. Version-37 registries carry a boolean this schema no
 /// longer has, so they are rejected rather than migrated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 38;
+/// Version 39 moves `effect_scope_retirements` out of this string into the
+/// shared `SCOPE_RETIREMENT_TABLE` fragment (FIG-3260) so the fence is declared
+/// once for both carrying databases. The applied DDL is statement-identical,
+/// but the guarded `PROCESS_SCHEMA` text changed, so a pre-39 registry is
+/// rejected at open and recreated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 39;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1197,44 +1188,9 @@ CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_session
 CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_scope
     ON runtime_effect_group(scope_id);
 
-CREATE TABLE IF NOT EXISTS await_event_meta (
-    singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
-    signing_secret  BLOB NOT NULL
-);
-
-INSERT INTO await_event_meta (singleton, signing_secret)
-VALUES (1, randomblob(32))
-ON CONFLICT(singleton) DO NOTHING;
-
-CREATE TABLE IF NOT EXISTS await_event_waits (
-    key_id          TEXT PRIMARY KEY,
-    scope_json      TEXT NOT NULL,
-    wait_json       TEXT NOT NULL,
-    session_id      TEXT,
-    turn_control    INTEGER NOT NULL CHECK (turn_control IN (0, 1)),
-    terminal_json   TEXT,
-    created_at_ms   INTEGER NOT NULL,
-    resolved_at_ms  INTEGER
-);
-
-CREATE INDEX IF NOT EXISTS idx_await_event_waits_session
-    ON await_event_waits(session_id);
-
--- Permanent by design: session ids cannot be reused, so revocation evidence
--- must remain after every retention-pruning pass.
-CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
-    session_id      TEXT PRIMARY KEY,
-    revoked_at_ms   INTEGER NOT NULL
-);
-
--- Permanent by design: process and runtime-operation ids are single-use, so a
--- retired scope's fence must outlive every retention pass and every restart.
--- Keyed by the scope's journal identity, the same key its effect rows carry.
-CREATE TABLE IF NOT EXISTS effect_scope_retirements (
-    scope_id        TEXT PRIMARY KEY,
-    retired_at_ms   INTEGER NOT NULL,
-    artifact_cleanup_completed INTEGER NOT NULL DEFAULT 0 CHECK (artifact_cleanup_completed IN (0, 1))
-);
+-- The await-event tables this database shares with durable core and the
+-- scope-retirement fence it shares with the process registry are applied
+-- from the shared AWAIT_EVENT_TABLES and SCOPE_RETIREMENT_TABLE fragments.
 
 -- Durable catalogs that may hold an authorized cancellation closure under a
 -- physical scope. Owner retirement and participant registration serialize on
@@ -1318,7 +1274,13 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 // Pre-22 effect databases are rejected and recreated; there is no migration arm
 // because the resolved duration cannot be turned back into the deadline the
 // guest asked for.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 22;
+// Version 23 moves the await-event tables and `effect_scope_retirements` out of
+// this string into the shared `AWAIT_EVENT_TABLES` and `SCOPE_RETIREMENT_TABLE`
+// fragments (FIG-3260) so each declaration exists once for every carrying
+// database. The applied DDL is statement-identical, but the guarded
+// `EFFECT_SCHEMA` text changed, so a pre-23 journal is rejected at open and
+// recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 23;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
@@ -1375,14 +1337,21 @@ fn prepare_versioned_schema_at_version<'connection>(
     // `busy_timeout`). Holding the write lock from the first statement makes
     // every contender serialise on the busy handler instead.
     let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let apply_schema = |tx: &rusqlite::Transaction<'_>| -> rusqlite::Result<()> {
+        tx.execute_batch(database.schema())?;
+        for fragment in database.fragments() {
+            tx.execute_batch(fragment)?;
+        }
+        Ok(())
+    };
     let user_version: i32 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if user_version == schema_version {
-        tx.execute_batch(database.schema())?;
+        apply_schema(&tx)?;
         stamp_writing_release(&tx, database)?;
         return Ok(tx);
     }
     if user_version == 0 && !has_user_schema_objects(&tx)? {
-        tx.execute_batch(database.schema())?;
+        apply_schema(&tx)?;
         tx.pragma_update(None, "user_version", schema_version)?;
         stamp_writing_release(&tx, database)?;
         return Ok(tx);
@@ -1391,7 +1360,7 @@ fn prepare_versioned_schema_at_version<'connection>(
     // unreachable for production opens now that SCHEMA_VERSION is 50.
     if database == SqliteDatabase::DurableCore && user_version == 43 && schema_version == 44 {
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
-        tx.execute_batch(database.schema())?;
+        apply_schema(&tx)?;
         tx.pragma_update(None, "user_version", schema_version)?;
         stamp_writing_release(&tx, database)?;
         return Ok(tx);
@@ -1617,6 +1586,61 @@ mod schema_metadata_tests {
 #[cfg(test)]
 mod check_constraint_tests {
     use super::*;
+
+    /// The fragment dedup's whole point: every database that carries a shared
+    /// table must end up with the same stored DDL for it. This is the
+    /// invariant the two copy-pasted declarations silently assumed.
+    #[test]
+    fn shared_fragment_tables_carry_identical_ddl_in_every_carrier_database() {
+        let carriers: &[(&[&str], &[SqliteDatabase])] = &[
+            (
+                &[
+                    "await_event_meta",
+                    "await_event_waits",
+                    "idx_await_event_waits_session",
+                    "await_event_revoked_sessions",
+                ],
+                &[SqliteDatabase::DurableCore, SqliteDatabase::EffectReplay],
+            ),
+            (
+                &["effect_scope_retirements"],
+                &[
+                    SqliteDatabase::ProcessRegistry,
+                    SqliteDatabase::EffectReplay,
+                ],
+            ),
+        ];
+        for &(objects, databases) in carriers {
+            for &object in objects {
+                let mut rendered = Vec::new();
+                for &database in databases {
+                    let mut connection =
+                        Connection::open_in_memory().expect("open shared-DDL fixture");
+                    prepare_versioned_schema(&mut connection, database)
+                        .expect("apply database schema and fragments")
+                        .commit()
+                        .expect("commit shared-DDL fixture");
+                    let sql: String = connection
+                        .query_row(
+                            "SELECT sql FROM sqlite_master WHERE name = ?1",
+                            [object],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or_else(|error| {
+                            panic!("{object} missing from {}: {error}", database.name())
+                        });
+                    rendered.push((database.name(), sql));
+                }
+                let (first_database, first_sql) = &rendered[0];
+                for (database, sql) in &rendered[1..] {
+                    assert_eq!(
+                        first_sql, sql,
+                        "{object} DDL drifted between {first_database} and {database}"
+                    );
+                }
+            }
+        }
+    }
 
     fn assert_check_rejects(connection: &Connection, statement: &str, constraint: &str) {
         let error = connection
