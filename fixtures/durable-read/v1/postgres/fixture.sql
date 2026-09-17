@@ -35,7 +35,7 @@ SET default_table_access_method = heap;
 CREATE TABLE lash_durable_read_fixture.lash_artifact_owner_retirements (
     owner_kind text NOT NULL,
     owner_id text NOT NULL,
-    CONSTRAINT lash_artifact_owner_retirements_owner_kind_check CHECK ((owner_kind = 'execution'::text))
+    CONSTRAINT ck_artifact_owner_retirements_owner_kind CHECK ((owner_kind = 'execution'::text))
 );
 
 
@@ -48,7 +48,7 @@ CREATE TABLE lash_durable_read_fixture.lash_artifact_owners (
     artifact_ref text NOT NULL,
     owner_kind text NOT NULL,
     owner_id text NOT NULL,
-    CONSTRAINT lash_artifact_owners_owner_kind_check CHECK ((owner_kind = ANY (ARRAY['host'::text, 'process'::text, 'execution'::text])))
+    CONSTRAINT ck_artifact_owners_owner_kind CHECK ((owner_kind = ANY (ARRAY['host'::text, 'process'::text, 'execution'::text])))
 );
 
 
@@ -61,9 +61,9 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_condemnations (
     phase text NOT NULL,
     write_token text,
     write_session_id text,
-    CONSTRAINT lash_attachment_condemnations_check CHECK (((write_token IS NULL) = (write_session_id IS NULL))),
-    CONSTRAINT lash_attachment_condemnations_check1 CHECK (((write_token IS NULL) OR (phase = 'condemned'::text))),
-    CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text])))
+    CONSTRAINT ck_attachment_condemnations_phase CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text]))),
+    CONSTRAINT ck_attachment_condemnations_write_token_pairing CHECK (((write_token IS NULL) = (write_session_id IS NULL))),
+    CONSTRAINT ck_attachment_condemnations_write_token_phase CHECK (((write_token IS NULL) OR (phase = 'condemned'::text)))
 );
 
 
@@ -82,8 +82,8 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_manifest (
     owner_kind text,
     owner_id text,
     owner_incarnation bigint,
-    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((((owner_kind IS NULL) AND (owner_id IS NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'turn'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'process'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NOT NULL)))),
-    CONSTRAINT lash_attachment_manifest_owner_kind_check CHECK ((owner_kind = ANY (ARRAY['turn'::text, 'process'::text])))
+    CONSTRAINT ck_attachment_manifest_owner_kind CHECK ((owner_kind = ANY (ARRAY['turn'::text, 'process'::text]))),
+    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((((owner_kind IS NULL) AND (owner_id IS NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'turn'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'process'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NOT NULL))))
 );
 
 
@@ -94,7 +94,7 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_manifest (
 CREATE TABLE lash_durable_read_fixture.lash_await_event_meta (
     singleton boolean DEFAULT true NOT NULL,
     signing_secret bytea NOT NULL,
-    CONSTRAINT lash_await_event_meta_singleton_check CHECK (singleton)
+    CONSTRAINT ck_await_event_meta_singleton CHECK (singleton)
 );
 
 
@@ -178,7 +178,7 @@ CREATE TABLE lash_durable_read_fixture.lash_fork_lineage (
     ancestor_session_id text NOT NULL,
     fork_node_id text NOT NULL,
     fork_generation bigint NOT NULL,
-    CONSTRAINT lash_fork_lineage_fork_generation_check CHECK ((fork_generation >= 0))
+    CONSTRAINT ck_fork_lineage_fork_generation CHECK ((fork_generation >= 0))
 );
 
 
@@ -194,7 +194,7 @@ CREATE TABLE lash_durable_read_fixture.lash_graph_nodes (
     frame_node_id text NOT NULL,
     node_json text NOT NULL,
     tombstoned boolean DEFAULT false NOT NULL,
-    CONSTRAINT lash_graph_nodes_generation_check CHECK ((generation >= 0))
+    CONSTRAINT ck_graph_nodes_generation CHECK ((generation >= 0))
 );
 
 
@@ -296,7 +296,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_change_clock (
     singleton boolean DEFAULT true NOT NULL,
     current_seq bigint NOT NULL,
     tombstone_compaction_horizon bigint DEFAULT 0 NOT NULL,
-    CONSTRAINT lash_process_change_clock_singleton_check CHECK (singleton)
+    CONSTRAINT ck_process_change_clock_singleton CHECK (singleton)
 );
 
 
@@ -501,7 +501,7 @@ CREATE TABLE lash_durable_read_fixture.lash_release_stamp (
     release_version text NOT NULL,
     schema_versions text NOT NULL,
     written_at_epoch_ms bigint NOT NULL,
-    CONSTRAINT lash_release_stamp_singleton_check CHECK (singleton)
+    CONSTRAINT ck_release_stamp_singleton CHECK (singleton)
 );
 
 
@@ -559,7 +559,7 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_turn_commits (
     request_identity_hash text,
     requested_node_count bigint,
     identity_encoding_version integer,
-    CONSTRAINT lash_runtime_turn_commits_check CHECK ((((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)) AND ((requested_node_count IS NULL) OR (request_identity_hash IS NOT NULL))))
+    CONSTRAINT ck_runtime_turn_commits_identity CHECK ((((request_identity_hash IS NULL) = (identity_encoding_version IS NULL)) AND ((requested_node_count IS NULL) OR (request_identity_hash IS NOT NULL))))
 );
 
 
@@ -646,7 +646,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta_pending_observer_intent
     process_id text NOT NULL,
     process_incarnation bigint,
     attribution text NOT NULL,
-    CONSTRAINT lash_session_meta_pending_observer_intents_attribution_check CHECK ((attribution = ANY (ARRAY['host_requested'::text, 'fork_inherited'::text])))
+    CONSTRAINT ck_session_meta_pending_observer_intents_attribution CHECK ((attribution = ANY (ARRAY['host_requested'::text, 'fork_inherited'::text])))
 );
 
 
@@ -782,7 +782,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
     intent_revision bigint NOT NULL,
     affected_input_ids text[] DEFAULT '{}'::text[] NOT NULL,
     affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL,
-    CONSTRAINT lash_turn_cancel_requests_intent_revision_check CHECK ((intent_revision >= 1))
+    CONSTRAINT ck_turn_cancel_requests_intent_revision CHECK ((intent_revision >= 1))
 );
 
 
@@ -803,7 +803,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancellation_bindings (
     session_id text NOT NULL,
     binding_id text NOT NULL,
     admitted_scope_json text,
-    CONSTRAINT lash_turn_cancellation_bindings_binding_id_check CHECK ((length(binding_id) > 0))
+    CONSTRAINT ck_turn_cancellation_bindings_binding_id CHECK ((length(binding_id) > 0))
 );
 
 
@@ -1104,7 +1104,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 -- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=99', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=100', 1700000000000);
 
 
 --
@@ -1134,7 +1134,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 99);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 100);
 
 
 --

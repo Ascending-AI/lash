@@ -364,7 +364,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // encoding -- so component 95 is rejected and recreated rather than migrated:
 // the resolved duration cannot be turned back into the deadline the guest
 // asked for.
-const SCHEMA_VERSION: i32 = 99;
+// Version 100 names the formerly-anonymous CHECKs (FIG-3261) so the
+// required-constraints gate can see them. Constraint names change the stored
+// DDL, so component-99 catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 100;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

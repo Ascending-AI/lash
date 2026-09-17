@@ -32,6 +32,9 @@ const OUTGOING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const RETIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-82-10ae0a31f/postgres-expected.json",
 ];
+const DEPARTING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-83-04b02aef6/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -170,7 +173,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 99);
+    assert_eq!(PostgresStorage::schema_version(), 100);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -402,7 +405,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // only the deliberately obsolete checkpoint component remains historical.
     for constraint in lash_core::store_backend_support::required_constraints::EXPECTED_CONSTRAINTS
         .iter()
-        .map(|constraint| constraint.postgres)
+        .filter_map(|constraint| constraint.postgres)
         .filter(|constraint| constraint.table == "lash_session_meta")
     {
         sqlx::raw_sql(&format!(

@@ -43,7 +43,7 @@ pub(crate) async fn inspect_required_constraints(
 ) -> Result<RequiredConstraintReport, StoreError> {
     let expected: Vec<RenderedConstraint> = EXPECTED_CONSTRAINTS
         .iter()
-        .map(|constraint| constraint.postgres)
+        .filter_map(|constraint| constraint.postgres)
         .collect();
     let search_path = read_search_path(connection).await?;
     let Some(installation) = resolve_installation(connection, &search_path).await? else {

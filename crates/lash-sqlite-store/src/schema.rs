@@ -97,6 +97,12 @@ impl SqliteDatabase {
     fn fragments(self) -> &'static [&'static str] {
         self.definition().fragments
     }
+
+    /// The shared fragments provisioning applies after `schema`, in order.
+    #[cfg(feature = "testing")]
+    pub(crate) fn fragment_statements(self) -> impl Iterator<Item = &'static str> {
+        self.definition().fragments.iter().copied()
+    }
 }
 
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
@@ -164,7 +170,7 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
     session_id     TEXT NOT NULL,
     node_id        TEXT NOT NULL UNIQUE,
     parent_node_id TEXT,
-    generation     INTEGER NOT NULL CHECK (generation >= 0),
+    generation     INTEGER NOT NULL CONSTRAINT ck_graph_nodes_generation CHECK (generation >= 0),
     frame_node_id  TEXT NOT NULL,
     node_json      TEXT NOT NULL,
     tombstoned     INTEGER NOT NULL DEFAULT 0,
@@ -177,7 +183,7 @@ CREATE TABLE IF NOT EXISTS fork_lineage (
     session_id         TEXT NOT NULL,
     ancestor_session_id TEXT NOT NULL,
     fork_node_id       TEXT NOT NULL,
-    fork_generation    INTEGER NOT NULL CHECK (fork_generation >= 0),
+    fork_generation    INTEGER NOT NULL CONSTRAINT ck_fork_lineage_fork_generation CHECK (fork_generation >= 0),
     PRIMARY KEY (session_id, ancestor_session_id)
 );
 
@@ -235,7 +241,7 @@ CREATE TABLE IF NOT EXISTS session_meta_pending_observer_intents (
     process_index INTEGER NOT NULL,
     process_id    TEXT NOT NULL,
     process_incarnation INTEGER,
-    attribution TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited')),
+    attribution TEXT NOT NULL CONSTRAINT ck_session_meta_pending_observer_intents_attribution CHECK (attribution IN ('host_requested', 'fork_inherited')),
     PRIMARY KEY (session_id, process_id),
     UNIQUE (session_id, process_index),
     FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
@@ -262,20 +268,20 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     requested_node_count        INTEGER,
     identity_encoding_version   INTEGER,
     PRIMARY KEY (session_id, turn_id),
-    CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL))
+    CONSTRAINT ck_runtime_turn_commits_identity CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,
     turn_id    TEXT NOT NULL,
     record_json TEXT NOT NULL,
-    intent_revision INTEGER NOT NULL CHECK (intent_revision >= 1),
+    intent_revision INTEGER NOT NULL CONSTRAINT ck_turn_cancel_requests_intent_revision CHECK (intent_revision >= 1),
     PRIMARY KEY (session_id, turn_id)
 );
 
 CREATE TABLE IF NOT EXISTS turn_cancellation_bindings (
     session_id TEXT PRIMARY KEY,
-    binding_id TEXT NOT NULL CHECK (length(binding_id) > 0),
+    binding_id TEXT NOT NULL CONSTRAINT ck_turn_cancellation_bindings_binding_id CHECK (length(binding_id) > 0),
     admitted_scope_json TEXT
 );
 
@@ -394,7 +400,7 @@ CREATE TABLE IF NOT EXISTS attachment_manifest (
     write_id         TEXT,
     written_at_ms    INTEGER,
     committed_at_ms  INTEGER,
-    owner_kind       TEXT CHECK (owner_kind IN ('turn', 'process')),
+    owner_kind       TEXT CONSTRAINT ck_attachment_manifest_owner_kind CHECK (owner_kind IN ('turn', 'process')),
     owner_id         TEXT,
     owner_incarnation INTEGER,
     CONSTRAINT ck_attachment_manifest_owner_identity CHECK ((owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)),
@@ -406,11 +412,11 @@ CREATE TABLE IF NOT EXISTS attachment_manifest (
 -- `lash_core::AttachmentCondemnation`), never an expiry.
 CREATE TABLE IF NOT EXISTS attachment_condemnations (
     attachment_id TEXT PRIMARY KEY,
-    phase         TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting')),
+    phase         TEXT NOT NULL CONSTRAINT ck_attachment_condemnations_phase CHECK (phase IN ('condemned', 'deleting')),
     write_token   TEXT,
     write_session_id TEXT,
-    CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
-    CHECK (write_token IS NULL OR phase = 'condemned')
+    CONSTRAINT ck_attachment_condemnations_write_token_pairing CHECK ((write_token IS NULL) = (write_session_id IS NULL)),
+    CONSTRAINT ck_attachment_condemnations_write_token_phase CHECK (write_token IS NULL OR phase = 'condemned')
 );
 
 CREATE TABLE IF NOT EXISTS artifact_refs (
@@ -425,7 +431,7 @@ CREATE TABLE IF NOT EXISTS artifact_refs (
 CREATE TABLE IF NOT EXISTS artifact_owners (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    owner_kind   TEXT NOT NULL CHECK (owner_kind IN ('host', 'process', 'execution')),
+    owner_kind   TEXT NOT NULL CONSTRAINT ck_artifact_owners_owner_kind CHECK (owner_kind IN ('host', 'process', 'execution')),
     owner_id     TEXT NOT NULL,
     PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
@@ -434,7 +440,7 @@ CREATE TABLE IF NOT EXISTS artifact_owners (
 -- Execution-owner retirement is a permanent publication fence. Host and
 -- process releases are ordinary exact-edge severance and never enter here.
 CREATE TABLE IF NOT EXISTS artifact_owner_retirements (
-    owner_kind TEXT NOT NULL CHECK (owner_kind = 'execution'),
+    owner_kind TEXT NOT NULL CONSTRAINT ck_artifact_owner_retirements_owner_kind CHECK (owner_kind = 'execution'),
     owner_id   TEXT NOT NULL,
     PRIMARY KEY (owner_kind, owner_id)
 );
@@ -491,7 +497,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
     ON artifact_owners(owner_kind, owner_id);
 
 CREATE TABLE IF NOT EXISTS release_stamp (
-    singleton           INTEGER PRIMARY KEY CHECK (singleton = 1),
+    singleton           INTEGER PRIMARY KEY CONSTRAINT ck_release_stamp_singleton CHECK (singleton = 1),
     release_version     TEXT NOT NULL,
     schema_versions     TEXT NOT NULL,
     written_at_epoch_ms INTEGER NOT NULL
@@ -709,7 +715,11 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// once for both carrying databases. The applied DDL is statement-identical,
 /// but the guarded `SCHEMA` text changed, so a pre-68 database is rejected at
 /// open and recreated like any other schema change.
-pub(crate) const SCHEMA_VERSION: i32 = 68;
+/// Bumped to 69 for FIG-3261: every formerly-anonymous CHECK gained a
+/// `ck_<table>_<concern>` name so the required-constraints gate can see it.
+/// Constraint names change the stored DDL text, so a pre-69 database is
+/// rejected at open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 69;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -717,7 +727,7 @@ CREATE TABLE session_meta_pending_observer_intents (
     process_index       INTEGER NOT NULL,
     process_id          TEXT NOT NULL,
     process_incarnation INTEGER,
-    attribution         TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited')),
+    attribution         TEXT NOT NULL CONSTRAINT ck_session_meta_pending_observer_intents_attribution CHECK (attribution IN ('host_requested', 'fork_inherited')),
     PRIMARY KEY (session_id, process_id),
     UNIQUE (session_id, process_index),
     FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
@@ -831,7 +841,7 @@ CREATE INDEX IF NOT EXISTS idx_processes_parent_end_pending
       AND status IN ('running', 'waiting');
 
 CREATE TABLE IF NOT EXISTS process_change_clock (
-    singleton    INTEGER PRIMARY KEY CHECK (singleton = 1),
+    singleton    INTEGER PRIMARY KEY CONSTRAINT ck_process_change_clock_singleton CHECK (singleton = 1),
     current_seq  INTEGER NOT NULL DEFAULT 0,
     tombstone_compaction_horizon INTEGER NOT NULL DEFAULT 0
 );
@@ -1043,7 +1053,10 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// once for both carrying databases. The applied DDL is statement-identical,
 /// but the guarded `PROCESS_SCHEMA` text changed, so a pre-39 registry is
 /// rejected at open and recreated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 39;
+/// Version 40 names the formerly-anonymous CHECKs (FIG-3261) so the
+/// required-constraints gate can see them; a pre-40 registry is rejected at
+/// open and recreated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 40;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1204,83 +1217,86 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 );
 ";
 
-// Version 6 keys session-owned effects by the permanent session id and removes
-// the incarnation join column. Effect databases follow the crate's alpha
-// reject-and-recreate convention rather than carrying a migration chain.
-// Version 7 rejects live-serde await-event and direct replay identities.
-// Version 8 rejects the former live-serde tool-batch and process-transfer
-// replay names.
-// Version 9 rejects completed tool-attempt outcomes whose frame-switch control
-// still carries the pre-cutover `frame_id` field.
-// Version 10 adds the versioned tool-intent carrier to recorded tool-attempt
-// outcomes and the typed execution outcomes to completed tool batches.
-// Version 11 adds the durable effect-group journal (FIG-1416, ADR 0065): the
-// `runtime_effect_group` counter row, the `group_key`/`settlement_seq` columns
-// that seat a child in its group's settlement order, and the unique backstop
-// over the pair. Effect databases follow the crate's reject-and-recreate
-// convention, so an existing effect database is deleted on upgrade rather than
-// migrated — release-notes material, not a host's discovery.
-// Version 12 removes the duplicated `LlmResponse.full_text` member from
-// runtime-effect outcomes. Pre-cutover journal JSON is upgraded only at the
-// effect replay decode boundary.
-// Version 13 merges each journaled exec observation with its projection
-// metadata. Pre-13 effect databases are rejected at open; there is no migration
-// arm.
-//
-// The index-only carve-out documented on `SCHEMA_VERSION` applies here for the
-// same reason and with the same limit: an additive non-unique
-// `CREATE INDEX IF NOT EXISTS` self-heals into an existing effect database on
-// open and leaves it readable by an older binary, so it does not bump — while
-// any table, column, unique index, or semantic change still does.
-// `idx_runtime_effect_replay_group_unsettled` (FIG-1564) is added under it,
-// because bumping would delete live effect databases to buy a query plan. That
-// index serves `read_unsettled_group_children`, whose predicate is the opposite
-// half of the unique backstop's: without it the read scans the whole effect
-// journal on every child completion after a close and on every drain pass
-// (FIG-1536). `replay_key` trails the group key so the read's `ORDER BY` is the
-// index order and the plan needs no sort.
-//
-// The rationale lives here rather than beside the statement on purpose: the
-// version guard's projection elides a *new* index statement but not the SQL
-// comments around it, so prose inside `EFFECT_SCHEMA` would demand the very
-// bump the carve-out exists to avoid.
-// Version 14 switches durable effect identities to domain-tagged BLAKE3.
-// Version 15 adds the DDL-enforced effect-replay status vocabulary. Existing
-// effect journals are rejected rather than migrated.
-// Version 16 merges the two journaled exec dispatch ledgers. Pre-16 effect
-// databases are rejected at open; there is no compatibility decoder.
-// Version 17 adds the permanent `effect_scope_retirements` fence (FIG-2499,
-// FIG-2500): retiring a process or runtime-operation scope deletes its effect
-// children, groups, and await-event promises in one transaction and leaves a
-// tombstone every admission path refuses. Pre-17 effect databases are
-// rejected at open; there is no migration arm.
-// Version 18 persists the admitted execution scope with every replay key.
-// Pre-18 journals are rejected because their keys cannot identify the scope
-// whose authority admitted the effect.
-// Version 19 rejects the retired trigger-list envelope shape. Older journals
-// are recreated rather than replayed across this encoding cutover.
-// Version 20 makes lifecycle evidence own execution-artifact cleanup completion.
-// Pre-20 effect databases are rejected rather than migrated.
-// Version 21 adds owner-side cancellation-closure participants. This makes
-// scope retirement serialize with authorization held in separate session
-// catalogs; pre-21 effect databases are rejected and recreated.
-// Version 22 drains journals written before the canonical `SleepSpec` encoding
-// (FIG-2968, FIG-2983). A sleep row written at generation 21 carries the
-// resolved `Sleep { duration_ms }` command in `envelope_json`; this build
-// re-encodes the same intent as `Sleep { spec }`, so the row's replay-hash
-// fence no longer reconstructs and a redrive reported `ReplayMismatch` instead
-// of a refusal. The table shape is unchanged — the cutover is in the journaled
-// command encoding — so the generation moves to refuse those journals at open.
-// Pre-22 effect databases are rejected and recreated; there is no migration arm
-// because the resolved duration cannot be turned back into the deadline the
-// guest asked for.
-// Version 23 moves the await-event tables and `effect_scope_retirements` out of
-// this string into the shared `AWAIT_EVENT_TABLES` and `SCOPE_RETIREMENT_TABLE`
-// fragments (FIG-3260) so each declaration exists once for every carrying
-// database. The applied DDL is statement-identical, but the guarded
-// `EFFECT_SCHEMA` text changed, so a pre-23 journal is rejected at open and
-// recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 23;
+/// Version 6 keys session-owned effects by the permanent session id and removes
+/// the incarnation join column. Effect databases follow the crate's alpha
+/// reject-and-recreate convention rather than carrying a migration chain.
+/// Version 7 rejects live-serde await-event and direct replay identities.
+/// Version 8 rejects the former live-serde tool-batch and process-transfer
+/// replay names.
+/// Version 9 rejects completed tool-attempt outcomes whose frame-switch control
+/// still carries the pre-cutover `frame_id` field.
+/// Version 10 adds the versioned tool-intent carrier to recorded tool-attempt
+/// outcomes and the typed execution outcomes to completed tool batches.
+/// Version 11 adds the durable effect-group journal (FIG-1416, ADR 0065): the
+/// `runtime_effect_group` counter row, the `group_key`/`settlement_seq` columns
+/// that seat a child in its group's settlement order, and the unique backstop
+/// over the pair. Effect databases follow the crate's reject-and-recreate
+/// convention, so an existing effect database is deleted on upgrade rather than
+/// migrated — release-notes material, not a host's discovery.
+/// Version 12 removes the duplicated `LlmResponse.full_text` member from
+/// runtime-effect outcomes. Pre-cutover journal JSON is upgraded only at the
+/// effect replay decode boundary.
+/// Version 13 merges each journaled exec observation with its projection
+/// metadata. Pre-13 effect databases are rejected at open; there is no migration
+/// arm.
+///
+/// The index-only carve-out documented on `SCHEMA_VERSION` applies here for the
+/// same reason and with the same limit: an additive non-unique
+/// `CREATE INDEX IF NOT EXISTS` self-heals into an existing effect database on
+/// open and leaves it readable by an older binary, so it does not bump — while
+/// any table, column, unique index, or semantic change still does.
+/// `idx_runtime_effect_replay_group_unsettled` (FIG-1564) is added under it,
+/// because bumping would delete live effect databases to buy a query plan. That
+/// index serves `read_unsettled_group_children`, whose predicate is the opposite
+/// half of the unique backstop's: without it the read scans the whole effect
+/// journal on every child completion after a close and on every drain pass
+/// (FIG-1536). `replay_key` trails the group key so the read's `ORDER BY` is the
+/// index order and the plan needs no sort.
+///
+/// The rationale lives here rather than beside the statement on purpose: the
+/// version guard's projection elides a *new* index statement but not the SQL
+/// comments around it, so prose inside `EFFECT_SCHEMA` would demand the very
+/// bump the carve-out exists to avoid.
+/// Version 14 switches durable effect identities to domain-tagged BLAKE3.
+/// Version 15 adds the DDL-enforced effect-replay status vocabulary. Existing
+/// effect journals are rejected rather than migrated.
+/// Version 16 merges the two journaled exec dispatch ledgers. Pre-16 effect
+/// databases are rejected at open; there is no compatibility decoder.
+/// Version 17 adds the permanent `effect_scope_retirements` fence (FIG-2499,
+/// FIG-2500): retiring a process or runtime-operation scope deletes its effect
+/// children, groups, and await-event promises in one transaction and leaves a
+/// tombstone every admission path refuses. Pre-17 effect databases are
+/// rejected at open; there is no migration arm.
+/// Version 18 persists the admitted execution scope with every replay key.
+/// Pre-18 journals are rejected because their keys cannot identify the scope
+/// whose authority admitted the effect.
+/// Version 19 rejects the retired trigger-list envelope shape. Older journals
+/// are recreated rather than replayed across this encoding cutover.
+/// Version 20 makes lifecycle evidence own execution-artifact cleanup completion.
+/// Pre-20 effect databases are rejected rather than migrated.
+/// Version 21 adds owner-side cancellation-closure participants. This makes
+/// scope retirement serialize with authorization held in separate session
+/// catalogs; pre-21 effect databases are rejected and recreated.
+/// Version 22 drains journals written before the canonical `SleepSpec` encoding
+/// (FIG-2968, FIG-2983). A sleep row written at generation 21 carries the
+/// resolved `Sleep { duration_ms }` command in `envelope_json`; this build
+/// re-encodes the same intent as `Sleep { spec }`, so the row's replay-hash
+/// fence no longer reconstructs and a redrive reported `ReplayMismatch` instead
+/// of a refusal. The table shape is unchanged — the cutover is in the journaled
+/// command encoding — so the generation moves to refuse those journals at open.
+/// Pre-22 effect databases are rejected and recreated; there is no migration arm
+/// because the resolved duration cannot be turned back into the deadline the
+/// guest asked for.
+/// Version 23 moves the await-event tables and `effect_scope_retirements` out of
+/// this string into the shared `AWAIT_EVENT_TABLES` and `SCOPE_RETIREMENT_TABLE`
+/// fragments (FIG-3260) so each declaration exists once for every carrying
+/// database. The applied DDL is statement-identical, but the guarded
+/// `EFFECT_SCHEMA` text changed, so a pre-23 journal is rejected at open and
+/// recreated.
+/// Version 24 names the formerly-anonymous CHECKs in the shared fragments
+/// (FIG-3261) so the required-constraints gate can see them; a pre-24 journal
+/// is rejected at open and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 24;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
