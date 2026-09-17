@@ -1060,6 +1060,7 @@ fn generated_sim_search_mode_keeps_summary_lean_and_labels_shards() {
                 SimShard::new(1, 2).expect("shard"),
                 SimRunMode::Search,
                 SimSeedSource::exploration(Some("search-test-salt".to_string())),
+                None,
             ))
         },
     )
@@ -1267,6 +1268,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
                 SimShard::FULL,
                 SimRunMode::Evidence,
                 SimSeedSource::exploration(Some("evidence-test-salt".to_string())),
+                None,
             ))
         },
     )
