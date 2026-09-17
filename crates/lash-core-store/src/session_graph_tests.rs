@@ -935,6 +935,56 @@ fn a_frame_read_model_is_shared_by_identity_until_the_active_path_moves() {
     assert_eq!(after_append.messages.len(), 2);
 }
 
+/// A read for frame B after frame A must return B's model, not the first
+/// memoized answer.
+#[test]
+fn frame_read_models_are_memoized_per_frame() {
+    let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+        crate::TurnBudget::Unbounded,
+    ));
+    let mut graph = SessionGraph::default();
+    let session = SessionId::from("session");
+    for (index, key) in ["frame-a", "frame-b"].into_iter().enumerate() {
+        let frame_key = crate::FrameKey::from_caller_material(key).expect("non-empty material");
+        let frame = frame_node_id(&session, frame_key.as_str());
+        let reason = if index == 0 {
+            crate::AgentFrameReason::initial()
+        } else {
+            crate::AgentFrameReason::continue_as()
+        };
+        assert!(graph.append_frame_open_with_id_at(
+            frame,
+            frame_key,
+            reason,
+            assignment.clone(),
+            crate::ProtocolTurnOptions::default(),
+            "2026-09-16T00:00:00Z".to_string(),
+        ));
+        graph.append_message(text_message(key, MessageRole::User, key));
+    }
+
+    let frame_a = frame_node_id(
+        &session,
+        crate::FrameKey::from_caller_material("frame-a")
+            .expect("non-empty material")
+            .as_str(),
+    );
+    let frame_b = frame_node_id(
+        &session,
+        crate::FrameKey::from_caller_material("frame-b")
+            .expect("non-empty material")
+            .as_str(),
+    );
+    let a = graph.read_model(Some(&frame_a)).unwrap();
+    let b = graph.read_model(Some(&frame_b)).unwrap();
+    assert_eq!(a.messages.len(), 1, "frame A's model stops at B's open");
+    assert_eq!(a.messages[0].id, "frame-a");
+    assert_eq!(b.messages.len(), 1);
+    assert_eq!(b.messages[0].id, "frame-b");
+    let a_again = graph.read_model(Some(&frame_a)).unwrap();
+    assert!(Arc::ptr_eq(&a.messages, &a_again.messages));
+}
+
 #[test]
 fn root_frame_and_unscoped_reads_are_equivalent() {
     let assignment = crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
