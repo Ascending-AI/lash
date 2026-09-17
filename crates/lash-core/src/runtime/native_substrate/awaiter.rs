@@ -80,7 +80,7 @@ impl NativeProcessAwaiter {
         if let Some(output) = self.try_terminal_ref(process_ref).await? {
             return Ok(output);
         }
-        crate::runtime::process_worker::release_process_execution_permit_while(
+        lash_core_ids::execution_permit::release_process_execution_permit_while(
             self.wait_for(&process_ref.process_id, || {
                 self.try_terminal_ref(process_ref)
             }),
@@ -111,7 +111,7 @@ impl NativeProcessAwaiter {
         {
             return Ok(event);
         }
-        crate::runtime::process_worker::release_process_execution_permit_while(
+        lash_core_ids::execution_permit::release_process_execution_permit_while(
             self.wait_for(&process_ref.process_id, || {
                 self.read_event_ref(process_ref, event_type, after_sequence)
             }),

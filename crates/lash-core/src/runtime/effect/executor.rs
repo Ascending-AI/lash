@@ -704,7 +704,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     _ => None,
                 };
                 let task = crate::task::spawn(
-                    crate::runtime::process_worker::inherit_process_execution_permit(
+                    lash_core_ids::execution_permit::inherit_process_execution_permit(
                         runner.execute(envelope),
                     ),
                 );

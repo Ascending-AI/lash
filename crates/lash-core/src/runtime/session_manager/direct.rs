@@ -237,7 +237,7 @@ impl DirectCompletionCapability {
             }
             DirectExecutionPosition::ToolAttempt => local_executor.execute(envelope).await?,
         };
-        crate::runtime::effect::apply_direct_outcome(
+        super::direct_outcome::apply_direct_outcome(
             current,
             context.usage_capability,
             &request,

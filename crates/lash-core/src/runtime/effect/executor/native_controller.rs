@@ -227,7 +227,7 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
                 }
                 let result = task_panic::map_process_task_join(
                     crate::task::spawn(
-                        crate::runtime::process_worker::inherit_process_execution_permit(
+                        lash_core_ids::execution_permit::inherit_process_execution_permit(
                             async move { execution.execute(*command).await },
                         ),
                     )

@@ -1,3 +1,4 @@
+mod admission;
 mod awaiter;
 mod definition_ref;
 mod engine;
@@ -25,6 +26,11 @@ mod tests;
 mod validation;
 mod wake;
 
+pub use admission::{
+    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
+    ProcessDrainReport, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
+    ProcessWorkerFault,
+};
 pub use awaiter::{
     ProcessChangeHub, ProcessEventSink, WatchedRegistry, watch_process_registry,
     watch_process_registry_with_sink,

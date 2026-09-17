@@ -10,6 +10,7 @@ mod api;
 mod create_plan;
 mod current;
 mod direct;
+mod direct_outcome;
 mod graph;
 mod managed;
 mod materialize;

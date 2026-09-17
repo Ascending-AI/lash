@@ -1,5 +1,5 @@
 use crate::ProcessEvent;
-use crate::runtime::process_worker::ProcessWorkerFault;
+use crate::runtime::process::ProcessWorkerFault;
 
 /// Host-facing, best-effort push of each appended process event.
 ///

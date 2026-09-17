@@ -1701,6 +1701,17 @@ fn runner_outcome_requires_cancel_fence(
     )
 }
 
+#[async_trait::async_trait]
+impl super::native_substrate::NativeProcessAdmissionDriver for DurableProcessWorker {
+    fn native_work_cadence(&self) -> crate::WorkCadencePolicy {
+        self.config().native_substrate.work_cadence.clone()
+    }
+
+    async fn drive_pending_processes(&self) -> Result<ProcessAdmissionReport, PluginError> {
+        DurableProcessWorker::drive_pending_processes(self).await
+    }
+}
+
 #[cfg(test)]
 mod permit_tests;
 #[cfg(test)]

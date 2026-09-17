@@ -12,7 +12,7 @@ pub(crate) use awaiter::NativeProcessAwaiter;
 pub use policy::{
     NativeSubstrateConfig, NativeSubstrateConfigError, WorkCadencePolicy, WorkerSweepPolicy,
 };
-pub use process_work::NativeProcessWork;
+pub use process_work::{NativeProcessAdmissionDriver, NativeProcessWork};
 pub use queued::*;
 pub use wake_delivery::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
