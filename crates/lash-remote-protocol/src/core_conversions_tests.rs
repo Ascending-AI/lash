@@ -790,11 +790,6 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
                 occurred_at_ms: 12,
                 payload: serde_json::json!({ "text": "hi" }),
             }],
-            event_tail_sequence: 1,
-            state: lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
-                record_sequence: 0,
-                event_tail_sequence: 1,
-            },
         }],
     };
     let remote = RemoteProcessWorkSnapshot::try_from(snapshot.clone()).expect("remote snapshot");
@@ -2107,6 +2102,8 @@ fn observed_work_item_decode_rejects_a_mispaired_event_tail() {
 #[test]
 fn observed_work_item_round_trip_preserves_a_typed_event_tail_mismatch() {
     let mut observed = observed_work_item();
+    // The fixture record carries last_event_sequence 0; one event at sequence
+    // 1 makes the derived coherence a mismatch.
     observed
         .events
         .push(lash_core::facade_support::ObservedProcessEvent {
@@ -2115,11 +2112,6 @@ fn observed_work_item_round_trip_preserves_a_typed_event_tail_mismatch() {
             occurred_at_ms: 12,
             payload: serde_json::json!({}),
         });
-    observed.event_tail_sequence = 1;
-    observed.state = lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
-        record_sequence: 0,
-        event_tail_sequence: 1,
-    };
 
     let remote = RemoteProcessWorkItem::try_from(observed).expect("remote mismatch item");
     remote
@@ -2129,7 +2121,7 @@ fn observed_work_item_round_trip_preserves_a_typed_event_tail_mismatch() {
         lash_core::facade_support::ObservedWorkItem::try_from(remote).expect("core mismatch item");
 
     assert_eq!(
-        core.state,
+        core.state(),
         lash_core::facade_support::ObservedWorkItemState::EventTailMismatch {
             record_sequence: 0,
             event_tail_sequence: 1,

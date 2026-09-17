@@ -134,7 +134,5 @@ pub(super) fn observed_work_item() -> lash_core::facade_support::ObservedWorkIte
     lash_core::facade_support::ObservedWorkItem {
         process: observed_process(),
         events: Vec::new(),
-        event_tail_sequence: 0,
-        state: lash_core::facade_support::ObservedWorkItemState::Coherent,
     }
 }

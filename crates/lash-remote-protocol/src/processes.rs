@@ -706,48 +706,34 @@ pub enum RemoteObservedWorkItemState {
 }
 
 impl RemoteProcessWorkItem {
+    /// The coherence verdict the carried `process` and `events` determine.
+    /// `event_tail_sequence` and `state` on the wire are a peer's re-spelling
+    /// of this derivation; a payload is valid exactly when it agrees.
+    fn derived_state(&self) -> RemoteObservedWorkItemState {
+        let event_tail_sequence = self.events.last().map_or(0, |event| event.sequence);
+        if self.process.last_event_sequence == event_tail_sequence {
+            RemoteObservedWorkItemState::Coherent
+        } else {
+            RemoteObservedWorkItemState::EventTailMismatch {
+                record_sequence: self.process.last_event_sequence,
+                event_tail_sequence,
+            }
+        }
+    }
+
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         self.process.validate(type_name)?;
         for event in &self.events {
             event.validate(type_name)?;
         }
-        let actual_tail_sequence = self.events.last().map_or(0, |event| event.sequence);
-        if self.event_tail_sequence != actual_tail_sequence {
+        if self.event_tail_sequence != self.events.last().map_or(0, |event| event.sequence)
+            || self.state != self.derived_state()
+        {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name,
-                message: format!(
-                    "work-item event-tail sequence {} contradicts newest carried event sequence {actual_tail_sequence}",
-                    self.event_tail_sequence
-                ),
+                message: "work-item event-tail sequence and state contradict the carried record and events"
+                    .to_string(),
             });
-        }
-        match self.state {
-            RemoteObservedWorkItemState::Coherent => {
-                if self.process.last_event_sequence != self.event_tail_sequence {
-                    return Err(RemoteProtocolError::InvalidEnvelope {
-                        type_name,
-                        message: format!(
-                            "coherent work-item record sequence {} contradicts event-tail sequence {}",
-                            self.process.last_event_sequence, self.event_tail_sequence
-                        ),
-                    });
-                }
-            }
-            RemoteObservedWorkItemState::EventTailMismatch {
-                record_sequence,
-                event_tail_sequence,
-            } => {
-                if record_sequence != self.process.last_event_sequence
-                    || event_tail_sequence != self.event_tail_sequence
-                    || record_sequence == event_tail_sequence
-                {
-                    return Err(RemoteProtocolError::InvalidEnvelope {
-                        type_name,
-                        message: "work-item mismatch state contradicts its record and event-tail sequences"
-                            .to_string(),
-                    });
-                }
-            }
         }
         Ok(())
     }
