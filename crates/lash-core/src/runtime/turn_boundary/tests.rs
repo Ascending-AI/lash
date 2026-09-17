@@ -1742,6 +1742,22 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
 }
 
 #[test]
+fn state_after_export_is_the_real_committed_state() {
+    let mut boundary = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
+    boundary.state_mut().turn_index = 7;
+
+    let snapshot = boundary.export_state_for_assembly();
+    let state = boundary.state();
+
+    // Finalization must hand out the turn's real state. A fabricated
+    // `RuntimeSessionState::new` placeholder — the old mem::replace
+    // throwaway — would carry a fresh session id and turn_index 0.
+    assert_eq!(state.session_id, SessionId::from("session-1"));
+    assert_eq!(state.turn_index, 7);
+    assert_eq!(snapshot.session_id, state.session_id);
+}
+
+#[test]
 fn recovered_settlement_attempts_are_capped_by_original_rows() {
     for rows in [0, 1, 2, 64] {
         let mut budget = super::RecoveredSettlementBudget(rows);

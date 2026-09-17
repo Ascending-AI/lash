@@ -48,7 +48,12 @@ struct ProgressBoundarySnapshot<'a> {
 }
 
 pub(super) struct TurnBoundary {
-    stage: TurnCommitStage,
+    /// `Some` at every point outside `final_state_mut`'s transition, which
+    /// takes the stage, rewrites `Drafting` into `Finalized`, and puts it
+    /// back. The transient `None` is the honest "in transit" reading: a
+    /// fabricated `Finalized` placeholder would install a made-up
+    /// `RuntimeSessionState` if the transition ever panicked mid-move.
+    stage: Option<TurnCommitStage>,
     clock: Arc<dyn crate::Clock>,
     operation_scope: crate::ExecutionScope,
     commit_budget: crate::CommitBudget,
@@ -71,14 +76,6 @@ enum TurnCommitStage {
 
 struct FinalizedTurnCommitStage {
     state: RuntimeSessionState,
-}
-
-impl TurnCommitStage {
-    /// Throwaway value used to move out of `&mut self` during finalization.
-    fn placeholder() -> Self {
-        let state = RuntimeSessionState::new(SessionPolicy::new(crate::TurnBudget::Unbounded));
-        Self::Finalized(Box::new(FinalizedTurnCommitStage { state }))
-    }
 }
 
 impl TurnBoundary {
@@ -124,14 +121,14 @@ impl TurnBoundary {
     ) -> Self {
         let draft_clock = Arc::clone(&clock);
         Self {
-            stage: TurnCommitStage::Drafting(Box::new(
+            stage: Some(TurnCommitStage::Drafting(Box::new(
                 TurnCommitDraft::from_state_with_graph_appends(
                     state,
                     draft_clock,
                     operation_scope.id(),
                     graph_appends.clone(),
                 ),
-            )),
+            ))),
             clock,
             operation_scope,
             commit_budget,
@@ -153,14 +150,32 @@ impl TurnBoundary {
         &self.graph_appends
     }
 
+    fn stage_ref(&self) -> &TurnCommitStage {
+        match self.stage.as_ref() {
+            Some(stage) => stage,
+            None => {
+                unreachable!("turn commit stage is only absent inside final_state_mut")
+            }
+        }
+    }
+
+    fn stage_mut(&mut self) -> &mut TurnCommitStage {
+        match self.stage.as_mut() {
+            Some(stage) => stage,
+            None => {
+                unreachable!("turn commit stage is only absent inside final_state_mut")
+            }
+        }
+    }
+
     pub(super) fn state_mut(&mut self) -> &mut RuntimeSessionState {
-        match &mut self.stage {
+        match self.stage_mut() {
             TurnCommitStage::Drafting(draft) => draft.state_mut(),
             TurnCommitStage::Finalized(finalized) => &mut finalized.state,
         }
     }
     pub(super) fn state(&self) -> &RuntimeSessionState {
-        match &self.stage {
+        match self.stage_ref() {
             TurnCommitStage::Drafting(draft) => draft.state(),
             TurnCommitStage::Finalized(finalized) => &finalized.state,
         }
@@ -398,13 +413,16 @@ impl TurnBoundary {
 
     pub(super) fn into_final_state(self) -> RuntimeSessionState {
         match self.stage {
-            TurnCommitStage::Drafting(draft) => (*draft).into_final_state(),
-            TurnCommitStage::Finalized(finalized) => finalized.state,
+            Some(TurnCommitStage::Drafting(draft)) => (*draft).into_final_state(),
+            Some(TurnCommitStage::Finalized(finalized)) => finalized.state,
+            None => {
+                unreachable!("turn commit stage is only absent inside final_state_mut")
+            }
         }
     }
 
     fn draft_ref(&self) -> &TurnCommitDraft {
-        match &self.stage {
+        match self.stage_ref() {
             TurnCommitStage::Drafting(draft) => draft.as_ref(),
             TurnCommitStage::Finalized(_) => {
                 panic!("turn commit draft is unavailable after final state materialization")
@@ -413,7 +431,7 @@ impl TurnBoundary {
     }
 
     fn draft_mut(&mut self) -> &mut TurnCommitDraft {
-        match &mut self.stage {
+        match self.stage_mut() {
             TurnCommitStage::Drafting(draft) => draft.as_mut(),
             TurnCommitStage::Finalized(_) => {
                 panic!("turn commit draft is unavailable after final state materialization")
@@ -422,17 +440,19 @@ impl TurnBoundary {
     }
 
     fn final_state_mut(&mut self) -> &mut RuntimeSessionState {
-        self.stage = match std::mem::replace(&mut self.stage, TurnCommitStage::placeholder()) {
-            TurnCommitStage::Drafting(draft) => {
+        let stage = self.stage.take();
+        self.stage = Some(match stage {
+            Some(TurnCommitStage::Drafting(draft)) => {
                 TurnCommitStage::Finalized(Box::new(FinalizedTurnCommitStage {
                     state: (*draft).into_final_state(),
                 }))
             }
-            finalized => finalized,
-        };
-        match &mut self.stage {
-            TurnCommitStage::Finalized(finalized) => &mut finalized.state,
-            TurnCommitStage::Drafting(_) => unreachable!("stage was just finalized"),
+            Some(finalized) => finalized,
+            None => unreachable!("turn commit stage is only absent during this transition"),
+        });
+        match self.stage.as_mut() {
+            Some(TurnCommitStage::Finalized(finalized)) => &mut finalized.state,
+            _ => unreachable!("stage was just finalized"),
         }
     }
 
@@ -568,6 +588,10 @@ impl TurnBoundary {
             .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
                 error: Box::new(error),
             })?;
+        // `apply_commit` takes the finalized state directly, so the values it
+        // read from `self` are hoisted before the state borrow begins.
+        let operation = self.final_operation();
+        let commit_budget = self.commit_budget;
         let state = self.final_state_mut();
 
         if let Some(store) = store {
@@ -581,12 +605,14 @@ impl TurnBoundary {
                 .len()
                 .try_into()
                 .unwrap_or(u64::MAX);
-            self.apply_commit(
+            Self::apply_commit(
+                state,
+                commit_budget,
                 store,
                 graph,
                 usage_deltas,
                 failure_evidence,
-                self.final_operation(),
+                operation,
                 claim_settlement,
                 current_session_lease_fence,
                 enqueued_queue_batches,
@@ -621,7 +647,8 @@ impl TurnBoundary {
         reason = "derived graph node identities are non-empty"
     )]
     async fn apply_commit(
-        &mut self,
+        state: &mut RuntimeSessionState,
+        commit_budget: crate::CommitBudget,
         store: &(dyn RuntimePersistence + '_),
         mut graph: GraphAppend,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
@@ -639,31 +666,20 @@ impl TurnBoundary {
         adopted_intent_rows: u64,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
     ) -> FinalCommitResult {
-        let session_id = self.state().session_id.clone();
+        let session_id = state.session_id.clone();
         let node_id_mapping = graph.derive_node_ids(&session_id, &operation)?;
-        match &mut self.stage {
-            TurnCommitStage::Drafting(draft) => draft.remap_node_ids(&session_id, &node_id_mapping),
-            TurnCommitStage::Finalized(finalized) => {
-                finalized
-                    .state
-                    .session_graph
-                    .remap_node_ids(&session_id, &node_id_mapping);
-                if let Some(current) = finalized.state.current_frame_node_id.as_mut()
-                    && let Some((_, derived)) = node_id_mapping
-                        .iter()
-                        .find(|(draft, _)| draft == current.as_str())
-                {
-                    *current = crate::FrameNodeId::new(derived.clone())
-                        .expect("derived graph node identities are non-empty");
-                }
-                finalized.state.agent_frames = finalized
-                    .state
-                    .session_graph
-                    .agent_frame_records(&session_id);
-            }
+        state
+            .session_graph
+            .remap_node_ids(&session_id, &node_id_mapping);
+        if let Some(current) = state.current_frame_node_id.as_mut()
+            && let Some((_, derived)) = node_id_mapping
+                .iter()
+                .find(|(draft, _)| draft == current.as_str())
+        {
+            *current = crate::FrameNodeId::new(derived.clone())
+                .expect("derived graph node identities are non-empty");
         }
-        let commit_budget = self.commit_budget;
-        let state = self.state_mut();
+        state.agent_frames = state.session_graph.agent_frame_records(&session_id);
         let persisted_node_ids = graph
             .nodes
             .iter()
@@ -758,10 +774,7 @@ impl TurnBoundary {
         let committed_usage_delta_identities = result.committed_usage_delta_identities.clone();
         let turn_cancel_input_outcome = result.turn_cancel_input_outcome.clone();
         state.apply_persisted_commit_result(result);
-        state.mark_node_ids_persisted(persisted_node_ids.clone());
-        if let TurnCommitStage::Drafting(draft) = &mut self.stage {
-            draft.mark_node_ids_persisted(persisted_node_ids);
-        }
+        state.mark_node_ids_persisted(persisted_node_ids);
         Ok((
             enqueued_queue_batches,
             committed_usage_delta_identities,
