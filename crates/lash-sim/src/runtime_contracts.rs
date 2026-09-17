@@ -446,7 +446,7 @@ pub fn runtime_usage_invariant_facts(
     activities: &[lash::TurnActivity],
 ) -> RuntimeUsageInvariantFacts {
     let turn_usage = RuntimeUsageTotals::from_usage(&result.usage);
-    let total_usage = RuntimeUsageTotals::from_usage(&result.total_usage());
+    let total_usage = RuntimeUsageTotals::from_usage(&result.total_usage().0);
     let token_ledger_total =
         RuntimeUsageTotals::sum(result.state.token_ledger.iter().map(|entry| &entry.usage));
     let child_usage_total =
