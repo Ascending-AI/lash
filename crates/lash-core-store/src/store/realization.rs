@@ -90,7 +90,11 @@ mod tests {
                 head_revision: commit.expected_head_revision + u64::from(self.advances_revision),
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,
-                committed_leaf_node_id: commit.graph.leaf_node_id().cloned(),
+                committed_leaf_node_id: commit
+                    .graph
+                    .leaf_node_id()
+                    .or(commit.graph_base_leaf_node_id.as_ref())
+                    .cloned(),
                 realized_node_timestamps,
                 committed_usage_delta_identities: commit
                     .usage_deltas

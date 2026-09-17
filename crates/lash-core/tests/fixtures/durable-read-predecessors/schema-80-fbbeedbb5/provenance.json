@@ -1,0 +1,10 @@
+{
+  "schema": "lash.durable-read.predecessor-provenance.v1",
+  "fixture_schema_version": 80,
+  "source_commit": "fbbeedbb5",
+  "relationship": "current origin/main fixture bytes immediately before the FIG-3230 graph-append intent change",
+  "artifacts": {
+    "postgres-expected.json": "80ba39e09523ff6ba37c21155b6b8c5fc0b7fb9584b8812670d51fb1ecfd6b9a",
+    "sqlite-expected.json": "2c9778bb6f35995f230af89574a0f6ff0582e2386c61695a38a49df4a7f33a1c"
+  }
+}

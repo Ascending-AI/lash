@@ -340,8 +340,26 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         })?;
         let mut proposed = self.global_session_graph.lock_recover().clone();
         proposed.apply_append(&commit.graph)?;
+        if let crate::store::GraphAppend::PreserveHead = &commit.graph {
+            // A preserve-head commit still republishes the committing
+            // session's leaf as the global leaf; `graph_base_leaf_node_id`
+            // carries the resident head fact the removed empty-append
+            // `leaf_node_id` field used to.
+            match &commit.graph_base_leaf_node_id {
+                Some(leaf_node_id) if proposed.find_node(leaf_node_id.as_str()).is_none() => {
+                    return Err(crate::StoreError::InvalidGraphLeaf {
+                        leaf_node_id: commit.graph_base_leaf_node_id.clone(),
+                    });
+                }
+                leaf_node_id => proposed.data_mut().leaf_node_id = leaf_node_id.clone(),
+            }
+        }
         let (staged_tombstoned_node_ids, staged_session_heads) = {
-            let new_leaf_node_id = commit.graph.leaf_node_id().cloned();
+            let new_leaf_node_id = commit
+                .graph
+                .leaf_node_id()
+                .or(commit.graph_base_leaf_node_id.as_ref())
+                .cloned();
             let mut tombstoned = self.tombstoned_node_ids.lock_recover().clone();
             let mut session_heads = self.global_session_heads.lock_recover().clone();
             session_heads.insert(
