@@ -164,17 +164,32 @@ struct GeneratedCase {
     operations: Vec<StoreContractOp>,
 }
 
+/// The lifecycle of a modeled process: the only three legal combinations of
+/// the old `base`/`expected_record`/`tombstoned` triple.
+#[derive(Clone, Debug, Default)]
+enum ProcessLifecycle {
+    /// Never registered, or only touched by operations that did not spawn it.
+    #[default]
+    Absent,
+    /// Registered and retained: `base` is the record the fold law replays
+    /// events onto, `expected` is the independently derived projection.
+    Live {
+        base: ProcessRecord,
+        expected: ProcessRecord,
+    },
+    /// Pruned to a tombstone; a later register may reuse the row.
+    Tombstoned,
+}
+
 #[derive(Clone, Debug, Default)]
 struct ModelProcess {
-    base: Option<ProcessRecord>,
-    expected_record: Option<ProcessRecord>,
+    lifecycle: ProcessLifecycle,
     wake_target: Option<SessionId>,
     observers: BTreeSet<SessionId>,
     lifecycle_replay_keys: BTreeSet<String>,
     current_authority: Option<ProcessExecutionWriteAuthority>,
     superseded_authorities: Vec<ProcessExecutionWriteAuthority>,
     leases: Vec<ProcessLease>,
-    tombstoned: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -205,17 +220,41 @@ impl ReferenceModel {
 }
 
 impl ModelProcess {
+    fn is_tombstoned(&self) -> bool {
+        matches!(self.lifecycle, ProcessLifecycle::Tombstoned)
+    }
+
+    fn is_live(&self) -> bool {
+        matches!(self.lifecycle, ProcessLifecycle::Live { .. })
+    }
+
+    fn expected(&self) -> Option<&ProcessRecord> {
+        match &self.lifecycle {
+            ProcessLifecycle::Live { expected, .. } => Some(expected),
+            _ => None,
+        }
+    }
+
+    fn expected_mut(&mut self) -> Option<&mut ProcessRecord> {
+        match &mut self.lifecycle {
+            ProcessLifecycle::Live { expected, .. } => Some(expected),
+            _ => None,
+        }
+    }
+
     fn reset_to_tombstone(&mut self) {
         *self = Self {
-            tombstoned: true,
+            lifecycle: ProcessLifecycle::Tombstoned,
             ..Self::default()
         };
     }
 
     fn install_fresh(&mut self, record: ProcessRecord) {
         *self = Self {
-            base: Some(record.clone()),
-            expected_record: Some(record),
+            lifecycle: ProcessLifecycle::Live {
+                base: record.clone(),
+                expected: record,
+            },
             ..Self::default()
         };
     }
@@ -593,14 +632,12 @@ async fn apply_operation(
                 // The store permits registry-row reuse after prune. The wake layer separately
                 // rejects an unrecorded sequence at or below its surviving allocation floor.
                 // Keep this generated registry lifecycle to pin the narrower store behavior.
-                if entry.base.is_none() || entry.tombstoned {
+                if !entry.is_live() {
                     entry.install_fresh(record);
                     entry.wake_target = target;
                     model.process_counts.record_spawn();
                     shape[RunShapeCounter::Spawns] =
                         shape[RunShapeCounter::Spawns].saturating_add(1);
-                } else {
-                    entry.base.get_or_insert(record);
                 }
             }
         }
@@ -624,7 +661,7 @@ async fn apply_operation(
                 if let Some(previous) = entry.current_authority.replace(authority) {
                     entry.superseded_authorities.push(previous);
                 }
-                if let Some(expected) = entry.expected_record.as_mut() {
+                if let Some(expected) = entry.expected_mut() {
                     event_sequences.advance(expected);
                     expected.first_started = Some(Box::new(started));
                 }
@@ -649,7 +686,7 @@ async fn apply_operation(
             )
             .await?;
             if result.is_ok()
-                && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
+                && let Some(expected) = model.process_mut(&id).expected_mut()
             {
                 if expected.wait.as_ref() != Some(&wait_state(&id)) {
                     event_sequences.advance(expected);
@@ -677,7 +714,7 @@ async fn apply_operation(
             )
             .await?;
             if result.is_ok()
-                && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
+                && let Some(expected) = model.process_mut(&id).expected_mut()
             {
                 if expected.wait.take().is_some() {
                     event_sequences.advance(expected);
@@ -700,7 +737,7 @@ async fn apply_operation(
                 .set_external_ref(&id, external_ref.clone())
                 .await
                 .is_ok()
-                && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
+                && let Some(expected) = model.process_mut(&id).expected_mut()
                 && expected.external_ref.is_none()
             {
                 event_sequences.advance(expected);
@@ -752,7 +789,7 @@ async fn apply_operation(
             )
             .await?;
             if let Ok(appended) = result {
-                if let Some(expected) = model.process_mut(&id).expected_record.as_mut() {
+                if let Some(expected) = model.process_mut(&id).expected_mut() {
                     apply_process_event_projection(expected, &appended.event)
                         .map_err(|error| error.to_string())?;
                     expected.last_event_sequence = appended.last_event_sequence;
@@ -785,7 +822,7 @@ async fn apply_operation(
                         ),
                     )
                     .await
-                && let Some(expected) = model.process_mut(&id).expected_record.as_mut()
+                && let Some(expected) = model.process_mut(&id).expected_mut()
             {
                 apply_process_event_projection(expected, &appended.event)
                     .map_err(|error| error.to_string())?;
@@ -812,7 +849,7 @@ async fn apply_operation(
                 {
                     shape[RunShapeCounter::TerminalTransitions] =
                         shape[RunShapeCounter::TerminalTransitions].saturating_add(1);
-                    if let Some(expected) = model.process_mut(&id).expected_record.as_mut() {
+                    if let Some(expected) = model.process_mut(&id).expected_mut() {
                         event_sequences.advance(expected);
                         expected.wait = None;
                         let settled = terminal_outcome_under_standing_cancel(
@@ -910,7 +947,7 @@ async fn apply_operation(
             let retained = model
                 .processes
                 .get(&id)
-                .is_some_and(|process| process.expected_record.is_some());
+                .is_some_and(|process| process.expected().is_some());
             let outcome = handles
                 .registry
                 .claim_process_lease(
@@ -1088,17 +1125,14 @@ async fn apply_operation(
                     model
                         .wake_deliveries
                         .retain(|_, delivery| delivery.wake.process_id != *id);
-                    if !process.tombstoned
-                        && !process
-                            .expected_record
-                            .as_ref()
-                            .is_some_and(ProcessRecord::is_terminal)
+                    if !process.is_tombstoned()
+                        && !process.expected().is_some_and(ProcessRecord::is_terminal)
                     {
                         return Err(format!(
                             "Prune/tombstone safety: live process `{id}` was pruned"
                         ));
                     }
-                    if !process.tombstoned {
+                    if !process.is_tombstoned() {
                         process.reset_to_tombstone();
                     }
                 }
@@ -1372,7 +1406,10 @@ async fn assert_fold_law(
         let Some(base) = model
             .processes
             .get(&id)
-            .and_then(|process| process.base.clone())
+            .and_then(|process| match &process.lifecycle {
+                ProcessLifecycle::Live { base, .. } => Some(base.clone()),
+                _ => None,
+            })
         else {
             continue;
         };
