@@ -292,9 +292,9 @@ impl InMemorySessionStore {
                     executor_id: held.map(|fields| fields.executor_id.to_string()),
                     lease_token: held.map(|fields| fields.lease_token.to_string()),
                     fencing_token: lease.fencing_token,
-                    claimed_at_epoch_ms: held.map_or(0, |fields| fields.claimed_at_epoch_ms),
-                    lease_term_ms: held.map_or(0, |fields| fields.lease_term_ms),
-                    expires_at_epoch_ms: held.map_or(0, |fields| fields.expires_at_epoch_ms),
+                    claimed_at_epoch_ms: lease.claimed_at_epoch_ms,
+                    lease_term_ms: lease.lease_term_ms,
+                    expires_at_epoch_ms: lease.expires_at_epoch_ms,
                 }
             })
             .collect::<Vec<_>>();

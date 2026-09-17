@@ -7,23 +7,28 @@ use super::InMemorySessionStore;
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
+/// The held identity of one session-execution-lease row: the three columns
+/// both durable schemas store all-or-none, kept as one value so a released row
+/// carries no partial identity.
 #[derive(Clone)]
-pub(super) enum Lease {
-    Free,
-    Held {
-        owner: crate::LeaseOwnerIdentity,
-        executor_id: String,
-        lease_token: String,
-        claimed_at_epoch_ms: u64,
-        lease_term_ms: u64,
-        expires_at_epoch_ms: u64,
-    },
+pub(super) struct HeldLeaseIdentity {
+    pub(super) owner: crate::LeaseOwnerIdentity,
+    pub(super) executor_id: String,
+    pub(super) lease_token: String,
 }
 
+/// One durable session-execution-lease row as the in-memory backend holds it:
+/// a retained fencing generation and timing columns, with the held identity
+/// all-or-none. Release zeroes the timing columns exactly like the durable
+/// `= 0` writes, so a released row reports its own fields rather than a
+/// fabricated value.
 #[derive(Clone)]
 pub struct InMemorySessionExecutionLease {
-    pub(super) lease: Lease,
+    pub(super) holder: Option<HeldLeaseIdentity>,
     pub(super) fencing_token: u64,
+    pub(super) claimed_at_epoch_ms: u64,
+    pub(super) lease_term_ms: u64,
+    pub(super) expires_at_epoch_ms: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -39,79 +44,56 @@ pub(super) struct HeldLeaseFields<'a> {
 impl Default for InMemorySessionExecutionLease {
     fn default() -> Self {
         Self {
-            lease: Lease::Free,
+            holder: None,
             fencing_token: 0,
+            claimed_at_epoch_ms: 0,
+            lease_term_ms: 0,
+            expires_at_epoch_ms: 0,
         }
     }
 }
 
 impl InMemorySessionExecutionLease {
     pub(super) fn is_held(&self) -> bool {
-        matches!(&self.lease, Lease::Held { .. })
+        self.holder.is_some()
     }
 
     pub(super) fn is_live(&self, now: u64) -> bool {
-        matches!(
-            &self.lease,
-            Lease::Held {
-                expires_at_epoch_ms,
-                ..
-            } if *expires_at_epoch_ms > now
-        )
+        self.holder.is_some() && self.expires_at_epoch_ms > now
     }
 
     pub(super) fn is_held_by(&self, owner: &crate::LeaseOwnerIdentity, executor_id: &str) -> bool {
-        matches!(
-            &self.lease,
-            Lease::Held {
-                owner: current_owner,
-                executor_id: current_executor_id,
-                ..
-            } if current_owner.same_incarnation(owner) && current_executor_id == executor_id
-        )
+        self.holder.as_ref().is_some_and(|held| {
+            held.owner.same_incarnation(owner) && held.executor_id == executor_id
+        })
     }
 
     pub(super) fn lease_token_matches(&self, lease_token: &str) -> bool {
-        matches!(
-            &self.lease,
-            Lease::Held {
-                lease_token: current_lease_token,
-                ..
-            } if current_lease_token == lease_token
-        )
+        self.holder
+            .as_ref()
+            .is_some_and(|held| held.lease_token == lease_token)
     }
 
     pub(super) fn held_fields(&self) -> Option<HeldLeaseFields<'_>> {
-        match &self.lease {
-            Lease::Free => None,
-            Lease::Held {
-                owner,
-                executor_id,
-                lease_token,
-                claimed_at_epoch_ms,
-                lease_term_ms,
-                expires_at_epoch_ms,
-            } => Some(HeldLeaseFields {
-                owner,
-                executor_id,
-                lease_token,
-                claimed_at_epoch_ms: *claimed_at_epoch_ms,
-                lease_term_ms: *lease_term_ms,
-                expires_at_epoch_ms: *expires_at_epoch_ms,
-            }),
-        }
+        self.holder.as_ref().map(|held| HeldLeaseFields {
+            owner: &held.owner,
+            executor_id: &held.executor_id,
+            lease_token: &held.lease_token,
+            claimed_at_epoch_ms: self.claimed_at_epoch_ms,
+            lease_term_ms: self.lease_term_ms,
+            expires_at_epoch_ms: self.expires_at_epoch_ms,
+        })
     }
 
     pub(super) fn fence_facts(
         &self,
     ) -> crate::store::session_execution_lease::SessionExecutionLeaseFenceFacts<'_> {
-        let held = self.held_fields();
         crate::store::session_execution_lease::SessionExecutionLeaseFenceFacts {
-            owner: held.map(|fields| fields.owner),
-            executor_id: held.map(|fields| fields.executor_id),
-            lease_token: held.map(|fields| fields.lease_token),
+            owner: self.holder.as_ref().map(|held| &held.owner),
+            executor_id: self.holder.as_ref().map(|held| held.executor_id.as_str()),
+            lease_token: self.holder.as_ref().map(|held| held.lease_token.as_str()),
             fencing_token: self.fencing_token,
-            expires_at_epoch_ms: held.map_or(0, |fields| fields.expires_at_epoch_ms),
+            expires_at_epoch_ms: self.expires_at_epoch_ms,
         }
     }
 }
@@ -136,18 +118,12 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
             .or_default();
         if current.is_live(now) {
             if current.is_held_by(owner, executor_id) {
-                if let super::Lease::Held {
-                    lease_token: current_lease_token,
-                    lease_term_ms,
-                    expires_at_epoch_ms,
-                    ..
-                } = &mut current.lease
-                {
-                    if current_lease_token != lease_token {
-                        *current_lease_token = lease_token.to_string();
+                if let Some(held) = current.holder.as_mut() {
+                    if held.lease_token != lease_token {
+                        held.lease_token = lease_token.to_string();
                     }
-                    *lease_term_ms = lease_ttl_ms;
-                    *expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
+                    current.lease_term_ms = lease_ttl_ms;
+                    current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
                 }
                 // Reentry advances no generation, so it displaces nobody.
                 return Ok(crate::SessionExecutionLeaseClaimOutcome::Acquired(
@@ -163,24 +139,16 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
         // Read the lapsed holder before overwriting it: this claim is the only
         // atomic moment a takeover is observable, and the displaced runner is
         // usually why the lease lapsed and so cannot be relied on to report it.
-        let displaced = match &current.lease {
-            super::Lease::Free => None,
-            super::Lease::Held {
-                owner: previous,
-                executor_id: previous_executor_id,
-                expires_at_epoch_ms,
-                ..
-            } if previous.same_incarnation(owner) && previous_executor_id == executor_id => None,
-            super::Lease::Held {
-                owner: previous,
-                executor_id: previous_executor_id,
-                expires_at_epoch_ms,
-                ..
-            } => Some((
-                previous.clone(),
-                previous_executor_id.clone(),
+        let displaced = match &current.holder {
+            None => None,
+            Some(held) if held.owner.same_incarnation(owner) && held.executor_id == executor_id => {
+                None
+            }
+            Some(held) => Some((
+                held.owner.clone(),
+                held.executor_id.clone(),
                 current.fencing_token,
-                *expires_at_epoch_ms,
+                current.expires_at_epoch_ms,
             )),
         };
         let lease = Self::acquire_session_execution_lease_in_memory(
@@ -289,27 +257,20 @@ impl crate::store::SessionExecutionLeaseStore for InMemorySessionStore {
                 },
             );
         }
-        let renewed = match &mut current.lease {
-            super::Lease::Free => unreachable!("renewal passed the held-lease predicate"),
-            super::Lease::Held {
-                lease_term_ms,
-                expires_at_epoch_ms,
-                claimed_at_epoch_ms,
-                ..
-            } => {
-                *lease_term_ms = lease_ttl_ms;
-                *expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
-                crate::SessionExecutionLease {
-                    session_id: fence.session_id.clone(),
-                    owner: fence.owner.clone(),
-                    executor_id: fence.executor_id.clone(),
-                    lease_token: fence.lease_token.clone(),
-                    fencing_token: current.fencing_token,
-                    claimed_at_epoch_ms: *claimed_at_epoch_ms,
-                    lease_term_ms: *lease_term_ms,
-                    expires_at_epoch_ms: *expires_at_epoch_ms,
-                }
-            }
+        if current.holder.is_none() {
+            unreachable!("renewal passed the held-lease predicate");
+        }
+        current.lease_term_ms = lease_ttl_ms;
+        current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
+        let renewed = crate::SessionExecutionLease {
+            session_id: fence.session_id.clone(),
+            owner: fence.owner.clone(),
+            executor_id: fence.executor_id.clone(),
+            lease_token: fence.lease_token.clone(),
+            fencing_token: current.fencing_token,
+            claimed_at_epoch_ms: current.claimed_at_epoch_ms,
+            lease_term_ms: current.lease_term_ms,
+            expires_at_epoch_ms: current.expires_at_epoch_ms,
         };
         #[cfg(any(test, feature = "testing"))]
         if let Some(injected) = self
