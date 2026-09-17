@@ -466,8 +466,15 @@ async fn suspension_inside_a_finally_entered_by_break_resumes_to_the_break() {
             Record::new(),
             &program.chunk.slot_names,
             &ProjectedBindings::new(),
+            Vec::new(),
         );
-        let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Foreground);
+        let mut vm = Vm::new(
+            &program.chunk,
+            slots,
+            &host,
+            None,
+            ExecutionMode::Foreground,
+        );
         vm.suspend_after_effects(1);
         assert_eq!(
             vm.run_for_mode().await.expect("cleanup effect suspends"),
@@ -577,8 +584,15 @@ async fn a_cleanup_only_scope_keeps_the_failing_expression_span() {
         Record::new(),
         &program.chunk.slot_names,
         &ProjectedBindings::new(),
+        Vec::new(),
     );
-    let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Foreground);
+    let mut vm = Vm::new(
+        &program.chunk,
+        slots,
+        &host,
+        None,
+        ExecutionMode::Foreground,
+    );
     let failure = vm
         .run_traced_for_mode()
         .await
@@ -607,8 +621,15 @@ async fn a_suspended_cleanup_chain_resumes_with_the_original_error() {
         Record::new(),
         &program.chunk.slot_names,
         &ProjectedBindings::new(),
+        Vec::new(),
     );
-    let mut vm = Vm::new_with_mode(&program.chunk, slots, &host, ExecutionMode::Foreground);
+    let mut vm = Vm::new(
+        &program.chunk,
+        slots,
+        &host,
+        None,
+        ExecutionMode::Foreground,
+    );
     vm.suspend_after_effects(1);
     assert_eq!(
         vm.run_for_mode()
@@ -653,8 +674,9 @@ async fn control_flow_terminal_cleanups(terminal: Expr) -> (String, usize) {
         Record::new(),
         &compiled.chunk.slot_names,
         &ProjectedBindings::new(),
+        Vec::new(),
     );
-    let mut vm = Vm::new_with_mode(&compiled.chunk, slots, &host, ExecutionMode::Process);
+    let mut vm = Vm::new(&compiled.chunk, slots, &host, None, ExecutionMode::Process);
     let outcome = format!("{:?}", vm.run_for_mode().await);
     let cleanups = host.operations.lock_recover().len();
     (outcome, cleanups)

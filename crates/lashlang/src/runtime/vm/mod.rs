@@ -75,40 +75,23 @@ pub(crate) struct SlotState {
     values: Vec<Option<Value>>,
     projected: Vec<bool>,
     extras: Record,
+    /// Whether `extras` has been imported into the heap. Written once, when
+    /// the VM is built or restored, and read by `heapify_vm_state` — it lives
+    /// here so the flag always describes the record it travels with, and the
+    /// frame swap carries it for free.
+    extras_heapified: bool,
 }
 
 impl SlotState {
+    /// `values` is the buffer to build the slot table in — `Vec::new()` on a
+    /// cold start, or the recycled `ExecutionScratch::slot_values` buffer.
     pub(crate) fn from_globals(
         mut globals: Record,
         slot_names: &[Name],
         projected_bindings: &ProjectedBindings,
+        values: Vec<Option<Value>>,
     ) -> Self {
-        let mut values = Vec::with_capacity(slot_names.len());
-        let mut projected = Vec::with_capacity(slot_names.len());
-        for name in slot_names {
-            if let Some(value) = projected_bindings.get_symbol(name.symbol) {
-                globals.remove_symbol(name.symbol);
-                values.push(Some(Value::Projected(value)));
-                projected.push(true);
-            } else {
-                values.push(globals.remove_symbol(name.symbol));
-                projected.push(false);
-            }
-        }
-        Self {
-            values,
-            projected,
-            extras: globals,
-        }
-    }
-
-    pub(crate) fn from_globals_with_scratch(
-        mut globals: Record,
-        slot_names: &[Name],
-        scratch: &mut ExecutionScratch,
-        projected_bindings: &ProjectedBindings,
-    ) -> Self {
-        let mut values = std::mem::take(&mut scratch.slot_values);
+        let mut values = values;
         values.clear();
         if values.capacity() < slot_names.len() {
             values.reserve(slot_names.len() - values.capacity());
@@ -128,6 +111,7 @@ impl SlotState {
             values,
             projected,
             extras: globals,
+            extras_heapified: false,
         }
     }
 
@@ -174,33 +158,12 @@ impl SlotState {
         self.values[slot] = restore.previous;
     }
 
-    pub(crate) fn into_globals(self, slot_names: &[Name]) -> Result<Record, RuntimeError> {
-        let mut extras = self.extras;
-        for ((name, value), projected) in slot_names.iter().zip(self.values).zip(self.projected) {
-            if projected {
-                extras.remove_symbol(name.symbol);
-                continue;
-            }
-            match value {
-                Some(value) => {
-                    extras.insert_symbolized(
-                        name.symbol,
-                        name.text.clone(),
-                        materialize_value(value)?,
-                    );
-                }
-                None => {
-                    extras.remove_symbol(name.symbol);
-                }
-            }
-        }
-        Ok(extras)
-    }
-
-    fn recycle_into_globals(
+    /// `reclaim` receives the drained values buffer for recycling —
+    /// `ExecutionScratch::slot_values` when the caller reuses scratch.
+    pub(crate) fn into_globals(
         self,
         slot_names: &[Name],
-        slot_values: &mut Vec<Option<Value>>,
+        reclaim: Option<&mut Vec<Option<Value>>>,
     ) -> Result<Record, RuntimeError> {
         let mut extras = self.extras;
         let mut values = self.values;
@@ -224,8 +187,10 @@ impl SlotState {
                 }
             }
         }
-        values.clear();
-        *slot_values = values;
+        if let Some(reclaim) = reclaim {
+            values.clear();
+            *reclaim = values;
+        }
         Ok(extras)
     }
 }
@@ -257,9 +222,6 @@ pub struct Vm<'a, H> {
     active_execution_elapsed: Duration,
     pub(crate) heap: Heap,
     heap_initialized: bool,
-    /// Whether the extra-globals record has been imported into the heap. It is
-    /// written once, when the VM is built or restored, and only read after that.
-    extras_heapified: bool,
     assigned_globals: std::collections::BTreeSet<String>,
     pending_tools: std::collections::BTreeMap<lash_sansio::handle::HandleId, Option<Value>>,
     /// Identity of this execution, stamped into every pending-tool handle it
@@ -1574,12 +1536,12 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Materializes host-visible globals, omitting any entire binding that
     /// contains a function value at any depth.
     pub fn into_globals(mut self) -> Result<Record, RuntimeError> {
-        let runtime_globals = self.slots.into_globals(&self.chunk.slot_names)?;
+        let runtime_globals = self.slots.into_globals(&self.chunk.slot_names, None)?;
         super::state::host_view(&runtime_globals, &mut self.heap)
     }
 
     pub(crate) fn into_state_parts(self) -> Result<(Record, Heap), RuntimeError> {
-        let globals = self.slots.into_globals(&self.chunk.slot_names)?;
+        let globals = self.slots.into_globals(&self.chunk.slot_names, None)?;
         Ok((globals, self.heap))
     }
 
@@ -1594,7 +1556,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         scratch.assigned_globals = std::mem::take(&mut self.assigned_globals);
         let globals = self
             .slots
-            .recycle_into_globals(&self.chunk.slot_names, &mut scratch.slot_values)?;
+            .into_globals(&self.chunk.slot_names, Some(&mut scratch.slot_values))?;
         Ok((globals, self.heap))
     }
 }

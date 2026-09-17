@@ -622,8 +622,9 @@ async fn suspend_in_exceptional_finally<H: ExecutionHost>(
         Record::new(),
         &program.chunk.slot_names,
         &ProjectedBindings::new(),
+        Vec::new(),
     );
-    let mut vm = Vm::new_with_mode(&program.chunk, slots, host, ExecutionMode::Foreground);
+    let mut vm = Vm::new(&program.chunk, slots, host, None, ExecutionMode::Foreground);
     vm.suspend_after_effects(1);
     assert_eq!(
         vm.run_for_mode()

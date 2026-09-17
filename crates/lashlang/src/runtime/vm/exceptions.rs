@@ -289,7 +289,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.stack.truncate(frame.operand_stack_base);
         self.slots = frame.slots;
         self.iter_stack = frame.iter_stack;
-        self.extras_heapified = frame.extras_heapified;
         self.active_function = frame.function;
         self.ip = frame.return_ip;
         Ok(())

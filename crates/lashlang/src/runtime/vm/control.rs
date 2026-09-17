@@ -539,7 +539,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .enumerate()
             .filter_map(|(index, iterator)| (!iterator.heapified).then_some(index))
             .collect::<Vec<_>>();
-        let scan_extras = !self.extras_heapified;
+        let scan_extras = !self.slots.extras_heapified;
         // Durable holders come first so a transient holder of the same tree can
         // reuse what they imported rather than allocating a second object.
         let mut values = Vec::new();
@@ -641,7 +641,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         for index in pending_iterators {
             self.iter_stack[index].heapified = true;
         }
-        self.extras_heapified = true;
+        self.slots.extras_heapified = true;
         if self.heap.needs_collection() {
             let roots = self.heap_roots();
             self.heap.collect(roots.iter());

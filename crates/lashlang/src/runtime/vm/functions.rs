@@ -7,7 +7,6 @@ pub(super) struct CallFrame {
     pub(super) operand_stack_base: usize,
     pub(super) slots: SlotState,
     pub(super) iter_stack: Vec<IterState>,
-    pub(super) extras_heapified: bool,
     pub(super) return_target: ReturnTarget,
 }
 
@@ -211,6 +210,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         slots.values.clear();
         slots.projected.clear();
         slots.extras = Record::new();
+        slots.extras_heapified = false;
         self.slot_scratch = Some(slots);
     }
 
@@ -223,6 +223,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 values: vec![None; len],
                 projected: vec![false; len],
                 extras: Record::new(),
+                extras_heapified: false,
             };
         };
         slots.values.clear();
@@ -332,7 +333,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
             operand_stack_base: self.stack.len(),
             slots: std::mem::replace(&mut self.slots, slots),
             iter_stack: std::mem::take(&mut self.iter_stack),
-            extras_heapified: self.extras_heapified,
             return_target,
         };
         if self.frames.is_empty() {
@@ -345,7 +345,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.frames.push(frame);
         self.active_function = Some(function_index);
         self.ip = function.entry_ip;
-        self.extras_heapified = false;
         Ok(())
     }
 
@@ -356,7 +355,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let finished = std::mem::replace(&mut self.slots, frame.slots);
         self.recycle_slot_state(finished);
         self.iter_stack = frame.iter_stack;
-        self.extras_heapified = frame.extras_heapified;
         self.active_function = frame.function;
         self.ip = frame.return_ip;
         match frame.return_target {
