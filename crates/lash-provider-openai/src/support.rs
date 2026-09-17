@@ -24,7 +24,7 @@ pub(crate) use lash_core::{
 // lib free of unused-import warnings.
 pub(crate) use crate::schema::{classify_openai_error, responses_error_retry_verdict};
 #[cfg(test)]
-pub(crate) use lash_core::llm::types::{LlmRequestScope, ResponseTextMeta};
+pub(crate) use lash_core::llm::types::{LlmRequestScope, ResponsePhase, ResponseTextMeta};
 pub(crate) use lash_core::provider::{
     CacheControlDialect, CacheRetention, GenerationRetryGuarantee, Provider, ProviderComponents,
     ProviderOptions, StreamTermination, resolve_generation_policy,

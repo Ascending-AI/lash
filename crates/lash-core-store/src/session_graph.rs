@@ -1,7 +1,7 @@
 use crate::{NodeId, SessionId};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Deref;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
 use crate::session_graph_integrity::{
     ancestry_indices, graph_node_indices, validate_graph_parent_topology,
@@ -609,7 +609,7 @@ impl SessionGraphAppendBuilder {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct SessionGraphCache {
     by_id: HashMap<NodeId, usize>,
     active_path_indices: Vec<usize>,
@@ -621,7 +621,7 @@ struct SessionGraphCache {
     /// Replaced (not invalidated in-place) whenever `active_messages`
     /// changes — the `Arc` identity tracks the cache's validity.
     prompt_render_cache: Arc<BaseRenderCache>,
-    /// Memoized scoped read-model answer, keyed by the frame it was
+    /// Memoized scoped read-model answers, keyed by the frame each was
     /// projected for.
     ///
     /// Identity is the point, not the saved work: the turn projection decides
@@ -630,7 +630,25 @@ struct SessionGraphCache {
     /// projection rebuilt per call would hand the turn's two readers two
     /// equal-but-distinct `Arc`s and force the whole-window reconciliation on
     /// every boundary. Cleared whenever the active path moves.
-    frame_read_model: OnceLock<(String, SessionReadModel)>,
+    frame_read_model: StdMutex<BTreeMap<String, SessionReadModel>>,
+}
+
+impl Clone for SessionGraphCache {
+    fn clone(&self) -> Self {
+        Self {
+            by_id: self.by_id.clone(),
+            active_path_indices: self.active_path_indices.clone(),
+            active_events: Arc::clone(&self.active_events),
+            active_messages: Arc::clone(&self.active_messages),
+            prompt_render_cache: Arc::clone(&self.prompt_render_cache),
+            frame_read_model: StdMutex::new(
+                self.frame_read_model
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone(),
+            ),
+        }
+    }
 }
 
 impl SessionGraphCache {
@@ -646,7 +664,7 @@ impl SessionGraphCache {
             active_events: Arc::new(Vec::new()),
             active_messages: Arc::new(Vec::new()),
             prompt_render_cache: Arc::new(BaseRenderCache::new()),
-            frame_read_model: OnceLock::new(),
+            frame_read_model: StdMutex::new(BTreeMap::new()),
         };
         cache.rebuild_read_model(graph);
         Ok(cache)
@@ -670,7 +688,7 @@ impl SessionGraphCache {
         self.active_messages = Arc::new(active_messages);
         self.active_events = Arc::new(active_events);
         self.prompt_render_cache = Arc::new(BaseRenderCache::new());
-        self.frame_read_model = OnceLock::new();
+        self.frame_read_model = StdMutex::new(BTreeMap::new());
     }
 
     fn scoped_read_model(
@@ -678,15 +696,15 @@ impl SessionGraphCache {
         graph: &SessionGraph,
         frame_node_id: &crate::FrameNodeId,
     ) -> SessionReadModel {
-        if let Some((memoized_frame_node_id, read_model)) = self.frame_read_model.get()
-            && memoized_frame_node_id == frame_node_id.as_str()
-        {
+        let mut memoized = self
+            .frame_read_model
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(read_model) = memoized.get(frame_node_id.as_str()) {
             return read_model.clone();
         }
         let read_model = self.project_scoped_read_model(graph, frame_node_id);
-        let _ = self
-            .frame_read_model
-            .set((frame_node_id.to_string(), read_model.clone()));
+        memoized.insert(frame_node_id.to_string(), read_model.clone());
         read_model
     }
 
@@ -736,7 +754,7 @@ impl SessionGraphCache {
         if !parent_matches_leaf {
             return;
         }
-        self.frame_read_model = OnceLock::new();
+        self.frame_read_model = StdMutex::new(BTreeMap::new());
         self.active_path_indices.push(node_index);
         if let Some(event) = node.event() {
             Arc::make_mut(&mut self.active_events).push(event.clone());

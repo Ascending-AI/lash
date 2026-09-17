@@ -757,7 +757,7 @@ mod tests {
     use super::*;
     use lash_core::{
         AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCallOutput,
-        ToolValue, facade_support::AttachmentMeta, facade_support::ModelToolReturn,
+        ToolValue, facade_support::AttachmentRef, facade_support::ModelToolReturn,
     };
     use lash_sansio::sync::MutexExt;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -765,16 +765,13 @@ mod tests {
     use tokio::time::{Duration, timeout};
 
     fn attachment_source(id: &str) -> AttachmentSource {
-        AttachmentSource::stored(
-            AttachmentMeta::new(
-                AttachmentId::parse(id).expect("valid attachment id"),
-                MediaType::parse("image/png").unwrap(),
-                4,
-                Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-                Some("tiny".to_string()),
-            )
-            .as_ref(),
-        )
+        AttachmentSource::stored(AttachmentRef::new(
+            AttachmentId::parse(id).expect("valid attachment id"),
+            MediaType::parse("image/png").unwrap(),
+            4,
+            Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
+            Some("tiny".to_string()),
+        ))
     }
 
     #[test]

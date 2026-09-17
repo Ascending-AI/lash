@@ -86,12 +86,10 @@ pub struct CheckpointWriteEvent {
     pub session_id: SessionId,
     /// Optional generated-trace attribution for a separately executed contract
     /// proof. Ordinary generated runtime commits use `session_id` directly.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attributed_session_id: Option<SessionId>,
-    /// Boundary that caused a separately executed contract proof. Runtime-turn
-    /// writes are linked by session plus turn instead.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cause_boundary_id: Option<String>,
+    /// Flattened so the wire keys stay `attributed_session_id` and
+    /// `cause_boundary_id`.
+    #[serde(flatten)]
+    pub attribution: Option<CheckpointAttribution>,
     pub commit_index: usize,
     pub turn_index: usize,
     pub revision_before: u64,
@@ -116,6 +114,16 @@ pub struct CheckpointStateWrite {
     pub accepted_read_model: Option<serde_json::Value>,
 }
 
+/// Generated-trace attribution for a separately executed contract proof: the
+/// session the proof belongs to and the boundary that caused it. Runtime-turn
+/// writes are linked by session plus turn instead.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CheckpointAttribution {
+    #[serde(rename = "attributed_session_id")]
+    pub session_id: SessionId,
+    pub cause_boundary_id: String,
+}
+
 impl CheckpointWriteEvent {
     pub fn has_unchanged_ref(&self) -> bool {
         self.components
@@ -124,8 +132,9 @@ impl CheckpointWriteEvent {
     }
 
     pub fn attributed_session(&self) -> &str {
-        self.attributed_session_id
-            .as_deref()
+        self.attribution
+            .as_ref()
+            .map(|attribution| attribution.session_id.as_str())
             .unwrap_or(&self.session_id)
     }
 }
@@ -513,8 +522,7 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
     CheckpointWriteEvent {
         schema: CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
         session_id: commit.session_id.clone(),
-        attributed_session_id: None,
-        cause_boundary_id: None,
+        attribution: None,
         commit_index: 0,
         turn_index: commit.checkpoint.turn_state.turn_index,
         revision_before: commit.expected_head_revision,

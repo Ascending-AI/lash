@@ -207,7 +207,7 @@ impl LiveRestateEndpoint {
                 .drain_status(false)
                 .await
                 .expect("query Lash deployment drain status");
-            if deployment_open == 0 && lash_drain.drained {
+            if deployment_open == 0 && lash_drain.drained() {
                 break;
             }
             assert!(

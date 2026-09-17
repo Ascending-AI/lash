@@ -290,14 +290,13 @@ finish(result);"#,
 #[test]
 fn agent_scenario_awaited_process_attachment_is_a_parent_commit_gc_root() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-awaited-process-attachment", || async {
-        let attachment = lash_core::facade_support::AttachmentMeta::new(
+        let attachment = lash_core::facade_support::AttachmentRef::new(
             lash_core::AttachmentId::parse("awaited-child-only").expect("valid attachment id"),
             lash_core::MediaType::parse("image/png").expect("test media type"),
             18,
             Some(lash_core::AttachmentTypeMetadata::image(Some(1), Some(1))),
             Some("awaited-child-only.png".to_string()),
-        )
-        .as_ref();
+        );
         let run = run_agent_turn_scenario(
             AgentScenario::new(
                 AWAITED_PROCESS_ATTACHMENT_RETENTION.scenario_name,

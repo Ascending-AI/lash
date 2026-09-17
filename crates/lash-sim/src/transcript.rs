@@ -73,7 +73,8 @@ fn build(trace: &SimulationTrace, session_filter: Option<&str>) -> Transcript {
     let mut writes_by_turn = BTreeMap::<(&str, usize), Vec<&CheckpointWriteEvent>>::new();
     let mut writes_by_boundary = BTreeMap::<&str, Vec<&CheckpointWriteEvent>>::new();
     for write in writes {
-        if let Some(boundary_id) = write.cause_boundary_id.as_deref() {
+        if let Some(attribution) = write.attribution.as_ref() {
+            let boundary_id = attribution.cause_boundary_id.as_str();
             writes_by_boundary
                 .entry(boundary_id)
                 .or_default()
@@ -325,8 +326,7 @@ fn test_write(session_id: &SessionId, turn_index: usize) -> CheckpointWriteEvent
     CheckpointWriteEvent {
         schema: crate::store::CHECKPOINT_WRITE_EVENT_SCHEMA.to_string(),
         session_id: SessionId::from(session_id.to_string()),
-        attributed_session_id: None,
-        cause_boundary_id: None,
+        attribution: None,
         commit_index: turn_index,
         turn_index,
         revision_before: (turn_index - 1) as u64,
@@ -406,8 +406,10 @@ mod attribution_tests {
     #[test]
     fn contract_checkpoint_renders_after_its_causal_trigger() {
         let mut write = test_write(&SessionId::from("contract-store-session"), 1);
-        write.attributed_session_id = Some(SessionId::from("alpha"));
-        write.cause_boundary_id = Some("alpha:2".to_string());
+        write.attribution = Some(crate::store::CheckpointAttribution {
+            session_id: SessionId::from("alpha"),
+            cause_boundary_id: "alpha:2".to_string(),
+        });
         let trace = trace_with_events(
             vec![
                 test_boundary(1, "alpha", BoundaryKind::Ingress, 1),

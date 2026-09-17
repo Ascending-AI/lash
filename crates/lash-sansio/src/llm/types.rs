@@ -86,17 +86,45 @@ impl ProviderFailureKind {
     }
 }
 
+/// Provider replay phase tag: the two-value vocabulary the kernel interprets
+/// (`"commentary"`/`"final_answer"` on the wire). An unknown spelling fails
+/// decoding rather than silently meaning "neither".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsePhase {
+    Commentary,
+    FinalAnswer,
+}
+
+impl ResponsePhase {
+    /// The provider wire spelling.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Commentary => "commentary",
+            Self::FinalAnswer => "final_answer",
+        }
+    }
+
+    /// Decodes a provider wire spelling. An unrecognized phase is not a phase
+    /// the kernel interprets, so it decodes to `None` rather than guessing.
+    pub fn from_provider_wire(phase: &str) -> Option<Self> {
+        match phase {
+            "commentary" => Some(Self::Commentary),
+            "final_answer" => Some(Self::FinalAnswer),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResponseTextMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
-    /// Opaque provider replay phase tag. Provider crates own the wire
-    /// vocabulary (e.g. OpenAI Responses `"commentary"`/`"final_answer"`);
-    /// the kernel treats it as an opaque string and round-trips it verbatim.
+    /// Provider replay phase tag; see [`ResponsePhase`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub phase: Option<String>,
+    pub phase: Option<ResponsePhase>,
     /// Provider-owned payload needed to replay this text part on a future
     /// request. The kernel stores it opaquely and providers decide whether it
     /// is valid for their next wire request.
@@ -135,18 +163,12 @@ impl ResponseTextMeta {
             && self.provider_payload.is_none()
     }
 
-    pub fn phase_is(&self, expected: &str) -> bool {
-        self.phase
-            .as_deref()
-            .is_some_and(|phase| phase.eq_ignore_ascii_case(expected))
-    }
-
     pub fn is_final_answer_phase(&self) -> bool {
-        self.phase_is("final_answer")
+        self.phase == Some(ResponsePhase::FinalAnswer)
     }
 
     pub fn is_commentary_phase(&self) -> bool {
-        self.phase_is("commentary")
+        self.phase == Some(ResponsePhase::Commentary)
     }
 }
 

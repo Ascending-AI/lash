@@ -407,6 +407,18 @@ impl UsageAccumulator {
             .saturating_add(entry.usage_disposition.reconciled_attempts());
         saturated
     }
+
+    /// Folds another accumulator in: raw counters, so attempt netting still
+    /// happens once at whatever granularity the caller converts to totals.
+    fn absorb(&mut self, incoming: &UsageAccumulator, saturated: &mut bool) {
+        *saturated |= saturating_add_usage(&mut self.usage, &incoming.usage);
+        self.unreported_attempts = self
+            .unreported_attempts
+            .saturating_add(incoming.unreported_attempts);
+        self.reconciled_attempts = self
+            .reconciled_attempts
+            .saturating_add(incoming.reconciled_attempts);
+    }
 }
 
 impl UsageTotals {
@@ -425,6 +437,26 @@ impl UsageTotals {
             reconciled_attempts: accumulator.reconciled_attempts,
         }
     }
+
+    /// Fold one already-netted totals row into another, for rebuilding keyed
+    /// reports from wire rows whose raw attempt counters are no longer
+    /// available.
+    fn absorb(&mut self, incoming: &UsageTotals, saturated: &mut bool) {
+        *saturated |= saturating_add_usage(&mut self.usage, &incoming.usage);
+        self.total_tokens = match self.total_tokens.checked_add(incoming.total_tokens) {
+            Some(total) => total,
+            None => {
+                *saturated = true;
+                self.total_tokens.saturating_add(incoming.total_tokens)
+            }
+        };
+        self.unreported_attempts = self
+            .unreported_attempts
+            .saturating_add(incoming.unreported_attempts);
+        self.reconciled_attempts = self
+            .reconciled_attempts
+            .saturating_add(incoming.reconciled_attempts);
+    }
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -442,9 +474,51 @@ pub struct SessionUsageReport {
     /// typed error instead; reads saturate so reporting cannot fail a session.
     pub saturated: bool,
     pub usage: UsageTotals,
+    /// Per-source view, derived from `by_source_model`.
     pub by_source: BTreeMap<String, UsageTotals>,
+    /// Per-model view, derived from `by_source_model`.
     pub by_model: BTreeMap<String, UsageTotals>,
-    pub by_source_model: Vec<UsageReportRow>,
+    /// The report's keyed structure: one folded, netted row per
+    /// `(source, model)` pair. Serialized as the same `UsageReportRow` array
+    /// as before.
+    #[serde(
+        serialize_with = "serialize_by_source_model",
+        deserialize_with = "deserialize_by_source_model"
+    )]
+    pub by_source_model: BTreeMap<(String, String), UsageTotals>,
+}
+
+fn serialize_by_source_model<S>(
+    rows: &BTreeMap<(String, String), UsageTotals>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.collect_seq(rows.iter().map(|((source, model), usage)| UsageReportRow {
+        source: source.clone(),
+        model: model.clone(),
+        usage: usage.clone(),
+    }))
+}
+
+fn deserialize_by_source_model<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<(String, String), UsageTotals>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let rows = <Vec<UsageReportRow> as serde::Deserialize>::deserialize(deserializer)?;
+    // Legacy payloads can carry more than one row per key; fold duplicates
+    // instead of dropping them.
+    let mut saturated = false;
+    let mut map = BTreeMap::<(String, String), UsageTotals>::new();
+    for row in rows {
+        map.entry((row.source, row.model))
+            .or_default()
+            .absorb(&row.usage, &mut saturated);
+    }
+    Ok(map)
 }
 
 impl SessionUsageReport {
@@ -454,30 +528,36 @@ impl SessionUsageReport {
 
     pub fn from_entries_with_saturation(entries: &[TokenLedgerEntry], mut saturated: bool) -> Self {
         let mut total = UsageAccumulator::default();
-        let mut by_source_usage = BTreeMap::<String, UsageAccumulator>::new();
-        let mut by_model_usage = BTreeMap::<String, UsageAccumulator>::new();
-        let mut by_source_model = Vec::with_capacity(entries.len());
+        let mut by_pair = BTreeMap::<(String, String), UsageAccumulator>::new();
 
         for entry in entries {
             saturated |= total.add(entry);
-            saturated |= by_source_usage
-                .entry(entry.source.clone())
+            saturated |= by_pair
+                .entry((entry.source.clone(), entry.model.clone()))
                 .or_default()
                 .add(entry);
-            saturated |= by_model_usage
-                .entry(entry.model.clone())
-                .or_default()
-                .add(entry);
-            let mut row = UsageAccumulator::default();
-            saturated |= row.add(entry);
-            by_source_model.push(UsageReportRow {
-                source: entry.source.clone(),
-                model: entry.model.clone(),
-                usage: UsageTotals::from_accumulator(&row, &mut saturated),
-            });
         }
 
         let usage = UsageTotals::from_accumulator(&total, &mut saturated);
+        // The keyed accumulators are the owner; the per-source and per-model
+        // views fold them before netting so attempt counts net exactly as they
+        // did when each view folded the ledger itself.
+        let mut by_source_usage = BTreeMap::<String, UsageAccumulator>::new();
+        let mut by_model_usage = BTreeMap::<String, UsageAccumulator>::new();
+        for ((source, model), accumulator) in &by_pair {
+            by_source_usage
+                .entry(source.clone())
+                .or_default()
+                .absorb(accumulator, &mut saturated);
+            by_model_usage
+                .entry(model.clone())
+                .or_default()
+                .absorb(accumulator, &mut saturated);
+        }
+        let by_source_model: BTreeMap<(String, String), UsageTotals> = by_pair
+            .into_iter()
+            .map(|(key, usage)| (key, UsageTotals::from_accumulator(&usage, &mut saturated)))
+            .collect();
         let by_source = by_source_usage
             .into_iter()
             .map(|(key, usage)| (key, UsageTotals::from_accumulator(&usage, &mut saturated)))
@@ -607,12 +687,8 @@ pub fn diff_usage_reports(
         report
             .by_source_model
             .iter()
-            .map(|row| {
-                TokenLedgerEntry::reported(
-                    row.source.clone(),
-                    row.model.clone(),
-                    row.usage.usage.clone(),
-                )
+            .map(|((source, model), row)| {
+                TokenLedgerEntry::reported(source.clone(), model.clone(), row.usage.clone())
             })
             .collect::<Vec<_>>()
     };

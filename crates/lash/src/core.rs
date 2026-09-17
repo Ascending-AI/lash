@@ -115,7 +115,6 @@ impl LashCore {
             accepting_new_work,
             remaining_invocations,
             checked_at,
-            drained: !accepting_new_work && remaining_invocations == 0,
         })
     }
 

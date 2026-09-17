@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef};
+use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 
 use super::{
     AttachmentStore, AttachmentStoreError, AttachmentStorePersistence, StoredAttachment,
@@ -104,7 +104,7 @@ impl AttachmentStore for FileAttachmentStore {
         bytes: Vec<u8>,
         meta: AttachmentCreateMeta,
     ) -> Result<AttachmentRef, AttachmentStoreError> {
-        let meta = AttachmentMeta::new(
+        let meta = AttachmentRef::new(
             content_id(&bytes),
             meta.media_type,
             bytes.len() as u64,
@@ -196,7 +196,7 @@ impl AttachmentStore for FileAttachmentStore {
 fn put_at_path(
     path: PathBuf,
     bytes: Vec<u8>,
-    meta: AttachmentMeta,
+    meta: AttachmentRef,
 ) -> Result<AttachmentRef, AttachmentStoreError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| AttachmentStoreError::Io {
@@ -212,7 +212,7 @@ fn put_at_path(
     } else {
         write_atomic(&path, &bytes)?;
     }
-    Ok(meta.as_ref())
+    Ok(meta)
 }
 
 /// Refresh a blob's modification time on a dedup-hit `put`. Prefers a cheap

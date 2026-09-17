@@ -385,6 +385,21 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }
+/// The decided retry posture of a [`RuntimeErrorCode`].
+///
+/// `Unclassified` means no retry posture is decided: the code is neither
+/// explicitly safe to retry unchanged nor provably permanent, and durable
+/// hosts may settle it either way. Foreign codes land here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RuntimeErrorClass {
+    /// Retrying the identical operation is explicitly safe.
+    Retryable,
+    /// Retrying cannot succeed without changing input, configuration,
+    /// wiring, or corrupted durable state.
+    Terminal,
+    /// No decided retry posture.
+    Unclassified,
+}
 impl RuntimeErrorCode {
     /// Provides the canonical str view to store, effect-host, and protocol implementors while
     /// materializing, executing, or persisting a session turn.
@@ -616,175 +631,394 @@ impl RuntimeErrorCode {
         matches!(self, Self::WorkerReplacementAbort)
     }
 
+    /// The decided retry posture of this code.
+    ///
+    /// This is the single classification site: the match is exhaustive, so a
+    /// new variant does not compile until it is deliberately classified.
+    /// [`Self::is_retryable`] and [`Self::is_terminal`] are projections of it.
+    pub(crate) const fn classification(&self) -> RuntimeErrorClass {
+        match self {
+            // A hook failure is an incomplete derivation over an already
+            // durable completion, so redriving phase 2 is the correct recovery
+            // (FIG-1276).
+            Self::RuntimeEffectAssistantResponseHook
+            | Self::RuntimeEffectGroupDrainDeferred
+            | Self::ManagedTurnConcurrencyLimitExceeded
+            | Self::SessionExecutionLaneBusy
+            | Self::TurnInputSettlementSuperseded
+            | Self::StoreCommitContended
+            | Self::CancelStartGateUnavailable
+            | Self::PostgresAwaitEventStore
+            | Self::PostgresEffectJournalRetirement
+            | Self::RestateAwaitEventAwait
+            | Self::RestateAwaitEventCancel
+            | Self::RestateAwaitEventPeek
+            | Self::RestateAwaitEventResolve
+            | Self::RestateAwaitEventRevocationRead
+            | Self::RestateAwaitEventRevoke
+            | Self::RestateAwaitEventSessionUpdate
+            | Self::RestateProcessCancel
+            | Self::RestateProcessIngressSubmit
+            | Self::RestateTurnTerminalAttach
+            | Self::RestateTurnTerminalAttachCeilingElapsed
+            | Self::RuntimePerfStartGateRetry
+            | Self::RuntimeStore
+            | Self::SessionCommandPostDriveRefresh
+            | Self::SessionCommandRefresh
+            | Self::SessionCommandRefreshTools
+            | Self::SqliteAwaitEventStore
+            | Self::SqliteEffectJournalRetirement
+            | Self::TransientCancelWatch
+            | Self::TransientTerminalPublication
+            | Self::TurnControlWaitTimeout
+            | Self::TurnTerminalAwaitTimeout => RuntimeErrorClass::Retryable,
+            Self::AttachmentSourcePolicyDenied
+            | Self::EffectPanicked
+            | Self::MissingExecutionScopeId
+            | Self::ExecutionScopeTurnIdMismatch
+            | Self::TurnInputRedriveSetUnavailable
+            | Self::QueuedWorkRowExceedsContextWindow
+            | Self::StoreCommitNodeBudgetExceeded
+            | Self::StoreCommitByteBudgetExceeded
+            | Self::SessionDeleted
+            | Self::CheckpointComponentEncodingVersionMismatch
+            | Self::RecordEncodingFailed
+            | Self::MissingProcessExecutionId
+            | Self::DurableEffectLiveProtocolExtension
+            | Self::DurableEffectLivePluginInput
+            | Self::AwaitEventCancelUnsupported
+            | Self::AwaitEventKeySign
+            | Self::AwaitEventUnknownOrRevoked
+            | Self::AwaitEventUnsupported
+            | Self::EffectGroupUnsupported
+            | Self::EffectJournalRetirementUnsupported
+            | Self::EffectScopeRetired
+            | Self::EffectScopeNotQuiescent
+            | Self::AwaitEventScopeNotRetirable
+            | Self::InvalidAwaitEventSessionId
+            | Self::InvalidAwaitEventWaitIdentity
+            | Self::InvalidTurnCancelRequest
+            | Self::HistoricalAgentFrameSwitchUnsupported
+            | Self::AgentFrameSwitchAuthorConflict
+            | Self::LlmProvider
+            | Self::Plugin
+            | Self::PostgresEffectReplayCorruptRow
+            | Self::PostgresEffectReplayDecode
+            | Self::PostgresEffectReplayEncode
+            | Self::PostgresEffectReplayHashConflict
+            | Self::PostgresEffectReplayKeyMissing
+            | Self::PostgresEffectReplayLeaseLost
+            | Self::PostgresEffectReplayMissing
+            | Self::PostgresEffectReplayStore
+            | Self::PostgresAwaitEventDecode
+            | Self::PostgresAwaitEventEncode
+            | Self::PostgresAwaitEventSign
+            | Self::RestateEffectController
+            | Self::ToolIntentReplayKeyFormatCutover
+            | Self::ProcessPanicked
+            | Self::ProcessNotVisible
+            | Self::ProcessAlreadyTerminal
+            | Self::ProcessParentEnded
+            | Self::ProcessCancelConflict
+            | Self::DurableIdentityConflict
+            | Self::ProcessNoLongerRetained
+            | Self::ProcessIncarnationSuperseded
+            | Self::ProcessRegistryUnavailable
+            | Self::ProcessSignalWaitCancelled
+            | Self::ProcessSignalWaitTimeout
+            | Self::WorkerReplacementAbort
+            | Self::RestateEffectHostRequiresHandlerScope
+            | Self::RestateJournaledEffectPoisoned
+            | Self::RestateProcessAwait
+            | Self::RestateProcessJournalIdentityDrift
+            | Self::RestateProcessJournalPayloadIncompatible
+            | Self::RestateServiceUnregistered
+            | Self::RestateProcessAwaitAfterTurnCancel
+            | Self::RestateProcessTurnCancelContextMissing
+            | Self::RestateProcessTerminalEncode
+            | Self::RestateTurnTerminalDecode
+            | Self::RestateTurnTerminalInvalidResolution
+            | Self::RestateTurnCancelScopeMismatch
+            | Self::RestateTurnCancelScopeMissing
+            | Self::RuntimeEffectAttachmentStore
+            | Self::RuntimeEffectEnvelopeCanonicalDecode
+            | Self::RuntimeEffectEnvelopeCanonicalHashInvariant
+            | Self::RuntimeEffectEnvelopeHash
+            | Self::RuntimeEffectEnvelopeVersion
+            | Self::RuntimeEffectGroupAwaitCancelled
+            | Self::RuntimeEffectGroupChildCancelled
+            | Self::RuntimeEffectGroupShape
+            | Self::RuntimeEffectInvocationSubject
+            | Self::RuntimeEffectScopeMismatch
+            | Self::RuntimeEffectLocalExecutorMismatch
+            | Self::RuntimeEffectLocalExecutorUnavailable
+            | Self::RuntimeEffectLocalTaskClosed
+            | Self::RuntimeEffectProcessTaskJoin
+            | Self::RuntimeEffectReplayRequired
+            | Self::RuntimeEffectSleepCancelled
+            | Self::RuntimeEffectTaskJoin
+            | Self::RuntimeEffectToolAttemptCallId
+            | Self::RuntimeEffectToolAttemptIndex
+            | Self::RuntimeEffectToolBatchCallId
+            | Self::RuntimeEffectToolBatchCallReplay
+            | Self::RuntimeEffectToolBatchEmpty
+            | Self::RuntimeEffectToolBatchId
+            | Self::RuntimeEffectWrongOutcome
+            | Self::RuntimeStoreCorrupt
+            | Self::SessionCommandClaim
+            | Self::SessionCommandIdempotencyKey
+            | Self::SessionDeleteScopeMismatch
+            | Self::SessionToolRegistry
+            | Self::SqliteAwaitEventDecode
+            | Self::SqliteAwaitEventEncode
+            | Self::SqliteAwaitEventSign
+            | Self::SqliteEffectReplayCorruptRow
+            | Self::SqliteEffectReplayDecode
+            | Self::SqliteEffectReplayEncode
+            | Self::SqliteEffectReplayHashConflict
+            | Self::SqliteEffectReplayKeyMissing
+            | Self::SqliteEffectReplayLeaseLost
+            | Self::SqliteEffectReplayMissing
+            | Self::SqliteEffectReplayStore
+            | Self::ToolBatchMissingResult
+            | Self::ToolBatchResultCountMismatch
+            | Self::ToolCatalogResolutionFailed
+            | Self::ToolCompletionKeyMissingCallId
+            | Self::ToolCompletionKeyProcessLifetime
+            | Self::ToolDeferralNotDeclared
+            | Self::TurnCancelGateDecode
+            | Self::TurnCancelGateEncode
+            | Self::TurnCancelGateInvalidTerminal
+            | Self::TurnControlPeekOutcome
+            | Self::TurnControlUnknownOrRevoked
+            | Self::TurnTerminalDecode
+            | Self::TurnTerminalEncode
+            | Self::TurnTerminalInvalidResolution
+            | Self::TurnTerminalUnknownOrRevoked
+            | Self::TriggerStoreUnavailable => RuntimeErrorClass::Terminal,
+            Self::SessionExecutionLeaseLost
+            | Self::StoreCommitSuperseded
+            | Self::ExecutionStateCaptureFailed
+            | Self::ResidentSessionReloadFailed
+            | Self::StoreCommitFailed
+            | Self::PluginSessionManager
+            | Self::PluginFinalizeTurn
+            | Self::PluginCheckpoint
+            | Self::PluginPrepareTurn
+            | Self::ContextPrepareTurn
+            | Self::ProtocolTurnExtension
+            | Self::ProtocolBeforeLlmCall
+            | Self::TurnStreamJoin
+            | Self::EmptyAgentFrameRun
+            | Self::LiveReplay
+            | Self::PostgresAwaitEventNotify
+            | Self::QueuedWork
+            | Self::RuntimeEffectControllerTaskClosed
+            | Self::SessionHeadRefresh
+            | Self::SqliteAwaitEventNotify
+            | Self::TurnControlWaitCancelled
+            | Self::ArtifactOwnerRetired
+            | Self::ArtifactDestinationOwnerRetired
+            | Self::ArtifactStagingEdgeMissing
+            | Self::ForeignCode(_) => RuntimeErrorClass::Unclassified,
+        }
+    }
+
     /// Whether retrying the identical operation is explicitly safe.
     pub fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::ManagedTurnConcurrencyLimitExceeded
-                | Self::RuntimeEffectGroupDrainDeferred
-                | Self::SessionExecutionLaneBusy
-                | Self::TurnInputSettlementSuperseded
-                | Self::StoreCommitContended
-                | Self::PostgresAwaitEventStore
-                | Self::PostgresEffectJournalRetirement
-                | Self::CancelStartGateUnavailable
-                | Self::RestateAwaitEventAwait
-                | Self::RestateAwaitEventCancel
-                | Self::RestateAwaitEventPeek
-                | Self::RestateAwaitEventResolve
-                | Self::RestateAwaitEventRevocationRead
-                | Self::RestateAwaitEventRevoke
-                | Self::RestateAwaitEventSessionUpdate
-                | Self::RestateProcessCancel
-                | Self::RestateProcessIngressSubmit
-                | Self::RestateTurnTerminalAttach
-                | Self::RestateTurnTerminalAttachCeilingElapsed
-                | Self::RuntimeEffectAssistantResponseHook
-                | Self::RuntimePerfStartGateRetry
-                | Self::RuntimeStore
-                | Self::SessionCommandPostDriveRefresh
-                | Self::SessionCommandRefresh
-                | Self::SessionCommandRefreshTools
-                | Self::SqliteAwaitEventStore
-                | Self::SqliteEffectJournalRetirement
-                | Self::TransientCancelWatch
-                | Self::TransientTerminalPublication
-                | Self::TurnControlWaitTimeout
-                | Self::TurnTerminalAwaitTimeout
-        )
+        self.classification() == RuntimeErrorClass::Retryable
     }
 
     /// Whether retrying cannot succeed without changing input, configuration,
     /// wiring, or corrupted durable state.
     pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::AttachmentSourcePolicyDenied
-                | Self::EffectPanicked
-                | Self::MissingExecutionScopeId
-                | Self::ExecutionScopeTurnIdMismatch
-                | Self::TurnInputRedriveSetUnavailable
-                | Self::QueuedWorkRowExceedsContextWindow
-                | Self::StoreCommitNodeBudgetExceeded
-                | Self::StoreCommitByteBudgetExceeded
-                | Self::SessionDeleted
-                | Self::CheckpointComponentEncodingVersionMismatch
-                | Self::RecordEncodingFailed
-                | Self::MissingProcessExecutionId
-                | Self::DurableEffectLiveProtocolExtension
-                | Self::DurableEffectLivePluginInput
-                | Self::AwaitEventCancelUnsupported
-                | Self::AwaitEventKeySign
-                | Self::AwaitEventUnknownOrRevoked
-                | Self::AwaitEventUnsupported
-                | Self::EffectGroupUnsupported
-                | Self::EffectJournalRetirementUnsupported
-                | Self::EffectScopeRetired
-                | Self::EffectScopeNotQuiescent
-                | Self::AwaitEventScopeNotRetirable
-                | Self::InvalidAwaitEventSessionId
-                | Self::InvalidAwaitEventWaitIdentity
-                | Self::InvalidTurnCancelRequest
-                | Self::HistoricalAgentFrameSwitchUnsupported
-                | Self::AgentFrameSwitchAuthorConflict
-                | Self::LlmProvider
-                | Self::Plugin
-                | Self::PostgresEffectReplayCorruptRow
-                | Self::PostgresEffectReplayDecode
-                | Self::PostgresEffectReplayEncode
-                | Self::PostgresEffectReplayHashConflict
-                | Self::PostgresEffectReplayKeyMissing
-                | Self::PostgresEffectReplayLeaseLost
-                | Self::PostgresEffectReplayMissing
-                | Self::PostgresEffectReplayStore
-                | Self::PostgresAwaitEventDecode
-                | Self::PostgresAwaitEventEncode
-                | Self::PostgresAwaitEventSign
-                | Self::RestateEffectController
-                | Self::ToolIntentReplayKeyFormatCutover
-                | Self::ProcessPanicked
-                | Self::ProcessNotVisible
-                | Self::ProcessAlreadyTerminal
-                | Self::ProcessParentEnded
-                | Self::ProcessCancelConflict
-                | Self::DurableIdentityConflict
-                | Self::ProcessNoLongerRetained
-                | Self::ProcessIncarnationSuperseded
-                | Self::ProcessRegistryUnavailable
-                | Self::ProcessSignalWaitCancelled
-                | Self::ProcessSignalWaitTimeout
-                | Self::WorkerReplacementAbort
-                | Self::RestateEffectHostRequiresHandlerScope
-                | Self::RestateJournaledEffectPoisoned
-                | Self::RestateProcessAwait
-                | Self::RestateProcessJournalIdentityDrift
-                | Self::RestateProcessJournalPayloadIncompatible
-                | Self::RestateServiceUnregistered
-                | Self::RestateProcessAwaitAfterTurnCancel
-                | Self::RestateProcessTurnCancelContextMissing
-                | Self::RestateProcessTerminalEncode
-                | Self::RestateTurnTerminalDecode
-                | Self::RestateTurnTerminalInvalidResolution
-                | Self::RestateTurnCancelScopeMismatch
-                | Self::RestateTurnCancelScopeMissing
-                | Self::RuntimeEffectAttachmentStore
-                | Self::RuntimeEffectEnvelopeCanonicalDecode
-                | Self::RuntimeEffectEnvelopeCanonicalHashInvariant
-                | Self::RuntimeEffectEnvelopeHash
-                | Self::RuntimeEffectEnvelopeVersion
-                | Self::RuntimeEffectGroupAwaitCancelled
-                | Self::RuntimeEffectGroupChildCancelled
-                | Self::RuntimeEffectGroupShape
-                | Self::RuntimeEffectInvocationSubject
-                | Self::RuntimeEffectScopeMismatch
-                | Self::RuntimeEffectLocalExecutorMismatch
-                | Self::RuntimeEffectLocalExecutorUnavailable
-                | Self::RuntimeEffectLocalTaskClosed
-                | Self::RuntimeEffectProcessTaskJoin
-                | Self::RuntimeEffectReplayRequired
-                | Self::RuntimeEffectSleepCancelled
-                | Self::RuntimeEffectTaskJoin
-                | Self::RuntimeEffectToolAttemptCallId
-                | Self::RuntimeEffectToolAttemptIndex
-                | Self::RuntimeEffectToolBatchCallId
-                | Self::RuntimeEffectToolBatchCallReplay
-                | Self::RuntimeEffectToolBatchEmpty
-                | Self::RuntimeEffectToolBatchId
-                | Self::RuntimeEffectWrongOutcome
-                | Self::RuntimeStoreCorrupt
-                | Self::SessionCommandClaim
-                | Self::SessionCommandIdempotencyKey
-                | Self::SessionDeleteScopeMismatch
-                | Self::SessionToolRegistry
-                | Self::SqliteAwaitEventDecode
-                | Self::SqliteAwaitEventEncode
-                | Self::SqliteAwaitEventSign
-                | Self::SqliteEffectReplayCorruptRow
-                | Self::SqliteEffectReplayDecode
-                | Self::SqliteEffectReplayEncode
-                | Self::SqliteEffectReplayHashConflict
-                | Self::SqliteEffectReplayKeyMissing
-                | Self::SqliteEffectReplayLeaseLost
-                | Self::SqliteEffectReplayMissing
-                | Self::SqliteEffectReplayStore
-                | Self::ToolBatchMissingResult
-                | Self::ToolBatchResultCountMismatch
-                | Self::ToolCatalogResolutionFailed
-                | Self::ToolCompletionKeyMissingCallId
-                | Self::ToolCompletionKeyProcessLifetime
-                | Self::ToolDeferralNotDeclared
-                | Self::TurnCancelGateDecode
-                | Self::TurnCancelGateEncode
-                | Self::TurnCancelGateInvalidTerminal
-                | Self::TurnControlPeekOutcome
-                | Self::TurnControlUnknownOrRevoked
-                | Self::TurnTerminalDecode
-                | Self::TurnTerminalEncode
-                | Self::TurnTerminalInvalidResolution
-                | Self::TurnTerminalUnknownOrRevoked
-                | Self::TriggerStoreUnavailable
-        )
+        self.classification() == RuntimeErrorClass::Terminal
     }
+
+    /// Every first-party variant, for test iteration. The variant-count
+    /// assertion in `runtime_error_tests` keeps this list complete.
+    #[cfg(test)]
+    pub(crate) const ALL_FIRST_PARTY: &[Self] = &[
+        Self::AttachmentSourcePolicyDenied,
+        Self::ArtifactOwnerRetired,
+        Self::ArtifactDestinationOwnerRetired,
+        Self::ArtifactStagingEdgeMissing,
+        Self::EffectPanicked,
+        Self::MissingExecutionScopeId,
+        Self::ExecutionScopeTurnIdMismatch,
+        Self::ManagedTurnConcurrencyLimitExceeded,
+        Self::SessionExecutionLeaseLost,
+        Self::SessionExecutionLaneBusy,
+        Self::TurnInputSettlementSuperseded,
+        Self::TurnInputRedriveSetUnavailable,
+        Self::StoreCommitContended,
+        Self::StoreCommitSuperseded,
+        Self::SessionDeleted,
+        Self::StoreCommitNodeBudgetExceeded,
+        Self::StoreCommitByteBudgetExceeded,
+        Self::CheckpointComponentEncodingVersionMismatch,
+        Self::RecordEncodingFailed,
+        Self::MissingProcessExecutionId,
+        Self::ExecutionStateCaptureFailed,
+        Self::ResidentSessionReloadFailed,
+        Self::StoreCommitFailed,
+        Self::PluginSessionManager,
+        Self::PluginFinalizeTurn,
+        Self::PluginCheckpoint,
+        Self::PluginPrepareTurn,
+        Self::ContextPrepareTurn,
+        Self::ProtocolTurnExtension,
+        Self::ProtocolBeforeLlmCall,
+        Self::TurnStreamJoin,
+        Self::EmptyAgentFrameRun,
+        Self::HistoricalAgentFrameSwitchUnsupported,
+        Self::AgentFrameSwitchAuthorConflict,
+        Self::DurableEffectLiveProtocolExtension,
+        Self::DurableEffectLivePluginInput,
+        Self::AwaitEventCancelUnsupported,
+        Self::AwaitEventKeySign,
+        Self::AwaitEventUnknownOrRevoked,
+        Self::AwaitEventUnsupported,
+        Self::CancelStartGateUnavailable,
+        Self::EffectGroupUnsupported,
+        Self::EffectJournalRetirementUnsupported,
+        Self::EffectScopeRetired,
+        Self::EffectScopeNotQuiescent,
+        Self::AwaitEventScopeNotRetirable,
+        Self::InvalidAwaitEventSessionId,
+        Self::InvalidAwaitEventWaitIdentity,
+        Self::InvalidTurnCancelRequest,
+        Self::LiveReplay,
+        Self::LlmProvider,
+        Self::Plugin,
+        Self::PostgresEffectReplayCorruptRow,
+        Self::PostgresEffectReplayDecode,
+        Self::PostgresEffectReplayEncode,
+        Self::PostgresEffectReplayHashConflict,
+        Self::PostgresEffectReplayKeyMissing,
+        Self::PostgresEffectReplayLeaseLost,
+        Self::PostgresEffectReplayMissing,
+        Self::PostgresEffectReplayStore,
+        Self::PostgresAwaitEventDecode,
+        Self::PostgresAwaitEventEncode,
+        Self::PostgresAwaitEventNotify,
+        Self::PostgresAwaitEventSign,
+        Self::PostgresAwaitEventStore,
+        Self::PostgresEffectJournalRetirement,
+        Self::QueuedWork,
+        Self::QueuedWorkRowExceedsContextWindow,
+        Self::ProcessPanicked,
+        Self::ProcessNotVisible,
+        Self::ProcessAlreadyTerminal,
+        Self::ProcessParentEnded,
+        Self::ProcessCancelConflict,
+        Self::DurableIdentityConflict,
+        Self::ProcessNoLongerRetained,
+        Self::ProcessIncarnationSuperseded,
+        Self::ProcessRegistryUnavailable,
+        Self::ProcessSignalWaitCancelled,
+        Self::ProcessSignalWaitTimeout,
+        Self::RestateAwaitEventAwait,
+        Self::RestateAwaitEventCancel,
+        Self::RestateAwaitEventPeek,
+        Self::RestateAwaitEventResolve,
+        Self::RestateAwaitEventRevocationRead,
+        Self::RestateAwaitEventRevoke,
+        Self::RestateAwaitEventSessionUpdate,
+        Self::RestateEffectController,
+        Self::WorkerReplacementAbort,
+        Self::ToolIntentReplayKeyFormatCutover,
+        Self::RestateEffectHostRequiresHandlerScope,
+        Self::RestateJournaledEffectPoisoned,
+        Self::RestateProcessAwait,
+        Self::RestateProcessCancel,
+        Self::RestateProcessJournalIdentityDrift,
+        Self::RestateProcessJournalPayloadIncompatible,
+        Self::RestateProcessIngressSubmit,
+        Self::RestateServiceUnregistered,
+        Self::RestateProcessAwaitAfterTurnCancel,
+        Self::RestateProcessTurnCancelContextMissing,
+        Self::RestateProcessTerminalEncode,
+        Self::RestateTurnTerminalAttach,
+        Self::RestateTurnTerminalAttachCeilingElapsed,
+        Self::RestateTurnTerminalDecode,
+        Self::RestateTurnTerminalInvalidResolution,
+        Self::RestateTurnCancelScopeMismatch,
+        Self::RestateTurnCancelScopeMissing,
+        Self::RuntimeEffectAttachmentStore,
+        Self::RuntimeEffectEnvelopeCanonicalDecode,
+        Self::RuntimeEffectEnvelopeCanonicalHashInvariant,
+        Self::RuntimeEffectEnvelopeHash,
+        Self::RuntimeEffectEnvelopeVersion,
+        Self::RuntimeEffectGroupAwaitCancelled,
+        Self::RuntimeEffectGroupChildCancelled,
+        Self::RuntimeEffectGroupDrainDeferred,
+        Self::RuntimeEffectGroupShape,
+        Self::RuntimeEffectInvocationSubject,
+        Self::RuntimeEffectScopeMismatch,
+        Self::RuntimeEffectLocalExecutorMismatch,
+        Self::RuntimeEffectLocalExecutorUnavailable,
+        Self::RuntimeEffectAssistantResponseHook,
+        Self::RuntimeEffectLocalTaskClosed,
+        Self::RuntimeEffectProcessTaskJoin,
+        Self::RuntimeEffectReplayRequired,
+        Self::RuntimeEffectSleepCancelled,
+        Self::RuntimeEffectTaskJoin,
+        Self::RuntimeEffectToolAttemptCallId,
+        Self::RuntimeEffectToolAttemptIndex,
+        Self::RuntimeEffectToolBatchCallId,
+        Self::RuntimeEffectToolBatchCallReplay,
+        Self::RuntimeEffectToolBatchEmpty,
+        Self::RuntimeEffectToolBatchId,
+        Self::RuntimeEffectWrongOutcome,
+        Self::RuntimeEffectControllerTaskClosed,
+        Self::RuntimePerfStartGateRetry,
+        Self::RuntimeStore,
+        Self::RuntimeStoreCorrupt,
+        Self::SessionCommandClaim,
+        Self::SessionCommandIdempotencyKey,
+        Self::SessionCommandPostDriveRefresh,
+        Self::SessionCommandRefresh,
+        Self::SessionCommandRefreshTools,
+        Self::SessionDeleteScopeMismatch,
+        Self::SessionHeadRefresh,
+        Self::SessionToolRegistry,
+        Self::SqliteAwaitEventDecode,
+        Self::SqliteAwaitEventEncode,
+        Self::SqliteAwaitEventNotify,
+        Self::SqliteAwaitEventSign,
+        Self::SqliteAwaitEventStore,
+        Self::SqliteEffectJournalRetirement,
+        Self::SqliteEffectReplayCorruptRow,
+        Self::SqliteEffectReplayDecode,
+        Self::SqliteEffectReplayEncode,
+        Self::SqliteEffectReplayHashConflict,
+        Self::SqliteEffectReplayKeyMissing,
+        Self::SqliteEffectReplayLeaseLost,
+        Self::SqliteEffectReplayMissing,
+        Self::SqliteEffectReplayStore,
+        Self::ToolBatchMissingResult,
+        Self::ToolBatchResultCountMismatch,
+        Self::ToolCatalogResolutionFailed,
+        Self::ToolCompletionKeyMissingCallId,
+        Self::ToolCompletionKeyProcessLifetime,
+        Self::ToolDeferralNotDeclared,
+        Self::TransientCancelWatch,
+        Self::TransientTerminalPublication,
+        Self::TurnCancelGateDecode,
+        Self::TurnCancelGateEncode,
+        Self::TurnCancelGateInvalidTerminal,
+        Self::TurnControlPeekOutcome,
+        Self::TurnControlUnknownOrRevoked,
+        Self::TurnControlWaitCancelled,
+        Self::TurnControlWaitTimeout,
+        Self::TurnTerminalAwaitTimeout,
+        Self::TurnTerminalDecode,
+        Self::TurnTerminalEncode,
+        Self::TurnTerminalInvalidResolution,
+        Self::TurnTerminalUnknownOrRevoked,
+        Self::TriggerStoreUnavailable,
+    ];
 
     /// Constructs a typed code from its stable wire representation.
     ///

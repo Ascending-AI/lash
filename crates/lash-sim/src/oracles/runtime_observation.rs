@@ -738,10 +738,7 @@ pub(super) fn runtime_graph_projection_acyclic(events: &[DeliveredBoundary]) -> 
 /// rows cannot disappear before the oracle observes them.
 pub fn runtime_graph_acyclic(writes: &[crate::store::CheckpointWriteEvent]) -> OracleVerdict {
     let mut checked = 0usize;
-    for write in writes
-        .iter()
-        .filter(|write| write.cause_boundary_id.is_none())
-    {
+    for write in writes.iter().filter(|write| write.attribution.is_none()) {
         let Some(state) = &write.state else {
             // Promoted v1/v2 fixtures predate accepted raw-row observations.
             continue;

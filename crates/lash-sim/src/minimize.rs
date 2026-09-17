@@ -631,9 +631,11 @@ fn retain_causally_supported_checkpoint_writes(trace: &mut SimulationTrace) {
         .collect::<BTreeSet<_>>();
     trace.durable_writes.retain(|write| {
         admitted_sessions.contains(write.attributed_session())
-            && write.cause_boundary_id.as_deref().map_or_else(
+            && write.attribution.as_ref().map_or_else(
                 || retained_runtime_turns.contains(&(write.attributed_session(), write.turn_index)),
-                |boundary_id| retained_boundary_ids.contains(boundary_id),
+                |attribution| {
+                    retained_boundary_ids.contains(attribution.cause_boundary_id.as_str())
+                },
             )
     });
 }
@@ -1173,14 +1175,14 @@ mod tests {
         let contract_attributions = trace
             .durable_writes
             .iter()
-            .filter(|write| write.cause_boundary_id.is_some())
+            .filter(|write| write.attribution.is_some())
             .map(|write| write.attributed_session().to_string())
             .collect::<BTreeSet<_>>();
         let target = trace
             .durable_writes
             .iter()
             .find(|write| {
-                write.cause_boundary_id.is_none()
+                write.attribution.is_none()
                     && !contract_attributions.contains(write.attributed_session())
             })
             .map(|write| write.attributed_session().to_string())

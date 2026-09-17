@@ -30,10 +30,7 @@ fn resident_leaf_body_bytes(state: &RuntimeSessionState) -> usize {
         .checkpoint_components
         .entries
         .values()
-        .filter_map(|component| match &component.body {
-            ResidentCheckpointComponentBody::Opaque(Some(body)) => Some(body.len()),
-            _ => None,
-        })
+        .filter_map(|component| component.opaque_body().map(|body| body.len()))
         .sum()
 }
 
@@ -363,10 +360,9 @@ fn descriptorless_execution_state_leaves_without_a_root_remain_corrupt() {
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     state.checkpoint_components.entries.insert(
         "execution_state/blake3/corrupt".to_string(),
-        ResidentCheckpointComponent {
+        ResidentCheckpointComponent::Changed {
             descriptor: None,
-            body: ResidentCheckpointComponentBody::Opaque(None),
-            dirty: false,
+            body: PendingCheckpointComponentBody::Opaque(b"orphan".to_vec()),
         },
     );
 

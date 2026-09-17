@@ -123,7 +123,10 @@ fn phased_text(phase: &str, text: &str) -> LlmOutputPart {
     LlmOutputPart::Text {
         text: text.to_string(),
         response_meta: Some(lash_core::llm::types::ResponseTextMeta {
-            phase: Some(phase.to_string()),
+            phase: Some(
+                lash_core::llm::types::ResponsePhase::from_provider_wire(phase)
+                    .expect("test phase vocabulary"),
+            ),
             ..Default::default()
         }),
     }

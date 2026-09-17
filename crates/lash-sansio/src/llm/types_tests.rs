@@ -226,7 +226,7 @@ fn replay_gate_covers_response_text_metadata_and_omits_empty_reasoning_fallbacks
             response_meta: Some(ResponseTextMeta {
                 id: Some("response-item".to_string()),
                 status: Some("completed".to_string()),
-                phase: Some("final_answer".to_string()),
+                phase: Some(ResponsePhase::FinalAnswer),
                 provider_payload: Some("signature".to_string()),
                 origin: Some(foreign.clone()),
                 ..Default::default()

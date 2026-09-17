@@ -26,8 +26,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v15";
 
 pub use attachment::{
-    AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef, AttachmentTypeMetadata,
-    InvalidAttachmentId, InvalidMediaType, MediaType,
+    AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,
+    InvalidMediaType, MediaType,
 };
 pub use causal::CausalRef;
 pub use effect_identity::{

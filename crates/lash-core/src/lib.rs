@@ -456,7 +456,7 @@ pub mod facade_support {
     pub use lash_sansio::AttachmentMaterializationNotice;
     pub use lash_sansio::AttachmentMaterializationReason;
     pub use lash_sansio::AttachmentMaterializationSource;
-    pub use lash_sansio::AttachmentMeta;
+    pub use lash_sansio::AttachmentRef;
     pub use lash_sansio::EffectId;
     pub use lash_sansio::ErrorEnvelope;
     pub use lash_sansio::MessageSequence;

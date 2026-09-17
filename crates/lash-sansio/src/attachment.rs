@@ -277,7 +277,7 @@ impl AttachmentCreateMeta {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AttachmentMeta {
+pub struct AttachmentRef {
     pub id: AttachmentId,
     pub media_type: MediaType,
     pub byte_len: u64,
@@ -287,7 +287,7 @@ pub struct AttachmentMeta {
     pub label: Option<String>,
 }
 
-impl AttachmentMeta {
+impl AttachmentRef {
     pub fn new(
         id: AttachmentId,
         media_type: MediaType,
@@ -304,29 +304,6 @@ impl AttachmentMeta {
         }
     }
 
-    pub fn as_ref(&self) -> AttachmentRef {
-        AttachmentRef {
-            id: self.id.clone(),
-            media_type: self.media_type.clone(),
-            byte_len: self.byte_len,
-            type_metadata: self.type_metadata.clone(),
-            label: self.label.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AttachmentRef {
-    pub id: AttachmentId,
-    pub media_type: MediaType,
-    pub byte_len: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub type_metadata: Option<AttachmentTypeMetadata>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-}
-
-impl AttachmentRef {
     pub fn media_type(&self) -> &MediaType {
         &self.media_type
     }

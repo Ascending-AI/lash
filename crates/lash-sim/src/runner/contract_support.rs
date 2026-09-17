@@ -46,8 +46,10 @@ async fn contract_execution_boundaries(
     for execution in agent_contract_executions().await? {
         let boundary = agent_contract_execution_boundary(events, next_at, execution.payload)?;
         for mut write in execution.checkpoint_writes {
-            write.attributed_session_id = Some(SessionId::from(boundary.actor_alias.clone()));
-            write.cause_boundary_id = Some(boundary.boundary_id.clone());
+            write.attribution = Some(crate::store::CheckpointAttribution {
+                session_id: SessionId::from(boundary.actor_alias.clone()),
+                cause_boundary_id: boundary.boundary_id.clone(),
+            });
             // Contract proofs execute in isolated facade worlds whose opaque
             // execution-state identities are intentionally not seed-canonical.
             // Preserve the durable stored/ref disposition, but do not let those
