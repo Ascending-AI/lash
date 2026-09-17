@@ -362,7 +362,11 @@ pub(super) fn in_memory_residue_digest(state: &RawDurableState) -> ResidueDigest
 }
 
 /// SQLite schema source, read back so the coverage gate below cannot drift.
-const SQLITE_SCHEMA_SOURCE: &str = include_str!("../../../lash-sqlite-store/src/schema.rs");
+/// Fragment-carried tables live in schema_fragments.rs (FIG-3260).
+const SQLITE_SCHEMA_SOURCE: &str = concat!(
+    include_str!("../../../lash-sqlite-store/src/schema_fragments.rs"),
+    include_str!("../../../lash-sqlite-store/src/schema.rs"),
+);
 
 /// Reason strings shared by the tables one other suite owns.
 const TURN_CANCELLATION: &str = "turn-cancellation surface: this fixture wires no TurnCancellationAuthority, so no driven \
