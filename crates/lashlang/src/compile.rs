@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use thiserror::Error;
 
 use crate::{
@@ -52,27 +52,64 @@ pub fn compile_module(
     })
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ModuleCompileStage {
-    Parse,
-    Link,
+/// One compile-stage failure, for hosts and models.
+///
+/// `span` is the single location representation: `offset` is its start, and
+/// `line`/`column` are derived on demand against the source via the methods
+/// below, so no two copies of one position can disagree. The wire form keeps
+/// the flat `offset` key hosts already read.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct ModuleCompileDiagnostic {
+    pub message: String,
+    #[serde(default)]
+    pub span: Option<Span>,
+    #[serde(default)]
+    pub diagnostic: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModuleCompileDiagnostic {
-    pub stage: ModuleCompileStage,
-    pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub offset: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub span: Option<Span>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub column: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostic: Option<String>,
+impl ModuleCompileDiagnostic {
+    /// The byte offset into the source the diagnostic's span starts at.
+    pub fn offset(&self) -> Option<usize> {
+        self.span.map(|span| span.start)
+    }
+
+    /// The 1-based line containing `offset()` within `source`.
+    pub fn line(&self, source: &str) -> Option<usize> {
+        self.offset()
+            .map(|offset| source_location(source, offset).0)
+    }
+
+    /// The 1-based column of `offset()` within `source`.
+    pub fn column(&self, source: &str) -> Option<usize> {
+        self.offset()
+            .map(|offset| source_location(source, offset).1)
+    }
+}
+
+/// `ModuleCompileDiagnostic` keeps the flat `offset` key hosts read, derived
+/// from `span` at write time. `line`/`column` need the source text the
+/// diagnostic does not carry, so they are methods instead of fields; the
+/// `stage` field is gone — the enum's `stage` tag already says it.
+impl Serialize for ModuleCompileDiagnostic {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut entries = 2;
+        entries += usize::from(self.span.is_some());
+        entries += usize::from(self.offset().is_some());
+        entries += usize::from(self.diagnostic.is_some());
+        let mut map = serializer.serialize_map(Some(entries))?;
+        map.serialize_entry("message", &self.message)?;
+        if let Some(span) = self.span {
+            map.serialize_entry("span", &span)?;
+        }
+        if let Some(offset) = self.offset() {
+            map.serialize_entry("offset", &offset)?;
+        }
+        if let Some(diagnostic) = &self.diagnostic {
+            map.serialize_entry("diagnostic", diagnostic)?;
+        }
+        map.end()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
@@ -94,56 +131,26 @@ impl ModuleCompileError {
     /// reports it here so a host reads one shape for both stages. `rendered` is
     /// the front-end's own rendering of the diagnostic, shown in preference to
     /// `message`.
-    pub fn parse_failure(
-        source: &str,
-        offset: Option<usize>,
-        message: String,
-        rendered: String,
-    ) -> Self {
-        let (line, column) = match offset {
-            Some(offset) => {
-                let (line, column) = source_location(source, offset);
-                (Some(line), Some(column))
-            }
-            None => (None, None),
-        };
+    pub fn parse_failure(span: Option<Span>, message: String, rendered: String) -> Self {
         Self::Parse(ModuleCompileDiagnostic {
-            stage: ModuleCompileStage::Parse,
             message,
-            offset,
-            span: None,
-            line,
-            column,
+            span,
             diagnostic: Some(rendered),
         })
     }
 
     fn link(source: &str, err: LinkError) -> Self {
-        let span = err.span();
-        let offset = span.map(|span| span.start);
-        let (line, column) = offset
-            .map(|offset| source_location(source, offset))
-            .map(|(line, column)| (Some(line), Some(column)))
-            .unwrap_or((None, None));
         Self::Link(ModuleCompileDiagnostic {
-            stage: ModuleCompileStage::Link,
             message: err.to_string(),
-            offset,
-            span,
-            line,
-            column,
+            span: err.span(),
             diagnostic: Some(format_link_diagnostic(source, &err)),
         })
     }
 
     fn introspection(err: ModuleIntrospectionError) -> Self {
         Self::Link(ModuleCompileDiagnostic {
-            stage: ModuleCompileStage::Link,
             message: err.to_string(),
-            offset: None,
             span: None,
-            line: None,
-            column: None,
             diagnostic: Some(err.to_string()),
         })
     }
@@ -224,9 +231,9 @@ mod tests {
     fn compile_module_facade_reports_parse_errors() {
         // The front-end owns the parse (ADR 0096) and reports its refusal
         // through the facade, so a host reads one shape for both stages.
+        let source = "if true";
         let err = ModuleCompileError::parse_failure(
-            "if true",
-            Some(3),
+            Some(Span { start: 3, end: 7 }),
             "unexpected `true`".to_string(),
             "unexpected `true`\n--> line 1, column 4".to_string(),
         );
@@ -234,15 +241,47 @@ mod tests {
         let ModuleCompileError::Parse(diagnostic) = err else {
             panic!("expected parse error");
         };
-        assert_eq!(diagnostic.stage, ModuleCompileStage::Parse);
-        assert_eq!(diagnostic.line, Some(1));
-        assert_eq!(diagnostic.column, Some(4));
+        assert_eq!(diagnostic.offset(), Some(3));
+        assert_eq!(diagnostic.line(source), Some(1));
+        assert_eq!(diagnostic.column(source), Some(4));
         assert!(
             diagnostic
                 .diagnostic
                 .expect("diagnostic")
                 .contains("line 1")
         );
+    }
+
+    #[test]
+    fn compile_error_wire_form_keeps_flat_location_keys() {
+        // FIG-3268: `span` is authoritative; `offset` remains on the wire as
+        // the derived flat key hosts read, while the shadow `stage` field is
+        // gone — the enum tag already carries it.
+        let err = ModuleCompileError::parse_failure(
+            Some(Span { start: 3, end: 7 }),
+            "unexpected `true`".to_string(),
+            "unexpected `true`".to_string(),
+        );
+        let value = serde_json::to_value(&err).expect("serialize");
+        assert_eq!(value["stage"], "parse");
+        let error = &value["error"];
+        assert_eq!(error["offset"], 3);
+        assert_eq!(error["span"], serde_json::json!({"start": 3, "end": 7}));
+        assert!(error.get("stage").is_none());
+        // Round-trip ignores the derived flat keys older payloads may carry.
+        let decoded: ModuleCompileError = serde_json::from_value(serde_json::json!({
+            "stage": "parse",
+            "error": {
+                "message": "unexpected `true`",
+                "span": {"start": 3, "end": 7},
+                "offset": 3,
+                "line": 1,
+                "column": 4,
+                "diagnostic": "unexpected `true`"
+            }
+        }))
+        .expect("deserialize");
+        assert_eq!(decoded, err);
     }
 
     #[test]
@@ -273,8 +312,7 @@ mod tests {
         let ModuleCompileError::Link(diagnostic) = err else {
             panic!("expected link error");
         };
-        assert_eq!(diagnostic.stage, ModuleCompileStage::Link);
-        assert_eq!(diagnostic.line, Some(1));
+        assert_eq!(diagnostic.line(source), Some(1));
         assert!(diagnostic.message.contains("sleep"), "{diagnostic:?}");
     }
 
