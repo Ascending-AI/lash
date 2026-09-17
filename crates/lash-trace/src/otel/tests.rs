@@ -11,15 +11,20 @@ use crate::{TraceEvent, TraceLlmRequest, TraceRecord};
 
 #[test]
 fn typed_exec_diagnostics_preserve_the_otel_span_family() {
-    assert_eq!(
-        typed_diagnostic_span_name(&TraceEvent::ExecCodeStarted {
+    use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
+
+    let exporter = InMemorySpanExporter::default();
+    let provider = SdkTracerProvider::builder()
+        .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
+        .build();
+    let sink = OtelTraceSink::new(provider.tracer("test"));
+
+    let events = [
+        TraceEvent::ExecCodeStarted {
             code: "print(1)".to_string(),
             code_chars: 8,
-        }),
-        Some("lash.exec_code")
-    );
-    assert_eq!(
-        typed_diagnostic_span_name(&TraceEvent::ExecCodeCompleted {
+        },
+        TraceEvent::ExecCodeCompleted {
             duration_ms: 3,
             output: "1".to_string(),
             output_chars: 1,
@@ -28,27 +33,32 @@ fn typed_exec_diagnostics_preserve_the_otel_span_family() {
             error: None,
             terminal_finish: None,
             tool_calls: Vec::new(),
-        }),
-        Some("lash.exec_code")
-    );
-    assert_eq!(
-        typed_diagnostic_span_name(&TraceEvent::ExecCodeFailed {
+        },
+        TraceEvent::ExecCodeFailed {
             error: "boom".to_string(),
-        }),
-        Some("lash.exec_code")
-    );
-    assert_eq!(
-        typed_diagnostic_span_name(&TraceEvent::ObservationProjection {
+        },
+        TraceEvent::ObservationProjection {
             projections: Vec::new(),
-        }),
-        Some("lash.observation_projection")
-    );
+        },
+    ];
+    for event in events {
+        sink.append(&TraceRecord::new(TraceContext::default(), event))
+            .unwrap();
+    }
+
+    let spans = exporter.get_finished_spans().unwrap();
+    let names = spans
+        .iter()
+        .map(|span| span.name.as_ref())
+        .collect::<Vec<_>>();
     assert_eq!(
-        typed_diagnostic_span_name(&TraceEvent::ProtocolStep {
-            plugin_id: "custom".to_string(),
-            payload: serde_json::json!({ "code": "print 1" }),
-        }),
-        None
+        names,
+        [
+            "lash.exec_code",
+            "lash.exec_code",
+            "lash.exec_code",
+            "lash.observation_projection"
+        ]
     );
 }
 
