@@ -214,14 +214,18 @@ Each item below is landed and gated by `cargo test -p lash-sim`:
 The confidence gate's search lane (`run_sim_search_lane`) runs `--mode search`
 at lane-scaled budgets: 256 seeds @ 500 max boundaries for default
 (`LASH_SIM_DEFAULT_SEEDS`/`LASH_SIM_DEFAULT_MAX_BOUNDARIES`), 512 @ 512 for
-broad (`LASH_SIM_BROAD_SEEDS`/`LASH_SIM_BROAD_MAX_BOUNDARIES`), and 5000 @
+broad (`LASH_SIM_BROAD_SEEDS`/`LASH_SIM_BROAD_MAX_BOUNDARIES`), and 243 @
 2000 for full (`LASH_SIM_FULL_SEEDS`/`LASH_SIM_FULL_MAX_BOUNDARIES`), all
 shardable with `LASH_SIM_SHARD`. The weekly Confidence workflow partitions the
 full seed space as shard `1/9` on the main full job plus eight
 `sim-search:<i>/9` matrix jobs, so the fleet covers every configured seed
 exactly once per week. `scripts/confidence-gate.sh sim-search:<i>/<n>` runs
-one shard standalone. The fast lane is the release gate and keeps its small
-fixed evidence budget; it never runs the search lane.
+one shard standalone. A dedicated `sim-search:` shard is bounded by wall
+clock, not the seed count alone: the gate hands each pass a `--time-budget`
+derived from the job cap minus measured fixed cost, and `lash-sim` stops
+cleanly at the budget and records `reached_seeds` in the summary, so a slow
+shard still produces evidence. The fast lane is the release gate and keeps
+its small fixed evidence budget; it never runs the search lane.
 
 ## Known limitations
 

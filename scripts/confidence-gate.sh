@@ -186,31 +186,29 @@ declare -A confidence_fast_shard_steps=(
 )
 SIM_SEARCH_MIN_SEEDS=4
 SIM_SEARCH_MIN_MAX_BOUNDARIES=256
-# Full-lane sim-search seeds across the nine `sim-search-<i>` shards, sized to
-# fit the 100-minute job cap instead of left at a number no shard has ever
-# reached: every shard of run 35091816279 was cancelled at exactly 100 minutes
-# without writing a search summary at all.
+# Full-lane sim-search seeds across the nine `sim-search-<i>` shards: the seed
+# space the shards partition, not the thing that bounds a shard's wall clock.
+# Per-seed cost varies ~3x (measured 36-112 s/seed through this script at 2000
+# max boundaries) and each shard runs its seeds twice -- once as the search
+# lane and once as the named regression corpus -- so a seed-count estimate
+# alone cannot keep a shard inside the 100-minute job cap. Every shard of run
+# 35091816279 was cancelled at exactly 100 minutes without writing a search
+# summary at all.
 #
-#   job cap                                        100 min
+# The bound is now wall-clock: each sim-search invocation gets --time-budget
+# derived from the job cap minus the measured fixed cost of the CI steps
+# before this script runs, minus whatever this script has already burned, and
+# lash-sim stops cleanly at the budget and records reached_seeds in the
+# summary. The SIM_SEARCH_MIN_SEEDS floor still applies to the reached count.
+#
+#   job cap                                        100 min = 6000 s
 #   - download shared build                        -19.5 min   (measured)
 #   - restore shared build                          -3.5 min   (measured)
 #   - checkout, toolchain, protoc                     -2 min
 #   = lane budget                                    75 min = 4500 s
-#
-# A shard runs the search twice, once as the search lane and once as the named
-# regression corpus below it, and the pair was measured end to end through this
-# script at 2000 max boundaries: 4 seeds per shard cost 552 s (143 s search +
-# 409 s corpus). Taking ~105 s of that as per-invocation setup leaves about
-# 112 s per seed per shard. Per-seed cost is not uniform -- the same binary run
-# over the first four seeds of an unsharded space cost 36 s/seed -- so this is
-# the expensive end of the measurement, deliberately.
-#
-#   27 seeds/shard -> 105 + 27*112 = 3129 s = 52 min, 70% of the lane budget
-#
-# 9 * 27 = 243. Every shard now records `shard_seconds` in sim/search.json:
-# re-pin this from the first completed run's measurement rather than from the
-# estimate above.
 SIM_SEARCH_FULL_SEEDS=243
+SIM_SEARCH_JOB_CAP_SECONDS=6000
+SIM_SEARCH_SETUP_SECONDS=1500
 case "$lane" in
   fast) default_mutation_scope="none" ;;
   default|mutation) default_mutation_scope="targeted" ;;
@@ -1219,6 +1217,22 @@ run_sim_provider_scripts() {
   run_minimizer_fixture_suite
 }
 
+# Wall-clock budget for one sim-search pass: the CI job cap minus the fixed
+# cost measured before this script starts (shared-build download and restore,
+# checkout, toolchain), minus whatever this script has already burned, split
+# evenly across the passes still to run. The corpus pass therefore inherits
+# whatever the search pass left unused.
+sim_search_pass_budget_seconds() {
+  local passes_left="$1"
+  local job_cap_seconds="${LASH_SIM_JOB_CAP_SECONDS:-$SIM_SEARCH_JOB_CAP_SECONDS}"
+  local setup_seconds="${LASH_SIM_SETUP_SECONDS:-$SIM_SEARCH_SETUP_SECONDS}"
+  local remaining=$((job_cap_seconds - setup_seconds - (SECONDS - script_started_at)))
+  if ((remaining < 0)); then
+    remaining=0
+  fi
+  printf '%s\n' "$((remaining / passes_left))"
+}
+
 run_sim_search_lane() {
   if [ "$lane" = "fast" ]; then
     return
@@ -1250,6 +1264,15 @@ run_sim_search_lane() {
   if [ -n "$search_salt" ]; then
     salt_args+=(--salt "$search_salt")
   fi
+  # A dedicated sim-search shard is bounded by wall clock: each of the two
+  # passes (search lane, then named regression corpus) gets an even share of
+  # the lane budget that remains when it starts. Other lanes that reach this
+  # function are not bounded by a job cap, so they run unbudgeted.
+  local search_budget_args=()
+  if [ -n "$sim_search_shard" ]; then
+    search_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 2)")
+    step "sim-search pass budgets from ${SIM_SEARCH_JOB_CAP_SECONDS}s job cap - ${SIM_SEARCH_SETUP_SECONDS}s setup: search ${search_budget_args[1]}s"
+  fi
   local search_started_at="$SECONDS"
   cargo run -p lash-sim --locked -- run \
     --out "$search_dir" \
@@ -1258,10 +1281,12 @@ run_sim_search_lane() {
     --max-boundaries "$search_max_boundaries" \
     --shard "$search_shard" \
     --mode search \
-    "${salt_args[@]}"
+    "${salt_args[@]}" \
+    "${search_budget_args[@]}"
   local search_seconds=$((SECONDS - search_started_at))
-  # The shard budget is sized from an estimate; record what this shard actually
-  # cost so the next run re-pins SIM_SEARCH_FULL_SEEDS from a measurement.
+  # The shard is bounded by --time-budget and the summary records how many of
+  # its selected seeds it reached; record the wall clock it actually cost so
+  # the fixed-cost constants stay honest.
   python3 - "${search_dir}/summary.json" "${out_dir}/sim/search.json" "$search_max_boundaries" "$SIM_SEARCH_MIN_SEEDS" "$SIM_SEARCH_MIN_MAX_BOUNDARIES" "$search_seconds" <<'PY'
 import json
 import sys
@@ -1284,10 +1309,12 @@ artifact = {
     "configured_max_boundaries": int(max_boundaries),
     "required_min_seeds": min_seeds,
     "required_min_max_boundaries": min_max_boundaries,
+    "time_budget_seconds": summary.get("time_budget_seconds"),
     "search_seconds": int(search_seconds),
     "summary_path": summary_path,
     "counts": {
         "generated_seeds": counts.get("generated_seeds"),
+        "reached_seeds": counts.get("reached_seeds"),
         "boundary_events": counts.get("boundary_events"),
         "oracle_passes": counts.get("oracle_passes"),
         "oracle_failures": counts.get("oracle_failures"),
@@ -1301,8 +1328,12 @@ required_interleaving_depth = 2
 errors = []
 if summary.get("mode") != "search":
     errors.append("sim search lane must run in search mode")
-if counts.get("generated_seeds", 0) < min_seeds:
-    errors.append(f"sim search run must execute at least {min_seeds} generated seeds in this shard")
+if (counts.get("reached_seeds") or 0) < min_seeds:
+    errors.append(
+        f"sim search run must reach at least {min_seeds} seeds in this shard "
+        f"(reached {counts.get('reached_seeds') or 0} of "
+        f"{counts.get('generated_seeds') or 0} selected)"
+    )
 if int(max_boundaries) < min_max_boundaries:
     errors.append(f"sim search run must configure at least {min_max_boundaries} max boundaries")
 if counts.get("boundary_events", 0) < 512:
@@ -1329,6 +1360,10 @@ PY
 
   local corpus_dir="${out_dir}/sim-regression-${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
   step "Named simulation regression corpus (${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}, ${search_seeds} seeds, shard ${search_shard})"
+  local corpus_budget_args=()
+  if [ -n "$sim_search_shard" ]; then
+    corpus_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 1)")
+  fi
   local corpus_started_at="$SECONDS"
   cargo run -p lash-sim --locked -- run \
     --out "$corpus_dir" \
@@ -1337,7 +1372,8 @@ PY
     --max-boundaries "$search_max_boundaries" \
     --shard "$search_shard" \
     --mode search \
-    --corpus "${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}"
+    --corpus "${WEEKLY_SIM_CORPUS:-weekly-fixed-v1}" \
+    "${corpus_budget_args[@]}"
   local corpus_seconds=$((SECONDS - corpus_started_at))
   # Both passes run the same seeds, so a shard costs the pair. Fold the second
   # half in, so one artifact carries the whole lane's wall clock.

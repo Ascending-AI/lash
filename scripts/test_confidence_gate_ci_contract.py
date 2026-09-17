@@ -1130,6 +1130,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             'local search_shard="${LASH_SIM_SHARD:-1/1}"',
             "--mode search",
             '--shard "$search_shard"',
+            # Shards are bounded by wall clock, not just the seed estimate: a
+            # shard that runs out of time still writes a summary.
+            "sim_search_pass_budget_seconds",
+            "--time-budget",
+            '"reached_seeds": counts.get("reached_seeds")',
+            'counts.get("reached_seeds") or 0) < min_seeds',
             "sim search lane must run in search mode",
         ]
         for snippet in required_gate_snippets:
@@ -1169,16 +1175,15 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         gate = GATE.read_text(encoding="utf-8")
         confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
 
-        # The full lane is sized, not left at a number no shard has reached.
+        # The full lane is sized, not left at a number no shard has reached,
+        # and the wall-clock bound is derived from the job cap minus the
+        # measured fixed cost rather than the seed estimate alone.
         full_seeds = shell_int_constant(gate, "SIM_SEARCH_FULL_SEEDS")
         min_seeds = shell_int_constant(gate, "SIM_SEARCH_MIN_SEEDS")
+        job_cap_seconds = shell_int_constant(gate, "SIM_SEARCH_JOB_CAP_SECONDS")
+        setup_seconds = shell_int_constant(gate, "SIM_SEARCH_SETUP_SECONDS")
         shards = 9
         per_shard = full_seeds // shards
-        # A shard runs two search passes (the search lane and the named
-        # regression corpus). Measured end to end through the gate at 2000 max
-        # boundaries, the pair costs about 105 s of setup plus 112 s per seed,
-        # and that has to fit the cap once 23 minutes of shared-build download
-        # and restore plus two minutes of checkout are taken off it.
         sim_search_cap = int(
             re.search(
                 r"^    timeout-minutes: (\d+)$",
@@ -1186,7 +1191,31 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 re.MULTILINE,
             ).group(1)
         )
-        lane_budget_seconds = (sim_search_cap - 25) * 60
+        # The gate's job cap is the workflow's timeout-minutes on the
+        # sim-search job, and the setup constant is the measured 25 minutes of
+        # shared-build download/restore plus checkout before the script runs.
+        self.assertEqual(job_cap_seconds, sim_search_cap * 60)
+        self.assertEqual(setup_seconds, 25 * 60)
+        lane_budget_seconds = job_cap_seconds - setup_seconds
+        # Each pass is handed the remaining lane budget divided by the passes
+        # still to run, so the corpus pass inherits the search pass's slack.
+        self.assertIn(
+            "remaining=$((job_cap_seconds - setup_seconds - (SECONDS - script_started_at)))",
+            gate,
+        )
+        self.assertIn('printf \'%s\\n\' "$((remaining / passes_left))"', gate)
+        self.assertIn(
+            'search_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 2)")',
+            gate,
+        )
+        self.assertIn(
+            'corpus_budget_args=(--time-budget "$(sim_search_pass_budget_seconds 1)")',
+            gate,
+        )
+        # The estimate still has to be plausible: a shard runs two search
+        # passes (the search lane and the named regression corpus). Measured
+        # end to end through the gate at 2000 max boundaries, the pair costs
+        # about 105 s of setup plus 112 s per seed.
         self.assertLessEqual(
             105 + per_shard * 112,
             lane_budget_seconds,

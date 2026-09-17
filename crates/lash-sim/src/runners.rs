@@ -50,6 +50,7 @@ async fn run_run(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let mut mode = lash_sim::runner::SimRunMode::Evidence;
     let mut salt = None;
     let mut corpus = None;
+    let mut time_budget_seconds = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => out = args.next().map(PathBuf::from),
@@ -104,6 +105,12 @@ async fn run_run(mut args: impl Iterator<Item = String>) -> Result<(), String> {
                         .ok_or_else(|| format!("missing --corpus value\n\n{}", usage()))?,
                 );
             }
+            "--time-budget" => {
+                let raw = args
+                    .next()
+                    .ok_or_else(|| format!("missing --time-budget value\n\n{}", usage()))?;
+                time_budget_seconds = Some(parse_u64("--time-budget", &raw)?);
+            }
             "-h" | "--help" => return Err(usage()),
             other => return Err(format!("unknown argument `{other}`\n\n{}", usage())),
         }
@@ -141,6 +148,12 @@ async fn run_run(mut args: impl Iterator<Item = String>) -> Result<(), String> {
             usage()
         ));
     }
+    if !explicit_seeds.is_empty() && time_budget_seconds.is_some() {
+        return Err(format!(
+            "--time-budget bounds a --seeds count sweep and cannot combine with explicit --seed values\n\n{}",
+            usage()
+        ));
+    }
     let seeds = match seeds {
         Some(seeds) => seeds,
         None => lash_sim::generator::default_seed_count(&profile).map_err(|err| err.to_string())?,
@@ -164,6 +177,7 @@ async fn run_run(mut args: impl Iterator<Item = String>) -> Result<(), String> {
             shard.unwrap_or(lash_sim::generator::SimShard::FULL),
             mode,
             seed_source,
+            time_budget_seconds.map(std::time::Duration::from_secs),
         )
         .await
         .map_err(|err| err.to_string())?
@@ -488,7 +502,7 @@ fn parse_u64(name: &str, raw: &str) -> Result<u64, String> {
 fn usage() -> String {
     "Usage:
   lash-sim fixed-scripts --out <artifact-root>
-  lash-sim run --out <artifact-root> [--profile fast-random] [--seeds N | --seed U64 ...] [--max-boundaries N] [--shard I/N] [--mode evidence|search] [--salt TEXT | --corpus weekly-fixed-v1]
+  lash-sim run --out <artifact-root> [--profile fast-random] [--seeds N | --seed U64 ...] [--max-boundaries N] [--shard I/N] [--mode evidence|search] [--salt TEXT | --corpus weekly-fixed-v1] [--time-budget SECONDS]
   lash-sim run-postgres --out <artifact-root> [--profile fast-random] --seed U64 ... [--max-boundaries N]
   lash-sim replay <trace> [--out <artifact-root>]
   lash-sim replay-sqlite <trace> --out <artifact-root>

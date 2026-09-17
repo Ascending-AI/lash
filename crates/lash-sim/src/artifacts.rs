@@ -83,9 +83,14 @@ pub struct GeneratedSimProfileReport {
     pub profile: String,
     /// `<index>/<total>` seed-index shard this summary covers; `1/1` when unsharded.
     pub shard: String,
-    /// Seed count configured before shard filtering; equals the executed seed
+    /// Seed count configured before shard filtering; equals the selected seed
     /// count for unsharded and explicit-seed runs.
     pub configured_seeds: usize,
+    /// Wall-clock bound on the seed sweep when `--time-budget` was given. The
+    /// run stops cleanly once the budget is spent; `counts.reached_seeds`
+    /// records how many of the selected seeds actually ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_budget_seconds: Option<u64>,
     /// `evidence` for full per-seed artifact runs, `search` for high-volume
     /// runs that only persist failure packages.
     pub mode: &'static str,
@@ -399,6 +404,9 @@ pub struct GeneratedPostgresReplayCounts {
 #[derive(Clone, Debug, Serialize)]
 pub struct GeneratedSimCounts {
     pub generated_seeds: usize,
+    /// Seeds this run actually executed. Equals `generated_seeds` unless a
+    /// `--time-budget` stopped the sweep before the shard's selection ran out.
+    pub reached_seeds: usize,
     pub boundary_events: usize,
     pub scheduler_controlled_boundaries: usize,
     pub runtime_completion_registrations: usize,
