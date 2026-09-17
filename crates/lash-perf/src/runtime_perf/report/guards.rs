@@ -8,6 +8,7 @@ use super::budgets::{
     required_phase_names, steady_state_turn_allocation_budget_bytes, wall_clock_budget_ms,
 };
 use super::{RuntimePerfScenario, RuntimePerfScenarioSummary};
+use crate::runtime_perf::measurement::stage;
 
 /// Which guard classes are allowed to fail the process.
 ///
@@ -242,7 +243,7 @@ pub(super) fn evaluate_budgets(
                 &format!("phase:{phase}:duration_ms"),
                 "median",
                 RuntimePerfGuardClass::Duration,
-                metrics.duration_ms.median,
+                Some(metrics.duration_ms.median),
                 budget_ms,
             );
         }
@@ -251,9 +252,9 @@ pub(super) fn evaluate_budgets(
             match guarded_span(*scenario) {
                 GuardedSpan::WholeRun => (
                     "total_alloc_bytes",
-                    summary.total_alloc_bytes.median,
+                    stage_alloc_bytes(summary, stage::TOTAL),
                     "total_ms",
-                    summary.total_ms.median,
+                    stage_duration_ms(summary, stage::TOTAL),
                 ),
                 GuardedSpan::RunTurn => {
                     // The 1,537-row fixture is populated through TestLocalProcessRegistry,
@@ -261,9 +262,9 @@ pub(super) fn evaluate_budgets(
                     // reported setup span out of the product-facing release guard.
                     (
                         "run_turn_alloc_bytes",
-                        summary.run_turn_alloc_bytes.median,
+                        stage_alloc_bytes(summary, stage::RUN_TURN),
                         "run_turn_ms",
-                        summary.run_turn_ms.median,
+                        stage_duration_ms(summary, stage::RUN_TURN),
                     )
                 }
             };
@@ -305,17 +306,20 @@ pub(super) fn push_max_budget(
     metric: &str,
     statistic: &str,
     class: RuntimePerfGuardClass,
-    actual: f64,
+    actual: Option<f64>,
     budget: f64,
 ) {
-    let exceeded = actual > budget;
+    // A stage the run never reached has no measurement: `actual: None`
+    // reports that honestly and passes vacuously, exactly as the old
+    // zero-fill did — but without writing a fabricated 0.0 anywhere.
+    let exceeded = actual.is_some_and(|actual| actual > budget);
     budgets.push(RuntimePerfBudgetResult {
         scenario: summary.scenario.clone(),
         scenario_harness: summary.scenario_harness.clone(),
         metric: metric.to_string(),
         statistic: statistic.to_string(),
         class,
-        actual: Some(actual),
+        actual,
         budget: Some(budget),
         passed: !exceeded,
         reason: exceeded.then(|| {
@@ -332,13 +336,28 @@ pub(super) fn required_phases(scenario: RuntimePerfScenario) -> &'static [&'stat
     required_phase_names(scenario)
 }
 
-fn steady_state_turn_alloc_bytes(summary: &RuntimePerfScenarioSummary) -> f64 {
+fn steady_state_turn_alloc_bytes(summary: &RuntimePerfScenarioSummary) -> Option<f64> {
     summary
         .steady_state_turn
         .as_ref()
         .unwrap_or(&summary.last_turn)
-        .total_alloc_bytes
-        .median
+        .stage_summary
+        .get(stage::TOTAL)
+        .map(|stage| stage.alloc_bytes.median)
+}
+
+fn stage_duration_ms(summary: &RuntimePerfScenarioSummary, name: &str) -> Option<f64> {
+    summary
+        .stage_summary
+        .get(name)
+        .map(|stage| stage.duration_ms.median)
+}
+
+fn stage_alloc_bytes(summary: &RuntimePerfScenarioSummary, name: &str) -> Option<f64> {
+    summary
+        .stage_summary
+        .get(name)
+        .map(|stage| stage.alloc_bytes.median)
 }
 
 #[cfg(test)]
@@ -446,7 +465,7 @@ mod tests {
             "phase:rlm_process.load_artifact:duration_ms",
             "median",
             RuntimePerfGuardClass::Duration,
-            7.67,
+            Some(7.67),
             0.25,
         );
 

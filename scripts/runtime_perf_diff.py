@@ -12,8 +12,9 @@ Three metric families are compared per scenario:
   ``scripts/runtime_perf_percentiles.py`` reconstructs (``total_wall_ms``,
   ``steady_state_turn_wall_ms``, ``phase:<name>.duration_ms``). Wall clock is
   load-sensitive; read it only from a quiet box.
-* **allocation** — ``results[].allocations.<phase>.<field>``, summarized as the
-  median across measured runs.
+* **allocation** — ``results[].stages.<stage>.allocations.<field>``, summarized
+  as the median across measured runs. Stages absent from a run contribute
+  nothing — the run never reached them.
 * **counter** — ``results[].extra_counters.<name>``, summarized as the median
   across measured runs. Counters (hash passes, SQL statements, store calls,
   committed bytes) are deterministic and load-independent, so they are the
@@ -90,22 +91,29 @@ def _results_by_scenario(report_path: Path) -> dict[str, list[dict[str, Any]]]:
 
 
 def allocation_metrics(report_path: Path) -> dict[tuple[str, str], float]:
-    """Median allocation counts and bytes per scenario and allocation phase."""
+    """Median allocation counts and bytes per scenario and measured stage."""
     samples: dict[tuple[str, str], list[float]] = defaultdict(list)
     for scenario, results in _results_by_scenario(report_path).items():
         for index, result in enumerate(results):
-            prefix = f"{report_path}: {scenario} result[{index}].allocations"
-            allocations = result.get("allocations")
-            if not isinstance(allocations, dict):
+            prefix = f"{report_path}: {scenario} result[{index}].stages"
+            stages = result.get("stages")
+            if not isinstance(stages, dict):
                 raise RuntimePerfReportError(f"{prefix} must be an object")
-            for phase, delta in allocations.items():
+            for stage_name, stage in stages.items():
+                if not isinstance(stage, dict):
+                    raise RuntimePerfReportError(f"{prefix}.{stage_name} must be an object")
+                delta = stage.get("allocations")
                 if not isinstance(delta, dict):
-                    raise RuntimePerfReportError(f"{prefix}.{phase} must be an object")
+                    raise RuntimePerfReportError(
+                        f"{prefix}.{stage_name}.allocations must be an object"
+                    )
                 for field in ALLOCATION_FIELDS:
                     if field not in delta:
                         continue
-                    samples[(scenario, f"alloc:{phase}.{field}")].append(
-                        _number(delta[field], f"{prefix}.{phase}.{field}")
+                    samples[(scenario, f"alloc:{stage_name}.{field}")].append(
+                        _number(
+                            delta[field], f"{prefix}.{stage_name}.allocations.{field}"
+                        )
                     )
     return {key: _median(values) for key, values in samples.items()}
 

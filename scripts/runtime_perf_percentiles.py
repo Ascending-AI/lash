@@ -4,9 +4,12 @@
 For each scenario, the table contains the same duration populations as the
 Rust runtime report summary:
 
-* ``total_wall_ms`` uses one ``results[].total_ms`` sample per measured run.
-* ``steady_state_turn_wall_ms`` first averages ``turns[1:].total_ms`` within
-  each measured run, then uses one such steady-state sample per run.
+* ``total_wall_ms`` uses one ``results[].stages["total"].duration_ms`` sample
+  per measured run. A run whose stage map has no ``total`` key did not run
+  and contributes no sample.
+* ``steady_state_turn_wall_ms`` first averages ``turns[1:]`` ``total`` stage
+  durations within each measured run, then uses one such steady-state
+  sample per run.
 * ``phase:<name>.duration_ms`` uses one named ``results[].phase_profile``
   duration total per measured run.
 
@@ -124,14 +127,24 @@ def summarize_report(report_path: Path) -> list[dict[str, Any]]:
 
         for result_index, result in enumerate(scenario_results):
             prefix = f"{report_path}: {scenario} result[{result_index}]"
-            totals.append(_number(result.get("total_ms"), f"{prefix}.total_ms"))
+            stages = result.get("stages")
+            if not isinstance(stages, dict):
+                raise RuntimePerfReportError(f"{prefix}.stages must be an object")
+            total = stages.get("total")
+            if total is not None:
+                totals.append(
+                    _number(total.get("duration_ms"), f"{prefix}.stages.total.duration_ms")
+                )
 
             turns = _objects(result.get("turns"), f"{prefix}.turns")
-            steady_turns = turns[1:]
-            if steady_turns:
+            steady_turns = [turn for turn in turns[1:] if "total" in turn.get("stages", {})]
+            if total is not None and steady_turns:
                 steady_total = sum(
-                    _number(turn.get("total_ms"), f"{prefix}.turns[{index + 1}].total_ms")
-                    for index, turn in enumerate(steady_turns)
+                    _number(
+                        turn["stages"]["total"].get("duration_ms"),
+                        f"{prefix}.turns[].stages.total.duration_ms",
+                    )
+                    for turn in steady_turns
                 ) / len(steady_turns)
                 # Rust rounds each run's steady-state mean before summarizing runs.
                 steady_turn_totals.append(round3(steady_total))
