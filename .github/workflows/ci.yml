@@ -693,6 +693,7 @@ jobs:
           # deleted check lane carried.
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
+            --remote_download_outputs=minimal \
             --cache_test_results=yes --test_output=errors \
             //:workspace_tests //:workspace_compile
 
