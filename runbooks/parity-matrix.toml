@@ -33,6 +33,19 @@ deterministic = ["scripted-provider"]
 economy = ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"]
 frontier = ["openai/gpt-5.6-sol"]
 
+# One policy row per scenario table below, iterated in declaration order.
+# `emits` says whether the group produces judged rows; `label` is the artifact
+# label those rows carry, where the literal `language` resolves to the matrix
+# `language` id above. `referent` is what a non-emitting row names: a
+# `runbooks/<name>` runbook directory, or a scripted harness's
+# `runbooks/<harness>/cases/<case>` directory.
+[groups]
+scenarios = { emits = true, label = "language" }
+typescript_only = { emits = true, label = "language" }
+no_rlm_session_only = { emits = true, label = "standard" }
+scripted_live_model = { emits = false, referent = "harness_case" }
+deterministic_only = { emits = false, referent = "runbook" }
+
 # Ordinary RLM scenarios: one judged row each, pinned to `language`. Order is
 # the shard order, so a reordering moves rows between shards.
 [scenarios]
