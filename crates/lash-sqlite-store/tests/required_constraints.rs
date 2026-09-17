@@ -37,19 +37,12 @@ async fn fig2837_sqlite_missing_database_is_an_error_and_is_not_created() {
 #[test]
 fn fig2837_every_sqlite_registry_entry_names_an_inspectable_component() {
     use lash_core::store_backend_support::required_constraints::{
-        SQLITE_EXPECTED_CONSTRAINTS, SqliteConstraintDatabase,
+        EXPECTED_CONSTRAINTS, SqliteConstraintDatabase,
     };
 
-    let components = SQLITE_EXPECTED_CONSTRAINTS
+    let components = EXPECTED_CONSTRAINTS
         .iter()
-        .map(|constraint| {
-            constraint.sqlite_database.unwrap_or_else(|| {
-                panic!(
-                    "{}.{} has no SQLite database component",
-                    constraint.table, constraint.name
-                )
-            })
-        })
+        .map(|constraint| constraint.sqlite_database)
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         components,
