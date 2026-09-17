@@ -64,8 +64,9 @@ pub async fn inspect_required_constraints_at(
             .sqlite_databases
             .iter()
             .any(|component| sqlite_database(*component) == database)
+            && let Some(sqlite) = constraint.sqlite
         {
-            expected.push(constraint.sqlite);
+            expected.push(sqlite);
         }
     }
     let mut actual = Vec::new();

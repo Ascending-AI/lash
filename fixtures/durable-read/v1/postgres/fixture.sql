@@ -746,6 +746,21 @@ CREATE TABLE lash_durable_read_fixture.lash_trigger_subscriptions (
 
 
 --
+-- Name: lash_turn_cancel_affected_inputs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_affected_inputs (
+    session_id text NOT NULL,
+    turn_id text NOT NULL,
+    ordinal bigint NOT NULL,
+    input_id text NOT NULL,
+    disposition text NOT NULL,
+    input_json text NOT NULL,
+    CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK ((disposition = ANY (ARRAY['defer'::text, 'drop'::text])))
+);
+
+
+--
 -- Name: lash_turn_cancel_closure_authorizations; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -780,8 +795,6 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
     disposition text DEFAULT 'defer'::text NOT NULL,
     mode text DEFAULT 'immediate'::text NOT NULL,
     intent_revision bigint NOT NULL,
-    affected_input_ids text[] DEFAULT '{}'::text[] NOT NULL,
-    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL,
     CONSTRAINT ck_turn_cancel_requests_intent_revision CHECK ((intent_revision >= 1))
 );
 
@@ -1104,7 +1117,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 -- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=101', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=102', 1700000000000);
 
 
 --
@@ -1134,7 +1147,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 101);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 102);
 
 
 --
@@ -1202,6 +1215,12 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_occurrences VALUES ('trigger:
 --
 
 INSERT INTO lash_durable_read_fixture.lash_trigger_subscriptions VALUES ('trigger-subscription:v2:blake3:65d03d5aa96e165d6e48392576cb9dba7e571ae2df15f9947dae596f902e1d74', 'session:durable-read-fixture', 'durable-read-trigger', 'durable-read-trigger-incarnation', 1, 'trigger-definition:v3:blake3:a359a0f8b9619d0aa56a03b9a45ffaaa89c69ad02e3e9f45a7311249b8ee4df3', 'fixture.event', 'fixture-source', 'enabled', NULL, 1700000000000, 1700000000000, '{"subscription_id":"trigger-subscription:v2:blake3:65d03d5aa96e165d6e48392576cb9dba7e571ae2df15f9947dae596f902e1d74","owner_scope":{"type":"session","session_id":"durable-read-fixture"},"subscription_key":"durable-read-trigger","incarnation":"durable-read-trigger-incarnation","revision":1,"definition_fingerprint":"trigger-definition:v3:blake3:a359a0f8b9619d0aa56a03b9a45ffaaa89c69ad02e3e9f45a7311249b8ee4df3","registrant":{"type":"session","session_id":"durable-read-fixture"},"env_ref":"process-env:v6:blake3:4999a9eb5f1038bea76c7d1c114893c28c91b7fd479339f4b1edf60314744738","wake_target":{"session_id":"durable-read-fixture"},"name":"Durable read trigger","source_type":"fixture.event","source_key":"fixture-source","source":{"fixture":"source"},"payload_schema":{"schema":{"additionalProperties":false,"properties":{"value":{"type":"integer"}},"required":["value"],"type":"object"}},"source_capture":{"constructor_path":["fixture","event"],"config_schema":{"schema":{"additionalProperties":false,"properties":{"fixture":{"type":"string"}},"type":"object"}},"route":{"kind":"provider","provider_id":"fixture-provider","route":{"account":"fixture"}}},"target":{"type":"engine","kind":"durable-read-trigger-target","payload":{"fixture":"trigger"}},"target_identity":{"kind":"durable-read-trigger-target","label":"Durable read trigger target","definition":{"engine_kind":"durable-read-trigger-target","definition":{"fixture":"trigger"},"signature":{"signature":"unknown"}}},"event_types":[],"input_template":{"event":{"type":"event"}},"target_label":"Durable read trigger target","lifecycle":{"lifecycle":"enabled"},"created_at_ms":1700000000000,"updated_at_ms":1700000000000}');
+
+
+--
+-- Data for Name: lash_turn_cancel_affected_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
 
 
 --
@@ -1706,6 +1725,22 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_subscriptions
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_subscriptions
     ADD CONSTRAINT lash_trigger_subscriptions_pkey PRIMARY KEY (subscription_id);
+
+
+--
+-- Name: lash_turn_cancel_affected_inputs lash_turn_cancel_affected_input_session_id_turn_id_input_id_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_affected_inputs
+    ADD CONSTRAINT lash_turn_cancel_affected_input_session_id_turn_id_input_id_key UNIQUE (session_id, turn_id, input_id);
+
+
+--
+-- Name: lash_turn_cancel_affected_inputs lash_turn_cancel_affected_inputs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_affected_inputs
+    ADD CONSTRAINT lash_turn_cancel_affected_inputs_pkey PRIMARY KEY (session_id, turn_id, ordinal);
 
 
 --
@@ -2232,6 +2267,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_pending_observer_in
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_deliveries
     ADD CONSTRAINT lash_trigger_deliveries_occurrence_id_fkey FOREIGN KEY (occurrence_id) REFERENCES lash_durable_read_fixture.lash_trigger_occurrences(occurrence_id) ON DELETE CASCADE;
+
+
+--
+-- Name: lash_turn_cancel_affected_inputs lash_turn_cancel_affected_inputs_session_id_turn_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_affected_inputs
+    ADD CONSTRAINT lash_turn_cancel_affected_inputs_session_id_turn_id_fkey FOREIGN KEY (session_id, turn_id) REFERENCES lash_durable_read_fixture.lash_turn_cancel_requests(session_id, turn_id) ON DELETE CASCADE;
 
 
 --

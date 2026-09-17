@@ -337,12 +337,20 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     ),
 ];
 
-const POSTGRES_ONLY: &[(&str, RetentionClass)] = &[(
-    "lash_schema_versions",
-    PermanentlyExempt {
-        reason: "one current version per fixed component; not accumulating migration history",
-    },
-)];
+const POSTGRES_ONLY: &[(&str, RetentionClass)] = &[
+    (
+        "lash_schema_versions",
+        PermanentlyExempt {
+            reason: "one current version per fixed component; not accumulating migration history",
+        },
+    ),
+    (
+        "turn_cancel_affected_inputs",
+        LifecycleOwned {
+            scope: "session vacuum and deletion; cascade of its lash_turn_cancel_requests parent",
+        },
+    ),
+];
 
 #[expect(
     clippy::unwrap_used,

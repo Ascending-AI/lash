@@ -748,6 +748,21 @@ CREATE TABLE lash_durable_read_fixture.lash_trigger_subscriptions (
 
 
 --
+-- Name: lash_turn_cancel_affected_inputs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_affected_inputs (
+    session_id text NOT NULL,
+    turn_id text NOT NULL,
+    ordinal bigint NOT NULL,
+    input_id text NOT NULL,
+    disposition text NOT NULL,
+    input_json text NOT NULL,
+    CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK ((disposition = ANY (ARRAY['defer'::text, 'drop'::text])))
+);
+
+
+--
 -- Name: lash_turn_cancel_closure_authorizations; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -780,8 +795,6 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
     origin text,
     reason text,
     disposition text DEFAULT 'defer'::text NOT NULL,
-    affected_input_ids text[] DEFAULT '{}'::text[] NOT NULL,
-    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL,
     mode text DEFAULT 'immediate'::text NOT NULL,
     intent_revision bigint NOT NULL
 );
@@ -1125,7 +1138,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 101);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 102);
 
 
 --
@@ -1190,6 +1203,12 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_occurrences VALUES ('trigger:
 
 --
 -- Data for Name: lash_trigger_subscriptions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_turn_cancel_affected_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1694,6 +1713,22 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_subscriptions
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_subscriptions
     ADD CONSTRAINT lash_trigger_subscriptions_pkey PRIMARY KEY (subscription_id);
+
+
+--
+-- Name: lash_turn_cancel_affected_inputs lash_turn_cancel_affected_input_session_id_turn_id_input_id_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_affected_inputs
+    ADD CONSTRAINT lash_turn_cancel_affected_input_session_id_turn_id_input_id_key UNIQUE (session_id, turn_id, input_id);
+
+
+--
+-- Name: lash_turn_cancel_affected_inputs lash_turn_cancel_affected_inputs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_affected_inputs
+    ADD CONSTRAINT lash_turn_cancel_affected_inputs_pkey PRIMARY KEY (session_id, turn_id, ordinal);
 
 
 --
@@ -2220,6 +2255,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_pending_observer_in
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_deliveries
     ADD CONSTRAINT lash_trigger_deliveries_occurrence_id_fkey FOREIGN KEY (occurrence_id) REFERENCES lash_durable_read_fixture.lash_trigger_occurrences(occurrence_id) ON DELETE CASCADE;
+
+
+--
+-- Name: lash_turn_cancel_affected_inputs lash_turn_cancel_affected_inputs_session_id_turn_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_affected_inputs
+    ADD CONSTRAINT lash_turn_cancel_affected_inputs_session_id_turn_id_fkey FOREIGN KEY (session_id, turn_id) REFERENCES lash_durable_read_fixture.lash_turn_cancel_requests(session_id, turn_id) ON DELETE CASCADE;
 
 
 --

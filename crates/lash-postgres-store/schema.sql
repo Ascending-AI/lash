@@ -194,9 +194,24 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancel_requests (
     disposition TEXT NOT NULL DEFAULT 'defer',
     mode TEXT NOT NULL DEFAULT 'immediate',
     intent_revision BIGINT NOT NULL CONSTRAINT ck_turn_cancel_requests_intent_revision CHECK (intent_revision >= 1),
-    affected_input_ids TEXT[] NOT NULL DEFAULT '{}',
-    affected_dispositions TEXT[] NOT NULL DEFAULT '{}',
     PRIMARY KEY (session_id, turn_id)
+);
+
+-- Affected-input evidence for a cancellation receipt, one row per input.
+-- `input_json` deliberately snapshots the pending-input payload at
+-- disposition time: the pending row is vacuum-eligible once settled, and the
+-- receipt must stay readable afterwards. The (session_id, turn_id, input_id)
+-- uniqueness makes duplicate evidence impossible rather than checked.
+CREATE TABLE IF NOT EXISTS lash_turn_cancel_affected_inputs (
+    session_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    ordinal BIGINT NOT NULL,
+    input_id TEXT NOT NULL,
+    disposition TEXT NOT NULL CONSTRAINT ck_turn_cancel_affected_inputs_disposition CHECK (disposition IN ('defer', 'drop')),
+    input_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, turn_id, ordinal),
+    UNIQUE (session_id, turn_id, input_id),
+    FOREIGN KEY (session_id, turn_id) REFERENCES lash_turn_cancel_requests (session_id, turn_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS lash_turn_cancellation_bindings (
@@ -763,7 +778,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 101)
+VALUES ('lash-postgres-store', 102)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

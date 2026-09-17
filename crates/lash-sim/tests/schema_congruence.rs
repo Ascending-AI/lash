@@ -143,17 +143,17 @@ const TABLE_REGISTRY: &[TablePair] = &[
         sqlite_table: Some("turn_cancel_requests"),
         postgres_table: Some("lash_turn_cancel_requests"),
         parity: Parity::Divergent {
-            reason: "SQLite stores the typed cancel record as one JSON value while Postgres keeps request fields and ordered outcome arrays structural",
+            reason: "SQLite stores the typed cancel record as one JSON value while Postgres keeps request fields structural",
             sqlite_only_columns: &["record_json"],
-            postgres_only_columns: &[
-                "affected_dispositions",
-                "affected_input_ids",
-                "disposition",
-                "mode",
-                "origin",
-                "reason",
-                "request_id",
-            ],
+            postgres_only_columns: &["disposition", "mode", "origin", "reason", "request_id"],
+        },
+    },
+    TablePair {
+        sqlite_table: None,
+        postgres_table: Some("lash_turn_cancel_affected_inputs"),
+        parity: Parity::OneBackendOnly {
+            side: Backend::Postgres,
+            reason: "SQLite stores the cancel record's affected inputs inside record_json; only Postgres keeps them as a structural child table",
         },
     },
     pair("usage_deltas", "lash_usage_deltas"),
@@ -530,7 +530,7 @@ fn schema_congruence_registry_matches_both_backends() {
 fn sqlite_expected_constraints() -> Vec<RenderedConstraint> {
     EXPECTED_CONSTRAINTS
         .iter()
-        .map(|constraint| constraint.sqlite)
+        .filter_map(|constraint| constraint.sqlite)
         .collect()
 }
 

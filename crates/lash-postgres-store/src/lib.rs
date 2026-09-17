@@ -370,7 +370,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 101 widens the pending-input claim CHECK to the whole four-column
 // identity (FIG-3262): a claim id/token pair with no owner was representable.
 // Component-100 catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 101;
+// Version 102 moves a cancellation's affected-input evidence off the two
+// parallel TEXT[] columns into the lash_turn_cancel_affected_inputs child
+// table, where the payload is a snapshot and (request, input id) uniqueness
+// is structural (FIG-3263). Component-101 catalogs are rejected and
+// recreated.
+const SCHEMA_VERSION: i32 = 102;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

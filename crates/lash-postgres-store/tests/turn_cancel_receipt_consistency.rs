@@ -1,13 +1,13 @@
-//! PostgreSQL cancellation receipt integrity under vacuum and corrupt durable rows.
-
-use std::{sync::Arc, time::Duration};
+//! PostgreSQL cancellation receipt integrity: affected-input evidence is a
+//! snapshot on `lash_turn_cancel_affected_inputs`, so vacuuming the pending
+//! rows cannot split request metadata from the payloads it reports.
 
 use lash_core::{
-    PendingTurnInputDraft, StoreError, StoreMaintenance, TurnCancelDisposition, TurnInput,
+    PendingTurnInputDraft, StoreMaintenance, TurnCancelDisposition, TurnInput,
     TurnInputCheckpointBoundary, TurnInputIngress, TurnInputStore,
     facade_support::{TurnAddress, TurnCancelRequest},
 };
-use lash_postgres_store::{PostgresStorage, testing::TurnCancelReadPause};
+use lash_postgres_store::PostgresStorage;
 use lash_sansio::{SessionId, TurnId};
 
 use crate::support::{SharedDatabaseLock, database_url};
@@ -103,28 +103,39 @@ async fn seed_cancelled_inputs(
     .execute(storage.pool())
     .await
     .expect("make affected inputs vacuum eligible");
-    sqlx::query(
-        "UPDATE lash_turn_cancel_requests
-         SET affected_input_ids = $3, affected_dispositions = $4
-         WHERE session_id = $1 AND turn_id = $2",
-    )
-    .bind(session_id.as_str())
-    .bind(turn_id.as_str())
-    .bind(vec![
-        first.input_id.to_string(),
-        second.input_id.to_string(),
-    ])
-    .bind(vec!["drop", "defer"])
-    .execute(storage.pool())
-    .await
-    .expect("attach ordered affected input evidence");
+    for (ordinal, (input, disposition)) in [
+        (first.input.clone(), "drop"),
+        (second.input.clone(), "defer"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let input_id = match ordinal {
+            0 => first.input_id.to_string(),
+            _ => second.input_id.to_string(),
+        };
+        sqlx::query(
+            "INSERT INTO lash_turn_cancel_affected_inputs (
+                 session_id, turn_id, ordinal, input_id, disposition, input_json
+             ) VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(session_id.as_str())
+        .bind(turn_id.as_str())
+        .bind(ordinal as i64)
+        .bind(input_id)
+        .bind(disposition)
+        .bind(serde_json::to_string(&input).expect("encode affected input payload"))
+        .execute(storage.pool())
+        .await
+        .expect("attach ordered affected input evidence");
+    }
     (first, second)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_turn_cancel_read_is_complete_across_concurrent_vacuum_when_configured() {
+async fn postgres_turn_cancel_receipt_survives_vacuum_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres cancellation receipt race: database URL is not set");
+        eprintln!("skipping Postgres cancellation receipt vacuum check: database URL is not set");
         return;
     };
     let session_id = SessionId::from("turn-cancel-receipt-vacuum");
@@ -132,31 +143,20 @@ async fn postgres_turn_cancel_read_is_complete_across_concurrent_vacuum_when_con
     let store = storage.session_store(session_id.clone());
     let (first, second) = seed_cancelled_inputs(&storage, &session_id, &turn_id).await;
     let address = TurnAddress::new(&session_id, &turn_id);
-    let pause = Arc::new(TurnCancelReadPause::default());
-    let reader_store = store.clone();
-    let reader_pause = Arc::clone(&pause);
-    let reader = tokio::spawn(async move {
-        reader_store
-            .turn_cancel_request_paused_for_testing(&address, &reader_pause)
-            .await
-    });
 
-    tokio::time::timeout(Duration::from_secs(10), pause.wait_until_metadata_read())
-        .await
-        .expect("reader reached the deterministic pause");
+    // The pending rows are gone before the receipt is read: the evidence must
+    // come entirely from the child-table snapshot.
     let report = store.vacuum().await.expect("vacuum affected inputs");
     assert_eq!(report.removed_pending_turn_input_tombstone_count, 2);
-    pause.resume();
 
-    let record = tokio::time::timeout(Duration::from_secs(10), reader)
+    let record = store
+        .turn_cancel_request(&address)
         .await
-        .expect("paused receipt read completed")
-        .expect("receipt read task did not panic")
         .expect("receipt read succeeded")
-        .expect("reader observed request metadata before vacuum");
+        .expect("request metadata survives the vacuum");
     let affected = record
         .outcome
-        .expect("observed request retains a complete outcome")
+        .expect("vacuumed request retains a complete outcome")
         .affected_inputs;
     assert_eq!(affected.len(), 2);
     assert_eq!(affected[0].input_id, first.input_id);
@@ -171,93 +171,4 @@ async fn postgres_turn_cancel_read_is_complete_across_concurrent_vacuum_when_con
         serde_json::to_value(&affected[1].payload).expect("encode second returned payload"),
         serde_json::to_value(&second.input).expect("encode second submitted payload")
     );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_turn_cancel_read_rejects_malformed_or_missing_affected_evidence_when_configured()
-{
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres cancellation receipt integrity: database URL is not set");
-        return;
-    };
-    let session_id = SessionId::from("turn-cancel-receipt-integrity");
-    let turn_id = TurnId::from("turn-cancel-receipt-integrity:turn");
-    let store = storage.session_store(session_id.clone());
-    let (_first, second) = seed_cancelled_inputs(&storage, &session_id, &turn_id).await;
-    let address = TurnAddress::new(&session_id, &turn_id);
-    let request = TurnCancelRequest::new(
-        address.clone(),
-        format!("{session_id}:repeat"),
-        Some("receipt-test".to_string()),
-    );
-
-    sqlx::query(
-        "UPDATE lash_turn_cancel_requests
-         SET affected_dispositions = $3
-         WHERE session_id = $1 AND turn_id = $2",
-    )
-    .bind(session_id.as_str())
-    .bind(turn_id.as_str())
-    .bind(vec!["drop"])
-    .execute(storage.pool())
-    .await
-    .expect("corrupt affected disposition cardinality");
-    assert_integrity_error(
-        store
-            .turn_cancel_request(&address)
-            .await
-            .expect_err("public reader rejects unequal affected arrays"),
-        "cardinality",
-    );
-    assert_integrity_error(
-        store
-            .record_turn_cancel_request(request.clone())
-            .await
-            .expect_err("transactional reader rejects unequal affected arrays"),
-        "cardinality",
-    );
-
-    sqlx::query(
-        "UPDATE lash_turn_cancel_requests
-         SET affected_dispositions = $3
-         WHERE session_id = $1 AND turn_id = $2",
-    )
-    .bind(session_id.as_str())
-    .bind(turn_id.as_str())
-    .bind(vec!["drop", "defer"])
-    .execute(storage.pool())
-    .await
-    .expect("restore affected disposition cardinality");
-    sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE input_id = $1")
-        .bind(second.input_id.as_str())
-        .execute(storage.pool())
-        .await
-        .expect("remove one affected payload");
-    assert_integrity_error(
-        store
-            .turn_cancel_request(&address)
-            .await
-            .expect_err("public reader rejects a missing affected payload"),
-        &second.input_id,
-    );
-    assert_integrity_error(
-        store
-            .record_turn_cancel_request(request)
-            .await
-            .expect_err("transactional reader rejects a missing affected payload"),
-        &second.input_id,
-    );
-}
-
-fn assert_integrity_error(error: StoreError, expected_message_fragment: &str) {
-    match error {
-        StoreError::StoredDataCorrupt {
-            record_kind: "TurnCancelRequest",
-            message,
-        } => assert!(
-            message.contains(expected_message_fragment),
-            "unexpected integrity message: {message}"
-        ),
-        other => panic!("expected TurnCancelRequest integrity error, got {other:?}"),
-    }
 }

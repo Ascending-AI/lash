@@ -14,15 +14,17 @@ use crate::StoreError;
 ///
 /// `sqlite_databases` lists every SQLite component that carries the
 /// table: shared-fragment tables live in more than one database, so
-/// each carrier's inspection sees the constraint. `postgres` is `None`
-/// for checks that have no PostgreSQL counterpart (e.g. integer-boolean
-/// vocabularies where Postgres uses a native `BOOLEAN` instead).
+/// each carrier's inspection sees the constraint. `sqlite` is `None`
+/// for checks that have no SQLite counterpart (e.g. a PostgreSQL-only
+/// child table), and `postgres` is `None` for checks that have no
+/// PostgreSQL counterpart (e.g. integer-boolean vocabularies where
+/// Postgres uses a native `BOOLEAN` instead).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExpectedConstraint {
     /// Which SQLite schema components carry the table holding the check.
     pub sqlite_databases: &'static [SqliteConstraintDatabase],
-    /// The check as SQLite declares it.
-    pub sqlite: RenderedConstraint,
+    /// The check as SQLite declares it, when a counterpart exists.
+    pub sqlite: Option<RenderedConstraint>,
     /// The check as PostgreSQL declares it, when a counterpart exists.
     pub postgres: Option<RenderedConstraint>,
 }
@@ -63,7 +65,7 @@ const fn expected_constraint(
 ) -> ExpectedConstraint {
     ExpectedConstraint {
         sqlite_databases,
-        sqlite,
+        sqlite: Some(sqlite),
         postgres: Some(postgres),
     }
 }
@@ -74,8 +76,16 @@ const fn sqlite_only_constraint(
 ) -> ExpectedConstraint {
     ExpectedConstraint {
         sqlite_databases,
-        sqlite,
+        sqlite: Some(sqlite),
         postgres: None,
+    }
+}
+
+const fn postgres_only_constraint(postgres: RenderedConstraint) -> ExpectedConstraint {
+    ExpectedConstraint {
+        sqlite_databases: &[],
+        sqlite: None,
+        postgres: Some(postgres),
     }
 }
 
@@ -485,6 +495,14 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
             "length(binding_id) > 0",
         ),
     ),
+    // SQLite folds the whole cancel record into `record_json`, so the
+    // affected-input evidence table — and its disposition vocabulary — is a
+    // PostgreSQL-only shape (FIG-3263).
+    postgres_only_constraint(rendered(
+        "lash_turn_cancel_affected_inputs",
+        "ck_turn_cancel_affected_inputs_disposition",
+        "disposition IN ('defer', 'drop')",
+    )),
     expected_constraint(
         &[SqliteConstraintDatabase::DurableCore],
         rendered(

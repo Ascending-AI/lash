@@ -7,8 +7,8 @@ use super::*;
 /// by inventing the source contract and provider route every trigger
 /// subscription now captures (component 95), and none can be upgraded by
 /// turning a journaled sleep's resolved duration back into the deadline the
-/// guest asked for (component 96). Component 100 is therefore retained as the
-/// refusal-only endpoint and no row targets component 101.
+/// guest asked for (component 96). Component 101 is therefore retained as the
+/// refusal-only endpoint and no row targets component 102.
 ///
 /// Neither refusal-only generation installs a relation: component 95's capture
 /// lives inside the trigger subscription record document, and component 96
@@ -19,30 +19,39 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
         from: 94,
-        to: 100,
+        to: 101,
         // Component 95 (the source-call contract capture) and component 96
         // (the SleepSpec encoding) were refusal-only cutovers; component 97
         // creates the named process-definition registry (FIG-2995), component
         // 98 the release stamp (FIG-3092), component 99 the trigger
         // subscription lifecycle column (FIG-1951), component 100 the stable
-        // CHECK constraint names (FIG-3261) and component 101 the widened
-        // pending-input claim guard (FIG-3262). No predecessor records existed
-        // at any of these moves, so the retained endpoint carries all
-        // seven: a pre-cutover store is refused at open rather than migrated
-        // (its schema lacks both relations, the lifecycle columns, and the
-        // retained trigger capture).
-        source_missing_tables: &["lash_process_definitions", "lash_release_stamp"],
+        // CHECK constraint names (FIG-3261), component 101 the widened
+        // pending-input claim guard (FIG-3262) and component 102 the
+        // cancellation affected-input child table (FIG-3263). No predecessor
+        // records existed at any of these moves, so the retained endpoint
+        // carries all eight: a pre-cutover store is refused at open rather
+        // than migrated (its schema lacks the relations, the lifecycle
+        // columns, and the retained trigger capture).
+        source_missing_tables: &[
+            "lash_process_definitions",
+            "lash_release_stamp",
+            "lash_turn_cancel_affected_inputs",
+        ],
         source_missing_columns: &[
             ("lash_trigger_subscriptions", "lifecycle"),
             ("lash_trigger_subscriptions", "deleted_at_ms"),
         ],
         source_missing_guards: &[],
-        introduced_relations: &["lash_process_definitions", "lash_release_stamp"],
+        introduced_relations: &[
+            "lash_process_definitions",
+            "lash_release_stamp",
+            "lash_turn_cancel_affected_inputs",
+        ],
         statements: &[],
     },
     SchemaMigration {
         from: 95,
-        to: 100,
+        to: 101,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -51,7 +60,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 96,
-        to: 100,
+        to: 101,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -60,7 +69,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 97,
-        to: 100,
+        to: 101,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -69,7 +78,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 98,
-        to: 100,
+        to: 101,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -78,7 +87,16 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 99,
-        to: 100,
+        to: 101,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &[],
+        statements: &[],
+    },
+    SchemaMigration {
+        from: 100,
+        to: 101,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
