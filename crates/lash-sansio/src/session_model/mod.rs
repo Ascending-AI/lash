@@ -330,6 +330,43 @@ impl TokenUsage {
         Ok(merged)
     }
 
+    /// Returns a new usage value with every counter clamped on overflow, and
+    /// whether any counter clamped.
+    ///
+    /// The `(value, saturated)` pair is the reportable counterpart of
+    /// [`Self::checked_add`]: writes that must not lie use the checked seam,
+    /// while reads that must not fail use this one and propagate the flag.
+    /// `reasoning_output_tokens` is summed as a counter like `checked_add`.
+    pub fn saturating_add(&self, other: &TokenUsage) -> (Self, bool) {
+        let mut saturated = false;
+        let mut merge = |left: i64, right: i64| match left.checked_add(right) {
+            Some(value) => value,
+            None => {
+                saturated = true;
+                left.saturating_add(right)
+            }
+        };
+        (
+            Self {
+                input_tokens: merge(self.input_tokens, other.input_tokens),
+                output_tokens: merge(self.output_tokens, other.output_tokens),
+                cache_read_input_tokens: merge(
+                    self.cache_read_input_tokens,
+                    other.cache_read_input_tokens,
+                ),
+                cache_write_input_tokens: merge(
+                    self.cache_write_input_tokens,
+                    other.cache_write_input_tokens,
+                ),
+                reasoning_output_tokens: merge(
+                    self.reasoning_output_tokens,
+                    other.reasoning_output_tokens,
+                ),
+            },
+            saturated,
+        )
+    }
+
     pub fn checked_total(&self) -> Result<i64, TokenUsageOverflow> {
         self.input_tokens
             .checked_add(self.output_tokens)

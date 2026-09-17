@@ -1382,25 +1382,22 @@ impl TurnReport {
     }
 
     /// Sum of parent's own LLM tokens and every child session's LLM tokens
-    /// for this turn.
-    pub fn total_usage(&self) -> TokenUsage {
+    /// for this turn, and whether any counter saturated while summing.
+    ///
+    /// The `bool` is the same signal [`SessionUsageReport::saturated`] carries
+    /// one layer down: `true` marks the returned total as a lower bound
+    /// clamped at `i64::MAX`, never a silently truncated figure.
+    ///
+    /// [`SessionUsageReport::saturated`]: crate::usage::SessionUsageReport::saturated
+    pub fn total_usage(&self) -> (TokenUsage, bool) {
+        let mut saturated = false;
         let mut total = self.usage.clone();
         for entry in &self.children_usage {
-            total.input_tokens = total.input_tokens.saturating_add(entry.usage.input_tokens);
-            total.output_tokens = total
-                .output_tokens
-                .saturating_add(entry.usage.output_tokens);
-            total.cache_read_input_tokens = total
-                .cache_read_input_tokens
-                .saturating_add(entry.usage.cache_read_input_tokens);
-            total.cache_write_input_tokens = total
-                .cache_write_input_tokens
-                .saturating_add(entry.usage.cache_write_input_tokens);
-            total.reasoning_output_tokens = total
-                .reasoning_output_tokens
-                .saturating_add(entry.usage.reasoning_output_tokens);
+            let (merged, entry_saturated) = total.saturating_add(&entry.usage);
+            total = merged;
+            saturated |= entry_saturated;
         }
-        total
+        (total, saturated)
     }
 
     /// Wall-clock instant the runtime started this turn (claim of the

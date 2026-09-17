@@ -499,23 +499,8 @@ impl SessionUsageReport {
 }
 
 fn saturating_add_usage(target: &mut TokenUsage, incoming: &TokenUsage) -> bool {
-    let mut saturated = false;
-    macro_rules! add_counter {
-        ($field:ident) => {
-            target.$field = match target.$field.checked_add(incoming.$field) {
-                Some(value) => value,
-                None => {
-                    saturated = true;
-                    target.$field.saturating_add(incoming.$field)
-                }
-            };
-        };
-    }
-    add_counter!(input_tokens);
-    add_counter!(output_tokens);
-    add_counter!(cache_read_input_tokens);
-    add_counter!(cache_write_input_tokens);
-    add_counter!(reasoning_output_tokens);
+    let (merged, saturated) = target.saturating_add(incoming);
+    *target = merged;
     saturated
 }
 
