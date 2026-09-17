@@ -482,7 +482,7 @@ impl TurnInputStore for PostgresSessionStore {
                 enqueue_seq_u64,
             )
         });
-        let state = draft.ingress.initial_state();
+        let state = lash_core::TurnInputState::open(draft.ingress.clone());
         let ingress_json = encode_json(&draft.ingress)?;
         let input_json = encode_json(&draft.input)?;
         let input = if let Some(source_key) = draft.source_key.as_deref() {
@@ -579,8 +579,8 @@ impl TurnInputStore for PostgresSessionStore {
              ORDER BY enqueue_seq ASC"
         ))
         .bind(session_id.as_str())
-        .bind(lash_core::TurnInputState::PendingActive.as_str())
-        .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
+        .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
+        .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
         .bind(now as i64)
         .fetch_all(&mut *tx)
         .await
@@ -743,17 +743,15 @@ impl TurnInputStore for PostgresSessionStore {
         &self,
         claim: &lash_core::TurnInputClaim,
     ) -> Result<(), StoreError> {
-        let restored_state = match claim.mode {
-            lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
-                lash_core::TurnInputState::PendingActive
-            }
-            lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
-        };
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         sqlx::query(
             "UPDATE lash_pending_turn_inputs
              SET state = CASE
-                     WHEN state = $4 THEN $5
+                     WHEN state = $4 THEN
+                         CASE ingress_json::jsonb ->> 'scope'
+                             WHEN 'active_turn' THEN $5
+                             ELSE $6
+                         END
                      ELSE state
                  END,
                  claim_id = NULL,
@@ -766,8 +764,9 @@ impl TurnInputStore for PostgresSessionStore {
         .bind(claim.session_id.as_str())
         .bind(&claim.claim_id)
         .bind(&claim.lease_token)
-        .bind(lash_core::TurnInputState::Accepted.as_str())
-        .bind(restored_state.as_str())
+        .bind(lash_core::TurnInputStateKind::Accepted.as_str())
+        .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
+        .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
         .execute(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
@@ -781,47 +780,27 @@ impl TurnInputStore for PostgresSessionStore {
         if claims.is_empty() {
             return Ok(());
         }
-        // FIG-1573: restore each claim to its own mode's pre-claim state, exactly
-        // as the singular sibling does. Hardcoding `pending_active` sent a
-        // next-turn claim's rows to a state only an active-turn claim can reach,
-        // stranding them behind a turn id that will never exist again. Both mode
-        // partitions run in ONE transaction: a batch abandon is one caller
-        // giving up one set of rows, and a failure between two statements would
-        // leave half the batch claimed by a claim id the caller has dropped.
+        // FIG-1573: restore each row to the open spelling its own `ingress_json`
+        // carries, exactly as the singular sibling does — a next-turn row goes
+        // back to `deferred_next_turn`, never `pending_active`. The whole batch
+        // runs in ONE statement inside ONE transaction: a batch abandon is one
+        // caller giving up one set of rows, and a failure between two
+        // statements would leave half the batch claimed by a claim id the
+        // caller has already dropped.
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        for (mode_state, restored_state) in [
-            (
-                lash_core::TurnInputState::PendingActive,
-                lash_core::TurnInputState::PendingActive,
-            ),
-            (
-                lash_core::TurnInputState::DeferredNextTurn,
-                lash_core::TurnInputState::DeferredNextTurn,
-            ),
-        ] {
-            let batch = claims
-                .iter()
-                .filter(|claim| {
-                    let claim_state = match claim.mode {
-                        lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
-                            lash_core::TurnInputState::PendingActive
-                        }
-                        lash_core::TurnInputClaimMode::NextTurn => {
-                            lash_core::TurnInputState::DeferredNextTurn
-                        }
-                    };
-                    claim_state == mode_state
-                })
-                .collect::<Vec<_>>();
-            if batch.is_empty() {
-                continue;
-            }
+        {
             let accepted_state = lash_core::store_backend_support::state_sql_literal(
-                lash_core::TurnInputState::Accepted,
+                lash_core::TurnInputStateKind::Accepted,
+            );
+            let pending_active = lash_core::store_backend_support::state_sql_literal(
+                lash_core::TurnInputStateKind::PendingActive,
+            );
+            let deferred_next_turn = lash_core::store_backend_support::state_sql_literal(
+                lash_core::TurnInputStateKind::DeferredNextTurn,
             );
             let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
                 "UPDATE lash_pending_turn_inputs
@@ -829,7 +808,9 @@ impl TurnInputStore for PostgresSessionStore {
                          WHEN state = ",
             );
             query.push(accepted_state).push(" THEN ");
-            query.push_bind(restored_state.as_str());
+            query.push("CASE ingress_json::jsonb ->> 'scope' WHEN 'active_turn' THEN ");
+            query.push(pending_active).push(" ELSE ");
+            query.push(deferred_next_turn).push(" END");
             query.push(
                 "     ELSE state
                      END,
@@ -840,7 +821,7 @@ impl TurnInputStore for PostgresSessionStore {
                      claim_session_lease_generation = 0
                  WHERE (session_id, claim_id, claim_token) IN ",
             );
-            query.push_tuples(batch, |mut row, claim| {
+            query.push_tuples(claims.iter(), |mut row, claim| {
                 row.push_bind(claim.session_id.as_str())
                     .push_bind(&claim.claim_id)
                     .push_bind(&claim.lease_token);

@@ -10,9 +10,13 @@ pub(crate) fn decode_turn_input_ingress(
 
 pub(crate) fn decode_turn_input_state(
     value: String,
+    ingress: lash_core::TurnInputIngress,
 ) -> Result<lash_core::TurnInputState, StoreError> {
-    lash_core::TurnInputState::from_wire_str(&value)
-        .ok_or_else(|| StoreError::Backend(format!("unknown turn-input state `{value}`")))
+    lash_core::TurnInputState::from_persisted(&value, ingress).ok_or_else(|| {
+        StoreError::Backend(format!(
+            "unknown or scope-illegal turn-input state `{value}`"
+        ))
+    })
 }
 
 pub(crate) fn decode_turn_input(value: String) -> Result<lash_core::TurnInput, StoreError> {
@@ -81,13 +85,13 @@ pub(crate) fn pending_turn_input_read_row_from_sql(
 pub(crate) fn pending_turn_input_from_row(
     row: PendingTurnInputRow,
 ) -> Result<lash_core::PendingTurnInput, StoreError> {
+    let ingress = decode_turn_input_ingress(row.ingress_json)?;
     Ok(lash_core::PendingTurnInput {
         input_id: row.input_id.into(),
         session_id: row.session_id,
         enqueue_seq: row.enqueue_seq,
         source_key: row.source_key,
-        ingress: decode_turn_input_ingress(row.ingress_json)?,
-        state: decode_turn_input_state(row.state)?,
+        state: decode_turn_input_state(row.state, ingress)?,
         enqueued_at_ms: row.enqueued_at_ms,
         input: decode_turn_input(row.input_json)?,
     })

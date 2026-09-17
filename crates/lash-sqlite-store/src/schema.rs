@@ -211,7 +211,9 @@ CREATE TABLE IF NOT EXISTS session_meta (
     observer_inheritance_kind         TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
-    CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK (observer_inheritance_kind IN ('all', 'none', 'only'))
+    CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK (observer_inheritance_kind IN ('all', 'none', 'only')),
+    CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL AND observer_inheritance_kind IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL AND observer_inheritance_kind IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL AND observer_inheritance_kind IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
+    CONSTRAINT ck_session_meta_caused_by_family CHECK ((caused_by_kind IS NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'turn' AND caused_by_session_id IS NOT NULL AND caused_by_turn_id IS NOT NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'effect_address' AND caused_by_effect_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'tool_call' AND caused_by_session_id IS NOT NULL AND caused_by_call_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process' AND caused_by_process_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'process_event' AND caused_by_process_id IS NOT NULL AND caused_by_process_event_sequence IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'trigger_occurrence' AND caused_by_occurrence_id IS NOT NULL AND caused_by_session_id IS NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_node_id IS NULL) OR (caused_by_kind = 'session_node' AND caused_by_session_id IS NOT NULL AND caused_by_node_id IS NOT NULL AND caused_by_turn_id IS NULL AND caused_by_effect_id IS NULL AND caused_by_call_id IS NULL AND caused_by_process_id IS NULL AND caused_by_process_event_sequence IS NULL AND caused_by_occurrence_id IS NULL AND caused_by_subscription_id IS NULL AND caused_by_subscription_incarnation IS NULL AND caused_by_subscription_revision IS NULL) OR (caused_by_kind IS NOT NULL AND NOT (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node'))))
 );
 
 CREATE TABLE IF NOT EXISTS session_meta_pending_observer_intents (
@@ -704,7 +706,15 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// this store, so a host can read which build produced the data before wiring
 /// a runtime. A pre-66 database has no such table and, under the
 /// reject-and-recreate policy, is refused at open rather than midwifed one.
-pub(crate) const SCHEMA_VERSION: i32 = 66;
+/// Bumped to 67 for FIG-2885: `session_meta` gains the two family CHECKs that
+/// tie `relation_kind` and `caused_by_kind` to exactly their payload columns,
+/// so a mispaired discriminator is refused at write rather than silently
+/// dropped at decode. `caused_by_process_event_sequence` and
+/// `caused_by_subscription_revision` stay TEXT on purpose: both carry a u64
+/// `CausalRef` field whose full range exceeds SQLite's signed INTEGER, and the
+/// cross-backend differential round-trips u64::MAX through them. A pre-67
+/// database lacks the family guards, so it is rejected at open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 67;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -1670,33 +1680,52 @@ mod check_constraint_tests {
         );
         assert_check_rejects(
             &core,
-            "INSERT INTO session_meta (session_id, relation_kind)
-             VALUES ('bad-relation', 'sibling')",
+            "INSERT INTO session_meta (session_id, relation_kind) VALUES ('bad-relation', 'sibling')",
             "ck_session_meta_relation_kind",
         );
         assert_check_rejects(
             &core,
-            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
-             VALUES ('bad-cause', 'child', 'timer')",
+            "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind) VALUES ('bad-cause', 'child', 'parent', 'timer')",
             "ck_session_meta_caused_by_kind",
         );
         core.execute_batch(
-            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
-             VALUES ('effect-address-cause', 'child', 'effect_address')",
+            "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind, caused_by_effect_id) VALUES ('effect-address-cause', 'child', 'parent', 'effect_address', '{}')",
         )
         .expect("current effect-address discriminator is admitted");
         assert_check_rejects(
             &core,
-            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
-             VALUES ('legacy-effect-cause', 'child', 'effect')",
+            "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind) VALUES ('legacy-effect-cause', 'child', 'parent', 'effect')",
             "ck_session_meta_caused_by_kind",
         );
         assert_check_rejects(
             &core,
-            "INSERT INTO session_meta (
-                 session_id, relation_kind, observer_inheritance_kind
-             ) VALUES ('bad-inheritance', 'fork', 'selected')",
+            "INSERT INTO session_meta (session_id, relation_kind, source_session_id, source_node_id, observer_inheritance_kind) VALUES ('bad-inheritance', 'fork', 'source', 'source-node', 'selected')",
             "ck_session_meta_observer_inheritance_kind",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind) VALUES ('childless-child', 'child')",
+            "ck_session_meta_relation_family",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind, caused_by_session_id, caused_by_turn_id) VALUES ('caused-root', 'root', 'turn', 'cause-session', 'cause-turn')",
+            "ck_session_meta_relation_family",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind) VALUES ('bare-discriminator', 'child', 'parent', 'turn')",
+            "ck_session_meta_caused_by_family",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind, caused_by_session_id, caused_by_turn_id, caused_by_node_id) VALUES ('crossed-family', 'child', 'parent', 'turn', 'cause-session', 'cause-turn', 'stray-node')",
+            "ck_session_meta_caused_by_family",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_session_id) VALUES ('kindless-payload', 'child', 'parent', 'cause-session')",
+            "ck_session_meta_caused_by_family",
         );
 
         let process = Connection::open_in_memory().expect("open process constraint fixture");

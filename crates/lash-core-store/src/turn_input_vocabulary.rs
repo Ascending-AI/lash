@@ -35,7 +35,7 @@ pub fn derive_pending_turn_input_id(
         )
     )
 }
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "scope", rename_all = "snake_case")]
 pub enum TurnInputIngress {
     ActiveTurn {
@@ -46,15 +46,6 @@ pub enum TurnInputIngress {
     NextTurn,
 }
 impl TurnInputIngress {
-    /// Derives the only legal initial durable state for this ingress scope.
-    #[must_use]
-    pub fn initial_state(&self) -> TurnInputState {
-        match self {
-            Self::ActiveTurn { .. } => TurnInputState::PendingActive,
-            Self::NextTurn => TurnInputState::DeferredNextTurn,
-        }
-    }
-
     /// Routes an input to an active turn at or after the named checkpoint boundary for turn-input
     /// store implementors.
     pub fn active_turn(
@@ -110,25 +101,185 @@ impl TurnInputCheckpointBoundary {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TurnInputState {
+/// The `active_turn` admission scope's payload — carried by every
+/// [`TurnInputState`] variant the persisted CHECKs pin to that scope.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ActiveTurnIngress {
+    pub turn_id: crate::TurnId,
+    #[serde(default)]
+    pub min_boundary: TurnInputCheckpointBoundary,
+}
+impl From<ActiveTurnIngress> for TurnInputIngress {
+    fn from(scope: ActiveTurnIngress) -> Self {
+        Self::ActiveTurn {
+            turn_id: scope.turn_id,
+            min_boundary: scope.min_boundary,
+        }
+    }
+}
+
+/// The scope-free name of a persisted turn-input state.
+///
+/// This is the `state` column's vocabulary for SQL predicates and decoders;
+/// the value type [`TurnInputState`] carries the scope each name is pinned
+/// to, so the two can never disagree in memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TurnInputStateKind {
     PendingActive,
     DeferredNextTurn,
     Accepted,
     Cancelled,
     Completed,
 }
-impl TurnInputState {
-    /// Lets store, effect-host, and protocol implementors test whether this `TurnInputState` is
-    /// next turn pending while materializing, executing, or persisting a session turn.
+impl TurnInputStateKind {
+    /// Returns whether this state name is settled and eligible for tombstone vacuum.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Cancelled | Self::Completed)
+    }
+
+    /// Returns whether this state name is an open (claimable) state.
+    pub fn is_open(self) -> bool {
+        matches!(self, Self::PendingActive | Self::DeferredNextTurn)
+    }
+
+    /// Returns whether this state name is the `deferred_next_turn` open state.
     pub fn is_next_turn_pending(self) -> bool {
         matches!(self, Self::DeferredNextTurn)
     }
+}
+
+/// A pending input's durable lifecycle state, carrying the admission scope
+/// each variant is pinned to.
+///
+/// The scope lives inside the state so a value cannot disagree with the
+/// persisted `ingress_json`/`state` column pair: `pending_active` and
+/// `accepted` always carry `active_turn` scope, `deferred_next_turn` is
+/// always `next_turn` scope, and the terminal variants keep whichever scope
+/// the row was admitted under. The backend `CHECK` constraints remain as a
+/// belt-and-braces check on a value the type can no longer contradict.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnInputState {
+    PendingActive(ActiveTurnIngress),
+    DeferredNextTurn,
+    Accepted(ActiveTurnIngress),
+    Cancelled(TurnInputIngress),
+    Completed(TurnInputIngress),
+}
+impl TurnInputState {
+    /// The only legal initial durable state for an input admitted under `ingress`.
+    #[must_use]
+    pub fn open(ingress: TurnInputIngress) -> Self {
+        match ingress {
+            TurnInputIngress::ActiveTurn {
+                turn_id,
+                min_boundary,
+            } => Self::PendingActive(ActiveTurnIngress {
+                turn_id,
+                min_boundary,
+            }),
+            TurnInputIngress::NextTurn => Self::DeferredNextTurn,
+        }
+    }
+
+    /// Decodes a persisted `state` spelling against the row's decoded ingress.
+    ///
+    /// Returns `None` for an unknown spelling or a state/scope pair the
+    /// persisted CHECKs forbid (`pending_active` under `next_turn` scope,
+    /// `deferred_next_turn` under `active_turn` scope, or `accepted` under
+    /// `next_turn` scope) — the same disagreement the type refuses to
+    /// construct.
+    pub fn from_persisted(state: &str, ingress: TurnInputIngress) -> Option<Self> {
+        match (TurnInputStateKind::from_wire_str(state)?, ingress) {
+            (
+                TurnInputStateKind::PendingActive,
+                TurnInputIngress::ActiveTurn {
+                    turn_id,
+                    min_boundary,
+                },
+            ) => Some(Self::PendingActive(ActiveTurnIngress {
+                turn_id,
+                min_boundary,
+            })),
+            (
+                TurnInputStateKind::Accepted,
+                TurnInputIngress::ActiveTurn {
+                    turn_id,
+                    min_boundary,
+                },
+            ) => Some(Self::Accepted(ActiveTurnIngress {
+                turn_id,
+                min_boundary,
+            })),
+            (TurnInputStateKind::DeferredNextTurn, TurnInputIngress::NextTurn) => {
+                Some(Self::DeferredNextTurn)
+            }
+            (TurnInputStateKind::Cancelled, ingress) => Some(Self::Cancelled(ingress)),
+            (TurnInputStateKind::Completed, ingress) => Some(Self::Completed(ingress)),
+            _ => None,
+        }
+    }
+
+    /// The scope-free name this state persists under — the `state` column's spelling.
+    pub fn kind(&self) -> TurnInputStateKind {
+        match self {
+            Self::PendingActive(_) => TurnInputStateKind::PendingActive,
+            Self::DeferredNextTurn => TurnInputStateKind::DeferredNextTurn,
+            Self::Accepted(_) => TurnInputStateKind::Accepted,
+            Self::Cancelled(_) => TurnInputStateKind::Cancelled,
+            Self::Completed(_) => TurnInputStateKind::Completed,
+        }
+    }
+
+    /// The stable wire spelling this state persists under.
+    pub fn as_str(&self) -> &'static str {
+        self.kind().as_str()
+    }
+
+    /// The admission scope this state carries — the `ingress_json` column's value.
+    pub fn ingress(&self) -> TurnInputIngress {
+        match self {
+            Self::PendingActive(scope) | Self::Accepted(scope) => scope.clone().into(),
+            Self::DeferredNextTurn => TurnInputIngress::NextTurn,
+            Self::Cancelled(ingress) | Self::Completed(ingress) => ingress.clone(),
+        }
+    }
+
+    /// The turn id this input is scoped to, when its scope is `active_turn`.
+    pub fn active_turn_id(&self) -> Option<&TurnId> {
+        match self {
+            Self::PendingActive(scope) | Self::Accepted(scope) => Some(&scope.turn_id),
+            Self::Cancelled(ingress) | Self::Completed(ingress) => ingress.active_turn_id(),
+            Self::DeferredNextTurn => None,
+        }
+    }
+
+    /// Rebinds an `active_turn`-scoped open state to `accepted`, carrying its
+    /// scope forward. Returns `None` for `next_turn`-scoped or terminal
+    /// states — the pairs the persisted CHECKs refuse.
+    pub fn accepted(&self) -> Option<Self> {
+        match self {
+            Self::PendingActive(scope) | Self::Accepted(scope) => {
+                Some(Self::Accepted(scope.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    /// Lets store, effect-host, and protocol implementors test whether this `TurnInputState` is
+    /// next turn pending while materializing, executing, or persisting a session turn.
+    pub fn is_next_turn_pending(&self) -> bool {
+        self.kind().is_next_turn_pending()
+    }
 
     /// Returns whether this state is settled and eligible for tombstone vacuum.
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Cancelled | Self::Completed)
+    pub fn is_terminal(&self) -> bool {
+        self.kind().is_terminal()
+    }
+
+    /// Returns whether this state is open (claimable) — `pending_active` or `deferred_next_turn`.
+    pub fn is_open(&self) -> bool {
+        self.kind().is_open()
     }
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -179,7 +330,7 @@ impl PendingTurnInputDraft {
         &self,
         existing: &PendingTurnInput,
     ) -> Result<bool, serde_json::Error> {
-        Ok(self.ingress == existing.ingress
+        Ok(self.ingress == existing.ingress()
             && serde_json::to_value(&self.input)? == serde_json::to_value(&existing.input)?)
     }
 }
@@ -190,7 +341,9 @@ pub struct PendingTurnInput {
     pub enqueue_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
-    pub ingress: TurnInputIngress,
+    /// The admission scope lives inside `state`: every open or accepted
+    /// variant carries its scope, so the persisted `ingress_json`/`state`
+    /// column pair cannot disagree.
     pub state: TurnInputState,
     pub enqueued_at_ms: u64,
     pub input: TurnInput,
@@ -287,11 +440,17 @@ impl From<&PendingTurnInput> for TurnInputAcceptanceReceipt {
             input_id: input.input_id.clone(),
             session_id: input.session_id.clone(),
             source_key: input.source_key.clone(),
-            ingress: input.ingress.clone(),
+            ingress: input.ingress(),
         }
     }
 }
 impl PendingTurnInput {
+    /// The row's admission scope — derived from [`Self::state`], which carries
+    /// it, so the persisted `ingress_json`/`state` pair cannot disagree.
+    pub fn ingress(&self) -> TurnInputIngress {
+        self.state.ingress()
+    }
+
     /// Exposes accepted input to store and durable-substrate implementors while claiming and
     /// settling durable turn inputs. Returns `None` when no accepted input is present.
     pub fn accepted_input(&self) -> Option<crate::AcceptedInjectedTurnInput> {
@@ -1158,7 +1317,7 @@ turn_input_wire!(TurnInputCheckpointBoundary, pub, as_wire_str, from_wire_str {
     BeforeCompletion => "before_completion",
 });
 
-turn_input_wire!(TurnInputState, pub, as_str, from_wire_str {
+turn_input_wire!(TurnInputStateKind, pub, as_str, from_wire_str {
     PendingActive => "pending_active",
     DeferredNextTurn => "deferred_next_turn",
     Accepted => "accepted",
@@ -1193,3 +1352,7 @@ impl TurnInput {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "turn_input_vocabulary_tests.rs"]
+mod tests;

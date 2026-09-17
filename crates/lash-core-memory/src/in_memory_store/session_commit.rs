@@ -551,7 +551,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
                     if turn_input::settlement_matches(entry, completed) {
-                        entry.input.state = crate::TurnInputState::Completed;
+                        entry.input.state =
+                            crate::TurnInputState::Completed(entry.input.state.ingress());
                         entry.clear_claim();
                     }
                 }
@@ -575,12 +576,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 }
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == commit.session_id
-                        && entry.input.state == crate::TurnInputState::PendingActive
-                        && entry
-                            .input
-                            .ingress
-                            .active_turn_id()
-                            .is_some_and(|active| active == turn_id)
+                        && matches!(
+                            &entry.input.state,
+                            crate::TurnInputState::PendingActive(scope)
+                                if scope.turn_id.as_str() == turn_id
+                        )
                     {
                         let affected = crate::TurnCancelAffectedInput {
                             input_id: entry.input.input_id.clone(),
@@ -590,10 +590,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         match disposition {
                             crate::TurnCancelDisposition::Defer => {
                                 entry.input.state = crate::TurnInputState::DeferredNextTurn;
-                                entry.input.ingress = crate::TurnInputIngress::NextTurn;
                             }
                             crate::TurnCancelDisposition::Drop => {
-                                entry.input.state = crate::TurnInputState::Cancelled;
+                                entry.input.state =
+                                    crate::TurnInputState::Cancelled(entry.input.state.ingress());
                             }
                         }
                         entry.claim.release();

@@ -1568,7 +1568,10 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         .list_pending_turn_inputs(&request.session_id)
         .await
         .expect("read input after veto");
-    assert_eq!(pending[0].input.state, crate::TurnInputState::PendingActive);
+    assert_eq!(
+        pending[0].input.state.kind(),
+        crate::TurnInputStateKind::PendingActive
+    );
     let stale_after_step = store
         .turn_cancel_request_intent(&cancel.address)
         .await
@@ -1612,8 +1615,8 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         .await
         .expect("stale repair publishes no input effects");
     assert_eq!(
-        still_pending[0].input.state,
-        crate::TurnInputState::PendingActive
+        still_pending[0].input.state.kind(),
+        crate::TurnInputStateKind::PendingActive
     );
     let observed = store
         .turn_cancel_request_intent(&cancel.address)
@@ -1916,7 +1919,10 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         .await
         .expect("read active input after stale commit");
     assert_eq!(rows[0].input.input_id, pending.input_id);
-    assert_eq!(rows[0].input.state, crate::TurnInputState::PendingActive);
+    assert_eq!(
+        rows[0].input.state.kind(),
+        crate::TurnInputStateKind::PendingActive
+    );
     assert!(
         !store
             .turn_is_committed(&address)

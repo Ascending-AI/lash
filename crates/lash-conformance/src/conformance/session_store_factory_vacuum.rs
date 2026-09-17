@@ -176,7 +176,7 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
         replay_b.input_id, input_b.input_id,
         "session B pending tombstone must still exist after session A vacuum"
     );
-    assert_eq!(replay_b.state, crate::TurnInputState::Cancelled);
+    assert_eq!(replay_b.state.kind(), crate::TurnInputStateKind::Cancelled);
 
     // Vacuum store B: now removes session B's pending input tombstone
     let report_b = store_b.vacuum().await.expect("vacuum session b");

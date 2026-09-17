@@ -1137,7 +1137,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
             assert_eq!(stored.input.input_id, receipt.input_id);
             assert_eq!(stored.input.session_id, receipt.session_id);
             assert_eq!(stored.input.source_key, receipt.source_key);
-            assert_eq!(stored.input.ingress, receipt.ingress);
+            assert_eq!(stored.input.ingress(), receipt.ingress);
             assert_eq!(receipt.source_key.as_deref(), Some("host:fig-430-retry"));
         }
         (Err(error), stored) => panic!(
