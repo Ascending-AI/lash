@@ -10,8 +10,7 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let _ = attempt.child_process_parent_scope().await;
     let _ = attempt.agent_frame_id();
     let _ = attempt.cancellation_token();
-    let _ = attempt.async_process_id();
-    let _ = attempt.runtime_process_id();
+    let _ = attempt.enclosing_process();
     let _ = attempt.attachments();
     let _ = attempt.provider();
     let _ = attempt.prepared_payload();

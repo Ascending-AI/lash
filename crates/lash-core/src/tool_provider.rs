@@ -140,8 +140,9 @@ pub struct AttemptContext<'run> {
     sessions: AttemptSessionReads,
     processes: AttemptProcessReads,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
-    async_process_id: Option<ProcessId>,
-    runtime_process_id: Option<ProcessId>,
+    /// The process this attempt executes inside, resolved once at context
+    /// construction. `ToolContext` carries the same single fact.
+    enclosing_process: Option<ProcessId>,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     /// The dispatch-bound direct-completion client. `pub(crate)` so the
     /// attempt-atomicity laws can reach the *raw* client and prove the binding
@@ -246,18 +247,7 @@ impl<'run> AttemptContext<'run> {
                 processes: Arc::clone(&context.processes),
             },
             cancellation_token: context.cancellation_token.clone(),
-            async_process_id: context.async_process_id.clone(),
-            // A body that declares a process-scoped intent needs to name the
-            // process it runs in, and inside a process replay that id arrives
-            // only on the process-event binding the leaf context does not
-            // carry. Resolve it here rather than leaving the leaf blind to its
-            // own enclosing process.
-            runtime_process_id: context.runtime_process_id.clone().or_else(|| {
-                context
-                    .process_events
-                    .as_ref()
-                    .map(|process| process.process_id.clone())
-            }),
+            enclosing_process: context.enclosing_process.clone(),
             attachment_store: Arc::clone(&context.attachment_store),
             direct_completions: context.direct_completions.clone(),
             parent_invocation: context.parent_invocation.clone().map(Box::new),
@@ -332,13 +322,9 @@ impl<'run> AttemptContext<'run> {
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
         self.cancellation_token.as_ref()
     }
-    /// Integrator class 3 asynchronous process handle associated with this attempt.
-    pub fn async_process_id(&self) -> Option<&str> {
-        self.async_process_id.as_deref()
-    }
-    /// Integrator class 3 durable process currently executing this attempt, if any.
-    pub fn runtime_process_id(&self) -> Option<&str> {
-        self.runtime_process_id.as_deref()
+    /// Integrator class 3 process this attempt executes inside, if any.
+    pub fn enclosing_process(&self) -> Option<&str> {
+        self.enclosing_process.as_deref()
     }
     /// Integrator class 3 attachment capability for durable tool output.
     pub fn attachments(&self) -> ToolAttachmentClient {
@@ -499,8 +485,9 @@ pub struct ToolContext<'run> {
     pub runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     pub(crate) runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     pub(crate) cancellation_token: Option<tokio_util::sync::CancellationToken>,
-    pub(crate) async_process_id: Option<ProcessId>,
-    pub(crate) runtime_process_id: Option<ProcessId>,
+    /// The process this call executes inside. Set once at context
+    /// construction; `process_events`'s append target is asserted equal to it.
+    pub(crate) enclosing_process: Option<ProcessId>,
     pub(crate) process_events: Option<ToolProcessEventContext>,
     pub(crate) attachment_store: Arc<crate::SessionAttachmentStore>,
     pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
@@ -573,8 +560,7 @@ pub struct ToolContextBuilder<'run> {
     runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
-    async_process_id: Option<ProcessId>,
-    runtime_process_id: Option<ProcessId>,
+    enclosing_process: Option<ProcessId>,
     process_events: Option<ToolProcessEventContext>,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     direct_completions: crate::DirectCompletionClient<'run>,
@@ -603,8 +589,7 @@ impl<'run> ToolContextBuilder<'run> {
             runtime_dispatch: Some(Arc::clone(&dispatch)),
             runtime_execution_context: None,
             cancellation_token: None,
-            async_process_id: None,
-            runtime_process_id: None,
+            enclosing_process: None,
             process_events: None,
             attachment_store: Arc::clone(&dispatch.attachment_store),
             direct_completions: dispatch.direct_completions.clone(),
@@ -653,18 +638,11 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
-    pub(crate) fn runtime_process_id(mut self, process_id: Option<ProcessId>) -> Self {
-        self.runtime_process_id = process_id;
-        self
-    }
-
-    pub(crate) fn async_process(
-        mut self,
-        process_id: impl Into<ProcessId>,
-        cancellation_token: tokio_util::sync::CancellationToken,
-    ) -> Self {
-        self.async_process_id = Some(process_id.into());
-        self.cancellation_token = Some(cancellation_token);
+    /// Name the process this call executes inside. This is the one accessor
+    /// hosts write; the process-event append target set via
+    /// [`Self::process_events`] must agree with it.
+    pub(crate) fn enclosing_process(mut self, process_id: Option<ProcessId>) -> Self {
+        self.enclosing_process = process_id;
         self
     }
 
@@ -680,8 +658,19 @@ impl<'run> ToolContextBuilder<'run> {
         process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
+        let process_id = process_id.into();
+        // The event append target and the enclosing process are the same fact.
+        // When the host already named one, they must agree; when it has not,
+        // the write authority's id is it.
+        match &self.enclosing_process {
+            Some(enclosing) => assert_eq!(
+                enclosing, &process_id,
+                "process_events target must equal the context's enclosing process"
+            ),
+            None => self.enclosing_process = Some(process_id.clone()),
+        }
         self.process_events = Some(ToolProcessEventContext {
-            process_id: process_id.into(),
+            process_id,
             execution_write_authority,
             process_work,
             store,
@@ -715,8 +704,7 @@ impl<'run> ToolContextBuilder<'run> {
             runtime_dispatch: self.runtime_dispatch,
             runtime_execution_context: self.runtime_execution_context,
             cancellation_token: self.cancellation_token,
-            async_process_id: self.async_process_id,
-            runtime_process_id: self.runtime_process_id,
+            enclosing_process: self.enclosing_process,
             process_events: self.process_events,
             attachment_store: self.attachment_store,
             direct_completions: self.direct_completions,
@@ -764,8 +752,7 @@ impl<'run> ToolContext<'run> {
                 None => None,
             },
             cancellation_token: self.cancellation_token.clone(),
-            async_process_id: self.async_process_id.clone(),
-            runtime_process_id: self.runtime_process_id.clone(),
+            enclosing_process: self.enclosing_process.clone(),
             process_events: self.process_events.clone(),
             attachment_store: Arc::clone(&self.attachment_store),
             direct_completions: self.direct_completions.to_static()?,
@@ -814,8 +801,7 @@ impl<'run> ToolContext<'run> {
             runtime_dispatch: None,
             runtime_execution_context: None,
             cancellation_token: None,
-            async_process_id: None,
-            runtime_process_id: None,
+            enclosing_process: None,
             process_events: None,
             attachment_store,
             direct_completions,
@@ -953,23 +939,12 @@ impl<'run> ToolContext<'run> {
         }
     }
 
-    /// Exposes async process id to protocol and process-engine implementors while preparing or
-    /// executing an authorized tool call. Returns `None` when no async process id is present.
-    pub fn async_process_id(&self) -> Option<&str> {
-        self.async_process_id.as_deref()
-    }
-
-    /// Exposes runtime process id to protocol and process-engine implementors while preparing or
-    /// executing an authorized tool call. Returns `None` when no runtime process id is present.
-    pub fn runtime_process_id(&self) -> Option<&str> {
-        self.async_process_id
-            .as_deref()
-            .or(self.runtime_process_id.as_deref())
-            .or_else(|| {
-                self.process_events
-                    .as_ref()
-                    .map(|context| context.process_id.as_str())
-            })
+    /// Exposes the process this call executes inside to protocol and
+    /// process-engine implementors while preparing or executing an
+    /// authorized tool call. Returns `None` when the call runs outside a
+    /// process.
+    pub fn enclosing_process(&self) -> Option<&str> {
+        self.enclosing_process.as_deref()
     }
 
     /// Exposes tool call id to protocol and process-engine implementors while preparing or
@@ -1059,15 +1034,14 @@ impl<'run> ToolContext<'run> {
         self.completion.take()
     }
 
-    /// Sets the async process carried by a `ToolContext` for protocol and process-engine
-    /// implementors while preparing or executing an authorized tool call.
-    pub fn with_async_process(
+    /// Sets the process this call executes inside, along with the
+    /// cooperative cancellation token the host pairs with it.
+    pub fn with_enclosing_process(
         mut self,
         process_id: impl Into<ProcessId>,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> Self {
-        self.async_process_id = Some(process_id.into());
-        self.runtime_process_id = self.async_process_id.clone();
+        self.enclosing_process = Some(process_id.into());
         self.cancellation_token = Some(cancellation_token);
         self
     }
@@ -1080,6 +1054,13 @@ impl<'run> ToolContext<'run> {
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
     ) -> Self {
         let process_id = process_id.into();
+        match &self.enclosing_process {
+            Some(enclosing) => assert_eq!(
+                enclosing, &process_id,
+                "process_events target must equal the context's enclosing process"
+            ),
+            None => self.enclosing_process = Some(process_id.clone()),
+        }
         let watched = crate::facade_support::watch_process_registry(registry);
         let port = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
             watched.registry(),
@@ -1131,10 +1112,10 @@ impl<'run> ToolContext<'run> {
     pub fn __with_attempt_binding_for_testing(
         mut self,
         tool_call_id: Option<String>,
-        runtime_process_id: Option<ProcessId>,
+        enclosing_process: Option<ProcessId>,
     ) -> Self {
         self.tool_call_id = tool_call_id;
-        self.runtime_process_id = runtime_process_id;
+        self.enclosing_process = enclosing_process;
         self
     }
 
@@ -1747,7 +1728,7 @@ mod tests {
         )
         .prepared_call(&prepared)
         .cancellation_token(Some(cancellation.clone()))
-        .async_process("process-1", cancellation.clone())
+        .enclosing_process(Some("process-1".into()))
         .build();
 
         assert_eq!(context.session_id(), "session-1");
@@ -1756,8 +1737,42 @@ mod tests {
             context.prepared_payload(),
             &serde_json::json!({ "prepared": true })
         );
-        assert_eq!(context.async_process_id(), Some("process-1"));
+        assert_eq!(context.enclosing_process(), Some("process-1"));
         assert!(context.cancellation_token().is_some());
+    }
+
+    #[test]
+    fn enclosing_process_travels_from_tool_context_to_attempt_context() {
+        let context = crate::testing::mock_tool_context()
+            .with_enclosing_process("process-1", tokio_util::sync::CancellationToken::new());
+        let attempt = crate::AttemptContext::__for_testing(&context, "attempt-scope".to_string());
+        assert_eq!(attempt.enclosing_process(), Some("process-1"));
+    }
+
+    #[test]
+    fn process_events_target_supplies_enclosing_process_when_host_did_not() {
+        let registry: Arc<dyn crate::ProcessRegistry> =
+            Arc::new(crate::TestLocalProcessRegistry::default());
+        let context = crate::testing::mock_tool_context().with_process_events_for_testing(
+            "process-2",
+            registry,
+            crate::ProcessExecutionWriteAuthority::invocation("process-2", "exec-1"),
+        );
+        assert_eq!(context.enclosing_process(), Some("process-2"));
+    }
+
+    #[test]
+    #[should_panic(expected = "process_events target must equal the context's enclosing process")]
+    fn process_events_target_must_match_enclosing_process() {
+        let registry: Arc<dyn crate::ProcessRegistry> =
+            Arc::new(crate::TestLocalProcessRegistry::default());
+        let _ = crate::testing::mock_tool_context()
+            .with_enclosing_process("process-a", tokio_util::sync::CancellationToken::new())
+            .with_process_events_for_testing(
+                "process-b",
+                registry,
+                crate::ProcessExecutionWriteAuthority::invocation("process-b", "exec-1"),
+            );
     }
 
     #[tokio::test]
