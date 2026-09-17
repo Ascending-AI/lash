@@ -910,9 +910,10 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs (
             input_id, session_id, ingress_json, state, input_json, enqueued_at_ms,
-            claim_id, claim_token, claim_fencing_token, claim_session_lease_generation
+            claim_id, claim_owner_id, claim_owner_incarnation_id, claim_token,
+            claim_fencing_token, claim_session_lease_generation
          )
-         VALUES ($1, $2, '{}', $3, '{}', 1, $4, $5, 1, 1)",
+         VALUES ($1, $2, '{}', $3, '{}', 1, $4, 'owner-a', 'incarnation-a', $5, 1, 1)",
     )
     .bind(&input_id)
     .bind(session_id.as_str())
@@ -936,7 +937,8 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         .expect("bound superseder lock wait");
     let blocked = sqlx::query(
         "UPDATE lash_pending_turn_inputs
-         SET claim_id = 'claim-b', claim_token = 'token-b',
+         SET claim_id = 'claim-b', claim_owner_id = 'owner-b',
+             claim_owner_incarnation_id = 'incarnation-b', claim_token = 'token-b',
              claim_fencing_token = 2, claim_session_lease_generation = 2
          WHERE session_id = $1 AND input_id = $2",
     )
@@ -984,7 +986,8 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
         .expect("begin fresh superseder");
     sqlx::query(
         "UPDATE lash_pending_turn_inputs
-         SET claim_id = 'claim-b', claim_token = 'token-b',
+         SET claim_id = 'claim-b', claim_owner_id = 'owner-b',
+             claim_owner_incarnation_id = 'incarnation-b', claim_token = 'token-b',
              claim_fencing_token = 2, claim_session_lease_generation = 2
          WHERE session_id = $1 AND input_id = $2",
     )

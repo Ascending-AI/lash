@@ -14,6 +14,15 @@ pub fn trigger_subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilt
     crate::triggers::list_subscriptions_query(filter).0
 }
 
+/// The shared-fragment DDL statements provisioning applies to `database`.
+/// Fixtures that shadow a schema table with their own declaration apply these
+/// to complete the fragment-carried catalog without duplicating DDL text.
+pub fn database_fragment_statements(
+    database: crate::SqliteDatabase,
+) -> impl Iterator<Item = &'static str> {
+    database.fragment_statements()
+}
+
 /// Transaction boundary at which one armed fault is injected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

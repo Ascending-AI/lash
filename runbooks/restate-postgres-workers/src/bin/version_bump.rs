@@ -60,8 +60,13 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// run.
 const MIGRATION_FLOOR_VERSION: i32 = 94;
 /// The tables component 94 lacks: the named process-definition registry
-/// (component 97) and the release stamp (component 98).
-const POST_FLOOR_TABLES: [&str; 2] = ["lash_process_definitions", "lash_release_stamp"];
+/// (component 97), the release stamp (component 98), and the cancellation
+/// affected-input child table (component 102).
+const POST_FLOOR_TABLES: [&str; 3] = [
+    "lash_process_definitions",
+    "lash_release_stamp",
+    "lash_turn_cancel_affected_inputs",
+];
 /// The post-floor indexes the fixture must drop by name. Component 95 and 96
 /// installed none: both moved document content, not DDL.
 const POST_FLOOR_INDEXES: [&str; 0] = [];
@@ -74,7 +79,11 @@ const POST_FLOOR_COLUMNS: [(&str, &str); 2] = [
 ];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 2] = ["lash_process_definitions", "lash_release_stamp"];
+const POST_FLOOR_ARTIFACTS: [&str; 3] = [
+    "lash_process_definitions",
+    "lash_release_stamp",
+    "lash_turn_cancel_affected_inputs",
+];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the

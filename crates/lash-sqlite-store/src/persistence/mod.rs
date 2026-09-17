@@ -139,13 +139,14 @@ pub(crate) fn ensure_session_not_deleted_conn(
     }
 }
 
-/// The assignment half of turn-input settlement, shared by both settlement
-/// regimes so only the predicate differs (ADR 0069 §5). `?3` is the settled
-/// lifecycle state.
 const PENDING_TURN_INPUT_COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingress_json, state, input_json, enqueued_at_ms, claim_id, claim_fencing_token, claim_owner_id, claim_owner_incarnation_id, claim_token, claim_session_lease_generation";
 
-const TURN_INPUT_SETTLEMENT_ASSIGNMENTS: &str = "state = ?3,
-                                     claim_id = NULL,
+/// The claim-release assignment tail: settling an input clears the whole
+/// four-column identity family in one motion;
+/// `ck_pending_turn_inputs_claim_identity_all_or_none` makes that all-or-none
+/// shape load-bearing, so every release path shares this spelling. `?3` is the
+/// settled lifecycle state the caller assigns alongside it (ADR 0069 §5).
+const TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS: &str = "claim_id = NULL,
                                      claim_owner_id = NULL,
                                      claim_owner_incarnation_id = NULL,
                                      claim_token = NULL,

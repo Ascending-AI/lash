@@ -42,7 +42,7 @@ fn fig2837_every_sqlite_registry_entry_names_an_inspectable_component() {
 
     let components = EXPECTED_CONSTRAINTS
         .iter()
-        .map(|constraint| constraint.sqlite_database)
+        .flat_map(|constraint| constraint.sqlite_databases.iter().copied())
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         components,
@@ -119,7 +119,7 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
         finding,
         RequiredConstraintFinding::Missing { table, name, .. }
             if table == "pending_turn_inputs"
-                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+                && name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
 
     let altered_path = directory.path().join("altered.db");
@@ -129,7 +129,7 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
             "CREATE TABLE pending_turn_inputs (
                 claim_id TEXT,
                 claim_token TEXT,
-                CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
+                CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
                     CHECK (claim_id IS NULL OR claim_token IS NOT NULL)
             );",
         )
@@ -141,7 +141,7 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
         finding,
         RequiredConstraintFinding::Altered { table, name, .. }
             if table == "pending_turn_inputs"
-                && name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+                && name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
 
     let unrelated_path = directory.path().join("unrelated-grammar.db");
@@ -150,10 +150,14 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
         .execute_batch(
             "CREATE TABLE pending_turn_inputs (
                 claim_id TEXT,
+                claim_owner_id TEXT,
+                claim_owner_incarnation_id TEXT,
                 claim_token TEXT,
-                CONSTRAINT ck_pending_turn_inputs_claim_id_token_all_or_none
-                    CHECK ((claim_id IS NULL AND claim_token IS NULL)
-                        OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
+                CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none
+                    CHECK ((claim_id IS NULL AND claim_owner_id IS NULL
+                            AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL)
+                        OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL
+                            AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
                 CONSTRAINT ck_host_extra CHECK (printf('%q', claim_id) GLOB '*')
             );",
         )
@@ -164,7 +168,7 @@ async fn sqlite_inspection_distinguishes_missing_and_altered_named_checks() {
     assert!(!unrelated.findings().iter().any(|finding| matches!(
         finding,
         RequiredConstraintFinding::Altered { name, .. }
-            if name == "ck_pending_turn_inputs_claim_id_token_all_or_none"
+            if name == "ck_pending_turn_inputs_claim_identity_all_or_none"
     )));
 }
 
@@ -227,6 +231,15 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
             );",
         )
         .expect("create genuinely quoted lowercase identifiers");
+    // The custom table shadows the schema's own declaration; the shared
+    // fragments complete the fragment-carried catalog.
+    for statement in
+        lash_sqlite_store::testing::database_fragment_statements(SqliteDatabase::EffectReplay)
+    {
+        genuine
+            .execute_batch(statement)
+            .expect("apply the shared fragment tables");
+    }
     assert!(
         genuine
             .execute(
@@ -291,10 +304,19 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
                  CONSTRAINT ck_runtime_effect_replay_status
                      CHECK (status IN ('in_progress', 'completed', 'failed'))
              );
-             INSERT INTO runtime_effect_replay(status) VALUES ('completed');
-             PRAGMA wal_checkpoint(TRUNCATE);",
+             INSERT INTO runtime_effect_replay(status) VALUES ('completed');",
         )
         .expect("create and checkpoint fixture");
+    for statement in
+        lash_sqlite_store::testing::database_fragment_statements(SqliteDatabase::EffectReplay)
+    {
+        checkpointed
+            .execute_batch(statement)
+            .expect("apply the shared fragment tables");
+    }
+    checkpointed
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .expect("checkpoint the completed fixture");
     drop(checkpointed);
     for suffix in ["wal", "shm"] {
         let sidecar = sqlite_sidecar(&checkpointed_path, suffix);
@@ -346,6 +368,12 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
          INSERT INTO runtime_effect_replay(status) VALUES ('completed');",
     )
     .expect("commit schema and row to the live WAL");
+    for statement in
+        lash_sqlite_store::testing::database_fragment_statements(SqliteDatabase::EffectReplay)
+    {
+        live.execute_batch(statement)
+            .expect("apply the shared fragment tables");
+    }
     let wal_path = sqlite_sidecar(&live_path, "wal");
     assert!(wal_path.exists(), "fixture must retain a committed WAL");
     let main_before = std::fs::read(&live_path).expect("read live main database");
