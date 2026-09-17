@@ -912,12 +912,8 @@ impl RlmProtocolExpectations {
                 "{scenario_name} trajectory output"
             );
             assert_eq!(
-                entry.final_output, expected.final_output,
-                "{scenario_name} trajectory final value"
-            );
-            assert_eq!(
-                entry.error, expected.error,
-                "{scenario_name} trajectory error"
+                entry.outcome, expected.outcome,
+                "{scenario_name} trajectory outcome"
             );
         }
         if self.trajectory_omits_tool_call_ids {
@@ -940,8 +936,7 @@ impl RlmProtocolExpectations {
 pub(crate) struct RlmTrajectoryExpectation {
     pub(crate) code: &'static str,
     pub(crate) output: Vec<String>,
-    pub(crate) error: Option<String>,
-    pub(crate) final_output: Option<serde_json::Value>,
+    pub(crate) outcome: lash_rlm_types::CellOutcome<String>,
 }
 
 #[derive(Default)]

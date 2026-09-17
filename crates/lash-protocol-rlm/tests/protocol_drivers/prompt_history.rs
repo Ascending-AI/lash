@@ -116,8 +116,7 @@ fn rlm_prompt_history_text_only_cell_records_code_without_reasoning_or_prose() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -141,8 +140,7 @@ fn rlm_prompt_history_provider_reasoning_is_recorded_separately_from_lashlang_te
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -166,8 +164,7 @@ fn rlm_prompt_history_visible_text_before_cell_is_recorded_as_prose_not_reasonin
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -208,8 +205,7 @@ fn rlm_prompt_history_reasoning_and_visible_prose_are_independent_lanes() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -233,8 +229,7 @@ fn rlm_prompt_history_markdown_code_block_remains_visible_prose_before_real_lash
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "print \"done\"",
                 output: vec!["done\n".to_string()],
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -265,11 +260,10 @@ fn rlm_prompt_history_exec_error_keeps_reasoning_prose_and_code_exact() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "missing_name",
                 output: Vec::new(),
-                error: Some(program_failure_feedback(
+                outcome: lash_rlm_types::CellOutcome::Failed(program_failure_feedback(
                     "unknown binding `missing_name`",
                     "cell",
                 )),
-                final_output: None,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -297,8 +291,7 @@ fn rlm_prompt_history_finish_final_value_keeps_reasoning_prose_and_code_exact() 
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(\"done\");",
                 output: Vec::new(),
-                error: None,
-                final_output: Some(serde_json::json!("done")),
+                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done")),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -324,8 +317,7 @@ fn rlm_prompt_history_reasoning_part_is_preserved_in_trajectory() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(\"Hi.\");",
                 output: Vec::new(),
-                error: None,
-                final_output: Some(serde_json::json!("Hi.")),
+                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("Hi.")),
             }),
             ..RlmProtocolExpectations::default()
         })

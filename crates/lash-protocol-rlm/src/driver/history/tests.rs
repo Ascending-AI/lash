@@ -59,8 +59,7 @@ fn step_event(code: &str) -> SessionHistoryRecord {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: None,
-            final_output: None,
+            outcome: lash_rlm_types::CellOutcome::Running,
         }),
     ))
 }
@@ -119,8 +118,7 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
         }],
         calls: Vec::new(),
         calls_omitted: 0,
-        error: None,
-        final_output: None,
+        outcome: lash_rlm_types::CellOutcome::Running,
     };
 
     let rendered = step_output_text(dialect.prompt_vocabulary(), 7, &entry);
@@ -217,14 +215,13 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                 },
             ],
             calls_omitted: 0,
-            error: Some(crate::feedback::render(
+            outcome: lash_rlm_types::CellOutcome::Failed(crate::feedback::render(
                 &lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Program,
                     "read failed at secret.txt; cache failed at .cache/lash/state",
                 ),
                 "block",
             )),
-            final_output: None,
         }),
     ));
 
@@ -261,8 +258,7 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
                 outcome: lash_rlm_types::RlmExecutedCallOutcome::Ok,
             }],
             calls_omitted: 3,
-            error: None,
-            final_output: None,
+            outcome: lash_rlm_types::CellOutcome::Running,
         }),
     ));
 
@@ -286,8 +282,9 @@ fn legacy_unredacted_trajectory_errors_render_verbatim() {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: Some("read failed at /legacy/worker/private.txt".to_string()),
-            final_output: None,
+            outcome: lash_rlm_types::CellOutcome::Failed(
+                "read failed at /legacy/worker/private.txt".to_string(),
+            ),
         }),
     ));
 
@@ -305,8 +302,7 @@ fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord 
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: Some(error.to_string()),
-            final_output: None,
+            outcome: lash_rlm_types::CellOutcome::Failed(error.to_string()),
         }),
     ))
 }

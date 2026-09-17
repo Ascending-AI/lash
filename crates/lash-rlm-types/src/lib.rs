@@ -15,6 +15,120 @@ pub struct RlmAssistantContent {
     pub prose: String,
 }
 
+/// What an RLM cell resolved to: still running, failed, or finished with a
+/// driver-adjudicated value. One of three — a cell can never carry an error
+/// and a terminal value at once.
+///
+/// `E` is each layer's own error representation: `String` in durable
+/// trajectory and history records, `CellFailure` inside a parked driver
+/// state.
+///
+/// The durable spelling stays the `error` / `final_output` key pair stored
+/// trajectories already carry — the value flattens into the entry's object,
+/// writes at most one of the two keys, and refuses to decode a record that
+/// sets both.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum CellOutcome<E> {
+    /// The cell produced neither an error nor a terminal value.
+    #[default]
+    Running,
+    /// The cell failed.
+    Failed(E),
+    /// The cell produced a driver-adjudicated terminal value.
+    Finished(serde_json::Value),
+}
+
+impl<E> CellOutcome<E> {
+    /// Fold an `error` / `terminal value` pair into the single outcome it
+    /// describes. A pair carrying both resolves to the failure: a finished
+    /// cell must not silently discard its error.
+    pub fn from_parts(error: Option<E>, terminal: Option<serde_json::Value>) -> Self {
+        match (error, terminal) {
+            (Some(error), _) => Self::Failed(error),
+            (None, Some(value)) => Self::Finished(value),
+            (None, None) => Self::Running,
+        }
+    }
+
+    /// The failure, when the cell failed.
+    pub fn error(&self) -> Option<&E> {
+        match self {
+            Self::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Whether the cell failed.
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    /// The terminal value, when the cell finished.
+    pub fn terminal_value(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::Finished(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// A borrowed view, for remapping the error without cloning.
+    pub fn as_ref(&self) -> CellOutcome<&E> {
+        match self {
+            Self::Running => CellOutcome::Running,
+            Self::Failed(error) => CellOutcome::Failed(error),
+            Self::Finished(value) => CellOutcome::Finished(value.clone()),
+        }
+    }
+
+    /// Convert the error representation, keeping the variant.
+    pub fn map_error<F>(self, op: impl FnOnce(E) -> F) -> CellOutcome<F> {
+        match self {
+            Self::Running => CellOutcome::Running,
+            Self::Failed(error) => CellOutcome::Failed(op(error)),
+            Self::Finished(value) => CellOutcome::Finished(value),
+        }
+    }
+}
+
+impl<E: serde::Serialize> serde::Serialize for CellOutcome<E> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(serde::Serialize)]
+        struct Fields<'a, E> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            error: Option<&'a E>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            final_output: Option<&'a serde_json::Value>,
+        }
+        let (error, final_output) = match self {
+            Self::Running => (None, None),
+            Self::Failed(error) => (Some(error), None),
+            Self::Finished(value) => (None, Some(value)),
+        };
+        Fields {
+            error,
+            final_output,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de, E: serde::Deserialize<'de>> serde::Deserialize<'de> for CellOutcome<E> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Fields<E> {
+            error: Option<E>,
+            final_output: Option<serde_json::Value>,
+        }
+        let fields = Fields::deserialize(deserializer)?;
+        match (fields.error, fields.final_output) {
+            (Some(_), Some(_)) => Err(serde::de::Error::custom(
+                "a cell outcome cannot carry both `error` and `final_output`",
+            )),
+            (error, terminal) => Ok(Self::from_parts(error, terminal)),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct RlmTrajectoryEntry {
     pub id: String,
@@ -32,11 +146,12 @@ pub struct RlmTrajectoryEntry {
     pub calls: Vec<RlmExecutedCall>,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub calls_omitted: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    /// Driver-adjudicated terminal value, recorded only after validating the executor's request.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub final_output: Option<serde_json::Value>,
+    /// What the cell resolved to. Serialized flat as the `error` /
+    /// `final_output` key pair stored trajectories already carry; at most
+    /// one key is ever written, and decoding refuses a record that sets
+    /// both.
+    #[serde(flatten)]
+    pub outcome: CellOutcome<String>,
 }
 
 pub type RlmExecutedCall = lash_sansio::ExecutedCallRecord;
@@ -125,10 +240,10 @@ pub enum RlmHistoryItem {
         calls: Vec<RlmExecutedCall>,
         #[serde(default, skip_serializing_if = "is_zero")]
         calls_omitted: usize,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        final_output: Option<serde_json::Value>,
+        /// What the cell resolved to; same flat `error` / `final_output`
+        /// spelling the trajectory entry carries.
+        #[serde(flatten)]
+        outcome: CellOutcome<String>,
     },
 }
 
@@ -151,8 +266,7 @@ impl RlmHistoryItem {
                 .collect(),
             calls: entry.calls.clone(),
             calls_omitted: entry.calls_omitted,
-            error: entry.error.clone(),
-            final_output: entry.final_output.clone(),
+            outcome: entry.outcome.clone(),
         }
     }
 }
@@ -228,8 +342,7 @@ mod rlm_step_serde_tests {
                 outcome: lash_sansio::ExecutedCallOutcome::Ok,
             }],
             calls_omitted: 2,
-            error: Some("not really an error".to_string()),
-            final_output: Some(serde_json::json!({"answer": 42})),
+            outcome: super::CellOutcome::Finished(serde_json::json!({"answer": 42})),
         }
     }
 
@@ -259,7 +372,6 @@ mod rlm_step_serde_tests {
             "output",
             "calls",
             "calls_omitted",
-            "error",
             "final_output",
         ]
         .into_iter()
@@ -267,6 +379,30 @@ mod rlm_step_serde_tests {
         .collect::<Vec<_>>();
         assert_eq!(shared_field_order(&entry), expected_shared_fields);
         assert_eq!(shared_field_order(&history), expected_shared_fields);
+
+        // A failed step spells the same outcome slot `error`-keyed, again in
+        // parity between the two durable forms.
+        let failed_entry = RlmTrajectoryEntry {
+            outcome: super::CellOutcome::Failed("boom".to_string()),
+            ..populated_entry()
+        };
+        let expected_failed_fields = [
+            "id",
+            "protocol_iteration",
+            "code",
+            "output",
+            "calls",
+            "calls_omitted",
+            "error",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+        assert_eq!(shared_field_order(&failed_entry), expected_failed_fields);
+        assert_eq!(
+            shared_field_order(&RlmHistoryItem::from_trajectory_entry(&failed_entry)),
+            expected_failed_fields
+        );
 
         let entry_fields = serialized_field_order(&entry);
         let history_fields = serialized_field_order(&history);
@@ -282,8 +418,7 @@ mod rlm_step_serde_tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            error: None,
-            final_output: None,
+            outcome: super::CellOutcome::Running,
         };
         let sparse_history = RlmHistoryItem::from_trajectory_entry(&sparse_entry);
         let expected_sparse_fields = ["id", "protocol_iteration", "code", "output"]
@@ -294,6 +429,42 @@ mod rlm_step_serde_tests {
         assert_eq!(shared_field_order(&sparse_history), expected_sparse_fields);
         assert!(!serialized_field_order(&sparse_entry).contains(&"images".to_string()));
         assert!(!serialized_field_order(&sparse_history).contains(&"images".to_string()));
+    }
+
+    #[test]
+    fn trajectory_entry_refuses_an_outcome_both_failed_and_finished() {
+        for (label, decoded) in [
+            (
+                "trajectory entry",
+                serde_json::from_value::<RlmTrajectoryEntry>(serde_json::json!({
+                    "id": "step-1",
+                    "protocol_iteration": 0,
+                    "code": "print('x')",
+                    "output": [],
+                    "error": "boom",
+                    "final_output": {"answer": 42},
+                }))
+                .map(|_| ()),
+            ),
+            (
+                "history step",
+                serde_json::from_value::<RlmHistoryItem>(serde_json::json!({
+                    "kind": "lashlang_step",
+                    "id": "step-1",
+                    "protocol_iteration": 0,
+                    "code": "print('x')",
+                    "output": [],
+                    "error": "boom",
+                    "final_output": {"answer": 42},
+                }))
+                .map(|_| ()),
+            ),
+        ] {
+            assert!(
+                decoded.is_err(),
+                "{label}: a step cannot be failed and finished at once"
+            );
+        }
     }
 
     #[test]

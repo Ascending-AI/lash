@@ -18,7 +18,8 @@ use lash_core::{
     facade_support::normalized_response_parts,
 };
 use lash_rlm_types::{
-    RlmDiagnosticEvent, RlmExecutedCall, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry,
+    CellOutcome, RlmDiagnosticEvent, RlmExecutedCall, RlmProtocolEvent, RlmTermination,
+    RlmTrajectoryEntry,
 };
 use serde_json::Value;
 
@@ -499,7 +500,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
 
         match result {
             Ok(response) => {
-                let error = response.error;
+                // Fold the executor's `error` / `terminal_finish` pair into the
+                // one outcome it describes; a pair carrying both resolves to
+                // the failure rather than discarding it.
+                let outcome = CellOutcome::from_parts(response.error, response.terminal_finish);
                 if !response.degraded_bindings.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                         "projection_rehydration",
@@ -532,11 +536,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         state.output.push(observation.text);
                     }
                 }
-                if let Some(error) = error {
-                    state.error = Some(error);
-                }
-                if let Some(finish_value) = response.terminal_finish {
-                    state.terminal_finish = Some(finish_value);
+                match outcome {
+                    CellOutcome::Running => {}
+                    outcome => *state.outcome = outcome,
                 }
                 if let Some(outcome) = terminal_outcome {
                     actions.push(DriverAction::AppendEvents(trajectory_events(
@@ -544,7 +546,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
-                        None,
                         None,
                     )));
                     actions.push(DriverAction::StartCheckpoint {
@@ -555,14 +556,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 }
             }
             Err(error) => {
-                state.error = Some(lash_core::CellFailure::new(
+                *state.outcome = CellOutcome::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Host,
                     error,
                 ));
             }
         }
 
-        if let Some(finish_value) = &state.terminal_finish {
+        if let Some(finish_value) = state.outcome.terminal_value() {
             // Typed-RLM: validate against the declared schema. If it fails,
             // surface the error to the model and loop; otherwise fall
             // through to the shared terminate-with-value path below.
@@ -583,8 +584,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
-                        Some(error_text.clone()),
-                        None,
+                        Some(CellOutcome::Failed(error_text.clone())),
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
                         self.dialect.as_ref(),
@@ -602,8 +602,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
-                None,
-                Some(finish_value.clone()),
+                Some(CellOutcome::Finished(finish_value.clone())),
             )));
             actions.push(DriverAction::StartCheckpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
@@ -625,10 +624,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 ctx.protocol_iteration(),
                 &state,
                 None,
-                None,
             ),
             Vec::new(),
-            if state.error.is_some() {
+            if state.outcome.is_failed() {
                 AttemptProgress::Stalled
             } else {
                 AttemptProgress::Executed
@@ -1053,14 +1051,16 @@ fn trajectory_entry(
     turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
-    validation_error: Option<String>,
-    final_output: Option<Value>,
+    entry_outcome: Option<CellOutcome<String>>,
 ) -> RlmTrajectoryEntry {
-    let error = validation_error.or_else(|| {
-        state
-            .error
-            .as_ref()
-            .map(|failure| crate::feedback::render(failure, vocabulary.cell_noun))
+    // A step the driver adjudicated on the spot (schema-mismatch failure,
+    // validated finish) names its outcome explicitly; otherwise the entry
+    // records the state's failure, and a pending finish never leaks in.
+    let outcome = entry_outcome.unwrap_or_else(|| match &*state.outcome {
+        CellOutcome::Failed(failure) => {
+            CellOutcome::Failed(crate::feedback::render(failure, vocabulary.cell_noun))
+        }
+        CellOutcome::Running | CellOutcome::Finished(_) => CellOutcome::Running,
     });
     RlmTrajectoryEntry {
         id: format!("lashlang_step_{turn_id}_{protocol_iteration}"),
@@ -1070,8 +1070,7 @@ fn trajectory_entry(
         images: state.images.clone(),
         calls: state.calls.clone(),
         calls_omitted: state.calls_omitted,
-        error,
-        final_output,
+        outcome,
     }
 }
 
@@ -1084,8 +1083,7 @@ fn trajectory_events(
     turn_id: &TurnId,
     protocol_iteration: usize,
     state: &RlmDriverState,
-    validation_error: Option<String>,
-    final_output: Option<Value>,
+    entry_outcome: Option<CellOutcome<String>>,
 ) -> Vec<SessionHistoryRecord> {
     let mut events = Vec::new();
     if let Some(event) =
@@ -1098,8 +1096,7 @@ fn trajectory_events(
         turn_id,
         protocol_iteration,
         state,
-        validation_error,
-        final_output,
+        entry_outcome,
     )));
     events
 }
@@ -1437,21 +1434,22 @@ mod tests {
         let raw_error = "read failed at /workspace/private/secret.txt";
         let state = RlmDriverState {
             code: "read()".to_string(),
-            error: Some(lash_core::CellFailure::new(
+            outcome: CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Host,
                 raw_error,
-            )),
+            ))
+            .into(),
             ..RlmDriverState::default()
         };
 
         let vocabulary = crate::dialect::DialectPromptVocabulary::default();
-        let entry = trajectory_entry(vocabulary, &TurnId::from("turn"), 0, &state, None, None);
-        let error = entry.error.expect("captured public error");
+        let entry = trajectory_entry(vocabulary, &TurnId::from("turn"), 0, &state, None);
+        let error = entry.outcome.error().expect("captured public error");
 
         assert_eq!(entry.code, "read()");
         assert_eq!(
             error,
-            format!(
+            &format!(
                 "{raw_error}\n\nNext: the host failed while handling this cell. Retry it; if the failure persists, report the host problem."
             )
         );

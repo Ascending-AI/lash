@@ -1945,7 +1945,10 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
 
     let failed = &trajectory[0];
     assert_eq!(failed.output, vec!["partial output before the failure"]);
-    assert!(failed.error.is_some(), "the failure keeps its own error");
+    assert!(
+        failed.outcome.is_failed(),
+        "the failure keeps its own error"
+    );
 
     let repaired = &trajectory[1];
     assert_eq!(
@@ -1954,7 +1957,8 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
         "the repair iteration must not inherit the failed cell's output"
     );
     assert_eq!(
-        repaired.error, None,
+        repaired.outcome,
+        lash_rlm_types::CellOutcome::Running,
         "a clean cell must not inherit the previous iteration's error"
     );
     assert_eq!(repaired.code, "print \"repaired\"");

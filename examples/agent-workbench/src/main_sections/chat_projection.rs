@@ -428,8 +428,8 @@ pub(crate) fn transcript_rows_from_committed(
                         if !step.code.trim().is_empty() =>
                     {
                         let mut output = step.output.join("\n");
-                        if let Some(final_output) = step.final_output {
-                            let final_output = serde_json::to_string_pretty(&final_output)
+                        if let Some(final_output) = step.outcome.terminal_value() {
+                            let final_output = serde_json::to_string_pretty(final_output)
                                 .unwrap_or_else(|_| final_output.to_string());
                             if !output.is_empty() {
                                 output.push('\n');
@@ -441,8 +441,8 @@ pub(crate) fn transcript_rows_from_committed(
                             language: language.to_string(),
                             code: step.code,
                             output,
-                            success: step.error.is_none(),
-                            error: step.error,
+                            success: !step.outcome.is_failed(),
+                            error: step.outcome.error().cloned(),
                             tools: transcript_tools(step.calls, step.calls_omitted),
                         }]
                     }

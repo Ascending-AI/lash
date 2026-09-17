@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::{Part, SessionHistoryRecord};
-use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
+use lash_rlm_types::{CellOutcome, RlmProtocolEvent, RlmTrajectoryEntry};
 use lash_sansio::TurnId;
 
 fn step(id: &str, error: Option<&str>, terminal: bool) -> RlmTrajectoryEntry {
@@ -12,8 +12,10 @@ fn step(id: &str, error: Option<&str>, terminal: bool) -> RlmTrajectoryEntry {
         images: Vec::new(),
         calls: Vec::new(),
         calls_omitted: 0,
-        error: error.map(str::to_string),
-        final_output: terminal.then(|| serde_json::json!(1)),
+        outcome: CellOutcome::from_parts(
+            error.map(str::to_string),
+            terminal.then(|| serde_json::json!(1)),
+        ),
     }
 }
 fn pair(step: RlmTrajectoryEntry) -> Vec<SessionHistoryRecord> {

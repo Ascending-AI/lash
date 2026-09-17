@@ -282,7 +282,7 @@ fn superseded_failure_indices(
                         prose_entries.push(entry.index);
                     }
                     Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                        if step.error.is_some() {
+                        if step.outcome.is_failed() {
                             pending_failure_entries.append(&mut prose_entries);
                             pending_failure_entries.push(entry.index);
                             any_failure_pending = true;

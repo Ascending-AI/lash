@@ -365,11 +365,10 @@ fn rlm_protocol_scenario_finish_required_exec_error_at_max_turns_stops_without_r
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "missing_name",
                 output: Vec::new(),
-                error: Some(program_failure_feedback(
+                outcome: lash_rlm_types::CellOutcome::Failed(program_failure_feedback(
                     "unknown binding `missing_name`",
                     "cell",
                 )),
-                final_output: None,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -529,8 +528,7 @@ fn rlm_protocol_scenario_lashlang_cell_runs_exec_and_continues() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "print(\"hi\");",
                 output: vec!["hi\n".to_string()],
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -556,8 +554,7 @@ fn rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajector
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "print \"streamed hi\"",
                 output: vec!["streamed hi\n".to_string()],
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -621,8 +618,7 @@ fn rlm_protocol_scenario_empty_turn_options_use_natural_default() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(\"done\");",
                 output: Vec::new(),
-                error: None,
-                final_output: Some(serde_json::json!("done")),
+                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!("done")),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -663,8 +659,7 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "x = await tools.read_file({ path: \"foo\" })?",
                 output: Vec::new(),
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -722,8 +717,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "x = await tools.custom_frame_switch({})?",
                 output: Vec::new(),
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -773,8 +767,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "x = await tools.custom_fail({})?",
                 output: Vec::new(),
-                error: None,
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Running,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -806,8 +799,7 @@ fn rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ ok: true });",
                 output: Vec::new(),
-                error: None,
-                final_output: Some(serde_json::json!({ "ok": true })),
+                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!({ "ok": true })),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -838,8 +830,7 @@ fn rlm_protocol_scenario_natural_allows_finish_value() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ ok: true });",
                 output: Vec::new(),
-                error: None,
-                final_output: Some(serde_json::json!({ "ok": true })),
+                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!({ "ok": true })),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -889,8 +880,7 @@ fn rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ ok: true });",
                 output: Vec::new(),
-                error: None,
-                final_output: Some(serde_json::json!({ "ok": true })),
+                outcome: lash_rlm_types::CellOutcome::Finished(serde_json::json!({ "ok": true })),
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -931,11 +921,10 @@ fn rlm_protocol_scenario_typed_schema_mismatch_checks_any_of() {
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish(true);",
                 output: Vec::new(),
-                error: Some(
+                outcome: lash_rlm_types::CellOutcome::Failed(
                     "true is not valid under any of the schemas listed in the 'anyOf' keyword"
                         .to_string(),
                 ),
-                final_output: None,
             }),
             ..RlmProtocolExpectations::default()
         })
@@ -979,8 +968,9 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ missing: true });",
                 output: Vec::new(),
-                error: Some("\"ok\" is a required property".to_string()),
-                final_output: None,
+                outcome: lash_rlm_types::CellOutcome::Failed(
+                    "\"ok\" is a required property".to_string(),
+                ),
             }),
             ..RlmProtocolExpectations::default()
         })

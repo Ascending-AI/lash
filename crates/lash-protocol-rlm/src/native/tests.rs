@@ -287,7 +287,9 @@ fn run(
                         "prose"
                     } else if trajectory
                         .iter()
-                        .any(|step: &lash_rlm_types::RlmTrajectoryEntry| step.error.is_some())
+                        .any(|step: &lash_rlm_types::RlmTrajectoryEntry| {
+                            step.outcome.is_failed()
+                        })
                     {
                         if attempted_finish {
                             "schema_mismatch"
