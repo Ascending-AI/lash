@@ -10,7 +10,7 @@ use crate::perf_support::stack::StackProfile;
 use crate::runtime_perf::measurement::{
     CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY, CheckpointCurveAxis, CheckpointCurveConfig,
     HighTrafficConfig, RuntimePerfPhaseProbe, checkpoint_curve_points, phase_name, run_once,
-    run_once_durable_checkpoint_curve, run_once_store_hardening_hot_paths,
+    run_once_durable_checkpoint_curve, run_once_store_hardening_hot_paths, stage,
 };
 use crate::runtime_perf::scenarios::ScenarioPhaseContract;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
@@ -282,10 +282,13 @@ async fn stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls() {
         let cpu_ms = result.metric_samples["process.cpu_ms"][0];
         let available_cores =
             std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get) as f64;
+        let total_ms = result
+            .stage(stage::TOTAL)
+            .expect("measured runs record a total stage")
+            .duration_ms;
         assert!(
-            cpu_ms <= result.total_ms * available_cores,
-            "process CPU {cpu_ms} ms exceeds {} ms across {available_cores} cores",
-            result.total_ms
+            cpu_ms <= total_ms * available_cores,
+            "process CPU {cpu_ms} ms exceeds {total_ms} ms across {available_cores} cores",
         );
         assert!(result.metric_samples["process.cpu_utilization"][0] >= 0.0);
         assert!(result.metric_samples["runtime.workers"][0] >= 1.0);
@@ -706,10 +709,13 @@ async fn durable_queued_work_contention_postgres_smoke_binds_pool_wait_subspan()
         "checkout waits must fit within the observed claim-plus-service bound: pool_wait_max={:?}, claim_wait_max={claim_wait_max}, service_max={service_max}",
         pool_wait.iter().copied().reduce(f64::max)
     );
+    let run_turn_ms = result
+        .stage(stage::RUN_TURN)
+        .expect("the contention run measures run_turn")
+        .duration_ms;
     assert!(
-        pool_wait.iter().all(|sample| *sample <= result.run_turn_ms),
-        "checkout waits must fit within the whole contention run: run_turn_ms={}, pool_wait={pool_wait:?}",
-        result.run_turn_ms
+        pool_wait.iter().all(|sample| *sample <= run_turn_ms),
+        "checkout waits must fit within the whole contention run: run_turn_ms={run_turn_ms}, pool_wait={pool_wait:?}",
     );
 }
 

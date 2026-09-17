@@ -363,13 +363,19 @@ fn summarize_scenario_harnesses(
                 total_ms: summarize_metric(
                     matching
                         .iter()
-                        .map(|result| result.total_ms)
+                        .filter_map(|result| {
+                            result.stage(stage::TOTAL).map(|stage| stage.duration_ms)
+                        })
                         .collect::<Vec<_>>(),
                 ),
                 total_alloc_bytes: summarize_metric(
                     matching
                         .iter()
-                        .map(|result| result.allocations.total.bytes_allocated as f64)
+                        .filter_map(|result| {
+                            result
+                                .stage(stage::TOTAL)
+                                .map(|stage| stage.allocations.bytes_allocated as f64)
+                        })
                         .collect::<Vec<_>>(),
                 ),
             })
@@ -405,49 +411,8 @@ fn summarize(
                 runs: matching.len(),
                 chat_turns,
                 stack_profile: stack_profile.clone(),
-                build_runtime_ms: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.build_runtime_ms)
-                        .collect::<Vec<_>>(),
-                ),
-                seed_state_ms: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.seed_state_ms)
-                        .collect::<Vec<_>>(),
-                ),
-                run_turn_ms: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.run_turn_ms)
-                        .collect::<Vec<_>>(),
-                ),
-                await_background_work_ms: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.await_background_work_ms)
-                        .collect::<Vec<_>>(),
-                ),
-                export_state_ms: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.export_state_ms)
-                        .collect::<Vec<_>>(),
-                ),
-                total_ms: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.total_ms)
-                        .collect::<Vec<_>>(),
-                ),
-                rss_after_export_kb: summarize_optional_metric(
-                    matching
-                        .iter()
-                        .filter_map(|result| {
-                            result.memory.rss_after_export_kb.map(|value| value as f64)
-                        })
-                        .collect::<Vec<_>>(),
+                stage_summary: summarize_stage_entries(
+                    matching.iter().map(|result| &result.stages),
                 ),
                 rss_growth_kb: summarize_optional_metric(
                     matching
@@ -459,82 +424,6 @@ fn summarize(
                     matching
                         .iter()
                         .filter_map(|result| result.memory.hwm_growth_kb.map(|value| value as f64))
-                        .collect::<Vec<_>>(),
-                ),
-                build_runtime_alloc_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.build_runtime.bytes_allocated as f64)
-                        .collect::<Vec<_>>(),
-                ),
-                build_runtime_live_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.build_runtime.net_live_bytes as f64)
-                        .collect::<Vec<_>>(),
-                ),
-                seed_state_alloc_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.seed_state.bytes_allocated as f64)
-                        .collect::<Vec<_>>(),
-                ),
-                seed_state_live_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.seed_state.net_live_bytes as f64)
-                        .collect::<Vec<_>>(),
-                ),
-                run_turn_alloc_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.run_turn.bytes_allocated as f64)
-                        .collect::<Vec<_>>(),
-                ),
-                run_turn_live_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.run_turn.net_live_bytes as f64)
-                        .collect::<Vec<_>>(),
-                ),
-                await_background_work_alloc_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| {
-                            result.allocations.await_background_work.bytes_allocated as f64
-                        })
-                        .collect::<Vec<_>>(),
-                ),
-                await_background_work_live_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| {
-                            result.allocations.await_background_work.net_live_bytes as f64
-                        })
-                        .collect::<Vec<_>>(),
-                ),
-                export_state_alloc_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.export_state.bytes_allocated as f64)
-                        .collect::<Vec<_>>(),
-                ),
-                export_state_live_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.export_state.net_live_bytes as f64)
-                        .collect::<Vec<_>>(),
-                ),
-                total_alloc_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.total.bytes_allocated as f64)
-                        .collect::<Vec<_>>(),
-                ),
-                total_live_bytes: summarize_metric(
-                    matching
-                        .iter()
-                        .map(|result| result.allocations.total.net_live_bytes as f64)
                         .collect::<Vec<_>>(),
                 ),
                 phase_summary: summarize_phase_profiles(
@@ -638,32 +527,57 @@ fn summarize_phase_profiles(
         .collect()
 }
 
+/// Fold every run's (or turn group's) stage maps into per-stage summaries.
+/// Only records that contain the key contribute — a stage that did not run
+/// has no entry and so never reaches the summary, while a measured `0.0`
+/// stays a real sample.
+fn summarize_stage_entries<'a>(
+    stage_maps: impl IntoIterator<Item = &'a BTreeMap<String, RuntimePerfStageRunResult>>,
+) -> BTreeMap<String, RuntimePerfStageSummary> {
+    let mut by_stage: BTreeMap<String, Vec<&RuntimePerfStageRunResult>> = BTreeMap::new();
+    for stages in stage_maps {
+        for (name, entry) in stages {
+            by_stage.entry(name.clone()).or_default().push(entry);
+        }
+    }
+    by_stage
+        .into_iter()
+        .map(|(name, entries)| {
+            let summary = RuntimePerfStageSummary {
+                duration_ms: summarize_metric(
+                    entries.iter().map(|entry| entry.duration_ms).collect(),
+                ),
+                alloc_bytes: summarize_metric(
+                    entries
+                        .iter()
+                        .map(|entry| entry.allocations.bytes_allocated as f64)
+                        .collect(),
+                ),
+                live_bytes: summarize_metric(
+                    entries
+                        .iter()
+                        .map(|entry| entry.allocations.net_live_bytes as f64)
+                        .collect(),
+                ),
+                rss_after_kb: summarize_optional_metric(
+                    entries
+                        .iter()
+                        .filter_map(|entry| entry.rss_after_kb.map(|value| value as f64))
+                        .collect(),
+                ),
+            };
+            (name, summary)
+        })
+        .collect()
+}
+
 fn summarize_turn_group(turns: &[RuntimePerfTurnResult]) -> RuntimePerfTurnSummary {
     RuntimePerfTurnSummary {
-        total_ms: summarize_metric(turns.iter().map(|turn| turn.total_ms).collect()),
-        run_turn_ms: summarize_metric(turns.iter().map(|turn| turn.run_turn_ms).collect()),
-        await_background_work_ms: summarize_metric(
-            turns
-                .iter()
-                .map(|turn| turn.await_background_work_ms)
-                .collect(),
-        ),
+        stage_summary: summarize_stage_entries(turns.iter().map(|turn| &turn.stages)),
         rss_growth_kb: summarize_optional_metric(
             turns
                 .iter()
                 .filter_map(|turn| turn.memory.rss_growth_kb.map(|value| value as f64))
-                .collect(),
-        ),
-        total_alloc_bytes: summarize_metric(
-            turns
-                .iter()
-                .map(|turn| turn.allocations.total.bytes_allocated as f64)
-                .collect(),
-        ),
-        total_live_bytes: summarize_metric(
-            turns
-                .iter()
-                .map(|turn| turn.allocations.total.net_live_bytes as f64)
                 .collect(),
         ),
         phase_summary: summarize_phase_profiles(
@@ -690,41 +604,56 @@ fn mean_turn_result(turns: &[RuntimePerfTurnResult]) -> Option<RuntimePerfTurnRe
         return None;
     }
 
-    let count = turns.len() as f64;
     Some(RuntimePerfTurnResult {
         turn_index: turns[0].turn_index,
-        run_turn_ms: round3(turns.iter().map(|turn| turn.run_turn_ms).sum::<f64>() / count),
-        await_background_work_ms: round3(
-            turns
-                .iter()
-                .map(|turn| turn.await_background_work_ms)
-                .sum::<f64>()
-                / count,
-        ),
-        total_ms: round3(turns.iter().map(|turn| turn.total_ms).sum::<f64>() / count),
-        memory: RuntimePerfTurnMemoryRunResult {
+        stages: mean_turn_stages(turns),
+        memory: RuntimePerfMemoryRunResult {
             rss_before_kb: None,
-            rss_after_turn_kb: None,
-            rss_after_await_kb: None,
             peak_hwm_before_kb: None,
-            peak_hwm_after_await_kb: None,
+            peak_hwm_after_kb: None,
             rss_growth_kb: mean_option_i64(turns.iter().map(|turn| turn.memory.rss_growth_kb)),
             hwm_growth_kb: mean_option_i64(turns.iter().map(|turn| turn.memory.hwm_growth_kb)),
-        },
-        allocations: RuntimePerfTurnAllocationRunResult {
-            run_turn: mean_allocation_delta(turns.iter().map(|turn| &turn.allocations.run_turn)),
-            await_background_work: mean_allocation_delta(
-                turns
-                    .iter()
-                    .map(|turn| &turn.allocations.await_background_work),
-            ),
-            total: mean_allocation_delta(turns.iter().map(|turn| &turn.allocations.total)),
         },
         phase_profile: mean_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
         turn_usage: mean_token_usage(turns.iter().map(|turn| &turn.turn_usage)),
         usage_delta: SessionUsageReport::default(),
         cumulative_usage: SessionUsageReport::default(),
     })
+}
+
+/// The mean of each stage across the turns that ran it. A stage absent from
+/// every turn stays absent; one measured on a subset averages that subset.
+fn mean_turn_stages(
+    turns: &[RuntimePerfTurnResult],
+) -> BTreeMap<String, RuntimePerfStageRunResult> {
+    let mut means = BTreeMap::new();
+    for name in turns.iter().flat_map(|turn| turn.stages.keys()) {
+        if means.contains_key(name) {
+            continue;
+        }
+        let present = turns
+            .iter()
+            .filter_map(|turn| turn.stage(name))
+            .collect::<Vec<_>>();
+        let count = present.len() as f64;
+        means.insert(
+            name.clone(),
+            RuntimePerfStageRunResult {
+                duration_ms: round3(
+                    present.iter().map(|stage| stage.duration_ms).sum::<f64>() / count,
+                ),
+                allocations: mean_allocation_delta(present.iter().map(|stage| &stage.allocations)),
+                rss_after_kb: mean_option_u64(present.iter().map(|stage| stage.rss_after_kb)),
+            },
+        );
+    }
+    means
+}
+
+fn mean_option_u64(values: impl IntoIterator<Item = Option<u64>>) -> Option<u64> {
+    let present = values.into_iter().flatten().collect::<Vec<_>>();
+    (!present.is_empty())
+        .then(|| (present.iter().sum::<u64>() as f64 / present.len() as f64).round() as u64)
 }
 fn summarize_metric(values: Vec<f64>) -> RuntimePerfMetricSummary {
     basic_summary(values)
@@ -757,56 +686,29 @@ mod tests {
         }
     }
 
-    fn allocation_run(bytes_allocated: usize) -> RuntimePerfAllocationRunResult {
-        RuntimePerfAllocationRunResult {
-            build_runtime: allocation_delta(1),
-            seed_state: allocation_delta(2),
-            run_turn: allocation_delta(bytes_allocated / 2),
-            await_background_work: allocation_delta(bytes_allocated / 4),
-            export_state: allocation_delta(3),
-            total: allocation_delta(bytes_allocated),
-        }
-    }
-
     fn memory_run() -> RuntimePerfMemoryRunResult {
         RuntimePerfMemoryRunResult {
             rss_before_kb: None,
-            rss_after_build_kb: None,
-            rss_after_seed_kb: None,
-            rss_after_turn_kb: None,
-            rss_after_await_kb: None,
-            rss_after_export_kb: None,
             peak_hwm_before_kb: None,
-            peak_hwm_after_export_kb: None,
+            peak_hwm_after_kb: None,
             rss_growth_kb: None,
             hwm_growth_kb: None,
         }
     }
 
-    fn turn_memory_run() -> RuntimePerfTurnMemoryRunResult {
-        RuntimePerfTurnMemoryRunResult {
-            rss_before_kb: None,
-            rss_after_turn_kb: None,
-            rss_after_await_kb: None,
-            peak_hwm_before_kb: None,
-            peak_hwm_after_await_kb: None,
-            rss_growth_kb: None,
-            hwm_growth_kb: None,
-        }
+    fn stage_result(duration_ms: f64, bytes_allocated: usize) -> RuntimePerfStageRunResult {
+        RuntimePerfStageRunResult::measured(duration_ms, allocation_delta(bytes_allocated), None)
     }
 
     fn turn_result(total_ms: f64, bytes_allocated: usize) -> RuntimePerfTurnResult {
         RuntimePerfTurnResult {
             turn_index: 0,
-            run_turn_ms: total_ms / 2.0,
-            await_background_work_ms: total_ms / 4.0,
-            total_ms,
-            memory: turn_memory_run(),
-            allocations: RuntimePerfTurnAllocationRunResult {
-                run_turn: allocation_delta(bytes_allocated / 2),
-                await_background_work: allocation_delta(bytes_allocated / 4),
-                total: allocation_delta(bytes_allocated),
-            },
+            stages: turn_stages(
+                stage_result(total_ms / 2.0, bytes_allocated / 2),
+                Some(stage_result(total_ms / 4.0, bytes_allocated / 4)),
+                stage_result(total_ms, bytes_allocated),
+            ),
+            memory: memory_run(),
             phase_profile: BTreeMap::new(),
             turn_usage: lash_core::TokenUsage::default(),
             usage_delta: SessionUsageReport::default(),
@@ -819,26 +721,29 @@ mod tests {
         total_ms: f64,
         bytes_allocated: usize,
     ) -> RuntimePerfRunResult {
+        let turn = turn_result(total_ms, bytes_allocated);
         RuntimePerfRunResult {
             scenario: scenario.name().to_string(),
             scenario_harness: scenario.scenario_harness().name().to_string(),
             chat_turns: 1,
             stack_profile: None,
-            build_runtime_ms: 1.0,
-            seed_state_ms: 1.0,
-            run_turn_ms: total_ms / 2.0,
-            await_background_work_ms: total_ms / 4.0,
-            export_state_ms: 1.0,
-            total_ms,
+            stages: run_stages(
+                [
+                    (stage::BUILD_RUNTIME, stage_result(1.0, 1)),
+                    (stage::SEED_STATE, stage_result(1.0, 2)),
+                    (stage::EXPORT_STATE, stage_result(1.0, 3)),
+                    (stage::TOTAL, stage_result(total_ms, bytes_allocated)),
+                ],
+                std::slice::from_ref(&turn),
+            ),
             session_nodes: 1,
             active_path_messages: 1,
             extra_counters: BTreeMap::new(),
             metric_samples: BTreeMap::new(),
             metric_samples_ms: BTreeMap::new(),
             memory: memory_run(),
-            allocations: allocation_run(bytes_allocated),
             phase_profile: BTreeMap::new(),
-            turns: vec![turn_result(total_ms, bytes_allocated)],
+            turns: vec![turn],
             cumulative_usage: SessionUsageReport::default(),
         }
     }
@@ -1164,8 +1069,12 @@ mod tests {
             duration_trend::DurationTrendGeometry::current(1, 0, 1),
         );
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].total_ms, summary.total_ms.median);
-        assert_eq!(records[0].total_p95_ms, Some(summary.total_ms.p95));
+        let total = summary
+            .stage_summary
+            .get(stage::TOTAL)
+            .expect("total stage summary");
+        assert_eq!(records[0].total_ms, total.duration_ms.median);
+        assert_eq!(records[0].total_p95_ms, Some(total.duration_ms.p95));
         assert_eq!(
             records[0].duration_metrics_ms["process.cpu_ms"].median_ms,
             5.0
@@ -1180,7 +1089,65 @@ mod tests {
                 .duration_metrics_ms
                 .contains_key("process.cpu_utilization")
         );
-        assert_ne!(summary.total_ms.p95, 0.0);
+        assert_ne!(total.duration_ms.p95, 0.0);
+    }
+
+    #[test]
+    fn skipped_and_measured_zero_stages_are_distinguished_in_records_and_summary() {
+        let scenario = RuntimePerfScenario::TurnCheckpoint;
+        let stack_profile = stack_profile(2 * 1024 * 1024);
+
+        // A run that measured every stage, with `export_state` genuinely
+        // measuring zero, next to a run that never reached `export_state`
+        // at all.
+        let mut measured_zero = run_result(scenario, 10.0, 100);
+        measured_zero
+            .stages
+            .insert(stage::EXPORT_STATE.to_string(), stage_result(0.0, 0));
+        let mut missing = run_result(scenario, 10.0, 100);
+        missing.stages.remove(stage::EXPORT_STATE);
+
+        let serialized = serde_json::to_value(&measured_zero).expect("run result serializes");
+        assert!(serialized["stages"]["export_state"]["duration_ms"].is_f64());
+        assert_eq!(serialized["stages"]["export_state"]["duration_ms"], 0.0);
+        let serialized = serde_json::to_value(&missing).expect("run result serializes");
+        assert!(serialized["stages"].get("export_state").is_none());
+
+        let summary = summarize(&[measured_zero, missing], &[scenario], 1, &stack_profile)
+            .into_iter()
+            .next()
+            .expect("summary exists");
+        // Only the run that measured export_state contributes — the median of
+        // one sample is that sample, not an average against a phantom zero.
+        let export = summary
+            .stage_summary
+            .get(stage::EXPORT_STATE)
+            .expect("export_state was measured on one run");
+        assert_eq!(export.duration_ms.median, 0.0);
+        assert_eq!(export.duration_ms.min, export.duration_ms.max);
+    }
+
+    #[test]
+    fn skipped_result_emits_no_stage_records() {
+        let skipped = skipped_runtime_perf_result(RuntimePerfScenario::StoreHardeningHotPaths, 1);
+        assert!(skipped.stages.is_empty());
+        assert!(skipped.turns.iter().all(|turn| turn.stages.is_empty()));
+
+        let stack_profile = stack_profile(2 * 1024 * 1024);
+        let scenario = RuntimePerfScenario::StoreHardeningHotPaths;
+        let summary = summarize(&[skipped], &[scenario], 1, &stack_profile)
+            .into_iter()
+            .next()
+            .expect("summary exists");
+        assert!(summary.stage_summary.is_empty());
+        // No `total` stage means no duration-trend record — a skipped run must
+        // not write a fake 0.0 into the history.
+        let records = duration_trend::records_for_run(
+            std::slice::from_ref(&summary),
+            "full",
+            duration_trend::DurationTrendGeometry::current(1, 0, 1),
+        );
+        assert!(records.is_empty());
     }
 
     #[test]

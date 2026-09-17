@@ -354,9 +354,9 @@ pub(crate) struct DurationMetricHistoryValue {
 /// One durable observation: one scenario's median and p95 wall clock from one
 /// perf run.
 ///
-/// `total_ms` is the scenario summary's median `total_ms` — the same statistic
-/// the advisory duration guard reads — so the trend and the advisory line are
-/// never describing two different numbers.
+/// `total_ms` is the scenario summary's median `total` stage duration — the
+/// same statistic the advisory duration guard reads — so the trend and the
+/// advisory line are never describing two different numbers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DurationHistoryRecord {
     /// See [`HISTORY_RECORD_VERSION`].
@@ -468,7 +468,15 @@ pub(crate) fn records_for_run(
     let recorded_at = Utc::now().to_rfc3339();
     summaries
         .iter()
-        .map(|summary| DurationHistoryRecord {
+        // A scenario that skipped its run has no `total` stage — emitting a
+        // record for it would write a fabricated zero into the history.
+        .filter_map(|summary| {
+            summary
+                .stage_summary
+                .get(super::measurement::stage::TOTAL)
+                .map(|total| (summary, total))
+        })
+        .map(|(summary, total)| DurationHistoryRecord {
             version: HISTORY_RECORD_VERSION,
             scenario: summary.scenario.clone(),
             profile: profile.to_string(),
@@ -479,8 +487,8 @@ pub(crate) fn records_for_run(
             commit: commit.clone(),
             run_id: run_id.clone(),
             recorded_at: recorded_at.clone(),
-            total_ms: summary.total_ms.median,
-            total_p95_ms: Some(summary.total_ms.p95),
+            total_ms: total.duration_ms.median,
+            total_p95_ms: Some(total.duration_ms.p95),
             duration_metrics_ms: summary
                 .metric_summary
                 .iter()

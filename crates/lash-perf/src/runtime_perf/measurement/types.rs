@@ -128,60 +128,155 @@ impl HighTrafficConfig {
     }
 }
 
+/// Stage keys shared by the run- and turn-level `stages` maps.
+///
+/// The map is the contract: a stage the run never reached has no entry.
+/// `0.0` is a real measurement, so encoding "did not run" as a zero-filled
+/// field made a skipped stage indistinguishable from an instant one — and
+/// every aggregation over it silently averaged the placeholder in.
+pub(crate) mod stage {
+    /// Runtime build before any state seeding.
+    pub(crate) const BUILD_RUNTIME: &str = "build_runtime";
+    /// State seeding between build and the first turn.
+    pub(crate) const SEED_STATE: &str = "seed_state";
+    /// Turn execution. At run level this is the sum over all turns.
+    pub(crate) const RUN_TURN: &str = "run_turn";
+    /// Draining background work after the turn.
+    pub(crate) const AWAIT_BACKGROUND_WORK: &str = "await_background_work";
+    /// Exporting the resulting state.
+    pub(crate) const EXPORT_STATE: &str = "export_state";
+    /// The whole run or turn, measured as its own span.
+    pub(crate) const TOTAL: &str = "total";
+}
+
+/// One measured stage of a run or a turn: its wall clock, the allocation
+/// delta it caused, and the RSS sampled at its boundary.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct RuntimePerfStageRunResult {
+    pub(crate) duration_ms: f64,
+    pub(crate) allocations: RuntimePerfAllocationDelta,
+    pub(crate) rss_after_kb: Option<u64>,
+}
+
+impl RuntimePerfStageRunResult {
+    pub(crate) fn measured(
+        duration_ms: f64,
+        allocations: RuntimePerfAllocationDelta,
+        rss_after_kb: Option<u64>,
+    ) -> Self {
+        Self {
+            duration_ms,
+            allocations,
+            rss_after_kb,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfRunResult {
     pub(crate) scenario: String,
     pub(crate) scenario_harness: String,
     pub(crate) chat_turns: usize,
     pub(crate) stack_profile: Option<StackProfile>,
-    pub(crate) build_runtime_ms: f64,
-    pub(crate) seed_state_ms: f64,
-    pub(crate) run_turn_ms: f64,
-    pub(crate) await_background_work_ms: f64,
-    pub(crate) export_state_ms: f64,
-    pub(crate) total_ms: f64,
+    /// The stages this run measured, keyed by `stage::*` name
+    /// (`build_runtime`, `seed_state`, `run_turn`, `await_background_work`,
+    /// `export_state`, `total`). A stage that did not run has no entry.
+    pub(crate) stages: BTreeMap<String, RuntimePerfStageRunResult>,
     pub(crate) session_nodes: usize,
     pub(crate) active_path_messages: usize,
     pub(crate) extra_counters: BTreeMap<String, u64>,
     pub(crate) metric_samples: BTreeMap<String, Vec<f64>>,
     pub(crate) metric_samples_ms: BTreeMap<String, Vec<f64>>,
+    /// Run-scoped memory: the opening sample and whole-run growth. Stage
+    /// boundary readings live on the stage entries themselves.
     pub(crate) memory: RuntimePerfMemoryRunResult,
-    pub(crate) allocations: RuntimePerfAllocationRunResult,
     pub(crate) phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
     pub(crate) turns: Vec<RuntimePerfTurnResult>,
     pub(crate) cumulative_usage: SessionUsageReport,
 }
 
+impl RuntimePerfRunResult {
+    /// The stage entry by `stage::*` name, when the run reached it.
+    pub(crate) fn stage(&self, name: &str) -> Option<&RuntimePerfStageRunResult> {
+        self.stages.get(name)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfTurnResult {
     pub(crate) turn_index: usize,
-    pub(crate) run_turn_ms: f64,
-    pub(crate) await_background_work_ms: f64,
-    pub(crate) total_ms: f64,
-    pub(crate) memory: RuntimePerfTurnMemoryRunResult,
-    pub(crate) allocations: RuntimePerfTurnAllocationRunResult,
+    /// `stage::RUN_TURN`, `stage::AWAIT_BACKGROUND_WORK` and `stage::TOTAL`.
+    pub(crate) stages: BTreeMap<String, RuntimePerfStageRunResult>,
+    pub(crate) memory: RuntimePerfMemoryRunResult,
     pub(crate) phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
     pub(crate) turn_usage: TokenUsage,
     pub(crate) usage_delta: SessionUsageReport,
     pub(crate) cumulative_usage: SessionUsageReport,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RuntimePerfTurnMemoryRunResult {
-    pub(crate) rss_before_kb: Option<u64>,
-    pub(crate) rss_after_turn_kb: Option<u64>,
-    pub(crate) rss_after_await_kb: Option<u64>,
-    pub(crate) peak_hwm_before_kb: Option<u64>,
-    pub(crate) peak_hwm_after_await_kb: Option<u64>,
-    pub(crate) rss_growth_kb: Option<i64>,
-    pub(crate) hwm_growth_kb: Option<i64>,
+impl RuntimePerfTurnResult {
+    /// The stage entry by `stage::*` name, when the turn reached it.
+    pub(crate) fn stage(&self, name: &str) -> Option<&RuntimePerfStageRunResult> {
+        self.stages.get(name)
+    }
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RuntimePerfTurnAllocationRunResult {
-    pub(crate) run_turn: RuntimePerfAllocationDelta,
-    pub(crate) await_background_work: RuntimePerfAllocationDelta,
-    pub(crate) total: RuntimePerfAllocationDelta,
+/// A turn's stage map: `run_turn` and the `total` envelope always ran, while
+/// `await_background_work` records only when the producer actually drained.
+pub(crate) fn turn_stages(
+    run_turn: RuntimePerfStageRunResult,
+    await_background_work: Option<RuntimePerfStageRunResult>,
+    total: RuntimePerfStageRunResult,
+) -> BTreeMap<String, RuntimePerfStageRunResult> {
+    let mut stages = BTreeMap::from([
+        (stage::RUN_TURN.to_string(), run_turn),
+        (stage::TOTAL.to_string(), total),
+    ]);
+    if let Some(await_stage) = await_background_work {
+        stages.insert(stage::AWAIT_BACKGROUND_WORK.to_string(), await_stage);
+    }
+    stages
+}
+
+/// The run-level entry for a turn-level stage: summed duration and
+/// allocations across the turns that ran it, and the last such turn's
+/// boundary RSS. `None` when no turn reached the stage — the run records no
+/// entry rather than a zero.
+pub(crate) fn summed_turn_stage(
+    turns: &[RuntimePerfTurnResult],
+    name: &str,
+) -> Option<RuntimePerfStageRunResult> {
+    let present = turns
+        .iter()
+        .filter_map(|turn| turn.stage(name))
+        .collect::<Vec<_>>();
+    if present.is_empty() {
+        return None;
+    }
+    Some(RuntimePerfStageRunResult {
+        duration_ms: round3(present.iter().map(|stage| stage.duration_ms).sum()),
+        allocations: sum_allocation_deltas(present.iter().map(|stage| &stage.allocations)),
+        rss_after_kb: present.last().and_then(|stage| stage.rss_after_kb),
+    })
+}
+
+/// A run's stage map. `measured` carries the stages the run instrumented
+/// directly; the turn-level stages are then folded in from `turns` under
+/// `run_turn`/`await_background_work` unless the run already named them.
+pub(crate) fn run_stages(
+    measured: impl IntoIterator<Item = (&'static str, RuntimePerfStageRunResult)>,
+    turns: &[RuntimePerfTurnResult],
+) -> BTreeMap<String, RuntimePerfStageRunResult> {
+    let mut stages = measured
+        .into_iter()
+        .map(|(name, result)| (name.to_string(), result))
+        .collect::<BTreeMap<_, _>>();
+    for name in [stage::RUN_TURN, stage::AWAIT_BACKGROUND_WORK] {
+        if let Some(entry) = summed_turn_stage(turns, name) {
+            stages.entry(name.to_string()).or_insert(entry);
+        }
+    }
+    stages
 }
 
 pub(super) async fn runtime_perf_timed<T, F>(
@@ -220,18 +315,30 @@ fn runtime_perf_turn_timeout() -> Duration {
         .unwrap_or(DEFAULT_RUNTIME_PERF_TURN_TIMEOUT)
 }
 
+/// Memory scoped to the whole run or turn: the opening sample, the closing
+/// peak, and the growth between them. Stage-boundary RSS lives on the stage
+/// entries — a stage that did not run has no boundary to read.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfMemoryRunResult {
     pub(crate) rss_before_kb: Option<u64>,
-    pub(crate) rss_after_build_kb: Option<u64>,
-    pub(crate) rss_after_seed_kb: Option<u64>,
-    pub(crate) rss_after_turn_kb: Option<u64>,
-    pub(crate) rss_after_await_kb: Option<u64>,
-    pub(crate) rss_after_export_kb: Option<u64>,
     pub(crate) peak_hwm_before_kb: Option<u64>,
-    pub(crate) peak_hwm_after_export_kb: Option<u64>,
+    pub(crate) peak_hwm_after_kb: Option<u64>,
     pub(crate) rss_growth_kb: Option<i64>,
     pub(crate) hwm_growth_kb: Option<i64>,
+}
+
+/// The whole-span memory record between two samples.
+pub(crate) fn memory_span(
+    before: ProcessMemorySample,
+    after: ProcessMemorySample,
+) -> RuntimePerfMemoryRunResult {
+    RuntimePerfMemoryRunResult {
+        rss_before_kb: before.rss_kb,
+        peak_hwm_before_kb: before.hwm_kb,
+        peak_hwm_after_kb: after.hwm_kb,
+        rss_growth_kb: diff_opt_i64(before.rss_kb, after.rss_kb),
+        hwm_growth_kb: diff_opt_i64(before.hwm_kb, after.hwm_kb),
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -243,16 +350,6 @@ pub(crate) struct RuntimePerfAllocationDelta {
     pub(crate) bytes_deallocated: usize,
     pub(crate) bytes_reallocated: isize,
     pub(crate) net_live_bytes: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RuntimePerfAllocationRunResult {
-    pub(crate) build_runtime: RuntimePerfAllocationDelta,
-    pub(crate) seed_state: RuntimePerfAllocationDelta,
-    pub(crate) run_turn: RuntimePerfAllocationDelta,
-    pub(crate) await_background_work: RuntimePerfAllocationDelta,
-    pub(crate) export_state: RuntimePerfAllocationDelta,
-    pub(crate) total: RuntimePerfAllocationDelta,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -272,6 +369,16 @@ pub(crate) struct RuntimePerfPhaseSummary {
     pub(crate) rss_growth_kb: Option<RuntimePerfMetricSummary>,
 }
 
+/// One stage summarized across runs.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct RuntimePerfStageSummary {
+    pub(crate) duration_ms: RuntimePerfMetricSummary,
+    pub(crate) alloc_bytes: RuntimePerfMetricSummary,
+    pub(crate) live_bytes: RuntimePerfMetricSummary,
+    /// RSS at the stage boundary, when the runs sampled it.
+    pub(crate) rss_after_kb: Option<RuntimePerfMetricSummary>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfScenarioSummary {
     pub(crate) scenario: String,
@@ -281,27 +388,11 @@ pub(crate) struct RuntimePerfScenarioSummary {
     pub(crate) runs: usize,
     pub(crate) chat_turns: usize,
     pub(crate) stack_profile: StackProfile,
-    pub(crate) build_runtime_ms: RuntimePerfMetricSummary,
-    pub(crate) seed_state_ms: RuntimePerfMetricSummary,
-    pub(crate) run_turn_ms: RuntimePerfMetricSummary,
-    pub(crate) await_background_work_ms: RuntimePerfMetricSummary,
-    pub(crate) export_state_ms: RuntimePerfMetricSummary,
-    pub(crate) total_ms: RuntimePerfMetricSummary,
-    pub(crate) rss_after_export_kb: Option<RuntimePerfMetricSummary>,
+    /// Per-stage summaries keyed by `stage::*` name. Only runs that reached
+    /// the stage contribute, so a skipped stage has no summary entry either.
+    pub(crate) stage_summary: BTreeMap<String, RuntimePerfStageSummary>,
     pub(crate) rss_growth_kb: Option<RuntimePerfMetricSummary>,
     pub(crate) hwm_growth_kb: Option<RuntimePerfMetricSummary>,
-    pub(crate) build_runtime_alloc_bytes: RuntimePerfMetricSummary,
-    pub(crate) build_runtime_live_bytes: RuntimePerfMetricSummary,
-    pub(crate) seed_state_alloc_bytes: RuntimePerfMetricSummary,
-    pub(crate) seed_state_live_bytes: RuntimePerfMetricSummary,
-    pub(crate) run_turn_alloc_bytes: RuntimePerfMetricSummary,
-    pub(crate) run_turn_live_bytes: RuntimePerfMetricSummary,
-    pub(crate) await_background_work_alloc_bytes: RuntimePerfMetricSummary,
-    pub(crate) await_background_work_live_bytes: RuntimePerfMetricSummary,
-    pub(crate) export_state_alloc_bytes: RuntimePerfMetricSummary,
-    pub(crate) export_state_live_bytes: RuntimePerfMetricSummary,
-    pub(crate) total_alloc_bytes: RuntimePerfMetricSummary,
-    pub(crate) total_live_bytes: RuntimePerfMetricSummary,
     pub(crate) phase_summary: BTreeMap<String, RuntimePerfPhaseSummary>,
     pub(crate) first_turn: RuntimePerfTurnSummary,
     pub(crate) steady_state_turn: Option<RuntimePerfTurnSummary>,
@@ -315,12 +406,9 @@ pub(crate) struct RuntimePerfScenarioSummary {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfTurnSummary {
-    pub(crate) total_ms: RuntimePerfMetricSummary,
-    pub(crate) run_turn_ms: RuntimePerfMetricSummary,
-    pub(crate) await_background_work_ms: RuntimePerfMetricSummary,
+    /// Per-stage summaries across the grouped turns, keyed by `stage::*`.
+    pub(crate) stage_summary: BTreeMap<String, RuntimePerfStageSummary>,
     pub(crate) rss_growth_kb: Option<RuntimePerfMetricSummary>,
-    pub(crate) total_alloc_bytes: RuntimePerfMetricSummary,
-    pub(crate) total_live_bytes: RuntimePerfMetricSummary,
     pub(crate) phase_summary: BTreeMap<String, RuntimePerfPhaseSummary>,
 }
 
