@@ -28,7 +28,7 @@ impl LlmByteStream for TimeoutBodyStream {
         Err(LlmTransportError::response_read("injected body timeout")
             .with_kind(ProviderFailureKind::Timeout)
             .with_retry_verdict(TransportRetryVerdict::NotRetryable)
-            .with_code("body_timeout"))
+            .with_provider_code("body_timeout"))
     }
 }
 
@@ -72,8 +72,11 @@ async fn codex_non_sse_body_read_failure_preserves_observed_response_evidence() 
     assert_eq!(recorded.http_status, Some(200));
     assert_eq!(recorded.class, ProviderFailureKind::Timeout.code());
     assert_eq!(recorded.provider_code.as_deref(), Some("body_timeout"));
-    assert_eq!(failure.status, Some(200));
+    assert_eq!(failure.error.http_status, Some(200));
     assert_eq!(failure.kind, ProviderFailureKind::Timeout);
     assert_eq!(failure.retry_verdict, TransportRetryVerdict::NotRetryable);
-    assert_eq!(failure.code.as_deref(), Some("body_timeout"));
+    assert_eq!(
+        failure.error.code.as_ref().map(|code| code.to_string()),
+        Some("provider:body_timeout".to_string())
+    );
 }

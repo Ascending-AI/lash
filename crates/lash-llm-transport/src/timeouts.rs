@@ -85,7 +85,10 @@ mod tests {
 
         let error = result.expect_err("slow response start must time out");
         assert_eq!(error.kind, lash_core::ProviderFailureKind::Timeout);
-        assert_eq!(error.code.as_deref(), Some("timeout"));
+        assert_eq!(
+            error.code.as_ref().map(|code| code.to_string()),
+            Some("adapter:timeout".to_string())
+        );
         assert_eq!(error.message, "response start timed out");
         assert!(error.is_retryable());
     }

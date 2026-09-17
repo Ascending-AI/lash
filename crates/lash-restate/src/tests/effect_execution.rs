@@ -321,7 +321,10 @@ pub(super) fn assert_retryable_timeout(error: RestateHttpError, expected_message
         panic!("expected typed Restate request timeout, got {error}");
     };
     assert_eq!(source.kind, lash_core::ProviderFailureKind::Timeout);
-    assert_eq!(source.code.as_deref(), Some("timeout"));
+    assert_eq!(
+        source.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:timeout".to_string())
+    );
     assert!(source.is_retryable());
     assert!(source.message.contains(expected_message), "{source}");
 }

@@ -161,7 +161,7 @@ fn chat_refuses_unencodable_host_declared_provider_file_without_panicking() {
         .build_chat_request_body(&req, false)
         .unwrap_err();
     assert_eq!(
-        error.code.as_deref(),
-        Some("attachment_source_not_encodable")
+        error.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:attachment_source_not_encodable".to_string())
     );
 }

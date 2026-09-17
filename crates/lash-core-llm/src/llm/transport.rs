@@ -3,6 +3,7 @@
 
 pub use lash_http_transport::{LlmTransportError, TransportRetryVerdict, retry_after_from_headers};
 pub use lash_sansio::llm::types::ProviderFailureKind;
+pub use lash_sansio::session_model::TurnFailureCode;
 
 use lash_sansio::llm::types::AttachmentSource;
 
@@ -54,7 +55,7 @@ pub fn unsupported_attachment_capability(
     };
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Validation)
-        .with_code("unsupported_attachment_capability")
+        .with_adapter_code(TurnFailureCode::UnsupportedAttachmentCapability)
 }
 
 pub fn source_kind(source: &AttachmentSource) -> &'static str {

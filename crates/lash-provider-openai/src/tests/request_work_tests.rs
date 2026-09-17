@@ -66,7 +66,10 @@ async fn both_endpoints_bound_http_error_bodies_and_preserve_late_error_codes() 
         let error = crate::driver::complete(&mut provider, req, endpoint)
             .await
             .unwrap_err();
-        assert_eq!(error.code.as_deref(), Some("context_length_exceeded"));
+        assert_eq!(
+            error.code.as_ref().map(|code| code.to_string()),
+            Some("provider:context_length_exceeded".to_string())
+        );
         assert_eq!(error.terminal_reason, LlmTerminalReason::ContextOverflow);
         for diagnostic in [error.raw.as_deref(), error.request_body.as_deref()] {
             let diagnostic = diagnostic.unwrap();

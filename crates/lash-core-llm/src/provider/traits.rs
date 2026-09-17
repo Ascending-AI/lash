@@ -117,27 +117,18 @@ pub struct DefaultProviderFailureClassifier;
 
 impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
     fn classify(&self, mut failure: LlmTransportError) -> LlmTransportError {
-        // Driver-owned semantic evidence is conclusive. `Http`, a bare status,
-        // and its mirrored numeric code are the generic wire envelope, not a
-        // provider classification, so text fallbacks remain available there.
+        // Driver-owned semantic evidence is conclusive. `Http` and a bare
+        // status are the generic wire envelope, not a provider classification,
+        // so text fallbacks remain available there.
         let retry_verdict_classified = failure.retry_verdict_is_classified();
         let structurally_classified = !matches!(
             failure.kind,
             ProviderFailureKind::Unknown | ProviderFailureKind::Http
         ) || failure.terminal_reason
             != LlmTerminalReason::ProviderError
-            || failure
-                .code
-                .as_deref()
-                .is_some_and(|code| code.parse::<u16>().is_err())
+            || matches!(failure.code, Some(FailureCode::Provider(_)))
             || retry_verdict_classified;
-        if let Some(status) = failure.status.or_else(|| {
-            failure
-                .code
-                .as_deref()
-                .and_then(|code| code.parse::<u16>().ok())
-        }) {
-            failure.status = Some(status);
+        if let Some(status) = failure.http_status {
             let generic_kind = matches!(
                 failure.kind,
                 ProviderFailureKind::Unknown | ProviderFailureKind::Http
@@ -165,7 +156,11 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
 
         let haystack = format!(
             "{}\n{}\n{}",
-            failure.code.as_deref().unwrap_or_default(),
+            failure
+                .code
+                .as_ref()
+                .map(FailureCode::spelling)
+                .unwrap_or_default(),
             failure.message,
             failure
                 .raw

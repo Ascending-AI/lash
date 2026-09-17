@@ -74,6 +74,8 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
     result.llm_calls[0].attempts[0].error = Some(RemoteNormalizedError {
         class: String::new(),
         provider_code: None,
+        adapter_code: None,
+        refusal_code: None,
         http_status: None,
         provider_request_id: None,
         retry_after_ms: None,
@@ -118,6 +120,8 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
             error: Some(RemoteNormalizedError {
                 class: "transport".to_string(),
                 provider_code: Some("connection_failed".to_string()),
+                adapter_code: None,
+                refusal_code: None,
                 http_status: None,
                 provider_request_id: None,
                 retry_after_ms: None,
@@ -299,6 +303,8 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
     let normalized_error = || RemoteNormalizedError {
         class: "provider".to_string(),
         provider_code: None,
+        adapter_code: None,
+        refusal_code: None,
         http_status: None,
         provider_request_id: None,
         retry_after_ms: None,
@@ -332,6 +338,8 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         RemoteNormalizedError {
             class: class.to_string(),
             provider_code: None,
+            adapter_code: None,
+            refusal_code: None,
             http_status: None,
             provider_request_id: None,
             retry_after_ms: None,

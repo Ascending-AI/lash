@@ -1182,6 +1182,8 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                 error: Some(lash::remote::llm::RemoteNormalizedError {
                     class: "transport".to_string(),
                     provider_code: Some("connection_reset".to_string()),
+                            adapter_code: None,
+                            refusal_code: None,
                     http_status: Some(503),
                     provider_request_id: Some("request-1".to_string()),
                     retry_after_ms: Some(25),

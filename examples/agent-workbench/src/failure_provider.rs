@@ -292,8 +292,8 @@ impl Provider for DevFailureProvider {
                 send_delta(&request, "provider authentication check started");
                 Err(
                     LlmTransportError::new("development provider rejected credentials mid-turn")
-                        .with_status(401)
-                        .with_code("dev_auth_rejected"),
+                        .with_http_status(401)
+                        .with_provider_code("dev_auth_rejected"),
                 )
             }
             DevProviderScenario::AuthFailureOnce => {
@@ -307,9 +307,9 @@ impl Provider for DevFailureProvider {
                 debug_assert_eq!(retry_verdict.retry_after(), Some(std::time::Duration::ZERO));
                 Err(
                     LlmTransportError::new("development provider rate limit; retry is safe")
-                        .with_status(429)
+                        .with_http_status(429)
                         .with_retry_verdict(retry_verdict)
-                        .with_code("dev_rate_limited"),
+                        .with_provider_code("dev_rate_limited"),
                 )
             }
             DevProviderScenario::RateLimitOnce => Ok(streamed_response(
@@ -322,7 +322,7 @@ impl Provider for DevFailureProvider {
                 Err(
                     LlmTransportError::new("development provider interrupted after paid output")
                         .with_kind(ProviderFailureKind::Stream)
-                        .with_code("dev_paid_output_interrupted")
+                        .with_provider_code("dev_paid_output_interrupted")
                         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                         .with_output_started(true)
                         .with_partial_response(LlmResponse {
@@ -357,7 +357,7 @@ impl Provider for DevFailureProvider {
                 Err(
                     LlmTransportError::new("FIG-1350 deterministic retry boundary")
                         .with_kind(ProviderFailureKind::Stream)
-                        .with_code("fig1350_retry_reset")
+                        .with_provider_code("fig1350_retry_reset")
                         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                         .with_output_started(true)
                         .with_partial_response(LlmResponse {

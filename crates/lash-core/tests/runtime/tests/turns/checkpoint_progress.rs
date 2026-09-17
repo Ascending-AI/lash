@@ -551,7 +551,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
             .with_retry_verdict(
                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
             )
-            .with_code("http_500")),
+            .with_provider_code("http_500")),
         },
         MockCall {
             stream_events: Vec::new(),
@@ -561,7 +561,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
             .with_retry_verdict(
                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
             )
-            .with_code("http_500")),
+            .with_provider_code("http_500")),
         },
         MockCall {
             stream_events: Vec::new(),
@@ -571,7 +571,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
             .with_retry_verdict(
                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
             )
-            .with_code("http_500")),
+            .with_provider_code("http_500")),
         },
         MockCall {
             stream_events: Vec::new(),
@@ -581,7 +581,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
             .with_retry_verdict(
                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
             )
-            .with_code("http_500")),
+            .with_provider_code("http_500")),
         },
     ]);
     let mut runtime = runtime_with_plugins(Vec::new(), transport).await;
@@ -641,7 +641,8 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Err(
-            lash_core::llm::transport::LlmTransportError::new("bad request").with_code("400"),
+            lash_core::llm::transport::LlmTransportError::new("bad request")
+                .with_provider_code("400"),
         ),
     }]);
     let mut runtime = runtime_with_plugins(Vec::new(), transport).await;
@@ -902,10 +903,10 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
     }));
 }
 
-// Boundary: active-turn checkpoint input tests stay in `turns.rs` when they
-// assert model prompt replay, plugin checkpoint hooks, injected-input stream
-// events, image materialization, or persisted conversation projection. Runtime
-// Scenarios own the host-level active-input redrive/cancel/queue invariants.
+/// Boundary: active-turn checkpoint input tests stay in `turns.rs` when they
+/// assert model prompt replay, plugin checkpoint hooks, injected-input stream
+/// events, image materialization, or persisted conversation projection. Runtime
+/// Scenarios own the host-level active-input redrive/cancel/queue invariants.
 #[tokio::test]
 pub(super) async fn checkpoint_hook_can_inject_messages() {
     let plugin = Arc::new(RuntimeTestPluginFactory {

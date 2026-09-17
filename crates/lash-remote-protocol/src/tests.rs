@@ -373,6 +373,8 @@ fn remote_turn_result_json_round_trips() {
             error: Some(RemoteNormalizedError {
                 class: "stream_interrupted".to_string(),
                 provider_code: Some("eof".to_string()),
+                adapter_code: None,
+                refusal_code: None,
                 http_status: None,
                 provider_request_id: Some("provider-request".to_string()),
                 retry_after_ms: Some(0),

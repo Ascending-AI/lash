@@ -845,10 +845,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.record_llm_error(&error);
         let mut envelope = crate::session_model::make_error_envelope(
             crate::session_model::TurnFailureKind::LlmProvider,
-            error
-                .code
-                .as_deref()
-                .map(crate::session_model::TurnFailureCode::from_wire),
+            error.code.as_ref().map(|code| match code {
+                // Provider spellings are foreign vocabulary: the envelope
+                // keeps them verbatim under an explicit `provider:` prefix.
+                crate::session_model::FailureCode::Provider(slug) => {
+                    crate::session_model::TurnFailureCode::Other(format!("provider:{slug}"))
+                }
+                crate::session_model::FailureCode::Adapter(code)
+                | crate::session_model::FailureCode::Refusal(code) => code.clone(),
+            }),
             Some(error.terminal_reason),
             format!("LLM error: {}", error.message),
             error.raw.clone(),

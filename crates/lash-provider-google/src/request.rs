@@ -29,7 +29,7 @@ impl GoogleOAuthProvider {
         .map_err(|error: ReasoningRetentionValidationError| {
             LlmTransportError::new(error.message)
                 .with_kind(ProviderFailureKind::Unsupported)
-                .with_code("unsupported_reasoning_retention")
+                .with_adapter_code(TurnFailureCode::UnsupportedReasoningRetention)
                 .with_retry_verdict(TransportRetryVerdict::Forbidden)
         })
     }
@@ -98,7 +98,7 @@ impl GoogleOAuthProvider {
                     "Google Gemini could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
                 ))
                 .with_kind(ProviderFailureKind::Validation)
-                .with_code("stored_attachment_not_resolved"));
+                .with_adapter_code(TurnFailureCode::StoredAttachmentNotResolved));
                     }
 
                     Ok(())

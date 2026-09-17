@@ -12,8 +12,7 @@ mod recovery;
 
 pub(crate) use recovery::{
     OverflowRecoveryState, emit_recovery_trace, history_recovery_records,
-    overflow_recovery_after_turn, recovery_record_kind, recovery_record_payload,
-    run_overflow_recovery,
+    overflow_recovery_after_turn, recovery_record_payload, run_overflow_recovery,
 };
 use std::{collections::BTreeMap, sync::Arc};
 

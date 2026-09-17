@@ -207,7 +207,7 @@ impl Script {
                         } => {
                             let error = lash::provider::LlmTransportError::new(message)
                                 .with_kind(kind)
-                                .with_code(code)
+                                .with_provider_code(code)
                                 .with_retry_verdict(TransportRetryVerdict::NotRetryable);
                             return Err(error);
                         }
