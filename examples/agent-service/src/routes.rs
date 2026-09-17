@@ -1337,14 +1337,14 @@ mod zero_move_turn_tests {
         let notices: Vec<&StreamItem> = emitted
             .iter()
             .filter(
-                |item| matches!(item, StreamItem::Message { message } if message.role == "system"),
+                |item| matches!(item, StreamItem::Message { message } if message.role() == "system"),
             )
             .collect();
         assert_eq!(notices.len(), 1, "one forfeit notice: {emitted:#?}");
         let StreamItem::Message { message } = notices[0] else {
             unreachable!("filtered to messages");
         };
-        assert_eq!(message.text, ZERO_MOVE_FORFEIT);
+        assert_eq!(message.text(), ZERO_MOVE_FORFEIT);
     }
 }
 
