@@ -375,7 +375,7 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
     let contract_writes = trace
         .durable_writes
         .iter()
-        .filter(|write| write.cause_boundary_id.is_some())
+        .filter(|write| write.attribution.is_some())
         .collect::<Vec<_>>();
     assert!(
         !contract_writes.is_empty(),
@@ -383,7 +383,11 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
     );
     assert!(contract_writes.iter().all(|write| {
         trace.events.iter().any(|event| {
-            Some(event.boundary_id.as_str()) == write.cause_boundary_id.as_deref()
+            write
+                .attribution
+                .as_ref()
+                .map(|attribution| attribution.cause_boundary_id.as_str())
+                == Some(event.boundary_id.as_str())
                 && event.kind == BoundaryKind::Trigger
                 && event.actor_alias == write.attributed_session()
         })

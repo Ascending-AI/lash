@@ -17,9 +17,9 @@ use crate::trace::{
 };
 
 pub use lash_core::testing::checkpoint_observer::{
-    CHECKPOINT_WRITE_EVENT_SCHEMA, CheckpointComponent, CheckpointComponentWrite,
-    CheckpointComponentWriteKind, CheckpointStateWrite, CheckpointWriteCollector,
-    CheckpointWriteEvent, ObservedSessionStoreFactory,
+    CHECKPOINT_WRITE_EVENT_SCHEMA, CheckpointAttribution, CheckpointComponent,
+    CheckpointComponentWrite, CheckpointComponentWriteKind, CheckpointStateWrite,
+    CheckpointWriteCollector, CheckpointWriteEvent, ObservedSessionStoreFactory,
 };
 
 /// Honest checkpoint-evidence split for a static backend replay.
@@ -63,7 +63,7 @@ impl BackendCheckpointReplayEvidence {
             .collect::<BTreeSet<_>>();
         let (recorded_runtime, carried): (Vec<_>, Vec<_>) =
             trace.durable_writes.iter().cloned().partition(|write| {
-                write.cause_boundary_id.is_none()
+                write.attribution.is_none()
                     && replayed_sessions.contains(write.attributed_session())
             });
         // Runtime replay uses different provider input wording and allocates

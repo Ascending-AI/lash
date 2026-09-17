@@ -50,10 +50,7 @@ fn check_checkpoint_state(
     expectations: &WorkloadExpectations,
 ) -> Result<(usize, usize, usize), String> {
     let mut sessions = BTreeMap::<String, CheckedSession>::new();
-    for write in writes
-        .iter()
-        .filter(|write| write.cause_boundary_id.is_none())
-    {
+    for write in writes.iter().filter(|write| write.attribution.is_none()) {
         let Some(state) = &write.state else {
             if write.schema == CHECKPOINT_WRITE_EVENT_SCHEMA {
                 return Err(format!(
@@ -524,7 +521,7 @@ mod tests {
         let reconstructed_before = trace
             .durable_writes
             .iter()
-            .filter(|write| write.cause_boundary_id.is_none() && write.state.is_some())
+            .filter(|write| write.attribution.is_none() && write.state.is_some())
             .map(|write| write.attributed_session().to_string())
             .collect::<std::collections::BTreeSet<_>>();
         assert!(
@@ -539,7 +536,7 @@ mod tests {
         // attributions still outnumber the declared sessions.
         let surviving = without_declared_session
             .iter()
-            .filter(|write| write.cause_boundary_id.is_none() && write.state.is_some())
+            .filter(|write| write.attribution.is_none() && write.state.is_some())
             .map(|write| write.attributed_session().to_string())
             .collect::<std::collections::BTreeSet<_>>();
         assert!(
@@ -594,7 +591,7 @@ mod tests {
             .durable_writes
             .iter_mut()
             .find(|write| {
-                write.schema == CHECKPOINT_WRITE_EVENT_SCHEMA && write.cause_boundary_id.is_none()
+                write.schema == CHECKPOINT_WRITE_EVENT_SCHEMA && write.attribution.is_none()
             })
             .expect("generated v3 runtime write");
         v3.state = None;
@@ -622,12 +619,12 @@ mod tests {
         let mut legacy = trace.durable_writes.clone();
         let mut promoted = legacy
             .iter()
-            .find(|write| write.cause_boundary_id.is_none() && write.state.is_some())
+            .find(|write| write.attribution.is_none() && write.state.is_some())
             .expect("runtime write")
             .clone();
         promoted.schema = "lash.sim.checkpoint-write-event.v2".to_string();
         promoted.session_id = SessionId::from("promoted-v2-session");
-        promoted.attributed_session_id = None;
+        promoted.attribution = None;
         promoted.state = None;
         legacy.push(promoted.clone());
 
@@ -665,7 +662,7 @@ mod tests {
         let session = trace
             .durable_writes
             .iter()
-            .find(|write| write.cause_boundary_id.is_none() && write.state.is_some())
+            .find(|write| write.attribution.is_none() && write.state.is_some())
             .expect("runtime write")
             .attributed_session()
             .to_string();

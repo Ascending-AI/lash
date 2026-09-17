@@ -37,10 +37,7 @@ fn check_usage_conservation(
     let mut checked_commits = 0usize;
     let mut checked_entries = 0usize;
 
-    for write in writes
-        .iter()
-        .filter(|write| write.cause_boundary_id.is_none())
-    {
+    for write in writes.iter().filter(|write| write.attribution.is_none()) {
         let Some(state) = &write.state else {
             // Promoted v1/v2 replay fixtures predate checkpoint state. Schema
             // v3 state presence is enforced by the independent checker.
