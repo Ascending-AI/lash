@@ -831,7 +831,7 @@ impl SessionCommitStore for Store {
                                     params![
                                         completed.session_id.as_str(),
                                         input_id.as_str(),
-                                        lash_core::TurnInputState::Completed.as_str(),
+                                        lash_core::TurnInputStateKind::Completed.as_str(),
                                         claim.claim_id,
                                         claim.lease_token,
                                     ],
@@ -850,7 +850,7 @@ impl SessionCommitStore for Store {
                                     params![
                                         completed.session_id.as_str(),
                                         input_id.as_str(),
-                                        lash_core::TurnInputState::Completed.as_str(),
+                                        lash_core::TurnInputStateKind::Completed.as_str(),
                                     ],
                                 ),
                             }
@@ -914,7 +914,7 @@ impl SessionCommitStore for Store {
                                 .query_map(
                                     params![
                                         commit.session_id.as_str(),
-                                        lash_core::TurnInputState::PendingActive.as_str()
+                                        lash_core::TurnInputStateKind::PendingActive.as_str()
                                     ],
                                     |row| {
                                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
@@ -934,8 +934,8 @@ impl SessionCommitStore for Store {
                             }
                             input_ids
                         };
-                        let next_turn_ingress =
-                            encode_json(&lash_core::TurnInputIngress::NextTurn)?;
+                        let deferred = lash_core::TurnInputState::DeferredNextTurn;
+                        let deferred_ingress = encode_json(&deferred.ingress())?;
                         let mut stmt = tx
                             .prepare(
                                 "UPDATE pending_turn_inputs
@@ -954,11 +954,11 @@ impl SessionCommitStore for Store {
                                 commit.session_id.as_str(),
                                 input_id,
                                 match disposition {
-                                    lash_core::TurnCancelDisposition::Defer => lash_core::TurnInputState::DeferredNextTurn.as_str(),
-                                    lash_core::TurnCancelDisposition::Drop => lash_core::TurnInputState::Cancelled.as_str(),
+                                    lash_core::TurnCancelDisposition::Defer => deferred.as_str(),
+                                    lash_core::TurnCancelDisposition::Drop => lash_core::TurnInputStateKind::Cancelled.as_str(),
                                 },
                                 match disposition {
-                                    lash_core::TurnCancelDisposition::Defer => Some(next_turn_ingress.as_str()),
+                                    lash_core::TurnCancelDisposition::Defer => Some(deferred_ingress.as_str()),
                                     lash_core::TurnCancelDisposition::Drop => None,
                                 }
                             ])

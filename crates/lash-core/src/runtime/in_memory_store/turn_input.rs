@@ -55,7 +55,7 @@ impl InMemoryPendingTurnInput {
             .id()
             .is_some()
             .then(|| crate::PendingTurnInputClaimDiagnostics {
-                state: self.input.state,
+                state: self.input.state.clone(),
                 claim_id: self.claim.id(),
                 claim_owner: self.claim.owner(),
                 claim_session_lease_generation: self.claim.diagnostic_generation(),
@@ -68,23 +68,23 @@ impl InMemoryPendingTurnInput {
     }
 
     fn cancel_outcome(&mut self, claim_is_live: bool) -> crate::PendingTurnInputCancelOutcome {
-        match self.input.state {
-            crate::TurnInputState::Cancelled => {
+        match self.input.state.kind() {
+            crate::TurnInputStateKind::Cancelled => {
                 crate::PendingTurnInputCancelOutcome::AlreadyCancelled(self.input.clone())
             }
-            crate::TurnInputState::Completed => {
+            crate::TurnInputStateKind::Completed => {
                 crate::PendingTurnInputCancelOutcome::AlreadyCompleted(self.input.clone())
             }
-            crate::TurnInputState::PendingActive
-            | crate::TurnInputState::DeferredNextTurn
-            | crate::TurnInputState::Accepted => {
+            crate::TurnInputStateKind::PendingActive
+            | crate::TurnInputStateKind::DeferredNextTurn
+            | crate::TurnInputStateKind::Accepted => {
                 if self.claim.token().is_some() && claim_is_live {
                     crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
                         input: self.input.clone(),
                         claim: self.claim_diagnostics(),
                     }
                 } else {
-                    self.input.state = crate::TurnInputState::Cancelled;
+                    self.input.state = crate::TurnInputState::Cancelled(self.input.state.ingress());
                     self.clear_claim();
                     crate::PendingTurnInputCancelOutcome::Cancelled(self.input.clone())
                 }
@@ -440,14 +440,12 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             .input_id
             .map(crate::InputId::new)
             .unwrap_or_else(|| crate::InputId::new(format!("recording-ti-{next_seq}")));
-        let state = draft.ingress.initial_state();
         let stored = crate::PendingTurnInput {
             input_id,
             session_id: draft.session_id,
             enqueue_seq: *next_seq,
             source_key: draft.source_key,
-            ingress: draft.ingress,
-            state,
+            state: crate::TurnInputState::open(draft.ingress),
             enqueued_at_ms,
             input: draft.input,
         };
@@ -474,7 +472,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 entry.input.session_id == session_id
                     && matches!(
                         entry.input.state,
-                        crate::TurnInputState::PendingActive
+                        crate::TurnInputState::PendingActive(_)
                             | crate::TurnInputState::DeferredNextTurn
                     )
             })
@@ -622,15 +620,8 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 #[cfg(any(test, feature = "testing"))]
                 self.abandoned_turn_input_claim_count
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if matches!(entry.input.state, crate::TurnInputState::Accepted) {
-                    match &claim.mode {
-                        crate::TurnInputClaimMode::ActiveTurn { .. } => {
-                            entry.input.state = crate::TurnInputState::PendingActive;
-                        }
-                        crate::TurnInputClaimMode::NextTurn => {
-                            entry.input.state = crate::TurnInputState::DeferredNextTurn;
-                        }
-                    }
+                if let crate::TurnInputState::Accepted(scope) = &entry.input.state {
+                    entry.input.state = crate::TurnInputState::PendingActive(scope.clone());
                 }
                 entry.claim.release();
             }
@@ -655,12 +646,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 && crate::store_backend_support::orphaned_active_turn_input_is_repairable(
                     scope,
                     session_execution_lease.fencing_token,
-                    entry.input.state,
-                    &entry.input.ingress,
+                    &entry.input.state,
                     entry.claim.token().is_some(),
                     entry.claim.generation().unwrap_or(0),
                 )
-                && let Some(turn_id) = entry.input.ingress.active_turn_id()
+                && let Some(turn_id) = entry.input.state.active_turn_id()
             {
                 turn_ids.insert(turn_id.clone());
             }
@@ -729,8 +719,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 || !crate::store_backend_support::orphaned_active_turn_input_is_repairable(
                     crate::OrphanedTurnInputScope::Turn(turn_id),
                     session_execution_lease.fencing_token,
-                    entry.input.state,
-                    &entry.input.ingress,
+                    &entry.input.state,
                     entry.claim.token().is_some(),
                     entry.claim.generation().unwrap_or(0),
                 )
@@ -745,10 +734,10 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             match disposition {
                 crate::TurnCancelDisposition::Defer => {
                     entry.input.state = crate::TurnInputState::DeferredNextTurn;
-                    entry.input.ingress = crate::TurnInputIngress::NextTurn;
                 }
                 crate::TurnCancelDisposition::Drop => {
-                    entry.input.state = crate::TurnInputState::Cancelled;
+                    entry.input.state =
+                        crate::TurnInputState::Cancelled(entry.input.state.ingress());
                 }
             }
             entry.clear_claim();

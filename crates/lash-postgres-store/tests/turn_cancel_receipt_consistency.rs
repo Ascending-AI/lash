@@ -99,7 +99,7 @@ async fn seed_cancelled_inputs(
          WHERE session_id = $1",
     )
     .bind(session_id.as_str())
-    .bind(lash_core::TurnInputState::Cancelled.as_str())
+    .bind(lash_core::TurnInputStateKind::Cancelled.as_str())
     .execute(storage.pool())
     .await
     .expect("make affected inputs vacuum eligible");

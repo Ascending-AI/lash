@@ -881,7 +881,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
                 .iter()
                 .find(|(input_id, ..)| input_id == undelivered.input_id)
                 .expect("dropped input retains terminal lifecycle evidence");
-            assert_eq!(dropped.2, lash_core::TurnInputState::Cancelled);
+            assert_eq!(dropped.2.kind(), lash_core::TurnInputStateKind::Cancelled);
             assert!(
                 pending
                     .iter()
@@ -899,7 +899,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
                 lash_core::TurnInputState::DeferredNextTurn
             );
             assert!(matches!(
-                deferred.input.ingress,
+                deferred.input.ingress(),
                 lash_core::TurnInputIngress::NextTurn
             ));
         }
@@ -1029,7 +1029,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
     );
     assert_eq!(pending[0].input.input_id, active.input_id);
     assert!(matches!(
-        pending[0].input.ingress,
+        pending[0].input.ingress(),
         lash_core::TurnInputIngress::NextTurn
     ));
     assert_eq!(

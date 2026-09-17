@@ -102,19 +102,15 @@ pub fn queued_work_abandon_restore_claim_token(
 pub fn orphaned_active_turn_input_is_repairable(
     scope: crate::OrphanedTurnInputScope<'_>,
     live_generation: u64,
-    state: crate::TurnInputState,
-    ingress: &crate::TurnInputIngress,
+    state: &crate::TurnInputState,
     claim_token_present: bool,
     claim_session_lease_generation: u64,
 ) -> bool {
-    if !matches!(
-        state,
-        crate::TurnInputState::PendingActive | crate::TurnInputState::Accepted
-    ) {
-        return false;
-    }
-    let Some(pinned_turn_id) = ingress.active_turn_id() else {
-        return false;
+    let pinned_turn_id = match state {
+        crate::TurnInputState::PendingActive(scope) | crate::TurnInputState::Accepted(scope) => {
+            &scope.turn_id
+        }
+        _ => return false,
     };
     match scope {
         crate::OrphanedTurnInputScope::Turn(turn_id) => pinned_turn_id == turn_id,
@@ -175,12 +171,12 @@ pub fn admitted_min_boundary_sql(
 }
 
 /// Quote one turn-input state for interpolation into backend SQL.
-pub fn state_sql_literal(state: crate::TurnInputState) -> String {
+pub fn state_sql_literal(state: crate::TurnInputStateKind) -> String {
     format!("'{}'", state.as_str())
 }
 
 /// Quote a turn-input state list for interpolation into backend SQL.
-pub fn state_sql_literal_list(states: &[crate::TurnInputState]) -> String {
+pub fn state_sql_literal_list(states: &[crate::TurnInputStateKind]) -> String {
     states
         .iter()
         .copied()
@@ -191,7 +187,7 @@ pub fn state_sql_literal_list(states: &[crate::TurnInputState]) -> String {
 
 /// Spell the complete terminal turn-input state set for interpolation into backend SQL.
 pub fn terminal_turn_input_states_sql() -> String {
-    let terminal_states = crate::TurnInputState::ALL
+    let terminal_states = crate::TurnInputStateKind::ALL
         .iter()
         .copied()
         .filter(|state| state.is_terminal())

@@ -609,18 +609,14 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     use lash_core::{
         CausalRef, DeliveryPolicy, ObserverInheritance, ProcessStatus, QueuedWorkKind, SessionMeta,
         SessionRelation, ToolIntentKind, TurnInputCheckpointBoundary, TurnInputIngress,
-        TurnInputState, WakeDeliveryState, WakeDiscardReason,
+        TurnInputState, TurnInputStateKind, WakeDeliveryState, WakeDiscardReason,
     };
 
     assert_eq!(
-        [
-            TurnInputState::PendingActive,
-            TurnInputState::DeferredNextTurn,
-            TurnInputState::Accepted,
-            TurnInputState::Cancelled,
-            TurnInputState::Completed,
-        ]
-        .map(TurnInputState::as_str),
+        TurnInputStateKind::ALL
+            .iter()
+            .map(|kind| kind.as_str())
+            .collect::<Vec<_>>(),
         [
             "pending_active",
             "deferred_next_turn",
@@ -632,12 +628,11 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     let active_ingress =
         TurnInputIngress::active_turn("turn", TurnInputCheckpointBoundary::AfterWork);
     let next_ingress = TurnInputIngress::next_turn();
+    let opened = TurnInputState::open(active_ingress.clone());
+    assert_eq!(opened.kind(), TurnInputStateKind::PendingActive);
+    assert_eq!(opened.ingress(), active_ingress);
     assert_eq!(
-        active_ingress.initial_state(),
-        TurnInputState::PendingActive
-    );
-    assert_eq!(
-        next_ingress.initial_state(),
+        TurnInputState::open(next_ingress.clone()),
         TurnInputState::DeferredNextTurn
     );
     assert_eq!(
@@ -844,11 +839,11 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     }
     fn exhaustive_turn_input_state(state: TurnInputState) {
         match state {
-            TurnInputState::PendingActive
+            TurnInputState::PendingActive(_)
             | TurnInputState::DeferredNextTurn
-            | TurnInputState::Accepted
-            | TurnInputState::Cancelled
-            | TurnInputState::Completed => {}
+            | TurnInputState::Accepted(_)
+            | TurnInputState::Cancelled(_)
+            | TurnInputState::Completed(_) => {}
         }
     }
     fn exhaustive_turn_input_ingress(ingress: &TurnInputIngress) {
@@ -915,7 +910,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
         }
     }
     exhaustive_process_status(ProcessStatus::Running);
-    exhaustive_turn_input_state(TurnInputState::PendingActive);
+    exhaustive_turn_input_state(TurnInputState::open(active_ingress.clone()));
     exhaustive_turn_input_ingress(&next_ingress);
     exhaustive_queued_work_kind(QueuedWorkKind::Turn);
     exhaustive_delivery_policy(DeliveryPolicy::EarliestSafeBoundary);

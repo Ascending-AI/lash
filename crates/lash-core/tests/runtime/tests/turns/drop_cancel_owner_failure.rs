@@ -164,7 +164,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         .iter()
         .find(|(input_id, ..)| input_id == undelivered.input_id)
         .expect("the cancelled row remains as durable evidence");
-    assert_eq!(dropped.2, lash_core::TurnInputState::Cancelled);
+    assert_eq!(dropped.2.kind(), lash_core::TurnInputStateKind::Cancelled);
     assert!(dropped.3.is_none(), "recovery clears the dead turn claim");
 
     let pending = lash_core::TurnInputStore::list_pending_turn_inputs(
