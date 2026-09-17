@@ -70,6 +70,51 @@ impl RlmDriver {
     pub(crate) fn with_dialect(dialect: Arc<TypescriptDialect>) -> Self {
         Self { dialect }
     }
+
+    /// The tail every stall-retry branch shares: the extraction diagnostic,
+    /// the reply's durable assistant message when the projection carries
+    /// content, the branch's retry message, and the nonterminal
+    /// continue-or-stop. `assistant_message` names one projection for both
+    /// guard and content, so a reply with nothing visible can never write a
+    /// zero-part assistant message (S17-A2).
+    fn stall_retry_epilogue(
+        &self,
+        ctx: &DriverContextView<'_>,
+        actions: &mut Vec<DriverAction>,
+        retry: StallRetry<'_>,
+    ) -> Result<(), String> {
+        actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
+            LLM_EXTRACTION_PHASE,
+            llm_extraction_payload(
+                ctx.turn_id(),
+                retry.fingerprint,
+                retry.decision,
+                retry.termination,
+                prose_only_counts(self.dialect.language_id(), retry.raw_text, retry.reasoning),
+            ),
+        )]));
+        let mut retry_events = Vec::new();
+        if let Some((prose, purpose)) = retry.assistant_message
+            && (!prose.trim().is_empty() || !retry.reasoning.is_empty())
+        {
+            retry_events.push(conversation_event(
+                internal_assistant_prose_message_for_turn(
+                    ctx.turn_id(),
+                    rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), purpose),
+                    prose.to_string(),
+                    retry.reasoning,
+                ),
+            ));
+        }
+        retry_events.push(conversation_event(retry.retry));
+        continue_or_stop_after_nonterminal(
+            ctx,
+            actions,
+            Vec::new(),
+            retry_events,
+            AttemptProgress::Stalled,
+        )
+    }
 }
 
 impl Default for RlmDriver {
@@ -184,43 +229,22 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         ("retry_unclosed_cell", self.dialect.cell_error_message(err))
                     }
                 };
-                actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
-                    LLM_EXTRACTION_PHASE,
-                    llm_extraction_payload(
-                        ctx.turn_id(),
-                        &fingerprint,
-                        decision,
-                        &termination,
-                        prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
-                    ),
-                )]));
-                let mut retry_events = Vec::new();
-                let retry_prose = visible_prose;
-                if !retry_prose.trim().is_empty() || !reasoning.is_empty() {
-                    retry_events.push(conversation_event(
-                        internal_assistant_prose_message_for_turn(
-                            ctx.turn_id(),
-                            rlm_message_id(
-                                ctx.turn_id(),
-                                ctx.protocol_iteration(),
-                                "assistant_response",
-                            ),
-                            retry_prose,
-                            &reasoning,
-                        ),
-                    ));
-                }
-                retry_events.push(conversation_event(invalid_cell_message(
-                    self.dialect.as_ref(),
-                    rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "invalid_cell"),
-                    &message,
-                )));
-                if let Err(err) = continue_or_stop_after_nonterminal(
+                if let Err(err) = self.stall_retry_epilogue(
                     &ctx,
                     &mut actions,
-                    Vec::new(),
-                    retry_events,
-                    AttemptProgress::Stalled,
+                    StallRetry {
+                        decision,
+                        fingerprint: &fingerprint,
+                        termination: &termination,
+                        raw_text: &assistant_text,
+                        reasoning: &reasoning,
+                        assistant_message: Some((&visible_prose, "assistant_response")),
+                        retry: invalid_cell_message(
+                            self.dialect.as_ref(),
+                            rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "invalid_cell"),
+                            &message,
+                        ),
+                    },
                 ) {
                     return invalid_turn_options_actions(err);
                 }
@@ -229,48 +253,31 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         };
         let Some(cell) = extraction else {
             if terminal_reason == LlmTerminalReason::OutputLimit {
-                actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
-                    LLM_EXTRACTION_PHASE,
-                    llm_extraction_payload(
-                        ctx.turn_id(),
-                        &fingerprint,
-                        "retry_output_limit_prose",
-                        &termination,
-                        prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
-                    ),
-                )]));
-                let mut retry_events = Vec::new();
-                if !assistant_text.trim().is_empty() || !reasoning.is_empty() {
-                    retry_events.push(conversation_event(
-                        internal_assistant_prose_message_for_turn(
-                            ctx.turn_id(),
+                if let Err(err) = self.stall_retry_epilogue(
+                    &ctx,
+                    &mut actions,
+                    StallRetry {
+                        decision: "retry_output_limit_prose",
+                        fingerprint: &fingerprint,
+                        termination: &termination,
+                        raw_text: &assistant_text,
+                        reasoning: &reasoning,
+                        assistant_message: Some((
+                            &visible_assistant_text,
+                            "truncated_assistant_response",
+                        )),
+                        retry: output_limit_retry_message(
+                            self.dialect.prompt_vocabulary(),
                             rlm_message_id(
                                 ctx.turn_id(),
                                 ctx.protocol_iteration(),
-                                "truncated_assistant_response",
+                                "output_limit_retry",
                             ),
-                            visible_assistant_text.clone(),
-                            &reasoning,
+                            ctx.generation()
+                                .output_token_cap
+                                .map(std::num::NonZeroUsize::get),
                         ),
-                    ));
-                }
-                retry_events.push(conversation_event(output_limit_retry_message(
-                    self.dialect.prompt_vocabulary(),
-                    rlm_message_id(
-                        ctx.turn_id(),
-                        ctx.protocol_iteration(),
-                        "output_limit_retry",
-                    ),
-                    ctx.generation()
-                        .output_token_cap
-                        .map(std::num::NonZeroUsize::get),
-                )));
-                if let Err(err) = continue_or_stop_after_nonterminal(
-                    &ctx,
-                    &mut actions,
-                    Vec::new(),
-                    retry_events,
-                    AttemptProgress::Stalled,
+                    },
                 ) {
                     return invalid_turn_options_actions(err);
                 }
@@ -291,46 +298,26 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             if !matches!(termination, RlmTermination::Natural)
                 && malformed_cell_fence(&assistant_text, tags)
             {
-                actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
-                    LLM_EXTRACTION_PHASE,
-                    llm_extraction_payload(
-                        ctx.turn_id(),
-                        &fingerprint,
-                        "retry_malformed_cell_fence",
-                        &termination,
-                        prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
-                    ),
-                )]));
-                let mut retry_events = Vec::new();
-                if !visible_prose.trim().is_empty() || !reasoning.is_empty() {
-                    retry_events.push(conversation_event(
-                        internal_assistant_prose_message_for_turn(
-                            ctx.turn_id(),
+                if let Err(err) = self.stall_retry_epilogue(
+                    &ctx,
+                    &mut actions,
+                    StallRetry {
+                        decision: "retry_malformed_cell_fence",
+                        fingerprint: &fingerprint,
+                        termination: &termination,
+                        raw_text: &assistant_text,
+                        reasoning: &reasoning,
+                        assistant_message: Some((&visible_prose, "assistant_response")),
+                        retry: invalid_cell_message(
+                            self.dialect.as_ref(),
                             rlm_message_id(
                                 ctx.turn_id(),
                                 ctx.protocol_iteration(),
-                                "assistant_response",
+                                "malformed_cell_fence",
                             ),
-                            visible_prose,
-                            &reasoning,
+                            &self.dialect.malformed_cell_fence_retry_copy(),
                         ),
-                    ));
-                }
-                retry_events.push(conversation_event(invalid_cell_message(
-                    self.dialect.as_ref(),
-                    rlm_message_id(
-                        ctx.turn_id(),
-                        ctx.protocol_iteration(),
-                        "malformed_cell_fence",
-                    ),
-                    &self.dialect.malformed_cell_fence_retry_copy(),
-                )));
-                if let Err(err) = continue_or_stop_after_nonterminal(
-                    &ctx,
-                    &mut actions,
-                    Vec::new(),
-                    retry_events,
-                    AttemptProgress::Stalled,
+                    },
                 ) {
                     return invalid_turn_options_actions(err);
                 }
@@ -374,51 +361,29 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             let RlmTermination::FinishRequired { ref schema } = termination else {
                 unreachable!("Natural returned above");
             };
-            actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
-                LLM_EXTRACTION_PHASE,
-                llm_extraction_payload(
-                    ctx.turn_id(),
-                    &fingerprint,
-                    "request_finish",
-                    &termination,
-                    prose_only_counts(self.dialect.language_id(), &assistant_text, &reasoning),
-                ),
-            )]));
-            let mut events = Vec::new();
-            if !visible_assistant_text.trim().is_empty() {
-                events.push(conversation_event(
-                    internal_assistant_prose_message_for_turn(
-                        ctx.turn_id(),
-                        rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant_prose"),
-                        visible_assistant_text,
-                        &reasoning,
-                    ),
-                ));
+            let assistant_message = if !visible_assistant_text.trim().is_empty() {
+                Some((visible_assistant_text.as_str(), "assistant_prose"))
             } else if !reasoning.is_empty() {
-                events.push(conversation_event(
-                    internal_assistant_prose_message_for_turn(
-                        ctx.turn_id(),
-                        rlm_message_id(
-                            ctx.turn_id(),
-                            ctx.protocol_iteration(),
-                            "assistant_reasoning",
-                        ),
-                        String::new(),
-                        &reasoning,
-                    ),
-                ));
-            }
-            events.push(conversation_event(finish_required_reminder_message(
-                self.dialect.as_ref(),
-                rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "finish_reminder"),
-                schema.is_some(),
-            )));
-            if let Err(err) = continue_or_stop_after_nonterminal(
+                Some(("", "assistant_reasoning"))
+            } else {
+                None
+            };
+            if let Err(err) = self.stall_retry_epilogue(
                 &ctx,
                 &mut actions,
-                Vec::new(),
-                events,
-                AttemptProgress::Stalled,
+                StallRetry {
+                    decision: "request_finish",
+                    fingerprint: &fingerprint,
+                    termination: &termination,
+                    raw_text: &assistant_text,
+                    reasoning: &reasoning,
+                    assistant_message,
+                    retry: finish_required_reminder_message(
+                        self.dialect.as_ref(),
+                        rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "finish_reminder"),
+                        schema.is_some(),
+                    ),
+                },
             ) {
                 return invalid_turn_options_actions(err);
             }
@@ -1175,6 +1140,28 @@ fn reasoning_chars(reasoning: &[RlmReasoningPart]) -> usize {
             .iter()
             .map(|part| (part.text.as_str(), part.replay.as_ref())),
     )
+}
+
+/// One stall-retry branch's contribution to the shared epilogue: which
+/// diagnostic decision to record, which reply projection (if any) becomes the
+/// durable assistant message, and the retry message the model sees next.
+struct StallRetry<'a> {
+    /// Diagnostic decision token (`retry_unclosed_cell`, `request_finish`, …).
+    decision: &'static str,
+    /// Fingerprint of the reply as received.
+    fingerprint: &'a str,
+    /// Decoded termination options, recorded in the diagnostic.
+    termination: &'a RlmTermination,
+    /// Raw assistant text, feeding the diagnostic's character counters.
+    raw_text: &'a str,
+    /// Reply reasoning, counted in the diagnostic and carried into the
+    /// retained assistant message.
+    reasoning: &'a [RlmReasoningPart],
+    /// `(projection, message purpose)` for the retained assistant message. The
+    /// same string is guard and content; `None` emits no assistant message.
+    assistant_message: Option<(&'a str, &'static str)>,
+    /// The retry or reminder message the model sees next.
+    retry: Message,
 }
 
 fn llm_extraction_payload(

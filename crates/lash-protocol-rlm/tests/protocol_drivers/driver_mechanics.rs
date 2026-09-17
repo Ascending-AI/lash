@@ -506,6 +506,79 @@ fn output_limit_prose_retries_with_the_request_cap() {
     );
 }
 
+/// S17-A2: the stall epilogue emits the same projection it guards on. A
+/// commentary+final-answer reply disagrees between the raw and normalized
+/// projections, so the retained assistant message must carry the normalized
+/// text — and a reply whose projection is empty must never write a zero-part
+/// assistant message to history.
+#[test]
+fn output_limit_retry_emits_the_guarded_projection_with_no_empty_parts() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("answer me")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            parts: vec![
+                LlmOutputPart::Text {
+                    text: "internal commentary the user never sees".to_string(),
+                    response_meta: Some(lash_sansio::llm::types::ResponseTextMeta {
+                        phase: Some("commentary".to_string()),
+                        ..Default::default()
+                    }),
+                },
+                LlmOutputPart::Text {
+                    text: "the truncated answer".to_string(),
+                    response_meta: Some(lash_sansio::llm::types::ResponseTextMeta {
+                        phase: Some("final_answer".to_string()),
+                        ..Default::default()
+                    }),
+                },
+            ],
+            terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
+            ..LlmResponse::default()
+        }),
+    });
+
+    let effects = drain_effects(&mut machine);
+    let messages = machine.messages();
+    let assistant = messages
+        .iter()
+        .find(|message| {
+            message.role == MessageRole::Assistant
+                && message
+                    .parts
+                    .iter()
+                    .any(|part| part.content.contains("the truncated answer"))
+        })
+        .expect("the retry retains the assistant's visible reply");
+    assert!(
+        assistant
+            .parts
+            .iter()
+            .all(|part| !part.content.contains("internal commentary")),
+        "the retained message carries the normalized projection, not the raw one"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| { message.role != MessageRole::Assistant || !message.parts.is_empty() }),
+        "no zero-part assistant message reaches history"
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Checkpoint { .. })),
+        "the stall retry still checkpoints for the next iteration"
+    );
+}
+
 #[test]
 fn output_limit_prose_cut_at_a_close_tag_mention_retries() {
     let mut machine = TurnMachine::new(
