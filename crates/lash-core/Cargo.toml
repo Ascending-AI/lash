@@ -26,7 +26,7 @@ otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel
 perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness", "lash-core-memory/perf-witness", "lash-core-execution/perf-witness"]
 # Expose `lash::testing` for downstream plugin crates to share mock
 # session-manager/turn fixtures with lash's own tests.
-testing = ["dep:tracing-subscriber", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-memory/testing", "lash-core-execution/testing"]
+testing = ["lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-memory/testing", "lash-core-execution/testing"]
 
 [lints]
 workspace = true
@@ -42,7 +42,6 @@ lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt", "rt-multi-thread", "macros"] }
 serde = { workspace = true, features = ["derive", "rc"] }
-serde-content = { workspace = true }
 serde_json = { workspace = true }
 rmp-serde = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
@@ -52,11 +51,8 @@ uuid = { workspace = true, features = ["v4"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
-sha2 = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
-hmac = { workspace = true }
-tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
 lash-core = { package = "lash-internal-core", path = ".", features = ["testing"] }
@@ -64,3 +60,4 @@ insta = "1"
 proptest = "1"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber = { workspace = true }

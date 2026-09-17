@@ -65,8 +65,6 @@ pub mod stable_hash {
     pub use lash_core_ids::stable_hash::sha256_hex;
 }
 pub use lash_core_execution::store;
-#[cfg(not(feature = "testing"))]
-pub(crate) use lash_core_ids::stable_hash;
 pub use lash_core_ids::task;
 pub use lash_core_store::store_backend_support;
 /// Standard-lock poison recovery traits used across Lash hosts and runtimes.
@@ -839,12 +837,12 @@ pub use tool_provider::{
 };
 #[doc(hidden)]
 pub mod core_internal {
+    pub use crate::runtime::RuntimeSessionServices;
     pub use crate::runtime::process_permit::{
         DEFAULT_PROCESS_EXECUTION_CONCURRENCY, ensure_process_execution_permit,
         inherit_process_execution_permit, scope_process_execution_permit,
         scope_queued_work_execution_permit,
     };
-    pub use crate::runtime::session_manager::RuntimeSessionServices;
     pub use lash_core_ids::worker_capacity::{
         DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
         WorkerSlotSupplier,

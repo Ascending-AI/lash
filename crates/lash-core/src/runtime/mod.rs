@@ -73,6 +73,8 @@ pub use session_catalog::*;
 pub mod session_manager;
 #[cfg(not(feature = "testing"))]
 mod session_manager;
+#[doc(hidden)]
+pub use session_manager::RuntimeSessionServices;
 #[cfg(any(test, feature = "testing"))]
 pub use session_manager::append_receipt_mixed_usage_envelope_conformance;
 #[cfg(any(test, feature = "testing"))]

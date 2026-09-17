@@ -35,10 +35,7 @@ pub(crate) use intent_executor::execute_final_tool_intents;
 pub(crate) use preparation::dispatch_tool_call;
 #[cfg(test)]
 pub(crate) use preparation::dispatch_tool_call_with_execution_context;
-#[cfg(feature = "testing")]
 pub use preparation::resolve_callable_manifest_by_id;
-#[cfg(not(feature = "testing"))]
-pub(crate) use preparation::resolve_callable_manifest_by_id;
 #[cfg(test)]
 pub(crate) use preparation::resolve_tool_argument_projection_policy;
 pub use preparation::{

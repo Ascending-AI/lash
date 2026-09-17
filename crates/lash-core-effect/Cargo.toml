@@ -42,5 +42,5 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash-core-ids = { workspace = true, features = ["testing"] }
-lash-core-memory = { workspace = true, features = ["testing"] }
+lash-core-memory = { package = "lash-internal-core-memory", path = "../lash-core-memory", features = ["testing"] }
 tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }

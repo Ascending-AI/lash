@@ -39,5 +39,4 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-lash-core-memory = { package = "lash-internal-core-memory", path = ".", features = ["testing"] }
 tokio = { workspace = true, features = ["test-util", "rt-multi-thread"] }

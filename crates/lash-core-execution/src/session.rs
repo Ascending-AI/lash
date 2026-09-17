@@ -45,7 +45,7 @@ struct ToolCatalogArtifact {
 pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
 #[cfg(not(feature = "testing"))]
 #[derive(Clone)]
-pub(crate) struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
+pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
 
 type ToolContractFingerprints = Arc<Vec<[u8; 32]>>;
 type CompositionToolFingerprintCache = Arc<
@@ -398,7 +398,7 @@ impl Session {
     }
 
     #[cfg(not(feature = "testing"))]
-    pub(crate) fn pin_tool_surface(
+    pub fn pin_tool_surface(
         &self,
         session_id: &SessionId,
         tool_access: &crate::SessionToolAccess,
