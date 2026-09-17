@@ -29,7 +29,7 @@ mod retention;
 mod session_binding;
 mod session_commit;
 mod session_execution_lease;
-use session_execution_lease::{InMemorySessionExecutionLease, Lease};
+use session_execution_lease::{HeldLeaseIdentity, InMemorySessionExecutionLease};
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
 pub mod test_support;
@@ -466,7 +466,12 @@ impl InMemorySessionStore {
             && current.is_held_by(&completion.owner, &completion.executor_id)
             && current.lease_token_matches(&completion.lease_token)
         {
-            current.lease = Lease::Free;
+            // Released rows keep their fencing generation and zero their
+            // timing columns, exactly like the durable `= 0` release writes.
+            current.holder = None;
+            current.claimed_at_epoch_ms = 0;
+            current.lease_term_ms = 0;
+            current.expires_at_epoch_ms = 0;
             true
         } else {
             if trace_refusal {
@@ -521,14 +526,14 @@ impl InMemorySessionStore {
             "session_execution_lease_fencing_token",
             current.fencing_token,
         )?;
-        current.lease = Lease::Held {
+        current.holder = Some(HeldLeaseIdentity {
             owner: owner.clone(),
             executor_id: executor_id.to_string(),
             lease_token: lease_token.to_string(),
-            claimed_at_epoch_ms: now,
-            lease_term_ms: lease_ttl_ms,
-            expires_at_epoch_ms: now.saturating_add(lease_ttl_ms),
-        };
+        });
+        current.claimed_at_epoch_ms = now;
+        current.lease_term_ms = lease_ttl_ms;
+        current.expires_at_epoch_ms = now.saturating_add(lease_ttl_ms);
         Ok(Self::in_memory_session_execution_lease(session_id, current))
     }
 
