@@ -1035,7 +1035,9 @@ pub(crate) async fn run_queued_work_batch(
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),
         reason: "workbench_manual_batch_run".to_string(),
-        batch_ids: vec![batch_id.clone()],
+        scope: restate::QueuedTurnScope::Selected {
+            batch_ids: vec![batch_id.clone()],
+        },
         drain_id: Some(format!("workbench-queued-batch:{batch_id}")),
     };
     let cleanup =
