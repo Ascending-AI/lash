@@ -89,7 +89,7 @@ async fn law_lease_exclusivity_and_claim_generation_fencing(
             .map_err(TestCaseError::fail)?;
     }
     prop_assert!(
-        shape.lease_fence_rejections >= 3,
+        shape[RunShapeCounter::LeaseFenceRejections] >= 3,
         "generation fencing did not reject stale renewal and claim attempts"
     );
     prop_assert_eq!(model.work.len(), 1, "stale claim attempt removed work");
@@ -707,8 +707,8 @@ async fn law_checkpoint_refs_track_content(
             .await
             .map_err(TestCaseError::fail)?;
     }
-    prop_assert!(shape.checkpoint_stores >= 9);
-    prop_assert!(shape.checkpoint_ref_reuses >= 3);
+    prop_assert!(shape[RunShapeCounter::CheckpointStores] >= 9);
+    prop_assert!(shape[RunShapeCounter::CheckpointRefReuses] >= 3);
     assert_model_agreement(store.as_ref(), &model)
         .await
         .map_err(TestCaseError::fail)

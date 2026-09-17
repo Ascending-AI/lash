@@ -191,114 +191,167 @@ struct PendingUsageConfirmation {
     staged: lash_core::testing::conformance_support::StagedTokenLedger,
     identities: Vec<RuntimeUsageDeltaIdentity>,
 }
-#[derive(Clone, Copy, Debug, Default)]
-struct RunShape {
-    lease_acquisitions: u64,
-    lease_fence_rejections: u64,
-    queue_enqueues: u64,
-    queue_claims: u64,
-    selected_batch_claims: u64,
-    queue_completions: u64,
-    claim_supersession_rejections: u64,
-    stale_claim_settlements: u64,
-    out_of_order_settlements: u64,
-    coalesced_claims: u64,
-    queue_cancellations: u64,
-    input_enqueues: u64,
-    input_claims: u64,
-    input_applications: u64,
-    input_cancellations: u64,
-    usage_records: u64,
-    usage_stages: u64,
-    usage_confirmations: u64,
-    usage_receipt_replays: u64,
-    attachment_commits: u64,
-    attachment_intent_puts: u64,
-    attachment_receipt_replays: u64,
-    attachment_session_reclaims: u64,
-    attachment_gc_probes: u64,
-    accepted_commits: u64,
-    stale_head_rejections: u64,
-    checkpoint_stores: u64,
-    checkpoint_ref_reuses: u64,
-    checkpoint_clears: u64,
-    crash_points: u64,
-    crash_reclaims: u64,
+/// The run-shape counter alphabet. `RunShape`, `RunShapeTotals`, the
+/// required-shape table, and the report all derive from this one enum, so a
+/// new counter cannot be counted without being gated and reported.
+#[derive(Clone, Copy, Debug)]
+enum RunShapeCounter {
+    LeaseAcquisitions,
+    LeaseFenceRejections,
+    QueueEnqueues,
+    QueueClaims,
+    SelectedBatchClaims,
+    QueueCompletions,
+    ClaimSupersessionRejections,
+    StaleClaimSettlements,
+    OutOfOrderSettlements,
+    CoalescedClaims,
+    QueueCancellations,
+    InputEnqueues,
+    InputClaims,
+    InputApplications,
+    InputCancellations,
+    UsageRecords,
+    UsageStages,
+    UsageConfirmations,
+    UsageReceiptReplays,
+    AttachmentCommits,
+    AttachmentIntentPuts,
+    AttachmentReceiptReplays,
+    AttachmentSessionReclaims,
+    AttachmentGcProbes,
+    AcceptedCommits,
+    StaleHeadRejections,
+    CheckpointStores,
+    CheckpointRefReuses,
+    CheckpointClears,
+    CrashPoints,
+    CrashReclaims,
 }
 
-#[derive(Debug, Default)]
+impl RunShapeCounter {
+    const ALL: &[Self] = &[
+        Self::LeaseAcquisitions,
+        Self::LeaseFenceRejections,
+        Self::QueueEnqueues,
+        Self::QueueClaims,
+        Self::SelectedBatchClaims,
+        Self::QueueCompletions,
+        Self::ClaimSupersessionRejections,
+        Self::StaleClaimSettlements,
+        Self::OutOfOrderSettlements,
+        Self::CoalescedClaims,
+        Self::QueueCancellations,
+        Self::InputEnqueues,
+        Self::InputClaims,
+        Self::InputApplications,
+        Self::InputCancellations,
+        Self::UsageRecords,
+        Self::UsageStages,
+        Self::UsageConfirmations,
+        Self::UsageReceiptReplays,
+        Self::AttachmentCommits,
+        Self::AttachmentIntentPuts,
+        Self::AttachmentReceiptReplays,
+        Self::AttachmentSessionReclaims,
+        Self::AttachmentGcProbes,
+        Self::AcceptedCommits,
+        Self::StaleHeadRejections,
+        Self::CheckpointStores,
+        Self::CheckpointRefReuses,
+        Self::CheckpointClears,
+        Self::CrashPoints,
+        Self::CrashReclaims,
+    ];
+    const COUNT: usize = Self::ALL.len();
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::LeaseAcquisitions => "lease_acquisitions",
+            Self::LeaseFenceRejections => "lease_fence_rejections",
+            Self::QueueEnqueues => "queue_enqueues",
+            Self::QueueClaims => "queue_claims",
+            Self::SelectedBatchClaims => "selected_batch_claims",
+            Self::QueueCompletions => "queue_completions",
+            Self::ClaimSupersessionRejections => "claim_supersession_rejections",
+            Self::StaleClaimSettlements => "stale_claim_settlements",
+            Self::OutOfOrderSettlements => "out_of_order_settlements",
+            Self::CoalescedClaims => "coalesced_claims",
+            Self::QueueCancellations => "queue_cancellations",
+            Self::InputEnqueues => "input_enqueues",
+            Self::InputClaims => "input_claims",
+            Self::InputApplications => "input_applications",
+            Self::InputCancellations => "input_cancellations",
+            Self::UsageRecords => "usage_records",
+            Self::UsageStages => "usage_stages",
+            Self::UsageConfirmations => "usage_confirmations",
+            Self::UsageReceiptReplays => "usage_receipt_replays",
+            Self::AttachmentCommits => "attachment_commits",
+            Self::AttachmentIntentPuts => "attachment_intent_puts",
+            Self::AttachmentReceiptReplays => "attachment_receipt_replays",
+            Self::AttachmentSessionReclaims => "attachment_session_reclaims",
+            Self::AttachmentGcProbes => "attachment_gc_probes",
+            Self::AcceptedCommits => "accepted_commits",
+            Self::StaleHeadRejections => "stale_head_rejections",
+            Self::CheckpointStores => "checkpoint_stores",
+            Self::CheckpointRefReuses => "checkpoint_ref_reuses",
+            Self::CheckpointClears => "checkpoint_clears",
+            Self::CrashPoints => "crash_points",
+            Self::CrashReclaims => "crash_reclaims",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RunShape {
+    counts: [u64; RunShapeCounter::COUNT],
+}
+
+impl std::ops::Index<RunShapeCounter> for RunShape {
+    type Output = u64;
+    fn index(&self, counter: RunShapeCounter) -> &u64 {
+        &self.counts[counter as usize]
+    }
+}
+
+impl std::ops::IndexMut<RunShapeCounter> for RunShape {
+    fn index_mut(&mut self, counter: RunShapeCounter) -> &mut u64 {
+        &mut self.counts[counter as usize]
+    }
+}
+
+#[derive(Debug)]
 struct RunShapeTotals {
-    lease_acquisitions: AtomicU64,
-    lease_fence_rejections: AtomicU64,
-    queue_enqueues: AtomicU64,
-    queue_claims: AtomicU64,
-    selected_batch_claims: AtomicU64,
-    queue_completions: AtomicU64,
-    claim_supersession_rejections: AtomicU64,
-    stale_claim_settlements: AtomicU64,
-    out_of_order_settlements: AtomicU64,
-    coalesced_claims: AtomicU64,
-    queue_cancellations: AtomicU64,
-    input_enqueues: AtomicU64,
-    input_claims: AtomicU64,
-    input_applications: AtomicU64,
-    input_cancellations: AtomicU64,
-    usage_records: AtomicU64,
-    usage_stages: AtomicU64,
-    usage_confirmations: AtomicU64,
-    usage_receipt_replays: AtomicU64,
-    attachment_commits: AtomicU64,
-    attachment_intent_puts: AtomicU64,
-    attachment_receipt_replays: AtomicU64,
-    attachment_session_reclaims: AtomicU64,
-    attachment_gc_probes: AtomicU64,
-    accepted_commits: AtomicU64,
-    stale_head_rejections: AtomicU64,
-    checkpoint_stores: AtomicU64,
-    checkpoint_ref_reuses: AtomicU64,
-    checkpoint_clears: AtomicU64,
-    crash_points: AtomicU64,
-    crash_reclaims: AtomicU64,
+    counts: [AtomicU64; RunShapeCounter::COUNT],
+}
+
+impl Default for RunShapeTotals {
+    fn default() -> Self {
+        Self {
+            counts: std::array::from_fn(|_| AtomicU64::new(0)),
+        }
+    }
 }
 
 impl RunShapeTotals {
     fn add(&self, shape: RunShape) {
-        macro_rules! add {
-            ($field:ident) => {
-                self.$field.fetch_add(shape.$field, Ordering::Relaxed);
-            };
+        for counter in RunShapeCounter::ALL {
+            self.counts[*counter as usize].fetch_add(shape[*counter], Ordering::Relaxed);
         }
-        add!(lease_acquisitions);
-        add!(lease_fence_rejections);
-        add!(queue_enqueues);
-        add!(queue_claims);
-        add!(selected_batch_claims);
-        add!(queue_completions);
-        add!(claim_supersession_rejections);
-        add!(stale_claim_settlements);
-        add!(out_of_order_settlements);
-        add!(coalesced_claims);
-        add!(queue_cancellations);
-        add!(input_enqueues);
-        add!(input_claims);
-        add!(input_applications);
-        add!(input_cancellations);
-        add!(usage_records);
-        add!(usage_stages);
-        add!(usage_confirmations);
-        add!(usage_receipt_replays);
-        add!(attachment_commits);
-        add!(attachment_intent_puts);
-        add!(attachment_receipt_replays);
-        add!(attachment_session_reclaims);
-        add!(attachment_gc_probes);
-        add!(accepted_commits);
-        add!(stale_head_rejections);
-        add!(checkpoint_stores);
-        add!(checkpoint_ref_reuses);
-        add!(checkpoint_clears);
-        add!(crash_points);
-        add!(crash_reclaims);
+    }
+
+    fn report(&self) -> String {
+        RunShapeCounter::ALL
+            .iter()
+            .map(|counter| {
+                format!(
+                    "{}={}",
+                    counter.name(),
+                    self.counts[*counter as usize].load(Ordering::Relaxed)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -374,89 +427,18 @@ where
     }
 
     eprintln!(
-        "runtime-persistence run shape ({backend}, cases={cases}): lease_acquisitions={} lease_fence_rejections={} queue_enqueues={} queue_claims={} selected_batch_claims={} queue_completions={} claim_supersession_rejections={} stale_claim_settlements={} out_of_order_settlements={} coalesced_claims={} queue_cancellations={} input_enqueues={} input_claims={} input_applications={} input_cancellations={} usage_records={} usage_stages={} usage_confirmations={} usage_receipt_replays={} attachment_commits={} attachment_intent_puts={} attachment_receipt_replays={} attachment_session_reclaims={} attachment_gc_probes={} accepted_commits={} stale_head_rejections={} checkpoint_stores={} checkpoint_ref_reuses={} checkpoint_clears={} crash_points={} crash_reclaims={}",
-        totals.lease_acquisitions.load(Ordering::Relaxed),
-        totals.lease_fence_rejections.load(Ordering::Relaxed),
-        totals.queue_enqueues.load(Ordering::Relaxed),
-        totals.queue_claims.load(Ordering::Relaxed),
-        totals.selected_batch_claims.load(Ordering::Relaxed),
-        totals.queue_completions.load(Ordering::Relaxed),
-        totals.claim_supersession_rejections.load(Ordering::Relaxed),
-        totals.stale_claim_settlements.load(Ordering::Relaxed),
-        totals.out_of_order_settlements.load(Ordering::Relaxed),
-        totals.coalesced_claims.load(Ordering::Relaxed),
-        totals.queue_cancellations.load(Ordering::Relaxed),
-        totals.input_enqueues.load(Ordering::Relaxed),
-        totals.input_claims.load(Ordering::Relaxed),
-        totals.input_applications.load(Ordering::Relaxed),
-        totals.input_cancellations.load(Ordering::Relaxed),
-        totals.usage_records.load(Ordering::Relaxed),
-        totals.usage_stages.load(Ordering::Relaxed),
-        totals.usage_confirmations.load(Ordering::Relaxed),
-        totals.usage_receipt_replays.load(Ordering::Relaxed),
-        totals.attachment_commits.load(Ordering::Relaxed),
-        totals.attachment_intent_puts.load(Ordering::Relaxed),
-        totals.attachment_receipt_replays.load(Ordering::Relaxed),
-        totals.attachment_session_reclaims.load(Ordering::Relaxed),
-        totals.attachment_gc_probes.load(Ordering::Relaxed),
-        totals.accepted_commits.load(Ordering::Relaxed),
-        totals.stale_head_rejections.load(Ordering::Relaxed),
-        totals.checkpoint_stores.load(Ordering::Relaxed),
-        totals.checkpoint_ref_reuses.load(Ordering::Relaxed),
-        totals.checkpoint_clears.load(Ordering::Relaxed),
-        totals.crash_points.load(Ordering::Relaxed),
-        totals.crash_reclaims.load(Ordering::Relaxed),
+        "runtime-persistence run shape ({backend}, cases={cases}): {}",
+        totals.report()
     );
 }
 
 fn assert_required_shape(shape: RunShape) -> Result<(), TestCaseError> {
-    let required = [
-        (shape.lease_acquisitions, "lease acquisitions"),
-        (shape.lease_fence_rejections, "lease fence rejections"),
-        (shape.queue_enqueues, "queue enqueues"),
-        (shape.queue_claims, "queue claims"),
-        (shape.selected_batch_claims, "selected-batch claims"),
-        (shape.queue_completions, "queue completions"),
-        (
-            shape.claim_supersession_rejections,
-            "reclaim-mediated claim-supersession rejections",
-        ),
-        (
-            shape.stale_claim_settlements,
-            "accepted stale-generation claim settlements",
-        ),
-        (shape.out_of_order_settlements, "out-of-order settlements"),
-        (shape.coalesced_claims, "coalesced claims"),
-        (shape.queue_cancellations, "queue cancellations"),
-        (shape.input_enqueues, "input enqueues"),
-        (shape.input_claims, "input claims"),
-        (shape.input_applications, "input applications"),
-        (shape.input_cancellations, "input cancellations"),
-        (shape.usage_records, "usage records"),
-        (shape.usage_stages, "usage stages"),
-        (shape.usage_confirmations, "usage confirmations"),
-        (shape.usage_receipt_replays, "usage receipt replays"),
-        (shape.attachment_commits, "attachment commits"),
-        (shape.attachment_intent_puts, "attachment intent puts"),
-        (
-            shape.attachment_receipt_replays,
-            "attachment receipt replays",
-        ),
-        (
-            shape.attachment_session_reclaims,
-            "attachment session reclaims",
-        ),
-        (shape.attachment_gc_probes, "attachment GC probes"),
-        (shape.accepted_commits, "accepted commits"),
-        (shape.stale_head_rejections, "stale-head rejections"),
-        (shape.checkpoint_stores, "checkpoint stores"),
-        (shape.checkpoint_ref_reuses, "checkpoint ref reuses"),
-        (shape.checkpoint_clears, "checkpoint clears"),
-        (shape.crash_points, "claim-to-commit crash points"),
-        (shape.crash_reclaims, "post-crash reclaims"),
-    ];
-    for (count, name) in required {
-        prop_assert!(count > 0, "generated alphabet starvation: no {name}");
+    for counter in RunShapeCounter::ALL {
+        prop_assert!(
+            shape[*counter] > 0,
+            "generated alphabet starvation: no {}",
+            counter.name()
+        );
     }
     Ok(())
 }
@@ -553,7 +535,7 @@ async fn apply_operation(
                         return Err("fresh queued work returned a consumed receipt".to_string());
                     }
                     model.work.insert(key, ModeledWork { batch });
-                    shape.queue_enqueues += 1;
+                    shape[RunShapeCounter::QueueEnqueues] += 1;
                 }
             }
         }
@@ -629,17 +611,17 @@ async fn apply_operation(
             if let Some((claim, selected_id)) = claim {
                 validate_work_claim(model, lease, &claim, selected_id.as_deref())?;
                 if selected_id.is_some() {
-                    shape.selected_batch_claims += 1;
+                    shape[RunShapeCounter::SelectedBatchClaims] += 1;
                 }
                 if claim.batches.len() > 1 {
-                    shape.coalesced_claims += 1;
+                    shape[RunShapeCounter::CoalescedClaims] += 1;
                 }
                 for batch in &claim.batches {
                     if model.crashed_work.remove(&batch.batch_id) {
-                        shape.crash_reclaims += 1;
+                        shape[RunShapeCounter::CrashReclaims] += 1;
                     }
                 }
-                shape.queue_claims += 1;
+                shape[RunShapeCounter::QueueClaims] += 1;
                 model.active_work_claims.push(claim);
             }
         }
@@ -665,7 +647,7 @@ async fn apply_operation(
                 model
                     .work
                     .retain(|_, candidate| candidate.batch.batch_id != removed.batch_id);
-                shape.queue_cancellations += 1;
+                shape[RunShapeCounter::QueueCancellations] += 1;
             }
         }
         EnqueueTurnInput { slot, value } => {
@@ -710,7 +692,7 @@ async fn apply_operation(
                     }
                     model.input_receipts.insert(key.clone(), draft.clone());
                     model.inputs.insert(key, ModeledInput { input });
-                    shape.input_enqueues += 1;
+                    shape[RunShapeCounter::InputEnqueues] += 1;
                 }
             }
         }
@@ -735,10 +717,10 @@ async fn apply_operation(
                 validate_input_claim(lease, &claim, &expected, usize::from((*max_inputs).max(1)))?;
                 for input in &claim.inputs {
                     if model.crashed_inputs.remove(&input.input_id) {
-                        shape.crash_reclaims += 1;
+                        shape[RunShapeCounter::CrashReclaims] += 1;
                     }
                 }
-                shape.input_claims += 1;
+                shape[RunShapeCounter::InputClaims] += 1;
                 model.active_input_claims.push(claim);
             }
         }
@@ -762,7 +744,7 @@ async fn apply_operation(
                     model
                         .inputs
                         .retain(|_, candidate| candidate.input.input_id != cancelled.input_id);
-                    shape.input_cancellations += 1;
+                    shape[RunShapeCounter::InputCancellations] += 1;
                 }
                 PendingTurnInputCancelOutcome::AlreadyClaimed { .. } if held => {}
                 PendingTurnInputCancelOutcome::AlreadyClaimed { .. } => {
@@ -845,7 +827,7 @@ async fn claim_work_with_stale_lease(
         ));
     }
     assert_snapshot_unchanged(store, before, "superseded-generation queued-work claim").await?;
-    shape.lease_fence_rejections += 1;
+    shape[RunShapeCounter::LeaseFenceRejections] += 1;
     Ok(())
 }
 
@@ -872,7 +854,7 @@ async fn claim_turn_inputs_with_stale_lease(
         ));
     }
     assert_snapshot_unchanged(store, before, "superseded-generation turn-input claim").await?;
-    shape.lease_fence_rejections += 1;
+    shape[RunShapeCounter::LeaseFenceRejections] += 1;
     Ok(())
 }
 
@@ -929,7 +911,7 @@ async fn claim_lease(
                 }
             }
             model.current_lease = Some(acquisition.lease);
-            shape.lease_acquisitions += 1;
+            shape[RunShapeCounter::LeaseAcquisitions] += 1;
         }
         (None, SessionExecutionLeaseClaimOutcome::Busy { .. }) => {
             return Err("released/absent lease remained busy".to_string());
@@ -963,7 +945,7 @@ async fn renew_lease(
             ));
         }
         assert_snapshot_unchanged(store, before, "superseded lease renewal").await?;
-        shape.lease_fence_rejections += 1;
+        shape[RunShapeCounter::LeaseFenceRejections] += 1;
     } else {
         let renewed = result.map_err(|error| error.to_string())?;
         if renewed.fencing_token != lease.fencing_token {
@@ -999,7 +981,7 @@ async fn crash_between_claim_and_commit(
             .extend(claim.inputs.iter().map(|input| input.input_id.clone()));
         model.stale_input_claims.push(claim);
     }
-    shape.crash_points += 1;
+    shape[RunShapeCounter::CrashPoints] += 1;
     Ok(())
 }
 
@@ -1105,7 +1087,7 @@ async fn commit_operation(
             ));
         }
         assert_snapshot_unchanged(store, before, "stale expected-head rejection").await?;
-        shape.stale_head_rejections += 1;
+        shape[RunShapeCounter::StaleHeadRejections] += 1;
         return Ok(());
     }
 
@@ -1165,13 +1147,13 @@ async fn commit_operation(
             .iter()
             .any(|sequence| *sequence < settled_min)
         {
-            shape.out_of_order_settlements += 1;
+            shape[RunShapeCounter::OutOfOrderSettlements] += 1;
         }
         model
             .work
             .retain(|_, work| !settled.contains(work.batch.batch_id.as_str()));
         model.active_work_claims.remove(0);
-        shape.queue_completions += claim.batches.len() as u64;
+        shape[RunShapeCounter::QueueCompletions] += claim.batches.len() as u64;
     }
     if let Some(claim) = input_claim {
         let settled = claim
@@ -1184,9 +1166,9 @@ async fn commit_operation(
             .retain(|_, input| !settled.contains(input.input.input_id.as_str()));
         model.active_input_claims.remove(0);
         model.applications.extend(expected_applications);
-        shape.input_applications += claim.inputs.len() as u64;
+        shape[RunShapeCounter::InputApplications] += claim.inputs.len() as u64;
     }
-    shape.accepted_commits += 1;
+    shape[RunShapeCounter::AcceptedCommits] += 1;
     Ok(())
 }
 
@@ -1225,7 +1207,7 @@ fn update_components_after_commit(
             return Err("cleared execution-state transition retained its ref".to_string());
         }
         if before.execution_ref.is_some() {
-            shape.checkpoint_clears += 1;
+            shape[RunShapeCounter::CheckpointClears] += 1;
         }
     } else {
         check_component_ref(
@@ -1284,13 +1266,13 @@ fn check_component_ref(
         } else if previous_ref.is_some_and(|previous_ref| previous_ref == actual_ref) {
             return Err(format!("changed {name} body reused the old content ref"));
         }
-        shape.checkpoint_stores += 1;
+        shape[RunShapeCounter::CheckpointStores] += 1;
     } else if actual_ref != previous_ref {
         return Err(format!(
             "ref-only {name} transition did not preserve its ref"
         ));
     } else if actual_ref.is_some() {
-        shape.checkpoint_ref_reuses += 1;
+        shape[RunShapeCounter::CheckpointRefReuses] += 1;
     }
     Ok(())
 }
@@ -1324,7 +1306,7 @@ async fn settle_stale_work(
             ));
         }
         assert_snapshot_unchanged(store, before, "reclaimed queued-work settlement").await?;
-        shape.claim_supersession_rejections += 1;
+        shape[RunShapeCounter::ClaimSupersessionRejections] += 1;
         return Ok(());
     }
 
@@ -1348,9 +1330,9 @@ async fn settle_stale_work(
     model.stale_work_claims.pop();
     model.head_revision = result.head_revision;
     model.has_session = true;
-    shape.queue_completions += claim.batches.len() as u64;
-    shape.stale_claim_settlements += 1;
-    shape.accepted_commits += 1;
+    shape[RunShapeCounter::QueueCompletions] += claim.batches.len() as u64;
+    shape[RunShapeCounter::StaleClaimSettlements] += 1;
+    shape[RunShapeCounter::AcceptedCommits] += 1;
     Ok(())
 }
 
@@ -1383,7 +1365,7 @@ async fn settle_stale_input(
             ));
         }
         assert_snapshot_unchanged(store, before, "reclaimed turn-input settlement").await?;
-        shape.claim_supersession_rejections += 1;
+        shape[RunShapeCounter::ClaimSupersessionRejections] += 1;
         return Ok(());
     }
 
@@ -1413,9 +1395,9 @@ async fn settle_stale_input(
     model.stale_input_claims.pop();
     model.head_revision = result.head_revision;
     model.has_session = true;
-    shape.input_applications += claim.inputs.len() as u64;
-    shape.stale_claim_settlements += 1;
-    shape.accepted_commits += 1;
+    shape[RunShapeCounter::InputApplications] += claim.inputs.len() as u64;
+    shape[RunShapeCounter::StaleClaimSettlements] += 1;
+    shape[RunShapeCounter::AcceptedCommits] += 1;
     Ok(())
 }
 

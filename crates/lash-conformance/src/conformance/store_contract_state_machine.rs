@@ -16,11 +16,11 @@ use generated_prefix::generated_prefix;
 use lash_sansio::{ProcessId, SessionId};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
-use run_shape::{RunShape, RunShapeTotals};
+use run_shape::{RunShape, RunShapeCounter, RunShapeTotals};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::Arc;
 const PROCESS_COUNT: u8 = 3;
 const SESSION_COUNT: u8 = 2;
 const DEFAULT_CASES: u32 = 32;
@@ -304,11 +304,11 @@ where
                 let handles = make(case.seed, "prop-runtime-session".to_string()).await;
                 let shape = replay_case(handles, &case.operations).await?;
                 prop_assert!(
-                    shape.consumes_committed > 0,
+                    shape[RunShapeCounter::ConsumesCommitted] > 0,
                     "generated alphabet starvation: case committed no wake consumes"
                 );
                 prop_assert!(
-                    shape.out_of_order_states > 0,
+                    shape[RunShapeCounter::OutOfOrderStates] > 0,
                     "generated alphabet starvation: case reached no out-of-order settlement state"
                 );
                 runner_shape_totals.add(shape);
@@ -326,20 +326,8 @@ where
         );
     }
     eprintln!(
-        "store-contract run shape ({backend}, cases={cases}): enqueues_committed={} consumes_committed={} out_of_order_states={} spawns={} terminal_transitions={} tail_terminal_transitions={} tail_prune_ops={} prune_ops_with_effect={} tail_prune_ops_with_effect={}",
-        shape_totals.enqueues_committed.load(Ordering::Relaxed),
-        shape_totals.consumes_committed.load(Ordering::Relaxed),
-        shape_totals.out_of_order_states.load(Ordering::Relaxed),
-        shape_totals.spawns.load(Ordering::Relaxed),
-        shape_totals.terminal_transitions.load(Ordering::Relaxed),
-        shape_totals
-            .tail_terminal_transitions
-            .load(Ordering::Relaxed),
-        shape_totals.tail_prune_ops.load(Ordering::Relaxed),
-        shape_totals.prune_ops_with_effect.load(Ordering::Relaxed),
-        shape_totals
-            .tail_prune_ops_with_effect
-            .load(Ordering::Relaxed),
+        "store-contract run shape ({backend}, cases={cases}): {}",
+        shape_totals.report()
     );
 }
 
@@ -349,26 +337,23 @@ async fn replay_case(
 ) -> Result<RunShape, TestCaseError> {
     let mut scenario = StoreContractScenario::new(handles);
     for (step, operation) in operations.iter().enumerate() {
-        let terminal_transitions_before = scenario.shape.terminal_transitions;
-        let prune_ops_with_effect_before = scenario.shape.prune_ops_with_effect;
+        let terminal_transitions_before = scenario.shape[RunShapeCounter::TerminalTransitions];
+        let prune_ops_with_effect_before = scenario.shape[RunShapeCounter::PruneOpsWithEffect];
         scenario.apply(operation).await.map_err(|reason| {
             TestCaseError::fail(format!("step {step} {operation:?}: {reason}"))
         })?;
         if step >= GENERATED_PREFIX_OPS {
-            scenario.shape.tail_terminal_transitions =
-                scenario.shape.tail_terminal_transitions.saturating_add(
-                    scenario
-                        .shape
-                        .terminal_transitions
+            scenario.shape[RunShapeCounter::TailTerminalTransitions] =
+                scenario.shape[RunShapeCounter::TailTerminalTransitions].saturating_add(
+                    scenario.shape[RunShapeCounter::TerminalTransitions]
                         .saturating_sub(terminal_transitions_before),
                 );
             if matches!(operation, StoreContractOp::Prune { .. }) {
-                scenario.shape.tail_prune_ops = scenario.shape.tail_prune_ops.saturating_add(1);
-                scenario.shape.tail_prune_ops_with_effect =
-                    scenario.shape.tail_prune_ops_with_effect.saturating_add(
-                        scenario
-                            .shape
-                            .prune_ops_with_effect
+                scenario.shape[RunShapeCounter::TailPruneOps] =
+                    scenario.shape[RunShapeCounter::TailPruneOps].saturating_add(1);
+                scenario.shape[RunShapeCounter::TailPruneOpsWithEffect] =
+                    scenario.shape[RunShapeCounter::TailPruneOpsWithEffect].saturating_add(
+                        scenario.shape[RunShapeCounter::PruneOpsWithEffect]
                             .saturating_sub(prune_ops_with_effect_before),
                     );
             }
@@ -612,7 +597,8 @@ async fn apply_operation(
                     entry.install_fresh(record);
                     entry.wake_target = target;
                     model.process_counts.record_spawn();
-                    shape.spawns = shape.spawns.saturating_add(1);
+                    shape[RunShapeCounter::Spawns] =
+                        shape[RunShapeCounter::Spawns].saturating_add(1);
                 } else {
                     entry.base.get_or_insert(record);
                 }
@@ -824,7 +810,8 @@ async fn apply_operation(
                     .complete_process(&id, output.clone(), authority)
                     .await
                 {
-                    shape.terminal_transitions = shape.terminal_transitions.saturating_add(1);
+                    shape[RunShapeCounter::TerminalTransitions] =
+                        shape[RunShapeCounter::TerminalTransitions].saturating_add(1);
                     if let Some(expected) = model.process_mut(&id).expected_record.as_mut() {
                         event_sequences.advance(expected);
                         expected.wait = None;
@@ -1040,7 +1027,8 @@ async fn apply_operation(
             *sequence = sequence
                 .checked_add(1)
                 .expect("generated enqueue sequence must remain in range");
-            shape.enqueues_committed = shape.enqueues_committed.saturating_add(1);
+            shape[RunShapeCounter::EnqueuesCommitted] =
+                shape[RunShapeCounter::EnqueuesCommitted].saturating_add(1);
         }
         StoreContractOp::ConsumeWake {
             selection,
@@ -1061,9 +1049,11 @@ async fn apply_operation(
                     .get_mut(&key)
                     .expect("selected live wake group exists");
                 wakes.remove(&sequence);
-                shape.consumes_committed = shape.consumes_committed.saturating_add(1);
+                shape[RunShapeCounter::ConsumesCommitted] =
+                    shape[RunShapeCounter::ConsumesCommitted].saturating_add(1);
                 if lower_live {
-                    shape.out_of_order_states = shape.out_of_order_states.saturating_add(1);
+                    shape[RunShapeCounter::OutOfOrderStates] =
+                        shape[RunShapeCounter::OutOfOrderStates].saturating_add(1);
                 }
             }
         }
@@ -1084,7 +1074,8 @@ async fn apply_operation(
                 .map_err(|error| error.to_string())?;
             model.process_counts.record_pruned(report.pruned_processes);
             if report.pruned_processes > 0 {
-                shape.prune_ops_with_effect = shape.prune_ops_with_effect.saturating_add(1);
+                shape[RunShapeCounter::PruneOpsWithEffect] =
+                    shape[RunShapeCounter::PruneOpsWithEffect].saturating_add(1);
             }
             for (id, process) in &mut model.processes {
                 let pruned = matches!(

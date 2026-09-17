@@ -33,7 +33,7 @@ pub(super) fn record_usage(
         return Err("zero usage recording changed the pending ledger".to_string());
     }
     accumulate(&mut model.recorded_usage, &entry.usage);
-    shape.usage_records += 1;
+    shape[RunShapeCounter::UsageRecords] += 1;
     Ok(())
 }
 
@@ -56,7 +56,7 @@ pub(super) fn stage_usage(
     .map_err(|error| error.to_string())?;
     model.staged_usage = Some(staged);
     model.staged_usage_operation = Some(operation);
-    shape.usage_stages += 1;
+    shape[RunShapeCounter::UsageStages] += 1;
     Ok(())
 }
 
@@ -152,7 +152,7 @@ pub(super) fn confirm_usage(
         if json(&pending_usage_snapshot(model))? != json(&before)? {
             return Err("refused usage confirmation changed the pending ledger".to_string());
         }
-        shape.usage_confirmations += 1;
+        shape[RunShapeCounter::UsageConfirmations] += 1;
         return Ok(());
     }
     result.map_err(|error| error.to_string())?;
@@ -161,7 +161,7 @@ pub(super) fn confirm_usage(
             "usage confirmation removed rows other than the store-returned identities".to_string(),
         );
     }
-    shape.usage_confirmations += 1;
+    shape[RunShapeCounter::UsageConfirmations] += 1;
     Ok(())
 }
 
@@ -206,7 +206,7 @@ pub(super) async fn replay_usage_receipt(
             staged,
             identities: result.committed_usage_delta_identities,
         });
-    shape.usage_receipt_replays += 1;
+    shape[RunShapeCounter::UsageReceiptReplays] += 1;
     Ok(())
 }
 
