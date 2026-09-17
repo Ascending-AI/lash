@@ -275,9 +275,11 @@ pub(crate) async fn fork_chat(
         })
         .await?;
     if let Err(error) = state.core().fork_at(node_id, target_chat_id.clone()).await {
-        let _ = state
-            .with_db(move |db| db.delete_chat(&target_chat_id))
-            .await;
+        // Both abort paths run the same compensator: `fork_at` can fail after
+        // the fork's session store exists, and only `discard_pending_chat_fork`
+        // reclaims it. A compensator failure must not mask the fork error the
+        // caller is answered with.
+        let _ = state.discard_pending_chat_fork(&target_chat_id).await;
         return Err(branch_error(error));
     }
     let chat = match state

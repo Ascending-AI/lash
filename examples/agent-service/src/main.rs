@@ -21,6 +21,8 @@ mod demo_plugin;
 #[cfg(feature = "restate")]
 mod effect_groups;
 #[cfg(test)]
+mod fork_compensation_tests;
+#[cfg(test)]
 mod fork_rewind_contract;
 mod lease_triage;
 mod raw_activities;
