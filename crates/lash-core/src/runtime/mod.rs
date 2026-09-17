@@ -252,10 +252,11 @@ pub use native_substrate::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
-    LiveReplaySubscribeOutcome, LiveReplaySubscription, PreparedLiveReplayPublication,
-    RuntimeHandle, RuntimeObservation, SessionCursor, SessionCursorError, SessionObservation,
-    SessionObservationEvent, SessionObservationEventPayload, SessionObservationSubscription,
-    SessionProcessEventKind, SessionQueueEventKind, SessionResume, SessionRevision,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, ObservationPluginServices,
+    PreparedLiveReplayPublication, RuntimeHandle, RuntimeObservation, SessionCursor,
+    SessionCursorError, SessionObservation, SessionObservationEvent,
+    SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
+    SessionQueueEventKind, SessionResume, SessionRevision,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;
