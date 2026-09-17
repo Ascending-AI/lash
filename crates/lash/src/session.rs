@@ -672,7 +672,7 @@ impl LashSession {
 
     /// Returns a snapshot of the session policy.
     pub fn policy_snapshot(&self) -> SessionPolicy {
-        self.runtime.observe().policy.clone()
+        self.runtime.observe().read_view.policy().clone()
     }
 
     /// Returns an observable handle for session read models and replay.
@@ -1282,7 +1282,7 @@ impl ObservableSession {
 
     /// Returns a snapshot of the session policy.
     pub fn policy_snapshot(&self) -> SessionPolicy {
-        self.snapshot().policy.clone()
+        self.snapshot().read_view.policy().clone()
     }
 
     /// Returns a read-only view of the session state.
