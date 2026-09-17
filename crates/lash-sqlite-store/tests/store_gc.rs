@@ -533,7 +533,10 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
         .await
         .expect("replay second input");
     assert_eq!(replay.input_id, cancelled.input_id);
-    assert_eq!(replay.state, lash_core::TurnInputState::Cancelled);
+    assert_eq!(
+        replay.state.kind(),
+        lash_core::TurnInputStateKind::Cancelled
+    );
 
     let second_report = second.vacuum().await.expect("vacuum second session");
     assert_eq!(second_report.removed_node_count, 0);

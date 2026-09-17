@@ -1232,7 +1232,7 @@ impl WorkbenchQueuedWorkSubmitter {
             .into_iter()
             .any(|read| {
                 matches!(
-                    read.input.ingress,
+                    read.input.ingress(),
                     lash::persistence::TurnInputIngress::NextTurn
                 )
             });

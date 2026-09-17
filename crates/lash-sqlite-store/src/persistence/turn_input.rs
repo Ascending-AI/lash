@@ -517,7 +517,7 @@ impl TurnInputStore for Store {
                             nonce,
                         )
                     });
-                    let state = draft.ingress.initial_state();
+                    let state = lash_core::TurnInputState::open(draft.ingress.clone());
                     tx.execute(
                         "INSERT INTO pending_turn_inputs (
                             input_id, session_id, source_key, ingress_json, state,
@@ -581,8 +581,8 @@ impl TurnInputStore for Store {
                             .query_map(
                                 params![
                                     session_id.as_str(),
-                                    lash_core::TurnInputState::PendingActive.as_str(),
-                                    lash_core::TurnInputState::DeferredNextTurn.as_str(),
+                                    lash_core::TurnInputStateKind::PendingActive.as_str(),
+                                    lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
                                     now as i64
                                 ],
                                 pending_turn_input_read_row_from_sql,
@@ -794,18 +794,16 @@ impl TurnInputStore for Store {
         let session_id = claim.session_id.clone();
         let claim_id = claim.claim_id.clone();
         let lease_token = claim.lease_token.clone();
-        let restored_state = match claim.mode {
-            lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
-                lash_core::TurnInputState::PendingActive
-            }
-            lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
-        };
         self.conn
             .write(move |tx| {
                 tx.execute(
                     "UPDATE pending_turn_inputs
                      SET state = CASE
-                             WHEN state = ?4 THEN ?5
+                             WHEN state = ?4 THEN
+                                 CASE json_extract(ingress_json, '$.scope')
+                                     WHEN 'active_turn' THEN ?5
+                                     ELSE ?6
+                                 END
                              ELSE state
                          END,
                          claim_id = NULL,
@@ -818,8 +816,9 @@ impl TurnInputStore for Store {
                         session_id.as_str(),
                         claim_id.as_str(),
                         lease_token,
-                        lash_core::TurnInputState::Accepted.as_str(),
-                        restored_state.as_str(),
+                        lash_core::TurnInputStateKind::Accepted.as_str(),
+                        lash_core::TurnInputStateKind::PendingActive.as_str(),
+                        lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
                     ],
                 )
             })
@@ -950,37 +949,19 @@ impl TurnInputStore for Store {
         if claims.is_empty() {
             return Ok(());
         }
-        // FIG-1573: the restored state is the claim's own mode, exactly as the
-        // singular sibling resolves it. A next-turn claim restored to
-        // `pending_active` would be addressable only by a turn id that never
-        // claimed it. Both partitions are written in ONE transaction: a batch
-        // abandon is one caller giving up one set of rows, and a crash between
-        // two statements would leave half the batch claimed by a claim id the
-        // caller has already dropped.
-        let mut statements = Vec::new();
-        for (mode, claims) in [
-            (
-                lash_core::TurnInputState::PendingActive,
-                claims
-                    .iter()
-                    .filter(|claim| {
-                        matches!(claim.mode, lash_core::TurnInputClaimMode::ActiveTurn { .. })
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            (
-                lash_core::TurnInputState::DeferredNextTurn,
-                claims
-                    .iter()
-                    .filter(|claim| matches!(claim.mode, lash_core::TurnInputClaimMode::NextTurn))
-                    .collect::<Vec<_>>(),
-            ),
-        ] {
-            if claims.is_empty() {
-                continue;
-            }
-            statements.push(abandon_turn_input_claims_statement(&claims, mode));
-        }
+        // FIG-1573: the restored open spelling derives from each row's own
+        // ingress, exactly as the singular sibling resolves it — a next-turn
+        // row restores to `deferred_next_turn`, never `pending_active`. The
+        // whole batch is written in ONE statement inside ONE transaction: a
+        // batch abandon is one caller giving up one set of rows, and a crash
+        // between two statements would leave half the batch claimed by a
+        // claim id the caller has already dropped.
+        let claims: Vec<&lash_core::TurnInputClaim> = claims.iter().collect();
+        let statements = if claims.is_empty() {
+            Vec::new()
+        } else {
+            vec![abandon_turn_input_claims_statement(&claims)]
+        };
         self.conn
             .write(move |tx| {
                 for (sql, values) in &statements {
@@ -994,20 +975,28 @@ impl TurnInputStore for Store {
     }
 }
 
-/// One `UPDATE` restoring a batch of abandoned claims to `restored_state`.
-///
-/// Split out so the plural abandon can execute every mode partition inside a
-/// single transaction (FIG-1573).
+/// One `UPDATE` restoring a batch of abandoned claims to the open spelling
+/// each row's own `ingress_json` carries (FIG-1573, FIG-3232).
 fn abandon_turn_input_claims_statement(
     claims: &[&lash_core::TurnInputClaim],
-    restored_state: lash_core::TurnInputState,
 ) -> (String, Vec<rusqlite::types::Value>) {
-    let accepted_state =
-        lash_core::store_backend_support::state_sql_literal(lash_core::TurnInputState::Accepted);
+    let accepted_state = lash_core::store_backend_support::state_sql_literal(
+        lash_core::TurnInputStateKind::Accepted,
+    );
+    let pending_active = lash_core::store_backend_support::state_sql_literal(
+        lash_core::TurnInputStateKind::PendingActive,
+    );
+    let deferred_next_turn = lash_core::store_backend_support::state_sql_literal(
+        lash_core::TurnInputStateKind::DeferredNextTurn,
+    );
     let mut sql = format!(
         "UPDATE pending_turn_inputs
              SET state = CASE
-                     WHEN state = {accepted_state} THEN ?
+                     WHEN state = {accepted_state} THEN
+                         CASE json_extract(ingress_json, '$.scope')
+                             WHEN 'active_turn' THEN {pending_active}
+                             ELSE {deferred_next_turn}
+                         END
                      ELSE state
                  END,
                  claim_id = NULL,
@@ -1017,8 +1006,7 @@ fn abandon_turn_input_claims_statement(
                  claim_session_lease_generation = 0
              WHERE (session_id, claim_id, claim_token) IN ("
     );
-    let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(claims.len() * 3 + 1);
-    values.push(restored_state.as_str().to_string().into());
+    let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(claims.len() * 3);
     for (index, claim) in claims.iter().enumerate() {
         if index > 0 {
             sql.push_str(", ");

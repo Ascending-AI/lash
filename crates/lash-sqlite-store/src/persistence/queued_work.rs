@@ -834,7 +834,7 @@ impl QueuedWorkStore for Store {
                                 params![
                                     session_id.as_str(),
                                     now as i64,
-                                    lash_core::TurnInputState::DeferredNextTurn.as_str(),
+                                    lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
                                     QueuedWorkKind::Control.as_str()
                                 ],
                                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),

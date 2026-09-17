@@ -691,9 +691,9 @@ async fn apply_operation(
                     }
                     if !model.inputs.contains_key(&key)
                         && matches!(
-                            replay.state,
-                            crate::TurnInputState::PendingActive
-                                | crate::TurnInputState::DeferredNextTurn
+                            replay.state.kind(),
+                            crate::TurnInputStateKind::PendingActive
+                                | crate::TurnInputStateKind::DeferredNextTurn
                         )
                     {
                         return Err("terminal turn-input replay became pending again".to_string());
@@ -702,9 +702,9 @@ async fn apply_operation(
                 None => {
                     let input = result.map_err(|error| error.to_string())?;
                     if !matches!(
-                        input.state,
-                        crate::TurnInputState::PendingActive
-                            | crate::TurnInputState::DeferredNextTurn
+                        input.state.kind(),
+                        crate::TurnInputStateKind::PendingActive
+                            | crate::TurnInputStateKind::DeferredNextTurn
                     ) {
                         return Err("fresh turn input returned a terminal receipt".to_string());
                     }

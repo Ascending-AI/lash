@@ -1974,7 +1974,7 @@ pub(super) async fn activated_successor_loses_head_cas_after_predecessor_publica
         "the CAS loser must return its input to the durable next-turn queue"
     );
     assert_eq!(
-        successor_input.input.ingress,
+        successor_input.input.ingress(),
         lash_core::TurnInputIngress::NextTurn
     );
     assert!(

@@ -26,8 +26,8 @@ pub(super) async fn checkpoint_work_pending_postgres(
         checkpoint,
     );
     let admitted_states = lash_core::store_backend_support::state_sql_literal_list(&[
-        lash_core::TurnInputState::PendingActive,
-        lash_core::TurnInputState::Accepted,
+        lash_core::TurnInputStateKind::PendingActive,
+        lash_core::TurnInputStateKind::Accepted,
     ]);
     let sql = format!(
         "WITH {head_candidate}
@@ -703,8 +703,8 @@ pub(super) async fn orphaned_active_turn_ids_tx(
     .bind(session_id.as_str())
     .bind(
         [
-            lash_core::TurnInputState::PendingActive.as_str(),
-            lash_core::TurnInputState::Accepted.as_str(),
+            lash_core::TurnInputStateKind::PendingActive.as_str(),
+            lash_core::TurnInputStateKind::Accepted.as_str(),
         ]
         .as_slice(),
     )
@@ -713,10 +713,14 @@ pub(super) async fn orphaned_active_turn_ids_tx(
     .map_err(store_sqlx_error)?;
     let mut turn_ids = std::collections::BTreeSet::new();
     for (state, ingress_json, claim_token, claim_generation) in rows {
-        let state = lash_core::TurnInputState::from_wire_str(&state)
-            .ok_or_else(|| StoreError::Backend(format!("unknown turn-input state `{state}`")))?;
         let ingress: lash_core::TurnInputIngress =
             store_decode_json(&ingress_json, "turn-input ingress")?;
+        let state =
+            lash_core::TurnInputState::from_persisted(&state, ingress).ok_or_else(|| {
+                StoreError::Backend(format!(
+                    "unknown or scope-illegal turn-input state `{state}`"
+                ))
+            })?;
         let claim_generation = u64_from_sql(
             "PendingTurnInput",
             "claim_session_lease_generation",
@@ -725,12 +729,11 @@ pub(super) async fn orphaned_active_turn_ids_tx(
         if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
             scope,
             live_generation,
-            state,
-            &ingress,
+            &state,
             claim_token.is_some(),
             claim_generation,
         ) {
-            let turn_id = ingress.active_turn_id().ok_or_else(|| {
+            let turn_id = state.active_turn_id().ok_or_else(|| {
                 StoreError::Backend("active-turn input has no active turn id".to_string())
             })?;
             turn_ids.insert(turn_id.clone());
@@ -765,8 +768,8 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     .bind(session_id.as_str())
     .bind(
         [
-            lash_core::TurnInputState::PendingActive.as_str(),
-            lash_core::TurnInputState::Accepted.as_str(),
+            lash_core::TurnInputStateKind::PendingActive.as_str(),
+            lash_core::TurnInputStateKind::Accepted.as_str(),
         ]
         .as_slice(),
     )
@@ -779,10 +782,14 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     let disposition = effective.map_or(lash_core::TurnCancelDisposition::Defer, |e| e.undelivered);
     let mut repairable = Vec::new();
     for (input_id, state, ingress_json, input_json, claim_token, claim_generation) in rows {
-        let state = lash_core::TurnInputState::from_wire_str(&state)
-            .ok_or_else(|| StoreError::Backend(format!("unknown turn-input state `{state}`")))?;
         let ingress: lash_core::TurnInputIngress =
             store_decode_json(&ingress_json, "turn-input ingress")?;
+        let state =
+            lash_core::TurnInputState::from_persisted(&state, ingress).ok_or_else(|| {
+                StoreError::Backend(format!(
+                    "unknown or scope-illegal turn-input state `{state}`"
+                ))
+            })?;
         let claim_generation = u64_from_sql(
             "PendingTurnInput",
             "claim_session_lease_generation",
@@ -791,8 +798,7 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
         if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
             scope,
             live_generation,
-            state,
-            &ingress,
+            &state,
             claim_token.is_some(),
             claim_generation,
         ) {
@@ -804,7 +810,8 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
             Default::default(),
         ));
     }
-    let next_turn_ingress = encode_json(&lash_core::TurnInputIngress::NextTurn)?;
+    let deferred = lash_core::TurnInputState::DeferredNextTurn;
+    let deferred_ingress = encode_json(&deferred.ingress())?;
     let mut outcome = lash_core::TurnCancelInputOutcome::default();
     for (input_id, payload) in repairable {
         sqlx::query(
@@ -821,13 +828,13 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
         .bind(session_id.as_str())
         .bind(&input_id)
         .bind(match disposition {
-            lash_core::TurnCancelDisposition::Defer => {
-                lash_core::TurnInputState::DeferredNextTurn.as_str()
+            lash_core::TurnCancelDisposition::Defer => deferred.as_str(),
+            lash_core::TurnCancelDisposition::Drop => {
+                lash_core::TurnInputStateKind::Cancelled.as_str()
             }
-            lash_core::TurnCancelDisposition::Drop => lash_core::TurnInputState::Cancelled.as_str(),
         })
         .bind(match disposition {
-            lash_core::TurnCancelDisposition::Defer => Some(next_turn_ingress.as_str()),
+            lash_core::TurnCancelDisposition::Defer => Some(deferred_ingress.as_str()),
             lash_core::TurnCancelDisposition::Drop => None,
         })
         .execute(&mut **tx)
@@ -863,17 +870,18 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     let active_turn = matches!(mode, lash_core::TurnInputClaimMode::ActiveTurn { .. });
     let wanted_state = match &mode {
         lash_core::TurnInputClaimMode::ActiveTurn { .. } => {
-            lash_core::TurnInputState::PendingActive
+            lash_core::TurnInputStateKind::PendingActive
         }
-        lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
+        lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputStateKind::DeferredNextTurn,
     };
     let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(format!(
         "SELECT {PENDING_TURN_INPUT_COLUMNS}
          FROM lash_pending_turn_inputs
          WHERE session_id = "
     ));
-    let accepted_state =
-        lash_core::store_backend_support::state_sql_literal(lash_core::TurnInputState::Accepted);
+    let accepted_state = lash_core::store_backend_support::state_sql_literal(
+        lash_core::TurnInputStateKind::Accepted,
+    );
     query
         .push_bind(session_id.as_str())
         .push(" AND (state = ")
@@ -934,8 +942,8 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
         selected.iter().map(|(row, _)| row.claim_fencing_token),
     )?;
     let state_after_claim = match &mode {
-        lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputState::Accepted,
-        lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
+        lash_core::TurnInputClaimMode::ActiveTurn { .. } => lash_core::TurnInputStateKind::Accepted,
+        lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputStateKind::DeferredNextTurn,
     };
     let mut inputs = Vec::new();
     for ((row, mut input), sql_fencing_token) in selected.into_iter().zip(sql_fencing_tokens) {
@@ -973,7 +981,11 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
         if changed == 0 {
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
-        input.state = state_after_claim;
+        if state_after_claim == lash_core::TurnInputStateKind::Accepted
+            && let Some(accepted) = input.state.accepted()
+        {
+            input.state = accepted;
+        }
         inputs.push(input);
     }
     Ok(ClaimTransactionOutcome::Commit(Some(

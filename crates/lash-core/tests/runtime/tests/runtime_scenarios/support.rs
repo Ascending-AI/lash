@@ -698,7 +698,7 @@ async fn assert_pending_turn_inputs(
         match expected.ingress {
             RuntimePendingTurnInputIngressExpectation::NextTurn => {
                 assert!(
-                    matches!(input.input.ingress, TurnInputIngress::NextTurn),
+                    matches!(input.input.ingress(), TurnInputIngress::NextTurn),
                     "{scenario_name} expected `{}` to be pending for the next turn",
                     expected.alias
                 );

@@ -140,13 +140,13 @@ pub(crate) async fn complete_turn_input_claims_tx(
                 )
                 .bind(completed.session_id.as_str())
                 .bind(input_id.as_str())
-                .bind(lash_core::TurnInputState::Completed.as_str())
+                .bind(lash_core::TurnInputStateKind::Completed.as_str())
                 .bind(&claim.claim_id)
                 .bind(&claim.lease_token),
                 None => sqlx::query(&unclaimed_settlement_statement)
                     .bind(completed.session_id.as_str())
                     .bind(input_id.as_str())
-                    .bind(lash_core::TurnInputState::Completed.as_str()),
+                    .bind(lash_core::TurnInputStateKind::Completed.as_str()),
             }
             .execute(&mut **tx)
             .await

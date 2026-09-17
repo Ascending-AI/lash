@@ -1352,7 +1352,7 @@ pub(crate) async fn settle_workbench_turn(
         .await
         .map_err(AppError::runtime)?
         .into_iter()
-        .filter(|read| read.input.ingress.active_turn_id() == Some(turn_id))
+        .filter(|read| read.input.ingress().active_turn_id() == Some(turn_id))
         .map(|read| lash::PendingTurnInputCancelTarget::input_id(read.input.input_id))
         .collect::<Vec<_>>();
     if targets.is_empty() {
