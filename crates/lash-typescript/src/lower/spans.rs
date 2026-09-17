@@ -1,11 +1,11 @@
-//! Carrying TypeScript source positions into the lashlang span tables.
+//! Carrying TypeScript source positions into the lashlang span table.
 //!
 //! The lashlang diagnostic renderer prints `--> line N, column M`, the source
 //! line and a caret only when the error it renders carries a `Span`, and every
-//! span it can reach comes out of `Program::expression_source_spans`, which
-//! addresses an expression by the path of `Expr::children()` indices that
-//! reaches it from `Program::main`. The lashlang parser could fill that table
-//! directly because it built each node and its span together.
+//! span it can reach comes out of `Program::spans`, which addresses an
+//! expression by an [`AstPath`]: a root plus the `Expr::children()` index
+//! chain that reaches it. The lashlang parser could fill that table directly
+//! because it built each node and its span together.
 //!
 //! Lowering cannot: a TypeScript expression becomes a *tree* of lashlang
 //! expressions, the lowerer synthesizes nodes that no source position owns,
@@ -23,9 +23,10 @@
 //! recorded span still renders, it just falls back to the enclosing span the
 //! linker is already carrying.
 
+use std::collections::BTreeMap;
 use std::mem::Discriminant;
 
-use lashlang::{Expr as LashExpr, ExpressionSourceSpan, Span};
+use lashlang::{AstPath, Expr as LashExpr, Span};
 
 use crate::SourceSpan;
 
@@ -82,10 +83,10 @@ fn positions(expr: &LashExpr, path: &mut Vec<u32>, out: &mut Vec<PositionedNode>
 }
 
 /// Resolves `notes` against the finished `main` block.
-pub(super) fn source_spans(main: &LashExpr, notes: &[SpanNote]) -> Vec<ExpressionSourceSpan> {
+pub(super) fn source_spans(main: &LashExpr, notes: &[SpanNote]) -> BTreeMap<AstPath, Span> {
     let mut nodes = Vec::new();
     positions(main, &mut Vec::new(), &mut nodes);
-    let mut resolved = Vec::new();
+    let mut resolved = BTreeMap::new();
     let mut cursor = 0;
     for note in notes {
         let Some(offset) = nodes[cursor..]
@@ -95,15 +96,11 @@ pub(super) fn source_spans(main: &LashExpr, notes: &[SpanNote]) -> Vec<Expressio
             continue;
         };
         let index = cursor + offset;
-        // `main` itself is not an expression the tables address.
+        // `main` itself is not an expression the table addresses.
         if !nodes[index].path.is_empty() {
-            resolved.push(ExpressionSourceSpan {
-                path: nodes[index].path.clone(),
-                span: note.span,
-            });
+            resolved.insert(AstPath::main(nodes[index].path.clone()), note.span);
         }
         cursor = index + 1;
     }
-    resolved.sort_by(|left, right| left.path.cmp(&right.path));
     resolved
 }

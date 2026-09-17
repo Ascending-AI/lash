@@ -436,16 +436,22 @@ impl Compiler {
 
     fn compile_program_block(&mut self, program: &Program) {
         self.register_declared_functions(program);
-        match &program.main {
+        let last_statement = match &program.main {
             Expr::Block(expressions) => {
-                self.compile_block_value_with_spans(expressions, &program.expression_spans);
+                self.compile_block_value_with_spans(expressions);
+                expressions.last()
             }
-            expression => self.compile_expr(expression),
-        }
+            expression => {
+                self.compile_expr(expression);
+                Some(expression)
+            }
+        };
         if !is_terminal_expr(&program.main) {
             let pop = self.code.len();
             self.code.push(Instruction::Pop);
-            if let Some(span) = program.expression_spans.last().copied() {
+            if let Some(span) =
+                last_statement.and_then(|expression| self.expression_source_span(expression))
+            {
                 self.mark_instruction_spans(pop, self.code.len(), span);
             }
         }
@@ -462,16 +468,17 @@ impl Compiler {
         self.compile_expr(last);
     }
 
-    fn compile_block_value_with_spans(&mut self, expressions: &[Expr], spans: &[Span]) {
+    fn compile_block_value_with_spans(&mut self, expressions: &[Expr]) {
         let Some((last, prefix)) = expressions.split_last() else {
             self.code.push(Instruction::PushNull);
             return;
         };
-        for (index, expression) in prefix.iter().enumerate() {
-            let span = spans.get(index).copied();
+        for expression in prefix {
+            let span = self.expression_source_span(expression);
             self.compile_expr_discarding_value_with_span(expression, span);
         }
-        self.compile_expr_with_span(last, spans.get(expressions.len() - 1).copied());
+        let span = self.expression_source_span(last);
+        self.compile_expr_with_span(last, span);
     }
 
     fn compile_expr_with_span(&mut self, expression: &Expr, span: Option<Span>) {
