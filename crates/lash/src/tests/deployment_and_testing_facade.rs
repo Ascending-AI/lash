@@ -67,7 +67,7 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
         .await
         .expect("read deployment drain status");
     assert_eq!(status.remaining_invocations, 1);
-    assert!(!status.drained);
+    assert!(!status.drained());
 }
 
 #[tokio::test]

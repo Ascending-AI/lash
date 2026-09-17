@@ -106,7 +106,7 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
         .await
         .expect("query fixture A drain precondition");
     assert!(
-        !lash_drain.drained && lash_drain.remaining_invocations > 0,
+        !lash_drain.drained() && lash_drain.remaining_invocations > 0,
         "fixture A must retain its journaled process before transport interruption: {lash_drain:#?}"
     );
     let a_session_id = harness_a.state.current_session_id();
