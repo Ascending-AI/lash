@@ -712,7 +712,7 @@ impl SessionCommitStore for Store {
                     insert_graph_nodes_conn(
                         tx,
                         &commit.session_id,
-                        &commit.graph.nodes(),
+                        commit.graph.nodes(),
                         plan.planned_node_facts(),
                     )?;
                     let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());

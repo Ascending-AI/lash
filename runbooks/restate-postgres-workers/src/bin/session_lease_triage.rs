@@ -832,6 +832,7 @@ async fn commit_cas_livelock(
             config: state.config,
             current_frame_node_id: state.current_frame_node_id,
             graph: lash_core::store::GraphAppend::PreserveHead,
+            graph_base_leaf_node_id: state.graph.leaf_node_id.clone(),
             checkpoint: state
                 .checkpoint
                 .context("the materialized session has a checkpoint")?,

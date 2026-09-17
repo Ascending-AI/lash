@@ -491,6 +491,28 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
         "sha256:6056583b23117ff129cf39d93b9407bb95b0d06bf6e495f633b147662da1ed79"
     ),
+    # FIG-3230: GraphAppend became the explicit-intent enum
+    # (`Extend { nodes }` / `PreserveHead`), so the semantic-boundary
+    # projection's `graph.nodes` field read became `graph.nodes()` and the
+    # exhaustive destructure gained the ignored `graph_base_leaf_node_id`.
+    # `nodes()` returns the identical appended-node slice the field carried
+    # (`&nodes` for Extend, `&[]` for PreserveHead, matching the old
+    # `nodes: vec![]` arm), so `appended_payloads` collects the same payload
+    # sequence in the same order. The projection's serialized fields
+    # (operation key, session id, config, appended payloads, usage deltas) and
+    # every serde attribute and constant are unchanged, so the encoded
+    # identity bytes are identical on both sides: RECORD_CONFIG stays 3,
+    # CREATE_SESSION stays 3, and USAGE_LEDGER stays 5. One-time baseline;
+    # any further guarded-shape drift re-fails the gate.
+    "crates/lash-core-store/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
+    ),
+    "crates/lash-core-store/src/store/semantic_boundary.rs:CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
+    ),
+    "crates/lash-core-store/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
+        "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
+    ),
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

@@ -408,6 +408,7 @@ fn persistence_types_are_nameable(
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         current_frame_node_id: None,
         graph,
+        graph_base_leaf_node_id: None,
         checkpoint: Default::default(),
         adopted_intent_rows: 0,
         usage_deltas: ledger
