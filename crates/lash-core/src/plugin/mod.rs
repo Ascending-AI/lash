@@ -374,6 +374,55 @@ mod tests {
     }
 
     #[test]
+    fn plugin_host_collects_session_plugin_extension_contributions() {
+        struct SessionExtensionFactory;
+
+        impl PluginFactory for SessionExtensionFactory {
+            fn id(&self) -> &'static str {
+                "session_extension"
+            }
+
+            fn build(
+                &self,
+                _ctx: &PluginSessionContext,
+            ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+                Ok(Arc::new(SessionExtensionPlugin))
+            }
+        }
+
+        struct SessionExtensionPlugin;
+
+        impl SessionPlugin for SessionExtensionPlugin {
+            fn id(&self) -> &'static str {
+                "session_extension"
+            }
+
+            fn register(&self, _reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+                Ok(())
+            }
+
+            fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
+                vec![PluginExtensionContribution::from_value(
+                    TEST_EXTENSION_ID,
+                    json!({ "resource": "session.alarm" }),
+                )]
+            }
+        }
+
+        let host = PluginHost::new(vec![Arc::new(SessionExtensionFactory)]);
+        let session = host.build_session("root").expect("session");
+
+        assert_eq!(
+            session.session_extensions().payloads(TEST_EXTENSION_ID),
+            &[json!({ "resource": "session.alarm" })]
+        );
+        assert!(
+            session.extensions().payloads(TEST_EXTENSION_ID).is_empty(),
+            "session contributions must stay distinct from host-static extensions"
+        );
+    }
+
+    #[test]
     fn declared_triggers_enter_session_catalog() {
         struct TriggerEventOnlyFactory;
 

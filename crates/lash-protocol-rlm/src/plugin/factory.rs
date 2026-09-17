@@ -235,6 +235,7 @@ impl RlmProtocolPluginFactory {
         let config = rlm_protocol_config(self.config.clone(), process_lifecycle_available);
         let surface = rlm_lashlang_surface(&config, process_lifecycle_available)
             .with_plugin_extensions(plugin_host.extensions())
+            .and_then(|surface| surface.with_plugin_extensions(plugins.session_extensions()))
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         let host_environment = surface
             .host_environment(&tool_catalog)

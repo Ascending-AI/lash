@@ -23,6 +23,7 @@ use std::sync::Mutex;
 mod child_attempt_bound;
 mod deferred_and_processes;
 mod lifecycle_and_diagnostics;
+mod per_process_surface;
 mod projections_and_snapshots;
 mod triggers;
 mod typescript_cells;

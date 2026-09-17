@@ -145,6 +145,7 @@ mod rlm_inventory {
     use lash::rlm::NamedDataType as _;
     use lash::rlm::TypeExpr as _;
     use lash::rlm::TypeField as _;
+    use lash::rlm::lashlang_surface_extension as _;
     use lash::tools::link_with_deferred_resolution as _;
 
     // The Lashlang language vocabulary, re-exported whole as `lash::rlm::lang`.

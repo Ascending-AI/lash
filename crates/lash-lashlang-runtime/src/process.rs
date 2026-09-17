@@ -251,16 +251,23 @@ pub async fn run_lashlang_process(
                 return Err(lash_core::ProcessInfraError::new(err));
             }
         };
+        let session_extensions = context.plugins().session_extensions().clone();
         let surface = engine
             .surface
             .clone()
-            .for_process_registry(context.process_registry_available());
-        let host_environment = surface.host_environment(&tool_catalog);
+            .for_process_registry(context.process_registry_available())
+            .with_plugin_extensions(&session_extensions);
+        let host_environment = match surface {
+            Ok(surface) => surface
+                .host_environment(&tool_catalog)
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
         if let Err(output) = validate_lashlang_process_for_run(
             &artifact,
             &input,
             LashlangHostEnvironmentCheck::CheckHostEnvironment(
-                host_environment.as_ref().map_err(|error| error.to_string()),
+                host_environment.as_ref().map_err(Clone::clone),
             ),
         ) {
             return Ok((*output).into());

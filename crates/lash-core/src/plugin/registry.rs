@@ -86,6 +86,7 @@ impl PluginExtensions {
 
 #[derive(Clone, Default)]
 pub struct PluginSpec {
+    pub extension_contributions: Vec<PluginExtensionContribution>,
     pub tool_providers: Vec<Arc<dyn ToolProvider>>,
     pub orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     pub triggers: Vec<crate::TriggerEvent>,
@@ -110,6 +111,14 @@ pub struct PluginSpec {
 impl PluginSpec {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_extension_contribution(
+        mut self,
+        contribution: PluginExtensionContribution,
+    ) -> Self {
+        self.extension_contributions.push(contribution);
+        self
     }
 
     pub fn with_tool_provider(mut self, provider: Arc<dyn ToolProvider>) -> Self {
@@ -449,6 +458,16 @@ pub trait SessionPlugin: Send + Sync {
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError>;
 
+    /// Per-session mirror of [`PluginFactory::extension_contributions`].
+    ///
+    /// Collected once per session after [`register`](Self::register), so a
+    /// session plugin can derive extensions from the session's own plugin
+    /// options — on a durable-process session, the process's execution env
+    /// spec. Must be cheap and perform no I/O.
+    fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
+        Vec::new()
+    }
+
     fn session_ready(&self, _ctx: SessionReadyContext) -> Result<(), PluginError> {
         Ok(())
     }
@@ -662,6 +681,10 @@ impl PluginFactory for StaticPluginFactory {
 impl SessionPlugin for SpecPlugin {
     fn id(&self) -> &'static str {
         self.id
+    }
+
+    fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
+        self.spec.extension_contributions.clone()
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
