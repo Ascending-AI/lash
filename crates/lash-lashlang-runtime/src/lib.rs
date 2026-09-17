@@ -64,6 +64,16 @@ impl LashlangSurfaceContribution {
     }
 }
 
+/// Wrap a [`LashlangSurfaceContribution`] as the plugin extension a
+/// `SessionPlugin` returns from its `extension_contributions`, so a host can
+/// grant surface vocabulary per process from the execution env spec's plugin
+/// options rather than once per core.
+pub fn lashlang_surface_extension(
+    contribution: &LashlangSurfaceContribution,
+) -> Result<lash_core::plugin::PluginExtensionContribution, serde_json::Error> {
+    lash_core::plugin::PluginExtensionContribution::new(LASHLANG_SURFACE_EXTENSION_ID, contribution)
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ToolBinding {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1401,3 +1411,5 @@ pub use typed_output::parse_output_schema;
 
 #[cfg(test)]
 mod lib_tests;
+#[cfg(test)]
+mod session_surface_tests;
