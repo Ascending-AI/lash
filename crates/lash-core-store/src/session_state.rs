@@ -40,26 +40,10 @@ pub(crate) enum AcceptedExecutionRetention {
     Resident,
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
-enum ResidentCheckpointComponentBody {
-    ToolState {
-        snapshot: Option<crate::ToolState>,
-        generation: Option<u64>,
-    },
-    PluginState {
-        snapshot: Option<crate::PluginState>,
-        generations: std::collections::BTreeMap<String, u64>,
-    },
-    ExecutionState(Option<Vec<u8>>),
-    Opaque(Option<Vec<u8>>),
-}
-
-#[derive(Clone, Debug, serde::Serialize)]
-struct ResidentCheckpointComponent {
-    descriptor: Option<crate::CheckpointComponentDescriptor>,
-    body: ResidentCheckpointComponentBody,
-    dirty: bool,
-}
+mod checkpoint_component;
+use checkpoint_component::{
+    PendingCheckpointComponentBody, ResidentCheckpointComponent, ResidentCheckpointComponentBody,
+};
 
 /// Runtime-owned checkpoint component listing with an explicit completeness proof.
 ///
@@ -156,36 +140,33 @@ impl RuntimeCheckpointComponents {
         if let Some(blob_ref) = snapshot.tool_state_ref.clone() {
             result.entries.insert(
                 crate::store::TOOL_STATE_CHECKPOINT_COMPONENT.to_string(),
-                ResidentCheckpointComponent {
-                    descriptor: Some(Self::descriptor(blob_ref)),
+                ResidentCheckpointComponent::Unchanged {
+                    descriptor: Self::descriptor(blob_ref),
                     body: ResidentCheckpointComponentBody::ToolState {
                         snapshot: None,
                         generation: snapshot.tool_state_generation,
                     },
-                    dirty: false,
                 },
             );
         }
         if let Some(blob_ref) = snapshot.plugin_state_ref.clone() {
             result.entries.insert(
                 crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_string(),
-                ResidentCheckpointComponent {
-                    descriptor: Some(Self::descriptor(blob_ref)),
+                ResidentCheckpointComponent::Unchanged {
+                    descriptor: Self::descriptor(blob_ref),
                     body: ResidentCheckpointComponentBody::PluginState {
                         snapshot: None,
                         generations: snapshot.plugin_state_generations.clone(),
                     },
-                    dirty: false,
                 },
             );
         }
         if let Some(blob_ref) = snapshot.execution_state_ref.clone() {
             result.entries.insert(
                 crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
-                ResidentCheckpointComponent {
-                    descriptor: Some(Self::descriptor(blob_ref)),
+                ResidentCheckpointComponent::Unchanged {
+                    descriptor: Self::descriptor(blob_ref),
                     body: ResidentCheckpointComponentBody::ExecutionState(None),
-                    dirty: false,
                 },
             );
         }
@@ -252,11 +233,7 @@ impl RuntimeCheckpointComponents {
             };
             entries.insert(
                 key.clone(),
-                ResidentCheckpointComponent {
-                    descriptor: Some(descriptor),
-                    body,
-                    dirty: false,
-                },
+                ResidentCheckpointComponent::Unchanged { descriptor, body },
             );
         }
         Ok(Self {
@@ -275,10 +252,9 @@ impl RuntimeCheckpointComponents {
             .map(|(key, blob_ref)| {
                 (
                     key,
-                    ResidentCheckpointComponent {
-                        descriptor: Some(Self::descriptor(blob_ref)),
+                    ResidentCheckpointComponent::Unchanged {
+                        descriptor: Self::descriptor(blob_ref),
                         body: ResidentCheckpointComponentBody::Opaque(None),
-                        dirty: false,
                     },
                 )
             })
@@ -299,39 +275,28 @@ impl RuntimeCheckpointComponents {
         }
         let mut components = std::collections::BTreeMap::new();
         for (key, component) in &self.entries {
-            let pending = if component.dirty {
-                let body = match &component.body {
-                    ResidentCheckpointComponentBody::ToolState {
-                        snapshot: Some(snapshot),
-                        ..
-                    } => crate::store::encode_checkpoint_component(key, snapshot)?,
-                    ResidentCheckpointComponentBody::PluginState {
-                        snapshot: Some(snapshot),
-                        ..
-                    } => crate::store::encode_checkpoint_component(key, snapshot)?,
-                    ResidentCheckpointComponentBody::ExecutionState(Some(bytes))
-                    | ResidentCheckpointComponentBody::Opaque(Some(bytes)) => {
-                        let copied = bytes.clone();
-                        #[cfg(feature = "perf-witness")]
-                        crate::perf_witness::record_body_copy(bytes.len());
-                        copied
-                    }
-                    _ => {
-                        return Err(crate::StoreError::StoredDataCorrupt {
-                            record_kind: "RuntimeCheckpointComponents",
-                            message: format!("dirty component `{key}` has no body"),
-                        });
-                    }
-                };
-                crate::HydratedCheckpointComponent::changed(body)
-            } else {
-                let descriptor = component.descriptor.as_ref().ok_or_else(|| {
-                    crate::StoreError::StoredDataCorrupt {
-                        record_kind: "RuntimeCheckpointComponents",
-                        message: format!("unchanged component `{key}` has no durable ref"),
-                    }
-                })?;
-                crate::HydratedCheckpointComponent::unchanged(descriptor)
+            let pending = match component {
+                ResidentCheckpointComponent::Changed { body, .. } => {
+                    let body = match body {
+                        PendingCheckpointComponentBody::ToolState { snapshot, .. } => {
+                            crate::store::encode_checkpoint_component(key, snapshot)?
+                        }
+                        PendingCheckpointComponentBody::PluginState { snapshot, .. } => {
+                            crate::store::encode_checkpoint_component(key, snapshot)?
+                        }
+                        PendingCheckpointComponentBody::ExecutionState(bytes)
+                        | PendingCheckpointComponentBody::Opaque(bytes) => {
+                            let copied = bytes.clone();
+                            #[cfg(feature = "perf-witness")]
+                            crate::perf_witness::record_body_copy(bytes.len());
+                            copied
+                        }
+                    };
+                    crate::HydratedCheckpointComponent::changed(body)
+                }
+                ResidentCheckpointComponent::Unchanged { descriptor, .. } => {
+                    crate::HydratedCheckpointComponent::unchanged(descriptor)
+                }
             };
             components.insert(key.clone(), pending);
         }
@@ -347,28 +312,18 @@ impl RuntimeCheckpointComponents {
 
     fn component_ref(&self, key: &str) -> Option<&crate::store::BlobRef> {
         self.component(key)
-            .and_then(|component| component.descriptor.as_ref())
+            .and_then(|component| component.descriptor())
             .map(|descriptor| &descriptor.blob_ref)
     }
 
     fn tool_state_snapshot(&self) -> Option<&crate::ToolState> {
-        match self.component(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT) {
-            Some(ResidentCheckpointComponent {
-                body: ResidentCheckpointComponentBody::ToolState { snapshot, .. },
-                ..
-            }) => snapshot.as_ref(),
-            _ => None,
-        }
+        self.component(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
+            .and_then(ResidentCheckpointComponent::tool_state_snapshot)
     }
 
     fn tool_state_generation(&self) -> Option<u64> {
-        match self.component(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT) {
-            Some(ResidentCheckpointComponent {
-                body: ResidentCheckpointComponentBody::ToolState { generation, .. },
-                ..
-            }) => *generation,
-            _ => None,
-        }
+        self.component(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
+            .and_then(ResidentCheckpointComponent::tool_state_generation)
     }
 
     fn set_tool_state_snapshot(&mut self, snapshot: Option<crate::ToolState>) {
@@ -381,38 +336,27 @@ impl RuntimeCheckpointComponents {
         let descriptor = self
             .entries
             .get(&key)
-            .and_then(|entry| entry.descriptor.clone());
+            .and_then(|entry| entry.descriptor().cloned());
         self.entries.insert(
             key,
-            ResidentCheckpointComponent {
+            ResidentCheckpointComponent::Changed {
                 descriptor,
-                body: ResidentCheckpointComponentBody::ToolState {
-                    snapshot: Some(snapshot),
+                body: PendingCheckpointComponentBody::ToolState {
+                    snapshot,
                     generation,
                 },
-                dirty: true,
             },
         );
     }
 
     fn plugin_state(&self) -> Option<&crate::PluginState> {
-        match self.component(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT) {
-            Some(ResidentCheckpointComponent {
-                body: ResidentCheckpointComponentBody::PluginState { snapshot, .. },
-                ..
-            }) => snapshot.as_ref(),
-            _ => None,
-        }
+        self.component(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
+            .and_then(ResidentCheckpointComponent::plugin_state_snapshot)
     }
 
     fn plugin_generations(&self) -> Option<&std::collections::BTreeMap<String, u64>> {
-        match self.component(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT) {
-            Some(ResidentCheckpointComponent {
-                body: ResidentCheckpointComponentBody::PluginState { generations, .. },
-                ..
-            }) => Some(generations),
-            _ => None,
-        }
+        self.component(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
+            .and_then(ResidentCheckpointComponent::plugin_generations)
     }
 
     fn set_plugin_state(&mut self, snapshot: Option<crate::PluginState>) {
@@ -424,28 +368,22 @@ impl RuntimeCheckpointComponents {
         let descriptor = self
             .entries
             .get(&key)
-            .and_then(|entry| entry.descriptor.clone());
+            .and_then(|entry| entry.descriptor().cloned());
         self.entries.insert(
             key,
-            ResidentCheckpointComponent {
+            ResidentCheckpointComponent::Changed {
                 descriptor,
-                body: ResidentCheckpointComponentBody::PluginState {
+                body: PendingCheckpointComponentBody::PluginState {
                     generations: plugin_generations(&snapshot),
-                    snapshot: Some(snapshot),
+                    snapshot,
                 },
-                dirty: true,
             },
         );
     }
 
     fn execution_state_snapshot(&self) -> Option<&[u8]> {
-        match self.component(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT) {
-            Some(ResidentCheckpointComponent {
-                body: ResidentCheckpointComponentBody::ExecutionState(snapshot),
-                ..
-            }) => snapshot.as_deref(),
-            _ => None,
-        }
+        self.component(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+            .and_then(ResidentCheckpointComponent::execution_state_body)
     }
 
     fn set_execution_state_snapshot(&mut self, snapshot: Option<Vec<u8>>) {
@@ -464,13 +402,12 @@ impl RuntimeCheckpointComponents {
         let descriptor = self
             .entries
             .get(&key)
-            .and_then(|entry| entry.descriptor.clone());
+            .and_then(|entry| entry.descriptor().cloned());
         self.entries.insert(
             key,
-            ResidentCheckpointComponent {
+            ResidentCheckpointComponent::Changed {
                 descriptor,
-                body: ResidentCheckpointComponentBody::ExecutionState(Some(snapshot)),
-                dirty: true,
+                body: PendingCheckpointComponentBody::ExecutionState(snapshot),
             },
         );
     }
@@ -498,13 +435,12 @@ impl RuntimeCheckpointComponents {
                     let copied = body.clone();
                     #[cfg(feature = "perf-witness")]
                     crate::perf_witness::record_body_copy(body.len());
-                    ResidentCheckpointComponent {
+                    ResidentCheckpointComponent::Changed {
                         descriptor: self
                             .entries
                             .get(key)
-                            .and_then(|entry| entry.descriptor.clone()),
-                        body: ResidentCheckpointComponentBody::Opaque(Some(copied)),
-                        dirty: true,
+                            .and_then(|entry| entry.descriptor().cloned()),
+                        body: PendingCheckpointComponentBody::Opaque(copied),
                     }
                 }
                 crate::plugin::ExecutionStateComponentSnapshot::Unchanged => {
@@ -513,17 +449,25 @@ impl RuntimeCheckpointComponents {
                             "execution-state leaf component `{key}` was marked unchanged without resident state"
                         )));
                     };
-                    let has_pending_body = existing.dirty
-                        && matches!(
-                            &existing.body,
-                            ResidentCheckpointComponentBody::Opaque(Some(_))
-                        );
-                    if existing.descriptor.is_none() && !has_pending_body {
-                        return Err(crate::StoreError::Backend(format!(
-                            "execution-state leaf component `{key}` was marked unchanged without a durable ref or pending body"
-                        )));
+                    // A durable ref or a body still pending its first commit
+                    // both let the next commit reference the leaf as
+                    // unchanged; anything else has nothing to reference.
+                    match existing {
+                        ResidentCheckpointComponent::Unchanged { .. }
+                        | ResidentCheckpointComponent::Changed {
+                            descriptor: Some(_),
+                            ..
+                        }
+                        | ResidentCheckpointComponent::Changed {
+                            body: PendingCheckpointComponentBody::Opaque(_),
+                            ..
+                        } => existing.clone(),
+                        _ => {
+                            return Err(crate::StoreError::Backend(format!(
+                                "execution-state leaf component `{key}` was marked unchanged without a durable ref or pending body"
+                            )));
+                        }
                     }
-                    existing.clone()
                 }
             };
             replacement_entries.insert(key.clone(), replacement);
@@ -540,12 +484,18 @@ impl RuntimeCheckpointComponents {
     /// as unchanged: the resident set holds its durable ref or its pending body.
     fn holds_execution_state_leaf(&self, key: &str) -> bool {
         self.entries.get(key).is_some_and(|entry| {
-            entry.descriptor.is_some()
-                || (entry.dirty
-                    && matches!(
-                        &entry.body,
-                        ResidentCheckpointComponentBody::Opaque(Some(_))
-                    ))
+            matches!(
+                entry,
+                ResidentCheckpointComponent::Unchanged { .. }
+                    | ResidentCheckpointComponent::Changed {
+                        descriptor: Some(_),
+                        ..
+                    }
+                    | ResidentCheckpointComponent::Changed {
+                        body: PendingCheckpointComponentBody::Opaque(_),
+                        ..
+                    }
+            )
         })
     }
 
@@ -592,13 +542,13 @@ impl RuntimeCheckpointComponents {
             if !key.starts_with(Self::EXECUTION_STATE_LEAF_PREFIX) {
                 continue;
             }
-            let ResidentCheckpointComponentBody::Opaque(Some(body)) = &component.body else {
+            let Some(body) = component.opaque_body() else {
                 return Err(crate::StoreError::StoredDataCorrupt {
                     record_kind: "RuntimeCheckpointComponents",
                     message: format!("execution-state leaf component `{key}` was not hydrated"),
                 });
             };
-            let copied = body.clone();
+            let copied = body.to_vec();
             #[cfg(feature = "perf-witness")]
             crate::perf_witness::record_body_copy(body.len());
             components.insert(key.clone(), copied);
@@ -638,14 +588,7 @@ impl RuntimeCheckpointComponents {
             && self.execution_state_snapshot().is_some()
         {
             for component in self.entries.values_mut() {
-                match &mut component.body {
-                    ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
-                    ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
-                        *snapshot = None
-                    }
-                    ResidentCheckpointComponentBody::ExecutionState(_)
-                    | ResidentCheckpointComponentBody::Opaque(_) => {}
-                }
+                component.release_typed_snapshot();
             }
             return;
         }
@@ -662,22 +605,7 @@ impl RuntimeCheckpointComponents {
             (_, false) => ExecutionStateBodyResidency::CommitResultMismatch,
         };
         for component in self.entries.values_mut() {
-            let dirty = component.dirty;
-            match &mut component.body {
-                ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
-                ResidentCheckpointComponentBody::PluginState { snapshot, .. } => *snapshot = None,
-                ResidentCheckpointComponentBody::ExecutionState(snapshot) => *snapshot = None,
-                // Keyed execution-state leaves are the same class of body: once
-                // the durable ref is authoritative, the encoded bytes are a
-                // second resident copy of state the protocol already holds in
-                // its own form. A body that is still dirty has not been
-                // committed yet and is the retry's only source, so it stays.
-                ResidentCheckpointComponentBody::Opaque(body) => {
-                    if !dirty {
-                        *body = None;
-                    }
-                }
-            }
+            component.release_body();
         }
     }
 
@@ -686,15 +614,13 @@ impl RuntimeCheckpointComponents {
             .retain(|key, _| manifest.components.contains_key(key));
         for (key, descriptor) in &manifest.components {
             if let Some(component) = self.entries.get_mut(key) {
-                component.descriptor = Some(descriptor.clone());
-                component.dirty = false;
+                component.adopt_descriptor(descriptor.clone());
             } else {
                 self.entries.insert(
                     key.clone(),
-                    ResidentCheckpointComponent {
-                        descriptor: Some(descriptor.clone()),
+                    ResidentCheckpointComponent::Unchanged {
+                        descriptor: descriptor.clone(),
                         body: ResidentCheckpointComponentBody::Opaque(None),
-                        dirty: false,
                     },
                 );
             }
@@ -982,7 +908,9 @@ impl RuntimeSessionState {
     pub fn plugin_state_is_dirty(&self) -> bool {
         self.checkpoint_components
             .component(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
-            .is_some_and(|component| component.dirty)
+            .is_some_and(|component| {
+                matches!(component, ResidentCheckpointComponent::Changed { .. })
+            })
     }
 
     /// Durable reference for the well-known execution-state component.
