@@ -11,14 +11,20 @@ use crate::StoreError;
 /// One named `CHECK` Lash requires in the published store schemas: the
 /// same logical constraint rendered once per backend, so a row added
 /// here is gated on both stores at once.
+///
+/// `sqlite_databases` lists every SQLite component that carries the
+/// table: shared-fragment tables live in more than one database, so
+/// each carrier's inspection sees the constraint. `postgres` is `None`
+/// for checks that have no PostgreSQL counterpart (e.g. integer-boolean
+/// vocabularies where Postgres uses a native `BOOLEAN` instead).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExpectedConstraint {
-    /// Which SQLite schema component owns the table carrying the check.
-    pub sqlite_database: SqliteConstraintDatabase,
+    /// Which SQLite schema components carry the table holding the check.
+    pub sqlite_databases: &'static [SqliteConstraintDatabase],
     /// The check as SQLite declares it.
     pub sqlite: RenderedConstraint,
-    /// The check as PostgreSQL declares it.
-    pub postgres: RenderedConstraint,
+    /// The check as PostgreSQL declares it, when a counterpart exists.
+    pub postgres: Option<RenderedConstraint>,
 }
 
 /// A named `CHECK` as one backend declares it.
@@ -51,14 +57,25 @@ const fn rendered(
 }
 
 const fn expected_constraint(
-    sqlite_database: SqliteConstraintDatabase,
+    sqlite_databases: &'static [SqliteConstraintDatabase],
     sqlite: RenderedConstraint,
     postgres: RenderedConstraint,
 ) -> ExpectedConstraint {
     ExpectedConstraint {
-        sqlite_database,
+        sqlite_databases,
         sqlite,
-        postgres,
+        postgres: Some(postgres),
+    }
+}
+
+const fn sqlite_only_constraint(
+    sqlite_databases: &'static [SqliteConstraintDatabase],
+    sqlite: RenderedConstraint,
+) -> ExpectedConstraint {
+    ExpectedConstraint {
+        sqlite_databases,
+        sqlite,
+        postgres: None,
     }
 }
 
@@ -66,7 +83,7 @@ const fn expected_constraint(
 /// constraint with each backend's rendering beside the other.
 pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "attachment_manifest",
             "ck_attachment_manifest_owner_identity",
@@ -79,7 +96,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "pending_turn_inputs",
             "ck_pending_turn_inputs_state",
@@ -92,7 +109,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "pending_turn_inputs",
             "ck_pending_turn_inputs_state_ingress",
@@ -105,7 +122,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "pending_turn_inputs",
             "ck_pending_turn_inputs_claim_id_token_all_or_none",
@@ -118,7 +135,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "queued_work_batches",
             "ck_queued_work_batches_work_kind",
@@ -131,7 +148,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "queued_work_batches",
             "ck_queued_work_batches_delivery_policy",
@@ -144,7 +161,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "queued_work_batches",
             "ck_queued_work_batches_claim_id_token_all_or_none",
@@ -157,7 +174,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "session_execution_leases",
             "ck_session_execution_leases_identity_all_or_none",
@@ -170,7 +187,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "session_meta",
             "ck_session_meta_relation_kind",
@@ -183,7 +200,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "session_meta",
             "ck_session_meta_caused_by_kind",
@@ -196,7 +213,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "session_meta",
             "ck_session_meta_observer_inheritance_kind",
@@ -209,7 +226,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "session_meta",
             "ck_session_meta_relation_family",
@@ -222,7 +239,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "session_meta",
             "ck_session_meta_caused_by_family",
@@ -235,7 +252,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::DurableCore,
+        &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "process_definitions",
             "ck_process_definitions_lifecycle",
@@ -248,7 +265,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::ProcessRegistry,
+        &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "processes",
             "ck_processes_status",
@@ -261,7 +278,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::ProcessRegistry,
+        &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "processes",
             "ck_processes_parent_scope_kind",
@@ -274,7 +291,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::ProcessRegistry,
+        &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "processes",
             "ck_processes_parent_scope_id",
@@ -287,7 +304,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::ProcessRegistry,
+        &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "processes",
             "ck_processes_on_parent_end",
@@ -300,7 +317,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::ProcessRegistry,
+        &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "parent_end_plans",
             "ck_parent_end_plans_kind",
@@ -313,7 +330,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::ProcessRegistry,
+        &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "process_wake_deliveries",
             "ck_process_wake_deliveries_state",
@@ -326,7 +343,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::ProcessRegistry,
+        &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "process_wake_deliveries",
             "ck_process_wake_deliveries_discard_reason",
@@ -339,7 +356,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::ProcessRegistry,
+        &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "tool_intent_submissions",
             "ck_tool_intent_submissions_kind",
@@ -352,7 +369,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::Triggers,
+        &[SqliteConstraintDatabase::Triggers],
         rendered(
             "trigger_subscriptions",
             "ck_trigger_subscriptions_lifecycle",
@@ -365,7 +382,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::Triggers,
+        &[SqliteConstraintDatabase::Triggers],
         rendered(
             "trigger_subscriptions",
             "ck_trigger_subscriptions_lifecycle_deleted_at",
@@ -378,7 +395,7 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
-        SqliteConstraintDatabase::EffectReplay,
+        &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_replay",
             "ck_runtime_effect_replay_status",
@@ -388,6 +405,231 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
             "lash_runtime_effect_replay",
             "ck_runtime_effect_replay_status",
             "status IN ('in_progress', 'completed', 'failed')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "graph_nodes",
+            "ck_graph_nodes_generation",
+            "generation >= 0",
+        ),
+        rendered(
+            "lash_graph_nodes",
+            "ck_graph_nodes_generation",
+            "generation >= 0",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "fork_lineage",
+            "ck_fork_lineage_fork_generation",
+            "fork_generation >= 0",
+        ),
+        rendered(
+            "lash_fork_lineage",
+            "ck_fork_lineage_fork_generation",
+            "fork_generation >= 0",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "session_meta_pending_observer_intents",
+            "ck_session_meta_pending_observer_intents_attribution",
+            "attribution IN ('host_requested', 'fork_inherited')",
+        ),
+        rendered(
+            "lash_session_meta_pending_observer_intents",
+            "ck_session_meta_pending_observer_intents_attribution",
+            "attribution IN ('host_requested', 'fork_inherited')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "runtime_turn_commits",
+            "ck_runtime_turn_commits_identity",
+            "(request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL)",
+        ),
+        rendered(
+            "lash_runtime_turn_commits",
+            "ck_runtime_turn_commits_identity",
+            "(request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL)",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "turn_cancel_requests",
+            "ck_turn_cancel_requests_intent_revision",
+            "intent_revision >= 1",
+        ),
+        rendered(
+            "lash_turn_cancel_requests",
+            "ck_turn_cancel_requests_intent_revision",
+            "intent_revision >= 1",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "turn_cancellation_bindings",
+            "ck_turn_cancellation_bindings_binding_id",
+            "length(binding_id) > 0",
+        ),
+        rendered(
+            "lash_turn_cancellation_bindings",
+            "ck_turn_cancellation_bindings_binding_id",
+            "length(binding_id) > 0",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "attachment_manifest",
+            "ck_attachment_manifest_owner_kind",
+            "owner_kind IN ('turn', 'process')",
+        ),
+        rendered(
+            "lash_attachment_manifest",
+            "ck_attachment_manifest_owner_kind",
+            "owner_kind IN ('turn', 'process')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "attachment_condemnations",
+            "ck_attachment_condemnations_phase",
+            "phase IN ('condemned', 'deleting')",
+        ),
+        rendered(
+            "lash_attachment_condemnations",
+            "ck_attachment_condemnations_phase",
+            "phase IN ('condemned', 'deleting')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "attachment_condemnations",
+            "ck_attachment_condemnations_write_token_pairing",
+            "(write_token IS NULL) = (write_session_id IS NULL)",
+        ),
+        rendered(
+            "lash_attachment_condemnations",
+            "ck_attachment_condemnations_write_token_pairing",
+            "(write_token IS NULL) = (write_session_id IS NULL)",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "attachment_condemnations",
+            "ck_attachment_condemnations_write_token_phase",
+            "write_token IS NULL OR phase = 'condemned'",
+        ),
+        rendered(
+            "lash_attachment_condemnations",
+            "ck_attachment_condemnations_write_token_phase",
+            "write_token IS NULL OR phase = 'condemned'",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "artifact_owners",
+            "ck_artifact_owners_owner_kind",
+            "owner_kind IN ('host', 'process', 'execution')",
+        ),
+        rendered(
+            "lash_artifact_owners",
+            "ck_artifact_owners_owner_kind",
+            "owner_kind IN ('host', 'process', 'execution')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "artifact_owner_retirements",
+            "ck_artifact_owner_retirements_owner_kind",
+            "owner_kind = 'execution'",
+        ),
+        rendered(
+            "lash_artifact_owner_retirements",
+            "ck_artifact_owner_retirements_owner_kind",
+            "owner_kind = 'execution'",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "release_stamp",
+            "ck_release_stamp_singleton",
+            "singleton = 1",
+        ),
+        rendered(
+            "lash_release_stamp",
+            "ck_release_stamp_singleton",
+            "singleton",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::ProcessRegistry],
+        rendered(
+            "process_change_clock",
+            "ck_process_change_clock_singleton",
+            "singleton = 1",
+        ),
+        rendered(
+            "lash_process_change_clock",
+            "ck_process_change_clock_singleton",
+            "singleton",
+        ),
+    ),
+    // `await_event_meta` is carried by the shared await-event fragment into
+    // both the durable-core and effect-replay databases; each carrier's
+    // inspection must find the check.
+    expected_constraint(
+        &[
+            SqliteConstraintDatabase::DurableCore,
+            SqliteConstraintDatabase::EffectReplay,
+        ],
+        rendered(
+            "await_event_meta",
+            "ck_await_event_meta_singleton",
+            "singleton = 1",
+        ),
+        rendered(
+            "lash_await_event_meta",
+            "ck_await_event_meta_singleton",
+            "singleton",
+        ),
+    ),
+    // Postgres stores these flags as native BOOLEAN, so the integer-domain
+    // vocabulary checks exist only on the SQLite side.
+    sqlite_only_constraint(
+        &[
+            SqliteConstraintDatabase::DurableCore,
+            SqliteConstraintDatabase::EffectReplay,
+        ],
+        rendered(
+            "await_event_waits",
+            "ck_await_event_waits_turn_control",
+            "turn_control IN (0, 1)",
+        ),
+    ),
+    sqlite_only_constraint(
+        &[
+            SqliteConstraintDatabase::ProcessRegistry,
+            SqliteConstraintDatabase::EffectReplay,
+        ],
+        rendered(
+            "effect_scope_retirements",
+            "ck_effect_scope_retirements_artifact_cleanup_completed",
+            "artifact_cleanup_completed IN (0, 1)",
         ),
     ),
 ];

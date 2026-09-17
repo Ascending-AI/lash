@@ -61,8 +61,9 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_condemnations (
     phase text NOT NULL,
     write_token text,
     write_session_id text,
-    CONSTRAINT lash_attachment_condemnations_check CHECK (((write_token IS NULL) = (write_session_id IS NULL))),
-    CONSTRAINT lash_attachment_condemnations_check1 CHECK (((write_token IS NULL) OR (phase = 'condemned'::text))),
+    CONSTRAINT ck_attachment_condemnations_phase CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text]))),
+    CONSTRAINT ck_attachment_condemnations_write_token_pairing CHECK (((write_token IS NULL) = (write_session_id IS NULL))),
+    CONSTRAINT ck_attachment_condemnations_write_token_phase CHECK (((write_token IS NULL) OR (phase = 'condemned'::text))),
     CONSTRAINT lash_attachment_condemnations_phase_check CHECK ((phase = ANY (ARRAY['condemned'::text, 'deleting'::text])))
 );
 
@@ -296,7 +297,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_change_clock (
     singleton boolean DEFAULT true NOT NULL,
     current_seq bigint NOT NULL,
     tombstone_compaction_horizon bigint DEFAULT 0 NOT NULL,
-    CONSTRAINT lash_process_change_clock_singleton_check CHECK (singleton)
+    CONSTRAINT ck_process_change_clock_singleton CHECK (singleton)
 );
 
 
@@ -803,7 +804,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_cancellation_bindings (
     session_id text NOT NULL,
     binding_id text NOT NULL,
     admitted_scope_json text,
-    CONSTRAINT lash_turn_cancellation_bindings_binding_id_check CHECK ((length(binding_id) > 0))
+    CONSTRAINT ck_turn_cancellation_bindings_binding_id CHECK ((length(binding_id) > 0))
 );
 
 
@@ -1124,7 +1125,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 99);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 100);
 
 
 --

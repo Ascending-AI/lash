@@ -537,7 +537,7 @@ fn sqlite_expected_constraints() -> Vec<RenderedConstraint> {
 fn postgres_expected_constraints() -> Vec<RenderedConstraint> {
     EXPECTED_CONSTRAINTS
         .iter()
-        .map(|constraint| constraint.postgres)
+        .filter_map(|constraint| constraint.postgres)
         .collect()
 }
 
@@ -556,22 +556,61 @@ fn schema_congruence_expected_constraints_match_both_backends() {
 }
 
 #[test]
-fn attachment_condemnation_phases_match_the_persisted_vocabulary() {
-    for (dialect, source, declaration) in [
-        (
-            "SQLite",
-            SQLITE_SCHEMA_SOURCE,
-            "phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))",
-        ),
-        (
-            "Postgres",
-            POSTGRES_SCHEMA_SOURCE,
-            "phase TEXT NOT NULL CHECK (phase IN ('condemned', 'deleting'))",
-        ),
+fn every_check_in_the_ddl_is_named_and_registered() {
+    // The inspector matches CHECKs by name, so an anonymous CHECK is invisible
+    // to the congruence gate: dropping one would pass. Every CHECK in a table
+    // body must be `CONSTRAINT ck_...`-named (and therefore registered, since
+    // `validate_expected_constraints` rejects unregistered names).
+    for (dialect, source) in [
+        ("SQLite", SQLITE_SCHEMA_SOURCE),
+        ("Postgres", POSTGRES_SCHEMA_SOURCE),
     ] {
+        let mut failures = Vec::new();
+        let mut rest = source;
+        // Only `CREATE TABLE IF NOT EXISTS` bodies are live DDL -- plain
+        // `CREATE TABLE` appears only in migration scripts and test fixtures,
+        // which are deliberately allowed anonymous CHECKs.
+        while let Some(start) = rest.find("CREATE TABLE IF NOT EXISTS ") {
+            let after = &rest[start + "CREATE TABLE IF NOT EXISTS ".len()..];
+            let Some((name, body_and_rest)) = after.split_once(" (") else {
+                break;
+            };
+            let Some((body, tail)) = body_and_rest.split_once("\n);") else {
+                // Not a schema-style table (e.g. an indented fixture string):
+                // skip past the opening line and keep scanning.
+                rest = body_and_rest;
+                continue;
+            };
+            // Line comments may carry the word "check"; strip them first.
+            let body = body
+                .lines()
+                .map(|line| {
+                    let line = line.split_once("--").map_or(line, |(code, _)| code);
+                    line.split_once("//").map_or(line, |(code, _)| code)
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let normalized = normalize_sql(&body);
+            let mut scan = normalized.as_str();
+            while let Some(position) = scan.find(" CHECK") {
+                let before = scan[..position].trim_end();
+                let mut words = before.rsplit(' ');
+                let constraint_name = words.next().unwrap_or("");
+                let keyword = words.next().unwrap_or("");
+                if !(keyword == "CONSTRAINT" && constraint_name.starts_with("ck_")) {
+                    let context = &before[before.len().saturating_sub(60)..];
+                    failures.push(format!(
+                        "{dialect} `{name}` anonymous CHECK near `{context}`"
+                    ));
+                }
+                scan = &scan[position + " CHECK".len()..];
+            }
+            rest = tail;
+        }
         assert!(
-            normalize_sql(source).contains(&normalize_sql(declaration)),
-            "{dialect} attachment condemnation phases drifted from the persisted vocabulary"
+            failures.is_empty(),
+            "{dialect} anonymous CHECKs found:\n{}",
+            failures.join("\n")
         );
     }
 }
@@ -952,25 +991,6 @@ fn schema_congruence_no_space_table_constraint_is_not_a_column() {
     let columns = sqlite_table_columns(SQLITE_SCHEMA_SOURCE, "trigger_subscriptions");
     assert!(!columns.contains("UNIQUE"));
     assert!(!columns.iter().any(|column| column.starts_with("UNIQUE(")));
-}
-
-#[test]
-fn pending_observer_intent_attribution_check_is_registered_on_both_backends() {
-    fn normalized(source: &str) -> String {
-        source.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
-    let expected =
-        "attribution TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited'))";
-    for (backend, source) in [
-        ("SQLite", SQLITE_SCHEMA_SOURCE),
-        ("Postgres", POSTGRES_SCHEMA_SOURCE),
-    ] {
-        assert!(
-            normalized(source).contains(expected),
-            "{backend} pending-observer-intent attribution CHECK drifted from the registered contract"
-        );
-    }
 }
 
 #[test]
