@@ -265,7 +265,7 @@ IDENTIFIER_RENAME_BASELINES = {
     # same two wire strings ('commentary'/'final_answer'), so both guarded
     # bytes are identical; APPEND_REQUEST_IDENTITY_ENCODING_VERSION stays 4
     # and SESSION_NODE_BODY_SCHEMA_VERSION stays 14.
-    'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:ee852463dcf8c7c8434554eeff8e847055fa3244aec8a25acc4a90c0fcbe3e1f',
+    'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:8442357a587b70a4ba0a3622c05364272cba7c7afd04b9bd7c89ac949cb7880d',
     'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:3b61169b1d807e9c468856385c2f3af0aca1f02c55bb37a043b0f0296fe0acf8',
 
     # FIG-2784 pass 1 (#1502): `push_causal_ref` in commit_identity.rs gained a
