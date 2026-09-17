@@ -617,7 +617,7 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part, encoding_version: u32) {
             (*phase).map(|phase| phase.as_str()),
             provider_payload.as_deref(),
         ] {
-            push_optional(encoded, value, |encoded, value| push_string(encoded, value));
+            push_optional(encoded, value, push_string);
         }
         if encoding_version == LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
             // ResponseTextMeta carried provider/model before the unified
