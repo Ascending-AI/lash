@@ -2207,3 +2207,28 @@ pub(super) async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does
         "an explicit replace still clears every option"
     );
 }
+
+/// The storeless half of the empty-drain contract: with no durable store the
+/// queue does not exist at all, and the drain must say so by name. Reporting
+/// `ExecutionLaneBusy` or `ClaimRefused` here would tell the host to retry or
+/// abandon work that was never queued.
+#[tokio::test]
+pub(super) async fn an_automatic_drain_without_a_durable_queue_says_so() {
+    let mut runtime = standard_runtime_with_transport(mock_provider(Vec::new())).await;
+    let drain = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_turn_scope(&SessionId::from("root"), &TurnId::from("storeless-drain")),
+        ))
+        .await
+        .expect("a storeless drain still answers");
+    assert!(
+        matches!(
+            drain,
+            lash_core::facade_support::QueuedTurnDrain::Empty(
+                lash_core::facade_support::EmptyQueuedDrainReason::NoDurableQueue
+            )
+        ),
+        "a session with no durable store must report NoDurableQueue, got {drain:?}"
+    );
+}
