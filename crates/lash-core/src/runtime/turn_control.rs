@@ -529,8 +529,9 @@ impl TurnWorkDriver {
     /// request reports the escalation that already won.
     ///
     /// Only a request whose undelivered-input disposition already matches the
-    /// base winner reaches here, and the reported evidence is projected back
-    /// onto that accepted disposition, so escalation can change the honoured
+    /// base winner reaches here, the escalation payload records no
+    /// disposition at all, and the reported evidence is rebuilt with the
+    /// accepted base disposition, so escalation can change the honoured
     /// timing and nothing else.
     async fn escalate(
         &self,
@@ -540,17 +541,19 @@ impl TurnWorkDriver {
         existing: TurnCancellationEvidence,
     ) -> Result<TurnCancelOutcome, RuntimeError> {
         let key = escalation_key(resolver, address).await?;
-        let resolution = gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
+        let resolution = gate_resolution(TurnEscalationTerminal::Escalated(
+            TurnEscalationEvidence::from(&evidence),
+        ))?;
         Ok(
             match resolver.resolve_await_event(&key, resolution).await? {
                 ResolveOutcome::Accepted => TurnCancelOutcome::Escalated(evidence),
                 ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
-                    TurnGateTerminal::CancelRequested(escalated) => {
-                        TurnCancelOutcome::AlreadyRequested(escalation_under_accepted_policy(
+                    TurnEscalationTerminal::Escalated(escalated) => {
+                        TurnCancelOutcome::AlreadyRequested(escalated_cancel_evidence(
                             &existing, escalated,
                         ))
                     }
-                    TurnGateTerminal::CompletionSealed => {
+                    TurnEscalationTerminal::CompletionSealed => {
                         TurnCancelOutcome::AlreadyRequested(existing)
                     }
                 },
@@ -623,7 +626,51 @@ enum TurnGateTerminal {
     CompletionSealed,
 }
 
-fn gate_resolution(value: TurnGateTerminal) -> Result<Resolution, RuntimeError> {
+/// The part of a cancellation request the escalation promise records: which
+/// stronger request won escalation admission, and nothing else.
+///
+/// The accepted undelivered-input disposition is deliberately absent. It has
+/// exactly one durable home — the base gate's [`TurnGateTerminal`] evidence —
+/// so an escalation row can never carry a second copy that disagrees. Readers
+/// rebuild the effective evidence via [`escalated_cancel_evidence`].
+///
+/// The variant keeps the `cancel_requested` tag so the two promise spellings
+/// inter-decode in both directions: a row written before this payload existed
+/// simply ignores the extra fields, and a row written now decodes under the
+/// old shape with `undelivered` taking its serde default — which every old
+/// reader then discarded under the accepted base policy anyway.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct TurnEscalationEvidence {
+    pub request_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Mode of the request that won escalation — always `Immediate`.
+    #[serde(default, skip_serializing_if = "TurnCancelMode::is_immediate")]
+    pub mode: TurnCancelMode,
+}
+
+impl From<&TurnCancellationEvidence> for TurnEscalationEvidence {
+    fn from(evidence: &TurnCancellationEvidence) -> Self {
+        Self {
+            request_id: evidence.request_id.clone(),
+            origin: evidence.origin.clone(),
+            reason: evidence.reason.clone(),
+            mode: evidence.mode,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "state", content = "cancellation", rename_all = "snake_case")]
+enum TurnEscalationTerminal {
+    #[serde(rename = "cancel_requested")]
+    Escalated(TurnEscalationEvidence),
+    CompletionSealed,
+}
+
+fn gate_resolution(value: impl Serialize) -> Result<Resolution, RuntimeError> {
     serde_json::to_value(value)
         .map(Resolution::Ok)
         .map_err(|err| {
@@ -634,7 +681,7 @@ fn gate_resolution(value: TurnGateTerminal) -> Result<Resolution, RuntimeError> 
         })
 }
 
-fn decode_gate(resolution: Resolution) -> Result<TurnGateTerminal, RuntimeError> {
+fn decode_gate<T: serde::de::DeserializeOwned>(resolution: Resolution) -> Result<T, RuntimeError> {
     match resolution {
         Resolution::Ok(value) => serde_json::from_value(value).map_err(|err| {
             RuntimeError::new(
@@ -717,26 +764,31 @@ async fn escalation_key(
         .await
 }
 
-/// Project an escalation-gate winner onto the accepted undelivered-input
-/// policy.
+/// Rebuild the effective cancellation evidence from an escalation-gate winner
+/// and the accepted undelivered-input policy.
 ///
 /// Timing escalation moves *when* a cancellation is honoured. It never moves
 /// *what* the accepted request decided about undelivered active-turn input:
 /// that disposition belongs to the base-gate winner and is immutable once
 /// accepted. [`TurnWorkDriver::request_cancel`] refuses a conflicting
-/// disposition before it ever reaches the escalation promise, so every reader
-/// of that promise carries the base disposition forward rather than trusting
-/// the escalation row's own copy. The invariant then holds structurally: no
-/// escalation row — replayed from a durable journal, written by a peer
-/// process, or minted by a future writer — can silently substitute the
-/// accepted policy, which is the substitution FIG-2874 removes.
-fn escalation_under_accepted_policy(
+/// disposition before it ever reaches the escalation promise, and the
+/// escalation payload no longer even carries the field, so every reader
+/// reconstructs the effective evidence with the base disposition. The
+/// invariant then holds structurally: no escalation row — replayed from a
+/// durable journal, written by a peer process, or minted by a future writer —
+/// can silently substitute the accepted policy, which is the substitution
+/// FIG-2874 removes.
+fn escalated_cancel_evidence(
     base: &TurnCancellationEvidence,
-    escalated: TurnCancellationEvidence,
+    escalation: TurnEscalationEvidence,
 ) -> TurnCancellationEvidence {
     TurnCancellationEvidence {
+        request_id: escalation.request_id,
+        origin: escalation.origin,
+        reason: escalation.reason,
         undelivered: base.undelivered,
-        ..escalated
+        mode: escalation.mode,
+        honoured_after_step: None,
     }
 }
 
@@ -769,10 +821,10 @@ async fn effective_cancel_evidence(
         Err(err) => return Err(err),
     };
     match terminal.map(decode_gate).transpose()? {
-        Some(TurnGateTerminal::CancelRequested(escalated)) => {
-            Ok(escalation_under_accepted_policy(&base, escalated))
+        Some(TurnEscalationTerminal::Escalated(escalated)) => {
+            Ok(escalated_cancel_evidence(&base, escalated))
         }
-        Some(TurnGateTerminal::CompletionSealed) | None => Ok(base),
+        Some(TurnEscalationTerminal::CompletionSealed) | None => Ok(base),
     }
 }
 
@@ -798,16 +850,16 @@ async fn close_cancel_escalation(
     let outcome = resolver
         .resolve_await_event(
             escalation_key,
-            gate_resolution(TurnGateTerminal::CompletionSealed)?,
+            gate_resolution(TurnEscalationTerminal::CompletionSealed)?,
         )
         .await?;
     match outcome {
         ResolveOutcome::Accepted => Ok(Some(base)),
         ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
-            TurnGateTerminal::CancelRequested(escalated) => {
-                Ok(Some(escalation_under_accepted_policy(&base, escalated)))
+            TurnEscalationTerminal::Escalated(escalated) => {
+                Ok(Some(escalated_cancel_evidence(&base, escalated)))
             }
-            TurnGateTerminal::CompletionSealed => Ok(Some(base)),
+            TurnEscalationTerminal::CompletionSealed => Ok(Some(base)),
         },
         ResolveOutcome::UnknownOrRevoked => Ok(None),
     }
@@ -1126,12 +1178,12 @@ impl ActiveTurnControl {
                     .await_await_event(&self.escalation_key, stop_wait, None)
                     .await?;
                 match decode_gate(resolution)? {
-                    TurnGateTerminal::CancelRequested(escalated) => {
-                        let evidence = escalation_under_accepted_policy(&base, escalated);
+                    TurnEscalationTerminal::Escalated(escalated) => {
+                        let evidence = escalated_cancel_evidence(&base, escalated);
                         self.remember(evidence.clone());
                         Ok(Some(evidence))
                     }
-                    TurnGateTerminal::CompletionSealed => Ok(None),
+                    TurnEscalationTerminal::CompletionSealed => Ok(None),
                 }
             }
             TurnGateTerminal::CompletionSealed => Ok(None),
@@ -1171,8 +1223,8 @@ impl ActiveTurnControl {
                 &self.escalation_key,
             )
             .await?;
-        if let Some(TurnGateTerminal::CancelRequested(escalated)) = escalation {
-            let escalated = escalation_under_accepted_policy(&evidence, escalated);
+        if let Some(TurnEscalationTerminal::Escalated(escalated)) = escalation {
+            let escalated = escalated_cancel_evidence(&evidence, escalated);
             self.remember(escalated.clone());
             return Ok(Some(escalated));
         }
@@ -1210,12 +1262,12 @@ impl ActiveTurnControl {
         Ok(())
     }
 
-    async fn peek(
+    async fn peek<T: serde::de::DeserializeOwned>(
         &self,
         controller: &ScopedEffectController<'_>,
         causal_identity: String,
         key: &AwaitEventKey,
-    ) -> Result<Option<TurnGateTerminal>, RuntimeError> {
+    ) -> Result<Option<T>, RuntimeError> {
         // TurnAddress continues to route the cancellation promise in `key`;
         // the journaled observation belongs to the controller's admitted scope.
         // Keep the shipped foreground key only when the admitted Turn exactly
