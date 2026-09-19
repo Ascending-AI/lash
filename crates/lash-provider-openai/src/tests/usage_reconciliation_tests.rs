@@ -120,7 +120,7 @@ async fn openrouter_generation_lookup_surfaces_server_failures() {
         .await
         .expect_err("a non-404 failure is reported");
     assert_eq!(error.kind, ProviderFailureKind::Quota);
-    assert_eq!(error.status, Some(429));
+    assert_eq!(error.http_status, Some(429));
     assert_eq!(transport.calls(), 2);
 }
 

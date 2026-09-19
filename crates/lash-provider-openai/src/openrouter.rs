@@ -84,7 +84,7 @@ fn classify(status: u16, body: &str) -> Result<Lookup, LlmTransportError> {
         return Err(LlmTransportError::new(format!(
             "OpenRouter generation lookup failed with HTTP {status}"
         ))
-        .with_status(status)
+        .with_http_status(status)
         .with_raw(crate::request_work::body_excerpt(body))
         .with_kind(if status == 429 {
             ProviderFailureKind::Quota
@@ -242,7 +242,7 @@ mod tests {
     fn non_success_statuses_other_than_404_are_errors() {
         assert!(matches!(classify(404, "").unwrap(), Lookup::Missing));
         let error = classify(500, "{\"error\":\"boom\"}").unwrap_err();
-        assert_eq!(error.status, Some(500));
+        assert_eq!(error.http_status, Some(500));
         assert_eq!(error.kind, ProviderFailureKind::Http);
         assert!(classify(200, "not json").is_err());
         assert!(classify(200, "{\"data\":null}").is_err());

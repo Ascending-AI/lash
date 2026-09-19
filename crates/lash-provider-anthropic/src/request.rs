@@ -81,7 +81,7 @@ impl AnthropicProvider {
                         "Anthropic tool_use input for `{tool_name}` is not JSON: {err}"
                     ))
                     .with_kind(ProviderFailureKind::Validation)
-                    .with_code("invalid_tool_call_input_json")
+                    .with_adapter_code(TurnFailureCode::InvalidToolCallInputJson)
                     .with_raw(input_json.clone())
                 })?;
                 Ok(Some(json!({
@@ -456,7 +456,7 @@ impl AnthropicProvider {
             .map_err(|error: ReasoningRetentionValidationError| {
                 LlmTransportError::new(error.message)
                     .with_kind(ProviderFailureKind::Unsupported)
-                    .with_code("unsupported_reasoning_retention")
+                    .with_adapter_code(TurnFailureCode::UnsupportedReasoningRetention)
                     .with_retry_verdict(TransportRetryVerdict::Forbidden)
             })?;
         let req = safe_request.as_ref();
@@ -477,7 +477,7 @@ impl AnthropicProvider {
                     "Anthropic Messages requires the media type for provider file ids in order to choose the image/document modality; supply `media_type` on `ProviderFile`",
                 )
                 .with_kind(ProviderFailureKind::Validation)
-                .with_code("provider_file_media_type_required"));
+                .with_adapter_code(TurnFailureCode::ProviderFileMediaTypeRequired));
                     }
                     let supported = req
                         .model_capability
@@ -502,7 +502,7 @@ impl AnthropicProvider {
                     "Anthropic Messages could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"
                 ))
                 .with_kind(ProviderFailureKind::Validation)
-                .with_code("stored_attachment_not_resolved"));
+                .with_adapter_code(TurnFailureCode::StoredAttachmentNotResolved));
                     }
 
                     Ok(())

@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use lash_core::llm::transport::{
+    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
+};
 use lash_core::runtime::{Clock, SystemClock};
 use lash_sansio::sync::RwLockExt;
 use std::fmt::{Debug, Display};
@@ -43,7 +45,7 @@ impl CredentialError {
         Self::new(CredentialErrorKind::Transient)
     }
 
-    pub const fn is_retryable(&self) -> bool {
+    pub fn is_retryable(&self) -> bool {
         self.kind.transport_classification().2.is_retryable()
     }
 
@@ -51,7 +53,7 @@ impl CredentialError {
         let (code, failure_kind, retry_verdict) = self.kind.transport_classification();
         LlmTransportError::new(self.to_string())
             .with_kind(failure_kind)
-            .with_code(code)
+            .with_adapter_code(code)
             .with_retry_verdict(retry_verdict)
     }
 }
@@ -68,22 +70,22 @@ pub enum CredentialErrorKind {
 }
 
 impl CredentialErrorKind {
-    const fn transport_classification(
+    fn transport_classification(
         self,
-    ) -> (&'static str, ProviderFailureKind, TransportRetryVerdict) {
+    ) -> (TurnFailureCode, ProviderFailureKind, TransportRetryVerdict) {
         match self {
             Self::InvalidGrant => (
-                "credential_invalid_grant",
+                TurnFailureCode::CredentialInvalidGrant,
                 ProviderFailureKind::Auth,
                 TransportRetryVerdict::Forbidden,
             ),
             Self::Transient => (
-                "credential_refresh_transient",
+                TurnFailureCode::CredentialRefreshTransient,
                 ProviderFailureKind::Transport,
                 TransportRetryVerdict::RetryableTransient,
             ),
             Self::Other => (
-                "credential_refresh_failed",
+                TurnFailureCode::CredentialRefreshFailed,
                 ProviderFailureKind::Auth,
                 TransportRetryVerdict::Forbidden,
             ),
@@ -394,7 +396,10 @@ mod tests {
             assert_eq!(transport.retry_verdict, retry_verdict);
             assert_eq!(transport.is_retryable(), retryable);
             assert!(transport.retry_verdict_is_classified());
-            assert_eq!(transport.code.as_deref(), Some(code));
+            assert_eq!(
+                transport.code.as_ref().map(|code| code.to_string()),
+                Some(format!("adapter:{code}"))
+            );
             assert_eq!(transport.message, message);
         }
     }

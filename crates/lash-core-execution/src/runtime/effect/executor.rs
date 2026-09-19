@@ -1200,7 +1200,9 @@ impl LocalDirectEffectRunner {
                         retryable: false,
                         kind: crate::ProviderFailureKind::Unknown,
                         raw: None,
-                        code: Some("attachment_resolution_failed".to_string()),
+                        code: Some(crate::FailureCode::Adapter(
+                            crate::TurnFailureCode::AttachmentResolutionFailed,
+                        )),
                         terminal_reason: crate::LlmTerminalReason::ProviderError,
                         request_body: None,
                         partial_response: None,

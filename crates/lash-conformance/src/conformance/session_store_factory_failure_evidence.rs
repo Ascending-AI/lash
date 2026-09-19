@@ -2,6 +2,7 @@
 
 use super::session_store_factory::session_store_request;
 use lash_sansio::SessionId;
+use lash_sansio::TurnFailureCode;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
@@ -54,7 +55,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
             Err(
                 crate::LlmTransportError::new("stream ended before terminal evidence")
                     .with_kind(crate::ProviderFailureKind::Stream)
-                    .with_code("stream_ended_before_terminal_response")
+                    .with_adapter_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
                     .with_retry_verdict(
                         crate::llm::transport::TransportRetryVerdict::RetryableTransient,
                     )

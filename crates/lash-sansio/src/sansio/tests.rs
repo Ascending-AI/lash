@@ -163,7 +163,7 @@ fn roundtrip_checkpoint(checkpoint: TurnCheckpoint) -> TurnCheckpoint {
 }
 
 #[test]
-fn turn_checkpoint_stamps_v3() {
+fn turn_checkpoint_stamps_v4() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
@@ -172,7 +172,7 @@ fn turn_checkpoint_stamps_v3() {
     );
     let checkpoint = machine.checkpoint();
     assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 3);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 4);
 }
 
 #[test]
@@ -1345,7 +1345,9 @@ fn context_overflow_llm_error_stops_as_its_own_outcome() {
             retryable: false,
             kind: crate::llm::types::ProviderFailureKind::Validation,
             raw: None,
-            code: Some("context_length_exceeded".to_string()),
+            code: Some(crate::session_model::FailureCode::Provider(
+                "context_length_exceeded".to_string(),
+            )),
             terminal_reason: LlmTerminalReason::ContextOverflow,
             request_body: None,
             partial_response: None,

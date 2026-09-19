@@ -1180,6 +1180,8 @@ fn synthetic_terminal_call_record(
             error: Some(lash_core::NormalizedError {
                 class: failure_kind.code().to_string(),
                 provider_code: Some(code.to_string()),
+                adapter_code: None,
+                refusal_code: None,
                 http_status: None,
                 provider_request_id: None,
                 retry_after: None,
@@ -1300,6 +1302,8 @@ fn core_diagnostics_do_not_cross_the_public_remote_projection() {
             error: Some(lash_core::NormalizedError {
                 class: "unknown".to_string(),
                 provider_code: Some("provider_panicked".to_string()),
+                adapter_code: None,
+                refusal_code: None,
                 http_status: None,
                 provider_request_id: None,
                 retry_after: None,

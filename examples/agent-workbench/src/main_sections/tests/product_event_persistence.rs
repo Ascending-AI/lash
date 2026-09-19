@@ -214,6 +214,8 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                         error: Some(lash::remote::llm::RemoteNormalizedError {
                             class: "cancelled".to_string(),
                             provider_code: Some("request_cancelled".to_string()),
+                            adapter_code: None,
+                            refusal_code: None,
                             http_status: Some(499),
                             provider_request_id: Some("request-1".to_string()),
                             retry_after_ms: Some(25),
@@ -254,6 +256,8 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                         error: Some(lash::remote::llm::RemoteNormalizedError {
                             class: "stream".to_string(),
                             provider_code: Some("eof".to_string()),
+                            adapter_code: None,
+                            refusal_code: None,
                             http_status: None,
                             provider_request_id: None,
                             retry_after_ms: None,

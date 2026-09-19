@@ -20,6 +20,7 @@ mod host_forwarder;
 mod terminal;
 
 use host_forwarder::{ProviderDeltaClass, ProviderHostForwarder};
+use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 use terminal::{observed_stream_protocol_position, synthesize_protocol_abort};
 
 /// Largest exact provider request body retained as structured JSON in a trace.
@@ -190,7 +191,7 @@ impl RuntimeTurnDriver<'_> {
                 retryable: false,
                 kind: crate::ProviderFailureKind::Unknown,
                 raw: None,
-                code: Some("plugin_assistant_stream".to_string()),
+                code: Some(FailureCode::Adapter(TurnFailureCode::PluginAssistantStream)),
                 terminal_reason: crate::LlmTerminalReason::ProviderError,
                 request_body: None,
                 partial_response: None,
@@ -287,7 +288,9 @@ impl RuntimeTurnDriver<'_> {
                         retryable: false,
                         kind: crate::ProviderFailureKind::Unknown,
                         raw: None,
-                        code: Some("attachment_resolution_failed".to_string()),
+                        code: Some(FailureCode::Adapter(
+                            TurnFailureCode::AttachmentResolutionFailed,
+                        )),
                         terminal_reason: crate::LlmTerminalReason::ProviderError,
                         request_body: None,
                         partial_response: None,
@@ -381,7 +384,7 @@ impl RuntimeTurnDriver<'_> {
                     llm_task.abort();
                     let failure = crate::llm::transport::LlmTransportError::new("cancelled")
                     .with_kind(crate::ProviderFailureKind::Unknown)
-                    .with_code("cancelled")
+                    .with_adapter_code(TurnFailureCode::Cancelled)
                     .with_terminal_reason(crate::LlmTerminalReason::Cancelled)
                     .with_retry_verdict(
                         crate::llm::transport::TransportRetryVerdict::NotRetryable,
@@ -543,7 +546,9 @@ impl RuntimeTurnDriver<'_> {
                                     }),
                                     error: Some(crate::NormalizedError {
                                         class: crate::ProviderFailureKind::Unknown.code().to_string(),
-                                        provider_code: Some("provider_panicked".to_string()),
+                                        provider_code: None,
+                                        adapter_code: Some(TurnFailureCode::ProviderPanicked),
+                                        refusal_code: None,
                                         http_status: None,
                                         provider_request_id: None,
                                         retry_after: None,
@@ -561,7 +566,7 @@ impl RuntimeTurnDriver<'_> {
                                 retryable: false,
                                 kind: crate::ProviderFailureKind::Unknown,
                                 raw: None,
-                                code: Some("provider_panicked".to_string()),
+                                code: Some(FailureCode::Adapter(TurnFailureCode::ProviderPanicked)),
                                 terminal_reason: crate::LlmTerminalReason::ProviderError,
                                 request_body: None,
                                 partial_response: None,
@@ -574,7 +579,7 @@ impl RuntimeTurnDriver<'_> {
                                 "internal task failed: {e}"
                             ))
                             .with_kind(crate::ProviderFailureKind::Unknown)
-                            .with_code("task_join_failed")
+                            .with_adapter_code(TurnFailureCode::TaskJoinFailed)
                             .with_retry_verdict(
                                 crate::llm::transport::TransportRetryVerdict::NotRetryable,
                             );
@@ -656,18 +661,29 @@ impl RuntimeTurnDriver<'_> {
                         retryable: false,
                         kind: crate::ProviderFailureKind::Validation,
                         raw: None,
-                        code: Some("provider_replay_origin_conflict".to_string()),
+                        code: Some(FailureCode::Adapter(
+                            TurnFailureCode::ProviderReplayOriginConflict,
+                        )),
                         terminal_reason: crate::LlmTerminalReason::ProviderError,
                         request_body: None,
                         partial_response: None,
                     });
                 }
-                Err(error) if error.code.as_deref() != Some("provider_replay_origin_conflict") => {
+                Err(error)
+                    if !matches!(
+                        &error.code,
+                        Some(FailureCode::Adapter(
+                            TurnFailureCode::ProviderReplayOriginConflict
+                        ))
+                    ) =>
+                {
                     error.message =
                         format!("{conflict}; original runtime failure: {}", error.message);
                     error.retryable = false;
                     error.kind = crate::ProviderFailureKind::Validation;
-                    error.code = Some("provider_replay_origin_conflict".to_string());
+                    error.code = Some(FailureCode::Adapter(
+                        TurnFailureCode::ProviderReplayOriginConflict,
+                    ));
                 }
                 Err(_) => {}
             }
@@ -830,7 +846,7 @@ impl RuntimeTurnDriver<'_> {
                             message,
                             retryable,
                             terminal_reason: Some(terminal_reason.code().to_string()),
-                            code,
+                            code: code.map(|code| code.to_string()),
                             raw,
                         },
                         stream_summary: stream_summary.map(|summary| summary.to_json()),
@@ -1256,7 +1272,7 @@ impl RuntimeTurnDriver<'_> {
             }
             LlmStreamEvent::Evidence(evidence) => {
                 state.stream_evidence.merge(evidence).map_err(|error| {
-                    let code = error.code().to_string();
+                    let code = FailureCode::Adapter(TurnFailureCode::from_wire(error.code()));
                     LlmCallError {
                         message: error.to_string(),
                         retryable: false,

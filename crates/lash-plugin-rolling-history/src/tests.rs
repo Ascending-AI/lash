@@ -997,11 +997,11 @@ fn history_with_record(messages: &mut Vec<Message>, record: OverflowRecoveryReco
     messages.retain(|message| {
         !matches!(
             recovery_record_kind(message),
-            Some(
+            Ok(Some(
                 OverflowRecoveryRecord::Failed { .. }
                     | OverflowRecoveryRecord::Completed
                     | OverflowRecoveryRecord::Exhausted
-            )
+            ))
         )
     });
     messages.push(recovery_record_node_message(record));
@@ -1077,23 +1077,14 @@ fn recovery_state_derivation_is_bounded_and_durable() {
     let pending = || vec![OverflowRecoveryRecord::Pending];
     assert_eq!(
         OverflowRecoveryState::derive(pending()),
-        OverflowRecoveryState {
-            pending: true,
-            attempts: 0
-        }
+        OverflowRecoveryState::Pending { attempts: 0 }
     );
 
     let failing = OverflowRecoveryState::derive(vec![
         OverflowRecoveryRecord::Pending,
         OverflowRecoveryRecord::Failed { attempt: 2 },
     ]);
-    assert_eq!(
-        failing,
-        OverflowRecoveryState {
-            pending: true,
-            attempts: 2
-        }
-    );
+    assert_eq!(failing, OverflowRecoveryState::Pending { attempts: 2 });
     assert!(!failing.exhausted());
 
     let exhausted = OverflowRecoveryState::derive(vec![
@@ -1103,8 +1094,7 @@ fn recovery_state_derivation_is_bounded_and_durable() {
     ]);
     assert_eq!(
         exhausted,
-        OverflowRecoveryState {
-            pending: true,
+        OverflowRecoveryState::Pending {
             attempts: OVERFLOW_RECOVERY_MAX_ATTEMPTS
         }
     );
@@ -1115,12 +1105,45 @@ fn recovery_state_derivation_is_bounded_and_durable() {
         OverflowRecoveryRecord::Failed { attempt: 1 },
         OverflowRecoveryRecord::Completed,
     ]);
+    assert_eq!(done, OverflowRecoveryState::Idle);
+}
+
+/// The prose title only marks a message as a recovery record; the record is
+/// always read back from its serde payload. A corrupt payload is an error —
+/// never an `Exhausted` guess from the title.
+#[test]
+fn recovery_record_reads_its_serde_payload_only() {
+    let record_message = |text: String| Message {
+        id: "m".to_string(),
+        role: MessageRole::System,
+        parts: vec![Part::text("m.p0".to_string(), text, None)].into(),
+        origin: Some(MessageOrigin::Plugin {
+            plugin_id: ROLLING_HISTORY_PLUGIN_ID.to_string(),
+            transient: false,
+        }),
+    };
+
+    let written = recovery_record_node_message(OverflowRecoveryRecord::Failed { attempt: 2 });
     assert_eq!(
-        done,
-        OverflowRecoveryState {
-            pending: false,
-            attempts: 0
-        }
+        recovery_record_kind(&written).expect("written record parses"),
+        Some(OverflowRecoveryRecord::Failed { attempt: 2 })
+    );
+
+    for payload in ["{not json", "{\"kind\":\"bogus\"}", ""] {
+        let corrupt = record_message(format!("{OVERFLOW_RECOVERY_FAILED}\n{payload}"));
+        assert!(
+            recovery_record_kind(&corrupt).is_err(),
+            "malformed payload {payload:?} must error, not guess a record"
+        );
+    }
+
+    // A title with another record's payload is read as the payload's kind.
+    let relabeled = record_message(format!(
+        "{OVERFLOW_RECOVERY_EXHAUSTED}\n{{\"kind\":\"pending\"}}"
+    ));
+    assert_eq!(
+        recovery_record_kind(&relabeled).expect("payload deserializes"),
+        Some(OverflowRecoveryRecord::Pending)
     );
 }
 
@@ -1236,6 +1259,7 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
                         transient: false,
                     }),
                 })
+                .expect("committed recovery record parses")
             })
         }
         _ => None,
@@ -1332,10 +1356,11 @@ async fn recovery_summarizer_child_does_not_inherit_the_pending_marker() {
         .expect("summarizer child read view")
         .messages()
         .to_vec();
-    let kinds: Vec<OverflowRecoveryRecord> = history_recovery_records(&child_messages);
+    let kinds: Vec<OverflowRecoveryRecord> =
+        history_recovery_records(&child_messages).expect("child history records parse");
     let derived = OverflowRecoveryState::derive(kinds.clone());
     assert!(
-        !derived.pending,
+        !derived.pending(),
         "the summarizer child re-derives the very recovery it is summarizing for \
          and spawns another summarizer: {kinds:?}"
     );

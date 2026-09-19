@@ -14,7 +14,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use lash_core::llm::transport::{
+    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
+};
 use lash_core::llm::types::LlmRequest;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -175,7 +177,11 @@ impl CodexWebSocketAttemptError {
                 .as_deref()
                 .map(String::as_str)
                 .unwrap_or_default(),
-            self.error.code.as_deref().unwrap_or_default()
+            self.error
+                .code
+                .as_ref()
+                .map(|code| code.spelling())
+                .unwrap_or_default()
         )
         .to_ascii_lowercase();
         haystack.contains("previous_response_id") || haystack.contains("previous response")
@@ -309,8 +315,8 @@ impl CodexProvider {
         Self::prune_expired_websocket_fallbacks(&mut sessions, now);
         let reason = error
             .code
-            .as_deref()
-            .map(|code| format!("{code}: {}", error.message))
+            .as_ref()
+            .map(|code| format!("{}: {}", code.namespaced(), error.message))
             .unwrap_or_else(|| error.message.clone());
         sessions.fallback_by_scope.insert(
             scope_key,
@@ -327,6 +333,10 @@ impl CodexProvider {
         sessions.fallback_by_scope.remove(&scope_key);
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the attempt error carries the transport error plus lease evidence; boxing it would push the cost onto every caller"
+    )]
     async fn connect_websocket(
         &self,
         req: &LlmRequest,
@@ -401,7 +411,7 @@ impl CodexProvider {
                     LlmTransportError::new("Codex WebSocket connect timed out")
                         .with_kind(ProviderFailureKind::Timeout)
                         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                        .with_code("websocket_connect_timeout"),
+                        .with_adapter_code(TurnFailureCode::WebsocketConnectTimeout),
                 )
             })?;
         connect.map(|(websocket, _)| websocket).map_err(|error| {
@@ -414,14 +424,18 @@ impl CodexProvider {
             let mut transport_error =
                 LlmTransportError::new(format!("Codex WebSocket connect failed: {error}"))
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                    .with_code("websocket_connect");
+                    .with_adapter_code(TurnFailureCode::WebsocketConnect);
             if let Some(status) = status {
-                transport_error = transport_error.with_status(status);
+                transport_error = transport_error.with_http_status(status);
             }
             CodexWebSocketAttemptError::before_send(transport_error)
         })
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the attempt error carries the transport error plus lease evidence; boxing it would push the cost onto every caller"
+    )]
     pub(super) async fn acquire_websocket(
         &self,
         req: &LlmRequest,

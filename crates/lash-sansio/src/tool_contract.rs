@@ -764,18 +764,7 @@ impl ToolDefinition {
     }
 
     pub fn parameter_metadata(&self) -> Vec<serde_json::Value> {
-        self.parameter_docs()
-            .into_iter()
-            .map(|param| param.into_value())
-            .collect()
-    }
-
-    fn parameter_docs(&self) -> Vec<ParameterDoc> {
-        let mut params = schema_parameter_docs(self.contract.input_schema.canonical());
-        self.contract
-            .output_contract
-            .apply_type_witness_parameter(&mut params);
-        params
+        self.contract.parameter_metadata()
     }
 }
 

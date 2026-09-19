@@ -18,7 +18,9 @@ use lash::prompt::{PromptContribution, PromptLayer};
 use lash::provider::{ProviderHandle, ProviderOptions};
 use lash::tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink};
 use lash::{LashCore, ModelSpec, SessionSpec};
-use lash_plugin_mcp::{McpPluginFactory, McpServerConfig};
+use lash_plugin_mcp::{
+    McpPluginFactory, McpServerConfig, McpStdioTransport, McpStreamableHttpTransport, McpTransport,
+};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 
 use super::mcp_client::{DemoElicitationHandler, DemoRootsProvider, DemoSamplingHandler};
@@ -81,20 +83,22 @@ impl RuntimeConfig {
 /// Configuration for the bundled stdio server.
 ///
 /// The child's whole environment is the two values it needs, supplied with
-/// [`McpServerConfig::with_env`]: an MCP child inherits nothing implicitly here,
+/// [`McpStdioTransport::with_env`]: an MCP child inherits nothing implicitly here,
 /// so the server cannot read a token this host did not hand it.
 pub fn demo_mcp_server_config(
     command: &str,
     api_base_url: &str,
     bot_token: &str,
 ) -> McpServerConfig {
-    McpServerConfig::stdio(command, Vec::new())
-        .with_env([(API_BASE_URL_ENV, api_base_url), (BOT_TOKEN_ENV, bot_token)])
-        .with_timeouts(
-            Duration::from_secs(10),
-            Duration::from_secs(20),
-            Duration::from_secs(120),
-        )
+    McpServerConfig::stdio(
+        McpStdioTransport::new(command, Vec::new())
+            .with_env([(API_BASE_URL_ENV, api_base_url), (BOT_TOKEN_ENV, bot_token)]),
+    )
+    .with_timeouts(
+        Duration::from_secs(10),
+        Duration::from_secs(20),
+        Duration::from_secs(120),
+    )
 }
 
 /// Configuration for the bundled streamable-HTTP server.
@@ -116,14 +120,16 @@ pub fn demo_mcp_server_config(
 /// reporting `connected: true` forever. The default probes on timeout instead,
 /// which distinguishes "slow" from "gone".
 pub fn http_mcp_server_config(url: &str, token: &str) -> McpServerConfig {
-    McpServerConfig::streamable_http(url)
-        .with_headers([("Authorization", format!("Bearer {token}"))])
-        .with_timeouts(
-            Duration::from_secs(5),
-            Duration::from_secs(2),
-            Duration::from_secs(10),
-        )
-        .with_binary_content_attachments(true)
+    McpServerConfig::streamable_http(
+        McpStreamableHttpTransport::new(url)
+            .with_headers([("Authorization", format!("Bearer {token}"))]),
+    )
+    .with_timeouts(
+        Duration::from_secs(5),
+        Duration::from_secs(2),
+        Duration::from_secs(10),
+    )
+    .with_binary_content_attachments(true)
 }
 
 /// Everything [`build_core`] hands back to the host.
@@ -262,13 +268,14 @@ fn demo_mcp_server_binary() -> Result<PathBuf> {
 
 fn validate_stdio_commands(servers: &BTreeMap<String, McpServerConfig>) -> Result<()> {
     for (server_name, config) in servers {
-        let McpServerConfig::Stdio { command, cwd, .. } = config else {
+        let McpTransport::Stdio(transport) = &config.transport else {
             continue;
         };
-        if resolve_stdio_command(command, cwd.as_deref()).is_none() {
+        if resolve_stdio_command(&transport.command, transport.cwd.as_deref()).is_none() {
             bail!(
-                "MCP server `{server_name}` executable `{command}` does not exist; \
-                 build it or correct SLACK_CLONE_MCP_SERVER before starting the bot"
+                "MCP server `{server_name}` executable `{}` does not exist; \
+                 build it or correct SLACK_CLONE_MCP_SERVER before starting the bot",
+                transport.command
             );
         }
     }
@@ -454,7 +461,10 @@ mod tests {
         ));
         let servers = BTreeMap::from([(
             DEMO_MCP_SERVER_NAME.to_string(),
-            McpServerConfig::stdio(missing.display().to_string(), Vec::new()),
+            McpServerConfig::stdio(McpStdioTransport::new(
+                missing.display().to_string(),
+                Vec::new(),
+            )),
         )]);
 
         let error = validate_stdio_commands(&servers).expect_err("missing command must fail boot");

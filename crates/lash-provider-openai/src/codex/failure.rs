@@ -83,9 +83,7 @@ impl ProviderFailureClassifier for CodexFailureClassifier {
         // usage-limit/quota and content-filter text markers, and context
         // overflow. Codex's only genuine delta is rewriting the user-facing
         // message into a friendly "you hit your ChatGPT usage limit" form.
-        let status = failure
-            .status
-            .or_else(|| failure.code.as_deref().and_then(|code| code.parse().ok()));
+        let status = failure.http_status;
         let summary = status.and_then(|status| {
             CodexProvider::codex_error_summary(
                 status,

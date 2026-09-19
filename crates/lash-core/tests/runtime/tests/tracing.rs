@@ -1331,7 +1331,7 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
         response: Err(lash_core::llm::transport::LlmTransportError::new(
             "HTTP request failed: builder error",
         )
-        .with_code("builder")
+        .with_provider_code("builder")
         .with_raw("transport raw body")
         .with_request_body("{\"model\":\"mock-model\"}")),
     }]);
@@ -1386,7 +1386,10 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
         error_entry["error"]["message"].as_str(),
         Some("HTTP request failed: builder error")
     );
-    assert_eq!(error_entry["error"]["code"].as_str(), Some("builder"));
+    assert_eq!(
+        error_entry["error"]["code"].as_str(),
+        Some("provider:builder")
+    );
     assert_eq!(
         error_entry["error"]["raw"].as_str(),
         Some("transport raw body")

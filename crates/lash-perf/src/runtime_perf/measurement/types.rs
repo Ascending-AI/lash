@@ -3,7 +3,57 @@ use super::*;
 const RUNTIME_PERF_TURN_TIMEOUT_ENV: &str = "LASH_RUNTIME_PERF_TURN_TIMEOUT_MS";
 const DEFAULT_RUNTIME_PERF_TURN_TIMEOUT: Duration = Duration::from_secs(10);
 
-const HIGH_TRAFFIC_KINDS: [&str; 6] = ["plain", "tool", "queued", "child", "wake", "trigger"];
+/// One high-traffic operation kind. `Display`/`FromStr` are the single
+/// definition of the `load-kind:<kind>` prompt vocabulary: the measurement
+/// side renders it into the prompt and the provider side parses it back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HighTrafficOperationKind {
+    Plain,
+    Tool,
+    Queued,
+    Child,
+    Wake,
+    Trigger,
+}
+
+impl HighTrafficOperationKind {
+    pub(crate) const ALL: [Self; 6] = [
+        Self::Plain,
+        Self::Tool,
+        Self::Queued,
+        Self::Child,
+        Self::Wake,
+        Self::Trigger,
+    ];
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Tool => "tool",
+            Self::Queued => "queued",
+            Self::Child => "child",
+            Self::Wake => "wake",
+            Self::Trigger => "trigger",
+        }
+    }
+}
+
+impl std::fmt::Display for HighTrafficOperationKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for HighTrafficOperationKind {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.as_str() == value)
+            .ok_or(())
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CheckpointCurveConfig {
@@ -52,7 +102,7 @@ impl CheckpointCurveConfig {
 pub(crate) struct HighTrafficConfig {
     pub(crate) population: usize,
     pub(crate) arrival_rate: u64,
-    pub(crate) mix: [u64; HIGH_TRAFFIC_KINDS.len()],
+    pub(crate) mix: [u64; HighTrafficOperationKind::ALL.len()],
     pub(crate) knee_populations: Vec<usize>,
     pub(crate) knee_threshold: f64,
 }
@@ -65,19 +115,23 @@ impl HighTrafficConfig {
         knee_populations: &str,
         knee_threshold: f64,
     ) -> anyhow::Result<Self> {
-        let mut weights = [0; HIGH_TRAFFIC_KINDS.len()];
+        let mut weights = [0; HighTrafficOperationKind::ALL.len()];
         for entry in mix.split(',').filter(|entry| !entry.trim().is_empty()) {
             let (kind, weight) = entry.split_once('=').ok_or_else(|| {
                 anyhow::anyhow!("invalid high-traffic mix entry `{entry}`; expected kind=weight")
             })?;
-            let index = HIGH_TRAFFIC_KINDS
+            let index = HighTrafficOperationKind::ALL
                 .iter()
-                .position(|candidate| *candidate == kind.trim())
+                .position(|candidate| candidate.as_str() == kind.trim())
                 .ok_or_else(|| {
                     anyhow::anyhow!(
                         "unknown high-traffic mix kind `{}`; expected one of {}",
                         kind.trim(),
-                        HIGH_TRAFFIC_KINDS.join(", ")
+                        HighTrafficOperationKind::ALL
+                            .iter()
+                            .map(|kind| kind.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     )
                 })?;
             weights[index] = weight.trim().parse::<u64>().map_err(|_| {
@@ -115,12 +169,12 @@ impl HighTrafficConfig {
         })
     }
 
-    pub(crate) fn operation_kind(&self, ordinal: usize) -> &'static str {
+    pub(crate) fn operation_kind(&self, ordinal: usize) -> HighTrafficOperationKind {
         let total = self.mix.iter().sum::<u64>();
         let mut selected = ordinal as u64 % total;
         for (index, weight) in self.mix.iter().copied().enumerate() {
             if selected < weight {
-                return HIGH_TRAFFIC_KINDS[index];
+                return HighTrafficOperationKind::ALL[index];
             }
             selected -= weight;
         }

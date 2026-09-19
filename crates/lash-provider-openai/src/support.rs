@@ -6,8 +6,8 @@ pub(crate) use serde_json::{Value, json};
 pub(crate) use std::collections::HashMap;
 
 pub(crate) use lash_core::llm::transport::{
-    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, known_attachment_acceptors,
-    unsupported_attachment_capability,
+    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
+    known_attachment_acceptors, unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmEventSender, LlmOutputPart,

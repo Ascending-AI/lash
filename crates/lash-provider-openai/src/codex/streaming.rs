@@ -15,7 +15,9 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use lash_core::llm::transport::{
+    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
+};
 use lash_core::llm::types::{
     ExecutionEvidence, LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence,
     LlmTerminalReason, LlmUsage, ProviderRouteIdentity,
@@ -30,6 +32,7 @@ use lash_llm_transport::{
     openai_usage_from_response_value, read_http_body_text,
 };
 use lash_provider_auth::{CredentialCallError, CredentialExecuteError};
+use lash_sansio::FailureCode;
 
 use crate::responses_shared as shared;
 
@@ -134,12 +137,16 @@ impl CodexProvider {
             "Codex returned HTTP {status} with non-SSE body{content_type_detail} but it could not be read: {}",
             detail
         );
-        err.status = Some(status);
+        err.http_status = Some(status);
         err.code
-            .get_or_insert_with(|| "body_read_failed".to_string());
+            .get_or_insert(FailureCode::Adapter(TurnFailureCode::BodyReadFailed));
         err
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the attempt error carries the transport error plus lease evidence; boxing it would push the cost onto every caller"
+    )]
     async fn complete_websocket(
         &self,
         req: LlmRequest,
@@ -214,6 +221,10 @@ impl CodexProvider {
         }
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the attempt error carries the transport error plus lease evidence; boxing it would push the cost onto every caller"
+    )]
     async fn run_websocket_attempt(
         &self,
         req: &LlmRequest,
@@ -268,7 +279,7 @@ impl CodexProvider {
                 LlmTransportError::new(format!("Codex WebSocket send failed: {error}"))
                     .with_request_body(request_body.clone())
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                    .with_code("websocket_send"),
+                    .with_adapter_code(TurnFailureCode::WebsocketSend),
                 events_seen,
                 &state,
             ));
@@ -303,7 +314,7 @@ impl CodexProvider {
                             .with_kind(ProviderFailureKind::Timeout)
                             .with_request_body(request_body.clone())
                             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                            .with_code("websocket_idle_timeout"),
+                            .with_adapter_code(TurnFailureCode::WebsocketIdleTimeout),
                         events_seen,
                         &state,
                     ));
@@ -318,7 +329,7 @@ impl CodexProvider {
                         LlmTransportError::new(format!("Codex WebSocket receive failed: {error}"))
                             .with_request_body(request_body.clone())
                             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                            .with_code("websocket_receive"),
+                            .with_adapter_code(TurnFailureCode::WebsocketReceive),
                         events_seen,
                         &state,
                     ));
@@ -334,7 +345,7 @@ impl CodexProvider {
                                 "Codex WebSocket binary frame was not UTF-8: {error}"
                             ))
                             .with_request_body(request_body.clone())
-                            .with_code("websocket_protocol"),
+                            .with_adapter_code(TurnFailureCode::WebsocketProtocol),
                             events_seen,
                             &state,
                         ));
@@ -435,7 +446,7 @@ impl CodexProvider {
                     .with_request_body(request_body)
                     .with_kind(ProviderFailureKind::Stream)
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                    .with_code("websocket_closed_before_completed")
+                    .with_adapter_code(TurnFailureCode::WebsocketClosedBeforeCompleted)
                     .with_partial_response(partial),
                 events_seen,
                 &state,
@@ -533,7 +544,9 @@ fn codex_replay_origin_conflict(
         );
     }
     error.kind = ProviderFailureKind::Validation;
-    error.code = Some("provider_replay_origin_conflict".to_string());
+    error.code = Some(FailureCode::Adapter(
+        TurnFailureCode::ProviderReplayOriginConflict,
+    ));
     error.retry_verdict = TransportRetryVerdict::Forbidden;
     error
 }
@@ -623,7 +636,7 @@ impl Provider for CodexProvider {
         route.validate_endpoint().map_err(|error| {
             LlmTransportError::new(error.to_string())
                 .with_kind(ProviderFailureKind::Validation)
-                .with_code("invalid_provider_endpoint")
+                .with_adapter_code(TurnFailureCode::InvalidProviderEndpoint)
         })?;
         if let Some(downstream) = req.stream_events.take() {
             let stream_route = route.clone();
@@ -1042,7 +1055,7 @@ impl Provider for CodexProvider {
                     "Codex stream ended before a terminal response event",
                 )
                 .with_kind(ProviderFailureKind::Stream)
-                .with_code("stream_ended_before_terminal_response")
+                .with_adapter_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
                 .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                 .with_output_started(output_started)
                 .with_partial_response(partial));
@@ -1061,7 +1074,7 @@ impl Provider for CodexProvider {
                         .unwrap_or_else(|| ", missing content-type".to_string())
                 ))
                 .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                .with_code("empty_stream"));
+                .with_adapter_code(TurnFailureCode::EmptyStream));
             }
 
             let mut response = shared::response_from_stream_state(
@@ -1085,7 +1098,7 @@ impl Provider for CodexProvider {
                         })?;
                     Ok(response)
                 }
-                Err(error) if error.status == Some(401) => {
+                Err(error) if error.http_status == Some(401) => {
                     let error = stamp_codex_partial_or_attach_conflict(error, minting_route)
                         .map_err(CredentialCallError::Failed)?;
                     Err(CredentialCallError::PreOutputAuth(error))

@@ -303,7 +303,7 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
                         stream.send(LlmStreamEvent::Usage(usage.clone()));
                         return Err(LlmTransportError::new("Stream ended without finish_reason")
                             .with_kind(lash_core::ProviderFailureKind::Stream)
-                            .with_code("stream_ended_before_finish_reason")
+                            .with_adapter_code(TurnFailureCode::StreamEndedBeforeFinishReason)
                             .with_retry_verdict(
                                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
                             )
@@ -490,7 +490,7 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
                 async move {
                     if call == 0 {
                         return Err(LlmTransportError::new("provider requested a retry delay")
-                            .with_status(429)
+                            .with_http_status(429)
                             .with_retry_verdict(
                                 lash_core::llm::transport::TransportRetryVerdict::RetryableThrottle {
                                     retry_after: Some(std::time::Duration::from_secs(1)),
@@ -592,7 +592,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
                             "stream ended before terminal evidence",
                         )
                         .with_kind(lash_core::ProviderFailureKind::Stream)
-                        .with_code("stream_ended_before_terminal_response")
+                        .with_adapter_code(TurnFailureCode::StreamEndedBeforeTerminalResponse)
                         .with_retry_verdict(
                             lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
                         )

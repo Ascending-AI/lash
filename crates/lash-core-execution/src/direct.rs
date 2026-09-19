@@ -690,7 +690,7 @@ mod tests {
                     .to_string(),
                 r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace structured rejection"}],"role":"user"}],"model":"trace-model","output_spec":{"name":"answer_shape","schema":{"canonical":{"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}},"strict":true,"type":"json_schema"},"stream":false,"tool_choice":"none"},"schema_version":21,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
-                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed","usage_disposition":"unreported_by_provider"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"code":"invalid_structured_output","message":"invalid response: \"answer\" is a required property","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":21,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
+                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed","usage_disposition":"unreported_by_provider"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"code":"adapter:invalid_structured_output","message":"invalid response: \"answer\" is a required property","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":21,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
                     .to_string(),
             ];
 

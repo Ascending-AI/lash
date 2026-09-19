@@ -82,8 +82,8 @@ fn test_host_rejects_gif_attachment_at_request_boundary() {
 
     assert_eq!(err.kind, lash_core::ProviderFailureKind::Validation);
     assert_eq!(
-        err.code.as_deref(),
-        Some("unsupported_attachment_capability")
+        err.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:unsupported_attachment_capability".to_string())
     );
     assert!(err.message.contains("Google Gemini"));
     assert!(err.message.contains("image/gif"));

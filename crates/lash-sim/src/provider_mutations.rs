@@ -514,11 +514,11 @@ async fn run_mutation_script(
         )))
     })?;
     if let Some(expected_status) = spec.expected_status
-        && err.status != Some(expected_status)
+        && err.http_status != Some(expected_status)
     {
         return Err(ProviderMutationExecutionError::new(format!(
             "mutated provider script `{script_name}` returned status {:?}, expected {expected_status}",
-            err.status
+            err.http_status
         )));
     }
     let classified = DefaultProviderFailureClassifier.classify(err.clone());
@@ -547,14 +547,14 @@ async fn run_mutation_script(
         "exchange_count": exchanges.len(),
         "endpoint": exchanges.first().map(|exchange| exchange.request.path.clone()),
         "response_events": exchanges.first().map(|exchange| exchange.response.event_names.clone()).unwrap_or_default(),
-        "status": err.status,
+        "status": err.http_status,
         "kind": format!("{:?}", err.kind),
         "retryable": err.is_retryable(),
         "terminal_reason": err.terminal_reason.code(),
         "classification": {
             "kind": format!("{:?}", classified.kind),
             "retryable": classified.is_retryable(),
-            "status": classified.status,
+            "status": classified.http_status,
             "terminal_reason": classified.terminal_reason.code(),
         },
     }))

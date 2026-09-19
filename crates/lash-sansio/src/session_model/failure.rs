@@ -177,6 +177,12 @@ pub enum TurnFailureCode {
     ChargeSafetyDuplicateCostLimitExceeded,
     /// The provider's requested retry delay exceeds the host's cap.
     RetryAfterExceedsCap,
+    /// The host charge-safety policy denied the retry outright.
+    ChargeSafetyRetryDenied,
+    /// Structured output validation failed before the call could complete.
+    InvalidStructuredOutput,
+    /// The provider response body could not be read.
+    BodyReadFailed,
 
     // ─── runtime ─────────────────────────────────────────────────────────
     /// A token-usage counter overflowed while accumulating turn usage.
@@ -198,6 +204,64 @@ pub enum TurnFailureCode {
     ProtocolRestoreSession,
     /// A plugin lifecycle hook failed.
     LifecycleHookFailed,
+
+    // ─── provider adapters and transports ────────────────────────────────
+    /// The provider endpoint configuration is not a usable URL or socket.
+    InvalidProviderEndpoint,
+    /// The request used an attachment capability the provider does not offer.
+    UnsupportedAttachmentCapability,
+    /// A message attachment could not be encoded for the request.
+    AttachmentSourceNotEncodable,
+    /// A stored attachment could not be resolved for the request.
+    StoredAttachmentNotResolved,
+    /// A provider-file attachment requires an explicit media type.
+    ProviderFileMediaTypeRequired,
+    /// The model does not support the requested reasoning-retention mode.
+    UnsupportedReasoningRetention,
+    /// Reasoning evidence could not be encoded for the provider's wire form.
+    ReasoningEncodingUnrepresentable,
+    /// A provider tool call carried arguments that were not valid JSON.
+    InvalidToolCallInputJson,
+    /// The credential refresh was rejected; the host must re-authenticate.
+    CredentialInvalidGrant,
+    /// The credential refresh failed transiently.
+    CredentialRefreshTransient,
+    /// The credential refresh failed.
+    CredentialRefreshFailed,
+    /// The call timed out.
+    Timeout,
+    /// A driver task join failed.
+    TaskJoinFailed,
+    /// An SSE event exceeded the configured byte limit.
+    SseEventTooLarge,
+    /// An SSE response exceeded the configured total byte limit.
+    SseResponseTooLarge,
+    /// The provider stream ended before a terminal response was observed.
+    StreamEndedBeforeTerminalResponse,
+    /// The provider stream ended before its terminal message marker.
+    StreamEndedBeforeMessageStop,
+    /// The provider stream ended before a finish reason was observed.
+    StreamEndedBeforeFinishReason,
+    /// The provider stream carried no events at all.
+    EmptyStream,
+    /// A responses-resume request was issued for a non-streaming call.
+    ResponsesResumeNotStreaming,
+    /// A responses-resume stream event lacked its sequence number.
+    ResponsesResumeEventMissingSequence,
+    /// The websocket connection could not be established.
+    WebsocketConnect,
+    /// The websocket connection timed out while connecting.
+    WebsocketConnectTimeout,
+    /// Writing to the websocket failed.
+    WebsocketSend,
+    /// The websocket idled past its timeout.
+    WebsocketIdleTimeout,
+    /// Reading from the websocket failed.
+    WebsocketReceive,
+    /// The websocket carried a protocol violation.
+    WebsocketProtocol,
+    /// The websocket closed before the response completed.
+    WebsocketClosedBeforeCompleted,
 
     /// A code from a vocabulary this type does not own, retained verbatim:
     /// provider and transport error codes, plugin abort codes, kernel
@@ -246,6 +310,9 @@ impl TurnFailureCode {
                 "charge_safety_duplicate_cost_limit_exceeded"
             }
             Self::RetryAfterExceedsCap => "retry_after_exceeds_cap",
+            Self::ChargeSafetyRetryDenied => "charge_safety_retry_denied",
+            Self::InvalidStructuredOutput => "invalid_structured_output",
+            Self::BodyReadFailed => "body_read_failed",
             Self::TokenUsageOverflow => "token_usage_overflow",
             Self::ReconfigureFailed => "reconfigure_failed",
             Self::SessionGraphScope => "session_graph_scope",
@@ -255,8 +322,53 @@ impl TurnFailureCode {
             Self::AgentFrameSwitchLimit => "agent_frame_switch_limit",
             Self::ProtocolRestoreSession => "protocol_restore_session",
             Self::LifecycleHookFailed => "lifecycle_hook_failed",
+            Self::InvalidProviderEndpoint => "invalid_provider_endpoint",
+            Self::UnsupportedAttachmentCapability => "unsupported_attachment_capability",
+            Self::AttachmentSourceNotEncodable => "attachment_source_not_encodable",
+            Self::StoredAttachmentNotResolved => "stored_attachment_not_resolved",
+            Self::ProviderFileMediaTypeRequired => "provider_file_media_type_required",
+            Self::UnsupportedReasoningRetention => "unsupported_reasoning_retention",
+            Self::ReasoningEncodingUnrepresentable => "reasoning_encoding_unrepresentable",
+            Self::InvalidToolCallInputJson => "invalid_tool_call_input_json",
+            Self::CredentialInvalidGrant => "credential_invalid_grant",
+            Self::CredentialRefreshTransient => "credential_refresh_transient",
+            Self::CredentialRefreshFailed => "credential_refresh_failed",
+            Self::Timeout => "timeout",
+            Self::TaskJoinFailed => "task_join_failed",
+            Self::SseEventTooLarge => "sse_event_too_large",
+            Self::SseResponseTooLarge => "sse_response_too_large",
+            Self::StreamEndedBeforeTerminalResponse => "stream_ended_before_terminal_response",
+            Self::StreamEndedBeforeMessageStop => "stream_ended_before_message_stop",
+            Self::StreamEndedBeforeFinishReason => "stream_ended_before_finish_reason",
+            Self::EmptyStream => "empty_stream",
+            Self::ResponsesResumeNotStreaming => "responses_resume_not_streaming",
+            Self::ResponsesResumeEventMissingSequence => "responses_resume_event_missing_sequence",
+            Self::WebsocketConnect => "websocket_connect",
+            Self::WebsocketConnectTimeout => "websocket_connect_timeout",
+            Self::WebsocketSend => "websocket_send",
+            Self::WebsocketIdleTimeout => "websocket_idle_timeout",
+            Self::WebsocketReceive => "websocket_receive",
+            Self::WebsocketProtocol => "websocket_protocol",
+            Self::WebsocketClosedBeforeCompleted => "websocket_closed_before_completed",
             Self::Other(spelling) => spelling,
         }
+    }
+
+    /// Whether this code was authored by charge-safety or retry policy while
+    /// refusing a regeneration.
+    pub fn is_refusal(&self) -> bool {
+        matches!(
+            self,
+            Self::UnsafeRetryAfterOutputStarted
+                | Self::UnsafeRetryAfterResponseObserved
+                | Self::UnsafeRetryWithoutTransportClassification
+                | Self::UnsafeRetryAfterTerminalObserved
+                | Self::ChargeSafetyGuaranteeRequired
+                | Self::ChargeSafetyUnsafeRetryLimitExceeded
+                | Self::ChargeSafetyDuplicateCostLimitExceeded
+                | Self::RetryAfterExceedsCap
+                | Self::ChargeSafetyRetryDenied
+        )
     }
 
     /// Classify a wire spelling. An unrecognized spelling is retained as
@@ -300,6 +412,9 @@ impl TurnFailureCode {
                 Self::ChargeSafetyDuplicateCostLimitExceeded
             }
             "retry_after_exceeds_cap" => Self::RetryAfterExceedsCap,
+            "charge_safety_retry_denied" => Self::ChargeSafetyRetryDenied,
+            "invalid_structured_output" => Self::InvalidStructuredOutput,
+            "body_read_failed" => Self::BodyReadFailed,
             "token_usage_overflow" => Self::TokenUsageOverflow,
             "reconfigure_failed" => Self::ReconfigureFailed,
             "session_graph_scope" => Self::SessionGraphScope,
@@ -309,8 +424,141 @@ impl TurnFailureCode {
             "agent_frame_switch_limit" => Self::AgentFrameSwitchLimit,
             "protocol_restore_session" => Self::ProtocolRestoreSession,
             "lifecycle_hook_failed" => Self::LifecycleHookFailed,
+            "invalid_provider_endpoint" => Self::InvalidProviderEndpoint,
+            "unsupported_attachment_capability" => Self::UnsupportedAttachmentCapability,
+            "attachment_source_not_encodable" => Self::AttachmentSourceNotEncodable,
+            "stored_attachment_not_resolved" => Self::StoredAttachmentNotResolved,
+            "provider_file_media_type_required" => Self::ProviderFileMediaTypeRequired,
+            "unsupported_reasoning_retention" => Self::UnsupportedReasoningRetention,
+            "reasoning_encoding_unrepresentable" => Self::ReasoningEncodingUnrepresentable,
+            "invalid_tool_call_input_json" => Self::InvalidToolCallInputJson,
+            "credential_invalid_grant" => Self::CredentialInvalidGrant,
+            "credential_refresh_transient" => Self::CredentialRefreshTransient,
+            "credential_refresh_failed" => Self::CredentialRefreshFailed,
+            "timeout" => Self::Timeout,
+            "task_join_failed" => Self::TaskJoinFailed,
+            "sse_event_too_large" => Self::SseEventTooLarge,
+            "sse_response_too_large" => Self::SseResponseTooLarge,
+            "stream_ended_before_terminal_response" => Self::StreamEndedBeforeTerminalResponse,
+            "stream_ended_before_message_stop" => Self::StreamEndedBeforeMessageStop,
+            "stream_ended_before_finish_reason" => Self::StreamEndedBeforeFinishReason,
+            "empty_stream" => Self::EmptyStream,
+            "responses_resume_not_streaming" => Self::ResponsesResumeNotStreaming,
+            "responses_resume_event_missing_sequence" => Self::ResponsesResumeEventMissingSequence,
+            "websocket_connect" => Self::WebsocketConnect,
+            "websocket_connect_timeout" => Self::WebsocketConnectTimeout,
+            "websocket_send" => Self::WebsocketSend,
+            "websocket_idle_timeout" => Self::WebsocketIdleTimeout,
+            "websocket_receive" => Self::WebsocketReceive,
+            "websocket_protocol" => Self::WebsocketProtocol,
+            "websocket_closed_before_completed" => Self::WebsocketClosedBeforeCompleted,
             other => Self::Other(other.to_string()),
         }
+    }
+}
+
+/// A failure code namespaced by who authored the spelling.
+///
+/// `code` fields that used to mix provider-emitted slugs, adapter-authored
+/// diagnostics, and Lash charge-safety refusals in one bare string now carry
+/// the namespace with the spelling, so a reader never has to guess which
+/// vocabulary a value belongs to — or mistake a numeric provider slug for an
+/// HTTP status. Serializes as `"<namespace>:<spelling>"`; a bare legacy
+/// spelling decodes as `Adapter` when it names a [`TurnFailureCode`] arm and
+/// as `Provider` otherwise.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FailureCode {
+    /// A code the provider emitted on the wire — an open vocabulary this
+    /// workspace does not own.
+    Provider(String),
+    /// A code the Lash adapter or transport authored while normalizing or
+    /// driving the provider exchange.
+    Adapter(TurnFailureCode),
+    /// A code Lash charge-safety or retry policy authored while refusing the
+    /// call.
+    Refusal(TurnFailureCode),
+}
+
+impl FailureCode {
+    /// The namespace that owns this code's spelling.
+    pub fn namespace(&self) -> &'static str {
+        match self {
+            Self::Provider(_) => "provider",
+            Self::Adapter(_) => "adapter",
+            Self::Refusal(_) => "refusal",
+        }
+    }
+
+    /// The spelling within its namespace.
+    pub fn spelling(&self) -> &str {
+        match self {
+            Self::Provider(code) => code,
+            Self::Adapter(code) | Self::Refusal(code) => code.as_str(),
+        }
+    }
+
+    /// `"<namespace>:<spelling>"` — the host-facing render.
+    pub fn namespaced(&self) -> String {
+        format!("{}:{}", self.namespace(), self.spelling())
+    }
+
+    /// Decode a namespaced or legacy bare spelling.
+    pub fn from_wire(spelling: &str) -> Self {
+        match spelling.split_once(':') {
+            Some(("provider", code)) => Self::Provider(code.to_string()),
+            Some(("adapter", code)) => Self::Adapter(TurnFailureCode::from_wire(code)),
+            Some(("refusal", code)) => Self::Refusal(TurnFailureCode::from_wire(code)),
+            _ => match TurnFailureCode::from_wire(spelling) {
+                // A legacy bare spelling: workspace-authored spellings decode
+                // as their authored namespace, foreign spellings as provider
+                // codes.
+                TurnFailureCode::Other(_) => Self::Provider(spelling.to_string()),
+                code if code.is_refusal() => Self::Refusal(code),
+                code => Self::Adapter(code),
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for FailureCode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.namespaced())
+    }
+}
+
+impl serde::Serialize for FailureCode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.namespaced())
+    }
+}
+
+impl schemars::JsonSchema for FailureCode {
+    fn schema_name() -> String {
+        "FailureCode".to_string()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        <String as schemars::JsonSchema>::json_schema(generator)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FailureCode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = FailureCode;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a namespaced failure code")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<FailureCode, E> {
+                Ok(FailureCode::from_wire(value))
+            }
+        }
+
+        deserializer.deserialize_str(Visitor)
     }
 }
 
@@ -389,7 +637,7 @@ impl From<crate::llm::types::LlmTerminalReason> for TurnFailureCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{TurnFailureCode, TurnFailureKind};
+    use super::{FailureCode, TurnFailureCode, TurnFailureKind};
 
     /// Every arm's spelling survives a round trip through the wire form, so a
     /// typed arm never silently degrades into an open arm.
@@ -445,6 +693,9 @@ mod tests {
             TurnFailureCode::ChargeSafetyUnsafeRetryLimitExceeded,
             TurnFailureCode::ChargeSafetyDuplicateCostLimitExceeded,
             TurnFailureCode::RetryAfterExceedsCap,
+            TurnFailureCode::ChargeSafetyRetryDenied,
+            TurnFailureCode::InvalidStructuredOutput,
+            TurnFailureCode::BodyReadFailed,
             TurnFailureCode::TokenUsageOverflow,
             TurnFailureCode::ReconfigureFailed,
             TurnFailureCode::SessionGraphScope,
@@ -454,6 +705,34 @@ mod tests {
             TurnFailureCode::AgentFrameSwitchLimit,
             TurnFailureCode::ProtocolRestoreSession,
             TurnFailureCode::LifecycleHookFailed,
+            TurnFailureCode::InvalidProviderEndpoint,
+            TurnFailureCode::UnsupportedAttachmentCapability,
+            TurnFailureCode::AttachmentSourceNotEncodable,
+            TurnFailureCode::StoredAttachmentNotResolved,
+            TurnFailureCode::ProviderFileMediaTypeRequired,
+            TurnFailureCode::UnsupportedReasoningRetention,
+            TurnFailureCode::ReasoningEncodingUnrepresentable,
+            TurnFailureCode::InvalidToolCallInputJson,
+            TurnFailureCode::CredentialInvalidGrant,
+            TurnFailureCode::CredentialRefreshTransient,
+            TurnFailureCode::CredentialRefreshFailed,
+            TurnFailureCode::Timeout,
+            TurnFailureCode::TaskJoinFailed,
+            TurnFailureCode::SseEventTooLarge,
+            TurnFailureCode::SseResponseTooLarge,
+            TurnFailureCode::StreamEndedBeforeTerminalResponse,
+            TurnFailureCode::StreamEndedBeforeMessageStop,
+            TurnFailureCode::StreamEndedBeforeFinishReason,
+            TurnFailureCode::EmptyStream,
+            TurnFailureCode::ResponsesResumeNotStreaming,
+            TurnFailureCode::ResponsesResumeEventMissingSequence,
+            TurnFailureCode::WebsocketConnect,
+            TurnFailureCode::WebsocketConnectTimeout,
+            TurnFailureCode::WebsocketSend,
+            TurnFailureCode::WebsocketIdleTimeout,
+            TurnFailureCode::WebsocketReceive,
+            TurnFailureCode::WebsocketProtocol,
+            TurnFailureCode::WebsocketClosedBeforeCompleted,
         ];
         for code in codes {
             assert_eq!(TurnFailureCode::from_wire(code.as_str()), code);
@@ -477,5 +756,47 @@ mod tests {
             TurnFailureCode::Other("session_execution_lease_lost".to_string())
         );
         assert_eq!(code.as_str(), "session_execution_lease_lost");
+    }
+
+    /// Namespaced failure codes round-trip, and legacy bare spellings decode
+    /// into the namespace that authored them.
+    #[test]
+    fn failure_code_namespaces_round_trip_and_decode_legacy_bare_spellings() {
+        let cases = [
+            (
+                FailureCode::Provider("insufficient_quota".to_string()),
+                "provider:insufficient_quota",
+            ),
+            (
+                FailureCode::Adapter(TurnFailureCode::Timeout),
+                "adapter:timeout",
+            ),
+            (
+                FailureCode::Refusal(TurnFailureCode::UnsafeRetryAfterOutputStarted),
+                "refusal:unsafe_retry_after_output_started",
+            ),
+        ];
+        for (code, namespaced) in cases {
+            assert_eq!(code.to_string(), namespaced);
+            assert_eq!(FailureCode::from_wire(namespaced), code);
+            let json = serde_json::to_string(&code).expect("serialize");
+            assert_eq!(
+                serde_json::from_str::<FailureCode>(&json).expect("deserialize"),
+                code
+            );
+        }
+
+        assert_eq!(
+            FailureCode::from_wire("timeout"),
+            FailureCode::Adapter(TurnFailureCode::Timeout)
+        );
+        assert_eq!(
+            FailureCode::from_wire("unsafe_retry_after_output_started"),
+            FailureCode::Refusal(TurnFailureCode::UnsafeRetryAfterOutputStarted)
+        );
+        assert_eq!(
+            FailureCode::from_wire("insufficient_quota"),
+            FailureCode::Provider("insufficient_quota".to_string())
+        );
     }
 }

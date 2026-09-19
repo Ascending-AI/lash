@@ -25,9 +25,9 @@ pub(crate) fn classify_openai_error(
         return failure;
     };
 
-    failure.code = Some(code.to_string());
+    failure.code = Some(lash_sansio::FailureCode::Provider(code.to_string()));
     match code {
-        "context_length_exceeded" if matches!(failure.status, None | Some(400)) => {
+        "context_length_exceeded" if matches!(failure.http_status, None | Some(400)) => {
             failure.kind = ProviderFailureKind::Validation;
             failure = failure.with_retry_verdict(TransportRetryVerdict::Forbidden);
             failure.terminal_reason = LlmTerminalReason::ContextOverflow;

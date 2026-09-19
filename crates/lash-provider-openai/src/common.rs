@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 use std::sync::{Arc, LazyLock};
 
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use lash_core::llm::transport::{
+    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
+};
 use lash_core::llm::types::{LlmRequest, ReasoningRetentionValidationError};
 use lash_core::provider::{ReasoningDisableEncoding, ReasoningEncoding, ReasoningSelection};
 use lash_llm_transport::{LlmHttpTransport, ReqwestLlmHttpTransport};
@@ -51,7 +53,7 @@ pub(crate) fn reasoning_retention_transport_error(
 ) -> LlmTransportError {
     LlmTransportError::new(error.message)
         .with_kind(ProviderFailureKind::Unsupported)
-        .with_code("unsupported_reasoning_retention")
+        .with_adapter_code(TurnFailureCode::UnsupportedReasoningRetention)
         .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
@@ -97,7 +99,7 @@ pub(crate) fn empty_response_diagnostic(
 ) -> lash_core::llm::transport::LlmTransportError {
     lash_core::llm::transport::LlmTransportError::new("OpenAI-compatible empty_response")
         .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::NotRetryable)
-        .with_code("empty_response")
+        .with_adapter_code(TurnFailureCode::EmptyResponse)
         .with_raw(raw)
 }
 

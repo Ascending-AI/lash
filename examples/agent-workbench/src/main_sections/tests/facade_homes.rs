@@ -47,7 +47,7 @@ fn closure_companions_are_usable_through_their_facade_domains() {
     ));
 
     let classified = lash::provider::DefaultProviderFailureClassifier
-        .classify(lash::provider::LlmTransportError::new("HTTP 429").with_status(429));
+        .classify(lash::provider::LlmTransportError::new("HTTP 429").with_http_status(429));
     assert!(classified.is_retryable());
     assert_eq!(classified.kind, lash::provider::ProviderFailureKind::Quota);
     assert!(matches!(

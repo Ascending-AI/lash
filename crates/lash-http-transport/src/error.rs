@@ -1,4 +1,5 @@
 use lash_sansio::llm::types::{LlmResponse, LlmTerminalReason, ProviderFailureKind};
+use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 
 /// Adapter-owned retry classification for a transport failure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -60,10 +61,14 @@ pub struct LlmTransportError {
     pub message: String,
     pub retry_verdict: TransportRetryVerdict,
     retry_verdict_classified: bool,
-    pub status: Option<u16>,
+    /// The HTTP status, when the failure observed one. Carried exactly once —
+    /// `code` never mirrors it.
+    pub http_status: Option<u16>,
     /// Cold raw provider evidence stays off the inline `Result` error path.
     pub raw: Option<Box<String>>,
-    pub code: Option<String>,
+    /// Namespaced failure code: the producer declares whether the spelling is
+    /// provider-owned, adapter-authored, or a Lash refusal.
+    pub code: Option<FailureCode>,
     pub terminal_reason: LlmTerminalReason,
     /// Cold diagnostic metadata stays off the inline `Result` error path.
     pub headers: Box<Vec<(String, String)>>,
@@ -86,7 +91,7 @@ impl LlmTransportError {
             message: message.into(),
             retry_verdict: TransportRetryVerdict::NotRetryable,
             retry_verdict_classified: false,
-            status: None,
+            http_status: None,
             raw: None,
             code: None,
             terminal_reason: LlmTerminalReason::ProviderError,
@@ -131,11 +136,8 @@ impl LlmTransportError {
         self.retry_verdict.retry_after()
     }
 
-    pub fn with_status(mut self, status: u16) -> Self {
-        self.status = Some(status);
-        if self.code.is_none() {
-            self.code = Some(status.to_string());
-        }
+    pub fn with_http_status(mut self, status: u16) -> Self {
+        self.http_status = Some(status);
         if !self.retry_verdict_classified {
             self.retry_verdict =
                 retry_verdict_for_status(status, retry_after_from_headers(self.headers.as_slice()));
@@ -148,8 +150,21 @@ impl LlmTransportError {
         self
     }
 
-    pub fn with_code(mut self, code: impl Into<String>) -> Self {
-        self.code = Some(code.into());
+    /// A code the provider emitted on the wire.
+    pub fn with_provider_code(mut self, code: impl Into<String>) -> Self {
+        self.code = Some(FailureCode::Provider(code.into()));
+        self
+    }
+
+    /// A code the Lash adapter or transport authored.
+    pub fn with_adapter_code(mut self, code: TurnFailureCode) -> Self {
+        self.code = Some(FailureCode::Adapter(code));
+        self
+    }
+
+    /// A code Lash charge-safety or retry policy authored while refusing.
+    pub fn with_refusal_code(mut self, code: TurnFailureCode) -> Self {
+        self.code = Some(FailureCode::Refusal(code));
         self
     }
 

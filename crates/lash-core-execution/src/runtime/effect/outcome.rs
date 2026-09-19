@@ -92,7 +92,10 @@ impl LlmTraceFailure {
             message,
             retryable: false,
             terminal_reason: crate::LlmTerminalReason::ProviderError,
-            code: Some("invalid_structured_output".to_string()),
+            code: Some(
+                crate::FailureCode::Adapter(crate::TurnFailureCode::InvalidStructuredOutput)
+                    .to_string(),
+            ),
             raw: None,
         }
     }
@@ -104,7 +107,7 @@ impl From<&LlmTransportError> for LlmTraceFailure {
             message: err.message.clone(),
             retryable: err.is_retryable(),
             terminal_reason: err.terminal_reason,
-            code: err.code.clone(),
+            code: err.code.as_ref().map(|code| code.to_string()),
             raw: err.raw.as_deref().cloned(),
         }
     }
@@ -116,7 +119,7 @@ impl From<&LlmCallError> for LlmTraceFailure {
             message: err.message.clone(),
             retryable: err.retryable,
             terminal_reason: err.terminal_reason,
-            code: err.code.clone(),
+            code: err.code.as_ref().map(|code| code.to_string()),
             raw: err.raw.clone(),
         }
     }

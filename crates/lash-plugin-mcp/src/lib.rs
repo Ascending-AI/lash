@@ -27,7 +27,10 @@ pub mod plugin;
 pub mod pool;
 mod service_lifecycle;
 
-pub use config::{McpCallPolicy, McpServerConfig, McpShutdownPolicy, TimeoutDisconnectPolicy};
+pub use config::{
+    McpCallPolicy, McpServerConfig, McpShutdownPolicy, McpStdioTransport,
+    McpStreamableHttpTransport, McpTransport, TimeoutDisconnectPolicy,
+};
 pub use error::McpError;
 pub use host::{
     MCP_PROTOCOL_VERSION, McpElicitationHandler, McpElicitationRequest,
