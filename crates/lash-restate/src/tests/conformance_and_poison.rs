@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::TurnFailureCode;
 
 // No store-family macros: Restate certifies an engine adapter over borrowed memory/SQLite stores.
 // No SQL-journal retirement/fencing macros: replay lives in workflow history, not SQL rows.
@@ -149,7 +150,7 @@ impl HttpTransport for ConformanceProcessWaitTransport {
             0 => Err(
                 LlmTransportError::new("conformance attachment ceiling elapsed")
                     .with_kind(lash_core::ProviderFailureKind::Timeout)
-                    .with_code("timeout")
+                    .with_adapter_code(TurnFailureCode::Timeout)
                     .with_retry_verdict(
                         lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
                     ),

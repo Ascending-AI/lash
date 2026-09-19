@@ -1,4 +1,5 @@
 use super::*;
+use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 
 impl RuntimeTurnDriver<'_> {
     /// Refuse a selected drain whose model-context cost Lash cannot bound.
@@ -171,7 +172,11 @@ impl RuntimeTurnDriver<'_> {
             result => result,
         };
         let loud_provider_panic = result.as_ref().err().and_then(|error| {
-            (error.code.as_deref() == Some("provider_panicked")).then(|| error.message.clone())
+            matches!(
+                &error.code,
+                Some(FailureCode::Adapter(TurnFailureCode::ProviderPanicked))
+            )
+            .then(|| error.message.clone())
         });
         // FIG-793: the LLM run is the deployed first journal command for this
         // protocol iteration, so it must be emitted and awaited before any

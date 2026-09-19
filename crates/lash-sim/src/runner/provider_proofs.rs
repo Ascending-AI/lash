@@ -191,7 +191,7 @@ pub(super) async fn prove_codex_responses_rate_limit() -> Result<ProofRun, Fixed
         .await
         .expect_err("codex rate-limit script should fail");
     require(
-        err.status == Some(429),
+        err.http_status == Some(429),
         "Codex rate limit script did not preserve 429 status",
     )?;
     let classified = DefaultProviderFailureClassifier.classify(err.clone());
@@ -202,7 +202,7 @@ pub(super) async fn prove_codex_responses_rate_limit() -> Result<ProofRun, Fixed
         transport_exchanges(transport.as_ref())?,
         error_terminal(&err),
         json!({
-            "status": err.status,
+            "status": err.http_status,
             "headers": redacted_headers(&err.headers),
             "raw_body_bytes": err.raw.as_ref().map(|body| body.len()),
             "retry_after_ms": err.retry_after().map(|duration| duration.as_millis() as u64),
@@ -381,7 +381,7 @@ pub(super) async fn prove_openai_compatible_rate_limit() -> Result<ProofRun, Fix
         .await
         .expect_err("rate-limit script should fail");
     require(
-        err.status == Some(429),
+        err.http_status == Some(429),
         "OpenAI-compatible rate limit script did not preserve 429 status",
     )?;
     let classified = DefaultProviderFailureClassifier.classify(err.clone());
@@ -392,7 +392,7 @@ pub(super) async fn prove_openai_compatible_rate_limit() -> Result<ProofRun, Fix
         transport_exchanges(transport.as_ref())?,
         error_terminal(&err),
         json!({
-            "status": err.status,
+            "status": err.http_status,
             "headers": redacted_headers(&err.headers),
             "raw_body_bytes": err.raw.as_ref().map(|body| body.len()),
             "retry_after_ms": err.retry_after().map(|duration| duration.as_millis() as u64),
@@ -415,7 +415,7 @@ pub(super) async fn prove_openai_compatible_validation() -> Result<ProofRun, Fix
         .await
         .expect_err("validation script should fail");
     require(
-        err.status == Some(400),
+        err.http_status == Some(400),
         "OpenAI-compatible validation script did not preserve 400 status",
     )?;
     let classified = DefaultProviderFailureClassifier.classify(err.clone());
@@ -426,7 +426,7 @@ pub(super) async fn prove_openai_compatible_validation() -> Result<ProofRun, Fix
         transport_exchanges(transport.as_ref())?,
         error_terminal(&err),
         json!({
-            "status": err.status,
+            "status": err.http_status,
             "headers": redacted_headers(&err.headers),
             "raw_body_bytes": err.raw.as_ref().map(|body| body.len()),
             "request_body_snapshot": err.request_body.is_some(),
@@ -480,9 +480,14 @@ pub(super) async fn prove_openai_compatible_response_start_timeout()
         .expect_err("response-start timeout script should fail");
     require(
         err.kind == ProviderFailureKind::Timeout
-            && err.code.as_deref() == Some("timeout")
+            && matches!(
+                err.code,
+                Some(lash_sansio::FailureCode::Adapter(
+                    lash_sansio::TurnFailureCode::Timeout
+                ))
+            )
             && err.is_retryable()
-            && err.status.is_none(),
+            && err.http_status.is_none(),
         "OpenAI-compatible response-start timeout did not match production timeout envelope",
     )?;
     proof(
@@ -519,9 +524,14 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
     let partial_response_events = committed_events.len() - evidence_events;
     require(
         err.kind == ProviderFailureKind::Timeout
-            && err.code.as_deref() == Some("timeout")
+            && matches!(
+                err.code,
+                Some(lash_sansio::FailureCode::Adapter(
+                    lash_sansio::TurnFailureCode::Timeout
+                ))
+            )
             && err.is_retryable()
-            && err.status.is_none(),
+            && err.http_status.is_none(),
         "OpenAI-compatible stream chunk timeout did not match production timeout envelope",
     )?;
     require(
@@ -637,10 +647,10 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
         .await
         .expect_err("retry exhaustion should fail");
     require(
-        err.status == Some(429) && err.is_retryable(),
+        err.http_status == Some(429) && err.is_retryable(),
         format!(
             "retry exhaustion did not return classified retryable 429: status={:?} retryable={} kind={:?} code={:?} message={}",
-            err.status,
+            err.http_status,
             err.is_retryable(),
             err.kind,
             err.code,
@@ -672,7 +682,7 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
         exchanges,
         error_terminal(&err),
         json!({
-            "status": err.status,
+            "status": err.http_status,
             "retryable": err.is_retryable(),
             "classification": failure_classification(&err),
             "attempts_consumed": attempt_budget,
@@ -736,8 +746,8 @@ fn error_terminal(error: &LlmTransportError) -> TranscriptTerminal {
         provider_result: None,
         error_envelope: Some(TranscriptErrorEnvelope {
             kind: format!("{:?}", error.kind),
-            code: error.code.clone(),
-            status: error.status,
+            code: error.code.as_ref().map(|code| code.to_string()),
+            status: error.http_status,
             retryable: error.is_retryable(),
             terminal_reason: error.terminal_reason.code().to_string(),
             raw_body_bytes: error.raw.as_ref().map(|body| body.len()),
@@ -764,7 +774,7 @@ fn failure_classification(failure: &LlmTransportError) -> serde_json::Value {
     json!({
         "kind": format!("{:?}", failure.kind),
         "retryable": failure.is_retryable(),
-        "status": failure.status,
+        "status": failure.http_status,
         "terminal_reason": failure.terminal_reason.code(),
     })
 }

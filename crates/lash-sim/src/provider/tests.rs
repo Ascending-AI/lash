@@ -65,7 +65,7 @@ async fn provider_wire_script_openai_compatible_rate_limit_error_preserves_envel
         .await
         .expect_err("rate limit error");
 
-    assert_eq!(err.status, Some(429));
+    assert_eq!(err.http_status, Some(429));
     assert_eq!(
         err.raw.as_deref().map(String::as_str),
         Some(RATE_LIMIT_BODY)
@@ -102,7 +102,7 @@ async fn provider_wire_script_openai_compatible_validation_error_preserves_envel
         .await
         .expect_err("validation error");
 
-    assert_eq!(err.status, Some(400));
+    assert_eq!(err.http_status, Some(400));
     assert_eq!(
         err.raw.as_deref().map(String::as_str),
         Some(VALIDATION_BODY)
@@ -207,9 +207,12 @@ async fn scripted_transport_response_start_gate_timeout_uses_production_timeout_
         .expect_err("response start gate should time out");
 
     assert_eq!(err.kind, ProviderFailureKind::Timeout);
-    assert_eq!(err.code.as_deref(), Some("timeout"));
+    assert_eq!(
+        err.code.as_ref().map(|code| code.to_string()),
+        Some("adapter:timeout".to_string())
+    );
     assert!(err.is_retryable());
-    assert!(err.status.is_none());
+    assert!(err.http_status.is_none());
     assert!(
         events.lock_recover().is_empty(),
         "response-start timeout should not commit stream events"

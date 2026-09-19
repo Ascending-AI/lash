@@ -32,9 +32,9 @@ use lash_core::llm::types::{
     ResponsePhase, ResponseTextMeta,
 };
 use lash_core::{
-    SchemaContract, facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
-    facade_support::SchemaResolutionError, facade_support::SchemaResolutionRequest,
-    facade_support::resolve_schema,
+    SchemaContract, TurnFailureCode, facade_support::ProviderSchemaCapabilities,
+    facade_support::SchemaPurpose, facade_support::SchemaResolutionError,
+    facade_support::SchemaResolutionRequest, facade_support::resolve_schema,
 };
 use lash_llm_transport::{
     frame_sse_payload, merge_usage,
@@ -84,7 +84,7 @@ pub fn validate_responses_attachments(
                 {
                     let mime = &attachment_ref.media_type;
                     return Err(LlmTransportError::new(format!("{provider} could not materialize stored attachment MIME `{mime}` because session-guard resolution did not provide its bytes"))
-                .with_kind(ProviderFailureKind::Validation).with_code("stored_attachment_not_resolved"));
+                .with_kind(ProviderFailureKind::Validation).with_adapter_code(TurnFailureCode::StoredAttachmentNotResolved));
                 }
 
                 Ok(())
@@ -1130,7 +1130,7 @@ impl ResponsesStreamState {
             |error| {
                 LlmTransportError::new(format!("Responses stream {error}"))
                     .with_kind(ProviderFailureKind::Stream)
-                    .with_code(error.code())
+                    .with_provider_code(error.code())
             },
         )
     }

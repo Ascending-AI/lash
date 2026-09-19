@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use lash_core::{
-    ProviderFailureKind, facade_support::LlmTransportError, llm::transport::TransportRetryVerdict,
+    ProviderFailureKind, TurnFailureCode, facade_support::LlmTransportError,
+    llm::transport::TransportRetryVerdict,
 };
 use lash_llm_transport::{
     LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport, run_with_timeout,

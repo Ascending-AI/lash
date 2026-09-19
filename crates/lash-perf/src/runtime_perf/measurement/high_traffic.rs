@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug)]
 struct HighTrafficOperationResult {
     ordinal: usize,
-    kind: &'static str,
+    kind: HighTrafficOperationKind,
     latency_ms: f64,
     pre_phase_dispatch_ms: f64,
     arrival_pacing_lateness_ms: Option<f64>,
@@ -512,17 +512,17 @@ async fn run_high_traffic_operation(
     core: &lash::LashCore,
     session: &lash::LashSession,
     ordinal: usize,
-    kind: &'static str,
+    kind: HighTrafficOperationKind,
     arrival_pacing_lateness_ms: Option<f64>,
 ) -> anyhow::Result<HighTrafficOperationResult> {
     let probe = Arc::new(RuntimePerfPhaseProbe::default());
     session.set_turn_phase_probe(probe.clone()).await;
     let operation_started = Instant::now();
     let mut durable_queue_depth = 0;
-    let turn_usage = if kind == "queued" {
+    let turn_usage = if kind == HighTrafficOperationKind::Queued {
         session
             .enqueue(TurnInput::text(format!(
-                "load-kind:queued operation:{ordinal}"
+                "load-kind:{kind} operation:{ordinal}"
             )))
             .id(format!("runtime-perf-load-{ordinal}"))
             .send()
@@ -542,7 +542,7 @@ async fn run_high_traffic_operation(
     } else {
         run_high_traffic_direct_turn(session, ordinal, kind).await?
     };
-    if kind == "trigger" {
+    if kind == HighTrafficOperationKind::Trigger {
         let source_key = lash_core::facade_support::empty_trigger_source_key(
             crate::runtime_perf::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
         )?;
@@ -616,7 +616,7 @@ async fn run_high_traffic_operation(
 async fn run_high_traffic_direct_turn(
     session: &lash::LashSession,
     ordinal: usize,
-    kind: &str,
+    kind: HighTrafficOperationKind,
 ) -> anyhow::Result<TokenUsage> {
     let controller = lash::runtime::NativeRuntimeEffectController::default()
         .allow_process_lifetime_completion_keys();
@@ -782,7 +782,7 @@ mod high_traffic_tests {
             (0..6)
                 .map(|ordinal| config.operation_kind(ordinal))
                 .collect::<Vec<_>>(),
-            vec!["plain", "tool", "queued", "child", "wake", "trigger"]
+            HighTrafficOperationKind::ALL
         );
     }
 

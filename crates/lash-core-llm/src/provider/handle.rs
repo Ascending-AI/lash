@@ -4,7 +4,7 @@ use futures_util::FutureExt as _;
 fn replay_origin_conflict_error(conflict: ProviderReplayOriginConflict) -> LlmTransportError {
     LlmTransportError::new(conflict.to_string())
         .with_kind(ProviderFailureKind::Validation)
-        .with_code("provider_replay_origin_conflict")
+        .with_adapter_code(TurnFailureCode::ProviderReplayOriginConflict)
         .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
@@ -17,7 +17,9 @@ fn replay_origin_conflict_with_provider_error(
         provider_error.message
     );
     provider_error.kind = ProviderFailureKind::Validation;
-    provider_error.code = Some("provider_replay_origin_conflict".to_string());
+    provider_error.code = Some(FailureCode::Adapter(
+        TurnFailureCode::ProviderReplayOriginConflict,
+    ));
     provider_error.retry_verdict = TransportRetryVerdict::Forbidden;
     provider_error
 }
@@ -305,7 +307,7 @@ impl ProviderHandle {
         if let Err(error) = serving_route.validate_endpoint() {
             let error = LlmTransportError::new(error.to_string())
                 .with_kind(ProviderFailureKind::Validation)
-                .with_code("invalid_provider_endpoint")
+                .with_adapter_code(TurnFailureCode::InvalidProviderEndpoint)
                 .with_retry_verdict(TransportRetryVerdict::Forbidden);
             return Err(ProviderCompletionError {
                 call_record: Box::new(synthetic_terminal_call_record(
@@ -346,7 +348,7 @@ impl ProviderHandle {
                     (
                         Err(LlmTransportError::new(message)
                             .with_kind(ProviderFailureKind::Unknown)
-                            .with_code("provider_panicked")
+                            .with_adapter_code(TurnFailureCode::ProviderPanicked)
                             .with_retry_verdict(TransportRetryVerdict::NotRetryable)),
                         Some(payload),
                     )
@@ -441,7 +443,7 @@ impl ProviderHandle {
                             target: "lash_core::provider::reliability",
                             provider = self.kind(),
                             failure_kind = failure.kind.code(),
-                            http_status = ?failure.status,
+                            http_status = ?failure.http_status,
                             retry_after_header_present,
                             retry_after_parsed_ms = ?failure
                                 .retry_after()
@@ -625,7 +627,7 @@ fn provider_close_panicked(
     let message = crate::panic_containment::payload_message(payload.as_ref());
     let failure = Err(LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Unknown)
-        .with_code("provider_panicked")
+        .with_adapter_code(TurnFailureCode::ProviderPanicked)
         .with_retry_verdict(TransportRetryVerdict::NotRetryable));
     crate::panic_containment::enforce_loudness(payload);
     failure
@@ -901,7 +903,7 @@ pub(super) fn failure_protocol_position(failure: &LlmTransportError) -> Protocol
             }
         })
         .unwrap_or_else(|| {
-            if failure.status.is_some() {
+            if failure.http_status.is_some() {
                 ProtocolPosition::ResponseObserved
             } else {
                 ProtocolPosition::NoResponse
@@ -990,32 +992,32 @@ fn unsafe_retry_refusal(
     let original_message = std::mem::take(&mut failure.message);
     let (code, message) = match position {
         ProtocolPosition::OutputStarted => (
-            "unsafe_retry_after_output_started",
+            TurnFailureCode::UnsafeRetryAfterOutputStarted,
             format!(
                 "provider output was already paid for and cannot be safely regenerated without an idempotency or resume guarantee: {original_message}"
             ),
         ),
         ProtocolPosition::ResponseObserved => (
-            "unsafe_retry_after_response_observed",
+            TurnFailureCode::UnsafeRetryAfterResponseObserved,
             format!(
                 "the provider response is not in a charge-safe retry class and cannot be safely regenerated: {original_message}"
             ),
         ),
         ProtocolPosition::NoResponse => (
-            "unsafe_retry_without_transport_classification",
+            TurnFailureCode::UnsafeRetryWithoutTransportClassification,
             format!(
                 "the provider failure is not in a charge-safe retry class and cannot be safely regenerated: {original_message}"
             ),
         ),
         ProtocolPosition::TerminalObserved => (
-            "unsafe_retry_after_terminal_observed",
+            TurnFailureCode::UnsafeRetryAfterTerminalObserved,
             format!(
                 "the provider attempt already reached a terminal response and cannot be safely regenerated: {original_message}"
             ),
         ),
     };
     failure.message = message;
-    failure.code = Some(code.to_string());
+    failure.code = Some(FailureCode::Refusal(code));
     failure.retry_verdict = TransportRetryVerdict::Forbidden;
     failure
 }
@@ -1057,7 +1059,7 @@ fn charge_safety_refusal(
     let code = charge_safety_denial_reason(reason);
     failure.message =
         format!("host charge-safety policy denied the retry ({code}): {original_message}");
-    failure.code = Some(code.to_string());
+    failure.code = Some(FailureCode::Refusal(TurnFailureCode::from_wire(code)));
     failure.retry_verdict = TransportRetryVerdict::Forbidden;
     failure
 }
@@ -1131,8 +1133,19 @@ fn failure_attempt_record(
         retry_decision,
         error: Some(NormalizedError {
             class: failure.kind.code().to_string(),
-            provider_code: failure.code.clone(),
-            http_status: failure.status,
+            provider_code: match &failure.code {
+                Some(FailureCode::Provider(code)) => Some(code.clone()),
+                _ => None,
+            },
+            adapter_code: match &failure.code {
+                Some(FailureCode::Adapter(code)) => Some(code.clone()),
+                _ => None,
+            },
+            refusal_code: match &failure.code {
+                Some(FailureCode::Refusal(code)) => Some(code.clone()),
+                _ => None,
+            },
+            http_status: failure.http_status,
             provider_request_id,
             retry_after: failure.retry_after(),
             diagnostic: bounded_redacted_diagnostic(&failure.message),

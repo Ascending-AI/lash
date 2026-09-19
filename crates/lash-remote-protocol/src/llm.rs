@@ -355,6 +355,10 @@ pub struct RemoteNormalizedError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_code: Option<lash_sansio::TurnFailureCode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_code: Option<lash_sansio::TurnFailureCode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_status: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_request_id: Option<String>,

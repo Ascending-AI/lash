@@ -276,7 +276,7 @@ impl GoogleOAuthProvider {
                             }),
                         ));
                     }
-                    Err(error) if error.status == Some(401) => return Err(error),
+                    Err(error) if error.http_status == Some(401) => return Err(error),
                     Err(_) => {
                         parts.push(((*source).clone(), Self::inline_attachment_part(req, source)))
                     }

@@ -1,10 +1,9 @@
-use crate::SessionId;
 use std::sync::Arc;
 
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
     TraceRecord, TraceRetryAttempt, TraceRetryAttemptOutcome, TraceSink, TraceTokenUsage,
-    TraceToolSpec, sha256_hex,
+    TraceToolSpec, llm_node_id, session_node_id, sha256_hex, tool_node_id, turn_node_id,
 };
 
 use crate::llm::types::{
@@ -286,29 +285,6 @@ fn set_span(context: &mut TraceContext, self_id: Option<String>, parent_id: Opti
     {
         context.parent_graph_node_id = Some(parent_id);
     }
-}
-
-fn session_node_id(session_id: &SessionId) -> String {
-    format!("session:{session_id}")
-}
-
-fn turn_node_id(context: &TraceContext) -> Option<String> {
-    let session_id = context.session_id.as_deref()?;
-    if let Some(turn_id) = context.turn_id.as_deref() {
-        Some(format!("turn:{session_id}:{turn_id}"))
-    } else {
-        context
-            .turn_index
-            .map(|turn_index| format!("turn:{session_id}:idx{turn_index}"))
-    }
-}
-
-fn llm_node_id(llm_call_id: &str) -> String {
-    format!("llm:{llm_call_id}")
-}
-
-fn tool_node_id(call_id: &str) -> String {
-    format!("tool:{call_id}")
 }
 
 /// Map a `caused_by` reference onto the node id its target span carries, so a
@@ -796,7 +772,7 @@ mod span_identity_tests {
         // A subagent caused_by this tool call must resolve to the same node id.
         assert_eq!(
             causal_node_id(&crate::CausalRef::ToolCall {
-                session_id: SessionId::from("sess"),
+                session_id: crate::SessionId::from("sess"),
                 call_id: "call_abc".to_string(),
             }),
             "tool:call_abc"
@@ -992,6 +968,8 @@ mod span_identity_tests {
                     error: Some(crate::NormalizedError {
                         class: "rate_limited".to_string(),
                         provider_code: Some("rate_limit_exceeded".to_string()),
+                        adapter_code: None,
+                        refusal_code: None,
                         http_status: Some(429),
                         provider_request_id: None,
                         retry_after: Some(std::time::Duration::from_millis(250)),
@@ -1028,7 +1006,9 @@ mod span_identity_tests {
             retryable: true,
             kind: crate::ProviderFailureKind::Http,
             raw: None,
-            code: Some("rate_limit_exceeded".to_string()),
+            code: Some(crate::FailureCode::Provider(
+                "rate_limit_exceeded".to_string(),
+            )),
             terminal_reason: crate::LlmTerminalReason::ProviderError,
             request_body: None,
             partial_response: None,

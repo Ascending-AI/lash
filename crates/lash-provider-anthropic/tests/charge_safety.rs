@@ -107,8 +107,8 @@ fn output_started_refusal(body: &'static str, tokens_at_stake: u64) -> ProviderC
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(
-        failure.error.code.as_deref(),
-        Some("unsafe_retry_after_output_started")
+        failure.error.code.as_ref().map(|code| code.to_string()),
+        Some("refusal:unsafe_retry_after_output_started".to_string())
     );
     let attempt = &failure.call_record.attempts[0];
     assert_eq!(attempt.protocol_position, ProtocolPosition::OutputStarted);

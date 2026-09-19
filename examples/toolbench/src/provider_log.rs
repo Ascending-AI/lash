@@ -259,7 +259,7 @@ pub(crate) fn error_object(error: &LlmTransportError, secret: &str) -> Value {
     });
     redact(
         json!({
-            "kind":error.kind, "status":error.status, "message":error.message,
+            "kind":error.kind, "status":error.http_status, "message":error.message,
             "body_excerpt":raw.map(|s| s.chars().take(2000).collect::<String>()), "raw":raw,
             "provider_request_id":header("x-request-id").or_else(|| header("request-id")),
             "provider_response_id":response_id,

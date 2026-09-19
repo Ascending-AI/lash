@@ -88,9 +88,92 @@ impl ParameterDoc {
         out
     }
 
-    pub(crate) fn into_value(self) -> serde_json::Value {
+    fn from_field_schema(path: String, schema: &serde_json::Value, required: bool) -> Self {
+        let (type_label, nullable) = schema_type_label_and_nullability(schema);
+        Self {
+            name: path,
+            type_label,
+            required,
+            nullable,
+            description: schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            default_value: None,
+            enum_values: schema
+                .get("enum")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|value| !value.is_null())
+                .collect(),
+            minimum: schema
+                .get("minimum")
+                .or_else(|| schema.get("exclusiveMinimum"))
+                .cloned(),
+            maximum: schema
+                .get("maximum")
+                .or_else(|| schema.get("exclusiveMaximum"))
+                .cloned(),
+            min_length: schema.get("minLength").and_then(serde_json::Value::as_u64),
+            max_length: schema.get("maxLength").and_then(serde_json::Value::as_u64),
+            min_items: schema.get("minItems").and_then(serde_json::Value::as_u64),
+            max_items: schema.get("maxItems").and_then(serde_json::Value::as_u64),
+            item_type: schema
+                .get("items")
+                .map(schema_type_label)
+                .filter(|value| value != "any"),
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.type_label = merge_type_labels(&self.type_label, &other.type_label);
+        self.required |= other.required;
+        self.nullable |= other.nullable || type_label_is_nullable(&other.type_label);
+        if self.nullable && !type_label_is_nullable(&self.type_label) {
+            self.type_label = merge_type_labels(&self.type_label, "null");
+        }
+        if self
+            .description
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            self.description = other.description;
+        }
+        for value in other.enum_values {
+            if !self.enum_values.iter().any(|existing| existing == &value) {
+                self.enum_values.push(value);
+            }
+        }
+        if self.minimum.is_none() {
+            self.minimum = other.minimum;
+        }
+        if self.maximum.is_none() {
+            self.maximum = other.maximum;
+        }
+        if self.min_length.is_none() {
+            self.min_length = other.min_length;
+        }
+        if self.max_length.is_none() {
+            self.max_length = other.max_length;
+        }
+        if self.min_items.is_none() {
+            self.min_items = other.min_items;
+        }
+        if self.max_items.is_none() {
+            self.max_items = other.max_items;
+        }
+        if self.item_type.is_none() {
+            self.item_type = other.item_type;
+        }
+    }
+
+    /// Emit the doc as a `serde_json::Value` keyed by `name_key` (`"name"` for
+    /// parameters, `"path"` for return fields).
+    fn into_value_with_key(self, name_key: &str) -> serde_json::Value {
         let mut out = serde_json::Map::new();
-        out.insert("name".to_string(), serde_json::json!(self.name));
+        out.insert(name_key.to_string(), serde_json::json!(self.name));
         out.insert("type".to_string(), serde_json::json!(self.type_label));
         out.insert("required".to_string(), serde_json::json!(self.required));
         if self.nullable {
@@ -126,110 +209,22 @@ impl ParameterDoc {
         if let Some(value) = self.item_type {
             out.insert("items".to_string(), serde_json::json!(value));
         }
-        out.insert(
-            "signature".to_string(),
-            serde_json::json!(parameter_signature_from_value(&out)),
-        );
-        serde_json::Value::Object(out)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct FieldDoc {
-    path: String,
-    type_label: String,
-    required: bool,
-    nullable: bool,
-    description: Option<String>,
-    enum_values: Vec<serde_json::Value>,
-    minimum: Option<serde_json::Value>,
-    maximum: Option<serde_json::Value>,
-    min_length: Option<u64>,
-    max_length: Option<u64>,
-    min_items: Option<u64>,
-    max_items: Option<u64>,
-    item_type: Option<String>,
-}
-
-impl FieldDoc {
-    fn from_schema(path: String, schema: &serde_json::Value, required: bool) -> Self {
-        let (type_label, nullable) = schema_type_label_and_nullability(schema);
-        Self {
-            path,
-            type_label,
-            required,
-            nullable,
-            description: schema
-                .get("description")
+        let signature = doc_signature_from_value(
+            out.get(name_key)
                 .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-            enum_values: schema
-                .get("enum")
-                .and_then(serde_json::Value::as_array)
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|value| !value.is_null())
-                .collect(),
-            minimum: schema
-                .get("minimum")
-                .or_else(|| schema.get("exclusiveMinimum"))
-                .cloned(),
-            maximum: schema
-                .get("maximum")
-                .or_else(|| schema.get("exclusiveMaximum"))
-                .cloned(),
-            min_length: schema.get("minLength").and_then(serde_json::Value::as_u64),
-            max_length: schema.get("maxLength").and_then(serde_json::Value::as_u64),
-            min_items: schema.get("minItems").and_then(serde_json::Value::as_u64),
-            max_items: schema.get("maxItems").and_then(serde_json::Value::as_u64),
-            item_type: schema
-                .get("items")
-                .map(schema_type_label)
-                .filter(|value| value != "any"),
-        }
+                .unwrap_or_default(),
+            &out,
+        );
+        out.insert("signature".to_string(), serde_json::json!(signature));
+        serde_json::Value::Object(out)
     }
 
-    fn into_value(self) -> serde_json::Value {
-        let mut out = serde_json::Map::new();
-        out.insert("path".to_string(), serde_json::json!(self.path));
-        out.insert("type".to_string(), serde_json::json!(self.type_label));
-        out.insert("required".to_string(), serde_json::json!(self.required));
-        if self.nullable {
-            out.insert("nullable".to_string(), serde_json::json!(true));
-        }
-        if let Some(description) = self.description.filter(|value| !value.trim().is_empty()) {
-            out.insert("description".to_string(), serde_json::json!(description));
-        }
-        if !self.enum_values.is_empty() {
-            out.insert("enum".to_string(), serde_json::json!(self.enum_values));
-        }
-        if let Some(value) = self.minimum {
-            out.insert("minimum".to_string(), value);
-        }
-        if let Some(value) = self.maximum {
-            out.insert("maximum".to_string(), value);
-        }
-        if let Some(value) = self.min_length {
-            out.insert("min_length".to_string(), serde_json::json!(value));
-        }
-        if let Some(value) = self.max_length {
-            out.insert("max_length".to_string(), serde_json::json!(value));
-        }
-        if let Some(value) = self.min_items {
-            out.insert("min_items".to_string(), serde_json::json!(value));
-        }
-        if let Some(value) = self.max_items {
-            out.insert("max_items".to_string(), serde_json::json!(value));
-        }
-        if let Some(value) = self.item_type {
-            out.insert("items".to_string(), serde_json::json!(value));
-        }
-        out.insert(
-            "signature".to_string(),
-            serde_json::json!(field_signature_from_value(&out)),
-        );
-        serde_json::Value::Object(out)
+    pub(crate) fn into_value(self) -> serde_json::Value {
+        self.into_value_with_key("name")
+    }
+
+    fn into_field_value(self) -> serde_json::Value {
+        self.into_value_with_key("path")
     }
 }
 
@@ -280,7 +275,7 @@ pub(crate) fn return_field_metadata(schema: &serde_json::Value) -> Vec<serde_jso
     collect_return_fields("", &schema, true, &mut fields);
     merge_return_fields(fields)
         .into_iter()
-        .map(FieldDoc::into_value)
+        .map(ParameterDoc::into_field_value)
         .collect()
 }
 
@@ -394,7 +389,7 @@ fn collect_return_fields(
     path: &str,
     schema: &serde_json::Value,
     required: bool,
-    fields: &mut Vec<FieldDoc>,
+    fields: &mut Vec<ParameterDoc>,
 ) {
     if let Some(any_of) = schema
         .get("anyOf")
@@ -402,7 +397,11 @@ fn collect_return_fields(
         .and_then(serde_json::Value::as_array)
     {
         if should_emit_return_field(path, schema) {
-            fields.push(FieldDoc::from_schema(path.to_string(), schema, required));
+            fields.push(ParameterDoc::from_field_schema(
+                path.to_string(),
+                schema,
+                required,
+            ));
         }
         for subschema in any_of {
             collect_return_fields(path, subschema, required, fields);
@@ -435,7 +434,11 @@ fn collect_return_fields(
     match schema_type.as_deref() {
         Some("object") => {
             if should_emit_return_field(path, schema) {
-                fields.push(FieldDoc::from_schema(path.to_string(), schema, required));
+                fields.push(ParameterDoc::from_field_schema(
+                    path.to_string(),
+                    schema,
+                    required,
+                ));
             }
             let required_properties = schema
                 .get("required")
@@ -460,7 +463,11 @@ fn collect_return_fields(
         }
         Some("array") => {
             if should_emit_return_field(path, schema) {
-                fields.push(FieldDoc::from_schema(path.to_string(), schema, required));
+                fields.push(ParameterDoc::from_field_schema(
+                    path.to_string(),
+                    schema,
+                    required,
+                ));
             }
             if let Some(items) = schema.get("items") {
                 collect_return_fields(&format!("{path}[]"), items, true, fields);
@@ -468,7 +475,11 @@ fn collect_return_fields(
         }
         _ => {
             if !path.is_empty() {
-                fields.push(FieldDoc::from_schema(path.to_string(), schema, required));
+                fields.push(ParameterDoc::from_field_schema(
+                    path.to_string(),
+                    schema,
+                    required,
+                ));
             }
         }
     }
@@ -497,12 +508,12 @@ fn join_compact_path(parent: &str, child: &str) -> String {
     }
 }
 
-fn merge_return_fields(fields: Vec<FieldDoc>) -> Vec<FieldDoc> {
-    let mut merged = Vec::<FieldDoc>::new();
+fn merge_return_fields(fields: Vec<ParameterDoc>) -> Vec<ParameterDoc> {
+    let mut merged = Vec::<ParameterDoc>::new();
     for field in fields {
         if let Some(existing) = merged
             .iter_mut()
-            .find(|existing| existing.path == field.path)
+            .find(|existing| existing.name == field.name)
         {
             existing.merge(field);
         } else {
@@ -510,50 +521,6 @@ fn merge_return_fields(fields: Vec<FieldDoc>) -> Vec<FieldDoc> {
         }
     }
     merged
-}
-
-impl FieldDoc {
-    fn merge(&mut self, other: FieldDoc) {
-        self.type_label = merge_type_labels(&self.type_label, &other.type_label);
-        self.required |= other.required;
-        self.nullable |= other.nullable || type_label_is_nullable(&other.type_label);
-        if self.nullable && !type_label_is_nullable(&self.type_label) {
-            self.type_label = merge_type_labels(&self.type_label, "null");
-        }
-        if self
-            .description
-            .as_deref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
-            self.description = other.description;
-        }
-        for value in other.enum_values {
-            if !self.enum_values.iter().any(|existing| existing == &value) {
-                self.enum_values.push(value);
-            }
-        }
-        if self.minimum.is_none() {
-            self.minimum = other.minimum;
-        }
-        if self.maximum.is_none() {
-            self.maximum = other.maximum;
-        }
-        if self.min_length.is_none() {
-            self.min_length = other.min_length;
-        }
-        if self.max_length.is_none() {
-            self.max_length = other.max_length;
-        }
-        if self.min_items.is_none() {
-            self.min_items = other.min_items;
-        }
-        if self.max_items.is_none() {
-            self.max_items = other.max_items;
-        }
-        if self.item_type.is_none() {
-            self.item_type = other.item_type;
-        }
-    }
 }
 
 fn merge_type_labels(left: &str, right: &str) -> String {
@@ -636,22 +603,6 @@ pub(crate) fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
         Some(description) => format!("- `{signature}` — {description}"),
         None => format!("- `{signature}`"),
     })
-}
-
-fn parameter_signature_from_value(map: &serde_json::Map<String, serde_json::Value>) -> String {
-    let name = map
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    doc_signature_from_value(name, map)
-}
-
-fn field_signature_from_value(map: &serde_json::Map<String, serde_json::Value>) -> String {
-    let path = map
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    doc_signature_from_value(path, map)
 }
 
 fn doc_signature_from_value(

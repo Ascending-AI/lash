@@ -194,34 +194,7 @@ impl Default for MockOptions {
 }
 
 fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
-    McpServerConfig::Stdio {
-        command: "python3".to_string(),
-        args: vec!["-u".to_string(), "-c".to_string(), MOCK_SERVER.to_string()],
-        env: BTreeMap::from([
-            ("BEHAVIOR".to_string(), options.behavior.to_string()),
-            ("PROTOCOL".to_string(), options.protocol.to_string()),
-            (
-                "LOG_PATH".to_string(),
-                root.join("received.jsonl").display().to_string(),
-            ),
-            (
-                "STARTS_PATH".to_string(),
-                root.join("starts").display().to_string(),
-            ),
-            (
-                "PID_PATH".to_string(),
-                root.join("pid").display().to_string(),
-            ),
-            (
-                "EOF_PATH".to_string(),
-                root.join("eof").display().to_string(),
-            ),
-            (
-                "CLOSE_PATH".to_string(),
-                root.join("close").display().to_string(),
-            ),
-        ]),
-        cwd: None,
+    McpServerConfig {
         startup_timeout_ms: options.startup_timeout_ms,
         call_policy: McpCallPolicy {
             call_timeout_ms: options.call_timeout_ms,
@@ -239,6 +212,35 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
         },
         shutdown_policy: Default::default(),
         binary_content_attachments: false,
+        transport: McpTransport::Stdio(McpStdioTransport {
+            command: "python3".to_string(),
+            args: vec!["-u".to_string(), "-c".to_string(), MOCK_SERVER.to_string()],
+            env: BTreeMap::from([
+                ("BEHAVIOR".to_string(), options.behavior.to_string()),
+                ("PROTOCOL".to_string(), options.protocol.to_string()),
+                (
+                    "LOG_PATH".to_string(),
+                    root.join("received.jsonl").display().to_string(),
+                ),
+                (
+                    "STARTS_PATH".to_string(),
+                    root.join("starts").display().to_string(),
+                ),
+                (
+                    "PID_PATH".to_string(),
+                    root.join("pid").display().to_string(),
+                ),
+                (
+                    "EOF_PATH".to_string(),
+                    root.join("eof").display().to_string(),
+                ),
+                (
+                    "CLOSE_PATH".to_string(),
+                    root.join("close").display().to_string(),
+                ),
+            ]),
+            cwd: None,
+        }),
     }
 }
 

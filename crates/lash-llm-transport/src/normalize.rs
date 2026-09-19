@@ -263,7 +263,7 @@ pub fn http_error_envelope(
         .map_or(message.clone(), |detail| format!("{message}: {detail}"));
     let mut err = LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Http)
-        .with_status(status)
+        .with_http_status(status)
         .with_headers(headers)
         .with_raw(raw_body.clone());
     if matches!(
@@ -467,8 +467,8 @@ mod tests {
             Some(r#"{"model":"m"}"#.to_string()),
         );
         assert_eq!(err.kind, ProviderFailureKind::Http);
-        assert_eq!(err.status, Some(429));
-        assert_eq!(err.code.as_deref(), Some("429"));
+        assert_eq!(err.http_status, Some(429));
+        assert_eq!(err.code, None);
         assert_eq!(
             err.raw.as_deref().map(String::as_str),
             Some(r#"{"error":"rate limited"}"#)

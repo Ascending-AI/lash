@@ -125,7 +125,7 @@ async fn request_shape_errors_are_not_retried_and_failed_rows_keep_rich_errors()
     for status in [400, 422] {
         let telemetry = crate::telemetry::Telemetry::default();
         let error = LlmTransportError::new("bad request test-secret")
-            .with_status(status)
+            .with_http_status(status)
             .with_raw("provider body verbatim")
             .with_headers([
                 ("x-request-id", "req-17"),
@@ -163,7 +163,7 @@ async fn request_shape_errors_are_not_retried_and_failed_rows_keep_rich_errors()
 async fn retry_after_is_honored_without_extra_courtesy_attempts() {
     let capture = Capture::default();
     let error = LlmTransportError::new("throttled")
-        .with_status(429)
+        .with_http_status(429)
         .with_headers([("retry-after", "1")]);
     let failure = handle(&capture, 1, vec![Err(error.clone()), Err(error)])
         .complete(request())

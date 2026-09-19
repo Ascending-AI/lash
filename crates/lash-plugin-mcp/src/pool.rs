@@ -45,6 +45,8 @@ use lash_tool_support::ToolDefinitionBindingExt;
 #[cfg(test)]
 use crate::config::McpCallPolicy;
 use crate::config::{McpServerConfig, McpShutdownPolicy, TimeoutDisconnectPolicy};
+#[cfg(test)]
+use crate::config::{McpStdioTransport, McpTransport};
 use crate::error::McpError;
 use crate::host::{McpHostServices, McpToolListChangedHandler};
 use crate::naming;

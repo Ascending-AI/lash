@@ -6,7 +6,7 @@ use super::*;
 /// host-reporting effect for tool calls refused before dispatch. Version 3
 /// removes the terminal-turn scheduling state; older checkpoints are not
 /// compatible because replaying them could re-enter the deleted extra turn.
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 3;
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 4;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1

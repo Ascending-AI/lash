@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime_perf::measurement::HighTrafficOperationKind;
 
 pub(crate) fn benchmark_stream_profile(scenario: RuntimePerfScenario) -> BenchmarkStreamProfile {
     benchmark_stream_profile_for_request(scenario, &empty_request())
@@ -574,13 +575,13 @@ finish(result);"#,
 )]
 pub(super) fn high_traffic_stream_profile(request: &LlmRequest) -> BenchmarkStreamProfile {
     let kind = high_traffic_operation_kind(request);
-    if kind == Some("tool") {
+    if kind == Some(HighTrafficOperationKind::Tool) {
         return text_profile(typescript_block(
             r#"const result = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 });
 finish(result.value);"#,
         ));
     }
-    if kind == Some("child") {
+    if kind == Some(HighTrafficOperationKind::Child) {
         return text_profile(typescript_block(
             r#"const loadChild = async () => {
   return await agents.spawn({
@@ -595,7 +596,7 @@ const result = await handle;
 finish("runtime perf benchmark ok");"#,
         ));
     }
-    if kind == Some("wake") {
+    if kind == Some(HighTrafficOperationKind::Wake) {
         return text_profile(typescript_block(
             r#"const loadWake = async () => {
   return await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
@@ -605,7 +606,7 @@ const result = await handle;
 finish(result.value);"#,
         ));
     }
-    if kind == Some("trigger") {
+    if kind == Some(HighTrafficOperationKind::Trigger) {
         let trigger_name = high_traffic_trigger_name(request);
         let trigger_name = serde_json::to_string(&trigger_name)
             .expect("high-traffic trigger name always serializes");
@@ -628,13 +629,13 @@ finish("runtime perf benchmark ok");"#,
     text_profile(typescript_block(r#"finish("runtime perf benchmark ok");"#))
 }
 
-pub(super) fn high_traffic_operation_kind(request: &LlmRequest) -> Option<&str> {
-    const KINDS: [&str; 6] = ["plain", "tool", "queued", "child", "wake", "trigger"];
+pub(super) fn high_traffic_operation_kind(
+    request: &LlmRequest,
+) -> Option<HighTrafficOperationKind> {
     let text = request_text(request);
-    let kind = text
-        .rsplit_once("load-kind:")
-        .and_then(|(_, suffix)| suffix.split_whitespace().next())?;
-    KINDS.into_iter().find(|candidate| *candidate == kind)
+    text.rsplit_once("load-kind:")
+        .and_then(|(_, suffix)| suffix.split_whitespace().next())
+        .and_then(|kind| kind.parse().ok())
 }
 
 pub(super) fn high_traffic_trigger_name(request: &LlmRequest) -> String {

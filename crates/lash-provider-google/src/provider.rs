@@ -12,7 +12,7 @@ struct GoogleCredentialCallContext<'a> {
 
 impl GoogleOAuthProvider {
     fn should_retry_inline(err: &LlmTransportError) -> bool {
-        matches!(err.code.as_deref(), Some("400" | "404"))
+        matches!(err.http_status, Some(400 | 404))
             || err.raw.as_deref().is_some_and(|raw| {
                 raw.contains("fileData") || raw.contains("fileUri") || raw.contains("file_uri")
             })
@@ -165,7 +165,7 @@ impl GoogleOAuthProvider {
             .map_err(|error| {
                 LlmTransportError::new(format!("Google response {error}"))
                     .with_kind(ProviderFailureKind::Stream)
-                    .with_code(error.code())
+                    .with_provider_code(error.code())
             })?;
             return Ok(LlmResponse {
                 parts,
@@ -317,7 +317,7 @@ impl GoogleOAuthProvider {
             return Err(
                 LlmTransportError::new("Google stream ended without finishReason")
                     .with_kind(ProviderFailureKind::Stream)
-                    .with_code("stream_ended_before_finish_reason")
+                    .with_adapter_code(TurnFailureCode::StreamEndedBeforeFinishReason)
                     .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                     .with_partial_response(partial_response()),
             );
@@ -584,7 +584,7 @@ impl Provider for GoogleOAuthProvider {
             .map_err(|error| {
                 LlmTransportError::new(error.to_string())
                     .with_kind(ProviderFailureKind::Validation)
-                    .with_code("invalid_provider_endpoint")
+                    .with_adapter_code(TurnFailureCode::InvalidProviderEndpoint)
             })?;
         let req = self.reasoning_retention_safe_request(&req)?.into_owned();
         Self::validate_attachments(&req)?;
@@ -602,7 +602,7 @@ impl Provider for GoogleOAuthProvider {
                         .await
                     {
                         Ok(response) => Ok(response),
-                        Err(error) if error.status == Some(401) => {
+                        Err(error) if error.http_status == Some(401) => {
                             Err(CredentialCallError::PreOutputAuth(error))
                         }
                         Err(error) => Err(CredentialCallError::Failed(error)),
@@ -813,8 +813,8 @@ mod error_detail_tests {
 
         assert_eq!(error.kind, ProviderFailureKind::Unsupported);
         assert_eq!(
-            error.code.as_deref(),
-            Some("unsupported_reasoning_retention")
+            error.code.as_ref().map(|code| code.to_string()),
+            Some("adapter:unsupported_reasoning_retention".to_string())
         );
         assert_eq!(
             transport.calls.load(Ordering::SeqCst),

@@ -21,7 +21,10 @@ async fn typed_context_length_error_is_authoritative_at_provider_handle() {
     )
     .await;
 
-    assert_eq!(failure.code.as_deref(), Some("context_length_exceeded"));
+    assert_eq!(
+        failure.code.as_ref().map(|code| code.to_string()),
+        Some("provider:context_length_exceeded".to_string())
+    );
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ContextOverflow);
     assert!(!failure.is_retryable());
@@ -34,7 +37,10 @@ async fn typed_validation_error_is_not_overridden_by_user_text_echo() {
     )
     .await;
 
-    assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
+    assert_eq!(
+        failure.code.as_ref().map(|code| code.to_string()),
+        Some("provider:invalid_request_error".to_string())
+    );
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
     assert!(!failure.is_retryable());
@@ -47,7 +53,10 @@ async fn typed_hard_quota_code_is_authoritative_at_provider_handle() {
     )
     .await;
 
-    assert_eq!(failure.code.as_deref(), Some("insufficient_quota"));
+    assert_eq!(
+        failure.code.as_ref().map(|code| code.to_string()),
+        Some("provider:insufficient_quota".to_string())
+    );
     assert_eq!(failure.kind, ProviderFailureKind::Quota);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
     assert!(!failure.is_retryable());
@@ -60,7 +69,10 @@ async fn typed_content_filter_code_is_authoritative_at_provider_handle() {
     )
     .await;
 
-    assert_eq!(failure.code.as_deref(), Some("content_filter"));
+    assert_eq!(
+        failure.code.as_ref().map(|code| code.to_string()),
+        Some("provider:content_filter".to_string())
+    );
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ContentFilter);
     assert!(!failure.is_retryable());
@@ -73,7 +85,10 @@ async fn typed_unsupported_model_code_is_authoritative_at_provider_handle() {
     )
     .await;
 
-    assert_eq!(failure.code.as_deref(), Some("model_not_found"));
+    assert_eq!(
+        failure.code.as_ref().map(|code| code.to_string()),
+        Some("provider:model_not_found".to_string())
+    );
     assert_eq!(failure.kind, ProviderFailureKind::Unsupported);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
     assert!(!failure.is_retryable());

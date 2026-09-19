@@ -1345,7 +1345,9 @@ fn context_overflow_llm_error_stops_as_its_own_outcome() {
             retryable: false,
             kind: crate::llm::types::ProviderFailureKind::Validation,
             raw: None,
-            code: Some("context_length_exceeded".to_string()),
+            code: Some(crate::session_model::FailureCode::Provider(
+                "context_length_exceeded".to_string(),
+            )),
             terminal_reason: LlmTerminalReason::ContextOverflow,
             request_body: None,
             partial_response: None,

@@ -68,7 +68,9 @@ pub(crate) async fn build_search_mcp(
     Ok(Arc::new(
         lash_plugin_mcp::McpPluginFactory::builder(BTreeMap::from([(
             WORKBENCH_SEARCH_MCP_SERVER.to_string(),
-            lash_plugin_mcp::McpServerConfig::streamable_http(url),
+            lash_plugin_mcp::McpServerConfig::streamable_http(
+                lash_plugin_mcp::McpStreamableHttpTransport::new(url),
+            ),
         )]))
         .build()
         .await

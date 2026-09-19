@@ -215,6 +215,39 @@ impl TraceContext {
     }
 }
 
+/// Node id of the session root span in the `graph_node_id` key space.
+///
+/// These `*_node_id` functions are the single definition of that key space:
+/// the runtime stamps them onto [`TraceContext::graph_node_id`] /
+/// [`TraceContext::parent_graph_node_id`], and span exporters key their
+/// `id -> span` maps with the same strings.
+pub fn session_node_id(session_id: &SessionId) -> String {
+    format!("session:{session_id}")
+}
+
+/// Node id of the turn span this context belongs to, or `None` when the
+/// context carries no session or no turn identity at all.
+pub fn turn_node_id(context: &TraceContext) -> Option<String> {
+    let session_id = context.session_id.as_deref()?;
+    if let Some(turn_id) = context.turn_id.as_deref() {
+        Some(format!("turn:{session_id}:{turn_id}"))
+    } else {
+        context
+            .turn_index
+            .map(|turn_index| format!("turn:{session_id}:idx{turn_index}"))
+    }
+}
+
+/// Node id of one LLM-call span.
+pub fn llm_node_id(llm_call_id: &str) -> String {
+    format!("llm:{llm_call_id}")
+}
+
+/// Node id of one tool-call span.
+pub fn tool_node_id(call_id: &str) -> String {
+    format!("tool:{call_id}")
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TraceRecord {
     pub schema_version: u32,

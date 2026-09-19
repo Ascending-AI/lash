@@ -16,7 +16,7 @@ use lash::tools::{
     ToolProvider,
 };
 use lash::{ModelSpec, TurnInput};
-use lash_plugin_mcp::{McpServerConfig, TimeoutDisconnectPolicy};
+use lash_plugin_mcp::{McpServerConfig, McpStdioTransport, McpTransport, TimeoutDisconnectPolicy};
 use serde_json::{Value, json};
 use slack_clone::bot::mcp_admin;
 use slack_clone::bot::runtime::{self, BotRuntime, RuntimeConfig};
@@ -316,14 +316,7 @@ async fn bundled_server_exercises_sampling_both_elicitation_modes_and_roots_thro
 }
 
 fn direct_server_config(api_base_url: &str) -> McpServerConfig {
-    McpServerConfig::Stdio {
-        command: env!("CARGO_BIN_EXE_slack-clone-mcp-server").to_string(),
-        args: Vec::new(),
-        env: BTreeMap::from([
-            (API_BASE_URL_ENV.to_string(), api_base_url.to_string()),
-            (BOT_TOKEN_ENV.to_string(), TEST_TOKEN.to_string()),
-        ]),
-        cwd: None,
+    McpServerConfig {
         startup_timeout_ms: 5_000,
         call_policy: lash_plugin_mcp::McpCallPolicy {
             call_timeout_ms: 5_000,
@@ -331,26 +324,20 @@ fn direct_server_config(api_base_url: &str) -> McpServerConfig {
         },
         shutdown_policy: Default::default(),
         binary_content_attachments: false,
+        transport: McpTransport::Stdio(McpStdioTransport {
+            command: env!("CARGO_BIN_EXE_slack-clone-mcp-server").to_string(),
+            args: Vec::new(),
+            env: BTreeMap::from([
+                (API_BASE_URL_ENV.to_string(), api_base_url.to_string()),
+                (BOT_TOKEN_ENV.to_string(), TEST_TOKEN.to_string()),
+            ]),
+            cwd: None,
+        }),
     }
 }
 
 fn wrapped_server_config(api_base_url: &str, pid_file: &std::path::Path) -> McpServerConfig {
-    McpServerConfig::Stdio {
-        command: "sh".to_string(),
-        args: vec![
-            "-c".to_string(),
-            "printf '%s\\n' \"$$\" > \"$MCP_PID_FILE\"; exec \"$MCP_BINARY\"".to_string(),
-        ],
-        env: BTreeMap::from([
-            (API_BASE_URL_ENV.to_string(), api_base_url.to_string()),
-            (BOT_TOKEN_ENV.to_string(), TEST_TOKEN.to_string()),
-            (
-                "MCP_BINARY".to_string(),
-                env!("CARGO_BIN_EXE_slack-clone-mcp-server").to_string(),
-            ),
-            ("MCP_PID_FILE".to_string(), pid_file.display().to_string()),
-        ]),
-        cwd: None,
+    McpServerConfig {
         startup_timeout_ms: 5_000,
         call_policy: lash_plugin_mcp::McpCallPolicy {
             call_timeout_ms: 5_000,
@@ -358,6 +345,23 @@ fn wrapped_server_config(api_base_url: &str, pid_file: &std::path::Path) -> McpS
         },
         shutdown_policy: Default::default(),
         binary_content_attachments: false,
+        transport: McpTransport::Stdio(McpStdioTransport {
+            command: "sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                "printf '%s\\n' \"$$\" > \"$MCP_PID_FILE\"; exec \"$MCP_BINARY\"".to_string(),
+            ],
+            env: BTreeMap::from([
+                (API_BASE_URL_ENV.to_string(), api_base_url.to_string()),
+                (BOT_TOKEN_ENV.to_string(), TEST_TOKEN.to_string()),
+                (
+                    "MCP_BINARY".to_string(),
+                    env!("CARGO_BIN_EXE_slack-clone-mcp-server").to_string(),
+                ),
+                ("MCP_PID_FILE".to_string(), pid_file.display().to_string()),
+            ]),
+            cwd: None,
+        }),
     }
 }
 
@@ -1110,14 +1114,11 @@ async fn a_host_can_opt_out_of_timeout_disconnects_entirely() {
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
     let mut config = runtime::http_mcp_server_config(&url, "integration-token");
-    // There is no builder for this field yet; the transport variant is public,
+    // There is no builder for this field yet; the call policy is public,
     // so a host that wants the opt-out pokes the flattened call policy.
-    let McpServerConfig::StreamableHttp { call_policy, .. } = &mut config else {
-        unreachable!("streamable_http returns the HTTP transport")
-    };
-    call_policy.timeout_disconnect_policy = TimeoutDisconnectPolicy::Never;
+    config.call_policy.timeout_disconnect_policy = TimeoutDisconnectPolicy::Never;
     assert_eq!(
-        call_policy.timeout_disconnect_policy,
+        config.call_policy.timeout_disconnect_policy,
         TimeoutDisconnectPolicy::Never
     );
     runtime

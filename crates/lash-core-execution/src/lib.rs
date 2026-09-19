@@ -670,7 +670,7 @@ pub type TurnMachine = lash_sansio::TurnMachine<HostTurnProtocol>;
 ///
 /// Protocol-engine implementors construct this configuration at their boundary.
 pub type TurnMachineConfig = lash_sansio::TurnMachineConfig<HostTurnProtocol>;
-pub use lash_sansio::{TurnFailureCode, TurnFailureKind};
+pub use lash_sansio::{FailureCode, TurnFailureCode, TurnFailureKind};
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{

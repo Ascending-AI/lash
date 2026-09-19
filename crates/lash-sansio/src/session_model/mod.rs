@@ -3,7 +3,7 @@ pub mod failure;
 pub mod message;
 pub mod prompt;
 
-pub use failure::{TurnFailureCode, TurnFailureKind};
+pub use failure::{FailureCode, TurnFailureCode, TurnFailureKind};
 pub use message::{
     BaseRenderCache, Message, MessageRole, MessageSequence, Part, PartAttachment, PartKind,
     PruneState, RenderedPrompt, append_rendered_prompt, messages_are_prompt_resume_safe,
