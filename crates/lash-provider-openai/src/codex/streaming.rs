@@ -143,6 +143,10 @@ impl CodexProvider {
         err
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the attempt error carries the transport error plus lease evidence; boxing it would push the cost onto every caller"
+    )]
     async fn complete_websocket(
         &self,
         req: LlmRequest,
@@ -217,6 +221,10 @@ impl CodexProvider {
         }
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the attempt error carries the transport error plus lease evidence; boxing it would push the cost onto every caller"
+    )]
     async fn run_websocket_attempt(
         &self,
         req: &LlmRequest,

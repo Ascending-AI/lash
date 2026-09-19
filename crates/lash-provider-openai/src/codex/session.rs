@@ -333,6 +333,10 @@ impl CodexProvider {
         sessions.fallback_by_scope.remove(&scope_key);
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the attempt error carries the transport error plus lease evidence; boxing it would push the cost onto every caller"
+    )]
     async fn connect_websocket(
         &self,
         req: &LlmRequest,
@@ -428,6 +432,10 @@ impl CodexProvider {
         })
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the attempt error carries the transport error plus lease evidence; boxing it would push the cost onto every caller"
+    )]
     pub(super) async fn acquire_websocket(
         &self,
         req: &LlmRequest,
