@@ -139,7 +139,7 @@ impl CodexProvider {
         );
         err.http_status = Some(status);
         err.code
-            .get_or_insert_with(|| FailureCode::Adapter(TurnFailureCode::BodyReadFailed));
+            .get_or_insert(FailureCode::Adapter(TurnFailureCode::BodyReadFailed));
         err
     }
 

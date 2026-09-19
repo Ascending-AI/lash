@@ -131,11 +131,9 @@ impl TurnFailureEvidence {
                 code: error
                     .code
                     .clone()
-                    .unwrap_or_else(|| {
-                        lash_sansio::session_model::FailureCode::Refusal(
-                            lash_sansio::session_model::TurnFailureCode::ChargeSafetyRetryDenied,
-                        )
-                    })
+                    .unwrap_or(lash_sansio::session_model::FailureCode::Refusal(
+                        lash_sansio::session_model::TurnFailureCode::ChargeSafetyRetryDenied,
+                    ))
                     .to_string(),
                 denial_reason: *reason,
                 protocol_position: attempt.protocol_position,
