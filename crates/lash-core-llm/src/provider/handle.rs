@@ -238,6 +238,10 @@ impl ProviderHandle {
         self.components.provider.requires_streaming()
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
+    )]
     pub async fn complete(
         &mut self,
         mut request: LlmRequest,
@@ -251,6 +255,10 @@ impl ProviderHandle {
     ///
     /// Prefer [`Self::complete`] unless the host has deliberately accepted a
     /// bounded duplicate-billing risk for this call.
+    #[allow(
+        clippy::result_large_err,
+        reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
+    )]
     pub async fn complete_with_charge_safety(
         &mut self,
         mut request: LlmRequest,
@@ -296,6 +304,10 @@ impl ProviderHandle {
         clippy::expect_used,
         reason = "the Backoff verdict selects the delay in the same match arm that schedules the retry, \
                   so it is always Some exactly when this code runs"
+    )]
+    #[allow(
+        clippy::result_large_err,
+        reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
     )]
     pub async fn complete_prepared(
         &mut self,

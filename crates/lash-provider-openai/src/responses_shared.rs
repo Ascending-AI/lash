@@ -1130,7 +1130,7 @@ impl ResponsesStreamState {
             |error| {
                 LlmTransportError::new(format!("Responses stream {error}"))
                     .with_kind(ProviderFailureKind::Stream)
-                    .with_provider_code(error.code())
+                    .with_adapter_code(TurnFailureCode::from_wire(error.code()))
             },
         )
     }

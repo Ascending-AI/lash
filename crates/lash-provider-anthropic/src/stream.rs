@@ -129,7 +129,7 @@ fn merge_execution_evidence(
     ExecutionEvidence::merge_optional(accumulated, Some(next)).map_err(|error| {
         LlmTransportError::new(format!("Anthropic stream {error}"))
             .with_kind(ProviderFailureKind::Stream)
-            .with_provider_code(error.code())
+            .with_adapter_code(TurnFailureCode::from_wire(error.code()))
     })
 }
 

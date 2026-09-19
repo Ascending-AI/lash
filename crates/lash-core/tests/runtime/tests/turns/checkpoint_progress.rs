@@ -642,6 +642,7 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
         stream_events: Vec::new(),
         response: Err(
             lash_core::llm::transport::LlmTransportError::new("bad request")
+                .with_http_status(400)
                 .with_provider_code("400"),
         ),
     }]);
@@ -683,7 +684,9 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
     );
     assert_eq!(
         issue.code,
-        Some(lash_core::TurnFailureCode::Other("400".to_string()))
+        Some(lash_core::TurnFailureCode::Other(
+            "provider:400".to_string()
+        ))
     );
     assert_eq!(turn.llm_calls.len(), 1);
     assert_eq!(turn.llm_calls[0].attempts.len(), 1);

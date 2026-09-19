@@ -165,7 +165,7 @@ impl GoogleOAuthProvider {
             .map_err(|error| {
                 LlmTransportError::new(format!("Google response {error}"))
                     .with_kind(ProviderFailureKind::Stream)
-                    .with_provider_code(error.code())
+                    .with_adapter_code(TurnFailureCode::from_wire(error.code()))
             })?;
             return Ok(LlmResponse {
                 parts,

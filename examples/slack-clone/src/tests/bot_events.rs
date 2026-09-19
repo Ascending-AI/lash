@@ -1424,7 +1424,7 @@ async fn a_provider_rejection_surfaces_as_typed_provider_error() {
         failure,
         ProviderFailure {
             kind: lash::provider::ProviderFailureKind::Validation,
-            code: Some("unsupported_attachment_capability".to_string()),
+            code: Some("provider:unsupported_attachment_capability".to_string()),
             message: "LLM error: cannot materialize attachment MIME `application/x-unknown`; providers accepting this MIME/source: none".to_string(),
             retryable: false,
         }
