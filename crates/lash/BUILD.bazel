@@ -453,6 +453,14 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+genrule(
+    name = "ui__test__cargo_fingerprint",
+    outs = ["ui__test.cargo_fingerprint.json"],
+    cmd = "echo "
+        + "eyJmZWF0dXJlcyI6ICJbXCJkZWZhdWx0XCIsIFwicmxtXCIsIFwidGVzdGluZ1wiXSJ9"
+        + " | base64 -d > $@",
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
