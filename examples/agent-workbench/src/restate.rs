@@ -1312,6 +1312,7 @@ pub(crate) async fn settle_workbench_turn(
         Err(error) => return Err(AppError::runtime(error)),
     };
     let targets = session
+        .durable()
         .pending_turn_inputs()
         .await
         .map_err(AppError::runtime)?
@@ -1324,6 +1325,7 @@ pub(crate) async fn settle_workbench_turn(
         return Ok(());
     }
     let cancellations = session
+        .durable()
         .cancel_pending_turn_inputs(targets)
         .await
         .map_err(AppError::runtime)?;

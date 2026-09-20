@@ -245,6 +245,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
         .await
         .expect("open the vacuum test session");
     let cancelled = session
+        .durable()
         .cancel_pending_turn_input(&lash::InputId::from(settled.input_id.as_str()))
         .await
         .expect("cancel the second input");
@@ -257,6 +258,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
         "the second input must reach a terminal state before the vacuum: {cancelled:?}"
     );
     let pending_before = session
+        .durable()
         .pending_turn_inputs()
         .await
         .expect("read pending inputs before the vacuum");
@@ -298,6 +300,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows_inner() {
         .await
         .expect("reopen the vacuumed session");
     let pending_after = session
+        .durable()
         .pending_turn_inputs()
         .await
         .expect("read pending inputs after the vacuum");

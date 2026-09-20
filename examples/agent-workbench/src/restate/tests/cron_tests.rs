@@ -1444,7 +1444,11 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
     assert!(
         state
             .core
-            .session_exists(session_id)
+            .session(session_id)
+            .durable()
+            .await
+            .expect("durable handle for the cron session")
+            .exists()
             .await
             .expect("read materialized session metadata")
     );
@@ -1452,14 +1456,22 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
     assert!(
         !state
             .core
-            .session_was_deleted(session_id)
+            .session(session_id)
+            .durable()
+            .await
+            .expect("durable handle for the cron session")
+            .was_deleted()
             .await
             .expect("read absent-session tombstone")
     );
     assert!(
         !state
             .core
-            .session_exists(session_id)
+            .session(session_id)
+            .durable()
+            .await
+            .expect("durable handle for the cron session")
+            .exists()
             .await
             .expect("read absent-session metadata")
     );

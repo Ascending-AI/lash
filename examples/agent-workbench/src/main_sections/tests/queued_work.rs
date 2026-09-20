@@ -139,7 +139,11 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         .expect("cancel first queued batch");
         assert!(cancelled.accepted);
         assert_eq!(cancelled.batch_id, first.batch_id);
-        let remaining = session.queued_work().await.expect("list after cancel");
+        let remaining = session
+            .durable()
+            .queued_work()
+            .await
+            .expect("list after cancel");
         assert_eq!(
             remaining
                 .iter()
@@ -275,6 +279,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
         );
         assert_eq!(
             session
+                .durable()
                 .queued_work()
                 .await
                 .expect("list after selected-drain re-selection")

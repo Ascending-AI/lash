@@ -162,6 +162,7 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
         .await
         .expect("open channel session");
     let pending = session
+        .durable()
         .pending_turn_inputs()
         .await
         .expect("read pending turn inputs");
@@ -182,6 +183,7 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
     assert_eq!(script.calls(), 1, "one turn, not one per queued line");
     assert!(
         session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("read pending turn inputs")
@@ -290,6 +292,7 @@ async fn each_channel_gets_its_own_session_and_neither_sees_the_others_context()
         .expect("open secrets session");
     assert_eq!(
         secret_session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("pending inputs")
@@ -305,6 +308,7 @@ async fn each_channel_gets_its_own_session_and_neither_sees_the_others_context()
         .expect("open public session");
     assert!(
         public_session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("pending inputs")
@@ -361,7 +365,11 @@ async fn a_thread_forks_on_its_first_reply_and_inherits_uncommitted_root_context
     let thread_id = thread_session_id(&channel, &root.to_string());
     assert!(
         bot.core()
-            .session_exists(&thread_id)
+            .session(thread_id.clone())
+            .durable()
+            .await
+            .expect("durable handle for the thread session")
+            .exists()
             .await
             .expect("check child session existence"),
         "the deterministic child session must exist"
@@ -433,7 +441,11 @@ async fn a_thread_reply_waits_for_midflight_root_admission_and_forks_from_that_t
     let thread_id = thread_session_id(&channel, &root.to_string());
     assert!(
         !bot.core()
-            .session_exists(&thread_id)
+            .session(thread_id.clone())
+            .durable()
+            .await
+            .expect("durable handle for the thread session")
+            .exists()
             .await
             .expect("check child before root completion"),
         "missing-root deferral must not fork from the channel's current leaf"
@@ -1155,6 +1167,7 @@ async fn thread_and_channel_traffic_are_isolated_after_the_fork() {
         .expect("open channel session");
     assert_eq!(
         channel_session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("channel pending inputs")
@@ -1239,6 +1252,7 @@ async fn an_ambient_thread_reply_creates_the_fork_and_waits_for_a_mention() {
         .expect("open fork created by first reply");
     assert_eq!(
         thread
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("thread pending inputs")

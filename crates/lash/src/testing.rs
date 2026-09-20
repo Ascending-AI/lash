@@ -738,6 +738,7 @@ finish("registered");
                         .await
                         .expect("inspect stalled wake deliveries");
                     let queued = session
+                        .durable()
                         .queued_work()
                         .await
                         .expect("inspect stalled wake queue");
@@ -772,6 +773,7 @@ finish("registered");
             let session = reopen_after_admission_contention(&core).await;
             assert!(
                 session
+                    .durable()
                     .queued_work()
                     .await
                     .expect("queued wake drained by background work driver")

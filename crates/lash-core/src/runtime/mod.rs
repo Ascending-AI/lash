@@ -40,6 +40,7 @@ pub(crate) use lash_core_execution::runtime::in_memory_store;
 pub use lash_core_store::input_normalization as io;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::input_normalization as io;
+mod durable_queue;
 mod lifecycle;
 use claim_settlement::TurnClaimSettlement;
 #[cfg(feature = "testing")]
@@ -195,6 +196,7 @@ use assembly::{classify_output_state, sanitize_assistant_output};
 pub use builder::EmbeddedRuntimeBuilder;
 pub use causal::process_event_invocation;
 pub use clock::{Clock, ClockWallTime, SystemClock};
+pub use durable_queue::{DurableSessionOps, EMPTY_HEAD_REVISION};
 /// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,

@@ -183,7 +183,11 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     let process_delete = deleted.process.expect("process cleanup report");
     assert_eq!(process_delete.removed_observer_count, 1);
     assert!(
-        core.session_was_deleted(SOURCE_SESSION)
+        core.session(SOURCE_SESSION)
+            .durable()
+            .await
+            .expect("durable handle for the retired source session")
+            .was_deleted()
             .await
             .expect("read retirement fence")
     );

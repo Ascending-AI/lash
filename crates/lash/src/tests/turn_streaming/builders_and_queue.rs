@@ -74,6 +74,7 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
     stream.finish().await?;
 
     session
+        .durable()
         .enqueue(TurnInput::text("queued"))
         .id("durable-queued-input")
         .send()
@@ -313,6 +314,7 @@ pub(super) async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-turn-run").open().await?;
     session
+        .durable()
         .enqueue(TurnInput::text("queued work"))
         .id("queued-request")
         .send()
@@ -355,6 +357,7 @@ pub(super) async fn queued_turn_id_sets_physical_activity_and_effect_identity() 
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-identified-queued-turn").open().await?;
     session
+        .durable()
         .enqueue(TurnInput::text("host identified queued work"))
         .id("host-identified-input")
         .send()
@@ -426,6 +429,7 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
     let controller = RecordingNativeEffectController::default();
 
     session
+        .durable()
         .enqueue(TurnInput::text("automatic queued builder"))
         .id("automatic-queued-input")
         .send()
@@ -442,6 +446,7 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
     );
 
     session
+        .durable()
         .enqueue(TurnInput::text("scoped automatic queued builder"))
         .id("scoped-automatic-queued-input")
         .send()
@@ -548,6 +553,7 @@ pub(super) async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Res
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pre-cancelled-queued-turn").open().await?;
     session
+        .durable()
         .enqueue(TurnInput::text(
             "must be cancelled before provider dispatch",
         ))
@@ -818,6 +824,7 @@ pub(super) async fn a_busy_execution_lane_is_never_reported_as_an_exhausted_queu
     // than trying to recover through the live holder.
     let peer = core.session("busy-lane-drain-reason").open().await?;
     holder
+        .durable()
         .enqueue(TurnInput::text("hang queued"))
         .send()
         .await?;
@@ -914,6 +921,7 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     assert_eq!(
         session
+            .durable()
             .queued_work()
             .await?
             .iter()
@@ -1306,6 +1314,7 @@ pub(super) async fn selected_queued_turn_empty_selection_is_satisfied_noop() -> 
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("selected-empty-noop").open().await?;
     session
+        .durable()
         .enqueue(TurnInput::text("must remain queued"))
         .id("selected-empty-noop-input")
         .send()
@@ -1729,6 +1738,7 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     assert_eq!(
         session
+            .durable()
             .queued_work()
             .await?
             .iter()
@@ -1757,11 +1767,13 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
     let session = core.session("idle-input-application").open().await?;
     let cursor = session.observe().current_remote_observation().cursor;
     let empty_admission = session
+        .durable()
         .enqueue(TurnInput::text(""))
         .id("idle-empty-source")
         .send()
         .await?;
     let admission = session
+        .durable()
         .enqueue(TurnInput::text("queued canonical input"))
         .id("idle-source")
         .send()
@@ -1819,7 +1831,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
         "typed evidence must identify the canonical committed message"
     );
 
-    let durable = session.remote_turn_input_applications().await?;
+    let durable = session.durable().remote_turn_input_applications().await?;
     assert_eq!(durable, vec![live.clone()]);
     Ok(())
 }
@@ -1845,6 +1857,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
     let session = core.session("durable-input-application-gap").open().await?;
     let stale_cursor = session.observe().current_remote_observation().cursor;
     let admission = session
+        .durable()
         .enqueue(TurnInput::text("survives replay gap"))
         .id("gap-source")
         .send()
@@ -1868,7 +1881,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         crate::observe::RemoteSessionObservationStreamItem::Gap { .. }
     ));
 
-    let applications = session.remote_turn_input_applications().await?;
+    let applications = session.durable().remote_turn_input_applications().await?;
     assert!(matches!(
         applications.as_slice(),
         [application]
@@ -1899,6 +1912,7 @@ pub(super) async fn queued_turn_explicit_effects_create_queue_drain_scope_intern
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-explicit-effects").open().await?;
     session
+        .durable()
         .enqueue(TurnInput::text("queued handler"))
         .send()
         .await?;

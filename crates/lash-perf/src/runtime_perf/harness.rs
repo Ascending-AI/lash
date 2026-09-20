@@ -391,6 +391,7 @@ impl BenchmarkRuntime {
         self.session
             .as_ref()
             .expect("benchmark session")
+            .durable()
             .enqueue(input)
             .id(source_id)
             .ingress(lash_core::TurnInputIngress::active_turn(

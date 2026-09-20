@@ -521,13 +521,14 @@ async fn run_high_traffic_operation(
     let mut durable_queue_depth = 0;
     let turn_usage = if kind == HighTrafficOperationKind::Queued {
         session
+            .durable()
             .enqueue(TurnInput::text(format!(
                 "load-kind:{kind} operation:{ordinal}"
             )))
             .id(format!("runtime-perf-load-{ordinal}"))
             .send()
             .await?;
-        durable_queue_depth = session.pending_turn_inputs().await?.len() as u64;
+        durable_queue_depth = session.durable().pending_turn_inputs().await?.len() as u64;
         let controller = lash::runtime::NativeRuntimeEffectController::default()
             .allow_process_lifetime_completion_keys();
         let drain = session

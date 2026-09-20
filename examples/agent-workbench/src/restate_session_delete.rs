@@ -103,7 +103,17 @@ pub(crate) async fn call_session_delete(
         lash_restate::RestateHttpError::Status { status: 409, .. }
             | lash_restate::RestateHttpError::Encode { .. }
     );
-    match state.core.session_was_deleted(&session_id).await {
+    let durable = match state.core.session(session_id.clone()).durable().await {
+        Ok(durable) => durable,
+        Err(probe_error) => {
+            return Err(AppError::session_delete_unconfirmed(
+                &session_id,
+                call_error,
+                probe_error,
+            ));
+        }
+    };
+    match durable.was_deleted().await {
         Ok(true) => {
             eprintln!(
                 "agent-workbench reconciled a failed Restate delete call to durable deletion: session_id={:?} call_error={call_error}",
@@ -111,7 +121,7 @@ pub(crate) async fn call_session_delete(
             );
             Ok(())
         }
-        Ok(false) if call_is_definitive => match state.core.session_exists(&session_id).await {
+        Ok(false) if call_is_definitive => match durable.exists().await {
             Ok(true) => Err(AppError::session_delete_failed(&session_id, call_error)),
             Ok(false) => Err(AppError::session_delete_unconfirmed(
                 &session_id,

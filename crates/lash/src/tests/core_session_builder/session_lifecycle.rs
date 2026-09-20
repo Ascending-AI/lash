@@ -1516,7 +1516,11 @@ async fn resume_of_a_session_deleted_while_parked_refuses_with_a_typed_tombstone
 
     delete_bound_session(&core, "deleted-while-parked").await?;
     assert!(
-        core.session_was_deleted("deleted-while-parked").await?,
+        core.session("deleted-while-parked")
+            .durable()
+            .await?
+            .was_deleted()
+            .await?,
         "the delete must leave a durable tombstone for the parked id"
     );
 
@@ -1829,14 +1833,34 @@ async fn core_delete_session_removes_factory_backed_session_state() -> Result<()
         .run()
         .await?;
     assert!(!session.read_view().messages().is_empty());
-    assert!(!core.session_was_deleted("delete-session").await?);
+    assert!(
+        !core
+            .session("delete-session")
+            .durable()
+            .await?
+            .was_deleted()
+            .await?
+    );
     drop(session);
 
     let report = delete_bound_session(&core, "delete-session").await?;
     // The tombstone the factory now keeps is the answer a resume needs; a
     // reopened-but-empty session is not on its own evidence that the id is dead.
-    assert!(core.session_was_deleted("delete-session").await?);
-    assert!(!core.session_was_deleted("never-existed").await?);
+    assert!(
+        core.session("delete-session")
+            .durable()
+            .await?
+            .was_deleted()
+            .await?
+    );
+    assert!(
+        !core
+            .session("never-existed")
+            .durable()
+            .await?
+            .was_deleted()
+            .await?
+    );
     let reopened = core.session("delete-session").open().await?;
 
     assert_eq!(report.session_id, "delete-session");

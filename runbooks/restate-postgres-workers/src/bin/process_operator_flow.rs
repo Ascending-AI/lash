@@ -663,7 +663,7 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
         provider_calls.load(Ordering::SeqCst) == 1,
         "selected A executed an unexpected number of provider calls"
     );
-    let pending_after_claim = session.queued_work().await?;
+    let pending_after_claim = session.durable().queued_work().await?;
     ensure!(
         pending_after_claim
             .iter()
@@ -730,7 +730,7 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
         unclaimed_batch_ids == vec![refusal_c2.batch_id.clone()],
         "selected-drain refusal named the wrong rows: {unclaimed_batch_ids:?}"
     );
-    let pending_after_refusal = session.queued_work().await?;
+    let pending_after_refusal = session.durable().queued_work().await?;
     let pending_ids = pending_after_refusal
         .iter()
         .map(|batch| batch.batch_id.clone())

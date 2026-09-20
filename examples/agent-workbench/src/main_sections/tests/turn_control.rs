@@ -225,6 +225,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .await
         .expect("open session for pending input evidence");
     let pending = session
+        .durable()
         .pending_turn_inputs()
         .await
         .expect("list pending inputs");
@@ -264,6 +265,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .await
         .expect("open session after turn settle");
     let after_settle = session
+        .durable()
         .pending_turn_inputs()
         .await
         .expect("list pending inputs after turn settle");
@@ -281,12 +283,14 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .expect("settle turn between route check and enqueue");
     let raced = state
         .core
-        .enqueue_turn_input(
-            session_id.clone(),
-            lash::TurnInput::text("must not be stranded"),
-            checked_ingress,
-            Some("settle-race-input".to_string()),
-        )
+        .session(session_id.clone())
+        .durable()
+        .await
+        .expect("durable handle for the raced session")
+        .enqueue(lash::TurnInput::text("must not be stranded"))
+        .ingress(checked_ingress)
+        .id("settle-race-input")
+        .send()
         .await
         .expect("enqueue after the checked turn settled");
     let race_error = reject_if_active_turn_settled(&state, &raced)
@@ -300,6 +304,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         .await
         .expect("open session after settle race");
     let after_race = session
+        .durable()
         .pending_turn_inputs()
         .await
         .expect("list pending inputs after settle race");

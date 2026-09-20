@@ -321,6 +321,7 @@ impl AppState {
     ) -> HandlerResult<TurnResponse> {
         let session = open_e2e_session(core).await?;
         let first = session
+            .durable()
             .enqueue(TurnInput::text(format!(
                 "Run queued frame switch. workflow_id={} frame_switch_queued_start=true",
                 request.workflow_id
@@ -340,6 +341,7 @@ impl AppState {
             )
             .await?;
             enqueue_session
+                .durable()
                 .enqueue(TurnInput::text(format!(
                     "Run pending item. workflow_id={enqueue_workflow_id} frame_switch_pending=true"
                 )))
@@ -364,6 +366,7 @@ impl AppState {
             .map_err(terminal_error)?
             .map_err(terminal_error)?;
         let pending_after_follow = session
+            .durable()
             .pending_turn_inputs()
             .await
             .map_err(terminal_error)?;
@@ -386,11 +389,13 @@ impl AppState {
             .cloned()
             .ok_or_else(|| terminal_error("second queued turn produced no final value"))?;
         let queue_empty = session
+            .durable()
             .queued_work()
             .await
             .map_err(terminal_error)?
             .is_empty();
         let inputs_empty = session
+            .durable()
             .pending_turn_inputs()
             .await
             .map_err(terminal_error)?
@@ -422,6 +427,7 @@ impl AppState {
     ) -> HandlerResult<TurnResponse> {
         let session = open_e2e_session(core).await?;
         session
+            .durable()
             .enqueue(TurnInput::text(format!(
                 "Run cancellable frame switch. workflow_id={} frame_switch_cancel_start=true",
                 request.workflow_id
@@ -457,11 +463,13 @@ impl AppState {
             TurnOutcome::Stopped(TurnStop::Cancelled { .. })
         );
         let claims_settled = session
+            .durable()
             .queued_work()
             .await
             .map_err(terminal_error)?
             .is_empty()
             && session
+                .durable()
                 .pending_turn_inputs()
                 .await
                 .map_err(terminal_error)?

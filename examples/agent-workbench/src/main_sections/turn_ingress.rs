@@ -100,9 +100,19 @@ pub(crate) async fn admit_turn_input(
     surface: &str,
 ) -> Result<TurnInputReceipt, AppError> {
     let source_id = format!("workbench-turn-input-{}", uuid::Uuid::new_v4());
+    // The Durable Session never creates (ADR 0097): this ingress is for a
+    // session the workbench already created, and an unknown or retired id is
+    // refused here instead of quietly materialising session metadata.
     let acceptance = state
         .core
-        .enqueue_turn_input(session_id.to_string(), input, ingress, Some(source_id))
+        .session(session_id.clone())
+        .durable()
+        .await
+        .map_err(|error| state.session_admission_error(session_id, surface, error))?
+        .enqueue(input)
+        .ingress(ingress)
+        .id(source_id)
+        .send()
         .await
         .map_err(|error| state.session_admission_error(session_id, surface, error))?;
     reject_if_active_turn_settled(state, &acceptance).await?;
@@ -148,6 +158,7 @@ pub(crate) async fn reject_if_active_turn_settled(
         .await
         .map_err(AppError::runtime)?;
     let outcome = session
+        .durable()
         .cancel_pending_turn_input(&acceptance.input_id)
         .await
         .map_err(AppError::runtime)?;

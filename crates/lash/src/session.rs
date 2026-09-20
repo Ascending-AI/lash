@@ -3,6 +3,7 @@ use lash_sansio::TurnId;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use crate::durable_session::DurableSession;
 use crate::session_binding::BoundSession;
 use crate::support::{
     Arc, CancellationToken, EffectHost, EmbedError, LashCore, LashRuntime, PluginBinding,
@@ -15,11 +16,6 @@ use crate::support::{
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
-use lash_core::runtime::{
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch, QueuedWorkClaim,
-    TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
-};
 use lash_core::runtime::{UnreportedUsageAttempt, UsageReconciliationReport};
 use lash_core::{
     LiveReplayStoreError, SessionObservationEvent, TurnCancelMode, facade_support::LiveReplayGap,
@@ -146,6 +142,43 @@ impl SessionBuilder {
         )
         .await?;
         Ok(())
+    }
+
+    /// Acquire this session's **Durable Session**: store-backed access to its
+    /// queue and settled reads with no runtime.
+    ///
+    /// This is the second terminal verb of the session builder. Unlike
+    /// [`open`](Self::open) it builds no runtime at all: no Session Execution
+    /// Lease, no plugin session, no tool registry, no lifecycle events, no
+    /// observer-intent reconcile and no process admission. Use it whenever the
+    /// host only needs to read or edit the queue — including beside a live
+    /// writer in another process.
+    ///
+    /// Acquisition resolves an *existing* store through the catalog's
+    /// non-creating seam (or, with [`store`](Self::store), the exact store the
+    /// host supplied), at most once per handle. The session id must already be
+    /// known; see [`DurableSession`] for the typed refusals.
+    pub async fn durable(self) -> Result<DurableSession> {
+        let queued = self.core.substrate_slot.ports().await.queued_port();
+        let live_replay_store = Arc::clone(&self.core.live_replay_store);
+        if let Some(store) = self.store.as_ref() {
+            return Ok(DurableSession::from_exact_store(
+                self.session_id.clone(),
+                Arc::clone(store),
+                queued,
+                live_replay_store,
+                self.core.store_factory.clone(),
+            ));
+        }
+        let Some(catalog) = self.core.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStore);
+        };
+        Ok(DurableSession::from_catalog(
+            self.session_id,
+            Arc::clone(catalog),
+            queued,
+            live_replay_store,
+        ))
     }
 
     /// Open with an explicitly supplied runtime state.
@@ -906,169 +939,29 @@ impl LashSession {
         }
     }
 
-    /// Creates a builder for durably enqueueing turn input.
-    pub fn enqueue(&self, input: TurnInput) -> EnqueueTurnBuilder<'_> {
-        EnqueueTurnBuilder {
-            session: self,
-            input,
-            id: None,
-            ingress: TurnInputIngress::NextTurn,
-        }
-    }
-
-    /// Return all pending durable queued-work batches for this session.
+    /// This session's **Durable Session**: store-backed access to its queue
+    /// and settled reads.
     ///
-    /// This is an admin/introspection view for non-user queued work such as
-    /// process wakes and session commands. User-visible model input is stored
-    /// separately as pending turn input and is exposed by
-    /// [`pending_turn_inputs`](Self::pending_turn_inputs).
-    pub async fn queued_work(&self) -> Result<Vec<QueuedWorkBatch>> {
-        let observation = self.runtime.observe();
-        let store = self.binding.store();
-        store
-            .list_pending_queued_work(&SessionId::from(observation.session_id()))
-            .await
-            .map_err(|err| {
-                EmbedError::Runtime(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::StoreCommitFailed,
-                    err.to_string(),
-                ))
-            })
-    }
-
-    /// Returns every open turn input and its factual read-time claim status.
+    /// The queue and read operations that stay correct beside another
+    /// process's writer live on [`DurableSession`], not here, so the type says
+    /// which authority a host is using. This handle is derived from the
+    /// session's Session Binding: it reuses the binding's admitted store and
+    /// owner-issued ports and never manufactures a catalog, so catalog-only
+    /// reads stay optional with the same typed errors the rest of the facade
+    /// returns.
     ///
-    /// A held input remains present with the exact expiry of the matching live
-    /// session-execution lease. That status does not prove the holder is alive;
-    /// resubmitting while it is held creates another admission unless the host
-    /// reuses the same source key.
-    pub async fn pending_turn_inputs(&self) -> Result<Vec<PendingTurnInputRead>> {
-        let observation = self.runtime.observe();
-        let store = self.binding.store();
-        store
-            .list_pending_turn_inputs(&SessionId::from(observation.session_id()))
-            .await
-            .map_err(|err| {
-                EmbedError::Runtime(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::StoreCommitFailed,
-                    err.to_string(),
-                ))
-            })
-    }
-
-    /// Read settled canonical input applications from durable turn commits.
-    ///
-    /// This is the reconciliation surface for hosts whose live observation
-    /// cursor fell outside the bounded replay window.
-    pub async fn turn_input_applications(&self) -> Result<Vec<lash_core::TurnInputApplication>> {
-        let observation = self.runtime.observe();
-        let store = self.binding.store();
-        store
-            .list_turn_input_applications(&SessionId::from(observation.session_id()))
-            .await
-            .map_err(|err| {
-                EmbedError::Runtime(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::StoreCommitFailed,
-                    err.to_string(),
-                ))
-            })
-    }
-
-    /// Versioned wire form of [`turn_input_applications`](Self::turn_input_applications).
-    pub async fn remote_turn_input_applications(
-        &self,
-    ) -> Result<Vec<lash_remote_protocol::RemoteTurnInputApplication>> {
-        Ok(self
-            .turn_input_applications()
-            .await?
-            .iter()
-            .map(Into::into)
-            .collect())
-    }
-
-    /// Cancels pending turn input.
-    pub async fn cancel_pending_turn_input(
-        &self,
-        input_id: &lash_core::InputId,
-    ) -> Result<PendingTurnInputCancelOutcome> {
-        let session_id = self.session_id();
-        self.runtime
-            .cancel_pending_turn_input(&session_id, input_id)
-            .await
-            .map_err(EmbedError::Runtime)
-    }
-
-    /// Atomically cancel a set of pending user inputs by runtime input id or
-    /// app source key.
-    ///
-    /// This is the app reconciliation path for explicit selections such as
-    /// "remove these pending drafts". Returned outcomes distinguish newly
-    /// cancelled input from input that was already claimed, completed,
-    /// cancelled, or missing.
-    pub async fn cancel_pending_turn_inputs(
-        &self,
-        targets: impl IntoIterator<Item = PendingTurnInputCancelTarget>,
-    ) -> Result<Vec<PendingTurnInputCancelReceipt>> {
-        let session_id = self.session_id();
-        let targets = targets.into_iter().collect::<Vec<_>>();
-        self.runtime
-            .cancel_pending_turn_inputs(&session_id, &targets)
-            .await
-            .map_err(EmbedError::Runtime)
-    }
-
-    /// Atomically cancel the same-session pending-input suffix from `anchor`.
-    ///
-    /// Apps that let users edit previously submitted product messages should
-    /// map the edited message to the stored pending-input `input_id` or
-    /// `source_key`, call this method, and only restore/edit drafts that return
-    /// [`PendingTurnInputCancelOutcome::Cancelled`]. Claimed or completed
-    /// inputs have already crossed the runtime boundary and should be treated
-    /// as reconciliation state, not local editable drafts.
-    pub async fn cancel_pending_turn_input_suffix(
-        &self,
-        anchor: PendingTurnInputCancelTarget,
-    ) -> Result<PendingTurnInputSuffixCancelOutcome> {
-        let session_id = self.session_id();
-        self.runtime
-            .cancel_pending_turn_input_suffix(&session_id, &anchor)
-            .await
-            .map_err(EmbedError::Runtime)
-    }
-
-    /// Cancels queued work batch.
-    pub async fn cancel_queued_work_batch(
-        &self,
-        batch_id: &lash_core::BatchId,
-    ) -> Result<Option<QueuedWorkBatch>> {
-        let session_id = self.session_id();
-        self.runtime
-            .cancel_queued_work_batch(&session_id, batch_id)
-            .await
-            .map_err(EmbedError::Runtime)
-    }
-
-    /// Release a held queued-work claim without completing it, returning its
-    /// batches to the pending queue immediately.
-    ///
-    /// A host stopping an external queued-work driver mid-claim calls this
-    /// with the claims that driver still holds so the work becomes claimable
-    /// again at once instead of waiting out the claim's lease TTL.
-    pub async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<()> {
-        self.runtime
-            .abandon_queued_work_claim(claim)
-            .await
-            .map_err(EmbedError::Runtime)
-    }
-
-    /// Release a held pending-turn-input claim without completing it, returning
-    /// its inputs to the pending queue immediately. The turn-input counterpart
-    /// of [`abandon_queued_work_claim`](Self::abandon_queued_work_claim).
-    pub async fn abandon_turn_input_claim(&self, claim: &TurnInputClaim) -> Result<()> {
-        self.runtime
-            .abandon_turn_input_claim(claim)
-            .await
-            .map_err(EmbedError::Runtime)
+    /// ```ignore
+    /// let pending = session.durable().pending_turn_inputs().await?;
+    /// session.durable().enqueue(input).id("draft-1").send().await?;
+    /// ```
+    pub fn durable(&self) -> DurableSession {
+        DurableSession::from_binding(
+            SessionId::from(self.runtime.observe().session_id()),
+            self.binding.store(),
+            self.binding.queued(),
+            Arc::clone(&self.runtime.live_replay_store),
+            self.binding.catalog(),
+        )
     }
 
     /// Cancel every outstanding durable wait for this session without deleting
@@ -1087,41 +980,6 @@ impl LashSession {
             .cancel_await_events_for_session(&session_id)
             .await
             .map_err(EmbedError::Runtime)
-    }
-
-    /// Resolve once `batch_id` is no longer pending in the queue store —
-    /// drained by whoever runs queued work (a queued-work runner, a durable
-    /// worker, or another handle's [`queued_turn`](Self::queued_turn)) or
-    /// cancelled. This is the enqueue-and-observe side of the queue: the
-    /// caller never claims the work itself.
-    ///
-    /// Completion is read from the persistent queue store, so it observes
-    /// drains performed by other session handles and other processes alike.
-    /// There is no built-in deadline — nothing resolves if nothing drains the
-    /// queue, so bound it with `tokio::time::timeout` when the worker may be
-    /// unavailable. A batch id the store has never seen resolves immediately.
-    pub async fn await_queued_work_batch(&self, batch_id: &lash_core::BatchId) -> Result<()> {
-        let observation = self.runtime.observe();
-        let store = self.binding.store();
-        let session_id = SessionId::from(observation.session_id());
-        drop(observation);
-        let mut delay = std::time::Duration::from_millis(25);
-        loop {
-            let pending = store
-                .list_pending_queued_work(&session_id)
-                .await
-                .map_err(|err| {
-                    EmbedError::Runtime(lash_core::RuntimeError::new(
-                        lash_core::RuntimeErrorCode::StoreCommitFailed,
-                        err.to_string(),
-                    ))
-                })?;
-            if !pending.iter().any(|batch| batch.batch_id == batch_id) {
-                return Ok(());
-            }
-            tokio::time::sleep(delay).await;
-            delay = (delay * 2).min(std::time::Duration::from_millis(400));
-        }
     }
 
     /// Returns a read-only view of the session state.
@@ -1535,53 +1393,6 @@ fn live_replay_error(err: lash_core::LiveReplayStoreError) -> EmbedError {
         RuntimeErrorCode::LiveReplay,
         err.to_string(),
     ))
-}
-
-/// Builder for configuring enqueue turn.
-pub struct EnqueueTurnBuilder<'a> {
-    session: &'a LashSession,
-    input: TurnInput,
-    id: Option<String>,
-    ingress: TurnInputIngress,
-}
-
-impl<'a> EnqueueTurnBuilder<'a> {
-    /// Sets the idempotency identifier for the enqueued input.
-    pub fn id(mut self, id: impl Into<String>) -> Self {
-        self.id = Some(id.into());
-        self
-    }
-
-    /// Sets how the enqueued input enters the turn pipeline.
-    pub fn ingress(mut self, ingress: TurnInputIngress) -> Self {
-        self.ingress = ingress;
-        self
-    }
-
-    /// Persist the input and return stable durable-acceptance identity.
-    ///
-    /// For retryable host requests, supply [`id`](Self::id) again after an
-    /// ambiguous transport failure; its source key is the idempotency identity.
-    /// Mutable queue lifecycle state is available from
-    /// [`LashSession::pending_turn_inputs`].
-    pub async fn send(self) -> Result<TurnInputAcceptanceReceipt> {
-        let source_key = self.id.map(|id| format!("host:{id}"));
-        self.session
-            .runtime
-            .enqueue_turn_input(self.input, self.ingress, source_key)
-            .await
-            .map(|pending| TurnInputAcceptanceReceipt::from(&pending))
-            .map_err(EmbedError::Runtime)
-    }
-}
-
-impl<'a> std::future::IntoFuture for EnqueueTurnBuilder<'a> {
-    type Output = Result<TurnInputAcceptanceReceipt>;
-    type IntoFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Self::Output> + 'a>>;
-
-    fn into_future(self) -> Self::IntoFuture {
-        Box::pin(self.send())
-    }
 }
 
 #[cfg(test)]

@@ -1002,7 +1002,11 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
         !harness
             .state
             .core
-            .session_was_deleted(&session_id)
+            .session(session_id.clone())
+            .durable()
+            .await
+            .expect("durable handle for the session")
+            .was_deleted()
             .await
             .expect("read failed-delete tombstone fence")
     );
@@ -1049,7 +1053,11 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
         harness
             .state
             .core
-            .session_was_deleted(&session_id)
+            .session(session_id.clone())
+            .durable()
+            .await
+            .expect("durable handle for the session")
+            .was_deleted()
             .await
             .expect("read successful retry tombstone fence")
     );

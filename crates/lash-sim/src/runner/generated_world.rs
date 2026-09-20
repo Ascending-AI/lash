@@ -341,6 +341,7 @@ impl GeneratedRuntimeWorld {
             .unwrap_or(&event.boundary_id);
         let mut enqueue = runtime_session
             .session
+            .durable()
             .enqueue(lash::TurnInput::text(text.to_string()))
             .id(source_key);
         let observed_active_turn_id = event
@@ -462,7 +463,7 @@ impl GeneratedRuntimeWorld {
                 // gate is closed, so these rows cannot have been cancelled or
                 // completed. An empty admission needs no store read.
                 while !expected_claims.is_empty() {
-                    let pending = runtime_session.session.pending_turn_inputs().await
+                    let pending = runtime_session.session.durable().pending_turn_inputs().await
                         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
                     if expected_claims.iter().all(|input_id| {
                         pending.iter().any(|read| {
@@ -854,6 +855,7 @@ impl GeneratedRuntimeWorld {
         })?;
         let outcome = runtime_session
             .session
+            .durable()
             .cancel_pending_turn_input(&lash_core::InputId::from(input_id.as_str()))
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;

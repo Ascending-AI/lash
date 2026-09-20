@@ -106,6 +106,7 @@ async fn a_restarted_bot_keeps_the_channel_transcript_and_does_not_reply_twice()
         .expect("open channel session");
     assert!(
         session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("pending inputs")

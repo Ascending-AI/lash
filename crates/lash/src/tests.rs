@@ -34,6 +34,27 @@ use tokio::sync::{Mutex as TokioMutex, oneshot};
 
 static TEST_SESSION_LEASE_TOKEN: AtomicUsize = AtomicUsize::new(1);
 
+/// Create a session's durable metadata through the catalog without building a
+/// runtime.
+///
+/// A Durable Session never creates (ADR 0097), so a test that enqueues to a
+/// session it has not opened creates it first — the same move an in-repo host
+/// that relied on enqueue-materialisation now makes.
+pub(crate) async fn create_catalog_session(
+    factory: &dyn SessionStoreFactory,
+    session_id: &str,
+) -> Result<()> {
+    factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from(session_id),
+            relation: lash_core::SessionRelation::Root,
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        })
+        .await?;
+    Ok(())
+}
+
 fn now_epoch_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2140,6 +2161,7 @@ use scope_support::{
 mod control_admin;
 mod core_session_builder;
 mod deployment_and_testing_facade;
+mod durable_session;
 mod harness;
 use harness::{
     core_without_session_store, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,

@@ -131,6 +131,7 @@ async fn run(mode: &str) -> Result<()> {
     match mode {
         "commit" => {
             session
+                .durable()
                 .enqueue(TurnInput::text(format!(
                     "Run crash-recovered frame switch. workflow_id={WORKFLOW_ID} frame_switch_crash_start=true"
                 )))
@@ -189,8 +190,8 @@ async fn run(mode: &str) -> Result<()> {
                 .final_value()
                 .cloned()
                 .context("recovered follow-on produced no final value")?;
-            let queue_empty = session.queued_work().await?.is_empty();
-            let inputs_empty = session.pending_turn_inputs().await?.is_empty();
+            let queue_empty = session.durable().queued_work().await?.is_empty();
+            let inputs_empty = session.durable().pending_turn_inputs().await?.is_empty();
             println!(
                 "{}",
                 json!({

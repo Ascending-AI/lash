@@ -197,7 +197,10 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
         )
         .await?;
 
-    session.await_queued_work_batch(&receipt.batch_id).await?;
+    session
+        .durable()
+        .await_queued_work_batch(&receipt.batch_id)
+        .await?;
     drop(session);
     let reopened = core
         .session("rlm-typescript-queued-session-command")
@@ -212,7 +215,7 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
             .contains(&lash_core::ToolId::from("tool:after_refresh")),
         "queued catalog refresh must apply the source's replacement manifest"
     );
-    assert!(reopened.queued_work().await?.is_empty());
+    assert!(reopened.durable().queued_work().await?.is_empty());
     Ok(())
 }
 

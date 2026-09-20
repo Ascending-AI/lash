@@ -1019,6 +1019,7 @@ pub(crate) async fn run_queued_work_batch(
             state.session_admission_error(&session_id, "api.queued_work.run", error)
         })?;
     if !session
+        .durable()
         .queued_work()
         .await
         .map_err(AppError::internal)?
@@ -1104,6 +1105,7 @@ pub(crate) async fn cancel_queued_work_batch(
             state.session_admission_error(&session_id, "api.queued_work.cancel", error)
         })?;
     if session
+        .durable()
         .cancel_queued_work_batch(&lash::BatchId::from(batch_id.as_str()))
         .await
         .map_err(AppError::internal)?

@@ -5,6 +5,28 @@
 //! app state, HTTP protocols, auth, and frontend streaming; this crate
 //! owns only the ergonomic core/session/turn API.
 //!
+//! # Two verbs for one session
+//!
+//! A session id reaches Lash two ways, and the choice is the first thing to
+//! make deliberately:
+//!
+//! * `core.session(id).open().await` — the **live session**
+//!   ([`LashSession`]). It builds a runtime: plugins, tool registry, protocol
+//!   restore, lifecycle events, process admission. Use it to run turns.
+//! * `core.session(id).durable().await` — the **Durable Session**
+//!   ([`DurableSession`]). It builds nothing: the session's queue and settled
+//!   reads, answered from its store, correct while another process holds the
+//!   session's execution lease. Use it to enqueue, list, cancel or reconcile.
+//!
+//! Polling a queue through `open()` costs a whole runtime per poll and, on a
+//! core that does not carry the session's tool sources, orphans them. Reach
+//! for `durable()` whenever no turn is being run. An open session exposes the
+//! same operations through [`LashSession::durable`], so there is one behaviour
+//! either way.
+//!
+//! A Durable Session never creates: the id must already exist, or the
+//! operation is refused with a typed error. See [`DurableSession`].
+//!
 //! Every public name has exactly one home. The crate root carries the daily
 //! core/session/turn path; each domain module ([`tools`], [`persistence`],
 //! [`plugins`], [`observe`], [`triggers`], [`attachments`], ...) carries its own
@@ -13,6 +35,7 @@
 /// Administrative facade handles and operations.
 pub mod admin;
 mod core;
+mod durable_session;
 mod error;
 pub mod formats;
 mod plugin_binding;
@@ -46,12 +69,11 @@ pub use crate::admin::{
     SessionTriggerAdmin, ToolAdmin,
 };
 pub use crate::core::{DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteReport};
+pub use crate::durable_session::{DurableSession, EnqueueTurnBuilder};
 pub use crate::error::{EmbedError, Result, SelectedQueuedWorkDrainRefusalCause};
 pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
-pub use crate::session::{
-    EnqueueTurnBuilder, LashSession, ObservableSession, ParkedSession, SessionBuilder,
-};
+pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::queued_drain::{EmptyQueuedDrainReason, QueuedTurnDrain};
 pub use crate::turn::{
@@ -101,17 +123,18 @@ pub use tokio_util::sync::CancellationToken;
 /// from the crate root.
 pub mod prelude {
     pub use crate::{
-        AdvancedToolAdmin, ChargeSafetyPolicy, CoreTriggerAdmin, DeploymentDrainStatus, EmbedError,
-        EnqueueTurnBuilder, InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits,
-        ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, ObservableSession,
-        ParkedSession, PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
-        PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder, SessionCommand,
-        SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest,
-        SessionDeleteReport, SessionListFilter, SessionRelationKind, SessionSpec,
-        SessionStartPoint, SessionSummary, SessionTriggerAdmin, ToolAdmin, TurnActivity,
-        TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget, TurnBuilder, TurnCause,
-        TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput, TurnInputAcceptanceReceipt,
-        TurnOutcome, TurnOutput, TurnReport, TurnStop, TurnStream, message_role, message_text,
+        AdvancedToolAdmin, ChargeSafetyPolicy, CoreTriggerAdmin, DeploymentDrainStatus,
+        DurableSession, EmbedError, EnqueueTurnBuilder, InputItem, LashCore, LashCoreBuilder,
+        LashSession, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget,
+        ObservableSession, ParkedSession, PendingTurnInputCancelOutcome, PluginBinding,
+        PluginOperations, PluginStack, PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder,
+        SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
+        SessionCreateRequest, SessionDeleteReport, SessionListFilter, SessionRelationKind,
+        SessionSpec, SessionStartPoint, SessionSummary, SessionTriggerAdmin, ToolAdmin,
+        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
+        TurnBuilder, TurnCause, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
+        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStop, TurnStream,
+        message_role, message_text,
     };
 }
 
