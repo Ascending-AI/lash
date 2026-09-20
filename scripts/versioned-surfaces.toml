@@ -188,12 +188,11 @@ description = "stable append-request identity byte projection"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core-store/src/store/commit_identity.rs"]
+paths = [
+  "crates/lash-core-store/src/store/commit_identity.rs",
+  "crates/lash-core-ids/src/stable_identity.rs",
+]
 symbols = [
-  "push_len_prefixed",
-  "push_string",
-  "push_optional",
-  "push_slice",
   "push_json_value",
   "push_message_role",
   "push_causal_ref",
@@ -206,6 +205,21 @@ symbols = [
   "push_part",
   "append_node_identity_bytes",
   "append_request_identity_bytes",
+  # FIG-2887: the projection is minted through the shared IdentityEncoder
+  # primitives (frozen unframed family, ADR 0097), so the framing grammar now
+  # lives in these methods and the guard follows it.
+  "new_unframed",
+  "tag",
+  "u8",
+  "u32",
+  "u64",
+  "i64",
+  "string",
+  "bytes",
+  "optional",
+  "sequence",
+  "finish",
+  "provider_route",
 ]
 
 [[surface]]

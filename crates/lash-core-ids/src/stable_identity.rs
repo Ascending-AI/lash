@@ -19,10 +19,13 @@ pub(crate) const GLOBAL_SALT: u8 = 2;
 /// Reserved durable identity family domains. Entries are append-only: retired
 /// families remain reserved so a later projection cannot silently reuse them.
 pub(crate) const FAMILY_DOMAINS: &[&str] = &[
+    "lash.append-request",
     "lash.await-event",
     "lash.await-event-auth",
     "lash.direct-effect-discriminator",
     "lash.direct-effect-replay-key",
+    "lash.history-node",
+    "lash.intent",
     "lash.process-cancellation-request",
     "lash.process-definition-reference",
     "lash.process-registration-definition",
@@ -42,6 +45,20 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     "lash.trigger-subscription-key",
 ];
 
+/// Grandfathered families whose preimages omit the framing header (ADR 0097).
+///
+/// `lash.append-request`, `lash.history-node`, and `lash.intent` predate this
+/// kit: their digests are persisted as opaque equality-compared evidence —
+/// append-receipt request hashes, history node ids, and turn-commit hashes —
+/// so their preimage bytes are frozen and can never gain the
+/// `magic || salt || family-version || domain` header. They are registered in
+/// `FAMILY_DOMAINS` so no later family claims the same semantic domain, and
+/// they are the only domains [`IdentityEncoder::new_unframed`] will mint.
+///
+/// Entries are permanent and append-only: a frozen grammar stays frozen.
+pub(crate) const FROZEN_UNFRAMED_DOMAINS: &[&str] =
+    &["lash.append-request", "lash.history-node", "lash.intent"];
+
 /// Append-only builder for one family-owned durable identity preimage.
 pub struct IdentityEncoder {
     bytes: Vec<u8>,
@@ -60,6 +77,22 @@ impl IdentityEncoder {
         encoder.u8(family_version);
         encoder.bytes(domain.as_bytes());
         encoder
+    }
+
+    /// Starts a preimage *without* the framing header for one of the
+    /// grandfathered [`FROZEN_UNFRAMED_DOMAINS`] families.
+    ///
+    /// The emitted bytes are the family's frozen legacy grammar; the
+    /// registration check still applies so the unframed path cannot leak into
+    /// a new family. New durable identity families must use
+    /// [`IdentityEncoder::new`].
+    pub fn new_unframed(domain: &str) -> Self {
+        debug_assert!(
+            FROZEN_UNFRAMED_DOMAINS.contains(&domain),
+            "unframed durable identity preimage `{domain}` is not a registered \
+             frozen family; new families must use IdentityEncoder::new"
+        );
+        Self { bytes: Vec::new() }
     }
 
     /// Emits a reserved integer tag. Tags are permanent and must never be
@@ -169,6 +202,19 @@ mod tests {
             hex(&encoder.finish()),
             "6c6173682d737461626c652d6964656e74697479020700000000000000047465737403010203040102030405060708fffffffffffffffe0000000000000003613a620000000000000002000100010900000000000000020405"
         );
+    }
+
+    #[test]
+    fn frozen_unframed_domains_are_registered_family_domains() {
+        for domain in FROZEN_UNFRAMED_DOMAINS {
+            assert!(
+                FAMILY_DOMAINS.contains(domain),
+                "frozen unframed family `{domain}` must also be reserved in FAMILY_DOMAINS"
+            );
+        }
+        let mut encoder = IdentityEncoder::new_unframed("lash.intent");
+        encoder.string("preimage");
+        assert_eq!(encoder.finish(), b"\0\0\0\0\0\0\0\x08preimage");
     }
 
     #[test]
