@@ -18,48 +18,41 @@ impl DurableProcessWorker {
             // already queued it — a second pass over the same row must not
             // relabel it as `Busy`.
             let externally_owned = record.disposition == RecoveryContract::ExternallyOwned;
-            if state
-                .scheduled
-                .insert(ProcessId::from(record.id.clone().to_string()))
-            {
+            let process_id = ProcessId::from(record.id.clone().to_string());
+            // A newer page's record replaces a retained rerun: the row may have
+            // gained an Abandon Request or other execution-relevant state while
+            // its prior attempt was still queued or finishing.
+            if state.admit(process_id.clone(), record, |retained, incoming| {
+                *retained = incoming
+            }) {
                 // The native worker still queues it, because a pending Abandon
                 // Request on such a row is reconciled there — but it reports
                 // the same typed deferral the Restate tier reports for it.
                 if externally_owned {
                     report.deferred.push(ProcessAdmissionDeferred {
-                        process_id: record.id.clone(),
+                        process_id: process_id.clone(),
                         disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
                     });
                 } else {
-                    report
-                        .admitted
-                        .push(ProcessId::from(record.id.clone().to_string()));
+                    report.admitted.push(process_id);
                 }
-                state.pending.push_back(record);
             } else {
                 // A live attempt on this worker already owns the row; this pass
                 // did not admit it.
                 report.deferred.push(ProcessAdmissionDeferred {
-                    process_id: record.id.clone(),
+                    process_id,
                     disposition: if externally_owned {
                         ProcessRecoveryAttemptOutcome::ExternallyOwned
                     } else {
                         ProcessRecoveryAttemptOutcome::Busy
                     },
                 });
-                // Coalesce a newer host-driven pass instead of dropping it.
-                // The row may have gained an Abandon Request or other
-                // execution-relevant state while its prior attempt was still
-                // queued or finishing.
-                state
-                    .rerun
-                    .insert(ProcessId::from(record.id.clone().to_string()), record);
             }
         }
-        state.worklist_scan = match page.continuation {
+        state.extra.worklist_scan = match page.continuation {
             Some(continuation) => ProcessWorklistScan::Ready(Some(continuation)),
-            None if state.rescan_requested => {
-                state.rescan_requested = false;
+            None if state.extra.rescan_requested => {
+                state.extra.rescan_requested = false;
                 ProcessWorklistScan::Ready(None)
             }
             None => ProcessWorklistScan::Idle,
@@ -88,11 +81,11 @@ impl DurableProcessWorker {
         let limit = std::num::NonZeroUsize::new(available)
             .unwrap_or(std::num::NonZeroUsize::MIN)
             .min(self.config.native_substrate.worker_sweep.intake_page);
-        let ProcessWorklistScan::Ready(continuation) = &state.worklist_scan else {
+        let ProcessWorklistScan::Ready(continuation) = &state.extra.worklist_scan else {
             return None;
         };
         let continuation = continuation.clone();
-        state.worklist_scan = ProcessWorklistScan::Fetching(continuation.clone());
+        state.extra.worklist_scan = ProcessWorklistScan::Fetching(continuation.clone());
         Some((limit, continuation))
     }
 
@@ -152,11 +145,10 @@ impl DurableProcessWorker {
             return None;
         }
         let mut state = self.execution_scheduler.state.lock_recover();
-        let Some(record) = state.pending.pop_front() else {
+        let Some(record) = state.pop_next() else {
             drop(permit);
             return None;
         };
-        state.active += 1;
         self.execution_scheduler.metrics.intake_depth(
             WorkerSlotKind::Process,
             state.pending.len() + state.rerun.len(),

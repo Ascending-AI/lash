@@ -1,16 +1,18 @@
 use crate::SessionId;
 use lash_sansio::sync::MutexExt;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use super::QueuedWorkExecutionConcurrency;
+use crate::runtime::coalescing_scheduler::{
+    CoalescingDispatcherGuard, CoalescingSchedulerHandle, CoalescingSchedulerState,
+};
 use crate::runtime::worker_capacity::{
     DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
 };
 use crate::runtime::{DEFAULT_PROCESS_EXECUTION_CONCURRENCY, WorkerSlotKind, WorkerSlotSupplier};
 
 #[derive(Clone, Debug)]
-pub(super) struct QueuedWorkDemand {
+pub(crate) struct QueuedWorkDemand {
     pub(super) session_id: Option<SessionId>,
     pub(super) reasons: Vec<String>,
 }
@@ -36,14 +38,9 @@ impl QueuedWorkDemand {
     }
 }
 
-#[derive(Default)]
-pub(super) struct QueuedWorkExecutionSchedulerState {
-    pub(super) pending: VecDeque<QueuedWorkDemand>,
-    pub(super) scheduled: BTreeSet<Option<SessionId>>,
-    pub(super) rerun: BTreeMap<Option<SessionId>, QueuedWorkDemand>,
-    pub(super) active: usize,
-    pub(super) dispatcher_running: bool,
-}
+/// The shared coalescing protocol state; queued work needs no side state.
+pub(super) type QueuedWorkExecutionSchedulerState =
+    CoalescingSchedulerState<Option<SessionId>, QueuedWorkDemand>;
 
 pub(crate) struct QueuedWorkExecutionScheduler {
     pub(super) slots: Option<Arc<dyn WorkerSlotSupplier>>,
@@ -53,43 +50,48 @@ pub(crate) struct QueuedWorkExecutionScheduler {
     pub(super) changed: Arc<tokio::sync::Notify>,
 }
 
+impl CoalescingSchedulerHandle for QueuedWorkExecutionScheduler {
+    type Key = Option<SessionId>;
+    type Work = QueuedWorkDemand;
+    type Extra = ();
+
+    fn state(&self) -> &Mutex<QueuedWorkExecutionSchedulerState> {
+        &self.state
+    }
+
+    fn changed(&self) -> &Arc<tokio::sync::Notify> {
+        &self.changed
+    }
+
+    fn slot_kind(&self) -> WorkerSlotKind {
+        WorkerSlotKind::QueuedWork
+    }
+
+    fn metrics(&self) -> &WorkerCapacityMetrics {
+        &self.metrics
+    }
+}
+
 pub(super) struct QueuedWorkExecutionTaskCompletion {
     pub(super) session_id: Option<SessionId>,
-    pub(super) completed: tokio::sync::mpsc::UnboundedSender<Option<SessionId>>,
+    pub(super) scheduler: Arc<QueuedWorkExecutionScheduler>,
 }
 
 impl Drop for QueuedWorkExecutionTaskCompletion {
     fn drop(&mut self) {
-        let _ = self.completed.send(self.session_id.clone());
+        self.scheduler.complete(&self.session_id, |session_id| {
+            tracing::warn!(
+                target: "lash_core::queued_work",
+                session_id = session_id.as_ref().map(SessionId::as_str),
+                event = "queued_work.scheduler_accounting",
+                "queued-work execution completed without an active scheduler entry"
+            );
+        });
     }
 }
 
-pub(super) struct QueuedWorkExecutionDispatcherGuard {
-    scheduler: Arc<QueuedWorkExecutionScheduler>,
-    armed: bool,
-}
-
-impl QueuedWorkExecutionDispatcherGuard {
-    pub(super) fn new(scheduler: Arc<QueuedWorkExecutionScheduler>) -> Self {
-        Self {
-            scheduler,
-            armed: true,
-        }
-    }
-
-    pub(super) fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for QueuedWorkExecutionDispatcherGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            self.scheduler.lock_state().dispatcher_running = false;
-            self.scheduler.changed.notify_one();
-        }
-    }
-}
+pub(super) type QueuedWorkExecutionDispatcherGuard =
+    CoalescingDispatcherGuard<QueuedWorkExecutionScheduler>;
 
 impl QueuedWorkExecutionScheduler {
     pub(super) fn unbounded() -> Self {

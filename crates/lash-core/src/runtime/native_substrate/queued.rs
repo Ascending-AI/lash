@@ -288,22 +288,12 @@ impl NativeQueuedWork {
         let reason = reason.to_string();
         let should_start_dispatcher = {
             let mut state = self.inner.scheduler.lock_state();
-            let demand = QueuedWorkDemand::new(session_id.clone(), reason);
-            if state.scheduled.insert(session_id.clone()) {
-                state.pending.push_back(demand);
-            } else {
-                state
-                    .rerun
-                    .entry(session_id)
-                    .and_modify(|rerun| rerun.merge(demand.clone()))
-                    .or_insert(demand);
-            }
-            if state.dispatcher_running {
-                false
-            } else {
-                state.dispatcher_running = true;
-                true
-            }
+            state.admit(
+                session_id.clone(),
+                QueuedWorkDemand::new(session_id, reason),
+                |retained, incoming| retained.merge(incoming),
+            );
+            state.claim_dispatcher()
         };
         {
             let state = self.inner.scheduler.lock_state();

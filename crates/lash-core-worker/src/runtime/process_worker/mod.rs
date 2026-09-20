@@ -1,7 +1,10 @@
 use crate::ProcessId;
 use crate::SessionId;
+use lash_core::runtime::coalescing_scheduler::{
+    CoalescingDispatcherGuard, CoalescingExtra, CoalescingSchedulerHandle, CoalescingSchedulerState,
+};
 use lash_sansio::sync::MutexExt;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use tokio::sync::Semaphore;
@@ -292,15 +295,23 @@ impl Drop for ProcessWorkerLifetime {
     }
 }
 
+type ProcessExecutionSchedulerState =
+    CoalescingSchedulerState<ProcessId, ProcessRecord, ProcessScanState>;
+
+/// The worklist paging state the process scheduler carries beside the shared
+/// coalescing protocol fields, under the same lock.
 #[derive(Default)]
-struct ProcessExecutionSchedulerState {
-    pending: VecDeque<ProcessRecord>,
-    scheduled: BTreeSet<ProcessId>,
-    rerun: BTreeMap<ProcessId, ProcessRecord>,
-    active: usize,
-    dispatcher_running: bool,
+struct ProcessScanState {
     worklist_scan: ProcessWorklistScan,
     rescan_requested: bool,
+}
+
+impl CoalescingExtra for ProcessScanState {
+    fn on_dispatcher_exit(&mut self) {
+        if let ProcessWorklistScan::Fetching(continuation) = &self.worklist_scan {
+            self.worklist_scan = ProcessWorklistScan::Ready(continuation.clone());
+        }
+    }
 }
 
 #[derive(Default)]
@@ -347,76 +358,43 @@ impl ProcessExecutionScheduler {
         }
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "this execution was counted active under the same lock"
-    )]
     fn complete_execution(&self, process_id: &ProcessId) {
-        let mut state = self.state.lock_recover();
-        state.active = state
-            .active
-            .checked_sub(1)
-            .expect("a completed process execution was active");
-        if let Some(record) = state.rerun.remove(process_id) {
-            state.pending.push_back(record);
-        } else {
-            state.scheduled.remove(process_id);
-        }
-        self.metrics.intake_depth(
-            super::WorkerSlotKind::Process,
-            state.pending.len() + state.rerun.len(),
-        );
-        drop(state);
-        self.changed.notify_one();
-    }
-}
-
-/// Clears the single-dispatcher latch if the fire-and-forget dispatcher
-/// unwinds. Without this guard, one panic permanently leaves queued work with
-/// no task allowed to drain it.
-struct ProcessExecutionDispatcherGuard {
-    scheduler: Arc<ProcessExecutionScheduler>,
-    armed: bool,
-}
-
-impl ProcessExecutionDispatcherGuard {
-    fn new(scheduler: Arc<ProcessExecutionScheduler>) -> Self {
-        Self {
-            scheduler,
-            armed: true,
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for ProcessExecutionDispatcherGuard {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        if let Some(mut state) = self.scheduler.state.try_lock_recover() {
-            state.dispatcher_running = false;
-            if let ProcessWorklistScan::Fetching(continuation) = &state.worklist_scan {
-                state.worklist_scan = ProcessWorklistScan::Ready(continuation.clone());
-            }
-            self.scheduler.changed.notify_one();
-            return;
-        }
-        let scheduler = Arc::clone(&self.scheduler);
-        crate::task::spawn(async move {
-            let mut state = scheduler.state.lock_recover();
-            state.dispatcher_running = false;
-            if let ProcessWorklistScan::Fetching(continuation) = &state.worklist_scan {
-                state.worklist_scan = ProcessWorklistScan::Ready(continuation.clone());
-            }
-            drop(state);
-            scheduler.changed.notify_one();
+        self.complete(process_id, |process_id| {
+            tracing::warn!(
+                process_id = process_id.as_str(),
+                event = "process_execution.scheduler_accounting",
+                "process execution completed without an active scheduler entry"
+            );
         });
     }
 }
+
+impl CoalescingSchedulerHandle for ProcessExecutionScheduler {
+    type Key = ProcessId;
+    type Work = ProcessRecord;
+    type Extra = ProcessScanState;
+
+    fn state(
+        &self,
+    ) -> &std::sync::Mutex<CoalescingSchedulerState<ProcessId, ProcessRecord, ProcessScanState>>
+    {
+        &self.state
+    }
+
+    fn changed(&self) -> &Arc<tokio::sync::Notify> {
+        &self.changed
+    }
+
+    fn slot_kind(&self) -> super::WorkerSlotKind {
+        super::WorkerSlotKind::Process
+    }
+
+    fn metrics(&self) -> &WorkerCapacityMetrics {
+        &self.metrics
+    }
+}
+
+type ProcessExecutionDispatcherGuard = CoalescingDispatcherGuard<ProcessExecutionScheduler>;
 
 struct ProcessExecutionTaskCompletion {
     process_id: ProcessId,
@@ -727,19 +705,15 @@ impl DurableProcessWorker {
         .min(self.config.native_substrate.worker_sweep.intake_page);
         let (fetch_initial_page, should_start_dispatcher) = {
             let mut state = self.execution_scheduler.state.lock_recover();
-            let fetch_initial_page = if matches!(state.worklist_scan, ProcessWorklistScan::Idle) {
-                state.worklist_scan = ProcessWorklistScan::Fetching(None);
-                Some(available)
-            } else {
-                state.rescan_requested = true;
-                None
-            };
-            let should_start_dispatcher = if state.dispatcher_running {
-                false
-            } else {
-                state.dispatcher_running = true;
-                true
-            };
+            let fetch_initial_page =
+                if matches!(state.extra.worklist_scan, ProcessWorklistScan::Idle) {
+                    state.extra.worklist_scan = ProcessWorklistScan::Fetching(None);
+                    Some(available)
+                } else {
+                    state.extra.rescan_requested = true;
+                    None
+                };
+            let should_start_dispatcher = state.claim_dispatcher();
             (fetch_initial_page, should_start_dispatcher)
         };
         // Coalesced until this call proves otherwise: an empty report from a
@@ -761,12 +735,13 @@ impl DurableProcessWorker {
                 Ok(page) => page,
                 Err(error) => {
                     let mut state = self.execution_scheduler.state.lock_recover();
-                    state.worklist_scan = if state.rescan_requested {
+                    state.extra.worklist_scan = if state.extra.rescan_requested {
                         ProcessWorklistScan::Ready(None)
                     } else {
                         ProcessWorklistScan::Idle
                     };
-                    let restart_dispatcher = should_start_dispatcher && state.rescan_requested;
+                    let restart_dispatcher =
+                        should_start_dispatcher && state.extra.rescan_requested;
                     if should_start_dispatcher && !restart_dispatcher {
                         state.dispatcher_running = false;
                     }
@@ -837,8 +812,8 @@ impl DurableProcessWorker {
                         tracing::warn!(error = %error, "process worklist scan remains incomplete after retry exhaustion");
                         {
                             let mut state = self.execution_scheduler.state.lock_recover();
-                            state.worklist_scan = ProcessWorklistScan::Ready(continuation);
-                            state.rescan_requested = true;
+                            state.extra.worklist_scan = ProcessWorklistScan::Ready(continuation);
+                            state.extra.rescan_requested = true;
                             state.dispatcher_running = false;
                         }
                         dispatcher_guard.disarm();
@@ -856,9 +831,7 @@ impl DurableProcessWorker {
 
             let idle = {
                 let state = self.execution_scheduler.state.lock_recover();
-                state.pending.is_empty()
-                    && state.active == 0
-                    && matches!(state.worklist_scan, ProcessWorklistScan::Idle)
+                state.queue_idle() && matches!(state.extra.worklist_scan, ProcessWorklistScan::Idle)
             };
 
             // An idle dispatcher waits instead of ending. Ending was what made
@@ -876,10 +849,10 @@ impl DurableProcessWorker {
             };
             if rescan_due {
                 let mut state = self.execution_scheduler.state.lock_recover();
-                if matches!(state.worklist_scan, ProcessWorklistScan::Idle) {
+                if matches!(state.extra.worklist_scan, ProcessWorklistScan::Idle) {
                     // A fresh scan from the start of the worklist: a row this
                     // dispatcher never saw is exactly the case being recovered.
-                    state.worklist_scan = ProcessWorklistScan::Ready(None);
+                    state.extra.worklist_scan = ProcessWorklistScan::Ready(None);
                 }
             }
         }
