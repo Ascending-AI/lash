@@ -252,7 +252,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
                 && message
                     .parts
                     .iter()
-                    .any(|part| part.tool_call_id().as_deref() == Some("lookup-1"))
+                    .any(|part| part.tool_call_id() == Some("lookup-1"))
         })
         .expect("stored interleaved assistant message");
     assert_eq!(

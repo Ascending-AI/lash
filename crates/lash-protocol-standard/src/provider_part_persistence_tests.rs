@@ -222,11 +222,8 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
     assert_eq!(tool_calling_response.provider_calls, 2);
 
     let persisted_tool_call = &tool_calling_response.parts[2];
-    assert_eq!(
-        persisted_tool_call.tool_call_id().as_deref(),
-        Some("call-1")
-    );
-    assert_eq!(persisted_tool_call.tool_name().as_deref(), Some("lookup"));
+    assert_eq!(persisted_tool_call.tool_call_id(), Some("call-1"));
+    assert_eq!(persisted_tool_call.tool_name(), Some("lookup"));
 
     let expected_reasoning_meta = ProviderReasoningReplay {
         item_id: Some("reasoning-1".to_string()),

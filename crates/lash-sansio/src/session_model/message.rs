@@ -163,14 +163,14 @@ pub enum MessageOrigin {
 /// tool-facing text, and `prune_state` tracks lifecycle within the
 /// context window.
 ///
-/// Serialization is internally tagged on `kind` so the durable JSON
-/// stays the flat, readable shape every stored message already uses
-/// (`{"id": …, "kind": "Text", "content": …, "prune_state": …}`).
-/// Deserialization accepts that same flat shape and rejects pairings
-/// the constructors cannot produce — e.g. a `Text` part carrying a
-/// `tool_call_id` — with [`InvalidPartCombination`].
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-#[serde(tag = "kind")]
+/// Serialization writes the same flat object the struct wrote —
+/// `{"id": …, "kind": "Text", "content": …, "prune_state": …}` with
+/// fields in the original order — via [`FlatPartRef`], so durable
+/// payloads stay byte-identical. Deserialization accepts that same flat
+/// shape and rejects pairings the constructors cannot produce — e.g. a
+/// `Text` part carrying a `tool_call_id` — with
+/// [`InvalidPartCombination`].
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Part {
     /// Ordinary response text; `response_meta` carries provider-assigned
@@ -178,7 +178,6 @@ pub enum Part {
     Text {
         id: String,
         content: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         response_meta: Option<ResponseTextMeta>,
         prune_state: PruneState,
     },
@@ -189,11 +188,8 @@ pub enum Part {
     Attachment {
         id: String,
         content: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         attachment: Option<PartAttachment>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_name: Option<String>,
         prune_state: PruneState,
     },
@@ -220,7 +216,6 @@ pub enum Part {
     Prose {
         id: String,
         content: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         response_meta: Option<ResponseTextMeta>,
         prune_state: PruneState,
     },
@@ -233,7 +228,6 @@ pub enum Part {
         content: String,
         tool_call_id: String,
         tool_name: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_replay: Option<ProviderReplayMeta>,
         prune_state: PruneState,
     },
@@ -257,7 +251,6 @@ pub enum Part {
     Reasoning {
         id: String,
         content: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         reasoning_meta: Option<ProviderReasoningReplay>,
         prune_state: PruneState,
     },
@@ -443,6 +436,48 @@ impl FlatPart {
             },
         };
         Ok(part)
+    }
+}
+
+/// The borrowed counterpart of [`FlatPart`], in the same declaration
+/// order the pre-enum struct used. [`Part`]'s `Serialize` impl writes
+/// through it so the emitted bytes — including field order — are
+/// identical to what the flat struct produced for the same value.
+#[derive(serde::Serialize)]
+struct FlatPartRef<'a> {
+    id: &'a str,
+    kind: PartKind,
+    content: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachment: Option<&'a PartAttachment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_replay: Option<&'a ProviderReplayMeta>,
+    prune_state: &'a PruneState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_meta: Option<&'a ProviderReasoningReplay>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_meta: Option<&'a ResponseTextMeta>,
+}
+
+impl serde::Serialize for Part {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        FlatPartRef {
+            id: self.id(),
+            kind: self.kind(),
+            content: self.content(),
+            attachment: self.attachment(),
+            tool_call_id: self.tool_call_id(),
+            tool_name: self.tool_name(),
+            tool_replay: self.tool_replay(),
+            prune_state: self.prune_state(),
+            reasoning_meta: self.reasoning_meta(),
+            response_meta: self.response_meta(),
+        }
+        .serialize(serializer)
     }
 }
 

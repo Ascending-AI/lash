@@ -883,7 +883,7 @@ mod tests {
                     );
                     match actual.kind() {
                         PartKind::ToolCall => assert_eq!(
-                            actual.tool_name().as_deref(),
+                            actual.tool_name(),
                             Some(marker.as_str()),
                             "tool marker at {position} in sequence {encoded} len {len}"
                         ),
@@ -1509,8 +1509,8 @@ mod tests {
         let part = &parts[0];
         assert!(matches!(part.kind(), PartKind::Attachment));
         assert_eq!(part.content(), "");
-        assert_eq!(part.tool_call_id().as_deref(), Some("call-9"));
-        assert_eq!(part.tool_name().as_deref(), Some("screenshot"));
+        assert_eq!(part.tool_call_id(), Some("call-9"));
+        assert_eq!(part.tool_name(), Some("screenshot"));
         let part_attachment = part.attachment().expect("attachment present");
         assert_eq!(part_attachment.source, attachment);
     }
