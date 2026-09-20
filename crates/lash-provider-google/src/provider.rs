@@ -467,13 +467,13 @@ impl GoogleOAuthProvider {
         let inline_contents =
             self.build_contents_with_attachment_parts(&req, &inline_attachment_parts)?;
 
-        let (attachment_parts, used_uploaded_files) = self
+        let (attachment_parts, uploaded_keys) = self
             .prepare_attachment_parts(&access_token, &refresh_token, project_id.as_deref(), &req)
             .await?;
-        let contents = if used_uploaded_files {
-            self.build_contents_with_attachment_parts(&req, &attachment_parts)?
-        } else {
+        let contents = if uploaded_keys.is_empty() {
             inline_contents.clone()
+        } else {
+            self.build_contents_with_attachment_parts(&req, &attachment_parts)?
         };
 
         let request = Self::build_request(self, &req, contents, project_id.as_deref())?;
@@ -491,7 +491,17 @@ impl GoogleOAuthProvider {
             .await
         {
             Ok(response) => Ok(response),
-            Err(err) if used_uploaded_files && Self::should_retry_inline(&err) => {
+            Err(err) if !uploaded_keys.is_empty() && Self::should_retry_inline(&err) => {
+                // The error does not name which file reference the API rejected,
+                // so every cached URI this request relied on is suspect; evict
+                // them all rather than re-attempting a dead URI on the next
+                // request.
+                {
+                    let mut cache = Self::uploaded_attachment_cache().lock().await;
+                    for key in &uploaded_keys {
+                        cache.remove(key);
+                    }
+                }
                 let inline_request =
                     Self::build_request(self, &req, inline_contents, project_id.as_deref())?;
                 self.execute_request(
