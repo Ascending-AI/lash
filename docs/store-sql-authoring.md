@@ -222,6 +222,16 @@ pub(crate) fn effect_sql(schema: Schema) -> &'static EffectSql { &EFFECT_SQL[sch
 instead. Call sites read `sql.group.select_by_key.sql()`; `.name()` is the
 statement's reported name for tracing and store metrics.
 
+A family that lives on **one** SQLite connection — the process registry's own
+database — renders once with `Dialect::sqlite_unqualified()` instead, which
+addresses its tables the way they have always been addressed. Keep that: the
+rendered text is what a statement's `INDEXED BY` plan assertions were measured
+against, and the multi-schema `Schema` machinery buys nothing for a family
+reached through one name.
+
+Attach the vocabulary (§3) to the dialect here, once, if the family's
+statements use tokens: `Dialect::postgres().with_vocabulary(PROCESS_LIFECYCLE)`.
+
 `render` panics on a malformed neutral statement, naming it. That runs once, at
 first use, so the defect is a startup failure rather than a query that reaches a
 database.
