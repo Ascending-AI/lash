@@ -551,17 +551,31 @@ impl LashRuntime {
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         let services = self.runtime_session_services()?;
         let compaction_boundary = scoped_effect_controller.scope_id().to_string();
-        let Some(plugin_session) = self.session.as_ref().map(|s| Arc::clone(s.plugins())) else {
+        let Some(session) = self.session.as_ref() else {
             return Err(PluginOperationInvokeError::Unknown(
                 "runtime session not available".to_string(),
             ));
         };
+        let plugin_session = Arc::clone(session.plugins());
+        let state = self
+            .read_view()
+            .map_err(|error| PluginOperationInvokeError::Unknown(error.to_string()))?;
+        let system_prompt = Self::compaction_system_prompt(
+            session.context_prompt_contributions().to_vec(),
+            Arc::clone(&plugin_session),
+            Arc::clone(&services),
+            self.state.session_id.clone(),
+            state.clone(),
+            self.protocol_turn_options().clone(),
+            self.host.core.prompt.prompt.clone(),
+            self.state.effective_policy().prompt.clone(),
+        )
+        .await?;
         let ctx = crate::CompactionContext {
             session_id: self.state.session_id.clone(),
-            state: self
-                .read_view()
-                .map_err(|error| PluginOperationInvokeError::Unknown(error.to_string()))?,
+            state,
             instructions,
+            system_prompt,
             sessions: services.state_service(),
             session_lifecycle: services.lifecycle_service(),
             session_graph: services.graph_service(),
@@ -573,38 +587,125 @@ impl LashRuntime {
                 None,
             ),
         };
-        let Some(compaction) = plugin_session.compact_context(&ctx).await.map_err(|err| {
-            PluginOperationInvokeError::Unknown(format!("context compaction failed: {err}"))
-        })?
-        else {
-            return Ok(false);
-        };
-        let frame_key = compaction_frame_key(
-            &self.state.session_id,
-            &compaction_boundary,
-            self.state
-                .current_frame_node_id
-                .as_deref()
-                .unwrap_or_default(),
-        );
-        let result = self
-            .open_agent_frame(
-                crate::OpenAgentFrameRequest::new(frame_key, crate::AgentFrameReason::compaction())
+        let outcome = async {
+            let Some(compaction) = plugin_session.compact_context(&ctx).await.map_err(|err| {
+                PluginOperationInvokeError::Unknown(format!("context compaction failed: {err}"))
+            })?
+            else {
+                return Ok(false);
+            };
+            let frame_key = compaction_frame_key(
+                &self.state.session_id,
+                &compaction_boundary,
+                self.state
+                    .current_frame_node_id
+                    .as_deref()
+                    .unwrap_or_default(),
+            );
+            let result = self
+                .open_agent_frame(
+                    crate::OpenAgentFrameRequest::new(
+                        frame_key,
+                        crate::AgentFrameReason::compaction(),
+                    )
                     .with_initial_nodes(compaction.initial_nodes),
-            )
-            .await
-            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        if result.opened {
-            self.stamp_live_plugin_state();
+                )
+                .await
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            if result.opened {
+                self.stamp_live_plugin_state();
+            }
+            Ok(result.opened)
         }
-        // Administrative compaction has no owning turn to settle usage at a
-        // commit (`direct_outcome.rs` stages into the shared ledger only).
-        // Mirror `park()`: if the compaction left pending graph nodes or
-        // usage, persist them at this explicit boundary with the same
-        // content-derived operation so a retried compact_context reuses
-        // byte-identical row identities.
+        .await;
+        // Usage settlement runs on every exit past the reload gate, not only
+        // a successful frame switch: a compaction that produced no summary or
+        // failed outright can still have staged billed usage into the shared
+        // ledger, and this boundary is the only place it persists.
+        let settlement = self.settle_pending_compaction_usage().await;
+        match (outcome, settlement) {
+            (Ok(opened), Ok(())) => Ok(opened),
+            (Ok(_), Err(err)) | (Err(err), Ok(())) => Err(err),
+            (Err(err), Err(settle_err)) => Err(PluginOperationInvokeError::Unknown(format!(
+                "{err}; usage settlement also failed: {settle_err}"
+            ))),
+        }
+    }
+
+    /// Renders the system prompt a compaction completion carries (`FIG-3374`).
+    ///
+    /// A turn resolves capability contributions, the core layer, the session
+    /// layer, and the turn layer (`turn_driver/tool_catalog.rs`
+    /// `build_prompt`). Compaction is one direct completion, not a turn: it
+    /// resolves the same stack minus the turn layer, with an empty execution
+    /// prompt and an empty tool list, so every tool-gated contribution drops
+    /// — the request ships no tools and could never honor them. Plugin prompt
+    /// hooks see the session's current read view, and a failing hook fails
+    /// the compaction exactly as it would fail a turn's prompt build.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "prompt assembly needs each resolved layer and the hook context pieces as explicit owned inputs so the recovery path can defer them into a 'static provider"
+    )]
+    pub(crate) async fn compaction_system_prompt(
+        context_contributions: Vec<crate::PromptContribution>,
+        plugin_session: Arc<crate::PluginSession>,
+        services: Arc<RuntimeSessionServices>,
+        session_id: crate::SessionId,
+        state: crate::SessionReadView,
+        protocol_turn_options: crate::ProtocolTurnOptions,
+        core_prompt: crate::PromptLayer,
+        policy_prompt: crate::PromptLayer,
+    ) -> Result<Option<Arc<str>>, PluginOperationInvokeError> {
+        let mut capability_prompt = crate::PromptLayer::new();
+        for contribution in context_contributions {
+            capability_prompt.add_contribution(contribution);
+        }
+        for contribution in plugin_session
+            .collect_prompt_contributions(crate::PromptHookContext {
+                session_id,
+                sessions: services.state_service(),
+                state,
+                protocol_turn_options,
+                turn_context: crate::TurnContext::new(),
+            })
+            .await
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?
+        {
+            capability_prompt.add_contribution(contribution);
+        }
+        let resolved =
+            crate::resolve_prompt_layers([&capability_prompt, &core_prompt, &policy_prompt]);
+        let contributions = resolved
+            .contributions
+            .into_iter()
+            .filter(|contribution| contribution.gate.is_empty())
+            .collect();
+        let rendered = lash_sansio::build_prompt(crate::PromptBuildInput {
+            template_fingerprint: crate::prompt_template_fingerprint(&resolved.template),
+            template: resolved.template,
+            execution_prompt_fingerprint: crate::prompt_text_fingerprint(""),
+            execution_prompt: Arc::from(""),
+            tool_names_fingerprint: lash_sansio::prompt_tool_names_fingerprint(&[]),
+            tool_names: Arc::new(Vec::new()),
+            contributions: lash_sansio::PromptContributionSet::new(contributions),
+        });
+        let system_prompt = rendered.system_prompt.trim();
+        Ok((!system_prompt.is_empty()).then(|| Arc::from(system_prompt)))
+    }
+
+    /// Persists pending graph nodes and staged usage an administrative
+    /// compaction left behind (`FIG-3374`).
+    ///
+    /// Administrative compaction has no owning turn to settle usage at a
+    /// commit (`direct_outcome.rs` stages into the shared ledger only), so
+    /// `compact_context` runs this on every exit past the reload gate —
+    /// including the no-summary and error paths. Mirrors `park()`: pending
+    /// state persists at this explicit boundary with the same content-derived
+    /// operation, so a retried compact_context reuses byte-identical row
+    /// identities.
+    async fn settle_pending_compaction_usage(&mut self) -> Result<(), PluginOperationInvokeError> {
         let Some(store) = self.services.store.clone() else {
-            return Ok(result.opened);
+            return Ok(());
         };
         let pending_usage = self
             .shared_token_ledger
@@ -612,51 +713,72 @@ impl LashRuntime {
             .iter()
             .map(|pending| pending.entry.clone())
             .collect::<Vec<_>>();
-        if !self.state.pending_graph_commit().nodes().is_empty() || !pending_usage.is_empty() {
-            let proposed = super::lifecycle::initial_park_preview(
-                &self.state,
-                &pending_usage,
+        if self.state.pending_graph_commit().nodes().is_empty() && pending_usage.is_empty() {
+            return Ok(());
+        }
+        let proposed = super::lifecycle::initial_park_preview(
+            &self.state,
+            &pending_usage,
+            self.host.core.durability.commit_budget,
+        )
+        .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        let operation = super::lifecycle::initial_park_operation(&proposed)
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        let staged =
+            session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        for delta in staged.deltas() {
+            crate::store::merge_token_ledger_entry_checked(
+                &mut self.state.token_ledger,
+                delta.entry.clone(),
+            )
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        }
+        let (commit, persisted_node_ids) =
+            crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
+                &mut self.state,
+                staged.deltas(),
+                operation,
                 self.host.core.durability.commit_budget,
             )
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-            let operation = super::lifecycle::initial_park_operation(&proposed)
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-            let staged =
-                session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
-                    .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-            for delta in staged.deltas() {
-                crate::store::merge_token_ledger_entry_checked(
-                    &mut self.state.token_ledger,
-                    delta.entry.clone(),
-                )
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+        let commit_result = commit_runtime_state_with_fresh_session_execution_lease(
+            store,
+            commit,
+            &self.runtime_lease_owner,
+            &self.runtime_lease_executor_id,
+            self.host.core.control.lease_timings,
+            Arc::clone(&self.host.core.clock),
+        )
+        .await;
+        let commit_result = match commit_result {
+            Ok(result) => result,
+            Err(err) => {
+                // The frame switch and the staged usage merge above live only
+                // in resident state until this commit lands. On failure,
+                // discard them and reload the durable head: the facade must
+                // not publish a mutation that never persisted. The staged
+                // pending rows are discarded too — the journaled completion
+                // effect re-records the billed usage when a retry replays it,
+                // so retaining them would double-merge the same usage.
+                staged.discard_staged();
+                self.invalidate_resident_session_state();
+                if let Err(reload_err) = self.reload_invalidated_resident_session_state().await {
+                    return Err(PluginOperationInvokeError::Unknown(format!(
+                        "{err}; resident-state reload after commit failure also failed: \
+                         {reload_err}"
+                    )));
+                }
+                return Err(PluginOperationInvokeError::Unknown(err.to_string()));
             }
-            let (commit, persisted_node_ids) =
-                crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
-                    &mut self.state,
-                    staged.deltas(),
-                    operation,
-                    self.host.core.durability.commit_budget,
-                )
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-            let commit_result = commit_runtime_state_with_fresh_session_execution_lease(
-                Arc::clone(&store),
-                commit,
-                &self.runtime_lease_owner,
-                &self.runtime_lease_executor_id,
-                self.host.core.control.lease_timings,
-                Arc::clone(&self.host.core.clock),
-            )
-            .await
+        };
+        let confirmed_usage = commit_result.committed_usage_delta_identities.clone();
+        staged
+            .confirm_identities(&confirmed_usage)
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-            let confirmed_usage = commit_result.committed_usage_delta_identities.clone();
-            staged
-                .confirm_identities(&confirmed_usage)
-                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-            self.state.apply_persisted_commit_result(commit_result);
-            self.state.mark_node_ids_persisted(persisted_node_ids);
-        }
-        Ok(result.opened)
+        self.state.apply_persisted_commit_result(commit_result);
+        self.state.mark_node_ids_persisted(persisted_node_ids);
+        Ok(())
     }
 
     pub fn session_policy(&self) -> SessionPolicy {

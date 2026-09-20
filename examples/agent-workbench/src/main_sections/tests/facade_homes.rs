@@ -452,6 +452,7 @@ fn workbench_rolling_history_projects_the_prompt_under_its_session_window() {
                     "direct completions are unavailable in this test".to_string(),
                 ))
             }),
+            system_prompt: None,
         };
         let prepared = lash::plugins::PreparedContext {
             messages: messages.into(),

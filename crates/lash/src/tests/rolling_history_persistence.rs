@@ -192,21 +192,35 @@ fn response_with_usage(text: &str, input_tokens: i64) -> LlmResponse {
 }
 
 fn rolling_history_provider(responses: Vec<LlmResponse>) -> ProviderHandle {
+    rolling_history_provider_counted(responses).0
+}
+
+fn rolling_history_provider_counted(
+    responses: Vec<LlmResponse>,
+) -> (ProviderHandle, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
     let responses = Arc::new(TokioMutex::new(VecDeque::from(responses)));
-    crate::testing::TestProvider::builder()
+    let provider = crate::testing::TestProvider::builder()
         .kind("rolling-history-persistence-test")
-        .complete(move |_request| {
+        .complete({
             let responses = Arc::clone(&responses);
-            async move {
-                Ok(responses
-                    .lock()
-                    .await
-                    .pop_front()
-                    .expect("queued rolling-history response"))
+            let calls = Arc::clone(&calls);
+            move |_request| {
+                let responses = Arc::clone(&responses);
+                let calls = Arc::clone(&calls);
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(responses
+                        .lock()
+                        .await
+                        .pop_front()
+                        .expect("queued rolling-history response"))
+                }
             }
         })
         .build()
-        .into_handle()
+        .into_handle();
+    (provider, calls)
 }
 
 fn sqlite_head_and_max_generation(
@@ -1634,6 +1648,213 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
     assert_eq!(
         replies, 1,
         "exactly one durable reply node expected: {described:?}"
+    );
+    Ok(())
+}
+
+/// Fails `commit_runtime_state` while armed so a test can inject the
+/// settlement-commit failure that used to leave a compacted resident state
+/// advanced with its usage merely staged (FIG-3374 review).
+struct FailArmedCommitStore {
+    inner: Arc<dyn lash_core::RuntimePersistence>,
+    armed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait]
+impl lash_core::store::RuntimePersistenceDecorator for FailArmedCommitStore {
+    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn commit_runtime_state(
+        &self,
+        commit: lash_core::store::RuntimeCommit,
+    ) -> std::result::Result<lash_core::store::RuntimeCommitReceipt, lash_core::StoreError> {
+        if self.armed.swap(false, Ordering::SeqCst) {
+            return Err(lash_core::StoreError::Backend(
+                "injected compaction settlement commit failure".to_string(),
+            ));
+        }
+        self.inner.commit_runtime_state(commit).await
+    }
+}
+
+struct FailArmedCommitFactory {
+    inner: lash_sqlite_store::SqliteSessionStoreFactory,
+    armed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait]
+impl lash_core::SessionStoreFactory for FailArmedCommitFactory {
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+        self.inner.open_existing_store_by_id(session_id).await
+    }
+
+    async fn session_was_deleted(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<bool, String> {
+        self.inner.session_was_deleted(session_id).await
+    }
+
+    async fn delete_session(
+        &self,
+        session_id: &SessionId,
+    ) -> lash_core::store::MaintenanceResult<lash_core::store::SessionBlobReclaimReport> {
+        self.inner.delete_session(session_id).await
+    }
+
+    async fn create_store(
+        &self,
+        request: &lash_core::SessionStoreCreateRequest,
+    ) -> std::result::Result<Arc<dyn lash_core::RuntimePersistence>, lash_core::StoreError> {
+        Ok(Arc::new(FailArmedCommitStore {
+            inner: self.inner.create_store(request).await?,
+            armed: Arc::clone(&self.armed),
+        }))
+    }
+}
+
+#[async_trait]
+impl lash_core::AttachmentRootSet for FailArmedCommitFactory {
+    async fn live_attachment_refs(
+        &self,
+        cutoff: u64,
+    ) -> std::result::Result<
+        std::collections::BTreeSet<lash_core::AttachmentId>,
+        lash_core::StoreError,
+    > {
+        self.inner.live_attachment_refs(cutoff).await
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &lash_core::AttachmentId,
+        cutoff: u64,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        self.inner.has_live_attachment_ref(id, cutoff).await
+    }
+}
+
+#[tokio::test]
+async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_on_retry()
+-> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let session_id = "rolling-history-commit-failure";
+    let effect_host = Arc::new(
+        lash_sqlite_store::SqliteEffectHost::open(&dir.path().join("effects.sqlite"))
+            .await
+            .expect("open SQLite effect host"),
+    );
+    let commit_failure = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (provider, provider_calls) = rolling_history_provider_counted(vec![
+        response_with_usage("first response", 1),
+        response_with_usage("second response", 1),
+        response_with_usage("rolled-back-then-summarized", 1),
+        // A spare covers the case where the retry makes a fresh provider call
+        // rather than replaying the journaled effect.
+        response_with_usage("rolled-back-then-summarized", 1),
+    ]);
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(model_spec("rolling-history-model", None, 40_000))
+        .plugin(Arc::new(
+            lash_plugin_rolling_history::RollingHistoryPluginFactory::default(),
+        ))
+        .store_factory(Arc::new(FailArmedCommitFactory {
+            inner: lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path().join("sessions")),
+            armed: Arc::clone(&commit_failure),
+        }))
+        .effect_host(effect_host.clone())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    session
+        .turn(TurnInput::text("first request"))
+        .turn_id("rolling-history-commit-failure-one")
+        .run()
+        .await?;
+    session
+        .turn(TurnInput::text("second request"))
+        .turn_id("rolling-history-commit-failure-two")
+        .run()
+        .await?;
+    let shared_scope = effect_host
+        .scoped_static(lash_core::ExecutionScope::runtime_operation(
+            "rolling-history-commit-failure:admin",
+        ))?
+        .expect("SQLite host supplies the admin scope");
+    let usage_before = session.usage_report().usage.usage.output_tokens;
+    let message_count_before = session.read_view().messages().len();
+
+    commit_failure.store(true, Ordering::SeqCst);
+    let err = session
+        .admin()
+        .state()
+        .compact_context(Some("summarize".to_string()), shared_scope.clone())
+        .await
+        .expect_err("the settlement commit failure must surface");
+    assert!(
+        err.to_string()
+            .contains("injected compaction settlement commit failure"),
+        "unexpected error: {err}"
+    );
+    // The rejected commit must not leak into the resident view: the frame
+    // switch rolls back to the durable head, so the pre-compaction history is
+    // still what the facade publishes.
+    let view = session.read_view();
+    assert_eq!(view.messages().len(), message_count_before);
+    assert!(
+        view.messages()
+            .iter()
+            .all(|message| !message.parts[0].content().contains("summarized")),
+        "a rolled-back compaction must not leave its summary resident: {:?}",
+        view.messages()
+            .iter()
+            .map(|message| message.parts[0].content().to_string())
+            .collect::<Vec<_>>()
+    );
+    // The staged usage rows are discarded with the rolled-back merge — the
+    // journaled completion effect re-records them when a retry replays it —
+    // so the report returns to the pre-compaction total.
+    assert_eq!(
+        session.usage_report().usage.usage.output_tokens,
+        usage_before,
+        "a rolled-back settlement must not retain the uncommitted usage merge"
+    );
+
+    let calls_before_retry = provider_calls.load(Ordering::SeqCst);
+
+    // A retry re-merges the still-staged usage exactly once: the durable head
+    // reload discarded the uncommitted merge, so the settled ledger grows by
+    // the summarizer's usage, not twice it.
+    assert!(
+        session
+            .admin()
+            .state()
+            .compact_context(Some("summarize".to_string()), shared_scope)
+            .await?,
+        "the retried compaction commits after the injected failure clears"
+    );
+    let view = session.read_view();
+    assert!(
+        view.messages()
+            .iter()
+            .any(|message| message.parts[0].content().contains("summarized")),
+        "the retried compaction's summary lands: {:?}",
+        view.messages()
+            .iter()
+            .map(|message| message.parts[0].content().to_string())
+            .collect::<Vec<_>>()
+    );
+    let replayed = provider_calls.load(Ordering::SeqCst) == calls_before_retry;
+    assert_eq!(
+        session.usage_report().usage.usage.output_tokens,
+        usage_before + 1,
+        "the retried compaction settles the summarizer's billed usage exactly \
+         once (replayed={replayed})"
     );
     Ok(())
 }

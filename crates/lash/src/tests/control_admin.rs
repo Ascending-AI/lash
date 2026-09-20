@@ -279,6 +279,109 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     Ok(())
 }
 
+struct PromptAssertingCompactor;
+
+#[async_trait]
+impl lash_core::facade_support::ContextCompactor for PromptAssertingCompactor {
+    fn id(&self) -> &'static str {
+        "test.prompt_asserting_compactor"
+    }
+
+    async fn compact(
+        &self,
+        ctx: &lash_core::facade_support::CompactionContext<'_>,
+    ) -> std::result::Result<
+        Option<lash_core::facade_support::ContextCompaction>,
+        lash_core::facade_support::ContextError,
+    > {
+        // FIG-3374: the direct completion carries the same prompt stack a
+        // turn on this session would resolve — capability (context + plugin
+        // hook), core, and session layers — minus the turn layer and every
+        // tool-gated contribution, since the request ships no tools.
+        let prompt = ctx
+            .system_prompt
+            .as_deref()
+            .expect("compaction request carries the resolved prompt stack");
+        for marker in [
+            "core-layer-guidance-marker",
+            "plugin-hook-guidance-marker",
+            "session-layer-guidance-marker",
+        ] {
+            assert!(
+                prompt.contains(marker),
+                "system prompt must contain `{marker}`: {prompt}"
+            );
+        }
+        assert!(
+            !prompt.contains("tool-gated-guidance-marker"),
+            "a tool-gated contribution cannot ship on a no-tools request: {prompt}"
+        );
+        Ok(Some(lash_core::facade_support::ContextCompaction::new(
+            vec![lash_core::SessionAppendNode::message(
+                lash_core::PluginMessage::text(
+                    lash_core::MessageRole::Assistant,
+                    "Compaction summary:\nprompt stack pinned",
+                )
+                .with_origin(lash_core::MessageOrigin::Plugin {
+                    plugin_id: "test_prompt_compactor".to_string(),
+                    transient: false,
+                }),
+            )],
+        )))
+    }
+}
+
+#[tokio::test]
+async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result<()> {
+    let core = explicit_ephemeral_facets(
+        LashCore::standard_builder(crate::TurnBudget::Unbounded)
+            .instructions("core-layer-guidance-marker"),
+    )
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(Arc::new(StaticPluginFactory::new(
+        "test-prompt-compactor",
+        lash_core::facade_support::PluginSpec::new()
+            .with_context_compactor(100, Arc::new(PromptAssertingCompactor))
+            .with_prompt_contributor(Arc::new(|_ctx| {
+                Box::pin(async {
+                    Ok(vec![
+                        lash_core::PromptContribution::guidance(
+                            "hook",
+                            "plugin-hook-guidance-marker",
+                        ),
+                        lash_core::PromptContribution::guidance(
+                            "gated",
+                            "tool-gated-guidance-marker",
+                        )
+                        .requires_tool("absent_tool"),
+                    ])
+                })
+            })),
+    )))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("compact-prompt-stack")
+        .instructions("session-layer-guidance-marker")
+        .open()
+        .await?;
+    session
+        .turn(TurnInput::text("content to compact"))
+        .run()
+        .await?;
+    assert!(
+        session
+            .admin()
+            .state()
+            .compact_context(
+                None,
+                runtime_operation_scope(&core, "compact-prompt-stack-test")
+            )
+            .await?
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))

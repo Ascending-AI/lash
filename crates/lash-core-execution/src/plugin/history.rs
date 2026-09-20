@@ -6,9 +6,19 @@
 pub use lash_core_store::session_read_view::SessionReadView;
 
 use crate::SessionId;
+use futures_util::future::BoxFuture;
 use std::sync::Arc;
 
 use super::PluginError;
+
+/// Lazily renders the system prompt a compaction completion carries.
+///
+/// Deferred so plugin prompt hooks run only when a compaction actually
+/// happens — an in-transform overflow recovery is rare, and resolving the
+/// prompt eagerly on every turn prepare would fire prompt hooks for prompts
+/// that are never sent.
+pub type CompactionSystemPrompt =
+    Arc<dyn Fn() -> BoxFuture<'static, Result<Option<Arc<str>>, PluginError>> + Send + Sync>;
 
 /// Context passed to a turn-context transform.
 #[derive(Clone)]
@@ -22,6 +32,12 @@ pub struct TurnTransformContext<'run> {
     pub session_graph: Arc<dyn super::SessionGraphService>,
     pub scoped_effect_controller: crate::ScopedEffectController<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
+    /// The system prompt an in-transform recovery completion carries: the
+    /// same capability, core, and session prompt layers a turn on this
+    /// session would resolve, minus the turn layer and every tool-gated
+    /// contribution. Lazy — resolved only if recovery runs; `None` when this
+    /// session cannot build a recovery prompt at all.
+    pub system_prompt: Option<CompactionSystemPrompt>,
 }
 
 /// Context passed to an explicit compactor.
@@ -35,6 +51,12 @@ pub struct CompactionContext<'run> {
     pub session_graph: Arc<dyn super::SessionGraphService>,
     pub scoped_effect_controller: crate::ScopedEffectController<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
+    /// The system prompt the compaction completion carries: the same
+    /// capability, core, and session prompt layers a turn on this session
+    /// would resolve, minus the turn layer and every tool-gated contribution
+    /// (the request ships no tools, so a gated contribution could never be
+    /// honored). `None` when the resolved stack renders empty.
+    pub system_prompt: Option<Arc<str>>,
 }
 
 #[derive(Debug, thiserror::Error, Clone)]

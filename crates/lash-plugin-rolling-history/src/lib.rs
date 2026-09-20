@@ -449,13 +449,13 @@ pub(crate) fn prepare_compaction_request(
     let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(state.clone());
     snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
     // The plugin's own overflow-recovery records are control state, not
-    // conversation, and they must never ride into a compaction child's read
-    // state. A child that still derives a pending recovery from them runs the
-    // recovery policy on its own prepare-turn and spawns another summarizer
-    // child: an unbounded `-compaction:` recursion rather than one summary
-    // (FIG-3107). Durable history keeps every record; only the summarizer's
-    // read state drops them, and the prefix a cut point hands the ordinary
-    // compaction policy cannot resurrect a marker its terminal record closed.
+    // conversation, and they must never ride into the summarizer request's
+    // read state. A request that still derived a pending recovery from them
+    // would feed a recovery marker back into the summarizer instead of
+    // answering the recovery it came from (FIG-3107). Durable history keeps
+    // every record; only the summarizer's read state drops them, and the
+    // prefix a cut point hands the ordinary compaction policy cannot
+    // resurrect a marker its terminal record closed.
     prefix_messages.retain(|message| recovery_record_payload(message).is_none());
     strip_all_attachments(&mut prefix_messages, COMPACTED_ATTACHMENT_PLACEHOLDER);
     snapshot.set_execution_state_snapshot(None);
@@ -491,24 +491,6 @@ fn prompt_tail_window(messages: &[Message], cut_point: usize) -> Vec<Message> {
     out
 }
 
-/// The system prompt a compaction request carries: the session's own prompt
-/// layer resolved against an empty execution/tool context, matching the
-/// no-tools, no-provider overlay the summarizer always ran under.
-fn compaction_instructions(snapshot: &SessionSnapshot) -> Option<Arc<str>> {
-    let resolved = lash_sansio::resolve_prompt_layers([&snapshot.policy.prompt]);
-    let rendered = lash_sansio::build_prompt(lash_sansio::PromptBuildInput {
-        template_fingerprint: lash_sansio::prompt_template_fingerprint(&resolved.template),
-        template: resolved.template,
-        execution_prompt_fingerprint: lash_sansio::prompt_text_fingerprint(""),
-        execution_prompt: Arc::from(""),
-        tool_names_fingerprint: lash_sansio::prompt_tool_names_fingerprint(&[]),
-        tool_names: Arc::new(Vec::new()),
-        contributions: lash_sansio::PromptContributionSet::new(resolved.contributions),
-    });
-    let system_prompt = rendered.system_prompt.trim();
-    (!system_prompt.is_empty()).then(|| Arc::from(system_prompt))
-}
-
 /// One direct LLM completion on the parent's own session (FIG-3374).
 ///
 /// The request keeps the durable identities the child-session lane derived:
@@ -524,6 +506,7 @@ async fn summarize_compaction_prefix(
     instructions: Option<&str>,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
     scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
+    system_prompt: Option<Arc<str>>,
 ) -> Result<Option<String>, ContextError> {
     if prefix_messages.is_empty() {
         return Ok(None);
@@ -550,7 +533,7 @@ async fn summarize_compaction_prefix(
     rendered.messages.push(directive);
 
     let request = lash_core::LlmRequest {
-        instructions: compaction_instructions(&snapshot),
+        instructions: system_prompt,
         model: snapshot.policy.model.id.clone(),
         messages: rendered.messages,
         resolved_stored: Default::default(),
@@ -579,6 +562,22 @@ async fn summarize_compaction_prefix(
         .direct_llm_completion_caused_by(request, "compaction", caused_by)
         .await
         .map_err(ContextError::from)?;
+    match completion.response.terminal_reason {
+        lash_sansio::llm::types::LlmTerminalReason::Stop
+        | lash_sansio::llm::types::LlmTerminalReason::Unknown => {}
+        reason => {
+            return Err(ContextError::Pipeline(format!(
+                "compaction summary ended with terminal reason `{}` ({}); \
+                 refusing to seed a durable frame from an incomplete summary",
+                reason.code(),
+                completion
+                    .response
+                    .terminal_diagnostic
+                    .as_deref()
+                    .unwrap_or("no provider diagnostic"),
+            )));
+        }
+    }
     let summary = completion.response.full_text().trim().to_string();
     if summary.is_empty() {
         return Ok(None);
@@ -606,6 +605,7 @@ async fn compact_messages_core(
     instructions: Option<&str>,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
     scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
+    system_prompt: Option<Arc<str>>,
 ) -> Result<Option<ContextCompaction>, ContextError> {
     let prefix_len = leading_system_prefix_len(messages);
     let cut_point = find_compaction_cut_point(messages, prefix_len);
@@ -620,6 +620,7 @@ async fn compact_messages_core(
         instructions,
         direct_completions,
         scoped_effect_controller,
+        system_prompt,
     )
     .await?
     else {
@@ -749,6 +750,7 @@ impl TurnContextTransform for RollingTurnTransform {
                 recovery_state,
                 ctx.max_context_tokens.unwrap_or(0),
                 &current_request,
+                ctx.system_prompt.clone(),
             )
             .await?
             {
@@ -880,6 +882,7 @@ impl ContextCompactor for RollingContextCompactor {
             ctx.instructions.as_deref(),
             &ctx.direct_completions,
             &ctx.scoped_effect_controller,
+            ctx.system_prompt.clone(),
         )
         .await;
         let summary_nodes = compaction

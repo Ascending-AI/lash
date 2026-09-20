@@ -220,8 +220,8 @@ pub(crate) async fn emit_recovery_trace(
 
 /// Plugin-origin record for the summarization attempt that just settled.
 /// Stable within its attempt: the operation id materializes from the same
-/// compaction child identity the summarizer turn used, so a retry that
-/// re-derives the same attempt id's first, durable receipt idempotently.
+/// compaction request identity the summarizer completion used, so a retry
+/// that re-derives the same attempt id's first, durable receipt idempotently.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn append_recovery_record(
     session_id: &SessionId,
@@ -368,6 +368,7 @@ pub(crate) async fn run_overflow_recovery(
     state: OverflowRecoveryState,
     max_context_tokens: usize,
     current_request: &[Message],
+    system_prompt: Option<lash_core::plugin::CompactionSystemPrompt>,
 ) -> Result<Option<Vec<Message>>, ContextError> {
     let attempt_no = state.attempts() + 1;
 
@@ -452,7 +453,13 @@ pub(crate) async fn run_overflow_recovery(
     }
 
     // The summarizer is one direct completion on the same seam the ordinary
-    // compaction policy uses (FIG-3374).
+    // compaction policy uses (FIG-3374). The system prompt resolves here, at
+    // the point of use, so its plugin hooks never fire on turns that recover
+    // without summarizing.
+    let resolved_system_prompt = match &system_prompt {
+        Some(provider) => provider().await.map_err(ContextError::from)?,
+        None => None,
+    };
     let summary = {
         let summarized = summarize_compaction_prefix(
             session_id,
@@ -461,6 +468,7 @@ pub(crate) async fn run_overflow_recovery(
             Some(&recovery_instructions(elided_parts)),
             direct_completions,
             scoped_effect_controller,
+            resolved_system_prompt.clone(),
         )
         .await;
         match summarized {
@@ -539,7 +547,7 @@ pub(crate) async fn run_overflow_recovery(
 }
 
 /// Opens the recovery frame through the plugin-visible frame-switch seam
-/// (FIG-3107). The operation id materializes from the same compaction child
+/// (FIG-3107). The operation id materializes from the same compaction request
 /// identity as the append above, so re-deriving the recovery answers the same
 /// switch commit idempotently.
 #[allow(clippy::too_many_arguments)]
