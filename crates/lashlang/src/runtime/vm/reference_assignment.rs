@@ -12,7 +12,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         let indexes = self.stack[index_start..].to_vec();
         let slot_names = slot_names_for(self.chunk, self.active_function);
         let root_name = &slot_names[slot];
-        self.slots.ensure_assignable(slot, slot_names)?;
+        self.slots
+            .ensure_assignable(slot, slot_names, self.active_projected_bindings())?;
         let root =
             self.slots
                 .get(slot)

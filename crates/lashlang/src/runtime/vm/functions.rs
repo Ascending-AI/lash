@@ -203,33 +203,29 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.begin_function_call(closure, CallArguments::Owned(args), ReturnTarget::Direct)
     }
 
-    /// Keeps a returning frame's slot vectors for the next call. Their
-    /// contents are dropped here: the scratch slot is not a root set, and a
-    /// finished frame's values must not outlive it.
+    /// Keeps a returning frame's slot state for the next call. Its contents
+    /// are dropped here: the scratch slot is not a root set, and a finished
+    /// frame's values must not outlive it.
     fn recycle_slot_state(&mut self, mut slots: SlotState) {
         slots.values.clear();
-        slots.projected.clear();
         slots.extras = Record::new();
         slots.extras_heapified = false;
         self.slot_scratch = Some(slots);
     }
 
-    /// Slot vectors for a frame of `len` slots, reusing the scratch pair when
-    /// one is held. Both vectors are reset to the fresh-frame state, so a
-    /// reused pair is indistinguishable from a newly allocated one.
+    /// Slot state for a frame of `len` slots, reusing the scratch state when
+    /// one is held. The values vector is reset to the fresh-frame state, so a
+    /// reused state is indistinguishable from a newly allocated one.
     fn take_slot_state(&mut self, len: usize) -> SlotState {
         let Some(mut slots) = self.slot_scratch.take() else {
             return SlotState {
                 values: vec![None; len],
-                projected: vec![false; len],
                 extras: Record::new(),
                 extras_heapified: false,
             };
         };
         slots.values.clear();
         slots.values.resize(len, None);
-        slots.projected.clear();
-        slots.projected.resize(len, false);
         slots
     }
 

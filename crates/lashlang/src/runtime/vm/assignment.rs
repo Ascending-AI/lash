@@ -7,8 +7,11 @@ use super::*;
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn append_assign(&mut self, slot: usize) -> Result<(), RuntimeError> {
         let item = self.pop_stack()?;
-        self.slots
-            .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
+        self.slots.ensure_assignable(
+            slot,
+            slot_names_for(self.chunk, self.active_function),
+            self.active_projected_bindings(),
+        )?;
         // `xs = xs + [item]` appends into the accumulator's own object.
         // Every other holder of the old value already owns a separate
         // copy, so the append is unobservable outside this binding.
@@ -53,8 +56,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         slot: usize,
         right: Value,
     ) -> Result<(), RuntimeError> {
-        self.slots
-            .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
+        self.slots.ensure_assignable(
+            slot,
+            slot_names_for(self.chunk, self.active_function),
+            self.active_projected_bindings(),
+        )?;
         // A list accumulator grows in place. Every other holder of its old
         // value already owns a separate copy, so extending the object it names
         // is unobservable — and it costs what is being appended rather than
@@ -120,8 +126,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         right: f64,
     ) -> Result<(), RuntimeError> {
         let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
-        self.slots
-            .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
+        self.slots.ensure_assignable(
+            slot,
+            slot_names_for(self.chunk, self.active_function),
+            self.active_projected_bindings(),
+        )?;
         let value = {
             let left = self
                 .slots
@@ -173,8 +182,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         right: f64,
     ) -> Result<(), RuntimeError> {
         let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
-        self.slots
-            .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
+        self.slots.ensure_assignable(
+            slot,
+            slot_names_for(self.chunk, self.active_function),
+            self.active_projected_bindings(),
+        )?;
         let root = self
             .slots
             .get_mut(slot)

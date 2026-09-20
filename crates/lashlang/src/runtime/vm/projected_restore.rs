@@ -30,7 +30,6 @@ impl SlotState {
                 };
                 if index < self.values.len() {
                     self.values[index] = Some(Value::Projected(live));
-                    self.projected[index] = true;
                     self.extras.remove_symbol(name.symbol);
                 }
             }
