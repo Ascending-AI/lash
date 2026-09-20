@@ -107,7 +107,6 @@ impl SubagentSpawnContext<'_> {
             SessionStartPoint::Empty,
             policy,
             plugin_options,
-            "subagent",
         )
         .with_plugin_source(plugin_source)
         .with_tool_access(self.base_tool_access.clone())
@@ -189,7 +188,7 @@ impl Capability for StaticCapability {
 #[derive(Clone, Copy, Debug)]
 pub enum TierPluginSource {
     CurrentHostFresh,
-    CurrentSessionFork,
+    ParentFork,
 }
 
 /// Built-in capability that maps a tier name to: an optional explicit
@@ -236,7 +235,7 @@ impl From<TierPluginSource> for SessionPluginSource {
     fn from(source: TierPluginSource) -> Self {
         match source {
             TierPluginSource::CurrentHostFresh => Self::CurrentHostFresh,
-            TierPluginSource::CurrentSessionFork => Self::CurrentSessionFork,
+            TierPluginSource::ParentFork => Self::ParentFork,
         }
     }
 }
@@ -320,7 +319,7 @@ pub fn default_registry(tier_models: &BTreeMap<String, ModelSpec>) -> Capability
     registry.add(Arc::new(TierCapability::new(
         "peer",
         model_for("peer"),
-        TierPluginSource::CurrentSessionFork,
+        TierPluginSource::ParentFork,
     )));
     registry
 }

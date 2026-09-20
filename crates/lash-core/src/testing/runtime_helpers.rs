@@ -870,6 +870,14 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Ch
         _args: &serde_json::Value,
         context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
     ) -> crate::ToolOutcome {
+        let plugin_init = match context
+            .sessions()
+            .session_plugin_init(&crate::SessionId::from(context.session_id()))
+            .await
+        {
+            Ok(init) => init,
+            Err(err) => return crate::ToolOutcome::err_fmt(format_args!("{err}")),
+        };
         let child = match context
             .sessions()
             .create_session(
@@ -879,8 +887,8 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for Ch
                     crate::PluginOptions::default(),
                 )
                 .with_session_id("subagent-child")
-                .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork)
-                .with_usage_source("subagent"),
+                .with_plugin_source(crate::SessionPluginSource::ParentFork)
+                .with_plugin_init(plugin_init),
             )
             .await
         {

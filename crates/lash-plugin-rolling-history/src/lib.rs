@@ -521,7 +521,6 @@ async fn summarize_compaction_prefix(
         },
         policy,
         PluginOptions::default(),
-        "compaction",
     )
     .with_context_overlay(SessionContextOverlay {
         include_base_tools: false,

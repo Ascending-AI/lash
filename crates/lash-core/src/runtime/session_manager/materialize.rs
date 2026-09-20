@@ -62,11 +62,23 @@ fn build_session_plugins(
                 plan.plugin_config.clone(),
             )
         }
-        crate::SessionPluginSource::CurrentSessionFork => current.plugins.fork_for_child_session(
-            &plan.session_id,
-            plan.parent_session_id.clone(),
-            plan.plugin_config.clone(),
-        ),
+        // The fork initializes from the spawn-time capture alone. There is
+        // deliberately no read of the running session that created this
+        // request — on a process worker that session is a synthetic runtime
+        // carrying fresh host plugins, not the real parent.
+        crate::SessionPluginSource::ParentFork => {
+            let init = plan.protocol_request.plugin_init.as_ref().ok_or(
+                crate::PluginError::MissingSessionInit {
+                    session_id: plan.session_id.clone(),
+                },
+            )?;
+            current.plugins.host().build_session_from_init(
+                &plan.session_id,
+                plan.parent_session_id.clone(),
+                init,
+                plan.plugin_config.clone(),
+            )
+        }
     }
 }
 

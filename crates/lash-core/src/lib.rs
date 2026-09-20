@@ -650,10 +650,10 @@ pub use plugin::{
     PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
     PluginStateError, PluginStateStore, ProcessEngineContributionContext,
     ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
-    SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginSource,
-    SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService,
-    SessionToolAccess, SessionToolAccessError, SubagentSessionContext, SwitchAgentFrameRequest,
-    durable_identity_conflict, is_durable_identity_conflict,
+    SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginInit,
+    SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
+    SessionStateService, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+    SwitchAgentFrameRequest, durable_identity_conflict, is_durable_identity_conflict,
 };
 pub use plugin::{OpenAgentFrameRequest, OpenAgentFrameResult};
 pub(crate) use plugin::{PluginRuntimeDirective, SessionTurnInput};

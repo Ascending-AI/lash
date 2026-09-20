@@ -746,37 +746,18 @@ impl PluginSession {
         )
     }
 
-    pub fn fork_for_child_session(
-        &self,
-        session_id: impl Into<SessionId>,
-        parent_session_id: Option<SessionId>,
-        config: super::SessionCreationConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        let snapshot = self.capture_state();
-        self.host.build_forked_session_with_parent_and_overlay(
-            session_id,
-            parent_session_id,
-            &snapshot,
+    /// Capture everything a forked peer session needs to initialize, exactly
+    /// as a fork would read it now: this session's plugin state, tool-catalog
+    /// overlay, and exported tool state.
+    ///
+    /// The returned payload is recorded on the [`crate::SessionCreateRequest`]
+    /// at spawn and is the only input materialization reads — the peer never
+    /// observes later mutations of this session.
+    pub fn capture_fork_init(&self) -> Result<crate::SessionPluginInit, PluginError> {
+        crate::SessionPluginInit::captured(
+            self.capture_state(),
             self.tool_catalog_overlay.clone(),
-            Some(self.tool_registry.export_state()),
-            config,
-        )
-    }
-
-    pub fn fork_for_session_with_tool_catalog(
-        &self,
-        session_id: impl Into<SessionId>,
-        tool_catalog_overlay: ToolCatalogContribution,
-        config: super::SessionCreationConfig,
-    ) -> Result<Arc<PluginSession>, PluginError> {
-        let snapshot = self.capture_state();
-        self.host.build_forked_session_with_parent_and_overlay(
-            session_id,
-            None,
-            &snapshot,
-            tool_catalog_overlay,
-            Some(self.tool_registry.export_state()),
-            config,
+            self.tool_registry.export_state(),
         )
     }
 

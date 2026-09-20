@@ -7,9 +7,9 @@ use crate::support::{
     Arc, AssembledTurn, BTreeMap, CancellationToken, EffectHost, EmbedError, EventSink, JoinHandle,
     LlmCallRecord, Message, MessageRole, PromptContribution, PromptLayer, PromptSlot,
     PromptTemplate, ProtocolTurnOptions, ProviderHandle, Result, RuntimeEffectController,
-    RuntimeErrorCode, RuntimeHandle, ScopedEffectController, SessionSnapshot, StdMutex,
-    TokenLedgerEntry, TokenUsage, ToolCallRecord, TurnActivity, TurnActivitySink,
-    TurnCancelOriginHint, TurnExecutionMetrics, TurnInput, TurnOutcome, async_trait, mpsc,
+    RuntimeErrorCode, RuntimeHandle, ScopedEffectController, SessionSnapshot, StdMutex, TokenUsage,
+    ToolCallRecord, TurnActivity, TurnActivitySink, TurnCancelOriginHint, TurnExecutionMetrics,
+    TurnInput, TurnOutcome, async_trait, mpsc,
 };
 use futures_util::Stream;
 use lash_core::facade_support::{
@@ -1291,16 +1291,9 @@ pub struct TurnReport {
     pub outcome: TurnOutcome,
     /// Assistant output committed by the turn.
     pub assistant_output: AssistantOutput,
-    /// Parent's own LLM tokens for this turn. Does **not** include child
-    /// sessions; see [`children_usage`](Self::children_usage) and
-    /// [`total_usage`](Self::total_usage).
+    /// This session's own LLM tokens for the turn. Every session owns its
+    /// usage; child-session tokens live on each child's own turn report.
     pub usage: TokenUsage,
-    /// Per-`(session, source, model)` ledger entries for child sessions whose
-    /// LLM calls completed during this turn (subagents, compaction, observers,
-    /// etc.). Two child sessions using the same source and model remain two
-    /// rows. Empty unless the turn spawned children.
-    #[serde(default)]
-    pub children_usage: Vec<TokenLedgerEntry>,
     /// Provider calls made by the parent session during this turn, in protocol
     /// order. Child-session calls remain on each child's result. This is the
     /// complete lash-side model attribution surface: a turn has no single
@@ -1351,7 +1344,6 @@ impl TurnReport {
             assistant_output,
             execution,
             token_usage,
-            children_usage,
             llm_calls,
             tool_calls,
             omitted,
@@ -1363,7 +1355,6 @@ impl TurnReport {
             outcome,
             assistant_output,
             usage: token_usage,
-            children_usage,
             llm_calls,
             failure_evidence,
             tool_calls,
@@ -1379,25 +1370,6 @@ impl TurnReport {
     /// cancelled. Cancellation evidence has no home other than the outcome.
     pub fn cancellation(&self) -> Option<&lash_core::facade_support::TurnCancellationEvidence> {
         self.outcome.cancellation()
-    }
-
-    /// Sum of parent's own LLM tokens and every child session's LLM tokens
-    /// for this turn, and whether any counter saturated while summing.
-    ///
-    /// The `bool` is the same signal [`SessionUsageReport::saturated`] carries
-    /// one layer down: `true` marks the returned total as a lower bound
-    /// clamped at `i64::MAX`, never a silently truncated figure.
-    ///
-    /// [`SessionUsageReport::saturated`]: crate::usage::SessionUsageReport::saturated
-    pub fn total_usage(&self) -> (TokenUsage, bool) {
-        let mut saturated = false;
-        let mut total = self.usage.clone();
-        for entry in &self.children_usage {
-            let (merged, entry_saturated) = total.saturating_add(&entry.usage);
-            total = merged;
-            saturated |= entry_saturated;
-        }
-        (total, saturated)
     }
 
     /// Wall-clock instant the runtime started this turn (claim of the

@@ -1060,15 +1060,6 @@ fn remote_turn_result_maps_core_semantics() {
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 0,
         },
-        children_usage: vec![lash_core::TokenLedgerEntry::reported(
-            "subagent",
-            "m",
-            lash_core::TokenUsage {
-                input_tokens: 3,
-                output_tokens: 4,
-                ..lash_core::TokenUsage::default()
-            },
-        )],
         llm_calls: vec![call_record.clone()],
         tool_calls: vec![lash_core::ToolCallRecord {
             call_id: Some("exec-call".to_string()),
@@ -1120,8 +1111,8 @@ fn remote_turn_result_maps_core_semantics() {
     );
     remote.validate().expect("valid turn result");
     assert_eq!(remote.status(), RemoteTurnStatus::Completed);
-    assert_eq!(remote.usage.total.input_tokens, 4);
-    assert_eq!(remote.usage.total.output_tokens, 6);
+    assert_eq!(remote.usage.usage.input_tokens, 1);
+    assert_eq!(remote.usage.usage.output_tokens, 2);
     assert_eq!(remote.execution.started_at_ms, 1_700_000_000_000);
     assert_eq!(remote.execution.duration_ms, 42);
     assert_eq!(remote.tool_calls.len(), 1);
@@ -1243,7 +1234,6 @@ fn assert_terminal_call_record_converts_and_validates(
         },
         execution: lash_core::facade_support::TurnExecutionMetrics::default(),
         token_usage: lash_core::TokenUsage::default(),
-        children_usage: Vec::new(),
         llm_calls: vec![record],
         tool_calls: Vec::new(),
         omitted: None,

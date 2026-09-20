@@ -1,5 +1,4 @@
 use super::*;
-use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 
 #[derive(Clone, Debug)]
@@ -29,78 +28,6 @@ impl std::ops::Deref for PendingTokenLedgerEntry {
 #[derive(Clone)]
 pub(in crate::runtime::session_manager) struct ChannelEventSink {
     pub(in crate::runtime::session_manager) tx: mpsc::Sender<SessionStreamEvent>,
-    pub(in crate::runtime::session_manager) live_usage: Option<LiveChildUsageForwarder>,
-}
-
-#[derive(Clone)]
-pub(in crate::runtime::session_manager) struct LiveChildUsageForwarder {
-    pub(in crate::runtime::session_manager) turn_id: TurnId,
-    pub(in crate::runtime::session_manager) session_id: SessionId,
-    pub(in crate::runtime::session_manager) source: String,
-    pub(in crate::runtime::session_manager) model: String,
-    pub(in crate::runtime::session_manager) token_ledger:
-        Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
-    pub(in crate::runtime::session_manager) child_turn_live_usage:
-        Arc<std::sync::Mutex<HashMap<TurnId, TokenUsage>>>,
-    pub(in crate::runtime::session_manager) relay: Option<ChildUsageEventRelay>,
-    /// Set by the turn's `ManagedTurnLease` when it releases the live-usage
-    /// entry. An emit still in flight at that moment must not report, because
-    /// `entry(..).or_default()` would resurrect the released entry with a zero
-    /// baseline and re-record the full cumulative usage.
-    pub(in crate::runtime::session_manager) turn_released: Arc<AtomicBool>,
-}
-
-#[derive(Clone, Default)]
-pub(in crate::runtime) struct ChildUsageEventRelay {
-    tx: Arc<StdMutex<Option<mpsc::Sender<RuntimeStreamEvent>>>>,
-}
-
-impl ChildUsageEventRelay {
-    pub(in crate::runtime) fn new(tx: mpsc::Sender<RuntimeStreamEvent>) -> Self {
-        Self {
-            tx: Arc::new(StdMutex::new(Some(tx))),
-        }
-    }
-
-    pub(in crate::runtime) fn clear(&self) {
-        self.tx.lock_recover().take();
-    }
-
-    async fn emit(&self, event: SessionStreamEvent) {
-        let tx = self.tx.lock_recover().clone();
-        let Some(tx) = tx else { return };
-        if tx.is_closed() {
-            return;
-        }
-        // Project ChildTokenUsage onto the embed-facing TurnActivity stream
-        // before forwarding the SessionStreamEvent itself. Other variants reach the
-        // turn-activity stream through `send_session_event` in `turn_driver`,
-        // but child usage skips that path because it originates in the
-        // session manager rather than the parent's turn driver.
-        if let SessionStreamEvent::ChildTokenUsage {
-            session_id,
-            source,
-            model,
-            protocol_iteration,
-            usage,
-            cumulative,
-        } = &event
-        {
-            let activity = TurnActivity::new(
-                TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
-                TurnEvent::ChildUsage {
-                    session_id: session_id.clone(),
-                    source: source.clone(),
-                    model: model.clone(),
-                    protocol_iteration: *protocol_iteration,
-                    usage: usage.clone(),
-                    cumulative: cumulative.clone(),
-                },
-            );
-            let _ = tx.send(RuntimeStreamEvent::Turn(activity)).await;
-        }
-        let _ = tx.send(RuntimeStreamEvent::Session(event)).await;
-    }
 }
 
 impl UsageCapability {
@@ -413,129 +340,9 @@ pub fn record_reconciled_usage_shared(
     }));
 }
 
-pub(in crate::runtime::session_manager) fn subtract_usage(
-    reported_total: &TokenUsage,
-    final_total: &TokenUsage,
-) -> Option<TokenUsage> {
-    let delta = TokenUsage {
-        input_tokens: final_total
-            .input_tokens
-            .saturating_sub(reported_total.input_tokens),
-        output_tokens: final_total
-            .output_tokens
-            .saturating_sub(reported_total.output_tokens),
-        cache_read_input_tokens: final_total
-            .cache_read_input_tokens
-            .saturating_sub(reported_total.cache_read_input_tokens),
-        cache_write_input_tokens: final_total
-            .cache_write_input_tokens
-            .saturating_sub(reported_total.cache_write_input_tokens),
-        reasoning_output_tokens: final_total
-            .reasoning_output_tokens
-            .saturating_sub(reported_total.reasoning_output_tokens),
-    };
-    (!delta.is_zero()).then_some(delta)
-}
-
-impl LiveChildUsageForwarder {
-    #[cfg(test)]
-    pub(in crate::runtime::session_manager) async fn relay_token_usage_for_test(
-        &self,
-        protocol_iteration: usize,
-        usage: &TokenUsage,
-        cumulative_usage: &TokenUsage,
-    ) {
-        self.relay_token_usage(protocol_iteration, usage, cumulative_usage)
-            .await;
-    }
-
-    #[cfg(test)]
-    pub(in crate::runtime::session_manager) async fn relay_token_usage_gated_for_test(
-        &self,
-        protocol_iteration: usize,
-        usage: &TokenUsage,
-        cumulative_usage: &TokenUsage,
-        after_live_accounting: impl std::future::Future<Output = ()>,
-    ) {
-        self.relay_token_usage_with_after_live_accounting(
-            protocol_iteration,
-            usage,
-            cumulative_usage,
-            after_live_accounting,
-        )
-        .await;
-    }
-
-    async fn relay_token_usage(
-        &self,
-        protocol_iteration: usize,
-        usage: &TokenUsage,
-        cumulative_usage: &TokenUsage,
-    ) {
-        self.relay_token_usage_with_after_live_accounting(
-            protocol_iteration,
-            usage,
-            cumulative_usage,
-            std::future::ready(()),
-        )
-        .await;
-    }
-
-    async fn relay_token_usage_with_after_live_accounting(
-        &self,
-        protocol_iteration: usize,
-        _usage: &TokenUsage,
-        cumulative_usage: &TokenUsage,
-        after_live_accounting: impl std::future::Future<Output = ()>,
-    ) {
-        let (delta, cumulative) = {
-            let mut live_usage = self.child_turn_live_usage.lock_recover();
-            // Ordering: the lease sets `turn_released` before it removes the
-            // entry, and this check happens under the same lock the removal
-            // takes, so an emit either observes a live entry (and is counted) or
-            // observes the release (and is dropped). Reporting after release
-            // would both leak a resurrected entry and double-count.
-            if self.turn_released.load(Ordering::Acquire) {
-                return;
-            }
-            let reported = live_usage.entry(self.turn_id.clone()).or_default();
-            let Some(delta) = subtract_usage(reported, cumulative_usage) else {
-                return;
-            };
-            *reported = cumulative_usage.clone();
-            (delta, reported.clone())
-        };
-        after_live_accounting.await;
-        record_token_usage_shared(&self.token_ledger, &self.source, &self.model, &delta);
-        if let Some(relay) = &self.relay {
-            relay
-                .emit(SessionStreamEvent::ChildTokenUsage {
-                    session_id: self.session_id.clone(),
-                    source: self.source.clone(),
-                    model: self.model.clone(),
-                    protocol_iteration,
-                    usage: delta,
-                    cumulative,
-                })
-                .await;
-        }
-    }
-}
-
 #[async_trait::async_trait]
 impl EventSink for ChannelEventSink {
     async fn emit(&self, event: SessionStreamEvent) {
-        if let SessionStreamEvent::TokenUsage {
-            protocol_iteration,
-            usage,
-            cumulative,
-        } = &event
-            && let Some(live_usage) = &self.live_usage
-        {
-            live_usage
-                .relay_token_usage(*protocol_iteration, usage, cumulative)
-                .await;
-        }
         if !self.tx.is_closed() {
             let _ = self.tx.send(event).await;
         }

@@ -207,8 +207,6 @@ pub struct AgentFrameAssignment {
     pub policy: SessionPolicy,
     #[serde(default)]
     pub plugin_options: PluginOptions,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage_source: Option<String>,
 }
 impl AgentFrameAssignment {
     /// Builds the assignment from a create request's durable fields.
@@ -217,13 +215,11 @@ impl AgentFrameAssignment {
     /// `lash-core`, so the two durable facts are passed explicitly.
     pub fn from_session_request_facts(
         plugin_options: PluginOptions,
-        usage_source: Option<String>,
         policy: SessionPolicy,
     ) -> Self {
         Self {
             policy,
             plugin_options,
-            usage_source,
         }
     }
 
@@ -233,7 +229,6 @@ impl AgentFrameAssignment {
         Self {
             policy,
             plugin_options: PluginOptions::default(),
-            usage_source: None,
         }
     }
 }
@@ -300,6 +295,10 @@ pub struct OpenAgentFrameResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub initial_node_ids: Vec<crate::NodeId>,
 }
+/// Durable session lineage. Each session's token usage lives on that session's
+/// own ledger — nothing folds child usage into a parent — so a host that wants
+/// an aggregate finds related sessions through this relation and sums their
+/// ledgers itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionRelation {
@@ -705,8 +704,6 @@ impl SessionSnapshot {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionStartPoint {
     Empty,
-    CurrentSession,
-    ExistingSession { session_id: SessionId },
     Snapshot { snapshot: Box<SessionSnapshot> },
 }
 

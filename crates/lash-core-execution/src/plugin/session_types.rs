@@ -36,7 +36,110 @@ pub struct PluginOwned<T> {
 pub enum SessionPluginSource {
     CurrentHostFresh,
     #[default]
-    CurrentSessionFork,
+    ParentFork,
+}
+
+/// Serialized upper bound on a captured [`SessionPluginInit`]. The payload
+/// rides inside the durable creation request (process rows, trigger targets,
+/// remote protocol), so a single capture cannot exceed the row budget a
+/// durable journal carries. Captures larger than this are refused with
+/// [`PluginError::SessionInitTooLarge`] rather than truncated.
+pub const SESSION_PLUGIN_INIT_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+/// Spawn-time capture of everything a forked peer session needs to initialize
+/// without ever reading the live parent.
+///
+/// The spawn site records exactly what the parent's [`PluginSession`]
+/// used to read when forking: the parent's plugin state, its tool-catalog
+/// overlay, and the
+/// exported tool state. The capture is taken once, travels inside the durable
+/// [`SessionCreateRequest`], and is what the materializer hands to plugin
+/// session construction — a worker restart between spawn and execution
+/// initializes byte-for-byte identically, and post-spawn parent mutations are
+/// invisible to the peer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionPluginInit {
+    pub plugin_state: crate::PluginState,
+    pub tool_catalog_overlay: crate::ToolCatalogContribution,
+    pub tool_state: crate::ToolState,
+}
+
+impl SessionPluginInit {
+    /// Builds a bounded capture; payloads serialized beyond
+    /// [`SESSION_PLUGIN_INIT_MAX_BYTES`] are refused.
+    pub fn captured(
+        plugin_state: crate::PluginState,
+        tool_catalog_overlay: crate::ToolCatalogContribution,
+        tool_state: crate::ToolState,
+    ) -> Result<Self, PluginError> {
+        let init = Self {
+            plugin_state,
+            tool_catalog_overlay,
+            tool_state,
+        };
+        let bytes = serde_json::to_vec(&init).map_err(|err| {
+            PluginError::Session(format!("session plugin init failed to serialize: {err}"))
+        })?;
+        if bytes.len() > SESSION_PLUGIN_INIT_MAX_BYTES {
+            return Err(PluginError::SessionInitTooLarge {
+                bytes: bytes.len(),
+                limit: SESSION_PLUGIN_INIT_MAX_BYTES,
+            });
+        }
+        Ok(init)
+    }
+}
+
+#[cfg(test)]
+mod session_plugin_init_tests {
+    use super::{SESSION_PLUGIN_INIT_MAX_BYTES, SessionPluginInit};
+    use crate::PluginError;
+
+    fn oversize_plugin_state() -> crate::PluginState {
+        let mut plugins = std::collections::BTreeMap::new();
+        let mut values = std::collections::BTreeMap::new();
+        values.insert(
+            "blob".to_string(),
+            serde_json::Value::String("x".repeat(SESSION_PLUGIN_INIT_MAX_BYTES)),
+        );
+        plugins.insert(
+            "fat-plugin".to_string(),
+            crate::PluginNamespaceState {
+                generation: 0,
+                values,
+            },
+        );
+        crate::PluginState { plugins }
+    }
+
+    #[test]
+    fn capture_refuses_payloads_beyond_the_bound() {
+        let err = SessionPluginInit::captured(
+            oversize_plugin_state(),
+            crate::ToolCatalogContribution::default(),
+            crate::ToolState::default(),
+        )
+        .expect_err("oversize capture must be refused");
+
+        assert!(
+            matches!(err, PluginError::SessionInitTooLarge { .. }),
+            "expected SessionInitTooLarge, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn capture_serializes_the_durable_payload_shape() {
+        let init = SessionPluginInit::captured(
+            crate::PluginState::default(),
+            crate::ToolCatalogContribution::default(),
+            crate::ToolState::default(),
+        )
+        .expect("empty capture");
+
+        let bytes = serde_json::to_vec(&init).expect("serialize");
+        let roundtrip: SessionPluginInit = serde_json::from_slice(&bytes).expect("deserialize");
+        assert_eq!(roundtrip.plugin_state, init.plugin_state);
+    }
 }
 
 #[cfg(test)]
@@ -114,12 +217,13 @@ pub struct SessionCreateRequest {
     /// creation time. Each plugin decodes only the entry keyed by its id.
     #[serde(default)]
     pub plugin_options: PluginOptions,
-    /// Label for the token-cost ledger. When this session's turns
-    /// complete, their token usage is accumulated under this label on
-    /// the parent session's `token_ledger`. Examples: `"subagent"`,
-    /// `"compaction"`. Defaults to `"child"` if unset.
+    /// Spawn-time capture of the spawning session's plugin state, tool-catalog
+    /// overlay, and exported tool state. Required when `plugin_source` is
+    /// [`SessionPluginSource::ParentFork`]; ignored otherwise. Materialization
+    /// initializes the peer from this payload alone and never reads a live
+    /// parent session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage_source: Option<String>,
+    pub plugin_init: Option<SessionPluginInit>,
 }
 
 impl SessionCreateRequest {
@@ -138,7 +242,7 @@ impl SessionCreateRequest {
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
             plugin_options,
-            usage_source: None,
+            plugin_init: None,
         }
     }
 
@@ -164,43 +268,26 @@ impl SessionCreateRequest {
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
             plugin_options,
-            usage_source: None,
+            plugin_init: None,
         }
     }
 
-    /// Builds a child-session request with an explicit policy and usage-ledger source for protocol
+    /// Builds a child-session request with an explicit policy for protocol
     /// and process-engine implementors materializing nested work.
     pub fn child(
         parent_session_id: impl Into<SessionId>,
         start: SessionStartPoint,
         policy: SessionPolicy,
         plugin_options: PluginOptions,
-        usage_source: impl Into<String>,
     ) -> Self {
-        Self::related(
-            SessionRelation::Child {
+        Self {
+            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
+            relation: SessionRelation::Child {
                 parent_session_id: parent_session_id.into(),
                 caused_by: None,
             },
             start,
-            Some(policy),
-            plugin_options,
-            usage_source,
-        )
-    }
-
-    fn related(
-        relation: SessionRelation,
-        start: SessionStartPoint,
-        policy: Option<SessionPolicy>,
-        plugin_options: PluginOptions,
-        usage_source: impl Into<String>,
-    ) -> Self {
-        Self {
-            session_id: Some(SessionId::from(uuid::Uuid::new_v4().to_string())),
-            relation,
-            start,
-            policy,
+            policy: Some(policy),
             plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
@@ -208,7 +295,7 @@ impl SessionCreateRequest {
             subagent: None,
             context_overlay: SessionContextOverlay::default(),
             plugin_options,
-            usage_source: Some(usage_source.into()),
+            plugin_init: None,
         }
     }
 
@@ -276,10 +363,11 @@ impl SessionCreateRequest {
         self
     }
 
-    /// Labels child-session token cost for protocol and administration embedders so committed usage
-    /// is attributed to the correct parent-ledger source.
-    pub fn with_usage_source(mut self, usage_source: impl Into<String>) -> Self {
-        self.usage_source = Some(usage_source.into());
+    /// Attaches the spawn-time plugin init capture carried by a
+    /// `SessionCreateRequest` for store and process-engine implementors while
+    /// preparing or materializing a forked session.
+    pub fn with_plugin_init(mut self, plugin_init: SessionPluginInit) -> Self {
+        self.plugin_init = Some(plugin_init);
         self
     }
 }

@@ -108,6 +108,13 @@ async fn every_created_session_requires_a_store_regardless_of_relation() -> Resu
             },
         ),
     ] {
+        let plugin_init = parent
+            .admin()
+            .state()
+            .session_state_service()
+            .await?
+            .session_plugin_init(&parent.session_id())
+            .await?;
         let error = parent
             .admin()
             .children()
@@ -116,14 +123,14 @@ async fn every_created_session_requires_a_store_regardless_of_relation() -> Resu
                 relation,
                 start: lash_core::SessionStartPoint::Empty,
                 policy: None,
-                plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
+                plugin_source: lash_core::SessionPluginSource::ParentFork,
+                plugin_init: Some(plugin_init),
                 initial_nodes: Vec::new(),
                 observed_processes: Vec::new(),
                 tool_access: lash_core::SessionToolAccess::default(),
                 subagent: None,
                 context_overlay: lash_core::SessionContextOverlay::default(),
                 plugin_options: lash_core::PluginOptions::default(),
-                usage_source: None,
             })
             .await
             .expect_err("session creation without a catalog must be refused");
@@ -308,6 +315,13 @@ async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Re
             .is_some()
     );
 
+    let plugin_init = session
+        .admin()
+        .state()
+        .session_state_service()
+        .await?
+        .session_plugin_init(&session.session_id())
+        .await?;
     session
         .admin()
         .children()
@@ -319,14 +333,14 @@ async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Re
             },
             start: lash_core::SessionStartPoint::Empty,
             policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
+            plugin_source: lash_core::SessionPluginSource::ParentFork,
+            plugin_init: Some(plugin_init.clone()),
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
             tool_access: lash_core::SessionToolAccess::default(),
             subagent: None,
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
         })
         .await?;
 
@@ -338,14 +352,14 @@ async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Re
             relation: lash_core::SessionRelation::Root,
             start: lash_core::SessionStartPoint::Empty,
             policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
+            plugin_source: lash_core::SessionPluginSource::ParentFork,
+            plugin_init: Some(plugin_init.clone()),
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
             tool_access: lash_core::SessionToolAccess::default(),
             subagent: None,
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
         })
         .await?;
 

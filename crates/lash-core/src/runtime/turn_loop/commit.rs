@@ -552,7 +552,6 @@ impl LashRuntime {
 
         let plugins = Arc::clone(session.plugins());
         let manager = match self.runtime_session_services_for_turn(
-            None,
             session_execution_lease,
             turn_pipeline.graph_appends(),
         ) {

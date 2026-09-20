@@ -89,12 +89,6 @@ pub struct AssembledTurn {
     pub execution: TurnExecutionMetrics,
     #[serde(default)]
     pub token_usage: TokenUsage,
-    /// Per-(session, source, model) ledger entries for child sessions whose
-    /// LLM calls completed during this turn. `token_usage` above is the
-    /// parent's own LLM tokens; `total_usage` (on the embed-facing
-    /// `TurnReport`) sums both.
-    #[serde(default)]
-    pub children_usage: Vec<TokenLedgerEntry>,
     /// Provider calls made by this session during the turn, in protocol order.
     /// Child-session calls remain on the child turn result.
     #[serde(default)]
@@ -333,14 +327,6 @@ pub enum TurnEvent {
         value: serde_json::Value,
     },
     Usage {
-        protocol_iteration: usize,
-        usage: TokenUsage,
-        cumulative: TokenUsage,
-    },
-    ChildUsage {
-        session_id: SessionId,
-        source: String,
-        model: String,
         protocol_iteration: usize,
         usage: TokenUsage,
         cumulative: TokenUsage,

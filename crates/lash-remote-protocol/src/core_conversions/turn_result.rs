@@ -2,89 +2,6 @@ use super::*;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
-impl From<lash_core::TokenLedgerEntry> for RemoteTokenLedgerEntry {
-    fn from(value: lash_core::TokenLedgerEntry) -> Self {
-        let lash_core::TokenLedgerEntry {
-            source,
-            model,
-            usage,
-            usage_disposition,
-        } = value;
-        Self {
-            source,
-            model,
-            usage: usage.into(),
-            usage_disposition: usage_disposition.into(),
-        }
-    }
-}
-
-impl From<RemoteTokenLedgerEntry> for lash_core::TokenLedgerEntry {
-    fn from(value: RemoteTokenLedgerEntry) -> Self {
-        let RemoteTokenLedgerEntry {
-            source,
-            model,
-            usage,
-            usage_disposition,
-        } = value;
-        Self {
-            source,
-            model,
-            usage: usage.into(),
-            usage_disposition: usage_disposition.into(),
-        }
-    }
-}
-
-impl From<lash_core::LedgerUsageDisposition> for RemoteLedgerUsageDisposition {
-    fn from(value: lash_core::LedgerUsageDisposition) -> Self {
-        match value {
-            lash_core::LedgerUsageDisposition::Reported => Self::Reported,
-            lash_core::LedgerUsageDisposition::Unreported { attempts } => Self::Unreported {
-                attempts: attempts
-                    .into_iter()
-                    .map(|attempt| RemoteUnreportedLedgerAttempt {
-                        call_id: attempt.call_id,
-                        attempt_ordinal: attempt.attempt_ordinal,
-                        generation_id: attempt.generation_id,
-                    })
-                    .collect(),
-            },
-            lash_core::LedgerUsageDisposition::Reconciled {
-                call_id,
-                attempt_ordinal,
-            } => Self::Reconciled {
-                call_id,
-                attempt_ordinal,
-            },
-        }
-    }
-}
-
-impl From<RemoteLedgerUsageDisposition> for lash_core::LedgerUsageDisposition {
-    fn from(value: RemoteLedgerUsageDisposition) -> Self {
-        match value {
-            RemoteLedgerUsageDisposition::Reported => Self::Reported,
-            RemoteLedgerUsageDisposition::Unreported { attempts } => {
-                Self::unreported(attempts.into_iter().map(|attempt| {
-                    lash_core::UnreportedLedgerAttempt {
-                        call_id: attempt.call_id,
-                        attempt_ordinal: attempt.attempt_ordinal,
-                        generation_id: attempt.generation_id,
-                    }
-                }))
-            }
-            RemoteLedgerUsageDisposition::Reconciled {
-                call_id,
-                attempt_ordinal,
-            } => Self::Reconciled {
-                call_id,
-                attempt_ordinal,
-            },
-        }
-    }
-}
-
 impl RemoteTurnReport {
     pub fn from_core(
         session_id: impl Into<SessionId>,
@@ -104,7 +21,6 @@ impl RemoteTurnReport {
             assistant_output,
             execution,
             token_usage,
-            children_usage,
             llm_calls,
             tool_calls,
             // Omission accounting is an internal bounded-stream surface; the
@@ -116,15 +32,6 @@ impl RemoteTurnReport {
             errors,
         } = turn;
         let activities = activities.into_iter().collect::<Vec<_>>();
-        let parent = RemoteUsage::from(token_usage);
-        let children = children_usage
-            .into_iter()
-            .map(RemoteTokenLedgerEntry::from)
-            .collect::<Vec<_>>();
-        let mut total = parent.clone();
-        for child in &children {
-            total.add(&child.usage);
-        }
         let outcome = RemoteTurnOutcome::from(outcome);
         Self {
             session_id: session_id.into(),
@@ -132,9 +39,7 @@ impl RemoteTurnReport {
             outcome,
             assistant_output: assistant_output.into(),
             usage: RemoteTurnUsageReport {
-                parent,
-                children,
-                total,
+                usage: RemoteUsage::from(token_usage),
             },
             execution: execution.into(),
             tool_calls: tool_calls

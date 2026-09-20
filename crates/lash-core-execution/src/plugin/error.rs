@@ -101,6 +101,16 @@ pub enum PluginError {
     },
     #[error("plugin session error: {0}")]
     Session(String),
+    /// A `ParentFork` creation request carried no captured init payload.
+    /// The capture is taken once at spawn; materialization never reads a live
+    /// parent session, so there is nothing to fall back to.
+    #[error(
+        "session `{session_id}` requested a parent fork but carries no captured plugin init payload"
+    )]
+    MissingSessionInit { session_id: SessionId },
+    /// A captured plugin init payload exceeded the durable-request bound.
+    #[error("captured session init payload is {bytes} bytes, exceeding the {limit}-byte bound")]
+    SessionInitTooLarge { bytes: usize, limit: usize },
     /// A session-creation request had no catalog capable of selecting and
     /// admitting the new session's exact store.
     #[error(

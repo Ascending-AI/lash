@@ -657,7 +657,6 @@ impl ModelStore {
                 if input_tokens != 0 || output_tokens != 0 || reasoning_output_tokens != 0 {
                     ledger_keys.insert(provider_kind.to_string());
                 }
-                let zero_usage = usage(0);
                 let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
                     .expect("non-empty initial frame material");
                 let frame_node_id = lash_core::facade_support::frame_node_id(
@@ -711,9 +710,7 @@ impl ModelStore {
                             "turn_usage": turn_usage,
                             "total_usage": turn_usage,
                             "token_ledger_total": total_usage,
-                            "child_usage_total": zero_usage,
                             "token_ledger_entry_count": ledger_keys.len(),
-                            "child_usage_entry_count": 0,
                             "usage_event_count": 1,
                             "usage_event_cumulative_totals": [turn_usage],
                             "non_negative": true,

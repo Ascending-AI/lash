@@ -41,7 +41,7 @@ pub(crate) use lash_core::{
     facade_support::ToolSourceHandle, facade_support::TurnActivitySink,
     facade_support::TurnExecutionMetrics, facade_support::TurnOutcome,
 };
-pub(crate) use lash_core::{InputItem, TokenLedgerEntry, TokenUsage};
+pub(crate) use lash_core::{InputItem, TokenUsage};
 pub(crate) use lash_core::{PromptContribution, PromptLayer, PromptSlot, PromptTemplate};
 pub(crate) use lash_core::{TurnActivity, TurnInput};
 #[cfg(test)]

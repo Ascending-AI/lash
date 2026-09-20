@@ -310,7 +310,7 @@ impl LashRuntime {
             Arc::clone(&self.host.core.clock),
         );
         let manager = self
-            .runtime_session_services_for_turn(None, session_execution_lease, &turn_graph_appends)
+            .runtime_session_services_for_turn(session_execution_lease, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;

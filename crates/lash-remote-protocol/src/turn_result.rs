@@ -14,7 +14,7 @@ use crate::llm::{RemoteLlmCallRecord, validate_llm_call_record};
 use crate::llm::{RemoteLlmTerminalReason, RemoteProviderFailureKind};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::turn_control::RemoteTurnCancellationEvidence;
-use crate::usage_activity::{RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteUsage};
+use crate::usage_activity::{RemoteTurnActivity, RemoteUsage};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnReport {
@@ -313,11 +313,7 @@ pub enum RemoteAssistantOutputState {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnUsageReport {
     #[serde(default)]
-    pub parent: RemoteUsage,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<RemoteTokenLedgerEntry>,
-    #[serde(default)]
-    pub total: RemoteUsage,
+    pub usage: RemoteUsage,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

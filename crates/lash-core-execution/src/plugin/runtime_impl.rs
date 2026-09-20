@@ -270,6 +270,27 @@ impl PluginHost {
         })
     }
 
+    /// Materialize a forked peer session from the spawn-time
+    /// [`SessionPluginInit`] capture. The payload is the only input — this
+    /// path never opens or reads a live parent session, so a worker restart
+    /// between spawn and execution initializes identically.
+    pub fn build_session_from_init(
+        &self,
+        session_id: impl Into<SessionId>,
+        parent_session_id: Option<SessionId>,
+        init: &SessionPluginInit,
+        config: SessionCreationConfig,
+    ) -> Result<Arc<PluginSession>, PluginError> {
+        self.build_forked_session_with_parent_and_overlay(
+            session_id,
+            parent_session_id,
+            &init.plugin_state,
+            init.tool_catalog_overlay.clone(),
+            Some(init.tool_state.clone()),
+            config,
+        )
+    }
+
     pub(super) fn build_forked_session_with_parent_and_overlay(
         &self,
         session_id: impl Into<SessionId>,

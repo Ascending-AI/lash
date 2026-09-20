@@ -1232,7 +1232,6 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         crate::SessionStartPoint::Empty,
         policy,
         crate::PluginOptions::default(),
-        "nested-wait-test",
     )
     .with_session_id("nested-wait-child");
     registry

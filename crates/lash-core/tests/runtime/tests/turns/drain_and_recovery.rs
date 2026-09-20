@@ -1034,17 +1034,39 @@ pub(super) async fn external_invoke_can_create_session_from_current_snapshot() {
                         },
                         Arc::new(|ctx, _args| {
                             Box::pin(async move {
+                                let source_id = SessionId::from("root");
+                                let source_snapshot = ctx
+                                    .sessions
+                                    .snapshot_session(&source_id)
+                                    .await
+                                    .map_err(|err| {
+                                        lash_core::test_support::PluginOperationFailure::new(err.to_string())
+                                    });
+                                let plugin_init = ctx
+                                    .sessions
+                                    .session_plugin_init(&source_id)
+                                    .await
+                                    .map_err(|err| {
+                                        lash_core::test_support::PluginOperationFailure::new(err.to_string())
+                                    });
+                                let (source_snapshot, plugin_init) = match (source_snapshot, plugin_init) {
+                                    (Ok(snapshot), Ok(init)) => (snapshot, init),
+                                    (Err(err), _) | (_, Err(err)) => return Err(err),
+                                };
                                 let handle = ctx
                                     .session_lifecycle
                                     .create_session(
                                         lash_core::SessionCreateRequest::root(
-                                            lash_core::SessionStartPoint::CurrentSession,
+                                            lash_core::SessionStartPoint::Snapshot {
+                                                snapshot: Box::new(source_snapshot),
+                                            },
                                             lash_core::PluginOptions::default(),
                                         )
                                         .with_session_id("branched")
                                         .with_plugin_source(
-                                            lash_core::SessionPluginSource::CurrentSessionFork,
+                                            lash_core::SessionPluginSource::ParentFork,
                                         )
+                                        .with_plugin_init(plugin_init)
                                         .with_initial_nodes(vec![lash_core::SessionAppendNode::message(
                                             lash_core::PluginMessage::text(
                                                 lash_core::MessageRole::User,
@@ -1236,6 +1258,12 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
     let handle = lifecycle
         .create_session(
             lash_core::SessionCreateRequest::root(
@@ -1243,7 +1271,8 @@ pub(super) async fn session_manager_can_run_child_session_turn() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init.clone()),
         )
         .await
         .expect("child session");
@@ -1288,6 +1317,12 @@ pub(super) async fn session_manager_preserves_runtime_error_from_child_session_t
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
     let handle = lifecycle
         .create_session(
             lash_core::SessionCreateRequest::root(
@@ -1295,7 +1330,8 @@ pub(super) async fn session_manager_preserves_runtime_error_from_child_session_t
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("busy-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init.clone()),
         )
         .await
         .expect("child session");
@@ -1385,6 +1421,15 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
     );
     runtime.state.turn_index = 3;
 
+    let manager = runtime.session_state_service().expect("session state");
+    let root_snapshot = manager
+        .snapshot_session(&SessionId::from("root"))
+        .await
+        .expect("root snapshot");
+    let plugin_init = manager
+        .session_plugin_init(&SessionId::from("root"))
+        .await
+        .expect("plugin init");
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
@@ -1392,11 +1437,14 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
         .create_session(
             lash_core::SessionCreateRequest::child_session(
                 "root",
-                lash_core::SessionStartPoint::CurrentSession,
+                lash_core::SessionStartPoint::Snapshot {
+                    snapshot: Box::new(root_snapshot),
+                },
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("child-store")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init.clone()),
         )
         .await
         .expect("child session");
@@ -1457,6 +1505,12 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
     lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child_session(
@@ -1465,7 +1519,8 @@ pub(super) async fn child_relation_does_not_replace_active_session() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("ordinary-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init.clone()),
         )
         .await
         .expect("child session");
@@ -1501,6 +1556,12 @@ pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
     lifecycle
         .create_session(
             lash_core::SessionCreateRequest::root(
@@ -1508,7 +1569,8 @@ pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init.clone()),
         )
         .await
         .expect("first child session");
@@ -1520,7 +1582,8 @@ pub(super) async fn session_manager_rejects_duplicate_child_session_ids() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init.clone()),
         )
         .await
         .expect_err("duplicate child session should fail");
@@ -1533,6 +1596,12 @@ pub(super) async fn runtime_can_activate_managed_child_session() {
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
     lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child(
@@ -1540,10 +1609,10 @@ pub(super) async fn runtime_can_activate_managed_child_session() {
                 lash_core::SessionStartPoint::Empty,
                 runtime.state.effective_policy().clone(),
                 lash_core::PluginOptions::default(),
-                "test",
             )
             .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init.clone()),
         )
         .await
         .expect("child session");
@@ -1589,6 +1658,12 @@ pub(super) async fn failed_managed_session_activation_leaves_the_child_activatab
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
     lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child(
@@ -1596,10 +1671,10 @@ pub(super) async fn failed_managed_session_activation_leaves_the_child_activatab
                 lash_core::SessionStartPoint::Empty,
                 runtime.state.effective_policy().clone(),
                 lash_core::PluginOptions::default(),
-                "test",
             )
             .with_session_id("child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init.clone()),
         )
         .await
         .expect("child session");

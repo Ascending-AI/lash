@@ -1,4 +1,3 @@
-use crate::SessionId;
 pub mod failure;
 pub mod message;
 pub mod prompt;
@@ -481,15 +480,6 @@ pub enum SessionStreamEvent {
     },
     #[serde(rename = "token_usage")]
     TokenUsage {
-        protocol_iteration: usize,
-        usage: TokenUsage,
-        cumulative: TokenUsage,
-    },
-    #[serde(rename = "child_token_usage")]
-    ChildTokenUsage {
-        session_id: SessionId,
-        source: String,
-        model: String,
         protocol_iteration: usize,
         usage: TokenUsage,
         cumulative: TokenUsage,

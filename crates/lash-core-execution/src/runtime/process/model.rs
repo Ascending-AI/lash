@@ -1317,7 +1317,6 @@ impl ProcessIdentity {
                     .subagent
                     .as_ref()
                     .map(|subagent| subagent.capability.clone())
-                    .or_else(|| create_request.usage_source.clone())
                     .or_else(|| create_request.session_id.clone().map(Into::into));
                 Self::labelled("session_turn", label)
             }

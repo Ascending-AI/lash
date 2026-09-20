@@ -242,10 +242,14 @@ pub struct SessionNodeRecord {
 /// Version 14 records genuine-user-segment boundaries on projected LLM
 /// messages so client-side retention can make deterministic whole-segment cuts.
 ///
+/// Version 17 (FIG-3376) drops `usage_source` from `AgentFrameAssignment`,
+/// drops the dead `SessionStartPoint` variants, and removes the child-usage
+/// stream event: usage folds are gone and each session owns its own ledger.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as an exact-generation fence rather
 /// than a counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 16;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 17;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {

@@ -702,7 +702,7 @@ pub mod remote {
             RemoteTurnCause, RemoteTurnOutputSource,
         };
         pub use lash_remote_protocol::usage_activity::{
-            RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteTurnEvent, RemoteUsage,
+            RemoteTurnActivity, RemoteTurnEvent, RemoteUsage,
         };
     }
 }

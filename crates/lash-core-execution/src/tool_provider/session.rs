@@ -124,6 +124,16 @@ impl<'run> ToolSessionAdmin<'run> {
         self.session_lifecycle.start_turn(request).await
     }
 
+    /// Captures the spawn-time [`crate::SessionPluginInit`] payload a
+    /// `ParentFork` creation request must carry for a peer of the given
+    /// session.
+    pub async fn session_plugin_init(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::SessionPluginInit, PluginError> {
+        self.sessions.session_plugin_init(session_id).await
+    }
+
     /// Read the current session's serialized tool catalog.
     ///
     /// # Integrator class

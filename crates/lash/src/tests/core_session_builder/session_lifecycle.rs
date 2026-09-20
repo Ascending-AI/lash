@@ -1284,6 +1284,13 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
         }),
     );
 
+    let plugin_init = session
+        .admin()
+        .state()
+        .session_state_service()
+        .await?
+        .session_plugin_init(&session.session_id())
+        .await?;
     let err = session
         .admin()
         .children()
@@ -1295,14 +1302,14 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
             },
             start: lash_core::SessionStartPoint::Empty,
             policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
+            plugin_source: lash_core::SessionPluginSource::ParentFork,
+            plugin_init: Some(plugin_init),
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
             tool_access: lash_core::SessionToolAccess::default(),
             subagent: None,
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options,
-            usage_source: None,
         })
         .await
         .expect_err("malformed RLM create extras should fail session creation");
@@ -2161,7 +2168,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
     let tier = lash_subagents::TierCapability::new(
         "inherited",
         None,
-        lash_subagents::TierPluginSource::CurrentSessionFork,
+        lash_subagents::TierPluginSource::ParentFork,
     );
     let parent_snapshot = state.to_snapshot();
     let session_spec = lash_core::facade_support::SessionSpec::inherit();
@@ -2311,6 +2318,13 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("root-with-child-store").open().await?;
 
+    let plugin_init = session
+        .admin()
+        .state()
+        .session_state_service()
+        .await?
+        .session_plugin_init(&session.session_id())
+        .await?;
     session
         .admin()
         .children()
@@ -2322,14 +2336,14 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
             },
             start: lash_core::SessionStartPoint::Empty,
             policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
+            plugin_source: lash_core::SessionPluginSource::ParentFork,
+            plugin_init: Some(plugin_init.clone()),
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
             tool_access: lash_core::SessionToolAccess::default(),
             subagent: None,
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
         })
         .await?;
 
@@ -2358,6 +2372,13 @@ async fn reused_exact_store_factory_reports_session_creation_guidance() -> Resul
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("root-store").open().await?;
 
+    let plugin_init = session
+        .admin()
+        .state()
+        .session_state_service()
+        .await?
+        .session_plugin_init(&session.session_id())
+        .await?;
     let err = session
         .admin()
         .children()
@@ -2369,14 +2390,14 @@ async fn reused_exact_store_factory_reports_session_creation_guidance() -> Resul
             },
             start: lash_core::SessionStartPoint::Empty,
             policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
+            plugin_source: lash_core::SessionPluginSource::ParentFork,
+            plugin_init: Some(plugin_init.clone()),
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
             tool_access: lash_core::SessionToolAccess::default(),
             subagent: None,
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
         })
         .await
         .expect_err("reused root store should not open a child session");

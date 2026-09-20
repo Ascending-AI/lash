@@ -21,11 +21,6 @@ pub(in crate::runtime) async fn send_session_event(
                 )
                 .await;
             }
-            // ChildTokenUsage is projected to TurnEvent::ChildUsage at its
-            // origin in `session_services::usage::ChildUsageEventRelay::emit`,
-            // not here. Child usage events bypass `send_session_event` because
-            // they're produced by the session manager rather than the parent's
-            // turn driver.
             SessionStreamEvent::LlmRequest {
                 protocol_iteration, ..
             } => {

@@ -22,8 +22,6 @@ mod runtime_dependencies;
 #[cfg(test)]
 mod session_delete_failure;
 #[cfg(test)]
-mod session_lifecycle_usage;
-
 #[cfg(feature = "rlm")]
 #[path = "core_session_builder/session_lifecycle_growth.rs"]
 mod session_lifecycle_growth;

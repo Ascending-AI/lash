@@ -1003,6 +1003,13 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
     let core = standard_core();
     let session = core.session("parent-control").open().await?;
     let children = session.admin().children();
+    let plugin_init = session
+        .admin()
+        .state()
+        .session_state_service()
+        .await?
+        .session_plugin_init(&session.session_id())
+        .await?;
     let child = children
         .create_session(SessionCreateRequest {
             session_id: Some(SessionId::from("child-control")),
@@ -1012,14 +1019,14 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
             },
             start: lash_core::SessionStartPoint::Empty,
             policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
+            plugin_source: lash_core::SessionPluginSource::ParentFork,
+            plugin_init: Some(plugin_init),
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
             tool_access: lash_core::SessionToolAccess::default(),
             subagent: None,
             context_overlay: lash_core::SessionContextOverlay::default(),
             plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
         })
         .await?;
 

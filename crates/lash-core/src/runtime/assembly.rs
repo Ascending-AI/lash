@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use serde_json::json;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::ToolCallRecord;
 use crate::llm::types::{
@@ -18,7 +18,6 @@ use crate::llm::types::{
 use crate::session_model::{MessageRole, PartKind, SessionStreamEvent, TokenUsage};
 use crate::{TurnFinish, TurnOutcome, TurnStop};
 
-use super::usage::TokenLedgerEntry;
 use super::{
     AssembledTurn, AssistantOutput, OutputState, TerminationPolicy, TurnExecutionMetrics, TurnIssue,
 };
@@ -665,12 +664,6 @@ pub struct TurnAssembler {
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub(super) token_usage: TokenUsage,
     pub(super) last_llm_usage: Option<TokenUsage>,
-    /// Latest `cumulative` reported by each child session, keyed by
-    /// `(session_id, source, model)`. Cumulative is monotonically
-    /// increasing per child session, so each new event for the same key
-    /// supersedes the previous value. At `finish()` time we aggregate by
-    /// `(source, model)` and sum across child sessions.
-    pub(super) child_cumulatives: BTreeMap<(String, String, String), TokenUsage>,
     pub(super) issues: Vec<TurnIssue>,
     pub(super) saw_done: bool,
     pub(super) outcome: Option<TurnOutcome>,
@@ -692,7 +685,6 @@ impl TurnAssembler {
             failure_evidence: Vec::new(),
             token_usage: TokenUsage::default(),
             last_llm_usage: None,
-            child_cumulatives: BTreeMap::new(),
             issues: Vec::new(),
             saw_done: false,
             outcome: None,
@@ -735,22 +727,6 @@ impl TurnAssembler {
             } => {
                 self.token_usage = cumulative.clone();
                 self.last_llm_usage = Some(usage.clone());
-            }
-            SessionStreamEvent::ChildTokenUsage {
-                session_id,
-                source,
-                model,
-                cumulative,
-                ..
-            } => {
-                self.child_cumulatives.insert(
-                    (
-                        session_id.clone().to_string(),
-                        source.clone(),
-                        model.clone(),
-                    ),
-                    cumulative.clone(),
-                );
             }
             SessionStreamEvent::Error { message, envelope } => {
                 let issue = if let Some(envelope) = envelope {
@@ -897,8 +873,6 @@ impl TurnAssembler {
         };
         let output_state = classify_output_state(&raw_output, &safe_output, &issues);
 
-        let children_usage = child_cumulative_entries(self.child_cumulatives);
-
         AssembledTurn {
             execution: TurnExecutionMetrics {
                 had_tool_calls: !self.tool_calls.is_empty(),
@@ -916,7 +890,6 @@ impl TurnAssembler {
                 state: output_state,
             },
             token_usage: self.token_usage,
-            children_usage,
             llm_calls: self.llm_calls,
             tool_calls: self.tool_calls,
             omitted: self.omitted,
@@ -932,25 +905,6 @@ impl TurnAssembler {
     pub(super) fn last_llm_usage(&self) -> Option<&TokenUsage> {
         self.last_llm_usage.as_ref()
     }
-}
-
-/// Sum the latest cumulative usage reported by each `(session_id, source,
-/// model)` triple into `(source, model)` ledger entries.
-fn child_cumulative_entries(
-    cumulatives: BTreeMap<(String, String, String), TokenUsage>,
-) -> Vec<TokenLedgerEntry> {
-    // Preserve one row per child session. The strict durable ledger merge owns
-    // aggregation by `(source, model)` and can therefore reject overflow with
-    // the same typed pre-commit error used for parent usage.
-    cumulatives
-        .into_iter()
-        .map(|((_session_id, source, model), usage)| TokenLedgerEntry {
-            source,
-            model,
-            usage,
-            usage_disposition: Default::default(),
-        })
-        .collect()
 }
 
 fn render_final_value_for_output(value: &serde_json::Value) -> String {
@@ -1077,53 +1031,4 @@ fn contains_traceback_only(raw_text: &str) -> bool {
         }
         !trimmed.contains(':')
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn child_usage_preserves_one_row_per_child_session() {
-        let cumulatives = BTreeMap::from([
-            (
-                (
-                    "child-a".to_string(),
-                    "child".to_string(),
-                    "shared-model".to_string(),
-                ),
-                TokenUsage {
-                    input_tokens: 3,
-                    ..TokenUsage::default()
-                },
-            ),
-            (
-                (
-                    "child-b".to_string(),
-                    "child".to_string(),
-                    "shared-model".to_string(),
-                ),
-                TokenUsage {
-                    input_tokens: 5,
-                    ..TokenUsage::default()
-                },
-            ),
-        ]);
-
-        let entries = child_cumulative_entries(cumulatives);
-
-        assert_eq!(entries.len(), 2);
-        assert!(
-            entries
-                .iter()
-                .all(|entry| { entry.source == "child" && entry.model == "shared-model" })
-        );
-        assert_eq!(
-            entries
-                .iter()
-                .map(|entry| entry.usage.input_tokens)
-                .collect::<Vec<_>>(),
-            vec![3, 5]
-        );
-    }
 }

@@ -82,7 +82,6 @@ struct TurnEffectLoopContext<'loop_run, 'run> {
     cancel_controller: &'loop_run ScopedEffectController<'run>,
     event_rx: &'loop_run mut mpsc::Receiver<RuntimeStreamEvent>,
     assembler: &'loop_run mut TurnAssembler,
-    child_usage_event_relay: &'loop_run ChildUsageEventRelay,
     sinks: TurnSinks<'loop_run>,
 }
 
@@ -174,7 +173,6 @@ async fn run_turn_effect_loop(
         cancel_controller,
         event_rx,
         assembler,
-        child_usage_event_relay,
         sinks: TurnSinks {
             events,
             turn_events,
@@ -214,14 +212,7 @@ async fn run_turn_effect_loop(
         cancellation.clone(),
         protocol_run_offset,
     ));
-    let drive = drive_turn_to_completion(
-        run_future,
-        event_rx,
-        assembler,
-        child_usage_event_relay,
-        events,
-        turn_events,
-    );
+    let drive = drive_turn_to_completion(run_future, event_rx, assembler, events, turn_events);
     tokio::pin!(cancel_watcher);
     tokio::pin!(drive);
     tokio::select! {
@@ -341,7 +332,6 @@ async fn drive_turn_to_completion<F>(
     mut run_future: Pin<Box<F>>,
     event_rx: &mut mpsc::Receiver<RuntimeStreamEvent>,
     assembler: &mut TurnAssembler,
-    child_usage_event_relay: &ChildUsageEventRelay,
     events: &dyn EventSink,
     turn_events: &dyn TurnActivitySink,
 ) -> Result<(crate::MessageSequence, usize), RuntimeError>
@@ -364,7 +354,6 @@ where
         },
     )
     .await;
-    child_usage_event_relay.clear();
     while let Some(event) = event_rx.recv().await {
         emit_runtime_stream_event_to_sinks(events, turn_events, event, assembler).await;
     }
@@ -585,7 +574,6 @@ impl LashRuntime {
         let session_execution_fence =
             session_execution_lease.map(SessionExecutionLeaseGuard::fence);
         let (event_tx, mut event_rx) = mpsc::channel::<RuntimeStreamEvent>(100);
-        let child_usage_event_relay = ChildUsageEventRelay::new(event_tx.clone());
         let mut turn_policy = self.state.effective_policy().clone();
         let turn_provider_override = turn_context.provider().cloned();
         if let Some(provider) = turn_provider_override.as_ref() {
@@ -597,11 +585,7 @@ impl LashRuntime {
             .map(|options| session_protocol_turn_options.merged_with_override(&options))
             .unwrap_or(session_protocol_turn_options);
         let manager = self
-            .runtime_session_services_for_turn(
-                Some(child_usage_event_relay.clone()),
-                session_execution_lease,
-                &turn_graph_appends,
-            )
+            .runtime_session_services_for_turn(session_execution_lease, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -707,11 +691,7 @@ impl LashRuntime {
                 })?
         };
         let manager = self
-            .runtime_session_services_for_turn(
-                Some(child_usage_event_relay.clone()),
-                session_execution_lease,
-                &turn_graph_appends,
-            )
+            .runtime_session_services_for_turn(session_execution_lease, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -779,7 +759,6 @@ impl LashRuntime {
             cancel_controller: turn_cancel_peek_controller,
             event_rx: &mut event_rx,
             assembler: &mut assembler,
-            child_usage_event_relay: &child_usage_event_relay,
             sinks: TurnSinks {
                 events,
                 turn_events,
