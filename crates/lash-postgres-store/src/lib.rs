@@ -379,7 +379,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // (FIG-2082), which retires every migration arm below component 101 so a
 // pre-cutover stamp has no applicable migration at open. Component-102 and
 // older catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 103;
+// Version 104 constrains the effect-group wake and loser-disposition
+// vocabularies at the DDL level (FIG-2811): both were unconstrained TEXT
+// whose closed enum was enforced only at read time. Component-103 catalogs
+// are rejected and recreated.
+const SCHEMA_VERSION: i32 = 104;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

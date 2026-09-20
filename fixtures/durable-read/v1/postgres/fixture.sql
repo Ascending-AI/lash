@@ -517,7 +517,9 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_group (
     loser_disposition text NOT NULL,
     children bigint NOT NULL,
     next_seq bigint DEFAULT 0 NOT NULL,
-    created_at_ms bigint NOT NULL
+    created_at_ms bigint NOT NULL,
+    CONSTRAINT ck_runtime_effect_group_loser_disposition CHECK ((loser_disposition = ANY (ARRAY['run_to_completion'::text, 'cancel'::text]))),
+    CONSTRAINT ck_runtime_effect_group_wake CHECK ((wake = ANY (ARRAY['first'::text, 'first_success'::text, 'all'::text])))
 );
 
 
@@ -1117,7 +1119,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 -- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=103', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=104', 1700000000000);
 
 
 --
@@ -1147,7 +1149,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 103);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 104);
 
 
 --

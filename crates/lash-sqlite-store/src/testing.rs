@@ -23,6 +23,43 @@ pub fn database_fragment_statements(
     database.fragment_statements()
 }
 
+/// The full provisioning DDL for `database`: the schema body followed by the
+/// shared fragments, in application order.
+///
+/// Fixtures that shadow one schema table with their own declaration apply
+/// this to complete the catalog: `CREATE TABLE IF NOT EXISTS` leaves the
+/// shadowed declaration alone while every table declared outside the shared
+/// fragments — and the named CHECKs the constraint inspector requires of them —
+/// is created from the same text the store provisions.
+pub fn database_provisioning_statements(
+    database: crate::SqliteDatabase,
+) -> impl Iterator<Item = &'static str> {
+    database.provisioning_statements()
+}
+
+/// The `CREATE TABLE` block for `table` cut out of `database`'s provisioning
+/// DDL, schema body and shared fragments alike.
+///
+/// Fixtures that shadow one table cannot apply the schema body whole — its
+/// indexes would name columns the shadow lacks — so they complete the catalog
+/// one statement at a time. Extracting from the provisioning text keeps the
+/// fixture on the same DDL bytes the store executes rather than a
+/// hand-duplicated copy that can drift.
+pub fn database_table_ddl(database: crate::SqliteDatabase, table: &str) -> &'static str {
+    let marker = format!("CREATE TABLE IF NOT EXISTS {table} (");
+    for statement in database.provisioning_statements() {
+        let Some(start) = statement.find(&marker) else {
+            continue;
+        };
+        let tail = &statement[start..];
+        let end = tail
+            .find(';')
+            .unwrap_or_else(|| panic!("{table} DDL must end with a semicolon"));
+        return &tail[..=end];
+    }
+    panic!("{database:?} provisioning must declare {table}");
+}
+
 /// Transaction boundary at which one armed fault is injected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

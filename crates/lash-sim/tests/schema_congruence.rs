@@ -868,9 +868,10 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     use lash_core::facade_support::effect_replay_driver::EffectRowStatus;
     use lash_core::store_backend_support::SessionMetaCodec;
     use lash_core::{
-        CausalRef, DeliveryPolicy, ObserverInheritance, ProcessStatus, QueuedWorkKind, SessionMeta,
-        SessionRelation, ToolIntentKind, TurnInputCheckpointBoundary, TurnInputIngress,
-        TurnInputState, TurnInputStateKind, WakeDeliveryState, WakeDiscardReason,
+        CausalRef, DeliveryPolicy, GroupWakePolicy, LoserPolicy, ObserverInheritance,
+        ProcessStatus, QueuedWorkKind, SessionMeta, SessionRelation, ToolIntentKind,
+        TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState, TurnInputStateKind,
+        WakeDeliveryState, WakeDiscardReason,
     };
 
     assert_eq!(
@@ -973,6 +974,34 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
         ]
         .map(EffectRowStatus::column),
         ["in_progress", "completed", "failed"]
+    );
+    // The effect-group policy columns spell the same snake_case strings their
+    // serde encoding uses; `EffectGroupColumn` is deliberately unexported, so
+    // the DDL vocabulary is pinned here through serialization.
+    assert_eq!(
+        [
+            GroupWakePolicy::First,
+            GroupWakePolicy::FirstSuccess,
+            GroupWakePolicy::All,
+        ]
+        .map(|policy| {
+            serde_json::to_value(policy)
+                .expect("serialize group wake policy")
+                .as_str()
+                .expect("group wake policy serializes as a string")
+                .to_string()
+        }),
+        ["first", "first_success", "all"]
+    );
+    assert_eq!(
+        [LoserPolicy::RunToCompletion, LoserPolicy::Cancel].map(|policy| {
+            serde_json::to_value(policy)
+                .expect("serialize loser policy")
+                .as_str()
+                .expect("loser policy serializes as a string")
+                .to_string()
+        }),
+        ["run_to_completion", "cancel"]
     );
     assert_eq!(
         [
@@ -1146,6 +1175,16 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
             EffectRowStatus::InProgress | EffectRowStatus::Completed | EffectRowStatus::Failed => {}
         }
     }
+    fn exhaustive_group_wake_policy(policy: GroupWakePolicy) {
+        match policy {
+            GroupWakePolicy::First | GroupWakePolicy::FirstSuccess | GroupWakePolicy::All => {}
+        }
+    }
+    fn exhaustive_loser_policy(policy: LoserPolicy) {
+        match policy {
+            LoserPolicy::RunToCompletion | LoserPolicy::Cancel => {}
+        }
+    }
     fn exhaustive_session_relation(relation: &SessionRelation) {
         match relation {
             SessionRelation::Root
@@ -1178,6 +1217,8 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     exhaustive_wake_delivery_state(WakeDeliveryState::Pending);
     exhaustive_tool_intent_kind(ToolIntentKind::StartProcess);
     exhaustive_effect_row_status(EffectRowStatus::InProgress);
+    exhaustive_group_wake_policy(GroupWakePolicy::First);
+    exhaustive_loser_policy(LoserPolicy::Cancel);
     exhaustive_session_relation(&SessionRelation::Root);
     exhaustive_observer_inheritance(&ObserverInheritance::All);
     exhaustive_causal_ref(&CausalRef::Process {

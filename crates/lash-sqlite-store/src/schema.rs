@@ -103,6 +103,15 @@ impl SqliteDatabase {
     pub(crate) fn fragment_statements(self) -> impl Iterator<Item = &'static str> {
         self.definition().fragments.iter().copied()
     }
+
+    /// Everything provisioning applies, in order: the schema body followed by
+    /// the shared fragments. Fixtures that shadow one table apply this to
+    /// complete the catalog — every statement is idempotent, so the shadowed
+    /// declaration stands while every other table is created.
+    #[cfg(feature = "testing")]
+    pub(crate) fn provisioning_statements(self) -> impl Iterator<Item = &'static str> {
+        std::iter::once(self.schema()).chain(self.fragment_statements())
+    }
 }
 
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
@@ -1150,7 +1159,9 @@ CREATE TABLE IF NOT EXISTS runtime_effect_group (
     loser_disposition  TEXT NOT NULL,
     children           INTEGER NOT NULL,
     next_seq           INTEGER NOT NULL DEFAULT 0,
-    created_at_ms      INTEGER NOT NULL
+    created_at_ms      INTEGER NOT NULL,
+    CONSTRAINT ck_runtime_effect_group_wake CHECK (wake IN ('first', 'first_success', 'all')),
+    CONSTRAINT ck_runtime_effect_group_loser_disposition CHECK (loser_disposition IN ('run_to_completion', 'cancel'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_runtime_effect_group_session
@@ -1254,7 +1265,11 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// Version 24 names the formerly-anonymous CHECKs in the shared fragments
 /// (FIG-3261) so the required-constraints gate can see them; a pre-24 journal
 /// is rejected at open and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 24;
+/// Version 25 constrains the effect-group wake and loser-disposition
+/// vocabularies at the DDL level (FIG-2811): both columns held closed enums
+/// enforced only at read time. A pre-25 journal is rejected at open and
+/// recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 25;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
@@ -1832,6 +1847,22 @@ mod check_constraint_tests {
                  created_at_ms, updated_at_ms
              ) VALUES ('scope', 'bad-effect-status', 'hash', '{}', 'cancelled', 0, 0)",
             "ck_runtime_effect_replay_status",
+        );
+        assert_check_rejects(
+            &effects,
+            "INSERT INTO runtime_effect_group (
+                 group_key, scope_id, session_id, wake, loser_disposition,
+                 children, next_seq, created_at_ms
+             ) VALUES ('bad-wake', 'scope', 'session', 'majority', 'cancel', 0, 0, 0)",
+            "ck_runtime_effect_group_wake",
+        );
+        assert_check_rejects(
+            &effects,
+            "INSERT INTO runtime_effect_group (
+                 group_key, scope_id, session_id, wake, loser_disposition,
+                 children, next_seq, created_at_ms
+             ) VALUES ('bad-disposition', 'scope', 'session', 'all', 'retry', 0, 0, 0)",
+            "ck_runtime_effect_group_loser_disposition",
         );
     }
 }

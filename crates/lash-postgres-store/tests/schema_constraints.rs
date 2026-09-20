@@ -412,6 +412,24 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         "ck_runtime_effect_replay_status",
     )
     .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_runtime_effect_group (
+             group_key, scope_id, session_id, wake, loser_disposition,
+             children, next_seq, created_at_ms
+         ) VALUES ('bad-wake', 'scope', 'session', 'majority', 'cancel', 0, 0, 0)",
+        "ck_runtime_effect_group_wake",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_runtime_effect_group (
+             group_key, scope_id, session_id, wake, loser_disposition,
+             children, next_seq, created_at_ms
+         ) VALUES ('bad-disposition', 'scope', 'session', 'all', 'retry', 0, 0, 0)",
+        "ck_runtime_effect_group_loser_disposition",
+    )
+    .await;
 
     // The cancellation receipt's affected-input evidence is structural: the
     // states the parallel-array shape made representable are all rejected.

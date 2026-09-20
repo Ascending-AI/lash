@@ -77,7 +77,12 @@ const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
+///
+/// Empty under the component-104 boundary: the retained generation is 103, whose
+/// immediate predecessor 102 carried an identical catalog (103 moved the floor,
+/// not a relation), so the component-102 divergent fixture has no post-stamp
+/// artifact to enumerate.
+const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary

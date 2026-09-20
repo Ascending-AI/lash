@@ -231,8 +231,15 @@ async fn fig2837_sqlite_quoted_identifiers_cannot_forge_a_named_check() {
             );",
         )
         .expect("create genuinely quoted lowercase identifiers");
-    // The custom table shadows the schema's own declaration; the shared
-    // fragments complete the fragment-carried catalog.
+    // The custom table shadows the schema's own declaration; the group table
+    // comes straight out of the provisioning text and the shared fragments
+    // complete the fragment-carried catalog.
+    genuine
+        .execute_batch(lash_sqlite_store::testing::database_table_ddl(
+            SqliteDatabase::EffectReplay,
+            "runtime_effect_group",
+        ))
+        .expect("apply the group table from the provisioning DDL");
     for statement in
         lash_sqlite_store::testing::database_fragment_statements(SqliteDatabase::EffectReplay)
     {
@@ -307,6 +314,12 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
              INSERT INTO runtime_effect_replay(status) VALUES ('completed');",
         )
         .expect("create and checkpoint fixture");
+    checkpointed
+        .execute_batch(lash_sqlite_store::testing::database_table_ddl(
+            SqliteDatabase::EffectReplay,
+            "runtime_effect_group",
+        ))
+        .expect("apply the group table from the provisioning DDL");
     for statement in
         lash_sqlite_store::testing::database_fragment_statements(SqliteDatabase::EffectReplay)
     {
@@ -368,6 +381,11 @@ async fn fig2837_sqlite_inspection_preserves_durable_state_and_reads_live_wal() 
          INSERT INTO runtime_effect_replay(status) VALUES ('completed');",
     )
     .expect("commit schema and row to the live WAL");
+    live.execute_batch(lash_sqlite_store::testing::database_table_ddl(
+        SqliteDatabase::EffectReplay,
+        "runtime_effect_group",
+    ))
+    .expect("apply the group table from the provisioning DDL");
     for statement in
         lash_sqlite_store::testing::database_fragment_statements(SqliteDatabase::EffectReplay)
     {
