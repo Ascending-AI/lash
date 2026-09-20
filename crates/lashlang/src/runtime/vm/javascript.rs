@@ -1070,22 +1070,14 @@ pub(super) fn javascript_string_method(
                 utf16_value(vec![units[index]])
             })
         }
-        ("charAt", []) => units
-            .first()
-            .copied()
-            .map_or(Ok(Value::String("".into())), |unit| utf16_value(vec![unit])),
         ("charAt", [index]) => relative_nonnegative_index(javascript_to_number(index), units.len())
             .map_or(Ok(Value::String("".into())), |index| {
                 utf16_value(vec![units[index]])
             }),
-        ("charCodeAt", []) => Ok(Value::Number(
-            units.first().map_or(f64::NAN, |value| *value as f64),
-        )),
         ("charCodeAt", [index]) => Ok(Value::Number(
             relative_nonnegative_index(javascript_to_number(index), units.len())
                 .map_or(f64::NAN, |index| units[index] as f64),
         )),
-        ("codePointAt", []) => code_point_at(&units, 0),
         ("codePointAt", [index]) => {
             relative_nonnegative_index(javascript_to_number(index), units.len())
                 .map_or(Ok(Value::Undefined), |index| code_point_at(&units, index))
@@ -1104,33 +1096,27 @@ pub(super) fn javascript_string_method(
             }
             Ok(Value::String(output.into()))
         }
-        ("startsWith", [needle]) => string_starts_with(&units, needle, 0),
         ("startsWith", [needle, position]) => string_starts_with(
             &units,
             needle,
             clamp_nonnegative_index(javascript_to_number(position), units.len()),
         ),
-        ("endsWith", [needle]) | ("endsWith", [needle, Value::Undefined]) => {
-            string_ends_with(&units, needle, units.len())
-        }
+        ("endsWith", [needle, Value::Undefined]) => string_ends_with(&units, needle, units.len()),
         ("endsWith", [needle, position]) => string_ends_with(
             &units,
             needle,
             clamp_nonnegative_index(javascript_to_number(position), units.len()),
         ),
-        ("includes", [needle]) => string_includes(&units, needle, 0),
         ("includes", [needle, position]) => string_includes(
             &units,
             needle,
             clamp_nonnegative_index(javascript_to_number(position), units.len()),
         ),
-        ("indexOf", [needle]) => string_index_of(&units, needle, 0),
         ("indexOf", [needle, position]) => string_index_of(
             &units,
             needle,
             clamp_nonnegative_index(javascript_to_number(position), units.len()),
         ),
-        ("lastIndexOf", [needle]) => string_last_index_of(&units, needle, units.len()),
         ("lastIndexOf", [needle, Value::Undefined]) => {
             string_last_index_of(&units, needle, units.len())
         }
@@ -1146,7 +1132,7 @@ pub(super) fn javascript_string_method(
                 },
             )
         }
-        ("padStart", [length]) | ("padStart", [length, Value::Undefined]) => {
+        ("padStart", [length, Value::Undefined]) => {
             pad_string(value, javascript_to_number(length), " ", true)
         }
         ("padStart", [length, fill]) => pad_string(
@@ -1155,7 +1141,7 @@ pub(super) fn javascript_string_method(
             &javascript_to_string(fill),
             true,
         ),
-        ("padEnd", [length]) | ("padEnd", [length, Value::Undefined]) => {
+        ("padEnd", [length, Value::Undefined]) => {
             pad_string(value, javascript_to_number(length), " ", false)
         }
         ("padEnd", [length, fill]) => pad_string(
@@ -1263,19 +1249,16 @@ pub(super) fn javascript_array_method(
             }
             Ok(Value::List(output.into()))
         }
-        ("includes", [needle]) => array_includes(items, needle, 0),
         ("includes", [needle, from]) => array_includes(
             items,
             needle,
             clamp_relative_index(javascript_to_number(from), items.len()),
         ),
-        ("indexOf", [needle]) => array_index_of(items, needle, 0),
         ("indexOf", [needle, from]) => array_index_of(
             items,
             needle,
             clamp_relative_index(javascript_to_number(from), items.len()),
         ),
-        ("lastIndexOf", [needle]) => array_last_index_of(items, needle, items.len()),
         ("lastIndexOf", [needle, Value::Undefined]) if argument_count < 2 => {
             array_last_index_of(items, needle, items.len())
         }
@@ -1285,23 +1268,26 @@ pub(super) fn javascript_array_method(
                     array_last_index_of(items, needle, end)
                 })
         }
-        ("join", []) => Ok(Value::String(
-            javascript_join(&Value::List(items.to_vec().into()), &Value::Undefined)?.into(),
-        )),
         ("join", [separator]) => Ok(Value::String(
             javascript_join(&Value::List(items.to_vec().into()), separator)?.into(),
         )),
         ("flat", depth) => {
-            let depth = depth.first().map_or(1, |value| {
-                let depth = javascript_to_number(value);
-                if depth.is_nan() || depth <= 0.0 {
-                    0
-                } else if depth == f64::INFINITY {
-                    usize::MAX
-                } else {
-                    depth.trunc() as usize
+            // Omitted and explicit `undefined` both select the ECMA default
+            // depth 1; coercing the padded `Undefined` to a number would give
+            // NaN and silently flatten nothing.
+            let depth = match depth.first() {
+                None | Some(Value::Undefined) => 1,
+                Some(value) => {
+                    let depth = javascript_to_number(value);
+                    if depth.is_nan() || depth <= 0.0 {
+                        0
+                    } else if depth == f64::INFINITY {
+                        usize::MAX
+                    } else {
+                        depth.trunc() as usize
+                    }
                 }
-            });
+            };
             let mut output = Vec::new();
             flatten_array(items, depth, &mut output);
             Ok(Value::List(output.into()))

@@ -9,66 +9,136 @@ pub(super) fn js_stdlib_error(reason: impl Into<String>) -> RuntimeError {
     }
 }
 
+/// Calls whose dispatch arms are written against a fixed-length argument
+/// vector: the normalizer truncates extras and pads omissions with
+/// `Value::Undefined` before the match runs. Membership is dispatch policy,
+/// not arity — a call whose ECMA semantics distinguish an omitted argument
+/// from an explicit `undefined` (the `Date.UTC` defaults, the `split` limit)
+/// must keep seeing the raw vector, and variadic rows can never be
+/// fixed-length. How many slots each member pads to is looked up from the
+/// signature row in [`crate::ecma_stdlib`], so the arity itself is stated
+/// once, in the prose that advertises the call.
+const FIXED_LENGTH_STATIC_METHODS: &[&str] = &[
+    "Object.keys",
+    "Object.values",
+    "Object.entries",
+    "Object.fromEntries",
+    "Array.isArray",
+    "Number.isFinite",
+    "Number.isInteger",
+    "Number.isNaN",
+    "Number.isSafeInteger",
+    "Number.parseFloat",
+    "Math.abs",
+    "Math.acos",
+    "Math.acosh",
+    "Math.asin",
+    "Math.asinh",
+    "Math.atan",
+    "Math.atanh",
+    "Math.cbrt",
+    "Math.ceil",
+    "Math.clz32",
+    "Math.cos",
+    "Math.cosh",
+    "Math.exp",
+    "Math.expm1",
+    "Math.floor",
+    "Math.fround",
+    "Math.log",
+    "Math.log1p",
+    "Math.log10",
+    "Math.log2",
+    "Math.round",
+    "Math.sin",
+    "Math.sinh",
+    "Math.sqrt",
+    "Math.tan",
+    "Math.tanh",
+    "Math.trunc",
+    "Math.sign",
+    "Object.hasOwn",
+    "Object.is",
+    "Number.parseInt",
+    "Math.atan2",
+    "Math.imul",
+    "Math.pow",
+];
+
+const FIXED_LENGTH_INSTANCE_METHODS: &[&str] = &[
+    "at",
+    "charAt",
+    "charCodeAt",
+    "codePointAt",
+    "flat",
+    "repeat",
+    "join",
+    "sort",
+    "toExponential",
+    "toFixed",
+    "toPrecision",
+    "toSorted",
+    "endsWith",
+    "includes",
+    "indexOf",
+    "lastIndexOf",
+    "padEnd",
+    "padStart",
+    "replace",
+    "replaceAll",
+    "startsWith",
+    "with",
+    "fill",
+    "slice",
+    "substring",
+    "reverse",
+    "toReversed",
+    "toLowerCase",
+    "toUpperCase",
+    "trim",
+    "trimStart",
+    "trimEnd",
+    "toString",
+    "valueOf",
+    "pop",
+    "shift",
+];
+
+// A fixed-length method whose signature row is missing or variadic would
+// fall back to raw arguments and silently re-arm the shorter dispatcher
+// patterns this ticket removed — check the whole policy at compile time.
+const _: () = {
+    let mut i = 0;
+    while i < FIXED_LENGTH_STATIC_METHODS.len() {
+        assert!(
+            crate::ecma_stdlib::static_method_arity(FIXED_LENGTH_STATIC_METHODS[i]).is_some(),
+            "fixed-length static method lacks a fixed-arity signature row"
+        );
+        i += 1;
+    }
+    let mut i = 0;
+    while i < FIXED_LENGTH_INSTANCE_METHODS.len() {
+        assert!(
+            crate::ecma_stdlib::instance_method_arity(FIXED_LENGTH_INSTANCE_METHODS[i]).is_some(),
+            "fixed-length instance method lacks a fixed-arity signature row"
+        );
+        i += 1;
+    }
+};
+
 pub(super) fn normalized_static_arguments(method: &str, args: &[Value]) -> Vec<Value> {
-    let arity = match method {
-        "Object.keys"
-        | "Object.values"
-        | "Object.entries"
-        | "Object.fromEntries"
-        | "Array.isArray"
-        | "Number.isFinite"
-        | "Number.isInteger"
-        | "Number.isNaN"
-        | "Number.isSafeInteger"
-        | "Number.parseFloat"
-        | "Math.abs"
-        | "Math.acos"
-        | "Math.acosh"
-        | "Math.asin"
-        | "Math.asinh"
-        | "Math.atan"
-        | "Math.atanh"
-        | "Math.cbrt"
-        | "Math.ceil"
-        | "Math.clz32"
-        | "Math.cos"
-        | "Math.cosh"
-        | "Math.exp"
-        | "Math.expm1"
-        | "Math.floor"
-        | "Math.fround"
-        | "Math.log"
-        | "Math.log1p"
-        | "Math.log10"
-        | "Math.log2"
-        | "Math.round"
-        | "Math.sin"
-        | "Math.sinh"
-        | "Math.sqrt"
-        | "Math.tan"
-        | "Math.tanh"
-        | "Math.trunc"
-        | "Math.sign" => 1,
-        "Object.hasOwn" | "Object.is" | "Number.parseInt" | "Math.atan2" | "Math.imul"
-        | "Math.pow" => 2,
-        _ => return args.to_vec(),
-    };
+    if !FIXED_LENGTH_STATIC_METHODS.contains(&method) {
+        return args.to_vec();
+    }
+    let arity = crate::ecma_stdlib::static_method_arity(method).unwrap_or(args.len());
     normalized_arguments(args, arity)
 }
 
 pub(super) fn normalized_instance_arguments(method: &str, args: &[Value]) -> Vec<Value> {
-    let arity = match method {
-        "at" | "charAt" | "charCodeAt" | "codePointAt" | "flat" | "repeat" | "join" | "sort"
-        | "toExponential" | "toFixed" | "toPrecision" | "toSorted" => 1,
-        "endsWith" | "includes" | "indexOf" | "lastIndexOf" | "padEnd" | "padStart" | "replace"
-        | "replaceAll" | "startsWith" => 2,
-        "with" => 2,
-        "fill" => 3,
-        "slice" | "substring" => 2,
-        "reverse" | "toReversed" | "toLowerCase" | "toUpperCase" | "trim" | "trimStart"
-        | "trimEnd" | "toString" | "valueOf" | "pop" | "shift" => 0,
-        _ => return args.to_vec(),
-    };
+    if !FIXED_LENGTH_INSTANCE_METHODS.contains(&method) {
+        return args.to_vec();
+    }
+    let arity = crate::ecma_stdlib::instance_method_arity(method).unwrap_or(args.len());
     normalized_arguments(args, arity)
 }
 
@@ -695,5 +765,88 @@ pub(super) fn to_int32(value: f64) -> i64 {
         value - 4_294_967_296
     } else {
         value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every fixed-length member's arity is derived from its signature row,
+    /// so the assertions below pin the prose the number comes from — a row
+    /// edited to a different arity moves the padding and kills the arms
+    /// written against the old length, which is exactly the silent failure
+    /// this census exists to catch at build time rather than review time.
+    #[test]
+    fn fixed_length_methods_resolve_their_signature_arity() {
+        let cases: &[(&str, usize)] = &[
+            ("at", 1),
+            ("join", 1),
+            ("flat", 1),
+            ("endsWith", 2),
+            ("padStart", 2),
+            ("lastIndexOf", 2),
+            ("slice", 2),
+            ("with", 2),
+            ("fill", 3),
+            ("reverse", 0),
+            ("toString", 0),
+        ];
+        for (method, arity) in cases {
+            assert_eq!(
+                crate::ecma_stdlib::instance_method_arity(method),
+                Some(*arity),
+                "{method}"
+            );
+        }
+        let statics: &[(&str, usize)] = &[
+            ("Object.keys", 1),
+            ("Math.abs", 1),
+            ("Number.parseInt", 2),
+            ("Math.pow", 2),
+        ];
+        for (name, arity) in statics {
+            assert_eq!(
+                crate::ecma_stdlib::static_method_arity(name),
+                Some(*arity),
+                "{name}"
+            );
+        }
+        // Presence-sensitive and variadic rows are never fixed-length.
+        assert_eq!(crate::ecma_stdlib::static_method_arity("Date.UTC"), Some(7));
+        assert_eq!(crate::ecma_stdlib::static_method_arity("Math.max"), None);
+        assert_eq!(crate::ecma_stdlib::instance_method_arity("concat"), None);
+        assert_eq!(
+            crate::ecma_stdlib::instance_method_arity("hasOwnProperty"),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn normalization_pads_and_truncates_to_the_derived_arity() {
+        assert_eq!(normalized_instance_arguments("endsWith", &[]).len(), 2);
+        assert_eq!(
+            normalized_instance_arguments("endsWith", &[Value::Null, Value::Null, Value::Null])
+                .len(),
+            2
+        );
+        assert_eq!(
+            normalized_instance_arguments("endsWith", &[Value::Null]),
+            vec![Value::Null, Value::Undefined]
+        );
+        assert_eq!(normalized_instance_arguments("fill", &[]).len(), 3);
+        assert_eq!(
+            normalized_instance_arguments("reverse", &[Value::Null]).len(),
+            0
+        );
+        assert_eq!(normalized_static_arguments("Math.pow", &[]).len(), 2);
+
+        // Methods outside the fixed-length policy keep the raw vector: the
+        // omitted/explicit-`undefined` distinction reaches the dispatcher.
+        assert!(normalized_instance_arguments("split", &[]).is_empty());
+        assert_eq!(
+            normalized_static_arguments("Date.UTC", &[Value::Null]).len(),
+            1
+        );
     }
 }
