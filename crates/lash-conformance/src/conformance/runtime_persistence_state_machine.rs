@@ -1,6 +1,7 @@
 //! Model-based [`RuntimePersistence`] laws for leases, queues, inputs, commit
 //! CAS, and checkpoint components; process-scoped laws live in the sibling harness.
 
+use super::run_shape::Counter;
 use super::*;
 use crate::StoreError::SessionExecutionLeaseRenewalRefused as RenewalRefused;
 use crate::store::{
@@ -21,7 +22,6 @@ use proptest::test_runner::{Config, RngSeed, TestRunner};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 mod attachment_conservation;
 mod claim_honesty;
 mod counterexample;
@@ -229,8 +229,8 @@ enum RunShapeCounter {
     CrashReclaims,
 }
 
-impl RunShapeCounter {
-    const ALL: &[Self] = &[
+impl run_shape::Counter for RunShapeCounter {
+    const ALL: &'static [Self] = &[
         Self::LeaseAcquisitions,
         Self::LeaseFenceRejections,
         Self::QueueEnqueues,
@@ -263,7 +263,6 @@ impl RunShapeCounter {
         Self::CrashPoints,
         Self::CrashReclaims,
     ];
-    const COUNT: usize = Self::ALL.len();
 
     fn name(self) -> &'static str {
         match self {
@@ -300,60 +299,14 @@ impl RunShapeCounter {
             Self::CrashReclaims => "crash_reclaims",
         }
     }
-}
 
-#[derive(Clone, Copy, Debug, Default)]
-struct RunShape {
-    counts: [u64; RunShapeCounter::COUNT],
-}
-
-impl std::ops::Index<RunShapeCounter> for RunShape {
-    type Output = u64;
-    fn index(&self, counter: RunShapeCounter) -> &u64 {
-        &self.counts[counter as usize]
+    fn index(self) -> usize {
+        self as usize
     }
 }
 
-impl std::ops::IndexMut<RunShapeCounter> for RunShape {
-    fn index_mut(&mut self, counter: RunShapeCounter) -> &mut u64 {
-        &mut self.counts[counter as usize]
-    }
-}
-
-#[derive(Debug)]
-struct RunShapeTotals {
-    counts: [AtomicU64; RunShapeCounter::COUNT],
-}
-
-impl Default for RunShapeTotals {
-    fn default() -> Self {
-        Self {
-            counts: std::array::from_fn(|_| AtomicU64::new(0)),
-        }
-    }
-}
-
-impl RunShapeTotals {
-    fn add(&self, shape: RunShape) {
-        for counter in RunShapeCounter::ALL {
-            self.counts[*counter as usize].fetch_add(shape[*counter], Ordering::Relaxed);
-        }
-    }
-
-    fn report(&self) -> String {
-        RunShapeCounter::ALL
-            .iter()
-            .map(|counter| {
-                format!(
-                    "{}={}",
-                    counter.name(),
-                    self.counts[*counter as usize].load(Ordering::Relaxed)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-}
+type RunShape = run_shape::RunShape<RunShapeCounter>;
+type RunShapeTotals = run_shape::RunShapeTotals<RunShapeCounter>;
 
 /// Run generated runtime-persistence laws with shrinking and persisted counterexamples.
 #[expect(
@@ -410,8 +363,8 @@ where
         runner.run(&generated_case(), |case| {
             runtime.block_on(async {
                 let shape = replay_case(make(case.seed).await, case.seed, &case.operations).await?;
-                assert_required_shape(shape)?;
-                runner_totals.add(shape);
+                assert_required_shape(&shape)?;
+                runner_totals.add(&shape);
                 Ok(())
             })
         })
@@ -432,7 +385,7 @@ where
     );
 }
 
-fn assert_required_shape(shape: RunShape) -> Result<(), TestCaseError> {
+fn assert_required_shape(shape: &RunShape) -> Result<(), TestCaseError> {
     for counter in RunShapeCounter::ALL {
         prop_assert!(
             shape[*counter] > 0,

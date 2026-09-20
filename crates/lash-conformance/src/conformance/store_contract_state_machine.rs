@@ -350,7 +350,7 @@ where
                     shape[RunShapeCounter::OutOfOrderStates] > 0,
                     "generated alphabet starvation: case reached no out-of-order settlement state"
                 );
-                runner_shape_totals.add(shape);
+                runner_shape_totals.add(&shape);
                 Ok(())
             })
         })

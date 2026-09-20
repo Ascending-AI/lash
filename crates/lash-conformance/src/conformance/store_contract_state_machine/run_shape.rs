@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use crate::conformance::run_shape;
 
 /// The run-shape counter alphabet. `RunShape`, `RunShapeTotals`, and the
 /// report all derive from this one enum, so a new counter cannot be counted
@@ -16,8 +16,8 @@ pub(super) enum RunShapeCounter {
     TailPruneOpsWithEffect,
 }
 
-impl RunShapeCounter {
-    pub(super) const ALL: &[Self] = &[
+impl run_shape::Counter for RunShapeCounter {
+    const ALL: &'static [Self] = &[
         Self::EnqueuesCommitted,
         Self::ConsumesCommitted,
         Self::OutOfOrderStates,
@@ -28,9 +28,8 @@ impl RunShapeCounter {
         Self::PruneOpsWithEffect,
         Self::TailPruneOpsWithEffect,
     ];
-    const COUNT: usize = Self::ALL.len();
 
-    pub(super) fn name(self) -> &'static str {
+    fn name(self) -> &'static str {
         match self {
             Self::EnqueuesCommitted => "enqueues_committed",
             Self::ConsumesCommitted => "consumes_committed",
@@ -43,57 +42,11 @@ impl RunShapeCounter {
             Self::TailPruneOpsWithEffect => "tail_prune_ops_with_effect",
         }
     }
-}
 
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct RunShape {
-    counts: [u64; RunShapeCounter::COUNT],
-}
-
-impl std::ops::Index<RunShapeCounter> for RunShape {
-    type Output = u64;
-    fn index(&self, counter: RunShapeCounter) -> &u64 {
-        &self.counts[counter as usize]
+    fn index(self) -> usize {
+        self as usize
     }
 }
 
-impl std::ops::IndexMut<RunShapeCounter> for RunShape {
-    fn index_mut(&mut self, counter: RunShapeCounter) -> &mut u64 {
-        &mut self.counts[counter as usize]
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct RunShapeTotals {
-    counts: [AtomicU64; RunShapeCounter::COUNT],
-}
-
-impl Default for RunShapeTotals {
-    fn default() -> Self {
-        Self {
-            counts: std::array::from_fn(|_| AtomicU64::new(0)),
-        }
-    }
-}
-
-impl RunShapeTotals {
-    pub(super) fn add(&self, shape: RunShape) {
-        for counter in RunShapeCounter::ALL {
-            self.counts[*counter as usize].fetch_add(shape[*counter], Ordering::Relaxed);
-        }
-    }
-
-    pub(super) fn report(&self) -> String {
-        RunShapeCounter::ALL
-            .iter()
-            .map(|counter| {
-                format!(
-                    "{}={}",
-                    counter.name(),
-                    self.counts[*counter as usize].load(Ordering::Relaxed)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-}
+pub(super) type RunShape = run_shape::RunShape<RunShapeCounter>;
+pub(super) type RunShapeTotals = run_shape::RunShapeTotals<RunShapeCounter>;
