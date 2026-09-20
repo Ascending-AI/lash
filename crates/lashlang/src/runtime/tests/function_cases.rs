@@ -878,7 +878,12 @@ async fn a_closure_does_not_survive_the_execution_that_allocated_it() {
     // The closure binding is gone from both views of the state, and the plain
     // values the same execution bound are not.
     assert_eq!(state.globals().get("closure"), None);
-    assert_eq!(state.runtime_globals.get("closure"), None);
+    assert_eq!(
+        state
+            .runtime_globals()
+            .and_then(|roots| roots.get("closure")),
+        None
+    );
     assert_eq!(state.globals().get("initialize"), Some(&Value::Bool(false)));
 
     // The state that survives is program-independent, which is the property

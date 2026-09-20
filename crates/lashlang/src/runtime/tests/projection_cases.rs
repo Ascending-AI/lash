@@ -67,7 +67,7 @@ async fn exec_with_global(
     program: Program,
 ) -> Result<Value, RuntimeError> {
     let mut state = State::new();
-    state.globals.insert(name.to_string(), value);
+    state.insert_global(name, value)?;
     match execute_program(&program, &mut state, &Host).await? {
         ExecutionOutcome::Finished(value) => Ok(value),
         ExecutionOutcome::Continued => panic!("expected `finish` in test program"),
@@ -438,7 +438,7 @@ async fn exec_with_global_state(
     program: Program,
 ) -> Result<(Value, State), RuntimeError> {
     let mut state = State::new();
-    state.globals.insert(name.to_string(), value);
+    state.insert_global(name, value)?;
     let outcome = execute_compiled(&compile_program(&program), &mut state, &Host).await?;
     match outcome {
         ExecutionOutcome::Finished(value) => Ok((value, state)),
@@ -703,10 +703,12 @@ async fn print_projected_leaves_projection_to_host_and_finish_materializes() {
 fn canonical_snapshot_encodes_projected_values_without_materializing() {
     let projected = Arc::new(SnapshotGuardProjectedValue::default());
     let mut state = State::new();
-    state.globals.insert(
-        "match_text".to_string(),
-        Value::Projected(ProjectedValue::custom("matches[0].text", projected.clone())),
-    );
+    state
+        .insert_global(
+            "match_text",
+            Value::Projected(ProjectedValue::custom("matches[0].text", projected.clone())),
+        )
+        .expect("seeding a projected global stays within the heap bound");
 
     let encoded = state
         .snapshot()
