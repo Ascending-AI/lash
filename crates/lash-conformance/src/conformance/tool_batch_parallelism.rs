@@ -1,0 +1,1114 @@
+//! One cross-tier law: a tool batch's leaves really overlap (FIG-3400).
+//!
+//! Overlap is proven by *rendezvous*, never by wall time. Every leaf in a
+//! width-n batch reports that it started and then refuses to produce its answer
+//! until the whole width has reported. A tier that runs the leaves one at a time
+//! cannot get past the first leaf, so it fails on a bounded timeout whose
+//! message names the leaves that never started; a tier that overlaps them
+//! finishes and leaves behind an observation log in which all n starts precede
+//! the first answer.
+//!
+//! Three things follow from the same log and are asserted here rather than
+//! re-derived by each backend:
+//!
+//! * observed peak in-flight equals n (the counterpart of the
+//!   `max_in_flight_tool_attempts` double in lash-core's runtime tests);
+//! * the activation shape — all n dispatches are observed before any settlement
+//!   is served — with the consumer's reply order asserted exactly; and
+//! * a serial-versus-concurrent differential: the same width-n program run with
+//!   leaves that never rendezvous returns the identical answers, so the
+//!   rendezvous changes the schedule and nothing else.
+//!
+//! The law is parameterised over two axes. The *tier* arrives as an
+//! [`crate::EffectHost`], so native, SQLite and PostgreSQL run the identical
+//! assertions. The *producer* arrives as a [`ToolBatchProducer`]: the product
+//! surface that spells a width-n parallel batch — parallel model tool calls on
+//! the standard protocol, an orchestrating relay that dispatches granted and
+//! deferred leaves, `Promise.all` on the RLM bridge, a Lashlang aggregate on the
+//! process bridge. A producer contributes its plugin factories and the model
+//! script that issues the plan; everything else is shared.
+//!
+//! Restate is deliberately not registered: it is serial today
+//! (`RestateRuntimeEffectController::supports_concurrent_effects` is a
+//! hardcoded `false`), and its registration lands red-first with the FIG-3397
+//! cutover. There is no expected-failure mechanism here and none may be added.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use lash_sansio::sync::MutexExt as _;
+
+use pretty_assertions::assert_eq;
+
+/// How long one leaf waits for the rest of its batch before the law gives up.
+///
+/// A serial tier burns this once and then short-circuits: the first leaf to
+/// time out poisons the rendezvous, so every later leaf returns immediately and
+/// the whole law fails in about this long rather than in `n` times this long.
+const RENDEZVOUS_BUDGET: Duration = Duration::from_secs(10);
+
+/// One leaf of a planned batch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolBatchLeaf {
+    /// The tool name the producer must call.
+    pub tool: String,
+    /// The route this leaf takes inside `execute_prepared_tool_batch_child`.
+    pub route: ToolBatchRoute,
+}
+
+/// The dispatch route a leaf takes inside the batch child.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolBatchRoute {
+    /// A catalogue-authorised leaf provider call.
+    Leaf,
+    /// A leaf carrying a `ToolExecutionGrant`, which never enters orchestration.
+    Granted,
+    /// An orchestrating body, dispatched through the orchestration lane.
+    Orchestrating,
+    /// A leaf that parks on a completion key and settles out of band.
+    Deferred,
+}
+
+/// How the producer must enter the batch.
+///
+/// A grant and an orchestrating body cannot be spelled as a model tool call, so
+/// the routes that need them are entered through one call to the plan's
+/// orchestrating relay, which dispatches the whole width itself. Every producer
+/// that can name a tool can therefore reach every route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolBatchEntry {
+    /// Issue each leaf directly, as the surface's own parallel construct.
+    Direct,
+    /// Issue one call to [`ToolBatchPlan::relay_tool`] with
+    /// [`ToolBatchPlan::relay_args`].
+    Relay,
+}
+
+/// What the producer is asked to issue: one batch, this wide, over these tools.
+#[derive(Clone, Debug)]
+pub struct ToolBatchPlan {
+    /// A label naming the scenario, used in assertion messages.
+    pub scenario: String,
+    /// The leaves, in the order the producer must issue them.
+    pub leaves: Vec<ToolBatchLeaf>,
+    /// How the producer enters the batch.
+    pub via: ToolBatchEntry,
+    /// The name of the orchestrating relay tool, for producers that issue the
+    /// granted/orchestrating/deferred scenario through a single call.
+    pub relay_tool: String,
+}
+
+impl ToolBatchPlan {
+    /// The plan's width.
+    pub fn width(&self) -> usize {
+        self.leaves.len()
+    }
+
+    /// The relay call's arguments: the leaves it must dispatch as one batch.
+    pub fn relay_args(&self) -> serde_json::Value {
+        serde_json::json!({
+            "leaves": self
+                .leaves
+                .iter()
+                .map(|leaf| serde_json::json!({
+                    "tool": leaf.tool,
+                    "route": format!("{:?}", leaf.route),
+                }))
+                .collect::<Vec<_>>()
+        })
+    }
+}
+
+/// The model script a producer hands the law: the responses, in order, that
+/// make the runtime issue one plan as one batch.
+pub type ToolBatchScript = Arc<dyn Fn(&ToolBatchPlan) -> Vec<crate::LlmResponse> + Send + Sync>;
+
+/// A product surface that issues a width-n parallel tool batch.
+///
+/// The law owns the leaves, the runtime, the tier and every assertion; a
+/// producer contributes only the plugin factories its surface needs and the
+/// model script that makes the runtime issue `plan` as one batch.
+#[derive(Clone)]
+pub struct ToolBatchProducer {
+    /// Names the surface in assertion messages.
+    pub label: String,
+    /// Plugin factories beyond the law's own leaf provider.
+    pub factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+    /// The provider script that issues `plan` as one batch. The law appends the
+    /// terminal text response, so a script that ends after the batch is enough.
+    pub script: ToolBatchScript,
+    /// Whether this surface reaches the orchestrating relay, and through it the
+    /// granted, orchestrating and deferred routes. Every surface that can name
+    /// a tool can; the flag exists for surfaces whose front door is a fixed
+    /// shape (a bare aggregate over catalogue leaves).
+    pub reaches_relay: bool,
+}
+
+impl std::fmt::Debug for ToolBatchProducer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolBatchProducer")
+            .field("label", &self.label)
+            .field("factories", &self.factories.len())
+            .field("reaches_relay", &self.reaches_relay)
+            .finish()
+    }
+}
+
+/// The standard protocol's parallel model tool calls: one model response
+/// carrying n `ToolCall` parts, which the turn driver prepares into exactly one
+/// `PreparedToolBatch`.
+pub fn parallel_model_tool_calls_producer() -> ToolBatchProducer {
+    ToolBatchProducer {
+        label: "parallel-model-tool-calls".to_string(),
+        factories: crate::testing::test_standard_protocol_factories(),
+        script: Arc::new(|plan| {
+            let parts = match plan.via {
+                ToolBatchEntry::Direct => plan
+                    .leaves
+                    .iter()
+                    .enumerate()
+                    .map(|(position, leaf)| crate::LlmOutputPart::ToolCall {
+                        call_id: format!("parallel-call-{position}"),
+                        tool_name: leaf.tool.clone(),
+                        input_json: serde_json::json!({ "position": position }).to_string(),
+                        replay: None,
+                    })
+                    .collect(),
+                ToolBatchEntry::Relay => vec![crate::LlmOutputPart::ToolCall {
+                    call_id: "relay-call".to_string(),
+                    tool_name: plan.relay_tool.clone(),
+                    input_json: plan.relay_args().to_string(),
+                    replay: None,
+                }],
+            };
+            vec![crate::LlmResponse {
+                parts,
+                response_metadata: Default::default(),
+                ..crate::LlmResponse::default()
+            }]
+        }),
+        reaches_relay: true,
+    }
+}
+
+/// The observation log every assertion in this law reads.
+///
+/// One record per leaf transition, appended under a single lock so the order is
+/// the order the runtime produced, not the order a reader happened to sample.
+#[derive(Debug, Default)]
+struct RendezvousLog {
+    events: std::sync::Mutex<Vec<RendezvousEvent>>,
+    in_flight: AtomicUsize,
+    peak_in_flight: AtomicUsize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RendezvousEvent {
+    Started(String),
+    Answered(String),
+    /// The named leaf gave up waiting; the payload is the set of leaves that
+    /// had not started by then.
+    TimedOut {
+        leaf: String,
+        missing: Vec<String>,
+    },
+}
+
+/// The rendezvous every leaf of one scenario shares.
+#[derive(Debug)]
+struct Rendezvous {
+    /// Every leaf the scenario plans to run, in plan order.
+    expected: Vec<String>,
+    started: std::sync::Mutex<Vec<String>>,
+    notify: tokio::sync::watch::Sender<usize>,
+    poisoned: std::sync::atomic::AtomicBool,
+    log: RendezvousLog,
+    /// When false the leaves do not wait for one another at all. That is the
+    /// serial-safe half of the differential: identical program, identical
+    /// answers, no schedule requirement.
+    gated: bool,
+}
+
+impl Rendezvous {
+    fn new(expected: Vec<String>, gated: bool) -> Self {
+        Self {
+            expected,
+            started: std::sync::Mutex::new(Vec::new()),
+            notify: tokio::sync::watch::channel(0).0,
+            poisoned: std::sync::atomic::AtomicBool::new(false),
+            log: RendezvousLog::default(),
+            gated,
+        }
+    }
+
+    fn record_started(&self, leaf: &str) {
+        self.started.lock_recover().push(leaf.to_string());
+        self.log
+            .events
+            .lock_recover()
+            .push(RendezvousEvent::Started(leaf.to_string()));
+        let current = self.log.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.log.peak_in_flight.fetch_max(current, Ordering::SeqCst);
+        let started = self.started.lock_recover().len();
+        let _ = self.notify.send(started);
+    }
+
+    fn record_answered(&self, leaf: &str) {
+        self.log.in_flight.fetch_sub(1, Ordering::SeqCst);
+        self.log
+            .events
+            .lock_recover()
+            .push(RendezvousEvent::Answered(leaf.to_string()));
+    }
+
+    fn missing(&self, required: &[String]) -> Vec<String> {
+        let started = self.started.lock_recover().clone();
+        required
+            .iter()
+            .filter(|leaf| !started.contains(leaf))
+            .cloned()
+            .collect()
+    }
+
+    /// Waits until every leaf in `required` has reported started.
+    ///
+    /// Returns `true` when the rendezvous was met. On the bounded timeout it
+    /// records the leaves that never started and poisons the rendezvous, so the
+    /// remaining leaves of a serial tier return at once instead of each burning
+    /// the whole budget.
+    async fn wait_for(&self, leaf: &str, required: &[String]) -> bool {
+        if !self.gated {
+            return true;
+        }
+        if self.poisoned.load(Ordering::SeqCst) {
+            return false;
+        }
+        let mut receiver = self.notify.subscribe();
+        let met = tokio::time::timeout(RENDEZVOUS_BUDGET, async {
+            loop {
+                if self.missing(required).is_empty() {
+                    return true;
+                }
+                if self.poisoned.load(Ordering::SeqCst) {
+                    return false;
+                }
+                if receiver.changed().await.is_err() {
+                    return false;
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+        if !met {
+            let missing = self.missing(required);
+            self.poisoned.store(true, Ordering::SeqCst);
+            let _ = self.notify.send(self.started.lock_recover().len());
+            self.log
+                .events
+                .lock_recover()
+                .push(RendezvousEvent::TimedOut {
+                    leaf: leaf.to_string(),
+                    missing,
+                });
+        }
+        met
+    }
+
+    fn events(&self) -> Vec<RendezvousEvent> {
+        self.log.events.lock_recover().clone()
+    }
+
+    fn peak_in_flight(&self) -> usize {
+        self.log.peak_in_flight.load(Ordering::SeqCst)
+    }
+
+    /// Every leaf that some waiter reported as never started, in first-seen
+    /// order. This is the message a serial tier fails with.
+    fn never_started(&self) -> Vec<String> {
+        let mut seen = Vec::new();
+        for event in self.events() {
+            if let RendezvousEvent::TimedOut { missing, .. } = event {
+                for leaf in missing {
+                    if !seen.contains(&leaf) {
+                        seen.push(leaf);
+                    }
+                }
+            }
+        }
+        seen
+    }
+}
+
+/// The per-scenario state the leaf provider and the relay tool share.
+#[derive(Debug)]
+struct ScenarioState {
+    /// The rendezvous for the scenario currently running.
+    rendezvous: std::sync::Mutex<Arc<Rendezvous>>,
+    /// Which leaves each leaf must wait for. An empty entry means "all of
+    /// them"; a non-empty one is the reverse-dependency case.
+    dependencies: std::sync::Mutex<BTreeMap<String, Vec<String>>>,
+}
+
+impl ScenarioState {
+    fn required_for(&self, leaf: &str, rendezvous: &Rendezvous) -> Vec<String> {
+        self.dependencies
+            .lock_recover()
+            .get(leaf)
+            .cloned()
+            .unwrap_or_else(|| rendezvous.expected.clone())
+    }
+}
+
+fn leaf_definition(name: &str) -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        format!("tool:{name}"),
+        name,
+        "A rendezvous leaf: answers only once its whole batch has started.",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    )
+}
+
+/// The leaf provider. Every plain, granted and deferred leaf of every scenario
+/// is one of these tools; the orchestrating leaves live in the relay factory
+/// below because orchestration is a separate registration lane.
+struct RendezvousLeaves {
+    names: Vec<String>,
+    deferred: Vec<String>,
+    state: Arc<ScenarioState>,
+    effect_host: Arc<dyn crate::EffectHost>,
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for RendezvousLeaves {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        self.names
+            .iter()
+            .map(|name| leaf_definition(name).manifest())
+            .collect()
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        self.names
+            .iter()
+            .any(|leaf| leaf == name)
+            .then(|| Arc::new(leaf_definition(name).contract()))
+    }
+
+    fn attempt_may_defer(&self, tool_id: &crate::ToolId) -> bool {
+        self.deferred
+            .iter()
+            .any(|name| leaf_definition(name).id() == tool_id)
+    }
+
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        let name = call.name().to_string();
+        let rendezvous = Arc::clone(&self.state.rendezvous.lock_recover());
+        rendezvous.record_started(&name);
+        let required = self.state.required_for(&name, &rendezvous);
+
+        if self.deferred.contains(&name) {
+            // A deferred leaf parks on its completion key and settles out of
+            // band. It joins the rendezvous exactly like a synchronous leaf:
+            // its start is already recorded, and the out-of-band task holds its
+            // in-flight slot until the whole width has started.
+            let key = match call.context.completion_key() {
+                Ok(key) => key,
+                Err(error) => {
+                    return crate::ToolOutcome::failure(crate::ToolFailure::runtime(
+                        crate::ToolFailureClass::Internal,
+                        "no_completion_key",
+                        format!(
+                            "this tier issues no completion key, so the deferred \
+                             route cannot be exercised on it: {error}"
+                        ),
+                    ))
+                    .into();
+                }
+            };
+            let effect_host = Arc::clone(&self.effect_host);
+            crate::task::spawn(async move {
+                let met = rendezvous.wait_for(&name, &required).await;
+                rendezvous.record_answered(&name);
+                let resolution = crate::Resolution::Ok(leaf_answer(&name, met));
+                let _ = effect_host
+                    .await_event_resolver()
+                    .resolve_await_event(&key, resolution)
+                    .await;
+            });
+            return crate::ToolAttemptOutcome::Pending(crate::PendingCompletion::new());
+        }
+
+        let met = rendezvous.wait_for(&name, &required).await;
+        rendezvous.record_answered(&name);
+        crate::ToolOutcome::ok(leaf_answer(&name, met)).into()
+    }
+}
+
+/// The answer a leaf returns. It is deliberately identical whether or not the
+/// leaf had to wait, so the serial-versus-concurrent differential compares like
+/// with like: only the schedule differs between the two halves.
+fn leaf_answer(name: &str, met: bool) -> serde_json::Value {
+    let _ = met;
+    serde_json::json!({ "leaf": name })
+}
+
+/// The orchestrating relay: one call that dispatches the plan's leaves as one
+/// batch through `OrchestrationContext::call_tool_batch`, attaching execution
+/// grants to the leaves the plan marks granted.
+///
+/// This is how a producer that can only name a tool still reaches the granted,
+/// orchestrating and deferred routes.
+struct RendezvousRelay {
+    name: String,
+    state: Arc<ScenarioState>,
+    /// The replies the relay observed, in the order its consumer received them.
+    replies: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+fn relay_definition(name: &str) -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        format!("tool:{name}"),
+        name,
+        "Dispatches a planned batch of rendezvous leaves as one parallel batch.",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "leaves": { "type": "array" } },
+            "required": ["leaves"],
+        }),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    )
+}
+
+#[async_trait::async_trait]
+impl crate::facade_support::OrchestratingToolImplementation for RendezvousRelay {
+    fn manifest(&self) -> crate::ToolManifest {
+        relay_definition(&self.name).manifest()
+    }
+
+    fn contract(&self) -> Arc<crate::ToolContract> {
+        Arc::new(relay_definition(&self.name).contract())
+    }
+
+    async fn execute(
+        &self,
+        args: &serde_json::Value,
+        context: &crate::facade_support::OrchestrationContext<'_>,
+    ) -> crate::ToolOutcome {
+        let Some(leaves) = args.get("leaves").and_then(|leaves| leaves.as_array()) else {
+            return crate::ToolOutcome::err(serde_json::json!("the relay call carries no leaves"));
+        };
+        let mut invocations = Vec::new();
+        for (position, leaf) in leaves.iter().enumerate() {
+            let tool = leaf
+                .get("tool")
+                .and_then(|tool| tool.as_str())
+                .unwrap_or("");
+            let route = leaf
+                .get("route")
+                .and_then(|route| route.as_str())
+                .unwrap_or("");
+            let definition = if route == "Orchestrating" {
+                orchestrating_leaf_definition(tool)
+            } else {
+                leaf_definition(tool)
+            };
+            let mut invocation = crate::ToolInvocation::new(
+                format!("relay-call-{position}"),
+                definition.id().clone(),
+                serde_json::json!({ "position": position }),
+            );
+            if route == "Granted" {
+                // A grant without a source id is refused by design: granted
+                // authority names the source it executes through rather than
+                // inferring one. The leaves live on a plugin-registered
+                // provider, so that source is the plugin route.
+                invocation = invocation.with_execution_grant(
+                    crate::ToolExecutionGrant::from_definition(definition)
+                        .with_source_id(crate::facade_support::PLUGIN_TOOL_SOURCE_ID),
+                );
+            }
+            invocations.push(invocation);
+        }
+        let replies = context.call_tool_batch(invocations).await;
+        let mut observed = Vec::new();
+        let mut answers = Vec::new();
+        for reply in replies {
+            let value = reply.output.value_for_projection();
+            // A reply that is not a leaf answer is recorded verbatim: when a
+            // route refuses, the refusal is the finding, and a placeholder
+            // would hide it behind a downstream ordering mismatch.
+            observed.push(
+                value
+                    .get("leaf")
+                    .and_then(|leaf| leaf.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| value.to_string()),
+            );
+            answers.push(value);
+        }
+        *self.replies.lock_recover() = observed;
+        let _ = &self.state;
+        crate::ToolOutcome::ok(serde_json::json!({ "answers": answers }))
+    }
+}
+
+fn orchestrating_leaf_definition(name: &str) -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        format!("tool:{name}"),
+        name,
+        "An orchestrating rendezvous leaf.",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    )
+}
+
+/// An orchestrating body that rendezvouses like a leaf, so the orchestration
+/// lane inside `execute_prepared_tool_batch_child` is covered by the same law.
+struct OrchestratingRendezvousLeaf {
+    name: String,
+    state: Arc<ScenarioState>,
+}
+
+#[async_trait::async_trait]
+impl crate::facade_support::OrchestratingToolImplementation for OrchestratingRendezvousLeaf {
+    fn manifest(&self) -> crate::ToolManifest {
+        orchestrating_leaf_definition(&self.name).manifest()
+    }
+
+    fn contract(&self) -> Arc<crate::ToolContract> {
+        Arc::new(orchestrating_leaf_definition(&self.name).contract())
+    }
+
+    async fn execute(
+        &self,
+        _args: &serde_json::Value,
+        _context: &crate::facade_support::OrchestrationContext<'_>,
+    ) -> crate::ToolOutcome {
+        let rendezvous = Arc::clone(&self.state.rendezvous.lock_recover());
+        rendezvous.record_started(&self.name);
+        let required = self.state.required_for(&self.name, &rendezvous);
+        let met = rendezvous.wait_for(&self.name, &required).await;
+        rendezvous.record_answered(&self.name);
+        crate::ToolOutcome::ok(leaf_answer(&self.name, met))
+    }
+}
+
+/// The scenario's plugin factory: the leaf provider, the orchestrating relay,
+/// and the orchestrating leaf the relay dispatches.
+#[expect(
+    unsafe_code,
+    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contracts it registers"
+)]
+fn rendezvous_plugin(
+    names: Vec<String>,
+    deferred: Vec<String>,
+    orchestrating: Vec<String>,
+    relay_name: String,
+    state: Arc<ScenarioState>,
+    effect_host: Arc<dyn crate::EffectHost>,
+    relay_replies: Arc<std::sync::Mutex<Vec<String>>>,
+) -> Arc<dyn crate::facade_support::PluginFactory> {
+    let leaves: Arc<dyn crate::ToolProvider> = Arc::new(RendezvousLeaves {
+        names,
+        deferred,
+        state: Arc::clone(&state),
+        effect_host,
+    });
+    let mut spec = crate::facade_support::PluginSpec::new().with_tool_provider(leaves);
+    spec = spec.with_orchestrating_tool(unsafe {
+        crate::facade_support::OrchestratingToolDef::from_first_party(Arc::new(RendezvousRelay {
+            name: relay_name,
+            state: Arc::clone(&state),
+            replies: relay_replies,
+        }))
+    });
+    for name in orchestrating {
+        spec = spec.with_orchestrating_tool(unsafe {
+            crate::facade_support::OrchestratingToolDef::from_first_party(Arc::new(
+                OrchestratingRendezvousLeaf {
+                    name,
+                    state: Arc::clone(&state),
+                },
+            ))
+        });
+    }
+    Arc::new(crate::plugin::StaticPluginFactory::new(
+        "conformance-tool-batch-parallelism",
+        spec,
+    ))
+}
+
+/// One scenario's world: a runtime bound to the tier under test, carrying the
+/// producer's factories and the law's own rendezvous leaves.
+struct ScenarioWorld {
+    state: Arc<ScenarioState>,
+    relay_replies: Arc<std::sync::Mutex<Vec<String>>>,
+    factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+    model_calls: Arc<AtomicUsize>,
+    effect_host: Arc<dyn crate::EffectHost>,
+    session_id: lash_sansio::SessionId,
+}
+
+/// Builds a runtime over `effect_host` with the producer's factories plus the
+/// law's leaves, runs one turn, and returns the scenario's observations.
+async fn run_scenario(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    producer: &ToolBatchProducer,
+    plan: &ToolBatchPlan,
+    gated: bool,
+    dependencies: BTreeMap<String, Vec<String>>,
+) -> ScenarioObservations {
+    let leaf_names = plan
+        .leaves
+        .iter()
+        .filter(|leaf| leaf.route != ToolBatchRoute::Orchestrating)
+        .map(|leaf| leaf.tool.clone())
+        .collect::<Vec<_>>();
+    let deferred = plan
+        .leaves
+        .iter()
+        .filter(|leaf| leaf.route == ToolBatchRoute::Deferred)
+        .map(|leaf| leaf.tool.clone())
+        .collect::<Vec<_>>();
+    let orchestrating = plan
+        .leaves
+        .iter()
+        .filter(|leaf| leaf.route == ToolBatchRoute::Orchestrating)
+        .map(|leaf| leaf.tool.clone())
+        .collect::<Vec<_>>();
+    let rendezvous = Arc::new(Rendezvous::new(
+        plan.leaves.iter().map(|leaf| leaf.tool.clone()).collect(),
+        gated,
+    ));
+    let state = Arc::new(ScenarioState {
+        rendezvous: std::sync::Mutex::new(Arc::clone(&rendezvous)),
+        dependencies: std::sync::Mutex::new(dependencies),
+    });
+    let relay_replies = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut factories = producer.factories.clone();
+    factories.push(rendezvous_plugin(
+        leaf_names,
+        deferred,
+        orchestrating,
+        plan.relay_tool.clone(),
+        Arc::clone(&state),
+        Arc::clone(&effect_host),
+        Arc::clone(&relay_replies),
+    ));
+    // The two halves of the differential run the identical program, so they
+    // must not land on the identical durable session: a journalling tier would
+    // replay the first half's recorded outcomes and the second half would
+    // observe no leaves at all. The discriminator is the session, never the
+    // program.
+    let schedule = if gated { "gated" } else { "serial-safe" };
+    let session_id = lash_sansio::SessionId::from(format!(
+        "{prefix}-{}-{}-{schedule}",
+        producer.label, plan.scenario
+    ));
+    let world = ScenarioWorld {
+        state,
+        relay_replies,
+        factories,
+        model_calls: Arc::new(AtomicUsize::new(0)),
+        effect_host,
+        session_id,
+    };
+    drive_turn(&world, producer, plan).await;
+    ScenarioObservations {
+        events: rendezvous.events(),
+        peak_in_flight: rendezvous.peak_in_flight(),
+        never_started: rendezvous.never_started(),
+        relay_replies: world.relay_replies.lock_recover().clone(),
+        model_calls: world.model_calls.load(Ordering::SeqCst),
+    }
+}
+
+/// Everything the assertions read back from one scenario run.
+#[derive(Debug)]
+struct ScenarioObservations {
+    events: Vec<RendezvousEvent>,
+    peak_in_flight: usize,
+    never_started: Vec<String>,
+    relay_replies: Vec<String>,
+    model_calls: usize,
+}
+
+impl ScenarioObservations {
+    /// The leaves that reported started, in the order they did.
+    fn started(&self) -> Vec<String> {
+        self.events
+            .iter()
+            .filter_map(|event| match event {
+                RendezvousEvent::Started(leaf) => Some(leaf.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The leaves that produced an answer, in the order they did. This is the
+    /// settlement order the batch observed.
+    fn answered(&self) -> Vec<String> {
+        self.events
+            .iter()
+            .filter_map(|event| match event {
+                RendezvousEvent::Answered(leaf) => Some(leaf.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// How many leaves started before the first answer was served. On a tier
+    /// that overlaps a width-n batch this is n; on a serial tier it is 1.
+    fn started_before_first_answer(&self) -> usize {
+        let mut started = 0;
+        for event in &self.events {
+            match event {
+                RendezvousEvent::Started(_) => started += 1,
+                RendezvousEvent::Answered(_) => break,
+                RendezvousEvent::TimedOut { .. } => break,
+            }
+        }
+        started
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn drive_turn(world: &ScenarioWorld, producer: &ToolBatchProducer, plan: &ToolBatchPlan) {
+    let mut script = (producer.script)(plan);
+    script.push(crate::LlmResponse {
+        parts: vec![crate::LlmOutputPart::Text {
+            text: "batch complete".to_string(),
+            response_meta: None,
+        }],
+        response_metadata: Default::default(),
+        ..crate::LlmResponse::default()
+    });
+    let script = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from(
+        script,
+    )));
+    let model_calls = Arc::clone(&world.model_calls);
+    let model = crate::testing::TestProvider::builder()
+        .kind("stub")
+        .complete(move |_| {
+            let script = Arc::clone(&script);
+            let model_calls = Arc::clone(&model_calls);
+            async move {
+                model_calls.fetch_add(1, Ordering::SeqCst);
+                let next = script.lock_recover().pop_front();
+                Ok(next.unwrap_or_else(|| crate::LlmResponse {
+                    parts: vec![crate::LlmOutputPart::Text {
+                        text: "batch complete".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..crate::LlmResponse::default()
+                }))
+            }
+        })
+        .build();
+    let mut host = crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
+    host.control.effect_host = Arc::clone(&world.effect_host);
+    host.providers.provider_resolver =
+        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+    let mut policy = crate::testing::mock_session_policy();
+    policy.session_id = Some(world.session_id.clone());
+    let state = crate::RuntimeSessionState {
+        session_id: world.session_id.clone(),
+        policy: policy.clone(),
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let mut runtime = Box::pin(
+        crate::LashRuntime::builder(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+            crate::testing::runtime_lease_owner(),
+        )
+        .with_session_id(&world.session_id)
+        .with_policy(policy)
+        .with_initial_state(state)
+        .with_runtime_host(host)
+        .with_plugin_factories(world.factories.clone())
+        .with_store(Arc::new(crate::InMemorySessionStore::new()))
+        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+        .build(),
+    )
+    .await
+    .expect("build the tool-batch parallelism conformance runtime");
+    let turn_id = lash_sansio::TurnId::from(format!("{}-turn", world.session_id));
+    let turn_scope = world
+        .effect_host
+        .scoped(crate::ExecutionScope::turn(&world.session_id, &turn_id))
+        .expect("scope the tool-batch parallelism turn");
+    let mut input = crate::TurnInput::text("run the planned batch");
+    input.trace_turn_id = Some(turn_id);
+    let turn = runtime
+        .stream_turn(
+            input,
+            crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), turn_scope),
+        )
+        .await
+        .expect("run the tool-batch parallelism conformance turn");
+    assert!(
+        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        "the batch turn must finish: {:?}",
+        turn.outcome
+    );
+    let _ = &world.state;
+}
+
+fn leaf_name(scenario: &str, position: usize) -> String {
+    format!("rv_{scenario}_{position}")
+}
+
+fn plan(scenario: &str, routes: &[ToolBatchRoute], via: ToolBatchEntry) -> ToolBatchPlan {
+    ToolBatchPlan {
+        scenario: scenario.to_string(),
+        leaves: routes
+            .iter()
+            .enumerate()
+            .map(|(position, route)| ToolBatchLeaf {
+                tool: leaf_name(scenario, position),
+                route: *route,
+            })
+            .collect(),
+        via,
+        relay_tool: format!("rv_relay_{scenario}"),
+    }
+}
+
+fn leaf_routes(width: usize) -> Vec<ToolBatchRoute> {
+    vec![ToolBatchRoute::Leaf; width]
+}
+
+/// The position of the first event matching `predicate`, or a failure naming
+/// the log so a missing transition is reported as itself rather than as a
+/// downstream ordering mismatch.
+fn position_of(
+    events: &[RendezvousEvent],
+    what: &str,
+    predicate: impl Fn(&RendezvousEvent) -> bool,
+) -> usize {
+    events
+        .iter()
+        .position(predicate)
+        .unwrap_or_else(|| panic!("no {what} in the rendezvous log: {events:?}"))
+}
+
+/// Fails with the message the law owes a serial tier: which leaves never
+/// started, and which ones did.
+fn assert_every_leaf_started(context: &str, plan: &ToolBatchPlan, observed: &ScenarioObservations) {
+    assert!(
+        observed.never_started.is_empty(),
+        "{context}: the batch did not overlap. Leaves that never started: {:?}; \
+         leaves that did start: {:?}; replies the consumer saw: {:?}. A \
+         width-{} tool batch whose leaves each wait for the whole width can \
+         only complete on a tier that runs them concurrently.",
+        observed.never_started,
+        observed.started(),
+        observed.relay_replies,
+        plan.width(),
+    );
+}
+
+/// Asserts the activation shape: every one of the plan's `n` dispatches is
+/// observed before any settlement is served, and every leaf answered exactly
+/// once.
+fn assert_activation_shape(context: &str, plan: &ToolBatchPlan, observed: &ScenarioObservations) {
+    assert_every_leaf_started(context, plan, observed);
+    let width = plan.width();
+    assert_eq!(
+        observed.started_before_first_answer(),
+        width,
+        "{context}: all {width} dispatches must be observed before the first \
+         settlement is served; log: {:?}",
+        observed.events,
+    );
+    assert_eq!(
+        observed.peak_in_flight, width,
+        "{context}: observed peak in-flight must equal the batch width; log: {:?}",
+        observed.events,
+    );
+    let mut answered = observed.answered();
+    answered.sort();
+    let mut expected = plan
+        .leaves
+        .iter()
+        .map(|leaf| leaf.tool.clone())
+        .collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(
+        answered, expected,
+        "{context}: every planned leaf answers exactly once",
+    );
+}
+
+/// The cross-tier tool-batch parallelism law.
+///
+/// `prefix` namespaces the sessions this law opens on the supplied tier;
+/// `effect_host` is the tier under test; `producer` is the product surface that
+/// issues the batch. See the module documentation for what is proven and why it
+/// is proven by rendezvous rather than by wall time.
+pub async fn tool_batch_cross_tier_parallelism(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    producer: ToolBatchProducer,
+) {
+    let context = format!("{prefix}/{}", producer.label);
+
+    // Width 2 and width 8, every leaf waiting for the whole width. A serial
+    // executor cannot leave the first leaf, so it fails here with the named
+    // leaves.
+    for width in [2_usize, 8] {
+        let plan = plan(
+            &format!("width{width}"),
+            &leaf_routes(width),
+            ToolBatchEntry::Direct,
+        );
+        let observed = run_scenario(
+            prefix,
+            Arc::clone(&effect_host),
+            &producer,
+            &plan,
+            true,
+            BTreeMap::new(),
+        )
+        .await;
+        assert_activation_shape(&format!("{context} width-{width}"), &plan, &observed);
+    }
+
+    // The reverse-dependency case: the input-first leaf answers only after the
+    // input-last leaf has started. A loop that runs the leaves in input order
+    // can never satisfy it, whatever its per-leaf latency.
+    let reverse = plan("reverse", &leaf_routes(4), ToolBatchEntry::Direct);
+    let observed = {
+        let first = reverse.leaves[0].tool.clone();
+        let last = reverse.leaves[3].tool.clone();
+        let mut dependencies = BTreeMap::new();
+        dependencies.insert(first.clone(), vec![last.clone()]);
+        for leaf in &reverse.leaves[1..] {
+            dependencies.insert(leaf.tool.clone(), Vec::new());
+        }
+        run_scenario(
+            prefix,
+            Arc::clone(&effect_host),
+            &producer,
+            &reverse,
+            true,
+            dependencies,
+        )
+        .await
+    };
+    assert_every_leaf_started(
+        &format!("{context} reverse-dependency"),
+        &reverse,
+        &observed,
+    );
+    let first = reverse.leaves[0].tool.clone();
+    let last = reverse.leaves[3].tool.clone();
+    let first_answered = position_of(
+        &observed.events,
+        &format!("answer from {first}"),
+        |event| matches!(event, RendezvousEvent::Answered(leaf) if *leaf == first),
+    );
+    let last_started = position_of(
+        &observed.events,
+        &format!("start of {last}"),
+        |event| matches!(event, RendezvousEvent::Started(leaf) if *leaf == last),
+    );
+    assert!(
+        first_answered > last_started,
+        "{context}: the input-first leaf `{first}` must answer only after the \
+         input-last leaf `{last}` has started; log: {:?}",
+        observed.events,
+    );
+
+    // The granted, orchestrating and deferred routes, dispatched as one batch
+    // through an orchestrating relay so every producer that can name a tool
+    // covers them.
+    if producer.reaches_relay {
+        let routes = plan(
+            "routes",
+            &[
+                ToolBatchRoute::Leaf,
+                ToolBatchRoute::Granted,
+                ToolBatchRoute::Orchestrating,
+                ToolBatchRoute::Deferred,
+                ToolBatchRoute::Leaf,
+                ToolBatchRoute::Granted,
+                ToolBatchRoute::Orchestrating,
+                ToolBatchRoute::Deferred,
+            ],
+            ToolBatchEntry::Relay,
+        );
+        let observed = run_scenario(
+            prefix,
+            Arc::clone(&effect_host),
+            &producer,
+            &routes,
+            true,
+            BTreeMap::new(),
+        )
+        .await;
+        assert_activation_shape(&format!("{context} routes"), &routes, &observed);
+        assert_eq!(
+            observed.relay_replies,
+            routes
+                .leaves
+                .iter()
+                .map(|leaf| leaf.tool.clone())
+                .collect::<Vec<_>>(),
+            "{context}: the consumer reads replies in call order however the \
+             leaves settled",
+        );
+    }
+
+    // The serial-versus-concurrent differential: the same width-8 program with
+    // the rendezvous removed, which a serial executor could also run, returns
+    // the identical answers. Only the schedule differs.
+    let differential = plan("differential", &leaf_routes(8), ToolBatchEntry::Direct);
+    let concurrent = run_scenario(
+        prefix,
+        Arc::clone(&effect_host),
+        &producer,
+        &differential,
+        true,
+        BTreeMap::new(),
+    )
+    .await;
+    let serial_safe = run_scenario(
+        prefix,
+        Arc::clone(&effect_host),
+        &producer,
+        &differential,
+        false,
+        BTreeMap::new(),
+    )
+    .await;
+    assert_activation_shape(
+        &format!("{context} differential"),
+        &differential,
+        &concurrent,
+    );
+    let mut concurrent_answers = concurrent.answered();
+    concurrent_answers.sort();
+    let mut serial_answers = serial_safe.answered();
+    serial_answers.sort();
+    assert_eq!(
+        concurrent_answers, serial_answers,
+        "{context}: the rendezvous changes the schedule, not the answers",
+    );
+    assert!(
+        serial_safe.model_calls >= 1,
+        "{context}: the serial-safe half must have driven the producer",
+    );
+}
