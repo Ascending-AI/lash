@@ -84,11 +84,12 @@ pub(super) fn parallel_tool_results_checkpoint_once_fact(
 pub(super) fn standard_max_turns_after_tool_result_fact(
     events: &[DeliveredBoundary],
 ) -> Result<ScenarioContractGeneratedFact, String> {
-    let proof_event = contract_execution_event(events, "standard.max_turns_after_tool_result")?;
+    let spec = NO_EXECUTION_FACT_CONTRACT;
+    let proof_event = contract_execution_event(events, spec.semantic_oracle)?;
     let execution = contract_execution_payload_matches_observed(
         proof_event,
-        "standard.max_turns_after_tool_result",
-        "standard_protocol_scenario_max_turns_terminates_after_tool_result",
+        spec.semantic_oracle,
+        spec.test_name,
     )?;
     let result = execution
         .get("result")

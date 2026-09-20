@@ -400,157 +400,156 @@ pub(super) fn json_array_equals(value: Option<&Value>, expected: &[&str]) -> boo
             .all(|(value, expected)| value.as_str() == Some(*expected))
 }
 
+/// The Standard family's fact-spec rows. `spec` is resolved from the imported
+/// contract table at compile time, so a row cannot name a contract the
+/// registry does not carry; the source scenario the metadata table used to
+/// copy is now just `spec.test_name`.
+pub(super) const STANDARD_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
+    ContractFactSpec {
+        spec: contract_spec(
+            STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
+            "standard.initial_request_projection",
+        ),
+        fact: "standard_initial_request_projection_execution",
+        assertion: "StandardDriver projects the user input into the first TurnMachine LLM request",
+        check: check_standard_initial_request_projection,
+        extras_before: &[],
+        extras_after: &[ExtraFact::Custom(initial_provider_projection_fact)],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
+            "standard.empty_response_finishes",
+        ),
+        fact: "standard_empty_response_finishes_execution",
+        assertion: "StandardDriver sends a valid empty model response through the normal completion checkpoint and finishes successfully",
+        check: check_standard_empty_response_finishes,
+        extras_before: &[],
+        extras_after: &[],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
+            "standard.provider_error_without_checkpoint",
+        ),
+        fact: "standard_provider_error_without_checkpoint_execution",
+        assertion: "StandardDriver provider error stops immediately without committing a checkpoint",
+        check: check_standard_provider_error_without_checkpoint,
+        extras_before: &[],
+        extras_after: &[ExtraFact::ProviderMutation {
+            mutation: "rate_limit_error_envelope",
+            fact: "standard_provider_error_no_checkpoint",
+            assertion: "provider error envelope is classified through migrated parsers without depending on a later checkpoint",
+        }],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
+            "standard.native_tool_loop_reenters_model",
+        ),
+        fact: "standard_native_tool_loop_reenters_model_execution",
+        assertion: "StandardDriver native tool results checkpoint after work and re-enter the model loop",
+        check: check_standard_native_tool_loop_reenters_model,
+        extras_before: &[],
+        extras_after: &[ExtraFact::ToolReentry {
+            fact: "standard_native_tool_reenters_model",
+            require_provider_event_release: false,
+        }],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
+            "standard.parallel_tool_results_checkpoint_once",
+        ),
+        fact: "standard_parallel_tool_results_checkpoint_once_execution",
+        assertion: "StandardDriver parallel tool results commit exactly one AfterWork checkpoint before model re-entry",
+        check: check_standard_parallel_tool_results_checkpoint_once,
+        extras_before: &[],
+        extras_after: &[ExtraFact::Custom(
+            parallel_tool_results_checkpoint_once_fact,
+        )],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
+            "standard.tool_failure_feedback_reenters_model",
+        ),
+        fact: "standard_tool_failure_feedback_reenters_model_execution",
+        assertion: "StandardDriver converts tool failure into model feedback, checkpoints, and re-enters",
+        check: check_standard_tool_failure_feedback_reenters_model,
+        extras_before: &[],
+        extras_after: &[
+            ExtraFact::ToolReentry {
+                fact: "standard_tool_feedback_reenters_model",
+                require_provider_event_release: false,
+            },
+            ExtraFact::ProviderMutation {
+                mutation: "malformed_sse_chunk",
+                fact: "standard_tool_failure_feedback_parser_path",
+                assertion: "tool-failure feedback package also carries generated provider failure parser evidence",
+            },
+        ],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
+            "standard.streamed_text_finalizes_once",
+        ),
+        fact: "standard_streamed_text_finalizes_once_execution",
+        assertion: "StandardDriver streamed assistant text finalizes once without duplicate text deltas",
+        check: check_standard_streamed_text_finalizes_once,
+        extras_before: &[],
+        extras_after: &[ExtraFact::Custom(streamed_text_finalizes_once_fact)],
+    },
+];
+
 pub(super) fn standard_protocol_execution_fact(
     events: &[DeliveredBoundary],
-    contract: &'static str,
+    row: &'static ContractFactSpec,
     memo: &ScenarioFactMemo,
 ) -> Result<ScenarioContractGeneratedFact, String> {
+    let contract = row.spec.semantic_oracle;
     let proof_event = contract_execution_event(events, contract)?;
     // Same shape as the agent facts: which event proves the contract depends on
     // the candidate, what the fact says about that event does not.
     let boundary_id = proof_event.boundary_id.clone();
     memo.fact_from_proof_event(contract, &boundary_id, || {
-        standard_protocol_execution_fact_from_proof_event(proof_event, contract)
+        standard_protocol_execution_fact_from_proof_event(proof_event, row)
     })
 }
 
 fn standard_protocol_execution_fact_from_proof_event(
     proof_event: &DeliveredBoundary,
-    contract: &'static str,
+    row: &'static ContractFactSpec,
 ) -> Result<ScenarioContractGeneratedFact, String> {
-    let (scenario, fact, assertion) = standard_protocol_contract_metadata(contract)?;
-    let execution = contract_execution_payload_matches_observed(proof_event, contract, scenario)?;
+    let contract = row.spec.semantic_oracle;
+    let execution =
+        contract_execution_payload_matches_observed(proof_event, contract, row.spec.test_name)?;
     let result = execution
         .get("result")
         .ok_or_else(|| format!("{contract} execution missing result"))?;
-    require_standard_str(
+    require_str(
         result,
         "/execution_api",
         "lash_core::sansio::TurnMachine",
         contract,
     )?;
-    require_standard_str(
+    require_str(
         result,
         "/driver",
         "lash_protocol_standard::StandardDriver",
         contract,
     )?;
-    require_standard_bool(
+    require_bool(
         result,
         "/initial_request_contains_user_message",
         true,
         contract,
     )?;
-    let contract_observed = match contract {
-        "standard.initial_request_projection" => {
-            require_standard_bool(result, "/done", false, contract)?;
-            require_standard_u64(result, "/llm_call_count", 1, contract)?;
-            json!({
-                "initial_request_contains_user_message": true,
-                "llm_call_count": 1,
-                "done": false,
-            })
-        }
-        "standard.empty_response_finishes" => {
-            require_standard_bool(result, "/done", true, contract)?;
-            require_standard_u64(result, "/llm_call_count", 1, contract)?;
-            require_standard_u64(result, "/text_delta_count", 0, contract)?;
-            require_standard_checkpoint(result, "before_completion", contract)?;
-            require_standard_finished_outcome_contains(result, "AssistantMessage", contract)?;
-            json!({
-                "done": true,
-                "llm_call_count": 1,
-                "text_delta_count": 0,
-                "checkpoint": "before_completion",
-                "turn_outcome": "assistant_message",
-            })
-        }
-        "standard.provider_error_without_checkpoint" => {
-            require_standard_bool(result, "/done", true, contract)?;
-            require_standard_u64(result, "/llm_call_count", 1, contract)?;
-            require_standard_checkpoint_count(result, 0, contract)?;
-            require_standard_error_contains(
-                result,
-                "LLM error: upstream provider unavailable",
-                contract,
-            )?;
-            require_standard_stopped_outcome(result, "ProviderError", contract)?;
-            json!({
-                "done": true,
-                "stop_reason": "provider_error",
-                "checkpoint_count": 0,
-                "llm_call_count": 1,
-            })
-        }
-        "standard.native_tool_loop_reenters_model" => {
-            require_standard_bool(result, "/done", false, contract)?;
-            require_standard_u64(result, "/llm_call_count", 2, contract)?;
-            require_standard_checkpoint(result, "after_work", contract)?;
-            require_standard_tool_call(result, "tc1", "read_file", contract)?;
-            json!({
-                "done": false,
-                "llm_call_count": 2,
-                "checkpoint": "after_work",
-                "tool_call": "read_file/tc1",
-            })
-        }
-        "standard.parallel_tool_results_checkpoint_once" => {
-            require_standard_bool(result, "/done", false, contract)?;
-            require_standard_u64(result, "/llm_call_count", 2, contract)?;
-            require_standard_checkpoint_count(result, 1, contract)?;
-            require_standard_checkpoint(result, "after_work", contract)?;
-            require_standard_tool_call(result, "tc1", "read_file", contract)?;
-            require_standard_tool_call(result, "tc2", "read_file", contract)?;
-            json!({
-                "done": false,
-                "llm_call_count": 2,
-                "checkpoint_count": 1,
-                "tool_calls": ["tc1", "tc2"],
-            })
-        }
-        "standard.tool_failure_feedback_reenters_model" => {
-            require_standard_bool(result, "/done", false, contract)?;
-            require_standard_u64(result, "/llm_call_count", 2, contract)?;
-            require_standard_checkpoint(result, "after_work", contract)?;
-            require_standard_tool_call(result, "tc1", "search", contract)?;
-            require_standard_tool_result(
-                result,
-                "tc1",
-                "failure",
-                Some("search_failed"),
-                contract,
-            )?;
-            json!({
-                "done": false,
-                "llm_call_count": 2,
-                "checkpoint": "after_work",
-                "tool_result": "failure/search_failed",
-            })
-        }
-        "standard.streamed_text_finalizes_once" => {
-            require_standard_bool(result, "/done", true, contract)?;
-            require_standard_u64(result, "/llm_call_count", 1, contract)?;
-            require_standard_u64(result, "/text_delta_count", 0, contract)?;
-            require_standard_checkpoint(result, "before_completion", contract)?;
-            require_standard_finished_outcome_contains(result, "AssistantMessage", contract)?;
-            require_standard_finished_outcome_contains(result, "streamed done", contract)?;
-            json!({
-                "done": true,
-                "llm_call_count": 1,
-                "text_delta_count": 0,
-                "checkpoint": "before_completion",
-                "turn_outcome": "assistant_message",
-            })
-        }
-        other => {
-            return Err(format!(
-                "Standard protocol contract execution fact has no checker for `{other}`"
-            ));
-        }
-    };
+    let contract_observed = (row.check)(result, contract)?;
     generated_fact(
-        fact,
-        assertion,
+        row.fact,
+        row.assertion,
         vec![proof_event],
         json!({
             "contract_execution_boundary": proof_event.boundary_id,
@@ -561,106 +560,122 @@ fn standard_protocol_execution_fact_from_proof_event(
     )
 }
 
-pub(super) fn standard_protocol_contract_metadata(
-    contract: &str,
-) -> Result<(&'static str, &'static str, &'static str), String> {
-    match contract {
-        "standard.initial_request_projection" => Ok((
-            "standard_protocol_scenario_projects_initial_request",
-            "standard_initial_request_projection_execution",
-            "StandardDriver projects the user input into the first TurnMachine LLM request",
-        )),
-        "standard.empty_response_finishes" => Ok((
-            "standard_protocol_scenario_empty_model_response_finishes_after_checkpoint",
-            "standard_empty_response_finishes_execution",
-            "StandardDriver sends a valid empty model response through the normal completion checkpoint and finishes successfully",
-        )),
-        "standard.provider_error_without_checkpoint" => Ok((
-            "standard_protocol_scenario_provider_error_stops_without_checkpoint",
-            "standard_provider_error_without_checkpoint_execution",
-            "StandardDriver provider error stops immediately without committing a checkpoint",
-        )),
-        "standard.native_tool_loop_reenters_model" => Ok((
-            "standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint",
-            "standard_native_tool_loop_reenters_model_execution",
-            "StandardDriver native tool results checkpoint after work and re-enter the model loop",
-        )),
-        "standard.parallel_tool_results_checkpoint_once" => Ok((
-            "standard_protocol_scenario_parallel_tool_results_checkpoint_once",
-            "standard_parallel_tool_results_checkpoint_once_execution",
-            "StandardDriver parallel tool results commit exactly one AfterWork checkpoint before model re-entry",
-        )),
-        "standard.tool_failure_feedback_reenters_model" => Ok((
-            "standard_protocol_scenario_tool_failure_feedback_reenters_model_after_checkpoint",
-            "standard_tool_failure_feedback_reenters_model_execution",
-            "StandardDriver converts tool failure into model feedback, checkpoints, and re-enters",
-        )),
-        "standard.streamed_text_finalizes_once" => Ok((
-            "standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta",
-            "standard_streamed_text_finalizes_once_execution",
-            "StandardDriver streamed assistant text finalizes once without duplicate text deltas",
-        )),
-        other => Err(format!(
-            "no Standard protocol metadata registered for `{other}`"
-        )),
-    }
+fn check_standard_initial_request_projection(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_bool(result, "/done", false, contract)?;
+    require_u64(result, "/llm_call_count", 1, contract)?;
+    Ok(json!({
+        "initial_request_contains_user_message": true,
+        "llm_call_count": 1,
+        "done": false,
+    }))
 }
 
-pub(super) fn require_standard_bool(
+fn check_standard_empty_response_finishes(
     result: &Value,
-    pointer: &str,
-    expected: bool,
-    contract: &str,
-) -> Result<(), String> {
-    if result.pointer(pointer).and_then(Value::as_bool) == Some(expected) {
-        Ok(())
-    } else {
-        Err(format!("{contract} expected {pointer}={expected}"))
-    }
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_bool(result, "/done", true, contract)?;
+    require_u64(result, "/llm_call_count", 1, contract)?;
+    require_u64(result, "/text_delta_count", 0, contract)?;
+    require_checkpoint(result, "before_completion", contract)?;
+    require_standard_finished_outcome_contains(result, "AssistantMessage", contract)?;
+    Ok(json!({
+        "done": true,
+        "llm_call_count": 1,
+        "text_delta_count": 0,
+        "checkpoint": "before_completion",
+        "turn_outcome": "assistant_message",
+    }))
 }
 
-pub(super) fn require_standard_u64(
+fn check_standard_provider_error_without_checkpoint(
     result: &Value,
-    pointer: &str,
-    expected: u64,
-    contract: &str,
-) -> Result<(), String> {
-    if result.pointer(pointer).and_then(Value::as_u64) == Some(expected) {
-        Ok(())
-    } else {
-        Err(format!("{contract} expected {pointer}={expected}"))
-    }
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_bool(result, "/done", true, contract)?;
+    require_u64(result, "/llm_call_count", 1, contract)?;
+    require_standard_checkpoint_count(result, 0, contract)?;
+    require_standard_error_contains(result, "LLM error: upstream provider unavailable", contract)?;
+    require_standard_stopped_outcome(result, "ProviderError", contract)?;
+    Ok(json!({
+        "done": true,
+        "stop_reason": "provider_error",
+        "checkpoint_count": 0,
+        "llm_call_count": 1,
+    }))
 }
 
-pub(super) fn require_standard_str(
+fn check_standard_native_tool_loop_reenters_model(
     result: &Value,
-    pointer: &str,
-    expected: &str,
-    contract: &str,
-) -> Result<(), String> {
-    if result.pointer(pointer).and_then(Value::as_str) == Some(expected) {
-        Ok(())
-    } else {
-        Err(format!("{contract} expected {pointer}=`{expected}`"))
-    }
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_bool(result, "/done", false, contract)?;
+    require_u64(result, "/llm_call_count", 2, contract)?;
+    require_checkpoint(result, "after_work", contract)?;
+    require_standard_tool_call(result, "tc1", "read_file", contract)?;
+    Ok(json!({
+        "done": false,
+        "llm_call_count": 2,
+        "checkpoint": "after_work",
+        "tool_call": "read_file/tc1",
+    }))
 }
 
-pub(super) fn require_standard_checkpoint(
+fn check_standard_parallel_tool_results_checkpoint_once(
     result: &Value,
-    checkpoint: &str,
-    contract: &str,
-) -> Result<(), String> {
-    if result
-        .get("checkpoints")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(|value| value.as_str() == Some(checkpoint))
-    {
-        Ok(())
-    } else {
-        Err(format!("{contract} missing checkpoint `{checkpoint}`"))
-    }
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_bool(result, "/done", false, contract)?;
+    require_u64(result, "/llm_call_count", 2, contract)?;
+    require_standard_checkpoint_count(result, 1, contract)?;
+    require_checkpoint(result, "after_work", contract)?;
+    require_standard_tool_call(result, "tc1", "read_file", contract)?;
+    require_standard_tool_call(result, "tc2", "read_file", contract)?;
+    Ok(json!({
+        "done": false,
+        "llm_call_count": 2,
+        "checkpoint_count": 1,
+        "tool_calls": ["tc1", "tc2"],
+    }))
+}
+
+fn check_standard_tool_failure_feedback_reenters_model(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_bool(result, "/done", false, contract)?;
+    require_u64(result, "/llm_call_count", 2, contract)?;
+    require_checkpoint(result, "after_work", contract)?;
+    require_standard_tool_call(result, "tc1", "search", contract)?;
+    require_standard_tool_result(result, "tc1", "failure", Some("search_failed"), contract)?;
+    Ok(json!({
+        "done": false,
+        "llm_call_count": 2,
+        "checkpoint": "after_work",
+        "tool_result": "failure/search_failed",
+    }))
+}
+
+fn check_standard_streamed_text_finalizes_once(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_bool(result, "/done", true, contract)?;
+    require_u64(result, "/llm_call_count", 1, contract)?;
+    require_u64(result, "/text_delta_count", 0, contract)?;
+    require_checkpoint(result, "before_completion", contract)?;
+    require_standard_finished_outcome_contains(result, "AssistantMessage", contract)?;
+    require_standard_finished_outcome_contains(result, "streamed done", contract)?;
+    Ok(json!({
+        "done": true,
+        "llm_call_count": 1,
+        "text_delta_count": 0,
+        "checkpoint": "before_completion",
+        "turn_outcome": "assistant_message",
+    }))
 }
 
 pub(super) fn require_standard_checkpoint_count(
