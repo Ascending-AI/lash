@@ -1187,7 +1187,7 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
     reset(&storage).await;
     sqlx::query(
         "ALTER TABLE lash_attachment_manifest
-         DROP CONSTRAINT IF EXISTS lash_attachment_manifest_owner_kind_check,
+         DROP CONSTRAINT IF EXISTS ck_attachment_manifest_owner_kind,
          DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity",
     )
     .execute(storage.pool())
@@ -1213,7 +1213,7 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
         .expect("remove corrupt owner-kind row");
     sqlx::query(
         "ALTER TABLE lash_attachment_manifest
-         ADD CONSTRAINT lash_attachment_manifest_owner_kind_check
+         ADD CONSTRAINT ck_attachment_manifest_owner_kind
              CHECK (owner_kind IN ('turn', 'process')),
          ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
              CHECK (

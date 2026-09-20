@@ -41,6 +41,9 @@ const PASSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const CLOSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-85-9b80fb5b7/postgres-expected.json",
 ];
+const PARTING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-86-a1cf357c7/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -179,7 +182,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 102);
+    assert_eq!(PostgresStorage::schema_version(), 103);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -447,6 +450,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .await
     .expect("stamp the refusal fixture with the current component generation");
     upgrade_prior_fixture_frame_identity(&pool).await;
+    refresh_prior_fixture_node_bodies(&pool).await;
     sqlx::query("UPDATE lash_session_meta SET session_state_version = $1")
         .bind(i32::try_from(lash_core::store::CURRENT_SESSION_STATE_VERSION).unwrap())
         .execute(&pool)
@@ -663,6 +667,54 @@ async fn upgrade_prior_fixture_frame_identity(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("upgrade prior fixture head frame reference");
+}
+
+/// Re-encode the refusal fixture's graph-node bodies at the current
+/// generation. Node-body decode is an exact-generation fence, so the bodies the
+/// fixture predates would now refuse the session before hydration reaches the
+/// component-v1 checkpoint the fixture exists to exercise.
+///
+/// The restamp goes through the production codec rather than editing the stamp
+/// field alone: decoding each re-stamped body proves the retained payload
+/// already matches the current shape, and `encode_storage_body` writes back
+/// exactly the bytes this build would have produced.
+async fn refresh_prior_fixture_node_bodies(pool: &sqlx::PgPool) {
+    let rows: Vec<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT node_id, parent_node_id, node_json
+           FROM lash_graph_nodes
+          WHERE session_id = $1
+          ORDER BY node_id",
+    )
+    .bind(fixture::SESSION_ID)
+    .fetch_all(pool)
+    .await
+    .expect("read prior fixture graph-node bodies");
+    assert_eq!(
+        rows.len(),
+        3,
+        "the prior fixture carries one three-node frame"
+    );
+    for (node_id, parent_node_id, node_json) in rows {
+        let mut body: serde_json::Value =
+            serde_json::from_str(&node_json).expect("parse prior fixture node body");
+        body["schema_version"] =
+            serde_json::Value::from(lash_core::SESSION_NODE_BODY_SCHEMA_VERSION);
+        let record = lash_core::SessionNodeRecord::decode_storage_body(
+            node_id.clone(),
+            parent_node_id,
+            &body.to_string(),
+        )
+        .expect("prior fixture node body must match the current payload shape");
+        let canonical = record
+            .encode_storage_body()
+            .expect("re-encode prior fixture node body at the current generation");
+        sqlx::query("UPDATE lash_graph_nodes SET node_json = $1 WHERE node_id = $2")
+            .bind(&canonical)
+            .bind(&node_id)
+            .execute(pool)
+            .await
+            .expect("write refreshed node body");
+    }
 }
 
 fn assert_fixture_version() {

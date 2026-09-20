@@ -69,7 +69,7 @@ pub(crate) use lash_core_llm::provider;
 pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
 pub(crate) use lash_sansio::llm::types::ChargeSafetyDecision;
 pub(crate) use lash_sansio::llm::types::{
-    AttachmentSource, ChargeSafetyDenialReason, GenerationOptions, LlmOutputPart, ProtocolPosition,
+    AttachmentSource, ChargeSafetyDenialReason, GenerationOptions, ProtocolPosition,
     ProviderFileScope,
 };
 pub(crate) use lash_sansio::session_model::{
@@ -171,7 +171,6 @@ pub(crate) mod facade_support {
     #[allow(unused_imports)]
     pub(crate) use crate::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub(crate) use crate::tool_state::facade_ops::ToolStateFacadeOps;
-    pub(crate) use lash_sansio::visible_response_text_from_parts;
 }
 
 /// Path shim: the durable session vocabulary `lash-core` exposes as

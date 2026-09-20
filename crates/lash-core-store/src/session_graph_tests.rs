@@ -484,21 +484,21 @@ fn storage_body_states_its_node_body_generation() {
 }
 
 #[test]
-fn unstamped_stored_bodies_keep_loading() {
+fn unstamped_stored_bodies_are_refused() {
     // Byte-for-byte a body written before the generation stamp existed.
     let legacy = r#"{"timestamp":"2026-07-27T00:00:00Z","kind":"plugin","plugin_type":"legacy","body":{"value":7}}"#;
 
-    let decoded = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, legacy)
-        .expect("pre-stamp durable bodies must keep loading");
+    let error = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, legacy)
+        .expect_err("pre-stamp durable bodies are pre-cutover data and must be refused");
 
-    assert_eq!(decoded.timestamp, "2026-07-27T00:00:00Z");
-    match decoded.payload {
-        SessionNodePayload::Plugin { plugin_type, body } => {
-            assert_eq!(plugin_type, "legacy");
-            assert_eq!(body.as_ref(), &serde_json::json!({"value": 7}));
-        }
-        other => panic!("unexpected payload: {other:?}"),
-    }
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "graph node body carries no schema_version stamp; this build reads exactly \
+             generation {SESSION_NODE_BODY_SCHEMA_VERSION}; remedy: the body is pre-cutover \
+             data, so recreate the session store under this build"
+        ),
+    );
 }
 
 /// The pre-stamp shape of the richest body the durable-read fixture carried,
@@ -513,95 +513,47 @@ fn unstamped_stored_bodies_keep_loading() {
 /// message parts rather than the plugin node above, because that is the shape
 /// whose fields the flattened payload family reaches furthest into.
 #[test]
-fn unstamped_conversation_bodies_keep_loading() {
+fn unstamped_conversation_bodies_are_refused() {
     let legacy = r#"{"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_legacy","role":"User","parts":[{"id":"m_legacy.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}]}}}"#;
 
-    let decoded = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, legacy)
-        .expect("a pre-stamp conversation body must keep loading");
+    let error = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, legacy)
+        .expect_err("a pre-stamp conversation body must be refused");
 
-    assert_eq!(decoded.timestamp, "2023-11-14T22:13:20+00:00");
-    // Re-encoding stamps it, which is the whole reason a fixture cannot keep an
-    // unstamped row: the next writer to touch it makes it current.
-    let restamped = decoded.encode_storage_body().expect("re-encode");
-    let restamped: serde_json::Value =
-        serde_json::from_str(&restamped).expect("re-encoded body is JSON");
-    assert_eq!(
-        restamped["schema_version"],
-        serde_json::json!(SESSION_NODE_BODY_SCHEMA_VERSION),
-        "an unstamped body re-encodes at this build's generation: {restamped}"
-    );
-}
-
-fn legacy_response_session_node_body(full_text: &str, parts: Vec<crate::LlmOutputPart>) -> String {
-    let response = crate::LlmResponse {
-        parts,
-        response_metadata: Default::default(),
-        ..crate::LlmResponse::default()
-    };
-    let mut payload = serde_json::to_value(response).expect("encode response fixture");
-    payload["full_text"] = serde_json::Value::String(full_text.to_string());
-    serde_json::json!({
-        "schema_version": 2,
-        "timestamp": "2026-08-24T00:00:00Z",
-        "kind": "event",
-        "event": {
-            "Protocol": {
-                "plugin_id": "legacy-response",
-                "payload": payload,
-            }
-        }
-    })
-    .to_string()
-}
-
-fn response_from_protocol_node(node_json: &str) -> crate::LlmResponse {
-    let decoded = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, node_json)
-        .expect("decode legacy response session node");
-    let SessionNodePayload::Event {
-        event: SessionHistoryRecord::Protocol(event),
-    } = decoded.payload
-    else {
-        panic!("fixture must decode as a protocol event");
-    };
-    serde_json::from_value(event.payload).expect("decode upgraded response payload")
-}
-
-#[test]
-fn pre_v3_session_node_synthesizes_missing_visible_text_part() {
-    let response = response_from_protocol_node(&legacy_response_session_node_body(
-        "legacy answer",
-        Vec::new(),
-    ));
-
-    assert_eq!(response.full_text(), "legacy answer");
-    assert_eq!(
-        response
-            .parts
-            .iter()
-            .filter(|part| matches!(part, crate::LlmOutputPart::Text { .. }))
-            .count(),
-        1
+    assert!(
+        error
+            .to_string()
+            .contains("carries no schema_version stamp"),
+        "the refusal must name the missing stamp: {error}"
     );
 }
 
 #[test]
-fn pre_v3_session_node_does_not_duplicate_existing_visible_text_part() {
-    let response = response_from_protocol_node(&legacy_response_session_node_body(
-        "legacy answer",
-        vec![crate::LlmOutputPart::Text {
-            text: "legacy answer".to_string(),
-            response_meta: None,
-        }],
-    ));
+fn stored_bodies_from_an_older_generation_are_refused() {
+    let node = SessionNodeRecord {
+        node_id: "node-1".into(),
+        parent_node_id: None,
+        timestamp: "2026-08-18T00:00:00Z".to_string(),
+        payload: SessionNodePayload::Event {
+            event: SessionHistoryRecord::Protocol(protocol_event()),
+        },
+    };
+    let encoded = node.encode_storage_body().expect("encode storage body");
+    let mut stamped: serde_json::Value =
+        serde_json::from_str(&encoded).expect("stored body is JSON");
+    stamped["schema_version"] = serde_json::json!(SESSION_NODE_BODY_SCHEMA_VERSION - 1);
 
-    assert_eq!(response.full_text(), "legacy answer");
+    let error =
+        SessionNodeRecord::decode_storage_body("node-1".to_string(), None, &stamped.to_string())
+            .expect_err("an older node-body generation must be refused");
+
     assert_eq!(
-        response
-            .parts
-            .iter()
-            .filter(|part| matches!(part, crate::LlmOutputPart::Text { .. }))
-            .count(),
-        1
+        error.to_string(),
+        format!(
+            "graph node body is schema version {}, but this build reads exactly {}; remedy: \
+             the body is pre-cutover data, so recreate the session store under this build",
+            SESSION_NODE_BODY_SCHEMA_VERSION - 1,
+            SESSION_NODE_BODY_SCHEMA_VERSION
+        ),
     );
 }
 
@@ -622,8 +574,8 @@ fn stored_bodies_from_a_newer_generation_are_refused() {
     assert_eq!(
         error.to_string(),
         format!(
-            "graph node body is schema version {}, but this build reads at most {}; remedy: \
-             run a Lash build at or past that node-body generation",
+            "graph node body is schema version {}, but this build reads exactly {}; remedy: \
+             run a Lash build at that node-body generation",
             SESSION_NODE_BODY_SCHEMA_VERSION + 1,
             SESSION_NODE_BODY_SCHEMA_VERSION
         ),

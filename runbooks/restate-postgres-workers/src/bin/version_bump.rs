@@ -58,37 +58,26 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
 /// component without moving them, so they are never discovered stale by a live
 /// run.
-const MIGRATION_FLOOR_VERSION: i32 = 94;
-/// The tables component 94 lacks: the named process-definition registry
-/// (component 97), the release stamp (component 98), and the cancellation
-/// affected-input child table (component 102).
-const POST_FLOOR_TABLES: [&str; 3] = [
-    "lash_process_definitions",
-    "lash_release_stamp",
-    "lash_turn_cancel_affected_inputs",
-];
-/// The post-floor indexes the fixture must drop by name. Component 95 and 96
-/// installed none: both moved document content, not DDL.
+const MIGRATION_FLOOR_VERSION: i32 = 101;
+/// The table component 101 lacks: the cancellation affected-input child table
+/// component 102 installed (FIG-3263).
+const POST_FLOOR_TABLES: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
+/// The post-floor indexes the fixture must drop by name: the child table's own
+/// guards drop with it, and component 102 added no index over a table the floor
+/// already had.
 const POST_FLOOR_INDEXES: [&str; 0] = [];
-/// The columns absent from component 94: the trigger subscription lifecycle
-/// pair component 99 installed (FIG-1951) — earlier generations moved document
-/// content, but this one moved the relational shape.
-const POST_FLOOR_COLUMNS: [(&str, &str); 2] = [
-    ("lash_trigger_subscriptions", "lifecycle"),
-    ("lash_trigger_subscriptions", "deleted_at_ms"),
-];
+/// The columns absent from component 101: none — component 102 moved the
+/// affected-input evidence into a child table rather than adding columns to a
+/// table the floor already had.
+const POST_FLOOR_COLUMNS: [(&str, &str); 0] = [];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 3] = [
-    "lash_process_definitions",
-    "lash_release_stamp",
-    "lash_turn_cancel_affected_inputs",
-];
+const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 0] = [];
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary
@@ -614,22 +603,15 @@ async fn seed(database_url: &str) -> Result<()> {
     // that a boot gate on every restart cannot.
     let probe_before_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
-    // Reconstruct the published component-61 receipt shape before rewinding its
-    // ledger: the predecessor allowed independently-nullable append identity
-    // fields and still carried the readerless requested-ancestor column.
-    sqlx::query(
-        "ALTER TABLE lash_runtime_turn_commits
-             DROP CONSTRAINT lash_runtime_turn_commits_check,
-             ADD COLUMN requested_ancestor_node_id TEXT",
-    )
-    .execute(&pool)
-    .await
-    .context("restore the component-61 append receipt shape")?;
+    // Rewind only the ledger stamp: the immediate predecessor's published
+    // catalog is this build's own catalog minus nothing — the window's floor
+    // move changed no shape — so the divergent fixture is the current catalog
+    // wearing the previous component version.
     let recorded = expected_version - 1;
     stamp_version(&pool, recorded).await?;
-    // The walk now sees the exact predecessor shape and stamp. The drain list
-    // stays empty: this is a schema recreation boundary, not undecodable durable
-    // payload.
+    // The walk now sees the exact predecessor stamp over the current shape.
+    // The drain list stays empty: this is a schema recreation boundary, not
+    // undecodable durable payload.
     let probe_after_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
     emit(json!({
@@ -697,18 +679,6 @@ async fn refuse(database_url: &str) -> Result<()> {
         "opened": opened,
         "error": error,
     }));
-
-    // The migration floor predates component 61's graph-sequence hard cutover,
-    // so restore that published column and index before removing later
-    // creation-only artifacts.
-    sqlx::query("ALTER TABLE lash_graph_nodes ADD COLUMN seq BIGSERIAL")
-        .execute(&pool)
-        .await
-        .context("restore the migration-floor graph sequence column")?;
-    sqlx::query("CREATE INDEX idx_lash_graph_nodes_seq ON lash_graph_nodes(session_id, seq)")
-        .execute(&pool)
-        .await
-        .context("restore the migration-floor graph sequence index")?;
 
     // Remove every artifact introduced after the migration floor, leaving the
     // catalog the floor generation (`MIGRATION_FLOOR_VERSION`) published, then

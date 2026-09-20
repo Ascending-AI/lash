@@ -304,7 +304,8 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         (
             DurableFormat::SessionNodeBody,
             SurfaceRelation::Unwalkable(
-                "no bounded surface: one row per graph node, and the boundary is forward-only",
+                "no bounded surface: one row per graph node, each body refused at decode rather \
+                 than at rest",
             ),
         ),
         (
@@ -371,7 +372,8 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             ),
             (
                 DurableFormat::SessionNodeBody,
-                "no bounded surface: one row per graph node, and the boundary is forward-only",
+                "no bounded surface: one row per graph node, each body refused at decode rather \
+                 than at rest",
             ),
             (
                 DurableFormat::WorkflowGraphSchema,
