@@ -72,6 +72,130 @@ impl RlmDriver {
         Self { dialect }
     }
 
+    /// The repair for a provider tool call on a request that declared no
+    /// tools: malformed provider output gets the same one-round extraction
+    /// repair as any other reply with no usable cell (FIG-2777).
+    fn native_tool_call_prompt(
+        &self,
+        attempt: &AttemptContext<'_>,
+        tool_name: &str,
+    ) -> RepairPrompt<'static> {
+        RepairPrompt {
+            decision: "retry_native_tool_call",
+            assistant_message: None,
+            correction: invalid_cell_message(
+                self.dialect.as_ref(),
+                attempt.message_id("native_tool_call"),
+                &self.dialect.native_tool_call_copy(tool_name),
+            ),
+        }
+    }
+
+    /// The one place a reply's extraction outcome is read as a decision:
+    /// cell, natural finish, or which repair prompt to emit. The branches
+    /// used to spell the decision string, the retained projection, the
+    /// message-id purpose and the correction text separately; keeping them in
+    /// one classification is what stops them drifting again.
+    ///
+    /// Decision strings and message-id purposes are durable history and do
+    /// not change here; the table test pins them byte for byte.
+    fn classify_reply<'a>(
+        &self,
+        attempt: &AttemptContext<'_>,
+        extraction: Result<Option<CellExtraction>, CellExtractionError>,
+        terminal_reason: LlmTerminalReason,
+        termination: &RlmTermination,
+        reply: ReplyProjections<'a>,
+    ) -> ReplyClass<'a> {
+        match extraction {
+            Ok(Some(cell)) => return ReplyClass::Cell(cell),
+            Ok(None) => {}
+            Err(err) => {
+                let (decision, message) = match (err, terminal_reason) {
+                    (CellExtractionError::UnclosedCell, LlmTerminalReason::OutputLimit) => (
+                        "retry_output_limit_cell",
+                        self.dialect
+                            .output_limit_cell_copy(attempt.output_token_cap),
+                    ),
+                    (CellExtractionError::UnclosedCell, _) => {
+                        ("retry_unclosed_cell", self.dialect.cell_error_message(err))
+                    }
+                };
+                return ReplyClass::Repair(RepairPrompt {
+                    decision,
+                    assistant_message: Some((reply.visible_prose, "assistant_response")),
+                    correction: invalid_cell_message(
+                        self.dialect.as_ref(),
+                        attempt.message_id("invalid_cell"),
+                        &message,
+                    ),
+                });
+            }
+        }
+
+        if terminal_reason == LlmTerminalReason::OutputLimit {
+            return ReplyClass::Repair(RepairPrompt {
+                decision: "retry_output_limit_prose",
+                assistant_message: Some((
+                    reply.visible_assistant_text,
+                    "truncated_assistant_response",
+                )),
+                correction: output_limit_retry_message(
+                    self.dialect.prompt_vocabulary(),
+                    attempt.message_id("output_limit_retry"),
+                    attempt.output_token_cap,
+                ),
+            });
+        }
+        // A reply that opened a line with the active dialect's tag and still
+        // produced no cell put a fence somewhere the grammar refuses. Read
+        // as prose it is silence: the model is asked to finish, answers with
+        // the same reply, and nothing in the loop ever names what was wrong
+        // with it (FIG-1475).
+        //
+        // Only where a cell is *required*. On a `Natural` turn prose is an
+        // answer, and prose about cells — "`<typescript>` and `</typescript>`
+        // are the tags you asked about" — opens a line with the tag while
+        // being exactly what the user wanted. Correcting a fence there would
+        // bury the answer under a lecture and spend the turn's attempts on a
+        // reply that had nothing wrong with it.
+        if !matches!(termination, RlmTermination::Natural)
+            && malformed_cell_fence(reply.assistant_text, self.dialect.cell_tags())
+        {
+            return ReplyClass::Repair(RepairPrompt {
+                decision: "retry_malformed_cell_fence",
+                assistant_message: Some((reply.visible_prose, "assistant_response")),
+                correction: invalid_cell_message(
+                    self.dialect.as_ref(),
+                    attempt.message_id("malformed_cell_fence"),
+                    &self.dialect.malformed_cell_fence_retry_copy(),
+                ),
+            });
+        }
+        if matches!(termination, RlmTermination::Natural) {
+            return ReplyClass::Finish;
+        }
+        let RlmTermination::FinishRequired { schema } = termination else {
+            unreachable!("Natural returned above");
+        };
+        let assistant_message = if !reply.visible_assistant_text.trim().is_empty() {
+            Some((reply.visible_assistant_text, "assistant_prose"))
+        } else if !reply.reasoning.is_empty() {
+            Some(("", "assistant_reasoning"))
+        } else {
+            None
+        };
+        ReplyClass::Repair(RepairPrompt {
+            decision: "request_finish",
+            assistant_message,
+            correction: finish_required_reminder_message(
+                self.dialect.as_ref(),
+                attempt.message_id("finish_reminder"),
+                schema.is_some(),
+            ),
+        })
+    }
+
     /// The tail every stall-retry branch shares: the extraction diagnostic,
     /// the reply's durable assistant message when the projection carries
     /// content, the branch's retry message, and the nonterminal
@@ -89,13 +213,13 @@ impl RlmDriver {
             llm_extraction_payload(
                 ctx.turn_id(),
                 retry.fingerprint,
-                retry.decision,
+                retry.prompt.decision,
                 retry.termination,
                 prose_only_counts(self.dialect.language_id(), retry.raw_text, retry.reasoning),
             ),
         )]));
         let mut retry_events = Vec::new();
-        if let Some((prose, purpose)) = retry.assistant_message
+        if let Some((prose, purpose)) = retry.prompt.assistant_message
             && (!prose.trim().is_empty() || !retry.reasoning.is_empty())
         {
             retry_events.push(conversation_event(
@@ -107,7 +231,7 @@ impl RlmDriver {
                 ),
             ));
         }
-        retry_events.push(conversation_event(retry.retry));
+        retry_events.push(conversation_event(retry.prompt.correction));
         continue_or_stop_after_nonterminal(
             ctx,
             actions,
@@ -176,27 +300,24 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     Ok(termination) => termination,
                     Err(err) => return invalid_turn_options_actions(err),
                 };
-                actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
-                    LLM_EXTRACTION_PHASE,
-                    llm_extraction_payload(
-                        ctx.turn_id(),
-                        &reply_fingerprint(&full_text),
-                        "retry_native_tool_call",
-                        &termination,
-                        prose_only_counts(self.dialect.language_id(), &full_text, &[]),
-                    ),
-                )]));
-                let retry_events = vec![conversation_event(invalid_cell_message(
-                    self.dialect.as_ref(),
-                    rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "native_tool_call"),
-                    &self.dialect.native_tool_call_copy(&tool_call.tool_name),
-                ))];
-                if let Err(err) = continue_or_stop_after_nonterminal(
+                let attempt = AttemptContext {
+                    turn_id: ctx.turn_id(),
+                    protocol_iteration: ctx.protocol_iteration(),
+                    output_token_cap: ctx
+                        .generation()
+                        .output_token_cap
+                        .map(std::num::NonZeroUsize::get),
+                };
+                if let Err(err) = self.stall_retry_epilogue(
                     &ctx,
                     &mut actions,
-                    Vec::new(),
-                    retry_events,
-                    AttemptProgress::Stalled,
+                    StallRetry {
+                        prompt: self.native_tool_call_prompt(&attempt, &tool_call.tool_name),
+                        fingerprint: &reply_fingerprint(&full_text),
+                        termination: &termination,
+                        raw_text: &full_text,
+                        reasoning: &[],
+                    },
                 ) {
                     return invalid_turn_options_actions(err);
                 }
@@ -249,117 +370,44 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Err(err) => return invalid_turn_options_actions(err),
         };
 
-        let extraction = match extraction {
-            Ok(extraction) => extraction,
-            Err(err) => {
-                let (decision, message) = match (err, terminal_reason) {
-                    (CellExtractionError::UnclosedCell, LlmTerminalReason::OutputLimit) => (
-                        "retry_output_limit_cell",
-                        self.dialect.output_limit_cell_copy(
-                            ctx.generation()
-                                .output_token_cap
-                                .map(std::num::NonZeroUsize::get),
-                        ),
-                    ),
-                    (CellExtractionError::UnclosedCell, _) => {
-                        ("retry_unclosed_cell", self.dialect.cell_error_message(err))
-                    }
-                };
-                if let Err(err) = self.stall_retry_epilogue(
-                    &ctx,
-                    &mut actions,
-                    StallRetry {
-                        decision,
-                        fingerprint: &fingerprint,
-                        termination: &termination,
-                        raw_text: &assistant_text,
-                        reasoning: &reasoning,
-                        assistant_message: Some((&visible_prose, "assistant_response")),
-                        retry: invalid_cell_message(
-                            self.dialect.as_ref(),
-                            rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "invalid_cell"),
-                            &message,
-                        ),
-                    },
-                ) {
-                    return invalid_turn_options_actions(err);
-                }
-                return actions;
-            }
+        let attempt = AttemptContext {
+            turn_id: ctx.turn_id(),
+            protocol_iteration: ctx.protocol_iteration(),
+            output_token_cap: ctx
+                .generation()
+                .output_token_cap
+                .map(std::num::NonZeroUsize::get),
         };
-        let Some(cell) = extraction else {
-            if terminal_reason == LlmTerminalReason::OutputLimit {
+        let cell = match self.classify_reply(
+            &attempt,
+            extraction,
+            terminal_reason,
+            &termination,
+            ReplyProjections {
+                assistant_text: &assistant_text,
+                visible_prose: &visible_prose,
+                visible_assistant_text: &visible_assistant_text,
+                reasoning: &reasoning,
+            },
+        ) {
+            ReplyClass::Cell(cell) => cell,
+            ReplyClass::Repair(prompt) => {
                 if let Err(err) = self.stall_retry_epilogue(
                     &ctx,
                     &mut actions,
                     StallRetry {
-                        decision: "retry_output_limit_prose",
+                        prompt,
                         fingerprint: &fingerprint,
                         termination: &termination,
                         raw_text: &assistant_text,
                         reasoning: &reasoning,
-                        assistant_message: Some((
-                            &visible_assistant_text,
-                            "truncated_assistant_response",
-                        )),
-                        retry: output_limit_retry_message(
-                            self.dialect.prompt_vocabulary(),
-                            rlm_message_id(
-                                ctx.turn_id(),
-                                ctx.protocol_iteration(),
-                                "output_limit_retry",
-                            ),
-                            ctx.generation()
-                                .output_token_cap
-                                .map(std::num::NonZeroUsize::get),
-                        ),
                     },
                 ) {
                     return invalid_turn_options_actions(err);
                 }
                 return actions;
             }
-            // A reply that opened a line with the active dialect's tag and still
-            // produced no cell put a fence somewhere the grammar refuses. Read
-            // as prose it is silence: the model is asked to finish, answers with
-            // the same reply, and nothing in the loop ever names what was wrong
-            // with it (FIG-1475).
-            //
-            // Only where a cell is *required*. On a `Natural` turn prose is an
-            // answer, and prose about cells — "`<typescript>` and `</typescript>`
-            // are the tags you asked about" — opens a line with the tag while
-            // being exactly what the user wanted. Correcting a fence there would
-            // bury the answer under a lecture and spend the turn's attempts on a
-            // reply that had nothing wrong with it.
-            if !matches!(termination, RlmTermination::Natural)
-                && malformed_cell_fence(&assistant_text, tags)
-            {
-                if let Err(err) = self.stall_retry_epilogue(
-                    &ctx,
-                    &mut actions,
-                    StallRetry {
-                        decision: "retry_malformed_cell_fence",
-                        fingerprint: &fingerprint,
-                        termination: &termination,
-                        raw_text: &assistant_text,
-                        reasoning: &reasoning,
-                        assistant_message: Some((&visible_prose, "assistant_response")),
-                        retry: invalid_cell_message(
-                            self.dialect.as_ref(),
-                            rlm_message_id(
-                                ctx.turn_id(),
-                                ctx.protocol_iteration(),
-                                "malformed_cell_fence",
-                            ),
-                            &self.dialect.malformed_cell_fence_retry_copy(),
-                        ),
-                    },
-                ) {
-                    return invalid_turn_options_actions(err);
-                }
-                return actions;
-            }
-            if matches!(termination, RlmTermination::Natural) {
+            ReplyClass::Finish => {
                 actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                     LLM_EXTRACTION_PHASE,
                     llm_extraction_payload(
@@ -394,36 +442,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 });
                 return actions;
             }
-            let RlmTermination::FinishRequired { ref schema } = termination else {
-                unreachable!("Natural returned above");
-            };
-            let assistant_message = if !visible_assistant_text.trim().is_empty() {
-                Some((visible_assistant_text.as_str(), "assistant_prose"))
-            } else if !reasoning.is_empty() {
-                Some(("", "assistant_reasoning"))
-            } else {
-                None
-            };
-            if let Err(err) = self.stall_retry_epilogue(
-                &ctx,
-                &mut actions,
-                StallRetry {
-                    decision: "request_finish",
-                    fingerprint: &fingerprint,
-                    termination: &termination,
-                    raw_text: &assistant_text,
-                    reasoning: &reasoning,
-                    assistant_message,
-                    retry: finish_required_reminder_message(
-                        self.dialect.as_ref(),
-                        rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "finish_reminder"),
-                        schema.is_some(),
-                    ),
-                },
-            ) {
-                return invalid_turn_options_actions(err);
-            }
-            return actions;
         };
 
         actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
@@ -1142,12 +1160,64 @@ fn reasoning_chars(reasoning: &[RlmReasoningPart]) -> usize {
     )
 }
 
-/// One stall-retry branch's contribution to the shared epilogue: which
-/// diagnostic decision to record, which reply projection (if any) becomes the
-/// durable assistant message, and the retry message the model sees next.
-struct StallRetry<'a> {
+/// The per-attempt coordinates every repair message shares: the turn and
+/// iteration that name message ids, and the request's output-token cap the
+/// output-limit corrections cite.
+struct AttemptContext<'a> {
+    turn_id: &'a TurnId,
+    protocol_iteration: usize,
+    output_token_cap: Option<usize>,
+}
+
+impl AttemptContext<'_> {
+    fn message_id(&self, purpose: &str) -> String {
+        rlm_message_id(self.turn_id, self.protocol_iteration, purpose)
+    }
+}
+
+/// The reply projections [`RlmDriver::classify_reply`] chooses between:
+/// `assistant_text` is the raw reply the fence scan reads, `visible_prose`
+/// the tag-stripped projection repairs journal as the assistant message, and
+/// `visible_assistant_text` the normalized projection the output-limit and
+/// finish-required repairs journal.
+struct ReplyProjections<'a> {
+    assistant_text: &'a str,
+    visible_prose: &'a str,
+    visible_assistant_text: &'a str,
+    reasoning: &'a [RlmReasoningPart],
+}
+
+/// One repair prompt for a reply that yielded no usable cell: the diagnostic
+/// decision token, which projection (if any) is journaled as the durable
+/// assistant message and under which message-id purpose, and the correction
+/// the model reads next. [`RlmDriver::classify_reply`] is the only producer.
+struct RepairPrompt<'a> {
     /// Diagnostic decision token (`retry_unclosed_cell`, `request_finish`, …).
     decision: &'static str,
+    /// `(projection, message purpose)` for the retained assistant message. The
+    /// same string is guard and content; `None` emits no assistant message.
+    assistant_message: Option<(&'a str, &'static str)>,
+    /// The retry or reminder correction the model sees next.
+    correction: Message,
+}
+
+/// What a reply's extraction outcome means for the rest of
+/// `handle_llm_success`.
+enum ReplyClass<'a> {
+    /// A usable cell arrived; the mainline executes it.
+    Cell(CellExtraction),
+    /// The reply is a `Natural`-termination finish: its prose is the answer
+    /// and the finish path in `handle_llm_success` renders it.
+    Finish,
+    /// A stall-repair round; `stall_retry_epilogue` renders the prompt.
+    Repair(RepairPrompt<'a>),
+}
+
+/// One stall-retry round as the shared epilogue consumes it: the classified
+/// prompt plus the reply's diagnostic inputs.
+struct StallRetry<'a> {
+    /// The classified repair: decision, retained projection and correction.
+    prompt: RepairPrompt<'a>,
     /// Fingerprint of the reply as received.
     fingerprint: &'a str,
     /// Decoded termination options, recorded in the diagnostic.
@@ -1157,11 +1227,6 @@ struct StallRetry<'a> {
     /// Reply reasoning, counted in the diagnostic and carried into the
     /// retained assistant message.
     reasoning: &'a [RlmReasoningPart],
-    /// `(projection, message purpose)` for the retained assistant message. The
-    /// same string is guard and content; `None` emits no assistant message.
-    assistant_message: Option<(&'a str, &'static str)>,
-    /// The retry or reminder message the model sees next.
-    retry: Message,
 }
 
 fn llm_extraction_payload(
@@ -1173,6 +1238,9 @@ fn llm_extraction_payload(
 ) -> Value {
     ExtractionDiagnostic::new(turn_id, reply_fingerprint, decision, termination, counts).payload()
 }
+
+#[cfg(test)]
+mod classification_tests;
 
 #[cfg(test)]
 mod tests {
