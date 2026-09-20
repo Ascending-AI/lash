@@ -1064,14 +1064,25 @@ impl LiveTurnInputs {
         ))
     }
 }
+/// How a running turn treats durable queued work.
+///
+/// Written as one fact: an automatic drain may keep claiming checkpoint
+/// batches as it runs, while a Selected Queued-Work Drain is closed over the
+/// host-pinned batch-id set — checkpoint pull-in is forbidden and the pinned
+/// composition's cost bound is enforced. The remaining flag combinations are
+/// unrepresentable.
+#[derive(Clone, Copy)]
+enum QueuedWorkDrainMode {
+    Automatic,
+    Selected,
+}
 #[derive(Clone)]
 pub struct TurnContext {
     plugin_inputs: LiveTurnInputs,
     provider: Option<crate::ProviderHandle>,
     prompt: crate::PromptLayer,
     local_cancel_origin: TurnCancelOriginHint,
-    claim_checkpoint_queued_work: bool,
-    enforce_selected_queued_work_cost_bound: bool,
+    queued_work_drain: QueuedWorkDrainMode,
 }
 impl Default for TurnContext {
     fn default() -> Self {
@@ -1080,8 +1091,7 @@ impl Default for TurnContext {
             provider: None,
             prompt: crate::PromptLayer::default(),
             local_cancel_origin: TurnCancelOriginHint::default(),
-            claim_checkpoint_queued_work: true,
-            enforce_selected_queued_work_cost_bound: false,
+            queued_work_drain: QueuedWorkDrainMode::Automatic,
         }
     }
 }
@@ -1122,19 +1132,17 @@ impl TurnContext {
     }
 
     pub fn mark_selected_queued_work_drain(&mut self) {
-        self.claim_checkpoint_queued_work = false;
-        self.enforce_selected_queued_work_cost_bound = true;
+        self.queued_work_drain = QueuedWorkDrainMode::Selected;
     }
 
     pub fn enforces_selected_queued_work_cost_bound(&self) -> bool {
-        self.enforce_selected_queued_work_cost_bound
+        matches!(self.queued_work_drain, QueuedWorkDrainMode::Selected)
     }
 
     pub fn checkpoint_queued_work_limit(&self, default_limit: usize) -> usize {
-        if self.claim_checkpoint_queued_work {
-            default_limit
-        } else {
-            0
+        match self.queued_work_drain {
+            QueuedWorkDrainMode::Automatic => default_limit,
+            QueuedWorkDrainMode::Selected => 0,
         }
     }
 
