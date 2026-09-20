@@ -6,7 +6,7 @@ use super::super::{
 };
 use super::effects::VmEffect;
 use super::heap_plan::{SlotExport, StackExport, instruction_heap_plan};
-use super::{Vm, VmRunOutcome};
+use super::{IterCursor, Vm, VmRunOutcome};
 use crate::span::Span;
 
 pub(super) enum VmStep {
@@ -540,101 +540,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .filter_map(|(index, iterator)| (!iterator.heapified).then_some(index))
             .collect::<Vec<_>>();
         let scan_extras = !self.slots.extras_heapified;
-        // Durable holders come first so a transient holder of the same tree can
-        // reuse what they imported rather than allocating a second object.
-        let mut values = Vec::new();
-        values.extend(
-            self.slots
-                .values
+        // One enumeration drives both halves: staging clones each holder's
+        // value in this order, and write-back resolves the same holders to
+        // the imported objects in this order, so order and the
+        // `needs_heap_import` filter hold by construction rather than by two
+        // positional walks agreeing.
+        let (holders, durable_len) = self.heap_import_holders(&pending_iterators, scan_extras);
+        if !holders.is_empty() {
+            let values = holders
                 .iter()
-                .flatten()
-                .filter(|value| needs_heap_import(value))
-                .cloned(),
-        );
-        if scan_extras {
-            values.extend(
-                self.slots
-                    .extras
-                    .values()
-                    .filter(|value| needs_heap_import(value))
-                    .cloned(),
-            );
-        }
-        for index in &pending_iterators {
-            let iterator = &self.iter_stack[*index];
-            values.extend(
-                iterator
-                    .restore
-                    .previous
-                    .iter()
-                    .filter(|value| needs_heap_import(value))
-                    .cloned(),
-            );
-        }
-        let durable_count = values.len();
-        values.extend(
-            self.stack
-                .iter()
-                .filter(|value| needs_heap_import(value))
-                .cloned(),
-        );
-        values.extend(
-            self.last_value
-                .iter()
-                .filter(|value| needs_heap_import(value))
-                .cloned(),
-        );
-        for index in &pending_iterators {
-            let iterator = &self.iter_stack[*index];
-            if let super::IterCursor::List {
-                values: iterator_values,
-                ..
-            } = &iterator.cursor
-            {
-                values.extend(
-                    iterator_values
-                        .iter()
-                        .filter(|value| needs_heap_import(value))
-                        .cloned(),
-                );
-            }
-        }
-
-        if !values.is_empty() {
-            let imported = self.heap.import_values(values, durable_count);
+                .map(|holder| self.heap_import_value(*holder).clone())
+                .collect();
+            let imported = self.heap.import_values(values, durable_len);
             self.heap.end_allocation_scope();
-            let mut imported = imported?.into_iter();
-            for value in self.slots.values.iter_mut().flatten() {
-                replace_imported_value(value, &mut imported);
+            let imported = imported?;
+            debug_assert_eq!(imported.len(), holders.len());
+            for (holder, value) in holders.iter().copied().zip(imported) {
+                *self.heap_import_value_mut(holder) = value;
             }
-            if scan_extras {
-                for entry in &mut self.slots.extras.entries {
-                    replace_imported_value(&mut entry.value, &mut imported);
-                }
-            }
-            for index in &pending_iterators {
-                if let Some(value) = &mut self.iter_stack[*index].restore.previous {
-                    replace_imported_value(value, &mut imported);
-                }
-            }
-            for value in &mut self.stack {
-                replace_imported_value(value, &mut imported);
-            }
-            if let Some(value) = &mut self.last_value {
-                replace_imported_value(value, &mut imported);
-            }
-            for index in &pending_iterators {
-                if let super::IterCursor::List {
-                    values: iterator_values,
-                    ..
-                } = &mut self.iter_stack[*index].cursor
-                {
-                    for value in iterator_values.make_mut() {
-                        replace_imported_value(value, &mut imported);
-                    }
-                }
-            }
-            debug_assert!(imported.next().is_none());
         } else {
             self.heap.end_allocation_scope();
         }
@@ -649,6 +572,131 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    /// The mutable value holders `heapify_vm_state` imports, in canonical
+    /// order, filtered to the ones holding an inline compound.
+    ///
+    /// Returns the holders plus the length of the durable prefix: slot, extra
+    /// and iterator-restore holders enumerate first so `import_values` sees
+    /// exactly the durable-then-transient split the old pair of positional
+    /// walks produced — VM slot values are durable unconditionally here, even
+    /// where `visit_vm_roots` would call the same holder transient.
+    fn heap_import_holders(
+        &self,
+        pending_iterators: &[usize],
+        scan_extras: bool,
+    ) -> (Vec<VmValueHolder>, usize) {
+        let mut holders = Vec::new();
+        for (index, value) in self.slots.values.iter().enumerate() {
+            if value.as_ref().is_some_and(needs_heap_import) {
+                holders.push(VmValueHolder::Slot(index));
+            }
+        }
+        if scan_extras {
+            for (index, entry) in self.slots.extras.entries.iter().enumerate() {
+                if needs_heap_import(&entry.value) {
+                    holders.push(VmValueHolder::Extra(index));
+                }
+            }
+        }
+        for &index in pending_iterators {
+            if let Some(value) = &self.iter_stack[index].restore.previous
+                && needs_heap_import(value)
+            {
+                holders.push(VmValueHolder::IteratorRestore(index));
+            }
+        }
+        let durable_len = holders.len();
+        for (index, value) in self.stack.iter().enumerate() {
+            if needs_heap_import(value) {
+                holders.push(VmValueHolder::Operand(index));
+            }
+        }
+        if let Some(value) = &self.last_value
+            && needs_heap_import(value)
+        {
+            holders.push(VmValueHolder::LastValue);
+        }
+        for &index in pending_iterators {
+            if let IterCursor::List { values, .. } = &self.iter_stack[index].cursor {
+                for (member, value) in values.iter().enumerate() {
+                    if needs_heap_import(value) {
+                        holders.push(VmValueHolder::IteratorCursor {
+                            iterator: index,
+                            member,
+                        });
+                    }
+                }
+            }
+        }
+        (holders, durable_len)
+    }
+
+    /// The `expect` stays: each holder was enumerated from this same state by
+    /// `heap_import_holders` and nothing between staging and write-back can
+    /// move it (each site's message states it).
+    #[expect(
+        clippy::expect_used,
+        reason = "holder was enumerated from this same state"
+    )]
+    fn heap_import_value(&self, holder: VmValueHolder) -> &Value {
+        match holder {
+            VmValueHolder::Slot(index) => self.slots.values[index]
+                .as_ref()
+                .expect("enumerated slot holder"),
+            VmValueHolder::Extra(index) => &self.slots.extras.entries[index].value,
+            VmValueHolder::IteratorRestore(index) => self.iter_stack[index]
+                .restore
+                .previous
+                .as_ref()
+                .expect("enumerated iterator restore holder"),
+            VmValueHolder::Operand(index) => &self.stack[index],
+            VmValueHolder::LastValue => self
+                .last_value
+                .as_ref()
+                .expect("enumerated last-value holder"),
+            VmValueHolder::IteratorCursor { iterator, member } => {
+                match &self.iter_stack[iterator].cursor {
+                    IterCursor::List { values, .. } => &values[member],
+                    IterCursor::Range { .. } => {
+                        unreachable!("iterator cursor holders only enumerate List cursors")
+                    }
+                }
+            }
+        }
+    }
+
+    /// The `expect` stays: see `heap_import_value`.
+    #[expect(
+        clippy::expect_used,
+        reason = "holder was enumerated from this same state"
+    )]
+    fn heap_import_value_mut(&mut self, holder: VmValueHolder) -> &mut Value {
+        match holder {
+            VmValueHolder::Slot(index) => self.slots.values[index]
+                .as_mut()
+                .expect("enumerated slot holder"),
+            VmValueHolder::Extra(index) => &mut self.slots.extras.entries[index].value,
+            VmValueHolder::IteratorRestore(index) => self.iter_stack[index]
+                .restore
+                .previous
+                .as_mut()
+                .expect("enumerated iterator restore holder"),
+            VmValueHolder::Operand(index) => &mut self.stack[index],
+            VmValueHolder::LastValue => self
+                .last_value
+                .as_mut()
+                .expect("enumerated last-value holder"),
+            VmValueHolder::IteratorCursor { iterator, member } => {
+                match &mut self.iter_stack[iterator].cursor {
+                    IterCursor::List { values, .. } => &mut values.make_mut()[member],
+                    IterCursor::Range { .. } => {
+                        unreachable!("iterator cursor holders only enumerate List cursors")
+                    }
+                }
+            }
+        }
+    }
+
     pub(super) fn heap_roots(&self) -> Vec<Value> {
         let mut roots = Vec::new();
         super::visit_vm_roots(self, &mut roots);
@@ -656,16 +704,171 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 }
 
+/// One mutable `Value` location the post-instruction heapify pass imports
+/// through, in the order `heap_import_holders` enumerates them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VmValueHolder {
+    Slot(usize),
+    Extra(usize),
+    IteratorRestore(usize),
+    Operand(usize),
+    LastValue,
+    IteratorCursor { iterator: usize, member: usize },
+}
+
 fn needs_heap_import(value: &Value) -> bool {
     matches!(value, Value::Tuple(_) | Value::List(_) | Value::Record(_))
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the import count was matched to the walk over needs_heap_import values, per the message"
-)]
-fn replace_imported_value(value: &mut Value, imported: &mut impl Iterator<Item = Value>) {
-    if needs_heap_import(value) {
-        *value = imported.next().expect("heap import count matches");
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::super::{ProjectedBindings, Record, SlotState};
+    use super::*;
+    use crate::runtime::Compiler;
+    use crate::runtime::vm::{IterCursor, IterState, LoopRestore};
+
+    fn holder_test_vm<'a>(
+        chunk: &'a super::super::Chunk,
+        host: &'a crate::testing::harness::EchoHost,
+    ) -> Vm<'a, crate::testing::harness::EchoHost> {
+        Vm::new(
+            chunk,
+            SlotState::from_globals(
+                Record::new(),
+                &chunk.slot_names,
+                &ProjectedBindings::new(),
+                Vec::new(),
+            ),
+            host,
+            None,
+            ExecutionMode::Foreground,
+        )
+    }
+
+    fn test_chunk() -> super::super::Chunk {
+        Compiler::compile_program(&crate::testing::ast_builders::program(vec![
+            crate::testing::ast_builders::assign("x", crate::testing::ast_builders::num(0.0)),
+            crate::testing::ast_builders::assign("y", crate::testing::ast_builders::num(0.0)),
+            crate::testing::ast_builders::finish(crate::testing::ast_builders::num(0.0)),
+        ]))
+        .0
+    }
+
+    /// The enumeration's durable prefix is exactly the sequence the old collect
+    /// pass walked: slots, then extra globals, then pending iterator restore
+    /// values — each in position order, each filtered to inline compounds —
+    /// followed by the transient operand, last-value and cursor members.
+    #[test]
+    fn heap_import_holders_pin_the_durable_prefix_order() {
+        let host = crate::testing::harness::EchoHost;
+        let chunk = test_chunk();
+        let mut vm = holder_test_vm(&chunk, &host);
+
+        let slot_value = Value::List(vec![Value::Number(1.0)].into());
+        let extra_value = Value::Tuple(vec![Value::Number(2.0)].into());
+        let restore_value = Value::Record(Arc::new(Record::new()));
+        let operand_value = Value::List(vec![Value::Number(3.0)].into());
+        let last = Value::Tuple(vec![Value::Number(4.0)].into());
+        let cursor_member = Value::Record(Arc::new(Record::new()));
+
+        vm.slots.values[0] = Some(slot_value.clone());
+        vm.slots.values[1] = Some(Value::Number(9.0));
+        vm.slots.extras.insert("g".to_string(), extra_value.clone());
+        vm.iter_stack.push(IterState {
+            cursor: IterCursor::List {
+                values: vec![cursor_member.clone(), Value::Number(5.0)].into(),
+                index: 0,
+            },
+            binding: 0,
+            restore: LoopRestore {
+                previous: Some(restore_value.clone()),
+            },
+            heapified: false,
+        });
+        // An already-heapified iterator holds compounds but is not pending, so
+        // it never enters the enumeration.
+        vm.iter_stack.push(IterState {
+            cursor: IterCursor::List {
+                values: vec![Value::List(vec![].into())].into(),
+                index: 0,
+            },
+            binding: 1,
+            restore: LoopRestore { previous: None },
+            heapified: true,
+        });
+        vm.stack.push(Value::Bool(true));
+        vm.stack.push(operand_value.clone());
+        vm.last_value = Some(last.clone());
+
+        let (holders, durable_len) = vm.heap_import_holders(&[0], true);
+        assert_eq!(
+            holders,
+            vec![
+                VmValueHolder::Slot(0),
+                VmValueHolder::Extra(0),
+                VmValueHolder::IteratorRestore(0),
+                VmValueHolder::Operand(1),
+                VmValueHolder::LastValue,
+                VmValueHolder::IteratorCursor {
+                    iterator: 0,
+                    member: 0
+                },
+            ]
+        );
+        assert_eq!(
+            durable_len, 3,
+            "the durable prefix is slots + extras + iterator restores"
+        );
+        let staged = holders
+            .iter()
+            .map(|holder| vm.heap_import_value(*holder).clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            staged,
+            vec![
+                slot_value,
+                extra_value,
+                restore_value,
+                operand_value,
+                last,
+                cursor_member
+            ]
+        );
+
+        // A VM whose extras were already imported keeps them out of the
+        // durable prefix entirely, as before.
+        let (holders, durable_len) = vm.heap_import_holders(&[0], false);
+        assert_eq!(durable_len, 2);
+        assert!(!holders.contains(&VmValueHolder::Extra(0)));
+    }
+
+    /// One inline record held by a slot and by the operand stack imports to a
+    /// single heap object: the durable slot import wins, and the transient
+    /// holder reuses it by tree identity.
+    #[test]
+    fn a_slot_and_an_operand_sharing_one_record_import_to_one_object() {
+        let host = crate::testing::harness::EchoHost;
+        let chunk = test_chunk();
+        let mut vm = holder_test_vm(&chunk, &host);
+
+        let shared = Value::Record(Arc::new(Record::from_iter([(
+            "k".to_string(),
+            Value::Number(1.0),
+        )])));
+        vm.slots.values[0] = Some(shared.clone());
+        vm.stack.push(shared);
+
+        vm.heapify_vm_state().expect("heapify");
+
+        let (Value::Ref(slot_id), Value::Ref(operand_id)) = (
+            vm.slots.values[0].as_ref().expect("slot keeps its value"),
+            &vm.stack[0],
+        ) else {
+            panic!("slot and operand must both hold heap references")
+        };
+        assert_eq!(slot_id, operand_id);
+        assert_eq!(vm.heap.objects_in_id_order().count(), 1);
     }
 }
