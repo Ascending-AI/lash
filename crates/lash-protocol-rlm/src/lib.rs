@@ -55,3 +55,14 @@ pub use rlm_support::format_budget_suffix;
 
 #[cfg(test)]
 mod prompt_contract_tests;
+
+/// Render one authored tool example the way the TypeScript dialect spells it
+/// in a served catalog doc. Examples are authored in the crate that owns the
+/// tool, where neither the prompt walker's copied corpus nor the prose sweep
+/// reaches them (FIG-1449's documented blind spot); this hook lets each owning
+/// crate pin its own rendered examples (FIG-1480).
+#[cfg(feature = "testing")]
+pub fn render_tool_example_for_typescript_catalog(example: &str) -> String {
+    dialect::TypescriptDialect::prompt_only(lash_lashlang_runtime::LashlangSurface::default())
+        .render_tool_example(example)
+}

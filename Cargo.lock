@@ -2724,6 +2724,7 @@ dependencies = [
  "lash-internal-rlm-types",
  "lash-internal-sansio",
  "lash-internal-tool-support",
+ "lash-internal-typescript",
  "serde",
  "serde_json",
  "tokio",

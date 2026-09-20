@@ -329,16 +329,13 @@ pub fn spawn_agent_tool_definition(capability_names: &[String]) -> ToolDefinitio
         vec![
             // Parallel subagent fan-out: start process handles first, then join.
             format!(
-                r#"process research(agents: Agents, task: str) {{
+                r#"research = async (task: string) => {{
   result = await agents.spawn({{ task: task{capability_arg}, output: {{ summary: "str" }} }})?
-  finish result
+  return result.summary
 }}
-handles = {{
-  first: start research(agents: agents, task: "Research the first topic"),
-  second: start research(agents: agents, task: "Research the second topic")
-}}
-results = await handles
-finish {{ first: results.first?, second: results.second? }}"#
+first = await processes.start({{ definition: research, args: {{ task: "Research the first topic" }} }})?
+second = await processes.start({{ definition: research, args: {{ task: "Research the second topic" }} }})?
+finish {{ first: await first, second: await second }}"#
             ),
             // Schema-first: the highest-leverage shape — bind a typed result.
             format!(
@@ -349,8 +346,9 @@ finish {{ first: results.first?, second: results.second? }}"#
             format!(
                 r#"queries = await agents.spawn({{ task: "Generate two focused web search queries"{capability_arg}, output: {{ queries: "list[str]" }} }})?"#
             ),
-            // Reusable Type literal for richer shapes.
-            r#"Shape = Type { name: str, tags: list[str], status: enum["ok", "err"] }"#.into(),
+            // A reusable shape binding, spelled as the same descriptor
+            // shorthand `output` accepts.
+            r#"Shape = { name: "str", tags: "list[str]", status: "str" }"#.into(),
             format!(
                 r#"signed = await agents.spawn({{ task: "Parse the book listing in data/books.json"{capability_arg}, output: Shape }})?"#
             ),

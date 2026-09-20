@@ -26,6 +26,14 @@
 //! strings reached TypeScript sessions through exactly that gap. The sibling
 //! gate is `tool_catalog::validate_dialect_neutral_tool_prose`, which sweeps
 //! whatever a session registers at registration time instead of a fixture here.
+//!
+//! Authored examples share the blind spot and sit outside even that gate's
+//! reach: the prose sweep excludes them on purpose, and `authored_tool_examples`
+//! below is a copied fixture rather than the live corpus — which is how
+//! `agents.spawn` rendered `const Shape = Type { ... }` to TypeScript sessions
+//! (FIG-1480). The rewriter stays pinned here over representative spellings;
+//! each owning crate pins its own rendered catalog (see the rendered-catalog
+//! test on `spawn_agent_tool_definition` in `lash-subagents`).
 
 use super::*;
 use crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY;

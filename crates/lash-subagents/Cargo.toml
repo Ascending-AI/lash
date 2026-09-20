@@ -37,4 +37,6 @@ tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-core-worker = { workspace = true, features = ["testing"] }
 lash-plugin-process-controls = { workspace = true }
+lash-protocol-rlm = { workspace = true, features = ["testing"] }
+lash-typescript = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
