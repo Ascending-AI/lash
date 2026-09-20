@@ -45,8 +45,8 @@ impl PluginMessage {
             return Some(self.content.as_str());
         }
         self.parts.iter().find_map(|part| {
-            matches!(part.kind, crate::PartKind::Text | crate::PartKind::Prose)
-                .then_some(part.content.as_str())
+            matches!(part.kind(), crate::PartKind::Text | crate::PartKind::Prose)
+                .then_some(part.content())
         })
     }
 }

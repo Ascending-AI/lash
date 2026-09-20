@@ -197,8 +197,8 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
         .messages()
         .iter()
         .flat_map(|message| message.parts.iter())
-        .filter(|part| part.kind == lash_core::PartKind::Reasoning)
-        .map(|part| part.content.as_str())
+        .filter(|part| part.kind() == lash_core::PartKind::Reasoning)
+        .map(|part| part.content())
         .collect::<Vec<_>>();
 
     assert_eq!(activities, ["same reasoning", "same reasoning"]);

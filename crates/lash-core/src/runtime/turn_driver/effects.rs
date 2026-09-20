@@ -739,7 +739,9 @@ async fn normalize_plugin_message_attachments(
             normalize_plugin_attachment_source(source, attachment_store, policy).await?;
         }
         for part in &mut message.parts {
-            if let Some(attachment) = part.attachment.as_mut() {
+            if let Some(slot) = part.attachment_mut()
+                && let Some(attachment) = slot.as_mut()
+            {
                 normalize_plugin_attachment_source(
                     &mut attachment.source,
                     attachment_store,

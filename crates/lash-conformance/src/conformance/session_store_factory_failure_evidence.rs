@@ -185,7 +185,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         reopened.messages().iter().all(|message| message
             .parts
             .iter()
-            .all(|part| !part.content.contains(PARTIAL_TEXT))),
+            .all(|part| !part.content().contains(PARTIAL_TEXT))),
         "failure evidence remains outside the reopened transcript"
     );
 }

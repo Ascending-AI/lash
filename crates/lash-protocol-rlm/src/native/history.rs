@@ -445,7 +445,7 @@ fn append_borrowed_entry_image_blocks(
     match entry.payload {
         BorrowedChronologicalPayload::Message(message) => {
             for part in message.parts {
-                let Some(attachment) = part.attachment.as_ref() else {
+                let Some(attachment) = part.attachment() else {
                     continue;
                 };
                 blocks.push(LlmContentBlock::Attachment {
@@ -505,10 +505,10 @@ fn message_attachment_refs(parts: &[lash_core::Part]) -> Vec<RlmAttachmentRef> {
     parts
         .iter()
         .filter_map(|part| {
-            let attachment = part.attachment.as_ref()?;
+            let attachment = part.attachment()?;
             let (media_type, label, source, reference) = attachment_summary(&attachment.source);
             Some(RlmAttachmentRef {
-                id: part.id.clone(),
+                id: part.id().to_string(),
                 media_type,
                 label,
                 source,
@@ -551,11 +551,11 @@ fn message_history_text_parts(parts: &[lash_core::Part]) -> String {
         .iter()
         .filter(|part| {
             matches!(
-                part.kind,
+                part.kind(),
                 lash_core::PartKind::Text | lash_core::PartKind::Prose
             )
         })
-        .map(|part| part.content.trim())
+        .map(|part| part.content().trim())
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     chunks.join("\n\n")
@@ -568,12 +568,12 @@ fn message_history_reasoning_blocks(parts: &[lash_core::Part]) -> Vec<LlmContent
     parts
         .iter()
         .filter_map(|part| {
-            if !matches!(part.kind, lash_core::PartKind::Reasoning) {
+            if !matches!(part.kind(), lash_core::PartKind::Reasoning) {
                 return None;
             }
-            let replay = part.reasoning_meta.as_ref()?;
+            let replay = part.reasoning_meta()?;
             (!replay.is_empty()).then(|| LlmContentBlock::Reasoning {
-                text: part.content.clone(),
+                text: part.content().to_string(),
                 replay: Some(replay.clone()),
             })
         })

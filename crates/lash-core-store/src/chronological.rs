@@ -222,9 +222,17 @@ mod tests {
     }
 
     fn tool_result_message(id: &str, call_id: &str) -> Message {
-        let mut message = text_message(id, MessageRole::User, "tool result");
-        std::sync::Arc::make_mut(&mut message.parts)[0].tool_call_id = Some(call_id.to_string());
-        message
+        Message {
+            id: id.to_string(),
+            role: MessageRole::User,
+            parts: shared_parts(vec![Part::tool_result(
+                format!("{id}.p0"),
+                "tool result".to_string(),
+                call_id.to_string(),
+                "tool".to_string(),
+            )]),
+            origin: None,
+        }
     }
 
     fn transient_message(id: &str) -> Message {
@@ -321,7 +329,7 @@ mod tests {
         let ChronologicalPayload::Message(live_tail) = &projection.entries()[1].payload else {
             panic!("expected the rewritten live message");
         };
-        assert_eq!(live_tail.parts[0].content, "second");
+        assert_eq!(live_tail.parts[0].content(), "second");
     }
 
     #[test]

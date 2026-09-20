@@ -103,10 +103,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         let prose = llm_response.full_text();
         let reasoning = parts
             .iter()
-            .filter(|part| part.kind == lash_core::PartKind::Reasoning)
+            .filter(|part| part.kind() == lash_core::PartKind::Reasoning)
             .map(|part| RlmReasoningPart {
-                text: part.content.clone(),
-                replay: part.reasoning_meta.clone(),
+                text: part.content().to_string(),
+                replay: part.reasoning_meta().cloned(),
             })
             .collect::<Vec<_>>();
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {

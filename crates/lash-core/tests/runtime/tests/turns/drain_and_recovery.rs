@@ -608,7 +608,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
                 && message
                     .parts
                     .iter()
-                    .any(|part| part.content == expected_text)
+                    .any(|part| part.content() == expected_text)
         })
         .expect("wake history message");
     assert!(matches!(
@@ -634,7 +634,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
                     && message
                         .parts
                         .iter()
-                        .any(|part| part.content == expected_text))
+                        .any(|part| part.content() == expected_text))
             }),
         "durable wake must not enter history as provider system text"
     );
@@ -1445,7 +1445,7 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
     let read_model = graph.read_model(None).unwrap();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].parts[0].content, "parent hello");
+    assert_eq!(messages[0].parts[0].content(), "parent hello");
     let checkpoint = read.checkpoint.expect("checkpoint");
     let turn_state = checkpoint.turn_state;
     assert_eq!(turn_state.turn_index, 3);
@@ -2231,4 +2231,33 @@ pub(super) async fn an_automatic_drain_without_a_durable_queue_says_so() {
         ),
         "a session with no durable store must report NoDurableQueue, got {drain:?}"
     );
+}
+
+#[tokio::test]
+pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_state() {
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
+    let full_loads_before = store.load_session_count();
+    let head_reads_before = store.load_session_head_meta_count();
+
+    let receipt = runtime
+        .submit_session_command(
+            lash_core::facade_support::SessionCommand::RefreshToolCatalog {
+                reason: "deferred queued lane".to_string(),
+            },
+            "deferred-queued-command",
+        )
+        .await
+        .expect("NoQueuedWork leaves the durable command pending");
+
+    assert_eq!(store.load_session_count(), full_loads_before);
+    assert_eq!(store.load_session_head_meta_count(), head_reads_before);
+    let pending = lash_core::store::QueuedWorkStore::list_queued_work(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("inspect deferred durable command");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].batch_id, receipt.batch_id);
 }

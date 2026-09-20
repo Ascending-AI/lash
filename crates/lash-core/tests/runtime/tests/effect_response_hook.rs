@@ -210,7 +210,7 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
         active_conversation_messages(&failed.state)
             .iter()
             .flat_map(|message| message.parts.iter())
-            .all(|part| !part.content.contains("paid completion 1")),
+            .all(|part| !part.content().contains("paid completion 1")),
         "an underived completion must not survive in committed history"
     );
 

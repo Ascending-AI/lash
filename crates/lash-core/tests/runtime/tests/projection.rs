@@ -221,8 +221,8 @@ async fn tool_result_projector_only_changes_model_observation() {
             .iter()
             .any(|message| {
                 message.parts.iter().any(|part| {
-                    part.content.contains("model projection")
-                        && matches!(part.kind, PartKind::ToolResult)
+                    part.content().contains("model projection")
+                        && matches!(part.kind(), PartKind::ToolResult)
                 })
             })
     );
@@ -318,9 +318,9 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].role, MessageRole::User);
-    assert_eq!(messages[0].parts[0].content, "where did this go?");
+    assert_eq!(messages[0].parts[0].content(), "where did this go?");
     assert_eq!(messages[1].role, MessageRole::Assistant);
-    assert_eq!(messages[1].parts[0].content, "Stored answer");
+    assert_eq!(messages[1].parts[0].content(), "Stored answer");
 }
 
 #[tokio::test]
@@ -913,8 +913,8 @@ async fn completed_turns_are_persisted_in_session_graph() {
     let read_model = graph.read_model(None).unwrap();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0].parts[0].content, "where did this go?");
-    assert_eq!(messages[1].parts[0].content, "Stored answer");
+    assert_eq!(messages[0].parts[0].content(), "where did this go?");
+    assert_eq!(messages[1].parts[0].content(), "Stored answer");
     let _checkpoint = read.checkpoint.expect("checkpoint");
     let ledger = read.token_ledger;
     assert_eq!(ledger.len(), 1);

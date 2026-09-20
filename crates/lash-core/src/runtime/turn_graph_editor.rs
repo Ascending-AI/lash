@@ -549,7 +549,7 @@ mod tests {
         editor.project_active_read_state(&[message("durable", "projected")]);
 
         assert!(editor.graph_commit().nodes().is_empty());
-        assert_eq!(editor.message_sequence()[0].parts[0].content, "projected");
+        assert_eq!(editor.message_sequence()[0].parts[0].content(), "projected");
         assert_eq!(
             editor.take_projection_diagnostics(),
             vec![ReadProjectionDiagnostic {
@@ -560,7 +560,7 @@ mod tests {
         );
         let durable_graph = editor.into_session_graph();
         assert_eq!(
-            durable_graph.read_model(None).unwrap().messages[0].parts[0].content,
+            durable_graph.read_model(None).unwrap().messages[0].parts[0].content(),
             "original"
         );
     }
