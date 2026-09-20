@@ -1703,8 +1703,8 @@ pub enum BinaryOp {
     Greater,
     GreaterEqual,
     In,
-    Or,
     And,
+    Or,
 }
 
 #[cfg(test)]

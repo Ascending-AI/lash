@@ -509,8 +509,8 @@ pub(crate) enum IntrinsicOp {
         slot: usize,
     },
     FormatCompiledSlotNumberBinary {
-        slot: usize,
         template: usize,
+        slot: usize,
         op: BinaryOp,
         right: f64,
     },
