@@ -91,11 +91,6 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         ToolRegistrationKind::Leaf
     }
     fn advertised_tools(&self) -> Vec<ToolManifest>;
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        self.advertised_tools()
-            .into_iter()
-            .find(|manifest| manifest.name == name)
-    }
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
         self.advertised_tools()
             .into_iter()
