@@ -462,6 +462,33 @@ class BazelTestContractTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(saving_jobs))
 
+    def test_the_output_base_is_restored_everywhere_and_saved_once(self) -> None:
+        """Every Bazel job restores the previous run's output base; one saves.
+
+        The output base carries the local action cache and the materialised
+        runfiles trees that dominate the merge group's local-side bookkeeping.
+        Persisting it under RUNNER_TEMP is useless -- RUNNER_TEMP dies with the
+        runner -- so the shared action restores it into that path and exactly
+        one job (Lint, which runs on every trusted event) uploads it again.
+        """
+        setup = shared_cache_action()
+        restore = job_step(setup, "Restore Bazel output base")
+        save = job_step(setup, "Restore and save Bazel output base")
+        self.assertEqual("${{ runner.temp }}/bazel-output", restore["with"]["path"])
+        self.assertEqual("${{ runner.temp }}/bazel-output", save["with"]["path"])
+        self.assertTrue(restore["uses"].startswith("actions/cache/restore@"))
+        self.assertTrue(save["uses"].startswith("actions/cache@"))
+        self.assertEqual("inputs.save-output-base != 'true'", restore["if"])
+        self.assertEqual("inputs.save-output-base == 'true'", save["if"])
+        saving_jobs = [
+            job
+            for job in workflow()["jobs"].values()
+            for step in job.get("steps", [])
+            if step.get("uses") == "./.github/actions/bazel-shared-cache"
+            and step.get("with", {}).get("save-output-base") == "true"
+        ]
+        self.assertEqual(1, len(saving_jobs))
+
     def test_the_shared_cache_action_fails_closed_on_a_bad_secret(self) -> None:
         """A misconfigured environment must name what is wrong, not build wrong.
 

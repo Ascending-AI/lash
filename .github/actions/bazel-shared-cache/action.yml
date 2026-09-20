@@ -17,6 +17,13 @@ inputs:
       upload rather than one per concurrent job.
     required: false
     default: "false"
+  save-output-base:
+    description: >-
+      Whether this job uploads the Bazel output base it used. Every Bazel job
+      restores it; exactly one saves it, so a cold key costs one upload rather
+      than one per concurrent job.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -129,6 +136,46 @@ runs:
           hashFiles('MODULE.bazel.lock', 'MODULE.bazel', 'Cargo.lock') }}
         restore-keys: |
           bazel-repository-v1-${{ runner.os }}-${{ runner.arch }}-
+
+    # The repository cache above only covers fetches. The output base holds the
+    # server state CI throws away with the runner: the local action cache and
+    # the already-materialised runfiles trees, which are most of the local
+    # bookkeeping cost a merge-group run pays even at a high remote hit ratio.
+    # Unlike the repository cache this content is not content-addressed, so a
+    # restore CAN serve stale state; Bazel's own digest and input validation is
+    # the correctness backstop, and the escape hatch is deleting the day's
+    # cache entry. The key rotates daily so yesterday's base cannot pin the
+    # workspace forever, and the restore prefix falls back to the previous day
+    # when today's has not been written yet.
+    - name: Output-base cache date bucket
+      shell: bash
+      run: echo "BAZEL_OUTPUT_BASE_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
+
+    - name: Restore and save Bazel output base
+      if: inputs.save-output-base == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      continue-on-error: true
+      with:
+        path: ${{ runner.temp }}/bazel-output
+        key: >-
+          bazel-output-v1-${{ runner.os }}-${{ runner.arch }}-${{
+          hashFiles('.bazelversion') }}-${{ env.BAZEL_OUTPUT_BASE_DATE }}
+        restore-keys: |
+          bazel-output-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion') }}-
+          bazel-output-v1-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Restore Bazel output base
+      if: inputs.save-output-base != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      continue-on-error: true
+      with:
+        path: ${{ runner.temp }}/bazel-output
+        key: >-
+          bazel-output-v1-${{ runner.os }}-${{ runner.arch }}-${{
+          hashFiles('.bazelversion') }}-${{ env.BAZEL_OUTPUT_BASE_DATE }}
+        restore-keys: |
+          bazel-output-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion') }}-
+          bazel-output-v1-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Configure authenticated cache
       shell: bash
