@@ -5,6 +5,13 @@ Status: accepted, superseded in part by [ADR 0094](0094-child-lifecycle-is-a-reg
 ADR 0094 replaces the parent-end policy and settlement design described below.
 The atomic-attempt and recorded-intent decisions remain accepted.
 
+Amended 2026-09-21 (FIG-3392): the phase between "final attempt recorded" and
+"declarations drained" is named as a protected lifecycle phase with an explicit
+arbitration against cancellation, and the coordination around an atomic attempt
+is placed at handler level on a child's own admitted controller. See
+["The protected phase, and where coordination runs"](#the-protected-phase-and-where-coordination-runs-fig-3392)
+at the end of this ADR. Not yet implemented outside the in-process batch path.
+
 Tool implementations are opaque host code. Lash cannot reliably discover,
 name, order, or replay every network call, database write, timer, or other side
 effect performed while a tool runs. Pretending that those operations compose
@@ -296,3 +303,71 @@ typed refusal. Artifact loads, catalog resolution, and compatibility checks are
 world readiness and run only in prepare or `ProcessEngine::run`. Consequently a
 temporary world failure while replaying a committed `Start` remains retryable
 and cannot be recorded as a `CommandFailed` tool-intent refusal.
+
+## The protected phase, and where coordination runs (FIG-3392)
+
+**Partly implemented.** The protected phase exists today in the in-process batch
+path; the arbitration below and the handler-level driver are FIG-2266's and
+FIG-3396's work. The contract is
+[docs/design/effect-group-tool-children.md](../design/effect-group-tool-children.md).
+
+### "Records the final attempt first, then drains its declarations" is a phase
+
+The sentence above — *Lash records the final attempt first, then admits and
+drains its declarations in source order* — describes a window in which a
+recorded fact exists and its declared consequences do not yet. That window is a
+**protected lifecycle phase**, not an implementation interval, and this ADR now
+says what happens when something else arrives during it.
+
+The code already takes the protection seriously on the in-process path.
+`crates/lash-core-execution/src/session/tool_execution/batch.rs` short-circuits
+its own cancel grace with `if final_result_committed.is_committed() { return
+tool_call.await; }`, and
+`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`
+publishes that signal where the terminal is sealed — `begin_final_drain`
+"Publishes this child's committed final result and waits for its turn to drain
+the declared intents".
+
+The arbitration, stated once:
+
+- **A cancellation that arrives while an attempt is uncommitted wins.** The
+  attempt is cancelled and no declarations are realized.
+- **A commit that lands before the cancel fence closes wins,** and the winning
+  commit **retains settlement ownership**: its declarations are drained and its
+  projection recorded before the enclosing scope may report success.
+- **A cancellation that arrives after a commit is refused, not queued.** An
+  implementation that defers it until the drain finishes has reintroduced the
+  loss the phase exists to prevent.
+- **A completion that arrives after the fence closed is a typed late-completion
+  refusal with no journal write,** and the refusal's evidence outlives the
+  group's retirement.
+- **Worker loss during the phase is not cancellation.** Recovery finishes the
+  drain. A recorded declaration is never destroyed because the worker that
+  recorded it died.
+
+This does not weaken the at-least-once disclaimer below: an *unrecorded*
+completion still means the whole attempt runs again, and opaque in-attempt I/O
+is still at-least-once. The protection is of the recorded declaration, not of
+the external write.
+
+### Coordination is at handler level; only the attempt is inside the recorded body
+
+The structural rule — *a recorded body must not emit commands into an
+ordinal-addressed journal* — is unchanged, and it decides where a tool child's
+coordination lives. Retry, completion-key derivation, deferred await and the
+orchestrating lane are **coordination**; they run at handler level on the
+child's own admitted controller. Only the atomic attempt runs inside the
+recorded body.
+
+On Restate the recorded body is a `ctx.run` closure, and two facts make the
+placement mandatory rather than stylistic: nothing inside the closure may emit a
+command, and **no SDK can interrupt a closure that is already executing** — the
+cancel signal is observable at handler level and not inside a running `ctx.run`.
+A driver built inside the closure therefore could neither coordinate nor be
+cancelled.
+
+One resolver answers "what runs this child" for first dispatch and for recovery
+alike ([ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)'s
+registered `GroupExecutors`). No caller-closure route is reintroduced: a caller
+vector can answer only first dispatch, and retry, drain, a resuming process and a
+fresh handler execution all run with no caller in scope.

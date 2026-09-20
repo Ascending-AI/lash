@@ -8,10 +8,18 @@ BSD license. Normal tests and CI never access the network.
 
 `inventory.tsv` is generated before selection. It lists every official feature
 tag from the pinned `features.txt`, every top-level test directory, and the
-TypeScript-only syntax decisions required by the dialect contract. Every row
+`typescript`-kind rows: dialect decisions that have no upstream feature tag to
+hang on, most of them TypeScript-only syntax and one — `async-array-callbacks` —
+a registered semantic deviation. Every row
 must have exactly one explicit ruling in `census.tsv`: `accepted`, `rejected`
 with a real `TS_*` diagnostic, or `skip` with a ticket/deviation reason. There
 is no fallback or wildcard row. The Rust harness fails if the two sets differ.
+
+A deviation reason is spelled `registered-deviation:<NAME>`, naming an entry in
+the deviation register in the crate README. It is the only way a row can record
+"the dialect accepts this construct and diverges in a named, documented way":
+`accepted` must carry reason `-`, and `rejected` must name a real `TS_*`
+diagnostic that some path actually produces.
 
 A `rejected` row also carries a fifth column, the **probe**: a source that must
 reject with exactly the diagnostic the row names. Naming a diagnostic is a claim

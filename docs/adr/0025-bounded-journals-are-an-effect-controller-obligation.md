@@ -198,6 +198,57 @@ when tools can return large values; changing to a universal byte rejection
 would be a separate product contract because it can turn an otherwise valid
 tool result into a deterministic failure.
 
+## Outstanding tool children at a boundary (FIG-3392)
+
+**Not yet implemented.** FIG-3397 lands reattachment and the admission bound;
+the contract is
+[docs/design/effect-group-tool-children.md](../design/effect-group-tool-children.md).
+
+Effect groups made it possible for a boundary to arrive while independently
+durable children are still running, and the obvious rule — *never segment while
+a tool child is unsettled* — is refused here, because it defeats this ADR rather
+than serving it. A process that repeatedly races one quick tool against one hung
+tool sits at width two indefinitely and would never reach a boundary; its
+journal would grow without bound, which is the cliff this obligation exists to
+close. Section 2's framing survives intact: the trigger is accumulated step
+cost, taken at a quiescent post-effect point, and **an outstanding child is not
+a reason to decline a boundary**. Declining at a *non-capturable* point remains
+correct (`crates/lash-lashlang-runtime/src/process.rs` records that case through
+`record_segment_boundary_decline`, "lashlang segment boundary declined at
+non-capturable point").
+
+**Outstanding children are reattached across segments instead.** The successor
+obtains the children the predecessor dispatched, by their retained invocation
+identity, and continues consuming settlements from the cursor the continuation
+carried. The three handover requirements in section 5 apply unchanged, and the
+third — *no second uncaptured pending operation at the cut* — is exactly the
+clause outstanding children must satisfy: the child identities, the consumed
+prefix and the result retention a successor still needs are carried into the
+continuation, or the boundary is not taken.
+
+Reattachment is bounded by the engine's retention, not by lash's wishes. On
+Restate, attach is by invocation id and is bounded by journal and idempotency
+retention (both default to 24 hours on the server), so **an expired attachment is
+a typed recovery failure, never permission to rerun the child's side effect**.
+
+**A group's open admits two dimensions, before it dispatches anything.** Width
+alone does not bound an opener: aggregate width *and* retained outstanding work,
+nested groups included, are admitted as a typed refusal of the whole open, with
+command headroom left for the close and handover the group will need. The
+controller's budget stays the controller's — `crates/lash-restate/src/controller/mod.rs`
+carries `segment_effect_budget` as a construction-time option — and admission
+must not spend all of it on children.
+
+**Mid-aggregate VM suspension is not assumed.** A resumable mid-aggregate frame
+is required only if command accounting shows a bounded aggregate cannot meet the
+controller budget; until that measurement exists, the aggregate is a unit of
+execution between boundaries and the bound above is the mechanism.
+
+**No universal result-byte cap follows**, for the reason the `ToolBatch` section
+above already gives: turning a valid tool result into a deterministic failure is
+a separate product contract. A group turns one journaled entry into *n*, which
+is honest accounting against this budget and not a new axis.
+
 Checkpoint journal rows deliberately carry the complete `CheckpointClaimSet`,
 not a compact list of row ids: the minimal durable-engine encoding is roughly
 2 KB — an order-of-magnitude estimate, not a measured bound — and grows with

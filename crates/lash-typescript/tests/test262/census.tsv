@@ -206,6 +206,7 @@ feature	WeakSet	skip	ticket-ruling:FIG-1413:WeakSet	-
 feature	well-formed-json-stringify	rejected	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED	JSON.stringify('\ud800');
 typescript	annotations	accepted	-	-
 typescript	as-casts	accepted	-	-
+typescript	async-array-callbacks	skip	registered-deviation:TS_ASYNC_MAP_SEQUENTIAL_V1	-
 typescript	decorators	rejected	TS_DECORATOR_UNSUPPORTED	@dec class A { }
 typescript	enum	accepted	-	-
 typescript	generics	accepted	-	-

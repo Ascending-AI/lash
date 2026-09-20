@@ -23,7 +23,9 @@ Planning, tracking, and everything in-flight live in **Linear** (team `figments`
 | Housekeeping / teardown / process chores | **Nowhere durable.** Linear is code-facing only; track chores in the session that owns them |
 
 `docs/` is not a published website and not a scratch directory. Since FIG-2364 it holds
-ADRs (`docs/adr/`) and the agent runbook you are reading (`docs/agents/`). There are no
+ADRs (`docs/adr/`), the agent runbooks you are reading (`docs/agents/`), and a small set of
+code-facing contract and procedure documents too long to live inside one ADR:
+`docs/store-sql-authoring.md` (FIG-3380) and `docs/design/` (FIG-3392). There are no
 `.html` pages left and nothing lints it. Anything else you want to write belongs on the
 Linear ticket per the table above.
 

@@ -202,3 +202,48 @@ one recorded settlement order and no phases.
   and the signature travelling on a value is checked against it.
 - Pre-existing stored continuations, handles and process rows do not load. This
   is a pre-1.0 break taken deliberately, consistent with ADR 0011.
+
+## Amendment: "never a batch child" becomes the Durable Wait child contract (FIG-3392)
+
+**Not yet implemented.** FIG-3397 lands it; the contract is
+[docs/design/effect-group-tool-children.md](../design/effect-group-tool-children.md).
+
+"One handle kind, and await is a Durable Wait" above says `processes.await` "is
+never a batch child". That sentence was written against the **atomic** batch,
+whose children had to settle inside one resource operation — which is exactly why
+a process terminal days away could not be one, and why the alternative
+"await a process as a batch child" was rejected for forcing ADR 0087's two-phase
+structure.
+
+Under [ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)'s
+effect groups a child is an independently durable unit with no such bound, so
+the sentence changes meaning rather than being deleted:
+
+> **`processes.await(h)` is a resumable child of the group, on the existing
+> Durable Wait protocol.** It is retained across segment boundaries, it takes its
+> place in the recorded settlement order at the moment its completion arrives
+> rather than at the position it was launched in, and it is not subject to the
+> cancel grace a running tool attempt is, because there is no attempt body to
+> interrupt.
+
+Nothing about the routing moves. The wait is still resolved by the process
+terminal through the work-driver seam
+([ADR 0016](0016-process-waits-live-on-the-work-driver-seam.md)); on Restate it
+is still resolved by attaching to the process;
+`crates/lash-core-execution/src/runtime/effect/executor/process_local.rs` still
+holds the equivalence it documents today, that "`await processes.await({ handle
+})` answers exactly what `await handle`".
+
+**Cancelling the wait releases the wait and never the process.** A losing
+`processes.await` inside a `race` is cancelled at opener close like any other
+unfinished arm, and the process it observed keeps running under its
+[ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)
+lifecycle, with its own captured environment, journal, cancel protocol and
+terminal delivery. This is the ruled answer to "I want work that outlives the
+turn": name a process, and race the wait rather than the work.
+
+The refusal of a **raw** handle at an element position is unchanged —
+`crates/lashlang/src/runtime/vm/pending_tools.rs` keeps the repair "a process
+handle cannot be awaited directly; call `processes.await(handle)` and await that
+call, so the durable wait settles with the rest of the batch" — and that repair
+is now literally what the group does.
