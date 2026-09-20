@@ -14,8 +14,12 @@ use lash_core::facade_support::await_event_coordinator::{
     PersistedPromise, RegisteredAwaitEvent, TerminalCas,
 };
 use lash_core::{RuntimeError, RuntimeErrorCode};
+use lash_store_sql::Dialect;
+use lash_store_sql::wait::revoked_sessions::RevokedSessionStatements;
+use lash_store_sql::wait::waits::{WaitRow, WaitStatements};
 use sqlx::postgres::{PgPool, PgRow};
 use sqlx::{Executor, Row as _};
+use std::sync::LazyLock;
 
 const SESSION_LOCK_NAMESPACE: i64 = 562;
 /// Advisory-lock namespace for session-free scopes, disjoint from the session
@@ -30,6 +34,97 @@ const VOCABULARY: AwaitEventVocabulary = AwaitEventVocabulary {
     notify: RuntimeErrorCode::PostgresAwaitEventNotify,
     display_name: "PostgreSQL",
 };
+
+lash_store_sql::statements! {
+    /// `await_event_waits` statements only PostgreSQL issues.
+    pub(crate) struct WaitPostgresStatements @ "await_event_wait" {
+        /// Register a pending promise, keeping any row already under the key.
+        ///
+        /// `ON CONFLICT DO NOTHING` is the fork: `READ COMMITTED` cannot make
+        /// "read the absence, then insert" atomic, so the conflict is what
+        /// detects a concurrent registrar. SQLite reads the absence under its
+        /// write lock and needs no clause.
+        insert_pending = "INSERT INTO await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL)
+             ON CONFLICT (key_id) DO NOTHING";
+
+        /// Register a promise that is already resolved, reporting the key when
+        /// this caller is the registrar. Forks for the same reason
+        /// [`WaitPostgresStatements::insert_pending`] does.
+        insert_resolved = "INSERT INTO await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT (key_id) DO NOTHING
+             RETURNING key_id";
+
+        /// Settle the pending promise under key `?1` with terminal `?6` at
+        /// `?7`, if the stored row is still that exact promise.
+        ///
+        /// FENCING (FIG-3381): the identity comparison rides in the predicate
+        /// because `READ COMMITTED` cannot hold a read of it across
+        /// statements. SQLite compares the row it read under the write lock
+        /// and carries no identity columns here. The two semantics are
+        /// deliberately left as they stand.
+        resolve_pending = "UPDATE await_event_waits
+                 SET terminal_json = ?6, resolved_at_ms = ?7
+                 WHERE key_id = ?1
+                   AND scope_json = ?2
+                   AND wait_json = ?3
+                   AND session_id IS NOT DISTINCT FROM ?4
+                   AND turn_control = ?5
+                   AND terminal_json IS NULL
+                 RETURNING terminal_json";
+
+        /// Cancel session `?1`'s unresolved non-control promises. PostgreSQL
+        /// stores `turn_control` as a boolean, SQLite as an integer.
+        cancel_session_promises = "UPDATE await_event_waits
+             SET terminal_json = ?2, resolved_at_ms = ?3
+             WHERE session_id = ?1
+               AND terminal_json IS NULL
+               AND turn_control = FALSE";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `await_event_meta` statements only PostgreSQL issues.
+    pub(crate) struct MetaPostgresStatements @ "await_event_meta" {
+        /// The promise signing secret. PostgreSQL stores the singleton flag
+        /// as a boolean, SQLite as an integer.
+        select_signing_secret = "SELECT signing_secret FROM await_event_meta WHERE singleton = TRUE";
+    }
+}
+
+/// Every wait-family statement, rendered once.
+pub(crate) struct WaitSql {
+    /// `await_event_waits` statements both backends issue verbatim.
+    pub(crate) shared: WaitStatements,
+    /// `await_event_waits` statements only PostgreSQL issues.
+    pub(crate) postgres: WaitPostgresStatements,
+    /// `await_event_revoked_sessions` statements both backends issue verbatim.
+    pub(crate) revoked: RevokedSessionStatements,
+    /// `await_event_meta` statements only PostgreSQL issues.
+    pub(crate) meta_postgres: MetaPostgresStatements,
+}
+
+static WAIT_SQL: LazyLock<WaitSql> = LazyLock::new(|| {
+    let dialect = Dialect::postgres();
+    WaitSql {
+        shared: WaitStatements::render(dialect),
+        postgres: WaitPostgresStatements::render(dialect),
+        revoked: RevokedSessionStatements::render(dialect),
+        meta_postgres: MetaPostgresStatements::render(dialect),
+    }
+});
+
+/// The wait-family statements, rendered once at first use and never again.
+pub(crate) fn wait_sql() -> &'static WaitSql {
+    &WAIT_SQL
+}
 
 /// The PostgreSQL promise coordinator: one shared state machine over
 /// [`PostgresAwaitEventBackend`].
@@ -84,26 +179,19 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         if identity_is_fenced(&mut tx, identity).await? {
             return Ok(false);
         }
-        sqlx::query(
-            "INSERT INTO lash_await_event_waits (
-                key_id, scope_json, wait_json, session_id, turn_control,
-                terminal_json, created_at_ms, resolved_at_ms
-             )
-             VALUES ($1, $2, $3, $4, $5, NULL, $6, NULL)
-             ON CONFLICT (key_id) DO NOTHING",
-        )
-        .bind(key_id)
-        .bind(&identity.scope_json)
-        .bind(&identity.wait_json)
-        .bind(identity.session_id.as_deref())
-        .bind(identity.turn_control)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_error)?;
+        sqlx::query(wait_sql().postgres.insert_pending.sql())
+            .bind(key_id)
+            .bind(&identity.scope_json)
+            .bind(&identity.wait_json)
+            .bind(identity.session_id.as_deref())
+            .bind(identity.turn_control)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_error)?;
         let accepted = select_wait_row(&mut *tx, key_id)
             .await?
-            .is_some_and(|row| row.matches(identity));
+            .is_some_and(|row| matches_identity(&row, identity));
         tx.commit().await.map_err(store_error)?;
         Ok(accepted)
     }
@@ -122,54 +210,38 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
             return Ok(TerminalCas::UnknownOrRevoked);
         }
 
-        let inserted: Option<String> = sqlx::query_scalar(
-            "INSERT INTO lash_await_event_waits (
-                key_id, scope_json, wait_json, session_id, turn_control,
-                terminal_json, created_at_ms, resolved_at_ms
-             )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-             ON CONFLICT (key_id) DO NOTHING
-             RETURNING key_id",
-        )
-        .bind(key_id)
-        .bind(&identity.scope_json)
-        .bind(&identity.wait_json)
-        .bind(identity.session_id.as_deref())
-        .bind(identity.turn_control)
-        .bind(terminal_json)
-        .bind(now)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_error)?;
+        let inserted: Option<String> =
+            sqlx::query_scalar(wait_sql().postgres.insert_resolved.sql())
+                .bind(key_id)
+                .bind(&identity.scope_json)
+                .bind(&identity.wait_json)
+                .bind(identity.session_id.as_deref())
+                .bind(identity.turn_control)
+                .bind(terminal_json)
+                .bind(now)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(store_error)?;
         let cas = if inserted.is_some() {
             TerminalCas::Stored
         } else {
-            let updated: Option<String> = sqlx::query_scalar(
-                "UPDATE lash_await_event_waits
-                 SET terminal_json = $6, resolved_at_ms = $7
-                 WHERE key_id = $1
-                   AND scope_json = $2
-                   AND wait_json = $3
-                   AND session_id IS NOT DISTINCT FROM $4
-                   AND turn_control = $5
-                   AND terminal_json IS NULL
-                 RETURNING terminal_json",
-            )
-            .bind(key_id)
-            .bind(&identity.scope_json)
-            .bind(&identity.wait_json)
-            .bind(identity.session_id.as_deref())
-            .bind(identity.turn_control)
-            .bind(terminal_json)
-            .bind(now)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_error)?;
+            let updated: Option<String> =
+                sqlx::query_scalar(wait_sql().postgres.resolve_pending.sql())
+                    .bind(key_id)
+                    .bind(&identity.scope_json)
+                    .bind(&identity.wait_json)
+                    .bind(identity.session_id.as_deref())
+                    .bind(identity.turn_control)
+                    .bind(terminal_json)
+                    .bind(now)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(store_error)?;
             if updated.is_some() {
                 TerminalCas::Stored
             } else {
                 match select_wait_row(&mut *tx, key_id).await? {
-                    Some(row) if row.matches(identity) => match row.terminal_json {
+                    Some(row) if matches_identity(&row, identity) => match row.terminal_json {
                         Some(terminal_json) => TerminalCas::AlreadyResolved { terminal_json },
                         None => {
                             return Err(RuntimeError::new(
@@ -202,7 +274,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         let Some(stored) = stored else {
             return Ok(PersistedPromise::Missing);
         };
-        if !stored.matches(identity) {
+        if !matches_identity(&stored, identity) {
             return Ok(PersistedPromise::UnknownOrRevoked);
         }
         Ok(stored
@@ -216,31 +288,21 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<RegisteredAwaitEvent>, RuntimeError> {
-        sqlx::query(
-            "SELECT key_id, scope_json, wait_json, turn_control
-             FROM lash_await_event_waits
-             WHERE session_id = $1
-               AND terminal_json IS NULL
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_await_event_revoked_sessions
-                   WHERE session_id = $1
-               )
-             ORDER BY key_id",
-        )
-        .bind(session_id.as_str())
-        .fetch_all(&self.pool)
-        .await
-        .map(|rows| {
-            rows.into_iter()
-                .map(|row| RegisteredAwaitEvent {
-                    key_id: row.get("key_id"),
-                    scope_json: row.get("scope_json"),
-                    wait_json: row.get("wait_json"),
-                    turn_control: row.get("turn_control"),
-                })
-                .collect()
-        })
-        .map_err(store_error)
+        sqlx::query(wait_sql().shared.list_pending_for_session.sql())
+            .bind(session_id.as_str())
+            .fetch_all(&self.pool)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| RegisteredAwaitEvent {
+                        key_id: row.get("key_id"),
+                        scope_json: row.get("scope_json"),
+                        wait_json: row.get("wait_json"),
+                        turn_control: row.get("turn_control"),
+                    })
+                    .collect()
+            })
+            .map_err(store_error)
     }
 
     async fn revoke_session(
@@ -251,17 +313,13 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         let now = now_ms as i64;
         let mut tx = self.pool.begin().await.map_err(store_error)?;
         lock_session(&mut tx, Some(session_id)).await?;
-        sqlx::query(
-            "INSERT INTO lash_await_event_revoked_sessions (session_id, revoked_at_ms)
-             VALUES ($1, $2)
-             ON CONFLICT (session_id) DO NOTHING",
-        )
-        .bind(session_id.as_str())
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_error)?;
-        sqlx::query("DELETE FROM lash_await_event_waits WHERE session_id = $1")
+        sqlx::query(wait_sql().revoked.insert_ignore.sql())
+            .bind(session_id.as_str())
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_error)?;
+        sqlx::query(wait_sql().shared.delete_by_session.sql())
             .bind(session_id.as_str())
             .execute(&mut *tx)
             .await
@@ -278,53 +336,35 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
         let now = now_ms as i64;
         let mut tx = self.pool.begin().await.map_err(store_error)?;
         lock_session(&mut tx, Some(session_id)).await?;
-        sqlx::query(
-            "UPDATE lash_await_event_waits
-             SET terminal_json = $2, resolved_at_ms = $3
-             WHERE session_id = $1
-               AND terminal_json IS NULL
-               AND turn_control = FALSE",
-        )
-        .bind(session_id.as_str())
-        .bind(terminal_json)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_error)?;
+        sqlx::query(wait_sql().postgres.cancel_session_promises.sql())
+            .bind(session_id.as_str())
+            .bind(terminal_json)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_error)?;
         tx.commit().await.map_err(store_error)
     }
 }
 
-struct WaitRow {
-    scope_json: String,
-    wait_json: String,
-    session_id: Option<SessionId>,
-    turn_control: bool,
-    terminal_json: Option<String>,
-}
-
-impl WaitRow {
-    fn matches(&self, identity: &AwaitEventRowIdentity) -> bool {
-        self.scope_json == identity.scope_json
-            && self.wait_json == identity.wait_json
-            && self.session_id == identity.session_id
-            && self.turn_control == identity.turn_control
-    }
+fn matches_identity(row: &WaitRow, identity: &AwaitEventRowIdentity) -> bool {
+    row.matches_identity(
+        &identity.scope_json,
+        &identity.wait_json,
+        identity.session_id.as_deref(),
+        identity.turn_control,
+    )
 }
 
 async fn select_wait_row<'e, E>(executor: E, key_id: &str) -> Result<Option<WaitRow>, RuntimeError>
 where
     E: Executor<'e, Database = sqlx::Postgres>,
 {
-    let row = sqlx::query(
-        "SELECT scope_json, wait_json, session_id, turn_control, terminal_json
-         FROM lash_await_event_waits
-         WHERE key_id = $1",
-    )
-    .bind(key_id)
-    .fetch_optional(executor)
-    .await
-    .map_err(store_error)?;
+    let row = sqlx::query(wait_sql().shared.select_by_key.sql())
+        .bind(key_id)
+        .fetch_optional(executor)
+        .await
+        .map_err(store_error)?;
     Ok(row.map(wait_row))
 }
 
@@ -332,9 +372,7 @@ fn wait_row(row: PgRow) -> WaitRow {
     WaitRow {
         scope_json: row.get("scope_json"),
         wait_json: row.get("wait_json"),
-        session_id: row
-            .get::<Option<String>, _>("session_id")
-            .map(SessionId::from),
+        session_id: row.get("session_id"),
         turn_control: row.get("turn_control"),
         terminal_json: row.get("terminal_json"),
     }
@@ -347,15 +385,11 @@ async fn session_is_revoked<'e, E>(
 where
     E: Executor<'e, Database = sqlx::Postgres>,
 {
-    sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM lash_await_event_revoked_sessions WHERE session_id = $1
-         )",
-    )
-    .bind(session_id.as_str())
-    .fetch_one(executor)
-    .await
-    .map_err(store_error)
+    sqlx::query_scalar(wait_sql().revoked.exists.sql())
+        .bind(session_id.as_str())
+        .fetch_one(executor)
+        .await
+        .map_err(store_error)
 }
 
 /// Whether either durable fence refuses `identity`: the owning session's
@@ -380,15 +414,11 @@ pub(crate) async fn scope_is_retired<'e, E>(
 where
     E: Executor<'e, Database = sqlx::Postgres>,
 {
-    sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM lash_effect_scope_retirements WHERE scope_id = $1
-         )",
-    )
-    .bind(scope_id)
-    .fetch_one(executor)
-    .await
-    .map_err(store_error)
+    sqlx::query_scalar(crate::effect_replay::effect_sql().fence.exists.sql())
+        .bind(scope_id)
+        .fetch_one(executor)
+        .await
+        .map_err(store_error)
 }
 
 /// Serialize a promise atom against every peer that can fence it: the session

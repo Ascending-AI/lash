@@ -15,6 +15,15 @@ use lash_core::{AwaitEventWaitIdentity, ExecutionScope};
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
+use lash_store_sql::wait::waits::WaitStatements;
+
+/// The one statement this helper issues, rendered once. The helper observes
+/// the durable row from outside the runtime, so it reads the same named
+/// statement the store does rather than a second spelling of it.
+static WAIT_COUNT_BY_KEY: std::sync::LazyLock<lash_store_sql::Rendered> =
+    std::sync::LazyLock::new(|| {
+        WaitStatements::render(lash_store_sql::Dialect::sqlite("main")).count_by_key
+    });
 
 #[path = "../../../lash-core/tests/support/cold_process_effect_driver.rs"]
 mod cold_process_effect_driver;
@@ -81,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             let connection = rusqlite::Connection::open(&database)?;
             let registered: i64 = connection.query_row(
-                "SELECT COUNT(*) FROM await_event_waits WHERE key_id = ?1",
+                WAIT_COUNT_BY_KEY.sql(),
                 rusqlite::params![key.key_id.as_str()],
                 |row| row.get(0),
             )?;

@@ -30,6 +30,7 @@ perf-witness = ["lash-core/perf-witness"]
 testing = ["lash-core/testing"]
 
 [dependencies]
+lash-store-sql = { workspace = true }
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 lash-core = { workspace = true }

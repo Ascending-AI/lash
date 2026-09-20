@@ -1,0 +1,249 @@
+//! Backend-neutral SQL for the lash SQL stores.
+//!
+//! This crate owns, per table, one column list, the row types that are pure SQL
+//! shape, and every statement whose text is byte-identical across backends once
+//! rendered. The backend crates own their driver's row decoder and the
+//! statements that genuinely fork.
+//!
+//! # What a table module holds
+//!
+//! * `TABLE` — the unprefixed table name. [`TABLES`] lists every one of them;
+//!   the renderer refuses a statement naming anything else, so a typo is a
+//!   startup failure rather than a query that runs against the wrong relation.
+//! * one column-list constant per **named projection**, and no other column
+//!   list anywhere. `scripts/check-store-sql-ownership.py` refuses a projection
+//!   of two or more columns that is not one of them, which is what stops the
+//!   per-call-site column subsets this crate exists to delete.
+//! * the row type, when the row is pure SQL shape (see [`wait::waits::WaitRow`]).
+//!   When the row is already a port type of the shared driver that consumes it,
+//!   the table module names the column list and the port type stays where the
+//!   driver defines it: one owner per fact, not two.
+//! * named statements, declared with [`statements!`]. The name — `family.op` —
+//!   is what tracing and store metrics report.
+//!
+//! # Neutral form
+//!
+//! Neutral SQL is written with `?N` placeholders and unprefixed, unqualified
+//! table names. [`render`] rewrites both, once, at startup:
+//!
+//! | | placeholder | table |
+//! |---|---|---|
+//! | SQLite | `?1` | `main.runtime_effect_replay` |
+//! | PostgreSQL | `$1` | `lash_runtime_effect_replay` |
+//!
+//! The SQLite schema qualifier is a render parameter because the retention
+//! sweep reaches the same tables through an `ATTACH`ed database, so the same
+//! statement is rendered once per schema it is read through rather than
+//! rebuilt with `format!` per call.
+//!
+//! Rendering runs through a tokenizer that understands string literals, quoted
+//! identifiers and comments, so a `?` inside `'…'` and a `$1` inside `--` are
+//! left alone, and a table name is matched as a whole token — never as a
+//! substring, which is what a regex would do to `await_event_waits` inside
+//! `await_event_waits_archive`.
+//!
+//! # Adding a table
+//!
+//! 1. Add `mod <table>;` under its family with `TABLE`, its column lists and a
+//!    `statements!` block for the statements both backends can share verbatim.
+//! 2. Add `TABLE` to [`TABLES`].
+//! 3. In each backend, declare a `statements!` block for the statements that
+//!    fork, and render both sets once into a `LazyLock`.
+//! 4. Add one `[[dialect_only]]` entry per forked statement to
+//!    `crates/lash-store-sql/dialect-only.toml`, with a reason, and add the
+//!    family to `converted` there. Until the family is listed the gate is
+//!    silent about it; once listed it is total for it.
+//!
+//! `docs/store-sql-authoring.md` is the long form.
+
+mod render;
+
+pub mod effect;
+pub mod wait;
+
+pub use render::{Dialect, Placeholder, RenderError, render};
+
+/// Every table name this crate owns.
+///
+/// The renderer refuses a statement that names a table outside this list, so
+/// the list is also the boundary of what neutral SQL may talk about.
+pub const TABLES: &[&str] = &[
+    effect::replay::TABLE,
+    effect::group::TABLE,
+    effect::scope_retirement::TABLE,
+    wait::waits::TABLE,
+    wait::meta::TABLE,
+    wait::revoked_sessions::TABLE,
+];
+
+/// Every shared statement this crate owns, across every family.
+///
+/// The render self-test walks it for both backends, so a statement that names
+/// an unowned table or misspells a placeholder fails the crate's own suite
+/// rather than the store that first calls it.
+#[must_use]
+pub fn all_statements() -> Vec<Statement> {
+    let mut statements = Vec::new();
+    statements.extend_from_slice(effect::EffectJournalStatements::NEUTRAL);
+    statements.extend_from_slice(effect::replay::ReplayStatements::NEUTRAL);
+    statements.extend_from_slice(effect::group::GroupStatements::NEUTRAL);
+    statements.extend_from_slice(effect::scope_retirement::ScopeRetirementStatements::NEUTRAL);
+    statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);
+    statements.extend_from_slice(wait::revoked_sessions::RevokedSessionStatements::NEUTRAL);
+    statements
+}
+
+/// One named statement in neutral form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Statement {
+    name: &'static str,
+    neutral: &'static str,
+}
+
+impl Statement {
+    /// Name a neutral statement. `name` is `family.operation`, and it is what
+    /// tracing and store metrics report.
+    #[must_use]
+    pub const fn new(name: &'static str, neutral: &'static str) -> Self {
+        Self { name, neutral }
+    }
+
+    /// The statement's reported name.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// The statement's neutral text.
+    #[must_use]
+    pub const fn neutral(&self) -> &'static str {
+        self.neutral
+    }
+
+    /// Render this statement for `dialect`.
+    ///
+    /// # Errors
+    ///
+    /// Reports the neutral text's own defects: an unknown table, a malformed
+    /// placeholder, or an unterminated literal or comment.
+    pub fn render(&self, dialect: Dialect) -> Result<Rendered, RenderError> {
+        Ok(Rendered {
+            name: self.name,
+            sql: render(self.neutral, dialect, TABLES)?,
+        })
+    }
+
+    /// Render this statement, naming it if its neutral text is malformed.
+    ///
+    /// This is what [`statements!`] calls. A malformed neutral statement is a
+    /// defect in this repository's own source, not a runtime condition a
+    /// caller could handle, and rendering runs once at startup — so the store
+    /// fails to open, naming the statement, rather than reaching a database
+    /// with text nobody checked.
+    ///
+    /// # Panics
+    ///
+    /// When the neutral text does not render. See [`RenderError`].
+    #[must_use]
+    pub fn render_or_panic(&self, dialect: Dialect) -> Rendered {
+        match self.render(dialect) {
+            Ok(rendered) => rendered,
+            Err(error) => panic!("neutral statement `{}` does not render: {error}", self.name),
+        }
+    }
+}
+
+/// One statement rendered for one backend, once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Rendered {
+    name: &'static str,
+    sql: String,
+}
+
+impl Rendered {
+    /// The statement's reported name.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// The rendered SQL, ready to hand to the driver.
+    #[must_use]
+    pub fn sql(&self) -> &str {
+        &self.sql
+    }
+}
+
+/// Declare a named statement set.
+///
+/// Every statement is a single string literal in neutral form, so the set is
+/// readable as SQL and parseable by the ownership gate. The generated type has
+/// one [`Rendered`] field per statement, a `NEUTRAL` inventory, and a `render`
+/// constructor a backend calls exactly once.
+///
+/// ```ignore
+/// lash_store_sql::statements! {
+///     /// Statements both backends share verbatim.
+///     pub struct ReplayStatements @ "effect_replay" {
+///         /// Whether a replay row exists.
+///         exists_by_key = "SELECT EXISTS(
+///                              SELECT 1 FROM runtime_effect_replay
+///                              WHERE scope_id = ?1 AND replay_key = ?2
+///                          )";
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! statements {
+    (
+        $(#[$set_meta:meta])*
+        $vis:vis struct $set:ident @ $family:literal {
+            $(
+                $(#[$statement_meta:meta])*
+                $field:ident = $sql:literal;
+            )*
+        }
+    ) => {
+        $(#[$set_meta])*
+        #[derive(Clone, Debug)]
+        $vis struct $set {
+            $(
+                $(#[$statement_meta])*
+                pub $field: $crate::Rendered,
+            )*
+        }
+
+        impl $set {
+            /// Every statement in this set, in neutral form.
+            pub const NEUTRAL: &'static [$crate::Statement] = &[
+                $(
+                    $crate::Statement::new(
+                        ::core::concat!($family, ".", ::core::stringify!($field)),
+                        $sql,
+                    ),
+                )*
+            ];
+
+            /// Render every statement in this set once, for `dialect`.
+            ///
+            /// # Panics
+            ///
+            /// Panics when a statement's neutral text is malformed — an
+            /// unknown table, a bad placeholder, an unterminated literal.
+            /// This runs once at startup, so the defect surfaces before the
+            /// store answers anything.
+            #[must_use]
+            pub fn render(dialect: $crate::Dialect) -> Self {
+                Self {
+                    $(
+                        $field: $crate::Statement::new(
+                            ::core::concat!($family, ".", ::core::stringify!($field)),
+                            $sql,
+                        )
+                        .render_or_panic(dialect),
+                    )*
+                }
+            }
+        }
+    };
+}

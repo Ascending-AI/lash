@@ -165,7 +165,10 @@ impl Store {
         let signing_secret = conn
             .call(|connection| {
                 connection.query_row(
-                    "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                    crate::await_event::wait_sql(crate::scope_fence::Schema::Main)
+                        .meta_sqlite
+                        .select_signing_secret
+                        .sql(),
                     [],
                     |row| row.get::<_, Vec<u8>>(0),
                 )
@@ -303,7 +306,10 @@ impl Store {
         let signing_secret = conn
             .call(|connection| {
                 connection.query_row(
-                    "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                    crate::await_event::wait_sql(crate::scope_fence::Schema::Main)
+                        .meta_sqlite
+                        .select_signing_secret
+                        .sql(),
                     [],
                     |row| row.get::<_, Vec<u8>>(0),
                 )

@@ -91,14 +91,18 @@ async fn retire_quiescent_operation_scopes(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<(usize, Vec<String>), sqlx::Error> {
     let keyed: Vec<String> = sqlx::query_scalar(
-        "SELECT scope_id FROM lash_runtime_effect_replay WHERE session_id IS NULL
-         UNION
-         SELECT scope_id FROM lash_runtime_effect_group WHERE session_id IS NULL",
+        crate::effect_replay::effect_sql()
+            .journal
+            .select_session_free_scope_ids
+            .sql(),
     )
     .fetch_all(&mut **tx)
     .await?;
     let waited: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT scope_json FROM lash_await_event_waits WHERE session_id IS NULL",
+        crate::await_event::wait_sql()
+            .shared
+            .select_session_free_scope_json
+            .sql(),
     )
     .fetch_all(&mut **tx)
     .await?;

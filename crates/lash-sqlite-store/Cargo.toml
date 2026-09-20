@@ -29,6 +29,7 @@ testing = ["lash-core/testing"]
 workspace = true
 
 [dependencies]
+lash-store-sql = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
 lashlang = { workspace = true, optional = true }

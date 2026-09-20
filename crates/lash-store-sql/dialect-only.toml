@@ -1,0 +1,239 @@
+# The dialect-only manifest (FIG-3380).
+#
+# `scripts/check-store-sql-ownership.py` reads this file and refuses:
+#
+#   * a production SQL string literal naming a converted family's table from a
+#     file that is not one of the family's declared owners;
+#   * two statements with the same text inside one backend;
+#   * a shared statement shadowed by a per-backend copy of the same name;
+#   * a statement declared in a backend and missing from `[[dialect_only]]`
+#     below, or listed here for backends that do not declare it — which is how
+#     an operation that exists in one backend only gets named;
+#   * a projection of two or more columns over a converted table that is not
+#     one of the column-list constants the table module declares.
+#
+# `converted` is what makes the gate total for what is converted and silent
+# about what is not. FIG-3387 closes it over every family.
+
+converted = ["effect", "wait"]
+
+# Production sources that may name a converted family's tables in SQL although
+# they own no statements. Each one needs a reason; the list is not a place to
+# park work.
+[[exempt]]
+path = "crates/lash-sim/src/postgres_replay.rs"
+reason = """
+Deterministic-simulation harness: one TRUNCATE naming every table in the
+PostgreSQL schema to reset a replay database between runs. It belongs to no
+family and names all sixty tables, so it cannot be owned by one.
+"""
+
+[families.effect]
+tables = ["runtime_effect_replay", "runtime_effect_group", "effect_scope_retirements"]
+statement_prefixes = [
+    "effect_journal",
+    "effect_replay",
+    "effect_group",
+    "effect_scope_retirement",
+]
+shared = [
+    "crates/lash-store-sql/src/effect.rs",
+    "crates/lash-store-sql/src/effect/replay.rs",
+    "crates/lash-store-sql/src/effect/group.rs",
+    "crates/lash-store-sql/src/effect/scope_retirement.rs",
+]
+sqlite = [
+    "crates/lash-sqlite-store/src/effect_replay.rs",
+    "crates/lash-sqlite-store/src/scope_fence.rs",
+]
+postgres = ["crates/lash-postgres-store/src/postgres/effect_replay.rs"]
+# Provisioning, not persistence: the schema artifacts that create these tables
+# and seed them. No table name, column or durable encoding changes in this arc.
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+[families.effect.table_modules]
+runtime_effect_replay = "crates/lash-store-sql/src/effect/replay.rs"
+runtime_effect_group = "crates/lash-store-sql/src/effect/group.rs"
+effect_scope_retirements = "crates/lash-store-sql/src/effect/scope_retirement.rs"
+
+[families.wait]
+tables = ["await_event_waits", "await_event_meta", "await_event_revoked_sessions"]
+statement_prefixes = [
+    "await_event_wait",
+    "await_event_revoked_session",
+    "await_event_meta",
+]
+shared = [
+    "crates/lash-store-sql/src/wait/waits.rs",
+    "crates/lash-store-sql/src/wait/meta.rs",
+    "crates/lash-store-sql/src/wait/revoked_sessions.rs",
+]
+sqlite = ["crates/lash-sqlite-store/src/await_event.rs"]
+postgres = ["crates/lash-postgres-store/src/await_event.rs"]
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+[families.wait.table_modules]
+await_event_waits = "crates/lash-store-sql/src/wait/waits.rs"
+await_event_meta = "crates/lash-store-sql/src/wait/meta.rs"
+await_event_revoked_sessions = "crates/lash-store-sql/src/wait/revoked_sessions.rs"
+
+# ---------------------------------------------------------------------------
+# effect family
+# ---------------------------------------------------------------------------
+
+[[dialect_only]]
+statement = "effect_journal.insert_session_scope_fences"
+backends = ["sqlite", "postgres"]
+kind = "server clock; boolean representation"
+reason = """
+PostgreSQL stamps the fence from the server's clock_timestamp() and writes the
+cleanup flag as FALSE. SQLite binds a host-clock stamp and writes 0, because
+the SQLite lease clock is the host's injected Clock.
+"""
+
+[[dialect_only]]
+statement = "effect_replay.select_for_claim"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = """
+PostgreSQL must take the row's write lock explicitly (FOR UPDATE) to decide a
+claim under READ COMMITTED. SQLite already holds the database write lock from
+BEGIN IMMEDIATE, so the same projection carries no suffix. The projection
+itself is one column list, shared.
+"""
+
+[[dialect_only]]
+statement = "effect_replay.insert_claimed"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+PostgreSQL detects a concurrent claimant through ON CONFLICT DO NOTHING,
+because FOR UPDATE cannot lock a row that does not exist yet. Under SQLite's
+write lock that race is unreachable and a conflict is a defect, so the
+constraint error is kept rather than swallowed.
+"""
+
+[[dialect_only]]
+statement = "effect_replay.finalize_terminal"
+backends = ["sqlite", "postgres"]
+kind = "server clock"
+reason = """
+PostgreSQL stamps and compares the lease from transaction_timestamp(), which is
+what makes its fencing survive skew between hosts; SQLite binds the host clock
+it shares with its runtime. The predicate is otherwise identical.
+"""
+
+[[dialect_only]]
+statement = "effect_replay.renew_lease"
+backends = ["sqlite", "postgres"]
+kind = "server clock"
+reason = "Same lease-clock fork as effect_replay.finalize_terminal."
+
+[[dialect_only]]
+statement = "effect_group.insert_new"
+backends = ["sqlite", "postgres"]
+kind = "RETURNING"
+reason = """
+PostgreSQL returns the inserted group row from the insert, so the durable
+read-back costs a second statement only on the conflict path. SQLite reads it
+back unconditionally, which is what its shared select_by_key is for.
+"""
+
+[[dialect_only]]
+statement = "effect_scope_retirement.insert_fence"
+backends = ["sqlite", "postgres"]
+kind = "server clock; boolean representation"
+reason = "Same clock and boolean fork as effect_journal.insert_session_scope_fences."
+
+[[dialect_only]]
+statement = "effect_scope_retirement.select_pending_artifact_cleanup"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation"
+reason = """
+artifact_cleanup_completed is INTEGER 0/1 on SQLite and BOOLEAN on PostgreSQL,
+so the predicate literal forks. The column is durable and unchanged by this
+arc.
+"""
+
+[[dialect_only]]
+statement = "effect_scope_retirement.complete_artifact_cleanup"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation"
+reason = "Same boolean fork as effect_scope_retirement.select_pending_artifact_cleanup."
+
+[[dialect_only]]
+statement = "effect_scope_retirement.select_all_scope_ids"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite alone keeps this table in two files — the journal's and a bound process
+registry's (ADR 0049) — and alone has to enumerate the journal's fences at bind
+time to lift the ones the registry says are stale. PostgreSQL has one table and
+no bind-time repair, so it has no counterpart operation.
+"""
+
+# ---------------------------------------------------------------------------
+# wait family
+# ---------------------------------------------------------------------------
+
+[[dialect_only]]
+statement = "await_event_wait.insert_pending"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+PostgreSQL cannot hold "read the absence, then insert" atomic under READ
+COMMITTED, so the conflict clause is what detects a concurrent registrar.
+SQLite reads the absence under the same BEGIN IMMEDIATE lock it inserts under.
+"""
+
+[[dialect_only]]
+statement = "await_event_wait.insert_resolved"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = "Same conflict-detection fork as await_event_wait.insert_pending, plus its RETURNING."
+
+[[dialect_only]]
+statement = "await_event_wait.resolve_pending"
+backends = ["sqlite", "postgres"]
+kind = "compare-and-swap predicate (FIG-3381)"
+reason = """
+PostgreSQL carries the promise's identity comparison inside the UPDATE
+predicate because READ COMMITTED cannot hold a read of it across statements;
+SQLite compares the row it read under the write lock. This is a fencing/CAS
+fork, left exactly as it stands for FIG-3381 to decide once in shared code.
+"""
+
+[[dialect_only]]
+statement = "await_event_wait.cancel_session_promises"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation"
+reason = """
+turn_control is INTEGER 0/1 on SQLite and BOOLEAN on PostgreSQL, so the
+predicate literal forks.
+"""
+
+[[dialect_only]]
+statement = "await_event_meta.select_signing_secret"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation"
+reason = """
+The singleton flag is INTEGER 1 on SQLite and BOOLEAN TRUE on PostgreSQL. It is
+the table's only read, which is why await_event_meta owns a name and a column
+list here but no shared statement.
+"""

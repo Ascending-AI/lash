@@ -7,6 +7,7 @@ members = [
     "crates/lash-core-ids",
     "crates/lash-core-llm",
     "crates/lash-core-store",
+    "crates/lash-store-sql",
     "crates/lash-core-effect",
     "crates/lash-core-memory",
     "crates/lash-core-execution",
@@ -52,6 +53,7 @@ members = [
 # Internal bins/benches/examples build with `cargo build --workspace` or `-p <name>`.
 default-members = [
     "crates/lash-core-ids",
+    "crates/lash-store-sql",
     "crates/lash-core-llm",
     "crates/lash-core-store",
     "crates/lash-core-effect",
@@ -289,6 +291,7 @@ lash-remote-protocol = { package = "lash-internal-remote-protocol", path = "crat
 lash-restate = { package = "lash-internal-restate", path = "crates/lash-restate", version = "=0.0.0-dev" }
 lash-rlm-types = { package = "lash-internal-rlm-types", path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
 lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", version = "=0.0.0-dev" }
+lash-store-sql = { package = "lash-internal-store-sql", path = "crates/lash-store-sql", version = "=0.0.0-dev" }
 lash-subagents = { package = "lash-internal-subagents", path = "crates/lash-subagents", version = "=0.0.0-dev" }
 lash-tool-support = { package = "lash-internal-tool-support", path = "crates/lash-tool-support", version = "=0.0.0-dev" }
 lash-trace = { package = "lash-internal-trace", path = "crates/lash-trace", version = "=0.0.0-dev" }
