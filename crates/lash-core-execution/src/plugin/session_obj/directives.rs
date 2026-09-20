@@ -33,17 +33,15 @@ fn append_plugin_messages(
 
 async fn interpret_ambient(
     emitted: PluginOwned<PluginDirective>,
-    session_lifecycle: &Arc<dyn SessionLifecycleService>,
     session_graph: &Arc<dyn SessionGraphService>,
 ) -> Result<crate::plugin::AmbientDirectiveAction, PluginError> {
-    crate::plugin::interpret_ambient_directive(emitted, session_lifecycle, session_graph)
+    crate::plugin::interpret_ambient_directive(emitted, session_graph)
         .await
         .map_err(|error| error.into_plugin_error())
 }
 
 async fn interpret_directive(
     emitted: PluginOwned<TurnPluginDirective>,
-    session_lifecycle: &Arc<dyn SessionLifecycleService>,
     session_graph: &Arc<dyn SessionGraphService>,
 ) -> Result<DirectiveAction, PluginError> {
     let PluginOwned { plugin_id, value } = emitted;
@@ -54,7 +52,6 @@ async fn interpret_directive(
                     plugin_id,
                     value: directive,
                 },
-                session_lifecycle,
                 session_graph,
             )
             .await?
@@ -82,7 +79,6 @@ impl PluginSession {
         &self,
         directives: Vec<PluginOwned<TurnPluginDirective>>,
         mut messages: crate::MessageSequence,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         message_scope_id: &str,
     ) -> Result<TurnPreparation, PluginError> {
@@ -91,7 +87,7 @@ impl PluginSession {
         let mut next_message_ordinal = 0usize;
 
         for emitted in directives {
-            match interpret_directive(emitted, &session_lifecycle, &session_graph).await? {
+            match interpret_directive(emitted, &session_graph).await? {
                 DirectiveAction::Abort(next) => abort = Some(next),
                 DirectiveAction::EnqueueMessages(plugin_messages) => {
                     append_plugin_messages(
@@ -124,7 +120,6 @@ impl PluginSession {
             state,
             messages,
             sessions,
-            session_lifecycle,
             session_graph,
             turn_context,
         } = request;
@@ -142,7 +137,6 @@ impl PluginSession {
         self.apply_turn_directives(
             directives,
             messages,
-            session_lifecycle,
             session_graph,
             &format!("{turn_scope_id}:before_turn"),
         )
@@ -159,7 +153,7 @@ impl PluginSession {
         let mut abort = None;
 
         for emitted in directives {
-            match interpret_directive(emitted, &ctx.session_lifecycle, &ctx.session_graph).await? {
+            match interpret_directive(emitted, &ctx.session_graph).await? {
                 DirectiveAction::Abort(next) => abort = Some(next),
                 DirectiveAction::EnqueueMessages(queued) => messages.extend(queued),
                 DirectiveAction::EmitRuntimeEvents(next_events) => events.extend(next_events),
@@ -178,7 +172,6 @@ impl PluginSession {
         &self,
         mut turn: AssembledTurn,
         sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
         phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
         turn_scope_id: &str,
@@ -209,7 +202,6 @@ impl PluginSession {
                             plugin_id,
                             value: directive,
                         },
-                        &session_lifecycle,
                         &session_graph,
                     )
                     .await?

@@ -405,7 +405,6 @@ impl LashRuntime {
                 })?,
                 messages,
                 sessions: manager.state_service(),
-                session_lifecycle: manager.lifecycle_service(),
                 session_graph: manager.graph_service(),
                 turn_context: turn_context.clone(),
             },

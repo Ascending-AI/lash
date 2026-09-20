@@ -50,10 +50,11 @@ impl<'run> OrchestrationContext<'run> {
 
     /// Session administration for a runtime-owned orchestrating body.
     ///
-    /// Journal-capable session work — child sessions and managed turns — lives
-    /// in this lane. A recorded leaf attempt receives
-    /// [`crate::AttemptContext`], which has no route to it.
-    pub fn sessions(&self) -> super::ToolSessionAdmin<'run> {
+    /// Session reads and membership changes live in this lane; a recorded leaf
+    /// attempt receives [`crate::AttemptContext`], which has no route to them.
+    /// An orchestrating body that needs a related session to run a turn starts
+    /// a `ProcessInput::SessionTurn` process, as `lash-subagents` does.
+    pub fn sessions(&self) -> super::ToolSessionAdmin {
         self.context.sessions()
     }
 
