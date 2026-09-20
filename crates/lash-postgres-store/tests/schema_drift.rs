@@ -2116,3 +2116,59 @@ async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls
     drop(storage);
     scratch.cleanup().await;
 }
+
+/// `schema.sql` stamps its component version twice: in the header comment a
+/// vendoring host reads first, and in the `lash_schema_versions` seed row that
+/// stamps the provisioned database. Both are generated from `SCHEMA_VERSION`,
+/// never transcribed by hand — a stamp edited by hand drifts silently the next
+/// time the constant moves, and a vendor following a stale header provisions a
+/// database whose open is refused for reasons the artifact does not confess.
+///
+/// After a version bump, regenerate both stamps by rerunning this test with
+/// `LASH_UPDATE_SCHEMA_SQL=1`; it rewrites them from `SCHEMA_VERSION` and fails
+/// once so the diff is reviewed.
+#[test]
+fn the_ddl_artifacts_component_version_stamps_track_schema_version() {
+    const HEADER_PREFIX: &str = "-- lash-postgres-store schema, component version ";
+    const SEED_PREFIX: &str = "VALUES ('lash-postgres-store', ";
+
+    let ddl = PostgresStorage::schema_ddl();
+    let version = PostgresStorage::schema_version();
+
+    let header = ddl.lines().next().expect("schema.sql is not empty");
+    let expected_header = format!("{HEADER_PREFIX}{version}.");
+
+    assert_eq!(
+        ddl.matches(SEED_PREFIX).count(),
+        1,
+        "schema.sql must seed exactly one lash_schema_versions row"
+    );
+    let seed_digits = &ddl[ddl.find(SEED_PREFIX).expect("seed row") + SEED_PREFIX.len()..];
+    let digit_len = seed_digits.bytes().take_while(u8::is_ascii_digit).count();
+    let seeded: i32 = seed_digits[..digit_len]
+        .parse()
+        .expect("the seeded component version is numeric");
+
+    if header == expected_header && seeded == version {
+        return;
+    }
+
+    if std::env::var("LASH_UPDATE_SCHEMA_SQL").as_deref() == Ok("1") {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schema.sql");
+        let rewritten = ddl.replacen(header, &expected_header, 1).replacen(
+            &format!("{SEED_PREFIX}{seeded}"),
+            &format!("{SEED_PREFIX}{version}"),
+            1,
+        );
+        std::fs::write(&path, rewritten).expect("rewrite the schema artifact's version stamps");
+        panic!(
+            "regenerated {} -- rerun the suite to confirm",
+            path.display()
+        );
+    }
+    panic!(
+        "schema.sql's component version stamps drifted from SCHEMA_VERSION ({version}): header \
+         is {header:?}, the seed row stamps {seeded}. Regenerate them with \
+         LASH_UPDATE_SCHEMA_SQL=1 and review the diff."
+    );
+}
