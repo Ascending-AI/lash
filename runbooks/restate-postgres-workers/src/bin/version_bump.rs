@@ -47,43 +47,29 @@ use serde_json::json;
 use sqlx::PgPool;
 
 const SCHEMA_COMPONENT: &str = "lash-postgres-store";
-/// The oldest component version this build has an explicit migration from
-/// (`lash_postgres_store::postgres::schema::SCHEMA_MIGRATIONS`). Anything below
-/// it is the ordinary reject-and-recreate boundary, which is what the
-/// older-store refusal exists to prove — so the fixture stamps a version under
-/// this floor, never one the build would happily migrate.
+/// The post-cutover floor: the last pre-cutover component generation.
+/// `SCHEMA_MIGRATIONS` is empty — the component-102 window closed with no
+/// migration out of any earlier stamp — so every stamp at or below this floor
+/// is the ordinary reject-and-recreate boundary, which is what the older-store
+/// refusal exists to prove. The fixture stamps one version under the floor,
+/// keeping its refusal strictly older than the immediate-predecessor refusal.
 ///
 /// This constant and the four artifact lists below are pinned to the newest
 /// component generation. `scripts/check_version_bump_fixtures.py` derives every
-/// one of them from `SCHEMA_MIGRATIONS` and fails when a bump moves the
-/// component without moving them, so they are never discovered stale by a live
-/// run.
-const MIGRATION_FLOOR_VERSION: i32 = 94;
-/// The tables component 94 lacks: the named process-definition registry
-/// (component 97), the release stamp (component 98), and the cancellation
-/// affected-input child table (component 102).
-const POST_FLOOR_TABLES: [&str; 3] = [
-    "lash_process_definitions",
-    "lash_release_stamp",
-    "lash_turn_cancel_affected_inputs",
-];
-/// The post-floor indexes the fixture must drop by name. Component 95 and 96
-/// installed none: both moved document content, not DDL.
+/// one of them from `SCHEMA_MIGRATIONS` — empty table, empty lists — and fails
+/// when a bump moves the component without moving them, so they are never
+/// discovered stale by a live run.
+const MIGRATION_FLOOR_VERSION: i32 = 101;
+/// Relations the floor generation lacks. Post-cutover there is no older
+/// published catalog to reconstruct — the fixture rewinds the stamp alone — so
+/// the list is empty until a future migration names what its source is missing.
+const POST_FLOOR_TABLES: [&str; 0] = [];
+/// The post-floor indexes the fixture must drop by name.
 const POST_FLOOR_INDEXES: [&str; 0] = [];
-/// The columns absent from component 94: the trigger subscription lifecycle
-/// pair component 99 installed (FIG-1951) — earlier generations moved document
-/// content, but this one moved the relational shape.
-const POST_FLOOR_COLUMNS: [(&str, &str); 2] = [
-    ("lash_trigger_subscriptions", "lifecycle"),
-    ("lash_trigger_subscriptions", "deleted_at_ms"),
-];
-/// Every post-floor relation, for proving the fixture retained none of them: the
-/// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 3] = [
-    "lash_process_definitions",
-    "lash_release_stamp",
-    "lash_turn_cancel_affected_inputs",
-];
+/// Columns the floor generation lacks on tables it already had.
+const POST_FLOOR_COLUMNS: [(&str, &str); 0] = [];
+/// Every post-floor relation, for proving the fixture retained none of them.
+const POST_FLOOR_ARTIFACTS: [&str; 0] = [];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
@@ -614,22 +600,15 @@ async fn seed(database_url: &str) -> Result<()> {
     // that a boot gate on every restart cannot.
     let probe_before_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
-    // Reconstruct the published component-61 receipt shape before rewinding its
-    // ledger: the predecessor allowed independently-nullable append identity
-    // fields and still carried the readerless requested-ancestor column.
-    sqlx::query(
-        "ALTER TABLE lash_runtime_turn_commits
-             DROP CONSTRAINT lash_runtime_turn_commits_check,
-             ADD COLUMN requested_ancestor_node_id TEXT",
-    )
-    .execute(&pool)
-    .await
-    .context("restore the component-61 append receipt shape")?;
+    // The recorded-predecessor fixture: the catalog this build just wrote,
+    // stamped with the last pre-cutover component generation. Post-cutover no
+    // older published shape exists to reconstruct — `SCHEMA_MIGRATIONS` is
+    // empty — so the stamp alone carries the fixture.
     let recorded = expected_version - 1;
     stamp_version(&pool, recorded).await?;
-    // The walk now sees the exact predecessor shape and stamp. The drain list
-    // stays empty: this is a schema recreation boundary, not undecodable durable
-    // payload.
+    // The walk now sees the predecessor stamp over the current catalog. The
+    // drain list stays empty: this is a schema recreation boundary, not
+    // undecodable durable payload.
     let probe_after_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
     emit(json!({
@@ -698,29 +677,18 @@ async fn refuse(database_url: &str) -> Result<()> {
         "error": error,
     }));
 
-    // The migration floor predates component 61's graph-sequence hard cutover,
-    // so restore that published column and index before removing later
-    // creation-only artifacts.
-    sqlx::query("ALTER TABLE lash_graph_nodes ADD COLUMN seq BIGSERIAL")
-        .execute(&pool)
-        .await
-        .context("restore the migration-floor graph sequence column")?;
-    sqlx::query("CREATE INDEX idx_lash_graph_nodes_seq ON lash_graph_nodes(session_id, seq)")
-        .execute(&pool)
-        .await
-        .context("restore the migration-floor graph sequence index")?;
-
     // Remove every artifact introduced after the migration floor, leaving the
-    // catalog the floor generation (`MIGRATION_FLOOR_VERSION`) published, then
-    // stamp a version below it. This makes the next refusal and recreation
-    // exercise a genuinely older *shape* rather than merely another integer over
-    // the current catalog. These lists are generation-pinned: each component bump
-    // that introduces a relation must add it here — a table to
-    // `POST_FLOOR_TABLES`, an index over a table the floor already had to
-    // `POST_FLOOR_INDEXES` — and to `POST_FLOOR_ARTIFACTS`, or the fixture
-    // silently stops being the published floor shape. A column added to a table
-    // the floor already had goes to `POST_FLOOR_COLUMNS` for the same reason;
-    // `scripts/check_version_bump_fixtures.py` is what makes that impossible.
+    // catalog the floor generation published, then stamp a version below it.
+    // Post-cutover the floor is the last pre-cutover generation and the lists
+    // are empty, so the rewind moves the stamp alone. When a future migration
+    // declares a floor generation with a distinct catalog, these lists regain
+    // entries: each component bump that introduces a relation must add it
+    // here — a table to `POST_FLOOR_TABLES`, an index over a table the floor
+    // already had to `POST_FLOOR_INDEXES` — and to `POST_FLOOR_ARTIFACTS`, or
+    // the fixture silently stops being the published floor shape. A column
+    // added to a table the floor already had goes to `POST_FLOOR_COLUMNS` for
+    // the same reason; `scripts/check_version_bump_fixtures.py` is what makes
+    // that impossible.
     for artifact in POST_FLOOR_TABLES {
         sqlx::query(&format!("DROP TABLE {artifact}"))
             .execute(&pool)
@@ -785,10 +753,10 @@ async fn refuse(database_url: &str) -> Result<()> {
         "older-store fixture retained {current_artifact_count} current-only artifacts"
     );
 
-    // Versions below every explicit migration's source remain the ordinary
-    // reject-and-recreate boundary. This must stay *below* the floor, not merely
-    // one behind the divergent stamp: this build migrates from both 50 and 51,
-    // so either of those would be migrated rather than refused. Leave this stamp
+    // A stamp below the post-cutover floor remains the ordinary
+    // reject-and-recreate boundary. This must stay *below* the floor, not
+    // merely one behind the divergent stamp: the floor generation itself is
+    // what `refused_divergent_store` already proved refused. Leave this stamp
     // in place after all refusal checks so the next phase exercises recreation
     // from that path.
     let older = MIGRATION_FLOOR_VERSION - 1;

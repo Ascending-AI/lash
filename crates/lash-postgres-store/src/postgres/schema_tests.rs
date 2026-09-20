@@ -5,12 +5,12 @@ const RETAINED_MIGRATION_ENDPOINT: i32 = 87;
 
 #[test]
 fn current_destructive_cutover_has_no_migration_arm() {
+    // Post-cutover the catalog is empty: no stamp below SCHEMA_VERSION has an
+    // applicable migration, so every pre-cutover database fails at open with
+    // the reject-and-recreate refusal rather than upgrading.
     assert!(
-        SCHEMA_MIGRATIONS
-            .iter()
-            .filter(|migration| migration.to == SCHEMA_VERSION)
-            .all(SchemaMigration::is_recreate_boundary),
-        "the current component must reject every pre-cutover schema rather than migrate it"
+        SCHEMA_MIGRATIONS.is_empty(),
+        "the post-cutover catalog must offer no migration out of any earlier stamp"
     );
 
     let immediate = HISTORICAL_MIGRATIONS

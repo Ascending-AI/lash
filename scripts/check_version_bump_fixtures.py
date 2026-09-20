@@ -11,9 +11,11 @@ phase came to assert divergence instead of the reject-and-recreate boundary it
 exists to prove.
 
 Every fixture constant here is therefore a projection of ``SCHEMA_MIGRATIONS``,
-and this check recomputes each projection and demands equality.  It reads sources
-only, needs no database, and uses the standard library alone so it can run before
-the Rust toolchain is installed.
+and this check recomputes each projection and demands equality.  An empty table
+is the post-cutover state: the fixture floor is the last pre-cutover generation
+and every artifact list pins empty.  It reads sources only, needs no database,
+and uses the standard library alone so it can run before the Rust toolchain is
+installed.
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ REFUSAL_MARKERS = (
 
 VERSION_CONSTANT = re.compile(r"^const SCHEMA_VERSION: i32 = (\d+);$", re.MULTILINE)
 MIGRATIONS_BLOCK = re.compile(
-    r"^(?:pub\(super\) )?const SCHEMA_MIGRATIONS: &\[SchemaMigration\] = &\[$(.*?)^\];$",
+    r"^(?:pub\(super\) )?const SCHEMA_MIGRATIONS: &\[SchemaMigration\] = &(?:\[\];$|\[$(.*?)^\];$)",
     re.MULTILINE | re.DOTALL,
 )
 MIGRATION_ENTRY = re.compile(r"^\s{4}SchemaMigration \{$", re.MULTILINE)
@@ -255,9 +257,16 @@ def parse_migrations(text: str) -> tuple[Migration, ...]:
     if block is None:
         raise CheckError(f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS is not in the expected shape")
     body = block.group(1)
+    if body is None:
+        # `= &[]` — the post-cutover state: no pre-cutover stamp has an
+        # applicable migration, and the fixture constants all pin empty.
+        return ()
     starts = [match.start() for match in MIGRATION_ENTRY.finditer(body)]
     if not starts:
-        raise CheckError(f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS lists no migrations")
+        raise CheckError(
+            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS declares a non-empty block with "
+            "no migrations; write the empty table as `= &[]`"
+        )
     bounds = [*starts, len(body)]
     migrations = tuple(
         Migration(
@@ -300,42 +309,50 @@ def check(repo: Path) -> tuple[bool, str]:
     )
     migrations = parse_migrations(migrations_text)
     migration_targets = {migration.to_version for migration in migrations}
-    if len(migration_targets) != 1:
+    if len(migration_targets) > 1:
         versions = ", ".join(str(version) for version in sorted(migration_targets))
         return False, (
             f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets multiple generations: {versions}"
         )
-    migration_target = migration_targets.pop()
-    if migration_target not in {component_version, component_version - 1}:
+    migration_target = migration_targets.pop() if migration_targets else None
+    if migration_target is not None and migration_target not in {
+        component_version,
+        component_version - 1,
+    }:
         return False, (
             f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets component {migration_target}, "
             f"which is neither the current component {component_version} nor its retained "
             "pre-cutover generation"
         )
-    destructive_cutover = migration_target == component_version - 1
-    off_target = [
-        migration for migration in migrations if migration.to_version != migration_target
-    ]
-    if off_target:
-        versions = ", ".join(str(migration.to_version) for migration in off_target)
-        return False, (
-            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets {versions}, not the selected "
-            f"migration generation {migration_target}"
-        )
-
-    floor = min(migrations, key=lambda migration: migration.from_version)
-    predecessors = [
-        migration
-        for migration in migrations
-        if migration.from_version == migration_target - 1
-    ]
-    if len(predecessors) != 1:
-        return False, (
-            f"{MIGRATIONS_SOURCE}: no migration from component {migration_target - 1}. The "
-            "historical divergence fixture needs the immediate predecessor of the retained "
-            "migration generation"
-        )
-    predecessor = predecessors[0]
+    # An empty table is the post-cutover state: every stamp at or below the
+    # last pre-cutover generation has no applicable migration, so the fixture
+    # floor is that generation and every derived artifact list is empty.
+    destructive_cutover = migration_target != component_version
+    if migrations:
+        floor = min(migrations, key=lambda migration: migration.from_version)
+        floor_version = floor.from_version
+        floor_tables = floor.source_missing_tables
+        floor_columns = floor.source_missing_columns
+        floor_relations = floor.introduced_relations
+        predecessors = [
+            migration
+            for migration in migrations
+            if migration.from_version == migration_target - 1
+        ]
+        if len(predecessors) != 1:
+            return False, (
+                f"{MIGRATIONS_SOURCE}: no migration from component {migration_target - 1}. The "
+                "historical divergence fixture needs the immediate predecessor of the retained "
+                "migration generation"
+            )
+        predecessor = predecessors[0]
+        divergent_relations = predecessor.introduced_relations
+    else:
+        floor_version = component_version - 1
+        floor_tables = ()
+        floor_columns = ()
+        floor_relations = ()
+        divergent_relations = ()
 
     failures: list[str] = []
 
@@ -345,11 +362,11 @@ def check(repo: Path) -> tuple[bool, str]:
         re.compile(r"^const MIGRATION_FLOOR_VERSION: i32 = (\d+);$", re.MULTILINE),
         "MIGRATION_FLOOR_VERSION",
     )
-    if declared_floor != floor.from_version:
+    if declared_floor != floor_version:
         failures.append(
-            f"{FIXTURE_SOURCE}: MIGRATION_FLOOR_VERSION is {declared_floor}, but the oldest "
-            f"migration source in {MIGRATIONS_SOURCE} is {floor.from_version}. The older-store "
-            "fixture stamps below the floor; a stale floor stamps a version this build migrates"
+            f"{FIXTURE_SOURCE}: MIGRATION_FLOOR_VERSION is {declared_floor}, but the floor "
+            f"derived from {MIGRATIONS_SOURCE} is {floor_version}. The older-store fixture "
+            "stamps below the floor; a stale floor stamps a version this build migrates"
         )
     if any(
         migration.from_version == declared_floor - 1 for migration in migrations
@@ -362,18 +379,18 @@ def check(repo: Path) -> tuple[bool, str]:
     for constant, expected, derivation in (
         (
             "POST_FLOOR_TABLES",
-            floor.source_missing_tables,
-            f"the component-{floor.from_version} migration's source_missing_tables",
+            floor_tables,
+            f"the component-{floor_version} floor's source_missing_tables",
         ),
         (
             "POST_FLOOR_ARTIFACTS",
-            floor.introduced_relations,
-            f"the component-{floor.from_version} migration's introduced_relations",
+            floor_relations,
+            f"the component-{floor_version} floor's introduced_relations",
         ),
         (
             "DIVERGENT_ARTIFACTS",
-            predecessor.introduced_relations,
-            f"the component-{predecessor.from_version} migration's introduced_relations",
+            divergent_relations,
+            "the immediate predecessor migration's introduced_relations",
         ),
     ):
         found = string_array_constant(fixture_text, FIXTURE_SOURCE, constant)
@@ -388,15 +405,15 @@ def check(repo: Path) -> tuple[bool, str]:
     declared_columns = pair_array_constant(
         fixture_text, FIXTURE_SOURCE, "POST_FLOOR_COLUMNS"
     )
-    if set(declared_columns) != set(floor.source_missing_columns):
+    if set(declared_columns) != set(floor_columns):
         failures.append(
             named_set_failure(
                 "POST_FLOOR_COLUMNS",
-                f"the component-{floor.from_version} migration's source_missing_columns",
+                f"the component-{floor_version} floor's source_missing_columns",
                 tuple(f"{table}.{column}" for table, column in declared_columns),
                 tuple(
                     f"{table}.{column}"
-                    for table, column in floor.source_missing_columns
+                    for table, column in floor_columns
                 ),
             )
         )
@@ -416,10 +433,10 @@ def check(repo: Path) -> tuple[bool, str]:
         f"{migrations_text}\n{renderers_text}",
         f"{MIGRATIONS_SOURCE} / {RENDERERS_SOURCE}",
     )
-    post_floor_tables = set(floor.source_missing_tables)
+    post_floor_tables = set(floor_tables)
     left_behind = tuple(
         relation
-        for relation in floor.introduced_relations
+        for relation in floor_relations
         if relation not in post_floor_tables
         and indexed_table.get(relation) not in post_floor_tables
     )
@@ -430,7 +447,7 @@ def check(repo: Path) -> tuple[bool, str]:
         failures.append(
             named_set_failure(
                 "POST_FLOOR_INDEXES",
-                f"the component-{floor.from_version} migration's introduced_relations that "
+                f"the component-{floor_version} floor's introduced_relations that "
                 "dropping POST_FLOOR_TABLES leaves behind (a relation survives unless it is "
                 "one of those tables or its CREATE INDEX in "
                 f"{MIGRATIONS_SOURCE} / {RENDERERS_SOURCE} names one)",
@@ -525,7 +542,7 @@ def check(repo: Path) -> tuple[bool, str]:
         )
     return True, (
         f"version-bump fixture check passed: component {component_version}, floor "
-        f"{floor.from_version}, {len(migrations)} explicit migrations, "
+        f"{floor_version}, {len(migrations)} explicit migrations, "
         f"{len(renderers)} disjoint refusal kinds, {len(declared_indexes)} explicitly "
         f"dropped post-floor indexes, {len(declared_columns)} explicitly dropped "
         f"post-floor columns, {len(demanded)} asserted checkpoints"
