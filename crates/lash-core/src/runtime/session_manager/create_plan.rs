@@ -82,7 +82,7 @@ async fn resolve_start_state(
     request: &SessionCreateRequest,
     session_id: &SessionId,
 ) -> Result<RuntimeSessionState, crate::PluginError> {
-    let mut state = match &request.start {
+    let state = match &request.start {
         SessionStartPoint::Empty => RuntimeSessionState {
             session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(current.policy.clone())
@@ -96,37 +96,6 @@ async fn resolve_start_state(
             state
         }
     };
-    // FIG-3107: a snapshot-start child of a parent whose last commit released
-    // its resident execution bodies otherwise refuses hydration with
-    // `ExecutionStateBodiesReleased` at its first protocol restore. The
-    // released bodies are a released *resident copy*; the durable head still
-    // carries the accepted execution, so the child resolves it there.
-    if let Err(crate::StoreError::ExecutionStateBodiesReleased) = state.execution_state_hydration()
-    {
-        let store = current.store.as_ref().ok_or_else(|| {
-            crate::PluginError::Session(
-                "a session created from released execution bodies requires the parent's \
-                 durable store to rehydrate them in the child"
-                    .to_string(),
-            )
-        })?;
-        let fresh = crate::store::load_persisted_session_state(store.as_ref())
-            .await
-            .map_err(|error| crate::PluginError::Session(error.to_string()))?
-            .ok_or_else(|| {
-                crate::PluginError::Session(
-                    "the parent session has no durable head to rehydrate released \
-                     execution bodies from"
-                        .to_string(),
-                )
-            })?;
-        if fresh.execution_state_hydration().is_err() {
-            return Err(crate::PluginError::Session(
-                "the durable head does not hydrate the released execution state".to_string(),
-            ));
-        }
-        state.adopt_execution_components_from(&fresh);
-    }
     Ok(state)
 }
 

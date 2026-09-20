@@ -32,10 +32,195 @@ use lash_core::facade_support::effect_replay_driver::{
 use lash_core::{GroupExecutors, StoreEffectGroupDrain};
 
 use crate::await_event::{
-    PostgresAwaitEventBackend, lock_scope, postgres_await_events, scope_is_retired,
+    PostgresAwaitEventBackend, lock_scope, postgres_await_events, scope_is_retired, wait_sql,
 };
 
+use std::sync::LazyLock;
+
+use lash_store_sql::Dialect;
+use lash_store_sql::effect::EffectJournalStatements;
+use lash_store_sql::effect::group::GroupStatements;
+use lash_store_sql::effect::replay::ReplayStatements;
+use lash_store_sql::effect::scope_retirement::ScopeRetirementStatements;
+
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();
+
+lash_store_sql::statements! {
+    /// Journal-wide statements only PostgreSQL issues.
+    pub(crate) struct EffectJournalPostgresStatements @ "effect_journal" {
+        /// Preserve one retirement fence per execution scope owned by session
+        /// `$1` before the session's journal rows are deleted.
+        ///
+        /// PostgreSQL stamps from the server clock and writes the boolean
+        /// column as `FALSE`; SQLite binds a host-clock stamp and writes `0`.
+        insert_session_scope_fences = "INSERT INTO effect_scope_retirements (
+                 scope_id, retired_at_ms, artifact_cleanup_completed
+             )
+             SELECT scope_id,
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+                    FALSE
+             FROM (
+                 SELECT DISTINCT scope_id FROM runtime_effect_replay
+                 WHERE session_id = ?1
+                 UNION
+                 SELECT DISTINCT scope_id FROM runtime_effect_group
+                 WHERE session_id = ?1
+             ) AS retired
+             ON CONFLICT (scope_id) DO NOTHING";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `runtime_effect_replay` statements only PostgreSQL issues.
+    pub(crate) struct ReplayPostgresStatements @ "effect_replay" {
+        /// The row a claim decision reads, for `$1` (scope) / `$2` (replay
+        /// key), under its write lock.
+        ///
+        /// `FOR UPDATE` is the whole fork: SQLite already holds the database
+        /// write lock through `BEGIN IMMEDIATE` and needs no suffix.
+        select_for_claim = "SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
+                lease_expires_at_ms, due_at_ms
+             FROM runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2
+             FOR UPDATE";
+
+        /// Insert a fresh claim, reporting no row when a concurrent claimant
+        /// won.
+        ///
+        /// `ON CONFLICT DO NOTHING` is how a concurrent inserter is detected:
+        /// `FOR UPDATE` cannot lock a row that does not exist yet. SQLite's
+        /// write lock makes the race unreachable, so its insert carries no
+        /// conflict clause and a conflict stays an error.
+        insert_claimed = "INSERT INTO runtime_effect_replay (
+                scope_id, session_id, replay_key, envelope_hash,
+                envelope_json, status, outcome_json, error_json, lease_owner_id,
+                lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
+                created_at_ms, updated_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, ?11, ?12)
+             ON CONFLICT (scope_id, replay_key) DO NOTHING";
+
+        /// Write the terminal under the lease fence and report the child's
+        /// group.
+        ///
+        /// The lease instant is the server's `transaction_timestamp()`, which
+        /// is what makes PostgreSQL fencing survive host clock skew; SQLite
+        /// binds its host clock instead, so the two texts fork.
+        finalize_terminal = "UPDATE runtime_effect_replay
+             SET status = ?6,
+                 outcome_json = ?7,
+                 error_json = ?8,
+                 lease_owner_id = NULL,
+                 lease_token = NULL,
+                 lease_expires_at_ms = 0,
+                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             WHERE scope_id = ?1
+               AND replay_key = ?2
+               AND envelope_hash = ?3
+               AND lease_owner_id = ?4
+               AND lease_token = ?5
+               AND status = 'in_progress'
+               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             RETURNING group_key";
+
+        /// Extend the lease of `?1` / `?2` by `?6` milliseconds if `?4` / `?5`
+        /// still hold it. Forks for the same reason
+        /// [`ReplayPostgresStatements::finalize_terminal`] does.
+        renew_lease = "UPDATE runtime_effect_replay
+             SET lease_expires_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint + ?6,
+                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             WHERE scope_id = ?1
+               AND replay_key = ?2
+               AND envelope_hash = ?3
+               AND lease_owner_id = ?4
+               AND lease_token = ?5
+               AND status = 'in_progress'
+               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `runtime_effect_group` statements only PostgreSQL issues.
+    pub(crate) struct GroupPostgresStatements @ "effect_group" {
+        /// Record a group, returning the inserted row and nothing on a
+        /// conflict.
+        ///
+        /// The `RETURNING` clause is the fork: it saves the read-back on the
+        /// insert path, which SQLite performs unconditionally.
+        insert_new = "INSERT INTO runtime_effect_group (
+                group_key, scope_id, session_id, wake, loser_disposition,
+                children, next_seq, created_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
+             ON CONFLICT (group_key) DO NOTHING
+             RETURNING group_key, scope_id, session_id, wake, loser_disposition,
+                       children, created_at_ms";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `effect_scope_retirements` statements only PostgreSQL issues.
+    pub(crate) struct ScopeRetirementPostgresStatements @ "effect_scope_retirement" {
+        /// Write the permanent fence of scope `?1`, keeping the first stamp.
+        /// Stamped from the server clock, with a boolean cleanup flag.
+        insert_fence = "INSERT INTO effect_scope_retirements (
+                 scope_id, retired_at_ms, artifact_cleanup_completed
+             )
+             VALUES (?1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT, FALSE)
+             ON CONFLICT (scope_id) DO NOTHING";
+
+        /// Every fenced scope whose artifact cleanup has not run. SQLite
+        /// stores the flag as an integer.
+        select_pending_artifact_cleanup = "SELECT scope_id FROM effect_scope_retirements
+             WHERE artifact_cleanup_completed = FALSE
+             ORDER BY scope_id";
+
+        /// Record that scope `?1`'s artifact cleanup has run. Forks on the
+        /// same boolean representation.
+        complete_artifact_cleanup = "UPDATE effect_scope_retirements
+             SET artifact_cleanup_completed = TRUE
+             WHERE scope_id = ?1";
+    }
+}
+
+/// Every effect-family statement, rendered once.
+pub(crate) struct EffectSql {
+    /// Journal-wide statements both backends issue verbatim.
+    pub(crate) journal: EffectJournalStatements,
+    /// Journal-wide statements only PostgreSQL issues.
+    pub(crate) journal_postgres: EffectJournalPostgresStatements,
+    /// `runtime_effect_replay` statements both backends issue verbatim.
+    pub(crate) replay: ReplayStatements,
+    /// `runtime_effect_replay` statements only PostgreSQL issues.
+    pub(crate) replay_postgres: ReplayPostgresStatements,
+    /// `runtime_effect_group` statements both backends issue verbatim.
+    pub(crate) group: GroupStatements,
+    /// `runtime_effect_group` statements only PostgreSQL issues.
+    pub(crate) group_postgres: GroupPostgresStatements,
+    /// `effect_scope_retirements` statements both backends issue verbatim.
+    pub(crate) fence: ScopeRetirementStatements,
+    /// `effect_scope_retirements` statements only PostgreSQL issues.
+    pub(crate) fence_postgres: ScopeRetirementPostgresStatements,
+}
+
+static EFFECT_SQL: LazyLock<EffectSql> = LazyLock::new(|| {
+    let dialect = Dialect::postgres();
+    EffectSql {
+        journal: EffectJournalStatements::render(dialect),
+        journal_postgres: EffectJournalPostgresStatements::render(dialect),
+        replay: ReplayStatements::render(dialect),
+        replay_postgres: ReplayPostgresStatements::render(dialect),
+        group: GroupStatements::render(dialect),
+        group_postgres: GroupPostgresStatements::render(dialect),
+        fence: ScopeRetirementStatements::render(dialect),
+        fence_postgres: ScopeRetirementPostgresStatements::render(dialect),
+    }
+});
+
+/// The effect-family statements, rendered once at first use and never again.
+pub(crate) fn effect_sql() -> &'static EffectSql {
+    &EFFECT_SQL
+}
 
 /// The PostgreSQL effect-replay driver: one shared state machine over
 /// [`PostgresEffectReplayRowStore`].
@@ -108,15 +293,11 @@ impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
         lock_scope(&mut tx, &scope_id)
             .await
             .map_err(retirement_error)?;
-        let retired: bool = sqlx::query_scalar(
-            "SELECT EXISTS(
-                SELECT 1 FROM lash_effect_scope_retirements WHERE scope_id = $1
-             )",
-        )
-        .bind(&scope_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(retirement_error)?;
+        let retired: bool = sqlx::query_scalar(effect_sql().fence.exists.sql())
+            .bind(&scope_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(retirement_error)?;
         if retired {
             tx.rollback().await.map_err(retirement_error)?;
             return Err(RuntimeError::new(
@@ -370,17 +551,12 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         scope_id: &str,
         replay_key: &str,
     ) -> Result<bool, RuntimeEffectControllerError> {
-        sqlx::query_scalar(
-            "SELECT EXISTS(
-                 SELECT 1 FROM lash_runtime_effect_replay
-                 WHERE scope_id = $1 AND replay_key = $2
-             )",
-        )
-        .bind(scope_id)
-        .bind(replay_key)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(effect_store_error)
+        sqlx::query_scalar(effect_sql().replay.exists_by_key.sql())
+            .bind(scope_id)
+            .bind(replay_key)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(effect_store_error)
     }
 
     /// Writes the terminal and, for a grouped child, allocates its settlement
@@ -408,35 +584,19 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         terminal: &EffectTerminal,
     ) -> Result<EffectFinalizeOutcome, RuntimeEffectControllerError> {
         let mut tx = self.pool.begin().await.map_err(effect_store_error)?;
-        let claimed: Option<Option<String>> = sqlx::query_scalar(
-            "UPDATE lash_runtime_effect_replay
-             SET status = $6,
-                 outcome_json = $7,
-                 error_json = $8,
-                 lease_owner_id = NULL,
-                 lease_token = NULL,
-                 lease_expires_at_ms = 0,
-                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
-             WHERE scope_id = $1
-               AND replay_key = $2
-               AND envelope_hash = $3
-               AND lease_owner_id = $4
-               AND lease_token = $5
-               AND status = 'in_progress'
-               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
-             RETURNING group_key",
-        )
-        .bind(&fence.scope_id)
-        .bind(&fence.replay_key)
-        .bind(&fence.envelope_hash)
-        .bind(&fence.owner_id)
-        .bind(&fence.lease_token)
-        .bind(terminal.status().column())
-        .bind(terminal.outcome_json())
-        .bind(terminal.error_json())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(effect_store_error)?;
+        let claimed: Option<Option<String>> =
+            sqlx::query_scalar(effect_sql().replay_postgres.finalize_terminal.sql())
+                .bind(&fence.scope_id)
+                .bind(&fence.replay_key)
+                .bind(&fence.envelope_hash)
+                .bind(&fence.owner_id)
+                .bind(&fence.lease_token)
+                .bind(terminal.status().column())
+                .bind(terminal.outcome_json())
+                .bind(terminal.error_json())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(effect_store_error)?;
 
         let Some(group_key) = claimed else {
             // The fence moved. Roll back rather than commit, and allocate
@@ -452,28 +612,20 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         let settlement_seq = match group_key {
             None => None,
             Some(group_key) => {
-                let allocated: Option<i64> = sqlx::query_scalar(
-                    "UPDATE lash_runtime_effect_group
-                     SET next_seq = next_seq + 1
-                     WHERE group_key = $1
-                     RETURNING next_seq",
-                )
-                .bind(&group_key)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(effect_store_error)?;
+                let allocated: Option<i64> =
+                    sqlx::query_scalar(effect_sql().group.bump_next_seq.sql())
+                        .bind(&group_key)
+                        .fetch_optional(&mut *tx)
+                        .await
+                        .map_err(effect_store_error)?;
                 let allocated = allocated.ok_or_else(|| missing_group_row(&group_key))?;
-                sqlx::query(
-                    "UPDATE lash_runtime_effect_replay
-                     SET settlement_seq = $3
-                     WHERE scope_id = $1 AND replay_key = $2",
-                )
-                .bind(&fence.scope_id)
-                .bind(&fence.replay_key)
-                .bind(allocated)
-                .execute(&mut *tx)
-                .await
-                .map_err(effect_store_error)?;
+                sqlx::query(effect_sql().replay.set_settlement_seq.sql())
+                    .bind(&fence.scope_id)
+                    .bind(&fence.replay_key)
+                    .bind(allocated)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(effect_store_error)?;
                 Some(u64::try_from(allocated).map_err(|_| {
                     effect_store_message(
                         StoreError::StoredDataCorrupt {
@@ -511,43 +663,29 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             tx.commit().await.map_err(effect_store_error)?;
             return Err(effect_replay_driver::scope_retired(&record.scope_id));
         }
-        let inserted = sqlx::query(
-            "INSERT INTO lash_runtime_effect_group (
-                group_key, scope_id, session_id, wake, loser_disposition,
-                children, next_seq, created_at_ms
-             )
-             VALUES ($1, $2, $3, $4, $5, $6, 0, $7)
-             ON CONFLICT (group_key) DO NOTHING
-             RETURNING group_key, scope_id, session_id, wake, loser_disposition,
-                       children, created_at_ms",
-        )
-        .bind(&record.group_key)
-        .bind(&record.scope_id)
-        .bind(record.session_id.as_deref())
-        .bind(record.wake.column())
-        .bind(record.loser_disposition.column())
-        .bind(record.children as i64)
-        .bind(record.created_at_ms as i64)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(effect_store_error)?;
+        let inserted = sqlx::query(effect_sql().group_postgres.insert_new.sql())
+            .bind(&record.group_key)
+            .bind(&record.scope_id)
+            .bind(record.session_id.as_deref())
+            .bind(record.wake.column())
+            .bind(record.loser_disposition.column())
+            .bind(record.children as i64)
+            .bind(record.created_at_ms as i64)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(effect_store_error)?;
         if let Some(row) = inserted {
             tx.commit().await.map_err(effect_store_error)?;
             return stored_group_record(row);
         }
         // The conflict path: some earlier open owns this key, and its row — not
         // the one just refused — is what a reopen must be fenced against.
-        let existing = sqlx::query(
-            "SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    children, created_at_ms
-             FROM lash_runtime_effect_group
-             WHERE group_key = $1",
-        )
-        .bind(&record.group_key)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(effect_store_error)?
-        .ok_or_else(|| missing_group_row(&record.group_key))?;
+        let existing = sqlx::query(effect_sql().group.select_by_key.sql())
+            .bind(&record.group_key)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(effect_store_error)?
+            .ok_or_else(|| missing_group_row(&record.group_key))?;
         tx.commit().await.map_err(effect_store_error)?;
         stored_group_record(existing)
     }
@@ -558,16 +696,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         &self,
         group_key: &str,
     ) -> Result<Option<EffectGroupRecord>, RuntimeEffectControllerError> {
-        let row = sqlx::query(
-            "SELECT group_key, scope_id, session_id, wake, loser_disposition,
-                    children, created_at_ms
-             FROM lash_runtime_effect_group
-             WHERE group_key = $1",
-        )
-        .bind(group_key)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(effect_store_error)?;
+        let row = sqlx::query(effect_sql().group.select_by_key.sql())
+            .bind(group_key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(effect_store_error)?;
         row.map(stored_group_record).transpose()
     }
 
@@ -587,16 +720,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         &self,
         group_key: &str,
     ) -> Result<Vec<UnsettledGroupChild>, RuntimeEffectControllerError> {
-        let rows = sqlx::query(
-            "SELECT scope_id, replay_key, envelope_json, status, outcome_json, error_json, lease_expires_at_ms
-             FROM lash_runtime_effect_replay
-             WHERE group_key = $1 AND settlement_seq IS NULL
-             ORDER BY replay_key",
-        )
-        .bind(group_key)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(effect_store_error)?;
+        let rows = sqlx::query(effect_sql().replay.select_unsettled_children.sql())
+            .bind(group_key)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(effect_store_error)?;
         rows.into_iter().map(unsettled_group_child).collect()
     }
 
@@ -608,18 +736,12 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         let Some(offset) = rank.checked_sub(1) else {
             return Ok(None);
         };
-        let row = sqlx::query(
-            "SELECT settlement_seq, replay_key, status, outcome_json, error_json
-             FROM lash_runtime_effect_replay
-             WHERE group_key = $1 AND settlement_seq IS NOT NULL
-             ORDER BY settlement_seq
-             LIMIT 1 OFFSET $2",
-        )
-        .bind(group_key)
-        .bind(offset as i64)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(effect_store_error)?;
+        let row = sqlx::query(effect_sql().replay.select_settlement_by_rank.sql())
+            .bind(group_key)
+            .bind(offset as i64)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(effect_store_error)?;
         row.map(stored_group_settlement).transpose()
     }
 
@@ -628,28 +750,17 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         fence: &EffectLeaseFence,
         lease_ttl_ms: u64,
     ) -> Result<bool, RuntimeEffectControllerError> {
-        let changed = sqlx::query(
-            "UPDATE lash_runtime_effect_replay
-             SET lease_expires_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint + $6,
-                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
-             WHERE scope_id = $1
-               AND replay_key = $2
-               AND envelope_hash = $3
-               AND lease_owner_id = $4
-               AND lease_token = $5
-               AND status = 'in_progress'
-               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint",
-        )
-        .bind(&fence.scope_id)
-        .bind(&fence.replay_key)
-        .bind(&fence.envelope_hash)
-        .bind(&fence.owner_id)
-        .bind(&fence.lease_token)
-        .bind(lease_ttl_ms as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(effect_store_error)?
-        .rows_affected();
+        let changed = sqlx::query(effect_sql().replay_postgres.renew_lease.sql())
+            .bind(&fence.scope_id)
+            .bind(&fence.replay_key)
+            .bind(&fence.envelope_hash)
+            .bind(&fence.owner_id)
+            .bind(&fence.lease_token)
+            .bind(lease_ttl_ms as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(effect_store_error)?
+            .rows_affected();
         Ok(changed == 1)
     }
 
@@ -675,10 +786,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 error.to_string(),
             )
         };
+        let sql = effect_sql();
         let (children_sql, groups_sql, key, fenced_scope) = match retirement {
             lash_core::EffectJournalRetirement::Session { session_id } => (
-                "DELETE FROM lash_runtime_effect_replay WHERE session_id = $1",
-                "DELETE FROM lash_runtime_effect_group WHERE session_id = $1",
+                sql.replay.delete_by_session.sql(),
+                sql.group.delete_by_session.sql(),
                 session_id.as_str().to_string(),
                 None,
             ),
@@ -695,8 +807,8 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                     "process and runtime-operation scopes always form durable journal identities",
                 );
                 (
-                    "DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1",
-                    "DELETE FROM lash_runtime_effect_group WHERE scope_id = $1",
+                    sql.replay.delete_by_scope.sql(),
+                    sql.group.delete_by_scope.sql(),
                     identity.key().to_string(),
                     Some(scope),
                 )
@@ -738,26 +850,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             tx.commit().await.map_err(retirement_error)?;
             return Ok(children);
         }
-        sqlx::query(
-            "INSERT INTO lash_effect_scope_retirements (
-                 scope_id, retired_at_ms, artifact_cleanup_completed
-             )
-             SELECT scope_id,
-                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
-                    FALSE
-             FROM (
-                 SELECT DISTINCT scope_id FROM lash_runtime_effect_replay
-                 WHERE session_id = $1
-                 UNION
-                 SELECT DISTINCT scope_id FROM lash_runtime_effect_group
-                 WHERE session_id = $1
-             ) AS retired
-             ON CONFLICT (scope_id) DO NOTHING",
-        )
-        .bind(&key)
-        .execute(&mut *tx)
-        .await
-        .map_err(retirement_error)?;
+        sqlx::query(sql.journal_postgres.insert_session_scope_fences.sql())
+            .bind(&key)
+            .execute(&mut *tx)
+            .await
+            .map_err(retirement_error)?;
         let children = sqlx::query(children_sql)
             .bind(&key)
             .execute(&mut *tx)
@@ -784,7 +881,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         lock_scope(&mut tx, scope_id)
             .await
             .map_err(retirement_error)?;
-        sqlx::query("DELETE FROM lash_effect_scope_retirements WHERE scope_id = $1")
+        sqlx::query(effect_sql().fence.delete_by_scope.sql())
             .bind(scope_id)
             .execute(&mut *tx)
             .await
@@ -796,9 +893,10 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         &self,
     ) -> Result<Vec<lash_core::ExecutionScope>, RuntimeError> {
         let keys: Vec<String> = sqlx::query_scalar(
-            "SELECT scope_id FROM lash_effect_scope_retirements
-             WHERE artifact_cleanup_completed = FALSE
-             ORDER BY scope_id",
+            effect_sql()
+                .fence_postgres
+                .select_pending_artifact_cleanup
+                .sql(),
         )
         .fetch_all(&self.pool)
         .await
@@ -821,20 +919,16 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     }
 
     async fn complete_artifact_owner_retirement(&self, scope_id: &str) -> Result<(), RuntimeError> {
-        sqlx::query(
-            "UPDATE lash_effect_scope_retirements
-             SET artifact_cleanup_completed = TRUE
-             WHERE scope_id = $1",
-        )
-        .bind(scope_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|error| {
-            RuntimeError::new(
-                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
-                error.to_string(),
-            )
-        })?;
+        sqlx::query(effect_sql().fence_postgres.complete_artifact_cleanup.sql())
+            .bind(scope_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })?;
         Ok(())
     }
 }
@@ -850,26 +944,11 @@ pub(crate) async fn scope_is_quiescent(
     scope_id: &str,
     scope_json: &str,
 ) -> Result<bool, sqlx::Error> {
-    let live: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM lash_runtime_effect_replay
-            WHERE scope_id = $1 AND status = 'in_progress'
-         ) OR EXISTS(
-            SELECT 1 FROM lash_runtime_effect_group AS grp
-            WHERE grp.scope_id = $1
-              AND grp.children > (
-                  SELECT COUNT(*) FROM lash_runtime_effect_replay AS child
-                  WHERE child.scope_id = $1 AND child.group_key = grp.group_key
-              )
-         ) OR EXISTS(
-            SELECT 1 FROM lash_await_event_waits
-            WHERE scope_json = $2 AND terminal_json IS NULL
-         )",
-    )
-    .bind(scope_id)
-    .bind(scope_json)
-    .fetch_one(&mut **tx)
-    .await?;
+    let live: bool = sqlx::query_scalar(effect_sql().journal.scope_is_quiescent.sql())
+        .bind(scope_id)
+        .bind(scope_json)
+        .fetch_one(&mut **tx)
+        .await?;
     Ok(!live)
 }
 
@@ -899,26 +978,21 @@ pub(crate) async fn retire_scope_rows_tx(
     scope_id: &str,
     scope_json: &str,
 ) -> Result<usize, sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO lash_effect_scope_retirements (
-             scope_id, retired_at_ms, artifact_cleanup_completed
-         )
-         VALUES ($1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT, FALSE)
-         ON CONFLICT (scope_id) DO NOTHING",
-    )
-    .bind(scope_id)
-    .execute(&mut **tx)
-    .await?;
-    sqlx::query("DELETE FROM lash_await_event_waits WHERE scope_json = $1")
+    let sql = effect_sql();
+    sqlx::query(sql.fence_postgres.insert_fence.sql())
+        .bind(scope_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(wait_sql().shared.delete_by_scope_json.sql())
         .bind(scope_json)
         .execute(&mut **tx)
         .await?;
-    let children = sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1")
+    let children = sqlx::query(sql.replay.delete_by_scope.sql())
         .bind(scope_id)
         .execute(&mut **tx)
         .await?
         .rows_affected();
-    sqlx::query("DELETE FROM lash_runtime_effect_group WHERE scope_id = $1")
+    sqlx::query(sql.group.delete_by_scope.sql())
         .bind(scope_id)
         .execute(&mut **tx)
         .await?;
@@ -992,18 +1066,12 @@ async fn select_effect_row_for_update(
     scope_id: &str,
     replay_key: &str,
 ) -> Result<Option<StoredEffectRow>, RuntimeEffectControllerError> {
-    let row = sqlx::query(
-        "SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
-                lease_expires_at_ms, due_at_ms
-         FROM lash_runtime_effect_replay
-         WHERE scope_id = $1 AND replay_key = $2
-         FOR UPDATE",
-    )
-    .bind(scope_id)
-    .bind(replay_key)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(effect_store_error)?;
+    let row = sqlx::query(effect_sql().replay_postgres.select_for_claim.sql())
+        .bind(scope_id)
+        .bind(replay_key)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(effect_store_error)?;
     row.map(stored_effect_row).transpose()
 }
 
@@ -1042,33 +1110,24 @@ async fn insert_claimed_row(
     request: &EffectClaimRequest,
     stamp: &EffectLeaseStamp,
 ) -> Result<bool, RuntimeEffectControllerError> {
-    let inserted = sqlx::query(
-        "INSERT INTO lash_runtime_effect_replay (
-            scope_id, session_id, replay_key, envelope_hash,
-            envelope_json, status, outcome_json, error_json, lease_owner_id,
-            lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
-            created_at_ms, updated_at_ms
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $13, NULL, $11, $12)
-         ON CONFLICT (scope_id, replay_key) DO NOTHING",
-    )
-    .bind(&request.scope_id)
-    .bind(request.session_id.as_deref())
-    .bind(&request.replay_key)
-    .bind(&request.envelope_hash)
-    .bind(&request.envelope_json)
-    .bind(EffectRowStatus::InProgress.column())
-    .bind(&request.owner_id)
-    .bind(&request.lease_token)
-    .bind(stamp.lease_expires_at_ms as i64)
-    .bind(stamp.due_at_ms.map(|value| value as i64))
-    .bind(stamp.now_ms as i64)
-    .bind(stamp.now_ms as i64)
-    .bind(request.group_key.as_deref())
-    .execute(&mut **tx)
-    .await
-    .map_err(effect_store_error)?
-    .rows_affected();
+    let inserted = sqlx::query(effect_sql().replay_postgres.insert_claimed.sql())
+        .bind(&request.scope_id)
+        .bind(request.session_id.as_deref())
+        .bind(&request.replay_key)
+        .bind(&request.envelope_hash)
+        .bind(&request.envelope_json)
+        .bind(EffectRowStatus::InProgress.column())
+        .bind(&request.owner_id)
+        .bind(&request.lease_token)
+        .bind(stamp.lease_expires_at_ms as i64)
+        .bind(stamp.due_at_ms.map(|value| value as i64))
+        .bind(stamp.now_ms as i64)
+        .bind(stamp.now_ms as i64)
+        .bind(request.group_key.as_deref())
+        .execute(&mut **tx)
+        .await
+        .map_err(effect_store_error)?
+        .rows_affected();
     Ok(inserted == 1)
 }
 
@@ -1077,25 +1136,17 @@ async fn take_over_expired_lease(
     request: &EffectClaimRequest,
     stamp: &EffectLeaseStamp,
 ) -> Result<(), RuntimeEffectControllerError> {
-    sqlx::query(
-        "UPDATE lash_runtime_effect_replay
-         SET lease_owner_id = $3,
-             lease_token = $4,
-             lease_expires_at_ms = $5,
-             due_at_ms = $6,
-             updated_at_ms = $7
-         WHERE scope_id = $1 AND replay_key = $2",
-    )
-    .bind(&request.scope_id)
-    .bind(&request.replay_key)
-    .bind(&request.owner_id)
-    .bind(&request.lease_token)
-    .bind(stamp.lease_expires_at_ms as i64)
-    .bind(stamp.due_at_ms.map(|value| value as i64))
-    .bind(stamp.now_ms as i64)
-    .execute(&mut **tx)
-    .await
-    .map_err(effect_store_error)?;
+    sqlx::query(effect_sql().replay.take_over_lease.sql())
+        .bind(&request.scope_id)
+        .bind(&request.replay_key)
+        .bind(&request.owner_id)
+        .bind(&request.lease_token)
+        .bind(stamp.lease_expires_at_ms as i64)
+        .bind(stamp.due_at_ms.map(|value| value as i64))
+        .bind(stamp.now_ms as i64)
+        .execute(&mut **tx)
+        .await
+        .map_err(effect_store_error)?;
     Ok(())
 }
 

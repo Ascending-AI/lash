@@ -457,6 +457,7 @@ jobs:
           python3 scripts/test_check_facade_only_examples.py
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
+          python3 scripts/test_check_store_sql_ownership.py
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_conformance_law_registration.py
@@ -728,11 +729,71 @@ jobs:
           # workspace compile aggregate does not ride this command -- it
           # would pay the workspace compile a second time on this job's
           # critical path. It remains available for local runs.
+          #
+          # `-//:workspace_tail_tests` subtracts the profiled long tail (the
+          # `//examples/` leaves and the `dev-deferred` slow tests), which the
+          # `bazel-tests-tail` job runs on a parallel runner; a core-touching
+          # diff otherwise ends this leg in a ~5.5-minute agent-workbench
+          # compile long after every crate test has finished.
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
             --cache_test_results=yes --test_output=errors \
-            //:workspace_tests
+            -- //:workspace_tests -//:workspace_tail_tests
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+  # The second leg of the Bazel partition. `//:workspace_tail_tests` is the
+  # generated tail of `//:workspace_tests` -- the `//examples/` test leaves
+  # that end the serial compile chain on a core-touching diff plus the
+  # `dev-deferred` slow labels -- so it runs here in parallel with the main
+  # leg instead of at the end of it. Same trust gate, same pool credentials,
+  # same flags: the legs differ only in which suite labels they expand.
+  bazel-tests-tail:
+    name: Test Bazel partition tail
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: plan
+    if: needs.plan.outputs.bazel_trusted == 'true' && needs.plan.outputs.rust == 'true'
+    environment: build-cache
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Configure shared build cache
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Test the workspace tail suite with shared cache
+        shell: bash
+        run: |
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            --remote_download_outputs=minimal \
+            --cache_test_results=yes --test_output=errors \
+            //:workspace_tail_tests
 
       - name: Remove client credentials
         if: always()
@@ -1206,6 +1267,12 @@ jobs:
         run: |
           python3 scripts/check-postgres-json-carrier-coverage.py
           python3 scripts/check-postgres-payload-shape-version.py
+
+      # One owner per table across both SQL stores (FIG-3380): no stray
+      # statement, no duplicate, no shadowed shared statement, and every
+      # dialect-only operation named in the manifest with a reason.
+      - name: Check store SQL ownership
+        run: python3 scripts/check-store-sql-ownership.py
 
       # The recreation E2E's fixtures are pinned to the newest component
       # generation. Catch a stale pin here rather than one container gate later.
@@ -2624,6 +2691,7 @@ jobs:
       - feature-lanes
       - workspace-tests
       - bazel-tests
+      - bazel-tests-tail
       - heavy-tests
       - lint
       - diff-hygiene

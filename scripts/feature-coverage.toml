@@ -30,6 +30,7 @@ features = [
   "lash-internal-provider-openai/default",
   "lash-internal-remote-protocol/default",
   "lash-internal-sansio/default",
+  "lash-internal-store-sql/default",
   "lash-internal-sqlite-store/default",
   "lash-internal-tool-support/default",
   "lash-internal-trace/default",

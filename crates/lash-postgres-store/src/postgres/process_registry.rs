@@ -485,11 +485,16 @@ impl lash_core::ProcessRegistrar for PostgresProcessRegistry {
         crate::await_event::lock_scope(&mut tx, fence_key.key())
             .await
             .map_err(plugin_sqlx_error)?;
-        sqlx::query("DELETE FROM lash_effect_scope_retirements WHERE scope_id = $1")
-            .bind(fence_key.key())
-            .execute(&mut *tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
+        sqlx::query(
+            crate::effect_replay::effect_sql()
+                .fence
+                .delete_by_scope
+                .sql(),
+        )
+        .bind(fence_key.key())
+        .execute(&mut *tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
         let process_id = record.id.clone();
         for session_id in observers {
             sqlx::query(

@@ -88,7 +88,10 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                     // together and a registration that fails keeps the id
                     // fenced (ADR 0049).
                     tx.execute(
-                        "DELETE FROM effect_scope_retirements WHERE scope_id = ?1",
+                        crate::scope_fence::fence_sql(crate::scope_fence::Schema::Main)
+                            .shared
+                            .delete_by_scope
+                            .sql(),
                         params![process_scope_fence_key(&record.id)?],
                     )
                     .map_err(process_sqlite_error)?;

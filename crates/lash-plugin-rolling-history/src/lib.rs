@@ -21,13 +21,11 @@ use async_trait::async_trait;
 use lash_core::facade_support::PreparedContext;
 use lash_core::plugin::{
     CompactionContext, ContextCompaction, ContextCompactor, ContextError, PluginError,
-    PluginFactory, PluginOptions, PluginRegistrar, PluginSessionContext, SessionContextOverlay,
-    SessionCreateRequest, SessionPlugin, SessionStartPoint, TurnContextTransform,
+    PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin, TurnContextTransform,
     TurnTransformContext,
 };
 use lash_core::{
-    InputItem, Message, MessageOrigin, MessageRole, Part, PartKind, PromptUsage, SessionSnapshot,
-    TurnInput,
+    Message, MessageOrigin, MessageRole, Part, PartKind, PromptUsage, SessionSnapshot,
 };
 
 const PRUNE_RECENT_USER_TURNS: usize = 2;
@@ -412,7 +410,7 @@ fn compaction_request_identity(
     })
 }
 
-pub(crate) fn compaction_child_ids(
+pub(crate) fn compaction_request_ids(
     parent_session_id: &SessionId,
     state: &SessionSnapshot,
     request_snapshot: &SessionSnapshot,
@@ -493,13 +491,39 @@ fn prompt_tail_window(messages: &[Message], cut_point: usize) -> Vec<Message> {
     out
 }
 
+/// The system prompt a compaction request carries: the session's own prompt
+/// layer resolved against an empty execution/tool context, matching the
+/// no-tools, no-provider overlay the summarizer always ran under.
+fn compaction_instructions(snapshot: &SessionSnapshot) -> Option<Arc<str>> {
+    let resolved = lash_sansio::resolve_prompt_layers([&snapshot.policy.prompt]);
+    let rendered = lash_sansio::build_prompt(lash_sansio::PromptBuildInput {
+        template_fingerprint: lash_sansio::prompt_template_fingerprint(&resolved.template),
+        template: resolved.template,
+        execution_prompt_fingerprint: lash_sansio::prompt_text_fingerprint(""),
+        execution_prompt: Arc::from(""),
+        tool_names_fingerprint: lash_sansio::prompt_tool_names_fingerprint(&[]),
+        tool_names: Arc::new(Vec::new()),
+        contributions: lash_sansio::PromptContributionSet::new(resolved.contributions),
+    });
+    let system_prompt = rendered.system_prompt.trim();
+    (!system_prompt.is_empty()).then(|| Arc::from(system_prompt))
+}
+
+/// One direct LLM completion on the parent's own session (FIG-3374).
+///
+/// The request keeps the durable identities the child-session lane derived:
+/// `turn_id` is the replay key, folding the physical parent turn, journal
+/// scope, request snapshot, and prompt text, so a redriven parent replays the
+/// recorded effect instead of double-billing. `compaction_session_id` survives
+/// as the request's `agent_frame_id` so recovery receipts and frame switches
+/// keyed off the same discriminator keep their values.
 async fn summarize_compaction_prefix(
     session_id: &SessionId,
     state: &SessionSnapshot,
     prefix_messages: Vec<Message>,
     instructions: Option<&str>,
-    session_lifecycle: Arc<dyn lash_core::plugin::runtime_host::SessionLifecycleService>,
-    scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+    direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
+    scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
 ) -> Result<Option<String>, ContextError> {
     if prefix_messages.is_empty() {
         return Ok(None);
@@ -507,49 +531,55 @@ async fn summarize_compaction_prefix(
 
     let (snapshot, prompt_text) = prepare_compaction_request(state, prefix_messages, instructions)?;
 
-    let (compaction_session_id, turn_id) = compaction_child_ids(
+    let (compaction_session_id, turn_id) = compaction_request_ids(
         session_id,
         state,
         &snapshot,
         &prompt_text,
         scoped_effect_controller.execution_scope(),
     )?;
-    let mut policy = snapshot.policy.clone();
-    policy.turn_budget = lash_core::TurnBudget::bounded(1);
-    let request = SessionCreateRequest::child(
-        session_id,
-        SessionStartPoint::Snapshot {
-            snapshot: Box::new(snapshot),
-        },
-        policy,
-        PluginOptions::default(),
-    )
-    .with_context_overlay(SessionContextOverlay {
-        include_base_tools: false,
-    })
-    .with_session_id(compaction_session_id);
-    let handle = session_lifecycle
-        .create_session(request)
+    let read_view = snapshot
+        .read_view()
+        .map_err(|error| ContextError::Session(error.to_string()))?;
+    let mut rendered = lash_sansio::session_model::render_prompt(read_view.messages());
+    let mut directive = lash_sansio::llm::types::LlmMessage::text(
+        lash_sansio::llm::types::LlmRole::User,
+        prompt_text,
+    );
+    directive.starts_user_segment = true;
+    rendered.messages.push(directive);
+
+    let request = lash_core::LlmRequest {
+        instructions: compaction_instructions(&snapshot),
+        model: snapshot.policy.model.id.clone(),
+        messages: rendered.messages,
+        resolved_stored: Default::default(),
+        tools: Arc::new(Vec::new()),
+        tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
+        model_variant: snapshot.policy.model.variant.clone(),
+        model_capability: snapshot.policy.model.capability.clone(),
+        generation: snapshot.policy.generation.clone(),
+        scope: lash_core::LlmRequestScope::new(
+            session_id.clone(),
+            compaction_session_id.to_string(),
+            turn_id.to_string(),
+        ),
+        output_spec: None,
+        stream_events: None,
+        provider_trace: None,
+    };
+    let caused_by = scoped_effect_controller
+        .execution_scope()
+        .turn_id()
+        .map(|parent_turn_id| lash_core::CausalRef::Turn {
+            session_id: session_id.clone(),
+            turn_id: parent_turn_id.clone(),
+        });
+    let completion = direct_completions
+        .direct_llm_completion_caused_by(request, "compaction", caused_by)
         .await
         .map_err(ContextError::from)?;
-
-    let request = lash_core::facade_support::SessionTurnRequest::new_runtime_internal_compaction(
-        &handle.session_id,
-        &turn_id,
-        TurnInput {
-            items: vec![InputItem::Text { text: prompt_text }],
-            protocol_turn_options: None,
-            trace_turn_id: None,
-            protocol_extension: None,
-            turn_context: lash_core::TurnContext::default(),
-        },
-        scoped_effect_controller,
-    )
-    .map_err(|err| ContextError::Session(err.to_string()))?;
-    let turn = session_lifecycle.start_turn(request).await;
-    let _ = session_lifecycle.close_session(&handle.session_id).await;
-    let turn = turn.map_err(ContextError::from)?;
-    let summary = turn.assistant_output.safe_text.trim().to_string();
+    let summary = completion.response.full_text().trim().to_string();
     if summary.is_empty() {
         return Ok(None);
     }
@@ -574,8 +604,8 @@ async fn compact_messages_core(
     state: &SessionSnapshot,
     messages: &[Message],
     instructions: Option<&str>,
-    session_lifecycle: Arc<dyn lash_core::plugin::runtime_host::SessionLifecycleService>,
-    scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+    direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
+    scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
 ) -> Result<Option<ContextCompaction>, ContextError> {
     let prefix_len = leading_system_prefix_len(messages);
     let cut_point = find_compaction_cut_point(messages, prefix_len);
@@ -588,7 +618,7 @@ async fn compact_messages_core(
         state,
         prefix_messages,
         instructions,
-        session_lifecycle,
+        direct_completions,
         scoped_effect_controller,
     )
     .await?
@@ -711,7 +741,7 @@ impl TurnContextTransform for RollingTurnTransform {
                 &ctx.session_id,
                 ctx.state.messages(),
                 &ctx.state.to_snapshot(),
-                ctx.session_lifecycle.clone(),
+                &ctx.direct_completions,
                 &*ctx.session_graph,
                 &ctx.scoped_effect_controller,
                 ctx.state.to_snapshot().current_frame_node_id.as_deref(),
@@ -842,16 +872,14 @@ impl ContextCompactor for RollingContextCompactor {
             .await?;
 
         let session_id = ctx.session_id.clone();
-        let session_lifecycle = Arc::clone(&ctx.session_lifecycle);
-        let scoped_effect_controller = ctx.scoped_effect_controller.clone();
 
         let compaction = compact_messages_core(
             &session_id,
             &ctx.state.to_snapshot(),
             ctx.state.messages(),
             ctx.instructions.as_deref(),
-            session_lifecycle,
-            scoped_effect_controller,
+            &ctx.direct_completions,
+            &ctx.scoped_effect_controller,
         )
         .await;
         let summary_nodes = compaction

@@ -1,6 +1,6 @@
 use super::*;
 
-fn initial_park_preview(
+pub(in crate::runtime) fn initial_park_preview(
     state: &crate::RuntimeSessionState,
     pending_usage: &[crate::TokenLedgerEntry],
     commit_budget: crate::CommitBudget,
@@ -21,7 +21,7 @@ fn initial_park_preview(
     )
 }
 
-fn initial_park_operation(
+pub(in crate::runtime) fn initial_park_operation(
     commit: &crate::store::RuntimeCommit,
 ) -> Result<crate::OperationId, crate::StoreError> {
     let content_hash = commit.turn_commit_hash()?;

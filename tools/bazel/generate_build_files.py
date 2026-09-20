@@ -1019,6 +1019,7 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
         # reconciling members to batches.
         "WORKSPACE_TEST_SUITE_LABELS": None,  # computed below
         "WORKSPACE_DEV_SUITE_LABELS": None,  # computed below
+        "WORKSPACE_TAIL_SUITE_LABELS": None,  # computed below
         "WORKSPACE_DEV_TEST_TARGETS": sorted(
             target["label"]
             for target in executable_tests
@@ -1049,6 +1050,21 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     )
     groups["WORKSPACE_DEV_SUITE_LABELS"] = sorted(
         set(groups["WORKSPACE_DEV_TEST_TARGETS"]) - batched_members | set(batches)
+    )
+    # The long tail of `//:workspace_tests`, run on a second CI runner so the
+    # partition's wall clock is max(legs), not sum. Two measured tails: the
+    # `//examples/` leaves, which sit at the end of the serial compile chain
+    # (a core-touching run ends in the agent-workbench unit-test compile), and
+    # the `dev-deferred` labels, which are already the tagged slow tests.
+    tail_members = {
+        target["label"]
+        for target in executable_tests
+        if "dev-deferred" in target["tags"]
+    }
+    groups["WORKSPACE_TAIL_SUITE_LABELS"] = sorted(
+        label
+        for label in groups["WORKSPACE_TEST_SUITE_LABELS"]
+        if label.startswith("//examples/") or label in tail_members
     )
     bzl = [GENERATED_HEADER]
     for name, values in groups.items():

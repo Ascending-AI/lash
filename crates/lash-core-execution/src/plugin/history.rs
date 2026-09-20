@@ -34,6 +34,7 @@ pub struct CompactionContext<'run> {
     pub session_lifecycle: Arc<dyn super::SessionLifecycleService>,
     pub session_graph: Arc<dyn super::SessionGraphService>,
     pub scoped_effect_controller: crate::ScopedEffectController<'run>,
+    pub direct_completions: crate::DirectCompletionClient<'run>,
 }
 
 #[derive(Debug, thiserror::Error, Clone)]

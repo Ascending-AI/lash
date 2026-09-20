@@ -10,40 +10,136 @@
 //! fence row in one single-file commit, and retirement's fence insert into
 //! that file is its one commit point, the journal purge that follows being an
 //! idempotent cleanup. Admission reads both tables.
+//!
+//! This module is the SQLite owner of `effect_scope_retirements`: its
+//! dialect-only statements, and the rendered form of the shared ones, for
+//! every schema a SQLite connection addresses the table through.
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
+use lash_store_sql::Dialect;
+use lash_store_sql::effect::scope_retirement::ScopeRetirementStatements;
 use rusqlite::params;
 
 use crate::conn::SqliteConnection;
 
-/// Schema name under which a bound registry file is attached to the journal
-/// connection.
-pub(crate) const PROCESS_REGISTRY_SCHEMA: &str = "process_registry";
+/// A database a SQLite connection in this crate addresses a shared table
+/// through.
+///
+/// Every statement over a converted table is rendered once per schema at
+/// startup, so a caller that reaches the journal through an `ATTACH` names the
+/// schema and gets finished SQL rather than building a qualified statement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Schema {
+    /// The connection's own database: the journal's own file on a journal
+    /// connection, the registry's own file on a registry connection.
+    Main,
+    /// The effect journal, attached to the session catalog for a retention
+    /// sweep.
+    EffectJournal,
+    /// A bound process registry, attached to the journal connection.
+    ProcessRegistry,
+}
 
-/// The journal's own database, as a schema name.
-pub(crate) const JOURNAL_SCHEMA: &str = "main";
+impl Schema {
+    /// Every schema, in [`Schema::index`] order.
+    pub(crate) const ALL: [Self; 3] = [Self::Main, Self::EffectJournal, Self::ProcessRegistry];
+
+    /// The schema's SQL qualifier.
+    pub(crate) const fn qualifier(self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::EffectJournal => "effect_journal",
+            Self::ProcessRegistry => "process_registry",
+        }
+    }
+
+    /// The render dialect that addresses tables through this schema.
+    pub(crate) const fn dialect(self) -> Dialect {
+        Dialect::sqlite(self.qualifier())
+    }
+
+    /// This schema's slot in a per-schema statement table.
+    pub(crate) const fn index(self) -> usize {
+        match self {
+            Self::Main => 0,
+            Self::EffectJournal => 1,
+            Self::ProcessRegistry => 2,
+        }
+    }
+}
+
+lash_store_sql::statements! {
+    /// `effect_scope_retirements` statements only SQLite issues.
+    pub(crate) struct ScopeRetirementSqliteStatements @ "effect_scope_retirement" {
+        /// Write the permanent fence of scope `?1` at `?2`, keeping the first
+        /// stamp.
+        insert_fence = "INSERT INTO effect_scope_retirements (
+                 scope_id, retired_at_ms, artifact_cleanup_completed
+             )
+             VALUES (?1, ?2, 0)
+             ON CONFLICT (scope_id) DO NOTHING";
+
+        /// Every fenced scope in this file.
+        select_all_scope_ids = "SELECT scope_id FROM effect_scope_retirements";
+
+        /// Every fenced scope whose artifact cleanup has not run.
+        select_pending_artifact_cleanup = "SELECT scope_id FROM effect_scope_retirements
+             WHERE artifact_cleanup_completed = 0
+             ORDER BY scope_id";
+
+        /// Record that scope `?1`'s artifact cleanup has run.
+        complete_artifact_cleanup = "UPDATE effect_scope_retirements
+             SET artifact_cleanup_completed = 1
+             WHERE scope_id = ?1";
+    }
+}
+
+/// Every `effect_scope_retirements` statement, rendered for one schema.
+pub(crate) struct FenceSql {
+    /// The statements PostgreSQL issues verbatim too.
+    pub(crate) shared: ScopeRetirementStatements,
+    /// The statements only SQLite issues.
+    pub(crate) sqlite: ScopeRetirementSqliteStatements,
+}
+
+impl FenceSql {
+    fn render(schema: Schema) -> Self {
+        Self {
+            shared: ScopeRetirementStatements::render(schema.dialect()),
+            sqlite: ScopeRetirementSqliteStatements::render(schema.dialect()),
+        }
+    }
+}
+
+static FENCE_SQL: LazyLock<[FenceSql; 3]> = LazyLock::new(|| Schema::ALL.map(FenceSql::render));
+
+/// The fence-table statements addressed through `schema`, rendered once.
+pub(crate) fn fence_sql(schema: Schema) -> &'static FenceSql {
+    &FENCE_SQL[schema.index()]
+}
 
 /// The fence tables a journal connection consults: its own, and the attached
 /// registry's when a registry is bound.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FenceLocations {
     /// The schema the journal's own fence table is addressed through.
-    journal: &'static str,
-    /// The attached registry's schema name, `None` when no registry file is
-    /// bound (or the registry is this very file, addressed as `main`).
-    registry: Option<&'static str>,
+    journal: Schema,
+    /// The attached registry's schema, `None` when no registry file is bound
+    /// (or the registry is this very file, addressed as `main`).
+    registry: Option<Schema>,
 }
 
 impl FenceLocations {
     /// The journal alone, addressed as `main`.
     pub(crate) const JOURNAL_ONLY: Self = Self {
-        journal: JOURNAL_SCHEMA,
+        journal: Schema::Main,
         registry: None,
     };
 
     /// A journal attached under `journal` with no registry beside it.
-    pub(crate) fn journal_only_at(journal: &'static str) -> Self {
+    pub(crate) const fn journal_only_at(journal: Schema) -> Self {
         Self {
             journal,
             registry: None,
@@ -51,22 +147,22 @@ impl FenceLocations {
     }
 
     /// A journal attached under `journal` beside a registry attached as
-    /// [`PROCESS_REGISTRY_SCHEMA`]: the retention sweep's view.
-    pub(crate) fn attached(journal: &'static str) -> Self {
+    /// [`Schema::ProcessRegistry`]: the retention sweep's view.
+    pub(crate) const fn attached(journal: Schema) -> Self {
         Self {
             journal,
-            registry: Some(PROCESS_REGISTRY_SCHEMA),
+            registry: Some(Schema::ProcessRegistry),
         }
     }
 
     /// Every schema holding a fence table, the journal first.
-    pub(crate) fn schemas(self) -> impl Iterator<Item = &'static str> {
+    pub(crate) fn schemas(self) -> impl Iterator<Item = Schema> {
         std::iter::once(self.journal).chain(self.registry)
     }
 
     /// The schema a fence for `scope` is written into: the registry's file
     /// for a process scope when a registry is bound, the journal otherwise.
-    pub(crate) fn fence_schema_for(self, scope: &lash_core::ExecutionScope) -> &'static str {
+    pub(crate) fn fence_schema_for(self, scope: &lash_core::ExecutionScope) -> Schema {
         match (scope, self.registry) {
             (lash_core::ExecutionScope::Process { .. }, Some(registry)) => registry,
             _ => self.journal,
@@ -79,37 +175,31 @@ impl FenceLocations {
         self.fence_schema_for(scope) != self.journal
     }
 
-    /// The single-statement predicate that is true when `scope_id` is fenced
-    /// in any of this view's locations.
-    ///
-    /// Admission asks one question — "is this scope retired anywhere?" — and
-    /// every location still has to be consulted to answer it, so the locations
-    /// are disjoined inside one statement instead of being walked one query at
-    /// a time. `OR` short-circuits left to right, so a journal fence still
-    /// answers without touching the registry file.
-    pub(crate) fn fenced_predicate(self, scope_id_parameter: &str) -> String {
-        self.schemas()
-            .map(|schema| {
-                format!(
-                    "EXISTS(SELECT 1 FROM {schema}.effect_scope_retirements \
-                     WHERE scope_id = {scope_id_parameter})"
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" OR ")
-    }
-
     /// Whether `scope_id` is fenced in any location.
+    ///
+    /// One prepared statement per location, asked journal-first and stopped at
+    /// the first `true`, so a journal fence still answers without touching the
+    /// registry file. The locations used to be disjoined into a single
+    /// `format!`ed statement to save a round trip; on an in-process SQLite
+    /// connection inside the caller's transaction that round trip is a
+    /// function call, and the statement it saved was rebuilt on every
+    /// admission.
     pub(crate) fn is_fenced(
         self,
         connection: &rusqlite::Connection,
         scope_id: &str,
     ) -> rusqlite::Result<bool> {
-        connection.query_row(
-            &format!("SELECT {}", self.fenced_predicate("?1")),
-            params![scope_id],
-            |row| row.get(0),
-        )
+        for schema in self.schemas() {
+            let fenced: bool = connection.query_row(
+                fence_sql(schema).shared.exists.sql(),
+                params![scope_id],
+                |row| row.get(0),
+            )?;
+            if fenced {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Delete the fence of `scope_id` everywhere it may be recorded.
@@ -120,7 +210,7 @@ impl FenceLocations {
     ) -> rusqlite::Result<()> {
         for schema in self.schemas() {
             connection.execute(
-                &format!("DELETE FROM {schema}.effect_scope_retirements WHERE scope_id = ?1"),
+                fence_sql(schema).shared.delete_by_scope.sql(),
                 params![scope_id],
             )?;
         }
@@ -212,10 +302,13 @@ impl RegistryAttachment {
                     return Ok(FenceLocations::JOURNAL_ONLY);
                 }
                 connection.execute(
-                    &format!("ATTACH DATABASE ?1 AS {PROCESS_REGISTRY_SCHEMA}"),
+                    // `ATTACH` names a schema rather than qualifying a table, so
+                    // the renderer has nothing to say about it; the name is
+                    // `Schema::ProcessRegistry.qualifier()`.
+                    "ATTACH DATABASE ?1 AS process_registry",
                     params![path.to_string_lossy().into_owned()],
                 )?;
-                Ok(FenceLocations::attached(JOURNAL_SCHEMA))
+                Ok(FenceLocations::attached(Schema::Main))
             })
             .await?;
         if locations.registry.is_some() {
@@ -224,11 +317,7 @@ impl RegistryAttachment {
             // file wrote for a process scope while no registry was bound is
             // stale once the registry says the process is registered.
             conn.write(move |tx| {
-                crate::effect_replay::purge_rows_under_fenced_scopes(
-                    tx,
-                    JOURNAL_SCHEMA,
-                    locations,
-                )?;
+                crate::effect_replay::purge_rows_under_fenced_scopes(tx, Schema::Main, locations)?;
                 lift_journal_fences_of_registered_processes(tx, locations)?;
                 Ok(())
             })
@@ -254,13 +343,12 @@ fn lift_journal_fences_of_registered_processes(
     tx: &rusqlite::Transaction<'_>,
     locations: FenceLocations,
 ) -> rusqlite::Result<usize> {
-    let Some(registry) = locations.registry else {
+    if locations.registry.is_none() {
         return Ok(0);
-    };
+    }
+    let journal = fence_sql(locations.journal);
     let fenced: Vec<String> = {
-        let mut statement = tx.prepare(&format!(
-            "SELECT scope_id FROM {JOURNAL_SCHEMA}.effect_scope_retirements"
-        ))?;
+        let mut statement = tx.prepare(journal.sqlite.select_all_scope_ids.sql())?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
@@ -271,18 +359,16 @@ fn lift_journal_fences_of_registered_processes(
         else {
             continue;
         };
+        // `processes` belongs to the process-registry family, which this arc
+        // converts in FIG-3384; until then its one schema-qualified read stays
+        // a literal, spelled once as a constant rather than built per scope.
         let registered: bool = tx.query_row(
-            &format!("SELECT EXISTS(SELECT 1 FROM {registry}.processes WHERE process_id = ?1)"),
+            "SELECT EXISTS(SELECT 1 FROM process_registry.processes WHERE process_id = ?1)",
             params![process_id.as_str()],
             |row| row.get(0),
         )?;
         if registered {
-            lifted += tx.execute(
-                &format!(
-                    "DELETE FROM {JOURNAL_SCHEMA}.effect_scope_retirements WHERE scope_id = ?1"
-                ),
-                params![scope_id],
-            )?;
+            lifted += tx.execute(journal.shared.delete_by_scope.sql(), params![scope_id])?;
         }
     }
     Ok(lifted)
@@ -295,45 +381,60 @@ mod fenced_predicate_tests {
     fn connection_with_both_fence_tables() -> rusqlite::Connection {
         let connection = rusqlite::Connection::open_in_memory().expect("open in-memory database");
         connection
-            .execute_batch(&format!(
-                "CREATE TABLE {JOURNAL_SCHEMA}.effect_scope_retirements (scope_id TEXT PRIMARY KEY);
-                 ATTACH ':memory:' AS {PROCESS_REGISTRY_SCHEMA};
-                 CREATE TABLE {PROCESS_REGISTRY_SCHEMA}.effect_scope_retirements (scope_id TEXT PRIMARY KEY);"
-            ))
+            .execute_batch(
+                "CREATE TABLE main.effect_scope_retirements (scope_id TEXT PRIMARY KEY);
+                 ATTACH ':memory:' AS process_registry;
+                 CREATE TABLE process_registry.effect_scope_retirements (scope_id TEXT PRIMARY KEY);",
+            )
             .expect("create both fence tables");
         connection
     }
 
-    fn fence(connection: &rusqlite::Connection, schema: &str, scope_id: &str) {
+    fn fence(connection: &rusqlite::Connection, schema: Schema, scope_id: &str) {
         connection
             .execute(
-                &format!("INSERT INTO {schema}.effect_scope_retirements (scope_id) VALUES (?1)"),
+                &format!(
+                    "INSERT INTO {}.effect_scope_retirements (scope_id) VALUES (?1)",
+                    schema.qualifier()
+                ),
                 params![scope_id],
             )
             .expect("insert fence row");
     }
 
     #[test]
-    fn the_predicate_disjoins_every_location_in_one_statement() {
-        let attached = FenceLocations::attached(JOURNAL_SCHEMA).fenced_predicate("?1");
-
-        assert!(attached.contains(&format!("{JOURNAL_SCHEMA}.effect_scope_retirements")));
-        assert!(attached.contains(&format!(
-            "{PROCESS_REGISTRY_SCHEMA}.effect_scope_retirements"
-        )));
-        assert_eq!(attached.matches(" OR ").count(), 1);
-        assert!(!attached.contains(';'));
+    fn every_location_is_addressed_through_its_own_rendered_statement() {
         assert!(
-            !FenceLocations::JOURNAL_ONLY
-                .fenced_predicate("?1")
-                .contains(PROCESS_REGISTRY_SCHEMA)
+            fence_sql(Schema::Main)
+                .shared
+                .exists
+                .sql()
+                .contains("FROM main.effect_scope_retirements WHERE scope_id = ?1")
+        );
+        assert!(
+            fence_sql(Schema::ProcessRegistry)
+                .shared
+                .exists
+                .sql()
+                .contains("FROM process_registry.effect_scope_retirements WHERE scope_id = ?1")
+        );
+        assert!(
+            fence_sql(Schema::EffectJournal)
+                .sqlite
+                .select_all_scope_ids
+                .sql()
+                .contains("FROM effect_journal.effect_scope_retirements")
+        );
+        assert_eq!(
+            fence_sql(Schema::Main).shared.exists.name(),
+            "effect_scope_retirement.exists"
         );
     }
 
     #[test]
     fn a_fence_in_either_location_answers_fenced_and_neither_answers_unfenced() {
         let connection = connection_with_both_fence_tables();
-        let locations = FenceLocations::attached(JOURNAL_SCHEMA);
+        let locations = FenceLocations::attached(Schema::Main);
 
         assert!(
             !locations
@@ -341,8 +442,8 @@ mod fenced_predicate_tests {
                 .expect("read fence")
         );
 
-        fence(&connection, JOURNAL_SCHEMA, "scope-a");
-        fence(&connection, PROCESS_REGISTRY_SCHEMA, "scope-b");
+        fence(&connection, Schema::Main, "scope-a");
+        fence(&connection, Schema::ProcessRegistry, "scope-b");
 
         assert!(
             locations
@@ -364,7 +465,7 @@ mod fenced_predicate_tests {
     #[test]
     fn a_journal_only_view_does_not_see_a_registry_fence() {
         let connection = connection_with_both_fence_tables();
-        fence(&connection, PROCESS_REGISTRY_SCHEMA, "scope-b");
+        fence(&connection, Schema::ProcessRegistry, "scope-b");
 
         assert!(
             !FenceLocations::JOURNAL_ONLY

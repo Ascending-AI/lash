@@ -639,7 +639,10 @@ impl PostgresStorage {
             return Err(version_mismatch_error(found_version, None));
         }
         let signing_secret: Option<Vec<u8>> = sqlx::query_scalar(
-            "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
+            crate::await_event::wait_sql()
+                .meta_postgres
+                .select_signing_secret
+                .sql(),
         )
         .fetch_optional(&pool)
         .await

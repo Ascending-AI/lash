@@ -7,8 +7,6 @@ use lash_sansio::sync::MutexExt;
 use std::sync::Mutex;
 
 use lash_core::plugin::{SessionGraphService, SessionLifecycleService, SessionStateService};
-use lash_core::plugin::{SessionHandle, SessionTurnRequest};
-use lash_core::runtime::AssembledTurn;
 use lash_core::{SessionGraph, SessionPolicy};
 use serde_json::json;
 
@@ -238,6 +236,7 @@ fn build_compaction_ctx_with_graph(
     instructions: Option<String>,
     manager: Arc<MockSessionManager>,
     session_graph: Arc<dyn SessionGraphService>,
+    direct_completions: lash_core::facade_support::DirectCompletionClient<'static>,
 ) -> CompactionContext<'static> {
     let sessions = manager.clone();
     build_compaction_ctx_with_services(
@@ -247,9 +246,11 @@ fn build_compaction_ctx_with_graph(
         sessions,
         manager,
         session_graph,
+        direct_completions,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_compaction_ctx_with_services(
     session_id: &SessionId,
     state: SessionSnapshot,
@@ -257,6 +258,7 @@ fn build_compaction_ctx_with_services(
     sessions: Arc<dyn SessionStateService>,
     session_lifecycle: Arc<dyn SessionLifecycleService>,
     session_graph: Arc<dyn SessionGraphService>,
+    direct_completions: lash_core::facade_support::DirectCompletionClient<'static>,
 ) -> CompactionContext<'static> {
     CompactionContext {
         session_id: SessionId::from(session_id.to_string()),
@@ -270,20 +272,65 @@ fn build_compaction_ctx_with_services(
             lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test"),
         )
         .expect("test scoped effect controller"),
+        direct_completions,
     }
 }
 
-struct FailingSessionLifecycle;
+fn llm_completion(text: &str) -> lash_core::plugin::DirectLlmCompletion {
+    lash_core::plugin::DirectLlmCompletion {
+        response: lash_sansio::llm::types::LlmResponse {
+            parts: vec![lash_sansio::llm::types::LlmOutputPart::Text {
+                text: text.to_string(),
+                response_meta: None,
+            }],
+            usage: Default::default(),
+            terminal_reason: lash_sansio::llm::types::LlmTerminalReason::Stop,
+            ..Default::default()
+        },
+        usage: Default::default(),
+        llm_call: test_llm_call_record(),
+    }
+}
 
-#[async_trait]
-impl SessionLifecycleService for FailingSessionLifecycle {
-    async fn create_session(
-        &self,
-        _request: SessionCreateRequest,
-    ) -> Result<lash_core::plugin::SessionHandle, PluginError> {
-        Err(PluginError::Session(
-            "scripted compaction-session failure".to_string(),
-        ))
+/// Records every raw `LlmRequest` the compaction seam issues so a test can
+/// pin the provider-visible request and prove no child session exists.
+#[derive(Default)]
+struct RecordingLlmCompletions {
+    requests: Mutex<Vec<lash_core::LlmRequest>>,
+    summary: String,
+    error: Option<String>,
+}
+
+impl RecordingLlmCompletions {
+    fn client(captured: &Arc<Self>) -> lash_core::facade_support::DirectCompletionClient<'static> {
+        let captured = Arc::clone(captured);
+        lash_core::facade_support::DirectCompletionClient::from_llm_fn(
+            move |request: lash_core::LlmRequest, _source: String| {
+                captured.requests.lock_recover().push(request.clone());
+                if let Some(error) = &captured.error {
+                    return Err(PluginError::Session(error.clone()));
+                }
+                Ok(llm_completion(&captured.summary))
+            },
+        )
+    }
+
+    fn requests(&self) -> Vec<lash_core::LlmRequest> {
+        self.requests.lock_recover().clone()
+    }
+
+    /// All text content the provider would see, in block order.
+    fn request_text(request: &lash_core::LlmRequest) -> String {
+        request
+            .messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                lash_sansio::llm::types::LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -522,7 +569,7 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
     let (request_snapshot, prompt_text) =
         prepare_compaction_request(&state, messages.clone(), Some(instructions))
             .expect("prepare compaction request");
-    let expected_child_ids = compaction_child_ids(
+    let expected_child_ids = compaction_request_ids(
         &SessionId::from("root"),
         &state,
         &request_snapshot,
@@ -536,7 +583,7 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
     assert_eq!(prompt_text, retry_prompt_text);
     assert_eq!(
         expected_child_ids,
-        compaction_child_ids(
+        compaction_request_ids(
             &SessionId::from("root"),
             &state,
             &retry_snapshot,
@@ -551,7 +598,7 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
             .expect("prepare changed-prompt compaction request");
     assert_ne!(
         expected_child_ids,
-        compaction_child_ids(
+        compaction_request_ids(
             &SessionId::from("root"),
             &state,
             &same_snapshot,
@@ -576,7 +623,7 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
     assert_eq!(prompt_text, changed_prompt_text);
     assert_ne!(
         expected_child_ids,
-        compaction_child_ids(
+        compaction_request_ids(
             &SessionId::from("root"),
             &changed_state,
             &changed_snapshot,
@@ -586,12 +633,17 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
         .expect("derive changed-snapshot compaction child identity"),
         "different request snapshots under one physical parent need distinct child identity"
     );
+    let captured = Arc::new(RecordingLlmCompletions {
+        summary: "Compacted work summary".to_string(),
+        ..Default::default()
+    });
     let ctx = build_compaction_ctx_with_graph(
         &SessionId::from("root"),
         state,
         Some(instructions.to_string()),
         manager.clone(),
         trace.clone(),
+        RecordingLlmCompletions::client(&captured),
     );
     let compactor = RollingContextCompactor::new(RollingHistoryConfig);
 
@@ -617,31 +669,30 @@ async fn rolling_compactor_returns_summary_seed_for_new_frame() {
         Some(MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == ROLLING_HISTORY_PLUGIN_ID
     ));
 
-    let created = manager.created_snapshot();
-    assert_eq!(created.len(), 1);
-    let expected_discriminator = "b40f268283d3fa70c6e175a5b6d7aeca855dec8aa307ba6304ea244ac14ce9f7";
-    let expected_child_session_id = format!("root-compaction:{expected_discriminator}");
-    let expected_child_turn_id =
-        format!("rolling-history-compact-test:rolling-history-compaction:{expected_discriminator}");
-    assert_eq!(
-        expected_child_ids,
-        (
-            SessionId::from(expected_child_session_id.clone()),
-            TurnId::from(expected_child_turn_id.clone())
-        )
+    // FIG-3374: compaction is one direct completion on the calling session.
+    // No session-creation attempt may exist — not merely a net-zero catalog.
+    assert!(
+        manager.created.lock_recover().is_empty(),
+        "compaction must not create a child session"
     );
-    assert_eq!(
-        created[0].session_id.as_deref(),
-        Some(expected_child_session_id.as_str())
+    assert!(
+        manager.turns.lock_recover().is_empty(),
+        "compaction must not start a managed child turn"
     );
-    let turns = manager.turns.lock_recover().clone();
-    assert_eq!(turns.len(), 1);
-    assert_eq!(turns[0].0, expected_child_session_id);
-    assert_eq!(turns[0].1, expected_child_turn_id);
-    assert_eq!(turns[0].2.as_deref(), Some(expected_child_turn_id.as_str()));
-    assert_eq!(
-        turns[0].3,
-        lash_core::ExecutionScope::runtime_operation("rolling-history-compact-test")
+    let requests = captured.requests();
+    assert_eq!(requests.len(), 1, "exactly one direct provider call");
+    let request = &requests[0];
+    assert_eq!(request.scope.session_id, SessionId::from("root"));
+    assert_eq!(request.scope.agent_frame_id, expected_child_ids.0.as_str());
+    assert_eq!(request.scope.request_id, expected_child_ids.1.as_str());
+    let request_text = RecordingLlmCompletions::request_text(request);
+    assert!(request_text.contains("old work"));
+    assert!(request_text.contains("assistant old"));
+    assert!(request_text.contains("latest request"));
+    assert!(request_text.contains("## Goal"));
+    assert!(
+        request_text.contains(instructions),
+        "the focus instruction rides the summarization directive"
     );
 
     let events = trace.events();
@@ -705,12 +756,14 @@ async fn rolling_compactor_records_zero_node_completion_for_none() {
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
+    let captured = Arc::new(RecordingLlmCompletions::default());
     let ctx = build_compaction_ctx_with_graph(
         &SessionId::from("root"),
         state,
         None,
         manager,
         trace.clone(),
+        RecordingLlmCompletions::client(&captured),
     );
 
     let compaction = RollingContextCompactor::new(RollingHistoryConfig)
@@ -741,19 +794,25 @@ async fn rolling_compactor_records_zero_node_completion_before_error() {
         ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     let sessions = manager as Arc<dyn SessionStateService>;
+    let lifecycle: Arc<dyn SessionLifecycleService> = Arc::new(MockSessionManager::default());
+    let captured = Arc::new(RecordingLlmCompletions {
+        error: Some("scripted compaction-session failure".to_string()),
+        ..Default::default()
+    });
     let ctx = build_compaction_ctx_with_services(
         &SessionId::from("root"),
         state,
         None,
         sessions,
-        Arc::new(FailingSessionLifecycle),
+        lifecycle,
         trace.clone(),
+        RecordingLlmCompletions::client(&captured),
     );
 
     let error = RollingContextCompactor::new(RollingHistoryConfig)
         .compact(&ctx)
         .await
-        .expect_err("scripted lifecycle failure must propagate");
+        .expect_err("scripted completion failure must propagate");
 
     assert!(
         error
@@ -778,7 +837,7 @@ fn overflow_turn_report(
 
 fn transform_state_ctx_with_services(
     state: SessionSnapshot,
-    direct: Arc<lash_core::facade_support::DirectCompletionClient<'static>>,
+    direct: Arc<RecordingLlmCompletions>,
     graph: Arc<dyn SessionGraphService>,
     max_context_tokens: usize,
 ) -> TurnTransformContext<'static> {
@@ -795,97 +854,7 @@ fn transform_state_ctx_with_services(
             lash_core::ExecutionScope::runtime_operation("rolling-history-recovery-test"),
         )
         .expect("test scoped effect controller"),
-        direct_completions: (*direct).clone(),
-    }
-}
-
-/// Lifecycle recording what the managed compaction child turn was asked.
-struct RecordingCompactionLifecycle {
-    inputs: Mutex<Vec<String>>,
-    snapshots: Mutex<Vec<String>>,
-    inner: MockSessionManager,
-}
-
-impl RecordingCompactionLifecycle {
-    fn with_summary(summary: &str) -> Arc<Self> {
-        Arc::new(Self {
-            inputs: Mutex::new(Vec::new()),
-            snapshots: Mutex::new(Vec::new()),
-            inner: MockSessionManager::default()
-                .with_turn(empty_turn(&SessionId::from("root"), summary)),
-        })
-    }
-
-    fn text_inputs(&self) -> Vec<String> {
-        self.inputs.lock_recover().clone()
-    }
-
-    fn snapshot_texts(&self) -> Vec<String> {
-        self.snapshots.lock_recover().clone()
-    }
-}
-
-#[async_trait]
-impl SessionLifecycleService for RecordingCompactionLifecycle {
-    async fn create_session(
-        &self,
-        request: SessionCreateRequest,
-    ) -> Result<SessionHandle, PluginError> {
-        if let SessionStartPoint::Snapshot { snapshot } = &request.start
-            && let Ok(encoded) = serde_json::to_string(&**snapshot)
-        {
-            self.snapshots.lock_recover().push(encoded);
-        }
-        self.inner.create_session(request).await
-    }
-    async fn close_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
-        self.inner.close_session(session_id).await
-    }
-
-    async fn start_turn(
-        &self,
-        request: SessionTurnRequest<'_>,
-    ) -> Result<AssembledTurn, PluginError> {
-        let (turn, scoped_effect_controller) = request.into_parts();
-        let mut text = String::new();
-        for item in &turn.input.items {
-            if let InputItem::Text { text: part_text } = item {
-                text.push_str(part_text);
-            }
-        }
-        self.inputs.lock_recover().push(text);
-        self.inner
-            .start_turn(SessionTurnRequest::new_runtime_internal_compaction(
-                turn.session_id.clone(),
-                turn.turn_id.clone(),
-                turn.input.clone(),
-                scoped_effect_controller,
-            )?)
-            .await
-    }
-}
-
-fn transform_state_ctx_with_lifecycle(
-    state: SessionSnapshot,
-    direct: Arc<lash_core::facade_support::DirectCompletionClient<'static>>,
-    lifecycle: Arc<dyn SessionLifecycleService>,
-    graph: Arc<dyn SessionGraphService>,
-    max_context_tokens: usize,
-) -> TurnTransformContext<'static> {
-    TurnTransformContext {
-        session_id: SessionId::from("root"),
-        state: state.read_view().expect("runtime frame scope resolves"),
-        prompt_usage: None,
-        max_context_tokens: Some(max_context_tokens),
-        sessions: Arc::new(MockSessionManager::default()),
-        session_lifecycle: lifecycle,
-        session_graph: graph,
-        scoped_effect_controller: lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            lash_core::ExecutionScope::runtime_operation("rolling-history-recovery-test"),
-        )
-        .expect("test scoped effect controller"),
-        direct_completions: (*direct).clone(),
+        direct_completions: RecordingLlmCompletions::client(&direct),
     }
 }
 
@@ -898,59 +867,18 @@ fn test_llm_call_record() -> lash_core::LlmCallRecord {
     }
 }
 
-fn empty_direct_client() -> Arc<lash_core::facade_support::DirectCompletionClient<'static>> {
-    Arc::new(lash_core::facade_support::DirectCompletionClient::from_fn(
-        |_request: lash_core::facade_support::DirectRequest, _source| {
-            Ok(lash_core::plugin::DirectCompletion {
-                text: String::new(),
-                usage: Default::default(),
-                llm_call: test_llm_call_record(),
-            })
-        },
-    ))
+/// A summarizer that always answers with the recovered summary text.
+fn recovered_direct() -> Arc<RecordingLlmCompletions> {
+    Arc::new(RecordingLlmCompletions {
+        summary: "Recovered: the user asked for the report verdict; it is done.".to_string(),
+        ..Default::default()
+    })
 }
 
-/// Captures the summarizer direct request so a regression can prove what
-/// the out-of-band call actually asked for.
-#[derive(Default)]
-struct CapturingDirect {
-    requests: Mutex<Vec<String>>,
-}
-
-impl CapturingDirect {
-    fn text_requests(&self) -> Vec<String> {
-        self.requests.lock_recover().clone()
-    }
-}
-
-fn capturing_direct_client(
-    captured: Arc<CapturingDirect>,
-) -> Arc<lash_core::facade_support::DirectCompletionClient<'static>> {
-    Arc::new(lash_core::facade_support::DirectCompletionClient::from_fn(
-        move |request: lash_core::facade_support::DirectRequest, _source: String| {
-            let text = request
-                .messages
-                .first()
-                .map(|message| {
-                    message
-                        .parts
-                        .iter()
-                        .map(|part| match part {
-                            lash_core::facade_support::DirectPart::Text(text) => text.clone(),
-                            _ => String::new(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-                .unwrap_or_default();
-            captured.requests.lock_recover().push(text);
-            Ok(lash_core::plugin::DirectCompletion {
-                text: "Recovered: the user asked for the report verdict; it is done.".to_string(),
-                usage: Default::default(),
-                llm_call: test_llm_call_record(),
-            })
-        },
-    ))
+/// A summarizer that always returns an empty completion — the
+/// `insufficient_reduction` failure path.
+fn empty_direct() -> Arc<RecordingLlmCompletions> {
+    Arc::new(RecordingLlmCompletions::default())
 }
 
 fn recovery_record_node_message(record: OverflowRecoveryRecord) -> Message {
@@ -1152,18 +1080,9 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
     let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
     let (history_before, state) = recovery_history(true);
     let history_before: Vec<Message> = history_before;
-    let lifecycle = RecordingCompactionLifecycle::with_summary(
-        "Recovered: the user asked for the report verdict; it is done.",
-    );
 
-    let direct = empty_direct_client();
-    let ctx = transform_state_ctx_with_lifecycle(
-        state,
-        direct,
-        lifecycle.clone(),
-        trace.clone(),
-        200_000,
-    );
+    let direct = recovered_direct();
+    let ctx = transform_state_ctx_with_services(state, direct.clone(), trace.clone(), 200_000);
 
     let prepared = PreparedContext {
         messages: vec![text_message(
@@ -1206,40 +1125,39 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
         "the current request must survive the recovery: {contents:?}"
     );
 
-    // One summarizer ran as the runtime-internal compaction managed child
-    // turn, and the prompt it was asked carries the standard compaction ask
-    // plus the recovery instructions, never the oversized body.
-    let created = lifecycle.inner.created.lock_recover().clone();
-    assert_eq!(created.len(), 1);
+    // One direct completion ran as the summarizer: the provider-visible
+    // request carries the rendered history plus the standard compaction ask
+    // and the recovery instructions, never the oversized body.
+    let requests = direct.requests();
+    assert_eq!(requests.len(), 1, "exactly one direct summarizer call");
+    let request = &requests[0];
+    assert_eq!(request.scope.session_id, SessionId::from("root"));
     assert!(
-        created[0]
-            .session_id
-            .as_ref()
-            .is_some_and(|session_id| session_id.as_str().contains("-compaction:")),
-        "the summarizer ran on the compaction child seam: {:?}",
-        created[0]
+        request
+            .scope
+            .request_id
+            .contains("rolling-history-compaction:"),
+        "the replay key keeps the compaction attempt identity: {:?}",
+        request.scope.request_id
     );
-    let inputs = lifecycle.text_inputs();
-    assert_eq!(inputs.len(), 1);
+    let request_text = RecordingLlmCompletions::request_text(request);
     assert!(
-        inputs[0].contains("##") && inputs[0].contains("the conversation above"),
+        request_text.contains("##") && request_text.contains("the conversation above"),
         "the recovery summarizer runs the standard compaction prompt: {}",
-        inputs[0]
+        request_text
     );
     assert!(
-        inputs[0].contains(OVERFLOW_RECOVERY_INSTRUCTIONS),
+        request_text.contains(OVERFLOW_RECOVERY_INSTRUCTIONS),
         "the recovery summarizer must carry the recovery instructions"
     );
     assert!(
-        inputs[0].len() < 40_000,
+        request_text.len() < 40_000,
         "the summarizer request itself must fit its window: {}",
-        inputs[0].len()
+        request_text.len()
     );
-    let snapshots = lifecycle.snapshot_texts();
-    assert_eq!(snapshots.len(), 1);
     assert!(
-        snapshots[0].contains(OVERFLOW_ELIDED_PART_PLACEHOLDER),
-        "the oversized part was elided before the summarizer's own snapshot"
+        request_text.contains(OVERFLOW_ELIDED_PART_PLACEHOLDER),
+        "the oversized part was elided before the summarizer saw the history"
     );
 
     // The durable terminal record was appended; the summary rides the
@@ -1322,53 +1240,36 @@ fn snapshot_with_messages(messages: &[Message]) -> SessionSnapshot {
     }
 }
 
-/// FIG-3107 regression: the summarizer child must not inherit the plugin's own
-/// still-open recovery marker. A child whose read state derives `pending` runs
-/// the recovery policy on its own prepare-turn and spawns another summarizer
-/// child. Before the fix that recursed without bound: the
-/// `context-overflow-recovery` e2e nested 202 `-compaction:` sessions, spent
-/// ~200 provider calls and grew memory without limit instead of taking one
-/// summary and returning.
+/// FIG-3107 regression, on the FIG-3374 seam: the summarizer request must not
+/// carry the plugin's own still-open recovery marker. A request that still
+/// derived `pending` would let a future reader of that transcript re-run the
+/// very recovery it is summarizing. Before the original fix this recursed
+/// without bound through nested `-compaction:` sessions; with the direct
+/// completion the same guarantee is pinned on the provider-visible request.
 #[tokio::test]
-async fn recovery_summarizer_child_does_not_inherit_the_pending_marker() {
+async fn recovery_summarizer_request_does_not_carry_the_pending_marker() {
     let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
     let (_history, state) = recovery_history(true);
-    let lifecycle = RecordingCompactionLifecycle::with_summary("Recovered: the verdict stands.");
-    let ctx = transform_state_ctx_with_lifecycle(
-        state,
-        empty_direct_client(),
-        lifecycle.clone(),
-        trace.clone(),
-        200_000,
-    );
+    let direct = recovered_direct();
+    let ctx = transform_state_ctx_with_services(state, direct.clone(), trace.clone(), 200_000);
 
     RollingTurnTransform::new(RollingHistoryConfig)
         .transform(&ctx, recovery_test_input())
         .await
         .expect("recovery transform runs");
 
-    let snapshots = lifecycle.snapshot_texts();
-    assert_eq!(snapshots.len(), 1, "exactly one summarizer child ran");
-    let child: SessionSnapshot =
-        serde_json::from_str(&snapshots[0]).expect("decode the summarizer child snapshot");
-    let child_messages = child
-        .read_view()
-        .expect("summarizer child read view")
-        .messages()
-        .to_vec();
-    let kinds: Vec<OverflowRecoveryRecord> =
-        history_recovery_records(&child_messages).expect("child history records parse");
-    let derived = OverflowRecoveryState::derive(kinds.clone());
+    let requests = direct.requests();
+    assert_eq!(requests.len(), 1, "exactly one summarizer call ran");
+    let request_text = RecordingLlmCompletions::request_text(&requests[0]);
     assert!(
-        !derived.pending(),
-        "the summarizer child re-derives the very recovery it is summarizing for \
-         and spawns another summarizer: {kinds:?}"
+        !request_text.contains(OVERFLOW_RECOVERY_MARKER.trim_end_matches(':')),
+        "the summarizer request must not carry the pending recovery marker it is recovering from"
     );
 }
 
 #[tokio::test]
 async fn recovery_failure_is_bounded_and_explicit() {
-    let empty_direct = empty_direct_client();
+    let empty = empty_direct();
     let (_messages1, _) = recovery_history(true);
     let mut history: Vec<Message> = _messages1;
 
@@ -1377,7 +1278,7 @@ async fn recovery_failure_is_bounded_and_explicit() {
         let trace = Arc::new(RecordingSessionGraph::default());
         let ctx = transform_state_ctx_with_services(
             snapshot_with_messages(&history),
-            empty_direct.clone(),
+            empty.clone(),
             trace.clone(),
             200_000,
         );
@@ -1420,12 +1321,11 @@ async fn recovery_failure_is_bounded_and_explicit() {
 
     // At the cap the recovery stops by itself: no summarizer call, no
     // append, no loop.
-    let captured = Arc::new(CapturingDirect::default());
-    let direct = capturing_direct_client(captured.clone());
+    let captured = Arc::new(RecordingLlmCompletions::default());
     let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
     let ctx = transform_state_ctx_with_services(
         snapshot_with_messages(&history),
-        direct,
+        captured.clone(),
         trace.clone(),
         200_000,
     );
@@ -1437,7 +1337,7 @@ async fn recovery_failure_is_bounded_and_explicit() {
         trace.appends().is_empty(),
         "the cap spends no further attempt"
     );
-    assert!(captured.text_requests().is_empty());
+    assert!(captured.requests().is_empty());
 
     let traces = trace.events();
     let outcomes: Vec<&str> = traces
@@ -1461,17 +1361,16 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
         OverflowRecoveryRecord::Exhausted,
     ] {
         let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
-        let captured = Arc::new(CapturingDirect::default());
+        let captured = Arc::new(RecordingLlmCompletions::default());
         let (mut messages, _) = recovery_history(false);
         messages.push(recovery_record_node_message(
             OverflowRecoveryRecord::Pending,
         ));
         messages.push(recovery_record_node_message(terminal));
 
-        let direct = capturing_direct_client(captured.clone());
         let ctx = transform_state_ctx_with_services(
             snapshot_with_messages(&messages),
-            direct,
+            captured.clone(),
             trace.clone(),
             200_000,
         );
@@ -1493,7 +1392,7 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
             trace.appends().is_empty(),
             "a settled recovery must not reopen: {terminal:?}"
         );
-        assert!(captured.text_requests().is_empty());
+        assert!(captured.requests().is_empty());
         let contents: Vec<&str> = built
             .messages
             .iter()

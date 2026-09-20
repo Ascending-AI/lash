@@ -30,11 +30,192 @@ use lash_core::{
     facade_support::LeaseTimings,
 };
 
+use std::sync::LazyLock;
+
+use lash_store_sql::effect::EffectJournalStatements;
+use lash_store_sql::effect::group::GroupStatements;
+use lash_store_sql::effect::replay::ReplayStatements;
+
 use super::*;
-use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events};
-use crate::scope_fence::{FenceLocations, JOURNAL_SCHEMA, RegistryAttachment};
+use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events, wait_sql};
+use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema, fence_sql};
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();
+
+lash_store_sql::statements! {
+    /// Journal-wide statements only SQLite issues.
+    pub(crate) struct EffectJournalSqliteStatements @ "effect_journal" {
+        /// Preserve one retirement fence per execution scope owned by session
+        /// `?1`, stamped `?2`, before the session's journal rows are deleted.
+        ///
+        /// SQLite stamps from the host clock and writes the boolean column as
+        /// `0`; PostgreSQL stamps from the server clock and writes `FALSE`.
+        insert_session_scope_fences = "INSERT INTO effect_scope_retirements (
+                 scope_id, retired_at_ms, artifact_cleanup_completed
+             )
+             SELECT scope_id, ?2, 0 FROM (
+                 SELECT DISTINCT scope_id FROM runtime_effect_replay
+                 WHERE session_id = ?1
+                 UNION
+                 SELECT DISTINCT scope_id FROM runtime_effect_group
+                 WHERE session_id = ?1
+             ) AS retired_session_scopes
+             WHERE 1
+             ON CONFLICT (scope_id) DO NOTHING";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `runtime_effect_replay` statements only SQLite issues.
+    pub(crate) struct ReplaySqliteStatements @ "effect_replay" {
+        /// The row a claim decision reads, for `?1` (scope) / `?2` (replay
+        /// key).
+        ///
+        /// No lock suffix: every atom already runs under `BEGIN IMMEDIATE`,
+        /// which holds the database write lock for the whole transaction.
+        select_for_claim = "SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
+                lease_expires_at_ms, due_at_ms
+             FROM runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2";
+
+        /// Insert a fresh claim.
+        ///
+        /// No `ON CONFLICT`: the row was read as absent under the same
+        /// `BEGIN IMMEDIATE` lock, so a conflict is a defect and the
+        /// constraint error is the right report.
+        insert_claimed = "INSERT INTO runtime_effect_replay (
+                scope_id, session_id, replay_key, envelope_hash,
+                envelope_json, status, outcome_json, error_json, lease_owner_id,
+                lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
+                created_at_ms, updated_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, ?11, ?12)";
+
+        /// Write the terminal under the lease fence and report the child's
+        /// group: `?1` scope, `?2` replay key, `?3` envelope hash, `?4`
+        /// owner, `?5` lease token, `?6` status, `?7` outcome, `?8` error,
+        /// `?9` now, `?10` now.
+        ///
+        /// The lease instant is bound by the caller from the host clock;
+        /// PostgreSQL reads its own `transaction_timestamp()` instead, which
+        /// is why the two texts fork.
+        finalize_terminal = "UPDATE runtime_effect_replay
+             SET status = ?6,
+                 outcome_json = ?7,
+                 error_json = ?8,
+                 lease_owner_id = NULL,
+                 lease_token = NULL,
+                 lease_expires_at_ms = 0,
+                 updated_at_ms = ?9
+             WHERE scope_id = ?1
+               AND replay_key = ?2
+               AND envelope_hash = ?3
+               AND lease_owner_id = ?4
+               AND lease_token = ?5
+               AND status = 'in_progress'
+               AND lease_expires_at_ms > ?10
+             RETURNING group_key";
+
+        /// Extend the lease of `?1` / `?2` to `?6`, stamping `?7`, if `?4` /
+        /// `?5` still hold it at `?8`. Forks for the same reason
+        /// [`ReplaySqliteStatements::finalize_terminal`] does.
+        renew_lease = "UPDATE runtime_effect_replay
+             SET lease_expires_at_ms = ?6,
+                 updated_at_ms = ?7
+             WHERE scope_id = ?1
+               AND replay_key = ?2
+               AND envelope_hash = ?3
+               AND lease_owner_id = ?4
+               AND lease_token = ?5
+               AND status = 'in_progress'
+               AND lease_expires_at_ms > ?8";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `runtime_effect_group` statements only SQLite issues.
+    pub(crate) struct GroupSqliteStatements @ "effect_group" {
+        /// Record a group, keeping any existing row.
+        ///
+        /// SQLite reads the durable row back with
+        /// [`GroupStatements::select_by_key`] unconditionally; PostgreSQL
+        /// carries a `RETURNING` clause so the read-back only costs a second
+        /// statement on the conflict path.
+        insert_new = "INSERT INTO runtime_effect_group (
+                group_key, scope_id, session_id, wake, loser_disposition,
+                children, next_seq, created_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
+             ON CONFLICT (group_key) DO NOTHING";
+    }
+}
+
+/// Every effect-family statement, rendered for one schema.
+pub(crate) struct EffectSql {
+    /// Journal-wide statements both backends issue verbatim.
+    pub(crate) journal: EffectJournalStatements,
+    /// Journal-wide statements only SQLite issues.
+    pub(crate) journal_sqlite: EffectJournalSqliteStatements,
+    /// `runtime_effect_replay` statements both backends issue verbatim.
+    pub(crate) replay: ReplayStatements,
+    /// `runtime_effect_replay` statements only SQLite issues.
+    pub(crate) replay_sqlite: ReplaySqliteStatements,
+    /// `runtime_effect_group` statements both backends issue verbatim.
+    pub(crate) group: GroupStatements,
+    /// `runtime_effect_group` statements only SQLite issues.
+    pub(crate) group_sqlite: GroupSqliteStatements,
+}
+
+impl EffectSql {
+    fn render(schema: Schema) -> Self {
+        let dialect = schema.dialect();
+        Self {
+            journal: EffectJournalStatements::render(dialect),
+            journal_sqlite: EffectJournalSqliteStatements::render(dialect),
+            replay: ReplayStatements::render(dialect),
+            replay_sqlite: ReplaySqliteStatements::render(dialect),
+            group: GroupStatements::render(dialect),
+            group_sqlite: GroupSqliteStatements::render(dialect),
+        }
+    }
+}
+
+static EFFECT_SQL: LazyLock<[EffectSql; 3]> = LazyLock::new(|| Schema::ALL.map(EffectSql::render));
+
+/// The effect-family statements addressed through `schema`, rendered once at
+/// first use and never again.
+pub(crate) fn effect_sql(schema: Schema) -> &'static EffectSql {
+    &EFFECT_SQL[schema.index()]
+}
+
+/// Whether a session catalog still pins `scope_id` through a cancellation
+/// closure, addressed through `schema`.
+///
+/// `turn_cancel_closure_participants` belongs to the session-core family,
+/// which this arc converts later; until then its three qualified spellings are
+/// constants rather than a statement built per call.
+const fn closure_participant_exists_sql(schema: Schema) -> &'static str {
+    match schema {
+        Schema::Main => {
+            "SELECT EXISTS(
+                SELECT 1 FROM main.turn_cancel_closure_participants
+                WHERE scope_id = ?1
+             )"
+        }
+        Schema::EffectJournal => {
+            "SELECT EXISTS(
+                SELECT 1 FROM effect_journal.turn_cancel_closure_participants
+                WHERE scope_id = ?1
+             )"
+        }
+        Schema::ProcessRegistry => {
+            "SELECT EXISTS(
+                SELECT 1 FROM process_registry.turn_cancel_closure_participants
+                WHERE scope_id = ?1
+             )"
+        }
+    }
+}
 
 /// The SQLite effect-replay driver: one shared state machine over
 /// [`SqliteEffectReplayRowStore`].
@@ -432,7 +613,10 @@ async fn open_effect_replay_driver(
     let signing_secret = conn
         .call(|connection| {
             connection.query_row(
-                "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                wait_sql(Schema::Main)
+                    .meta_sqlite
+                    .select_signing_secret
+                    .sql(),
                 [],
                 |row| row.get(0),
             )
@@ -459,7 +643,10 @@ async fn open_effect_replay_memory_driver(
     let signing_secret = conn
         .call(|connection| {
             connection.query_row(
-                "SELECT signing_secret FROM await_event_meta WHERE singleton = 1",
+                wait_sql(Schema::Main)
+                    .meta_sqlite
+                    .select_signing_secret
+                    .sql(),
                 [],
                 |row| row.get(0),
             )
@@ -592,10 +779,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         self.conn
             .call(move |connection| {
                 connection.query_row(
-                    "SELECT EXISTS(
-                         SELECT 1 FROM runtime_effect_replay
-                         WHERE scope_id = ?1 AND replay_key = ?2
-                     )",
+                    effect_sql(Schema::Main).replay.exists_by_key.sql(),
                     params![scope_id, replay_key],
                     |row| row.get(0),
                 )
@@ -632,22 +816,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 let now = clock.timestamp_ms();
                 let claimed: Option<Option<String>> = tx
                     .query_row(
-                        "UPDATE runtime_effect_replay
-                     SET status = ?6,
-                         outcome_json = ?7,
-                         error_json = ?8,
-                         lease_owner_id = NULL,
-                         lease_token = NULL,
-                         lease_expires_at_ms = 0,
-                         updated_at_ms = ?9
-                     WHERE scope_id = ?1
-                       AND replay_key = ?2
-                       AND envelope_hash = ?3
-                       AND lease_owner_id = ?4
-                       AND lease_token = ?5
-                       AND status = 'in_progress'
-                       AND lease_expires_at_ms > ?10
-                     RETURNING group_key",
+                        effect_sql(Schema::Main)
+                            .replay_sqlite
+                            .finalize_terminal
+                            .sql(),
                         params![
                             fence.scope_id.as_str(),
                             fence.replay_key.as_str(),
@@ -677,19 +849,14 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 };
                 let settlement_seq: i64 = tx
                     .query_row(
-                        "UPDATE runtime_effect_group
-                         SET next_seq = next_seq + 1
-                         WHERE group_key = ?1
-                         RETURNING next_seq",
+                        effect_sql(Schema::Main).group.bump_next_seq.sql(),
                         params![group_key.as_str()],
                         |row| row.get(0),
                     )
                     .optional()?
                     .ok_or_else(|| missing_group_row(&group_key))?;
                 tx.execute(
-                    "UPDATE runtime_effect_replay
-                     SET settlement_seq = ?3
-                     WHERE scope_id = ?1 AND replay_key = ?2",
+                    effect_sql(Schema::Main).replay.set_settlement_seq.sql(),
                     params![
                         fence.scope_id.as_str(),
                         fence.replay_key.as_str(),
@@ -731,12 +898,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 // reset `next_seq`, which would re-seat recorded children at
                 // ranks a caller has already consumed.
                 tx.execute(
-                    "INSERT INTO runtime_effect_group (
-                        group_key, scope_id, session_id, wake, loser_disposition,
-                        children, next_seq, created_at_ms
-                     )
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
-                     ON CONFLICT(group_key) DO NOTHING",
+                    effect_sql(Schema::Main).group_sqlite.insert_new.sql(),
                     params![
                         record.group_key.as_str(),
                         record.scope_id.as_str(),
@@ -789,10 +951,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         self.conn
             .call(move |connection| {
                 let mut statement = connection.prepare(
-                    "SELECT scope_id, replay_key, envelope_json, status, outcome_json, error_json, lease_expires_at_ms
-                     FROM runtime_effect_replay
-                     WHERE group_key = ?1 AND settlement_seq IS NULL
-                     ORDER BY replay_key",
+                    effect_sql(Schema::Main)
+                        .replay
+                        .select_unsettled_children
+                        .sql(),
                 )?;
                 let rows = statement
                     .query_map(params![group_key.as_str()], |row| {
@@ -833,11 +995,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .call(move |connection| {
                 connection
                     .query_row(
-                        "SELECT settlement_seq, replay_key, status, outcome_json, error_json
-                         FROM runtime_effect_replay
-                         WHERE group_key = ?1 AND settlement_seq IS NOT NULL
-                         ORDER BY settlement_seq
-                         LIMIT 1 OFFSET ?2",
+                        effect_sql(Schema::Main)
+                            .replay
+                            .select_settlement_by_rank
+                            .sql(),
                         params![group_key.as_str(), offset as i64],
                         |row| {
                             let state = effect_replay_driver::EffectRowState::from_columns(
@@ -874,16 +1035,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 let now = clock.timestamp_ms();
                 let renewed_expires_at = now.saturating_add(lease_ttl_ms);
                 let changed = tx.execute(
-                    "UPDATE runtime_effect_replay
-                     SET lease_expires_at_ms = ?6,
-                         updated_at_ms = ?7
-                     WHERE scope_id = ?1
-                       AND replay_key = ?2
-                       AND envelope_hash = ?3
-                       AND lease_owner_id = ?4
-                       AND lease_token = ?5
-                       AND status = 'in_progress'
-                       AND lease_expires_at_ms > ?8",
+                    effect_sql(Schema::Main).replay_sqlite.renew_lease.sql(),
                     params![
                         fence.scope_id.as_str(),
                         fence.replay_key.as_str(),
@@ -951,27 +1103,17 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         // Preserve those scopes as the same retirement
                         // evidence used by scope-exact retirement so artifact
                         // cleanup remains retryable after journal deletion.
+                        let sql = effect_sql(Schema::Main);
                         tx.execute(
-                            "INSERT INTO effect_scope_retirements (
-                                 scope_id, retired_at_ms, artifact_cleanup_completed
-                             )
-                             SELECT scope_id, ?2, 0 FROM (
-                                 SELECT DISTINCT scope_id FROM runtime_effect_replay
-                                 WHERE session_id = ?1
-                                 UNION
-                                 SELECT DISTINCT scope_id FROM runtime_effect_group
-                                 WHERE session_id = ?1
-                             ) AS retired_session_scopes
-                             WHERE 1
-                             ON CONFLICT(scope_id) DO NOTHING",
+                            sql.journal_sqlite.insert_session_scope_fences.sql(),
                             params![session_id.as_str(), now_ms as i64],
                         )?;
                         let deleted = tx.execute(
-                            "DELETE FROM runtime_effect_replay WHERE session_id = ?1",
+                            sql.replay.delete_by_session.sql(),
                             params![session_id.as_str()],
                         )?;
                         tx.execute(
-                            "DELETE FROM runtime_effect_group WHERE session_id = ?1",
+                            sql.group.delete_by_session.sql(),
                             params![session_id.as_str()],
                         )?;
                         Ok(deleted)
@@ -1016,12 +1158,12 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             self.conn
                 .write(move |tx| {
                     let closure_pinned =
-                        scope_has_turn_cancel_closure_participant(tx, JOURNAL_SCHEMA, &scope_id)?;
+                        scope_has_turn_cancel_closure_participant(tx, Schema::Main, &scope_id)?;
                     if closure_pinned {
                         return Ok(None);
                     }
                     if when_quiescent
-                        && !scope_is_quiescent(tx, JOURNAL_SCHEMA, &scope_id, &scope_json)?
+                        && !scope_is_quiescent(tx, Schema::Main, &scope_id, &scope_json)?
                     {
                         return Ok(None);
                     }
@@ -1031,7 +1173,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     }
                     Ok(Some(Some(delete_scope_rows(
                         tx,
-                        JOURNAL_SCHEMA,
+                        Schema::Main,
                         &scope_id,
                         &scope_json,
                     )?)))
@@ -1050,7 +1192,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         // Post-commit cleanup: idempotent, and repeated by the next bind or
         // sweep if this process dies before it lands.
         self.conn
-            .write(move |tx| delete_scope_rows(tx, JOURNAL_SCHEMA, &scope_id, &scope_json))
+            .write(move |tx| delete_scope_rows(tx, Schema::Main, &scope_id, &scope_json))
             .await
             .map_err(retirement_error)
     }
@@ -1084,9 +1226,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         self.conn
             .call(|conn| {
                 let mut statement = conn.prepare(
-                    "SELECT scope_id FROM effect_scope_retirements
-                     WHERE artifact_cleanup_completed = 0
-                     ORDER BY scope_id",
+                    fence_sql(Schema::Main)
+                        .sqlite
+                        .select_pending_artifact_cleanup
+                        .sql(),
                 )?;
                 let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
                 let mut scopes = Vec::new();
@@ -1115,9 +1258,10 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    "UPDATE effect_scope_retirements
-                     SET artifact_cleanup_completed = 1
-                     WHERE scope_id = ?1",
+                    fence_sql(Schema::Main)
+                        .sqlite
+                        .complete_artifact_cleanup
+                        .sql(),
                     params![scope_id],
                 )?;
                 Ok(())
@@ -1144,27 +1288,12 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
 /// the journal file from another database (the retention sweep).
 pub(crate) fn scope_is_quiescent(
     tx: &rusqlite::Transaction<'_>,
-    schema: &str,
+    schema: Schema,
     scope_id: &str,
     scope_json: &str,
 ) -> rusqlite::Result<bool> {
     let live: bool = tx.query_row(
-        &format!(
-            "SELECT EXISTS(
-                SELECT 1 FROM {schema}.runtime_effect_replay
-                WHERE scope_id = ?1 AND status = 'in_progress'
-             ) OR EXISTS(
-                SELECT 1 FROM {schema}.runtime_effect_group AS grp
-                WHERE grp.scope_id = ?1
-                  AND grp.children > (
-                      SELECT COUNT(*) FROM {schema}.runtime_effect_replay AS child
-                      WHERE child.scope_id = ?1 AND child.group_key = grp.group_key
-                  )
-             ) OR EXISTS(
-                SELECT 1 FROM {schema}.await_event_waits
-                WHERE scope_json = ?2 AND terminal_json IS NULL
-             )"
-        ),
+        effect_sql(schema).journal.scope_is_quiescent.sql(),
         params![scope_id, scope_json],
         |row| row.get(0),
     )?;
@@ -1176,16 +1305,11 @@ pub(crate) fn scope_is_quiescent(
 /// transaction that would insert the retirement fence.
 pub(crate) fn scope_has_turn_cancel_closure_participant(
     tx: &rusqlite::Transaction<'_>,
-    schema: &str,
+    schema: Schema,
     scope_id: &str,
 ) -> rusqlite::Result<bool> {
     tx.query_row(
-        &format!(
-            "SELECT EXISTS(
-                SELECT 1 FROM {schema}.turn_cancel_closure_participants
-                WHERE scope_id = ?1
-             )"
-        ),
+        closure_participant_exists_sql(schema),
         params![scope_id],
         |row| row.get(0),
     )
@@ -1197,7 +1321,7 @@ pub(crate) fn scope_has_turn_cancel_closure_participant(
 /// Returns the effect rows deleted.
 pub(crate) fn retire_scope_rows(
     tx: &rusqlite::Transaction<'_>,
-    schema: &str,
+    schema: Schema,
     scope_id: &str,
     scope_json: &str,
     now_ms: u64,
@@ -1209,18 +1333,12 @@ pub(crate) fn retire_scope_rows(
 /// Write the permanent fence of `scope_id` into `schema`'s fence table.
 pub(crate) fn insert_scope_fence(
     tx: &rusqlite::Transaction<'_>,
-    schema: &str,
+    schema: Schema,
     scope_id: &str,
     now_ms: u64,
 ) -> rusqlite::Result<()> {
     tx.execute(
-        &format!(
-            "INSERT INTO {schema}.effect_scope_retirements (
-                 scope_id, retired_at_ms, artifact_cleanup_completed
-             )
-             VALUES (?1, ?2, 0)
-             ON CONFLICT(scope_id) DO NOTHING"
-        ),
+        fence_sql(schema).sqlite.insert_fence.sql(),
         params![scope_id, now_ms as i64],
     )?;
     Ok(())
@@ -1230,20 +1348,15 @@ pub(crate) fn insert_scope_fence(
 /// `schema`'s journal tables. Returns the effect rows deleted.
 pub(crate) fn delete_scope_rows(
     tx: &rusqlite::Transaction<'_>,
-    schema: &str,
+    schema: Schema,
     scope_id: &str,
     scope_json: &str,
 ) -> rusqlite::Result<usize> {
-    let deleted = tx.execute(
-        &format!("DELETE FROM {schema}.runtime_effect_replay WHERE scope_id = ?1"),
-        params![scope_id],
-    )?;
+    let sql = effect_sql(schema);
+    let deleted = tx.execute(sql.replay.delete_by_scope.sql(), params![scope_id])?;
+    tx.execute(sql.group.delete_by_scope.sql(), params![scope_id])?;
     tx.execute(
-        &format!("DELETE FROM {schema}.runtime_effect_group WHERE scope_id = ?1"),
-        params![scope_id],
-    )?;
-    tx.execute(
-        &format!("DELETE FROM {schema}.await_event_waits WHERE scope_json = ?1"),
+        wait_sql(schema).shared.delete_by_scope_json.sql(),
         params![scope_json],
     )?;
     Ok(deleted)
@@ -1255,18 +1368,17 @@ pub(crate) fn delete_scope_rows(
 /// the scopes purged.
 pub(crate) fn purge_rows_under_fenced_scopes(
     tx: &rusqlite::Transaction<'_>,
-    journal_schema: &str,
+    journal_schema: Schema,
     fences: FenceLocations,
 ) -> rusqlite::Result<usize> {
     let mut scopes: Vec<(String, String)> = Vec::new();
     {
-        let mut keyed = tx.prepare(&format!(
-            "SELECT scope_id FROM {journal_schema}.runtime_effect_replay
-             WHERE session_id IS NULL
-             UNION
-             SELECT scope_id FROM {journal_schema}.runtime_effect_group
-             WHERE session_id IS NULL"
-        ))?;
+        let mut keyed = tx.prepare(
+            effect_sql(journal_schema)
+                .journal
+                .select_session_free_scope_ids
+                .sql(),
+        )?;
         for key in keyed.query_map([], |row| row.get::<_, String>(0))? {
             let key = key?;
             if let Some(scope) = lash_core::ExecutionScope::from_journal_key(&key) {
@@ -1278,10 +1390,12 @@ pub(crate) fn purge_rows_under_fenced_scopes(
                 scopes.push((key, scope_json));
             }
         }
-        let mut waited = tx.prepare(&format!(
-            "SELECT DISTINCT scope_json FROM {journal_schema}.await_event_waits
-             WHERE session_id IS NULL"
-        ))?;
+        let mut waited = tx.prepare(
+            wait_sql(journal_schema)
+                .shared
+                .select_session_free_scope_json
+                .sql(),
+        )?;
         for scope_json in waited.query_map([], |row| row.get::<_, String>(0))? {
             let scope_json = scope_json?;
             if let Ok(scope) = serde_json::from_str::<lash_core::ExecutionScope>(&scope_json)
@@ -1309,10 +1423,10 @@ fn select_effect_row(
     replay_key: &str,
 ) -> rusqlite::Result<Option<StoredEffectRow>> {
     tx.query_row(
-        "SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
-                lease_owner_id, lease_token, lease_expires_at_ms, due_at_ms
-         FROM runtime_effect_replay
-         WHERE scope_id = ?1 AND replay_key = ?2",
+        effect_sql(Schema::Main)
+            .replay_sqlite
+            .select_for_claim
+            .sql(),
         params![scope_id, replay_key],
         |row| {
             let state = effect_replay_driver::EffectRowState::from_columns(
@@ -1327,10 +1441,10 @@ fn select_effect_row(
                 lease_expires_at_ms: u64_from_sql(
                     "RuntimeEffectReplay",
                     "lease_expires_at_ms",
-                    row.get(7)?,
+                    row.get(5)?,
                 )?,
                 due_at_ms: row
-                    .get::<_, Option<i64>>(8)?
+                    .get::<_, Option<i64>>(6)?
                     .map(|value| u64_from_sql("RuntimeEffectReplay", "due_at_ms", value))
                     .transpose()?,
             })
@@ -1345,13 +1459,7 @@ fn insert_claimed_row(
     stamp: &EffectLeaseStamp,
 ) -> rusqlite::Result<()> {
     tx.execute(
-        "INSERT INTO runtime_effect_replay (
-            scope_id, session_id, replay_key, envelope_hash,
-            envelope_json, status, outcome_json, error_json, lease_owner_id,
-            lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
-            created_at_ms, updated_at_ms
-         )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?8, ?9, ?10, ?13, NULL, ?11, ?12)",
+        effect_sql(Schema::Main).replay_sqlite.insert_claimed.sql(),
         params![
             request.scope_id.as_str(),
             request.session_id.as_deref(),
@@ -1377,13 +1485,7 @@ fn take_over_expired_lease(
     stamp: &EffectLeaseStamp,
 ) -> rusqlite::Result<()> {
     tx.execute(
-        "UPDATE runtime_effect_replay
-         SET lease_owner_id = ?3,
-             lease_token = ?4,
-             lease_expires_at_ms = ?5,
-             due_at_ms = ?6,
-             updated_at_ms = ?7
-         WHERE scope_id = ?1 AND replay_key = ?2",
+        effect_sql(Schema::Main).replay.take_over_lease.sql(),
         params![
             request.scope_id.as_str(),
             request.replay_key.as_str(),
@@ -1408,10 +1510,7 @@ fn select_group_record(
     group_key: &str,
 ) -> rusqlite::Result<EffectGroupRecord> {
     tx.query_row(
-        "SELECT group_key, scope_id, session_id, wake, loser_disposition, children,
-                created_at_ms
-         FROM runtime_effect_group
-         WHERE group_key = ?1",
+        effect_sql(Schema::Main).group.select_by_key.sql(),
         params![group_key],
         |row| {
             Ok(EffectGroupRecord {

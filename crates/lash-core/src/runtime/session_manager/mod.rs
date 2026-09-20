@@ -179,12 +179,11 @@ impl ProcessVisibility {
 }
 
 impl CurrentSessionCapability {
-    fn snapshot_meta_with_frame_root(runtime: &LashRuntime) -> RuntimeSessionState {
-        let frame_root = runtime
-            .state
+    fn snapshot_meta_with_frame_root(state: &RuntimeSessionState) -> RuntimeSessionState {
+        let frame_root = state
             .current_frame_node_id
             .as_deref()
-            .and_then(|node_id| runtime.state.session_graph.find_node(node_id))
+            .and_then(|node_id| state.session_graph.find_node(node_id))
             .cloned()
             .map(|mut node| {
                 node.parent_node_id = None;
@@ -197,21 +196,21 @@ impl CurrentSessionCapability {
             frame_root.map(|node| node.node_id),
         );
         RuntimeSessionState {
-            session_id: runtime.state.session_id.clone(),
-            policy: runtime.state.effective_policy().clone(),
-            agent_frames: runtime.state.agent_frames.clone(),
-            current_frame_node_id: runtime.state.current_frame_node_id.clone(),
+            session_id: state.session_id.clone(),
+            policy: state.effective_policy().clone(),
+            agent_frames: state.agent_frames.clone(),
+            current_frame_node_id: state.current_frame_node_id.clone(),
             session_graph,
-            turn_index: runtime.state.turn_index,
-            token_usage: runtime.state.token_usage.clone(),
-            last_prompt_usage: runtime.state.last_prompt_usage.clone(),
-            protocol_turn_options: runtime.state.effective_protocol_turn_options().clone(),
-            authority: runtime.state.authority.clone(),
-            checkpoint_components: runtime.state.checkpoint_components.clone(),
-            token_ledger: runtime.state.token_ledger.clone(),
-            checkpoint_ref: runtime.state.checkpoint_ref.clone(),
-            head_revision: runtime.state.head_revision,
-            persisted_node_ids: runtime.state.persisted_node_ids.clone(),
+            turn_index: state.turn_index,
+            token_usage: state.token_usage.clone(),
+            last_prompt_usage: state.last_prompt_usage.clone(),
+            protocol_turn_options: state.effective_protocol_turn_options().clone(),
+            authority: state.authority.clone(),
+            checkpoint_components: state.checkpoint_components.clone(),
+            token_ledger: state.token_ledger.clone(),
+            checkpoint_ref: state.checkpoint_ref.clone(),
+            head_revision: state.head_revision,
+            persisted_node_ids: state.persisted_node_ids.clone(),
         }
     }
 
@@ -235,7 +234,7 @@ impl CurrentSessionCapability {
                         .read_model()
                         .expect("turn-scoped runtime state is normalized before service creation");
                     CurrentSnapshot::ReadModel {
-                        meta: Self::snapshot_meta_with_frame_root(runtime),
+                        meta: Self::snapshot_meta_with_frame_root(&runtime.state),
                         messages: read_model.messages,
                         graph_appends: graph_appends.clone(),
                     }
