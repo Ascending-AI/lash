@@ -643,11 +643,6 @@ impl ToolSourceExecutor for ExactResolvingSource {
         Vec::new()
     }
 
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        self.manifest_resolutions.fetch_add(1, Ordering::SeqCst);
-        (name == "host_only").then(|| test_tool("host_only", "host-only").manifest())
-    }
-
     fn resolve_manifest_by_id(&self, id: &crate::ToolId) -> Option<ToolManifest> {
         self.manifest_resolutions.fetch_add(1, Ordering::SeqCst);
         (id == &tool_id("host_only")).then(|| test_tool("host_only", "host-only").manifest())
@@ -703,10 +698,6 @@ impl ToolSourceExecutor for NamedExactSource {
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
         Vec::new()
-    }
-
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        (name == "host_only").then(|| test_tool("host_only", "host-only").manifest())
     }
 
     fn resolve_manifest_by_id(&self, id: &crate::ToolId) -> Option<ToolManifest> {
@@ -881,6 +872,14 @@ fn indexed_contract_lookup_falls_back_to_by_id_resolution() {
     );
 }
 
+/// Pinned behaviour: after a provider renames an id (`search` → `find`) and
+/// hands the old name to a different id, a contract lookup routed by the
+/// stable id must observe the id's current contract — never the contract of
+/// whatever now answers to the stale name. The provider's live name
+/// resolution is authoritative for the name→contract hop, and
+/// `resolve_contract_for_manifest` is the single enforcement point that
+/// rejects a name-resolved contract whose identity no longer matches the
+/// manifest the id lookup established.
 #[test]
 fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
     struct DriftingProvider {

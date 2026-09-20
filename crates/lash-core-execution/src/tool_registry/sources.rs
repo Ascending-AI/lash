@@ -104,15 +104,21 @@ impl ToolSourceExecutor for OrchestratingToolSource {
     }
 }
 
-fn resolve_contract_for_indexed_manifest(
+/// Accept a provider's name-resolved contract only when its process-local
+/// identity matches the manifest an id lookup established; otherwise preserve
+/// the provider's by-id outcome.
+///
+/// This is the single enforcement point that keeps a name→contract hop from
+/// crossing tool identity: a provider's own name resolution is live, so a
+/// name captured by an earlier id lookup may have been reassigned to another
+/// id by the time the contract is fetched. The pinned behaviour — a stale
+/// name falls back to the by-id outcome and never returns another id's
+/// contract — is exercised by
+/// `indexed_contract_lookup_does_not_cross_identity_after_name_drift`.
+fn resolve_contract_for_manifest(
     provider: &dyn ToolProvider,
     manifest: &ToolManifest,
 ) -> Option<Arc<ToolContract>> {
-    // The source index is authoritative for the id-to-name pairing. Accept a
-    // name-resolved contract only when its process-local identity matches that
-    // indexed pair; otherwise preserve the provider's by-id outcome. This
-    // prevents a stale name reassigned to another id from crossing tool
-    // identity while keeping the indexed fast path allocation-free.
     if let Some(contract) = provider.resolve_contract(&manifest.name)
         && contract.matches_manifest_identity(manifest)
     {
@@ -123,6 +129,12 @@ fn resolve_contract_for_indexed_manifest(
 
 /// One or more providers behind a single registry source, indexed by tool id:
 /// an unknown id is refused here rather than delegated to a provider.
+///
+/// The live [`ToolProviderSource`]'s copy is rebuilt once per advertise cycle
+/// (`advertised_tools`); a fresh copy is also built inside
+/// [`ToolProviderSourceCapture`] and handed to the
+/// [`PinnedToolProviderSource`] the cycle produces. No lookup mutates it, so
+/// "what does this name resolve to" cannot depend on lookup order.
 #[derive(Clone, Default)]
 struct ToolProviderIndex {
     by_id: BTreeMap<ToolId, (ToolManifest, usize)>,
@@ -135,21 +147,15 @@ impl ToolProviderIndex {
         for (provider_idx, provider) in providers.iter().enumerate() {
             for manifest in provider.tool_manifests() {
                 index
+                    .by_name
+                    .entry(manifest.name.clone())
+                    .or_insert_with(|| manifest.id.clone());
+                index
                     .by_id
                     .insert(manifest.id.clone(), (manifest, provider_idx));
             }
         }
-        index.rebuild_name_index();
         index
-    }
-
-    fn rebuild_name_index(&mut self) {
-        self.by_name.clear();
-        for (id, (manifest, _)) in &self.by_id {
-            self.by_name
-                .entry(manifest.name.clone())
-                .or_insert_with(|| id.clone());
-        }
     }
 
     fn insert(&mut self, manifest: ToolManifest, provider_idx: usize) {
@@ -171,6 +177,14 @@ impl ToolProviderIndex {
     }
 }
 
+/// The live view over a provider group.
+///
+/// `tools` is written once per advertise cycle — `read_advertised_tools`
+/// rebuilds it from the providers' current manifests. Every lookup is pure
+/// over it: a miss scans providers in registration order and the answer is
+/// not recorded, so whether an unadvertised id or name resolves cannot
+/// depend on whether a lookup ran first. Name resolution is one rule in
+/// both tiers — first-writer-wins in provider order.
 pub(super) struct ToolProviderSource {
     id: String,
     tools: Arc<RwLock<ToolProviderIndex>>,
@@ -180,7 +194,6 @@ pub(super) struct ToolProviderSource {
 struct ToolProviderSourceCapture {
     id: String,
     index: ToolProviderIndex,
-    live_tools: Arc<RwLock<ToolProviderIndex>>,
     providers: Vec<Arc<dyn ToolProvider>>,
 }
 
@@ -197,18 +210,23 @@ impl ToolSourceCapture for ToolProviderSourceCapture {
         self: Box<Self>,
         known_resident_ids: &BTreeSet<ToolId>,
     ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
-        let mut index = self.index.clone();
+        let Self {
+            id,
+            mut index,
+            providers,
+        } = *self;
         let advertised_ids = index.by_id.keys().cloned().collect();
-        for id in known_resident_ids {
-            if index.by_id.contains_key(id) {
+        for resident_id in known_resident_ids {
+            if index.by_id.contains_key(resident_id) {
                 continue;
             }
-            for (provider_idx, provider) in self.providers.iter().enumerate() {
-                if let Some(manifest) = provider.resolve_manifest_by_id(id) {
-                    if manifest.id != *id {
+            for (provider_idx, provider) in providers.iter().enumerate() {
+                if let Some(manifest) = provider.resolve_manifest_by_id(resident_id) {
+                    if manifest.id != *resident_id {
                         return Err(ReconfigureError::Validation(format!(
-                            "source `{}` resolved tool id `{id}` with mismatched manifest id `{}`",
-                            ToolSourceKey::Leaf(self.id.clone()),
+                            "source `{}` resolved tool id `{resident_id}` with mismatched \
+                             manifest id `{}`",
+                            ToolSourceKey::Leaf(id.clone()),
                             manifest.id,
                         )));
                     }
@@ -217,12 +235,11 @@ impl ToolSourceCapture for ToolProviderSourceCapture {
                 }
             }
         }
-        *self.live_tools.write_recover() = index.clone();
         Ok(Arc::new(PinnedToolProviderSource::new(
-            self.id.clone(),
+            id,
             index,
             advertised_ids,
-            &self.providers,
+            &providers,
         )))
     }
 }
@@ -236,6 +253,9 @@ impl ToolProviderSource {
         }
     }
 
+    /// The advertise cycle: republish the index from the providers' current
+    /// manifests and return them. This is the index's only writer; every
+    /// lookup below is a pure read over the published snapshot.
     fn read_advertised_tools(&self) -> Vec<ToolManifest> {
         let index = ToolProviderIndex::from_providers(&self.providers);
         let manifests = index
@@ -247,13 +267,16 @@ impl ToolProviderSource {
         manifests
     }
 
+    /// The provider owning `name` in the published index, else the first
+    /// provider in registration order whose manifest resolution answers it.
+    /// A name must resolve to a manifest before its contract is asked for.
     fn provider_index_for(&self, name: &str) -> Option<usize> {
-        self.resolve_manifest(name).and_then(|_| {
-            self.tools
-                .read_recover()
-                .get_by_name(name)
-                .map(|(_, provider_idx)| *provider_idx)
-        })
+        if let Some((_, provider_idx)) = self.tools.read_recover().get_by_name(name) {
+            return Some(*provider_idx);
+        }
+        self.providers
+            .iter()
+            .position(|provider| provider.resolve_manifest(name).is_some())
     }
 
     fn provider_index_for_id(&self, id: &ToolId) -> Option<usize> {
@@ -261,21 +284,23 @@ impl ToolProviderSource {
             .map(|(_, provider_idx)| provider_idx)
     }
 
+    /// The indexed pair for `id`, else the first provider in registration
+    /// order resolving it to a manifest that actually carries it. The
+    /// provider answer is returned without being recorded: whether an
+    /// unadvertised id resolves cannot depend on whether a lookup ran first.
     fn indexed_manifest_and_provider_by_id(&self, id: &ToolId) -> Option<(ToolManifest, usize)> {
         if let Some((manifest, provider_idx)) = self.tools.read_recover().by_id.get(id) {
             return Some((manifest.clone(), *provider_idx));
         }
-        for (provider_idx, provider) in self.providers.iter().enumerate() {
-            if let Some(manifest) = provider.resolve_manifest_by_id(id)
-                && manifest.id == *id
-            {
-                self.tools
-                    .write_recover()
-                    .insert(manifest.clone(), provider_idx);
-                return Some((manifest, provider_idx));
-            }
-        }
-        None
+        self.providers
+            .iter()
+            .enumerate()
+            .find_map(|(provider_idx, provider)| {
+                provider
+                    .resolve_manifest_by_id(id)
+                    .filter(|manifest| manifest.id == *id)
+                    .map(|manifest| (manifest, provider_idx))
+            })
     }
 }
 
@@ -289,7 +314,6 @@ impl ToolSourceExecutor for ToolProviderSource {
         Ok(Box::new(ToolProviderSourceCapture {
             id: self.id.clone(),
             index: ToolProviderIndex::from_providers(&self.providers),
-            live_tools: Arc::clone(&self.tools),
             providers: self.providers.clone(),
         }))
     }
@@ -305,21 +329,6 @@ impl ToolSourceExecutor for ToolProviderSource {
         self.read_advertised_tools()
     }
 
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        if let Some((manifest, _)) = self.tools.read_recover().get_by_name(name) {
-            return Some(manifest.clone());
-        }
-        for (provider_idx, provider) in self.providers.iter().enumerate() {
-            if let Some(manifest) = provider.resolve_manifest(name) {
-                self.tools
-                    .write_recover()
-                    .insert(manifest.clone(), provider_idx);
-                return Some(manifest);
-            }
-        }
-        None
-    }
-
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
         self.indexed_manifest_and_provider_by_id(id)
             .map(|(manifest, _)| manifest)
@@ -332,7 +341,7 @@ impl ToolSourceExecutor for ToolProviderSource {
 
     fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
         let (manifest, provider_idx) = self.indexed_manifest_and_provider_by_id(id)?;
-        resolve_contract_for_indexed_manifest(self.providers[provider_idx].as_ref(), &manifest)
+        resolve_contract_for_manifest(self.providers[provider_idx].as_ref(), &manifest)
     }
 
     async fn prepare_tool_call(
@@ -443,22 +452,18 @@ impl ToolSourceExecutor for PinnedToolProviderSource {
             .collect()
     }
 
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        self.route_by_name(name).map(|route| route.manifest.clone())
-    }
-
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
         self.route(id).map(|route| route.manifest.clone())
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
         let route = self.route_by_name(name)?;
-        resolve_contract_for_indexed_manifest(route.provider.as_ref(), &route.manifest)
+        resolve_contract_for_manifest(route.provider.as_ref(), &route.manifest)
     }
 
     fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
         let route = self.route(id)?;
-        resolve_contract_for_indexed_manifest(route.provider.as_ref(), &route.manifest)
+        resolve_contract_for_manifest(route.provider.as_ref(), &route.manifest)
     }
 
     async fn prepare_tool_call(
