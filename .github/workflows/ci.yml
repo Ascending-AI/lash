@@ -319,18 +319,14 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      # The ui harness compiles under Bazel's shared remote cache, which keys
-      # on content rather than the merge-group SHA: the lash graph it depends
-      # on is usually already cached by the Bazel partition, so a warm run
-      # downloads the harness instead of paying Cargo ~2m40s to recompile it
-      # into target-seal. `ui__test` carries the same crate, the same unified
-      # feature resolution (the BUILD generator's `crate_features`), and the
-      # same compile-pass module fixtures as `cargo test --test ui`; the
-      # compile-fail fixtures still run through trybuild against the restored
-      # target-seal tree, with Cargo and rustc on PATH as before.
-      # `run-seal-harness.sh` stages the Cargo fingerprint layout trybuild
-      # reads the feature set from. Fork and Dependabot runs have no cache
-      # credentials, so they keep the Cargo command.
+      # The whole seal check is served by Bazel's shared remote cache, which
+      # keys on content rather than the merge-group SHA (FIG-3364):
+      # `ui_fixtures` compiles every tests/ui/*.stderr fixture with the
+      # toolchain rustc against the ui__test rlib closure and diffs normalized
+      # output against the pins -- the same .stderr files the untrusted Cargo
+      # path checks through trybuild. `bazel build ui__test` separately proves
+      # the compile-pass module fixtures still compile. Fork and Dependabot
+      # runs have no cache credentials, so they keep the Cargo command.
       - name: Configure shared build cache
         if: needs.plan.outputs.bazel_trusted == 'true'
         uses: ./.github/actions/bazel-shared-cache
@@ -346,15 +342,14 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           if [ "${{ needs.plan.outputs.bazel_trusted }}" = "true" ]; then
-            # trybuild checks the fixture project with `cargo --offline`;
-            # the Cargo leg warms the registry as a side effect of the outer
-            # build, so the Bazel leg has to fetch it explicitly.
-            cargo fetch --locked
             bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
               ${BAZEL_SHARED_CACHE_FLAGS} \
               --remote_download_outputs=toplevel \
-              //crates/lash:ui__test //crates/lash:ui__test__cargo_fingerprint
-            bash scripts/ci/run-seal-harness.sh
+              //crates/lash:ui__test
+            bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
+              ${BAZEL_SHARED_CACHE_FLAGS} \
+              --test_output=errors \
+              //crates/lash:ui_fixtures
           else
             cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
           fi

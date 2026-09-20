@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import pathlib
@@ -715,23 +714,44 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         ])
         chunks.append(macro + "(\n" + "\n".join(args) + "\n)\n\n")
         if package["name"] == "lash-runtime" and name == "ui__test":
-            # The seal lane runs the Bazel-built ui binary directly, outside
-            # `bazel test`, so trybuild cannot see Cargo's fingerprint for it.
-            # trybuild resolves the fixture feature set from
-            # `<target>/debug/.fingerprint/*-<hash>/*.json`, where the hash is
-            # the suffix of the running binary's name; this file carries the
-            # same crate_features the harness was compiled with, so the staged
-            # fingerprint is a layout adaptation, never a second resolution.
-            fingerprint = json.dumps({
-                "features": json.dumps(target_features),
-            })
+            # FIG-3364: the trusted seal lane compiles every tests/ui/*.stderr
+            # fixture with the toolchain rustc directly (ui_fixtures_test)
+            # instead of trybuild's nested `cargo check`. The rule reads this
+            # harness's CrateInfo/DepInfo, so fixtures see the identical
+            # `--extern` set and feature resolution; the `.stderr` pins stay
+            # shared with the untrusted `cargo test --test ui` path.
+            #
+            # The fixture set mirrors the registration gates in tests/ui.rs:
+            # rlm-gated fixtures exist only when `rlm` resolves, and the two
+            # store-seam pins are written for the isolated rlm-without-testing
+            # graph (the `testing` feature changes the rendered qualified Pin
+            # path), so they stay excluded under the canonical resolution.
+            ui_rlm_gated = {
+                "rlm_turn_options_cannot_name_a_dialect",
+                "rlm_memory_limit_cannot_take_an_instruction_budget",
+                "rlm_execution_bounds_are_not_swappable",
+                "rlm_config_builder_requires_every_bound",
+                "rlm_config_builder_requires_channel",
+            }
+            ui_store_seam = {
+                "attachment_store_head_has_no_default",
+                "session_store_factory_requires_deletion_answer",
+            }
+            ui_dir = ROOT / package_dir / "tests" / "ui"
+            fixtures = sorted(p.stem for p in ui_dir.glob("*.stderr"))
+            if "rlm" not in target_features:
+                fixtures = [f for f in fixtures if f not in ui_rlm_gated]
+            if "rlm" not in target_features or "testing" in target_features:
+                fixtures = [f for f in fixtures if f not in ui_store_seam]
             chunks.append(
-                "genrule(\n"
-                f"    name = {quote(name + '__cargo_fingerprint')},\n"
-                f"    outs = [{quote(name + '.cargo_fingerprint.json')}],\n"
-                "    cmd = \"echo \"\n"
-                f"        + {quote(base64.b64encode(fingerprint.encode()).decode())}\n"
-                "        + \" | base64 -d > $@\",\n"
+                'load("//tools/bazel:ui_fixtures.bzl", "ui_fixtures_test")\n\n'
+                "ui_fixtures_test(\n"
+                "    name = \"ui_fixtures\",\n"
+                "    harness = \":ui__test\",\n"
+                "    package = \"crates/lash\",\n"
+                f"    fixtures = {string_list([f'tests/ui/{f}.rs' for f in fixtures])},\n"
+                f"    expected = {string_list([f'tests/ui/{f}.stderr' for f in fixtures])},\n"
+                '    tags = ["manual"],\n'
                 ")\n\n"
             )
         target_inventory = {
