@@ -156,35 +156,302 @@ pub enum MessageOrigin {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+/// A typed message part. Each variant owns exactly the fields its kind
+/// may carry — a text part cannot smuggle a `tool_call_id`, and a tool
+/// call cannot lack one. `id` is stable identity within the owning
+/// `Message` (`{message_id}.p{i}`), `content` is the human-readable or
+/// tool-facing text, and `prune_state` tracks lifecycle within the
+/// context window.
+///
+/// Serialization is internally tagged on `kind` so the durable JSON
+/// stays the flat, readable shape every stored message already uses
+/// (`{"id": …, "kind": "Text", "content": …, "prune_state": …}`).
+/// Deserialization accepts that same flat shape and rejects pairings
+/// the constructors cannot produce — e.g. a `Text` part carrying a
+/// `tool_call_id` — with [`InvalidPartCombination`].
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "kind")]
 #[non_exhaustive]
-pub struct Part {
-    /// e.g. "m3.p0"
-    pub id: String,
+pub enum Part {
+    /// Ordinary response text; `response_meta` carries provider-assigned
+    /// phase/replay metadata when present.
+    Text {
+        id: String,
+        content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response_meta: Option<ResponseTextMeta>,
+        prune_state: PruneState,
+    },
+    /// A pointer at a stored attachment. Tool-result attachments also
+    /// carry the `tool_call_id`/`tool_name` of the call they answer;
+    /// `content` holds the placeholder text rendered when the blob is
+    /// elided.
+    Attachment {
+        id: String,
+        content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attachment: Option<PartAttachment>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_name: Option<String>,
+        prune_state: PruneState,
+    },
+    /// Fenced code block.
+    Code {
+        id: String,
+        content: String,
+        prune_state: PruneState,
+    },
+    /// Tool or process output.
+    Output {
+        id: String,
+        content: String,
+        prune_state: PruneState,
+    },
+    /// An error surfaced as a message part.
+    Error {
+        id: String,
+        content: String,
+        prune_state: PruneState,
+    },
+    /// Markdown prose (e.g. a composed document); `response_meta` carries
+    /// provider-assigned phase/replay metadata when present.
+    Prose {
+        id: String,
+        content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response_meta: Option<ResponseTextMeta>,
+        prune_state: PruneState,
+    },
+    /// A tool invocation request. `tool_call_id` and `tool_name` are the
+    /// provider-side call id and the tool's registered name;
+    /// `tool_replay` carries the provider replay token so adapters can
+    /// re-emit the call verbatim on the next turn.
+    ToolCall {
+        id: String,
+        content: String,
+        tool_call_id: String,
+        tool_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_replay: Option<ProviderReplayMeta>,
+        prune_state: PruneState,
+    },
+    /// The text result answering a tool call.
+    ToolResult {
+        id: String,
+        content: String,
+        tool_call_id: String,
+        tool_name: String,
+        prune_state: PruneState,
+    },
+    /// Chain-of-thought / reasoning item captured from providers that
+    /// expose a reasoning channel. `content` holds the human-readable
+    /// summary for display (fix 1.3a). The encrypted blob and raw
+    /// `summary`/`id` needed to re-feed the model on the next turn
+    /// (fix 1.3b) live in `reasoning_meta`. Reasoning parts are preserved
+    /// across snapshots so next-turn re-feeding survives session resume;
+    /// they are never rendered into the flat chat prompt. Provider
+    /// adapters decide whether and how to re-emit them through their
+    /// native channel.
+    Reasoning {
+        id: String,
+        content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_meta: Option<ProviderReasoningReplay>,
+        prune_state: PruneState,
+    },
+}
+
+/// A legacy flat `Part` whose `kind` is paired with fields that kind
+/// cannot own — e.g. a `Text` part carrying a `tool_call_id`, or a
+/// `ToolResult` missing one. [`Part`]'s `Deserialize` impl rejects these
+/// pairings with this error instead of silently materializing a state
+/// the in-memory type can no longer represent.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InvalidPartCombination {
+    /// The `kind` value the flat form declared.
     pub kind: PartKind,
-    pub content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attachment: Option<PartAttachment>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
-    /// Opaque provider replay state attached to a `ToolCall` part.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_replay: Option<ProviderReplayMeta>,
-    pub prune_state: PruneState,
-    /// Populated only for `PartKind::Reasoning` parts. Carries opaque
-    /// provider replay metadata so the adapter can re-emit the exact same
-    /// reasoning item on subsequent turns.
-    /// `#[serde(default, skip_serializing_if)]` so older snapshots that
-    /// predate this field round-trip unchanged.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_meta: Option<ProviderReasoningReplay>,
-    /// Provider message metadata for assistant text parts. Legacy snapshots
-    /// omit it; adapters synthesize deterministic ids when replaying older
-    /// assistant text.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_meta: Option<ResponseTextMeta>,
+    /// The field that kind cannot own (or a required field that was
+    /// absent, named with a `missing:` prefix).
+    pub field: &'static str,
+}
+
+impl std::fmt::Display for InvalidPartCombination {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "part kind {:?} cannot carry {}", self.kind, self.field)
+    }
+}
+
+impl std::error::Error for InvalidPartCombination {}
+
+/// The pre-enum flat wire shape of `Part`, kept as the compatibility
+/// reader: stored snapshots and externally produced parts decode through
+/// it, then are validated into the variant that `kind` selects.
+#[derive(serde::Deserialize)]
+struct FlatPart {
+    id: String,
+    kind: PartKind,
+    content: String,
+    #[serde(default)]
+    attachment: Option<PartAttachment>,
+    #[serde(default)]
+    tool_call_id: Option<String>,
+    #[serde(default)]
+    tool_name: Option<String>,
+    #[serde(default)]
+    tool_replay: Option<ProviderReplayMeta>,
+    prune_state: PruneState,
+    #[serde(default)]
+    reasoning_meta: Option<ProviderReasoningReplay>,
+    #[serde(default)]
+    response_meta: Option<ResponseTextMeta>,
+}
+
+impl FlatPart {
+    /// The first field outside the set `kind` may carry, if any.
+    fn invalid_field(&self) -> Option<&'static str> {
+        use PartKind::*;
+        let tainted = [
+            (
+                "attachment",
+                self.attachment.is_some(),
+                self.kind == Attachment,
+            ),
+            (
+                "tool_call_id",
+                self.tool_call_id.is_some(),
+                matches!(self.kind, Attachment | ToolCall | ToolResult),
+            ),
+            (
+                "tool_name",
+                self.tool_name.is_some(),
+                matches!(self.kind, Attachment | ToolCall | ToolResult),
+            ),
+            (
+                "tool_replay",
+                self.tool_replay.is_some(),
+                self.kind == ToolCall,
+            ),
+            (
+                "reasoning_meta",
+                self.reasoning_meta.is_some(),
+                self.kind == Reasoning,
+            ),
+            (
+                "response_meta",
+                self.response_meta.is_some(),
+                matches!(self.kind, Text | Prose),
+            ),
+        ];
+        tainted
+            .into_iter()
+            .find_map(|(field, present, valid)| (present && !valid).then_some(field))
+    }
+
+    fn try_into_part(self) -> Result<Part, InvalidPartCombination> {
+        if let Some(field) = self.invalid_field() {
+            return Err(InvalidPartCombination {
+                kind: self.kind,
+                field,
+            });
+        }
+        let missing = |field: &'static str| InvalidPartCombination {
+            kind: self.kind,
+            field,
+        };
+        let part = match self.kind {
+            PartKind::Text => Part::Text {
+                id: self.id,
+                content: self.content,
+                response_meta: self.response_meta,
+                prune_state: self.prune_state,
+            },
+            PartKind::Attachment => {
+                // A tool-result attachment carries the call pair; an
+                // ordinary one carries neither. A lone id or name is
+                // a pairing the constructors cannot produce.
+                let (tool_call_id, tool_name) = match (self.tool_call_id, self.tool_name) {
+                    (Some(_), None) => return Err(missing("missing:tool_name")),
+                    (None, Some(_)) => return Err(missing("missing:tool_call_id")),
+                    pair => pair,
+                };
+                Part::Attachment {
+                    id: self.id,
+                    content: self.content,
+                    attachment: self.attachment,
+                    tool_call_id,
+                    tool_name,
+                    prune_state: self.prune_state,
+                }
+            }
+            PartKind::Code => Part::Code {
+                id: self.id,
+                content: self.content,
+                prune_state: self.prune_state,
+            },
+            PartKind::Output => Part::Output {
+                id: self.id,
+                content: self.content,
+                prune_state: self.prune_state,
+            },
+            PartKind::Error => Part::Error {
+                id: self.id,
+                content: self.content,
+                prune_state: self.prune_state,
+            },
+            PartKind::Prose => Part::Prose {
+                id: self.id,
+                content: self.content,
+                response_meta: self.response_meta,
+                prune_state: self.prune_state,
+            },
+            PartKind::ToolCall => {
+                let (tool_call_id, tool_name) = match (self.tool_call_id, self.tool_name) {
+                    (Some(call_id), Some(name)) => (call_id, name),
+                    (None, _) => return Err(missing("missing:tool_call_id")),
+                    (_, None) => return Err(missing("missing:tool_name")),
+                };
+                Part::ToolCall {
+                    id: self.id,
+                    content: self.content,
+                    tool_call_id,
+                    tool_name,
+                    tool_replay: self.tool_replay,
+                    prune_state: self.prune_state,
+                }
+            }
+            PartKind::ToolResult => {
+                let (tool_call_id, tool_name) = match (self.tool_call_id, self.tool_name) {
+                    (Some(call_id), Some(name)) => (call_id, name),
+                    (None, _) => return Err(missing("missing:tool_call_id")),
+                    (_, None) => return Err(missing("missing:tool_name")),
+                };
+                Part::ToolResult {
+                    id: self.id,
+                    content: self.content,
+                    tool_call_id,
+                    tool_name,
+                    prune_state: self.prune_state,
+                }
+            }
+            PartKind::Reasoning => Part::Reasoning {
+                id: self.id,
+                content: self.content,
+                reasoning_meta: self.reasoning_meta,
+                prune_state: self.prune_state,
+            },
+        };
+        Ok(part)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Part {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        <FlatPart as serde::Deserialize>::deserialize(deserializer)?
+            .try_into_part()
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -228,25 +495,260 @@ pub enum PruneState {
 }
 
 impl Part {
+    /// Test-only constructor used by fixtures that only need a kind and
+    /// content; tool variants get placeholder call metadata.
+    #[cfg(test)]
     fn base(id: String, kind: PartKind, content: String) -> Self {
-        Self {
-            id,
-            kind,
-            content,
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
+        let prune_state = PruneState::Intact;
+        match kind {
+            PartKind::Text => Self::Text {
+                id,
+                content,
+                response_meta: None,
+                prune_state,
+            },
+            PartKind::Attachment => Self::Attachment {
+                id,
+                content,
+                attachment: None,
+                tool_call_id: None,
+                tool_name: None,
+                prune_state,
+            },
+            PartKind::Code => Self::Code {
+                id,
+                content,
+                prune_state,
+            },
+            PartKind::Output => Self::Output {
+                id,
+                content,
+                prune_state,
+            },
+            PartKind::Error => Self::Error {
+                id,
+                content,
+                prune_state,
+            },
+            PartKind::Prose => Self::Prose {
+                id,
+                content,
+                response_meta: None,
+                prune_state,
+            },
+            PartKind::ToolCall => Self::ToolCall {
+                id,
+                content,
+                tool_call_id: String::new(),
+                tool_name: String::new(),
+                tool_replay: None,
+                prune_state,
+            },
+            PartKind::ToolResult => Self::ToolResult {
+                id,
+                content,
+                tool_call_id: String::new(),
+                tool_name: String::new(),
+                prune_state,
+            },
+            PartKind::Reasoning => Self::Reasoning {
+                id,
+                content,
+                reasoning_meta: None,
+                prune_state,
+            },
+        }
+    }
+
+    /// Stable identity within the owning `Message` (`{message_id}.p{i}`).
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Text { id, .. }
+            | Self::Attachment { id, .. }
+            | Self::Code { id, .. }
+            | Self::Output { id, .. }
+            | Self::Error { id, .. }
+            | Self::Prose { id, .. }
+            | Self::ToolCall { id, .. }
+            | Self::ToolResult { id, .. }
+            | Self::Reasoning { id, .. } => id,
+        }
+    }
+
+    /// Mutable access to the part's stable identity — used when a sequence
+    /// renames ids to the `{message_id}.p{i}` convention.
+    pub fn id_mut(&mut self) -> &mut String {
+        match self {
+            Self::Text { id, .. }
+            | Self::Attachment { id, .. }
+            | Self::Code { id, .. }
+            | Self::Output { id, .. }
+            | Self::Error { id, .. }
+            | Self::Prose { id, .. }
+            | Self::ToolCall { id, .. }
+            | Self::ToolResult { id, .. }
+            | Self::Reasoning { id, .. } => id,
+        }
+    }
+
+    /// Which payload contract this part follows.
+    pub fn kind(&self) -> PartKind {
+        match self {
+            Self::Text { .. } => PartKind::Text,
+            Self::Attachment { .. } => PartKind::Attachment,
+            Self::Code { .. } => PartKind::Code,
+            Self::Output { .. } => PartKind::Output,
+            Self::Error { .. } => PartKind::Error,
+            Self::Prose { .. } => PartKind::Prose,
+            Self::ToolCall { .. } => PartKind::ToolCall,
+            Self::ToolResult { .. } => PartKind::ToolResult,
+            Self::Reasoning { .. } => PartKind::Reasoning,
+        }
+    }
+
+    /// Human-readable or tool-facing text; attachments may carry the
+    /// placeholder text rendered when the blob is elided.
+    pub fn content(&self) -> &str {
+        match self {
+            Self::Text { content, .. }
+            | Self::Attachment { content, .. }
+            | Self::Code { content, .. }
+            | Self::Output { content, .. }
+            | Self::Error { content, .. }
+            | Self::Prose { content, .. }
+            | Self::ToolCall { content, .. }
+            | Self::ToolResult { content, .. }
+            | Self::Reasoning { content, .. } => content,
+        }
+    }
+
+    /// Mutable access to the rendered text — used by pruning and recovery
+    /// paths that rewrite part content in place.
+    pub fn content_mut(&mut self) -> &mut String {
+        match self {
+            Self::Text { content, .. }
+            | Self::Attachment { content, .. }
+            | Self::Code { content, .. }
+            | Self::Output { content, .. }
+            | Self::Error { content, .. }
+            | Self::Prose { content, .. }
+            | Self::ToolCall { content, .. }
+            | Self::ToolResult { content, .. }
+            | Self::Reasoning { content, .. } => content,
+        }
+    }
+
+    /// Lifecycle within the context window: intact, cleared, deleted
+    /// (breadcrumb retained), or summarized.
+    pub fn prune_state(&self) -> &PruneState {
+        match self {
+            Self::Text { prune_state, .. }
+            | Self::Attachment { prune_state, .. }
+            | Self::Code { prune_state, .. }
+            | Self::Output { prune_state, .. }
+            | Self::Error { prune_state, .. }
+            | Self::Prose { prune_state, .. }
+            | Self::ToolCall { prune_state, .. }
+            | Self::ToolResult { prune_state, .. }
+            | Self::Reasoning { prune_state, .. } => prune_state,
+        }
+    }
+
+    /// Mutable access to the prune lifecycle — pruning plugins rewrite
+    /// content and state together.
+    pub fn prune_state_mut(&mut self) -> &mut PruneState {
+        match self {
+            Self::Text { prune_state, .. }
+            | Self::Attachment { prune_state, .. }
+            | Self::Code { prune_state, .. }
+            | Self::Output { prune_state, .. }
+            | Self::Error { prune_state, .. }
+            | Self::Prose { prune_state, .. }
+            | Self::ToolCall { prune_state, .. }
+            | Self::ToolResult { prune_state, .. }
+            | Self::Reasoning { prune_state, .. } => prune_state,
+        }
+    }
+
+    /// The stored attachment this part points at; `Some` only for
+    /// attachment parts that carry one.
+    pub fn attachment(&self) -> Option<&PartAttachment> {
+        match self {
+            Self::Attachment { attachment, .. } => attachment.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Mutable access to the attachment slot; `None` for non-attachment
+    /// parts. Lets prune paths elide the pointer while leaving the
+    /// placeholder `content` in place.
+    pub fn attachment_mut(&mut self) -> Option<&mut Option<PartAttachment>> {
+        match self {
+            Self::Attachment { attachment, .. } => Some(attachment),
+            _ => None,
+        }
+    }
+
+    /// The provider-side call id this part's call issues or result
+    /// answers; `Some` for tool calls, tool results, and tool-result
+    /// attachments.
+    pub fn tool_call_id(&self) -> Option<&str> {
+        match self {
+            Self::Attachment { tool_call_id, .. } => tool_call_id.as_deref(),
+            Self::ToolCall { tool_call_id, .. } | Self::ToolResult { tool_call_id, .. } => {
+                Some(tool_call_id)
+            }
+            _ => None,
+        }
+    }
+
+    /// The invoked tool's registered name; `Some` for the same parts as
+    /// [`Part::tool_call_id`].
+    pub fn tool_name(&self) -> Option<&str> {
+        match self {
+            Self::Attachment { tool_name, .. } => tool_name.as_deref(),
+            Self::ToolCall { tool_name, .. } | Self::ToolResult { tool_name, .. } => {
+                Some(tool_name)
+            }
+            _ => None,
+        }
+    }
+
+    /// Provider replay token on a tool call; `Some` only for tool-call
+    /// parts that carry one.
+    pub fn tool_replay(&self) -> Option<&ProviderReplayMeta> {
+        match self {
+            Self::ToolCall { tool_replay, .. } => tool_replay.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Provider reasoning replay payload; `Some` only for reasoning
+    /// parts that carry one.
+    pub fn reasoning_meta(&self) -> Option<&ProviderReasoningReplay> {
+        match self {
+            Self::Reasoning { reasoning_meta, .. } => reasoning_meta.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Provider-assigned phase/replay metadata for response text;
+    /// `Some` only for text and prose parts that carry one.
+    pub fn response_meta(&self) -> Option<&ResponseTextMeta> {
+        match self {
+            Self::Text { response_meta, .. } | Self::Prose { response_meta, .. } => {
+                response_meta.as_ref()
+            }
+            _ => None,
         }
     }
 
     pub fn text(id: String, content: String, response_meta: Option<ResponseTextMeta>) -> Self {
-        Self {
+        Self::Text {
+            id,
+            content,
             response_meta,
-            ..Self::base(id, PartKind::Text, content)
+            prune_state: PruneState::Intact,
         }
     }
 
@@ -255,9 +757,13 @@ impl Part {
         content: String,
         attachment: Option<PartAttachment>,
     ) -> Self {
-        Self {
+        Self::Attachment {
+            id,
+            content,
             attachment,
-            ..Self::base(id, PartKind::Attachment, content)
+            tool_call_id: None,
+            tool_name: None,
+            prune_state: PruneState::Intact,
         }
     }
 
@@ -268,30 +774,46 @@ impl Part {
         tool_call_id: String,
         tool_name: String,
     ) -> Self {
-        Self {
+        Self::Attachment {
+            id,
+            content,
             attachment: Some(attachment),
             tool_call_id: Some(tool_call_id),
             tool_name: Some(tool_name),
-            ..Self::base(id, PartKind::Attachment, content)
+            prune_state: PruneState::Intact,
         }
     }
 
     pub fn code(id: String, content: String) -> Self {
-        Self::base(id, PartKind::Code, content)
+        Self::Code {
+            id,
+            content,
+            prune_state: PruneState::Intact,
+        }
     }
 
     pub fn output(id: String, content: String) -> Self {
-        Self::base(id, PartKind::Output, content)
+        Self::Output {
+            id,
+            content,
+            prune_state: PruneState::Intact,
+        }
     }
 
     pub fn error(id: String, content: String) -> Self {
-        Self::base(id, PartKind::Error, content)
+        Self::Error {
+            id,
+            content,
+            prune_state: PruneState::Intact,
+        }
     }
 
     pub fn prose(id: String, content: String, response_meta: Option<ResponseTextMeta>) -> Self {
-        Self {
+        Self::Prose {
+            id,
+            content,
             response_meta,
-            ..Self::base(id, PartKind::Prose, content)
+            prune_state: PruneState::Intact,
         }
     }
 
@@ -302,11 +824,13 @@ impl Part {
         tool_name: String,
         tool_replay: Option<ProviderReplayMeta>,
     ) -> Self {
-        Self {
-            tool_call_id: Some(tool_call_id),
-            tool_name: Some(tool_name),
+        Self::ToolCall {
+            id,
+            content,
+            tool_call_id,
+            tool_name,
             tool_replay,
-            ..Self::base(id, PartKind::ToolCall, content)
+            prune_state: PruneState::Intact,
         }
     }
 
@@ -316,10 +840,12 @@ impl Part {
         tool_call_id: String,
         tool_name: String,
     ) -> Self {
-        Self {
-            tool_call_id: Some(tool_call_id),
-            tool_name: Some(tool_name),
-            ..Self::base(id, PartKind::ToolResult, content)
+        Self::ToolResult {
+            id,
+            content,
+            tool_call_id,
+            tool_name,
+            prune_state: PruneState::Intact,
         }
     }
 
@@ -328,9 +854,11 @@ impl Part {
         content: String,
         reasoning_meta: Option<ProviderReasoningReplay>,
     ) -> Self {
-        Self {
+        Self::Reasoning {
+            id,
+            content,
             reasoning_meta,
-            ..Self::base(id, PartKind::Reasoning, content)
+            prune_state: PruneState::Intact,
         }
     }
 
@@ -341,13 +869,12 @@ impl Part {
         // via structured replay metadata instead. Excluding them from the
         // accounting keeps the rolling-history plugin's prune decisions
         // driven by real conversation content.
-        if matches!(self.kind, PartKind::Reasoning) {
+        if matches!(self.kind(), PartKind::Reasoning) {
             return 0;
         }
-        if matches!(self.kind, PartKind::Attachment) {
+        if matches!(self.kind(), PartKind::Attachment) {
             return self
-                .attachment
-                .as_ref()
+                .attachment()
                 .and_then(|attachment| attachment.source.stored_ref())
                 .map(|attachment_ref| attachment_ref.id.as_str().len())
                 .unwrap_or_else(|| self.render().len());
@@ -356,15 +883,20 @@ impl Part {
     }
 
     pub(crate) fn render(&self) -> String {
-        if matches!(self.kind, PartKind::Attachment) {
-            return if self.attachment.is_some() || self.content.trim().is_empty() {
+        if let Self::Attachment {
+            attachment,
+            content,
+            ..
+        } = self
+        {
+            return if attachment.is_some() || content.trim().is_empty() {
                 "[Attachment]".to_string()
             } else {
-                self.content.clone()
+                content.clone()
             };
         }
-        match &self.prune_state {
-            PruneState::Intact => self.content.clone(),
+        match self.prune_state() {
+            PruneState::Intact => self.content().to_string(),
             PruneState::Cleared => "[Old tool result content cleared]".to_string(),
             PruneState::Deleted {
                 breadcrumb,
@@ -393,7 +925,7 @@ impl Message {
 fn render_part_for_chat(role: MessageRole, part: &Part) -> String {
     let rendered = part.render();
     match role {
-        MessageRole::System => match part.kind {
+        MessageRole::System => match part.kind() {
             PartKind::Code => rendered,
             PartKind::Output => format!("<output>\n{}\n</output>", rendered),
             PartKind::Error => format!("<error>\n{}\n</error>", rendered),
@@ -404,7 +936,7 @@ fn render_part_for_chat(role: MessageRole, part: &Part) -> String {
             | PartKind::ToolResult
             | PartKind::Reasoning => rendered,
         },
-        MessageRole::Assistant => match part.kind {
+        MessageRole::Assistant => match part.kind() {
             PartKind::Code => rendered,
             PartKind::ToolCall => render_assistant_tool_call(part, &rendered),
             PartKind::Prose | PartKind::Text | PartKind::Attachment | PartKind::ToolResult => {
@@ -418,7 +950,7 @@ fn render_part_for_chat(role: MessageRole, part: &Part) -> String {
 }
 
 fn render_assistant_tool_call(part: &Part, rendered: &str) -> String {
-    let tool_name = part.tool_name.as_deref().unwrap_or("tool");
+    let tool_name = part.tool_name().unwrap_or("tool");
     let trimmed = rendered.trim();
     if trimmed.is_empty() || trimmed == "{}" {
         format!("{tool_name}()")
@@ -428,10 +960,10 @@ fn render_assistant_tool_call(part: &Part, rendered: &str) -> String {
 }
 
 fn attachment_from_part(part: &Part) -> Option<AttachmentSource> {
-    if !matches!(part.kind, PartKind::Attachment) {
+    if !matches!(part.kind(), PartKind::Attachment) {
         return None;
     }
-    let attachment = part.attachment.as_ref()?;
+    let attachment = part.attachment()?;
     Some(attachment.source.clone())
 }
 
@@ -441,7 +973,7 @@ fn render_message_for_transcript(msg: &Message, attachments: &mut Vec<Attachment
         // Reasoning items are display-only from the transcript's point of
         // view — they are never replayed as flat text. Provider adapters use
         // structured replay metadata when they can re-emit reasoning.
-        if matches!(part.kind, PartKind::Reasoning) {
+        if matches!(part.kind(), PartKind::Reasoning) {
             continue;
         }
         if let Some(attachment) = attachment_from_part(part) {
@@ -786,17 +1318,16 @@ pub fn messages_are_prompt_resume_safe<'a>(
         for part in message.parts.iter() {
             // Reasoning parts don't participate in tool pairing and are
             // always safe to resume through.
-            if matches!(part.kind, PartKind::Reasoning) {
+            if matches!(part.kind(), PartKind::Reasoning) {
                 continue;
             }
-            match part.kind {
+            match part.kind() {
                 PartKind::ToolCall => {
                     if !matches!(message.role, MessageRole::Assistant) {
                         return false;
                     }
                     let Some(call_id) = part
-                        .tool_call_id
-                        .as_deref()
+                        .tool_call_id()
                         .map(str::trim)
                         .filter(|call_id| !call_id.is_empty())
                     else {
@@ -811,8 +1342,7 @@ pub fn messages_are_prompt_resume_safe<'a>(
                         return false;
                     }
                     let Some(call_id) = part
-                        .tool_call_id
-                        .as_deref()
+                        .tool_call_id()
                         .map(str::trim)
                         .filter(|call_id| !call_id.is_empty())
                     else {
@@ -928,36 +1458,36 @@ fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
     for msg in msgs {
         let mut blocks: Vec<LlmContentBlock> = Vec::new();
         for part in msg.parts.iter() {
-            match part.kind {
+            match part.kind() {
                 PartKind::Reasoning => {
-                    let Some(meta) = part.reasoning_meta.as_ref() else {
+                    let Some(meta) = part.reasoning_meta() else {
                         continue;
                     };
                     if meta.is_empty() {
                         continue;
                     }
                     blocks.push(LlmContentBlock::Reasoning {
-                        text: part.content.clone(),
+                        text: part.content().to_string(),
                         replay: Some(meta.clone()),
                     });
                 }
                 PartKind::ToolCall => {
-                    let call_id = part.tool_call_id.clone().unwrap_or_default();
-                    let tool_name = part.tool_name.clone().unwrap_or_default();
+                    let call_id = part.tool_call_id().unwrap_or_default().to_string();
+                    let tool_name = part.tool_name().unwrap_or_default().to_string();
                     blocks.push(LlmContentBlock::ToolCall {
                         call_id,
                         tool_name,
-                        input_json: part.content.clone(),
-                        replay: part.tool_replay.clone(),
+                        input_json: part.content().to_string(),
+                        replay: part.tool_replay().cloned(),
                     });
                 }
                 PartKind::ToolResult => {
                     let text = part.render();
-                    let call_id = part.tool_call_id.clone().unwrap_or_default();
+                    let call_id = part.tool_call_id().unwrap_or_default().to_string();
                     blocks.push(LlmContentBlock::ToolResult {
                         call_id,
                         content: text,
-                        tool_name: part.tool_name.clone(),
+                        tool_name: part.tool_name().map(str::to_string),
                     });
                 }
                 _ => {
@@ -985,11 +1515,7 @@ fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
 
                     blocks.push(LlmContentBlock::Text {
                         text: text.into(),
-                        response_meta: if matches!(part.kind, PartKind::Text | PartKind::Prose) {
-                            part.response_meta.clone()
-                        } else {
-                            None
-                        },
+                        response_meta: part.response_meta().cloned(),
                         cache_breakpoint: false,
                     });
                 }

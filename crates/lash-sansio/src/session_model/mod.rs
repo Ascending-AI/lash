@@ -5,9 +5,9 @@ pub mod prompt;
 
 pub use failure::{FailureCode, TurnFailureCode, TurnFailureKind};
 pub use message::{
-    BaseRenderCache, Message, MessageRole, MessageSequence, Part, PartAttachment, PartKind,
-    PruneState, RenderedPrompt, append_rendered_prompt, messages_are_prompt_resume_safe,
-    render_prompt, render_transcript_prompt, shared_parts,
+    BaseRenderCache, InvalidPartCombination, Message, MessageRole, MessageSequence, Part,
+    PartAttachment, PartKind, PruneState, RenderedPrompt, append_rendered_prompt,
+    messages_are_prompt_resume_safe, render_prompt, render_transcript_prompt, shared_parts,
 };
 pub use prompt::{
     MAIN_AGENT_INTRO, PromptBuiltin, PromptLayer, PromptSlot, PromptSlotLayer, PromptTemplate,
@@ -744,7 +744,7 @@ pub fn truncate_raw_error(s: &str) -> String {
 
 pub fn reassign_part_ids(message_id: &str, parts: &mut [Part]) {
     for (idx, part) in parts.iter_mut().enumerate() {
-        part.id = format!("{message_id}.p{idx}");
+        *part.id_mut() = format!("{message_id}.p{idx}");
     }
 }
 

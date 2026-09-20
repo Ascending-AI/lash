@@ -1496,7 +1496,7 @@ fn checkpoint_messages_resume_prepare_protocol_iteration() {
             && message
                 .parts
                 .iter()
-                .any(|part| part.content == "one more thing")
+                .any(|part| part.content() == "one more thing")
     }));
     let progress_idx = effects
         .iter()
@@ -1513,7 +1513,7 @@ fn checkpoint_messages_resume_prepare_protocol_iteration() {
             && message
                 .parts
                 .iter()
-                .any(|part| part.content == "one more thing")
+                .any(|part| part.content() == "one more thing")
     }));
 }
 
@@ -1633,9 +1633,9 @@ fn checkpoint_after_mixed_tool_batch_results_replays_model_feedback_once() {
         effect,
         Effect::Progress { messages, .. }
             if messages.iter().any(|message| message.parts.iter().any(|part|
-                part.content.contains("read_file:Success")
-                    && part.content.contains("search:Failure")
-                    && part.content.contains("slow_tool:Cancelled")
+                part.content().contains("read_file:Success")
+                    && part.content().contains("search:Failure")
+                    && part.content().contains("slow_tool:Cancelled")
             ))
     )));
     let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("after-work checkpoint");
@@ -1678,7 +1678,7 @@ fn exec_driver_state_round_trip() {
         message
             .parts
             .iter()
-            .any(|part| part.content == "exec-state")
+            .any(|part| part.content() == "exec-state")
     }));
 }
 
@@ -1714,7 +1714,7 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
         message
             .parts
             .iter()
-            .any(|part| part.content.contains("exec-state"))
+            .any(|part| part.content().contains("exec-state"))
     }));
 }
 
