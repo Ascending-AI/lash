@@ -252,14 +252,11 @@ impl CommittedTurn {
             .resident_session
             .retain_committed_lease_continuity(self.retained_lease_continuity);
         runtime.state = self.resident_state;
-        let observation_revision = if runtime.state.checkpoint_ref.is_some() {
-            runtime.state.head_revision
-        } else {
-            runtime.state.turn_index as u64
-        };
+        let observation_revision =
+            crate::runtime::observation::observation_revision(&runtime.state);
         runtime
             .resident_session
-            .record_committed_observation_turn(observation_revision, trace_turn_id);
+            .record_committed_observation_turn(observation_revision.as_u64(), trace_turn_id);
         Ok(PostCommitDelivery {
             turn: self.turn,
             events: self.events,
@@ -528,13 +525,10 @@ impl LashRuntime {
 
         let Some(session) = self.session.as_ref() else {
             self.state.apply_snapshot(&assembled.state);
-            let observation_revision = if self.state.checkpoint_ref.is_some() {
-                self.state.head_revision
-            } else {
-                self.state.turn_index as u64
-            };
+            let observation_revision =
+                crate::runtime::observation::observation_revision(&self.state);
             self.resident_session
-                .record_committed_observation_turn(observation_revision, &trace_turn_id);
+                .record_committed_observation_turn(observation_revision.as_u64(), &trace_turn_id);
             self.emit_completed_turn_trace(&assembled.state, &assembled.outcome, &trace_turn_id);
             self.record_turn_parent_end(&trace_turn_id).await?;
             publish_terminal_after_commit(

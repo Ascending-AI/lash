@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use super::{LashRuntime, ProcessHandleView, ProcessRecord, ProcessRegistry};
 
+pub(in crate::runtime) use replay::observation_revision;
 pub use replay::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
@@ -1156,7 +1157,7 @@ mod tests {
         runtime.state.head_revision = 17;
 
         let exported = runtime.export_persistence_state();
-        let exported_revision = SessionRevision::from_state(&exported);
+        let exported_revision = observation_revision(&exported);
         let accessor_revision = SessionRevision::from_runtime(&runtime);
         assert_eq!(accessor_revision, exported_revision);
 

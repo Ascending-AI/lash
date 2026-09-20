@@ -14,7 +14,6 @@ use tokio::sync::broadcast;
 use tokio_util::sync::ReusableBoxFuture;
 
 use crate::runtime::LashRuntime;
-#[cfg(test)]
 use crate::runtime::RuntimeSessionState;
 
 const SESSION_CURSOR_PREFIX: &str = "lashsc2:";
@@ -41,21 +40,18 @@ impl SessionRevision {
     }
 
     pub(super) fn from_runtime(runtime: &LashRuntime) -> Self {
-        Self(if runtime.state.checkpoint_ref.is_some() {
-            runtime.state.head_revision
-        } else {
-            runtime.state.turn_index as u64
-        })
+        observation_revision(&runtime.state)
     }
+}
 
-    #[cfg(test)]
-    pub(super) fn from_state(state: &RuntimeSessionState) -> Self {
-        Self(if state.checkpoint_ref.is_some() {
-            state.head_revision
-        } else {
-            state.turn_index as u64
-        })
-    }
+/// The observation revision a session state projects: the committed head
+/// revision once a checkpoint exists, the turn index before the first one.
+pub(in crate::runtime) fn observation_revision(state: &RuntimeSessionState) -> SessionRevision {
+    SessionRevision(if state.checkpoint_ref.is_some() {
+        state.head_revision
+    } else {
+        state.turn_index as u64
+    })
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
