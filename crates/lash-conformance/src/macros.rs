@@ -1081,18 +1081,10 @@ macro_rules! trigger_store_reopenable_tests {
 /// Expansion machinery for trigger-retention fault laws.
 #[macro_export]
 macro_rules! __trigger_retention_fault_register {
-    ($fixture:block; $law:ident, $label:literal, legacy) => {
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_fixture_guard, store, legacy, _fault) = $fixture;
-            let _ = $label;
-            $crate::registration_macro_support::$law(store, legacy.as_ref()).await;
-        }
-    };
     ($fixture:block; $law:ident, $label:literal, retention) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_fixture_guard, store, _legacy, fault) = $fixture;
+            let (_fixture_guard, store, fault) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(store, fault.as_ref()).await;
         }
@@ -1104,7 +1096,6 @@ macro_rules! __trigger_retention_fault_register {
 macro_rules! trigger_retention_fault_tests {
     ($fixture:block) => {
         $crate::trigger_retention_fault_tests!(@catalogue $fixture; [
-            (legacy_ownerless_trigger_receipt_is_retained_law, "legacy-ownerless-trigger-receipt", legacy),
             (trigger_occurrence_retention_failure_law, "trigger-occurrence-retention-failure", retention),
             (trigger_retention_reconciliation_failure_law, "trigger-retention-reconciliation-failure", retention),
         ]);

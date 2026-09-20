@@ -398,6 +398,8 @@ table lash_trigger_deliveries
 table lash_trigger_mutation_receipts
   column created_at_ms bigint not-null
   column operation_id text not-null
+  column owner_id text not-null
+  column owner_kind text not-null
   column request_fingerprint text not-null
   column result_json text not-null
   primary-key (operation_id)

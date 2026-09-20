@@ -730,9 +730,12 @@ CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
 );
 CREATE TABLE IF NOT EXISTS lash_trigger_mutation_receipts (
     operation_id TEXT PRIMARY KEY,
+    owner_kind TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
     request_fingerprint TEXT NOT NULL,
     result_json TEXT NOT NULL,
-    created_at_ms BIGINT NOT NULL
+    created_at_ms BIGINT NOT NULL,
+    CONSTRAINT ck_trigger_receipts_owner_kind CHECK (owner_kind IN ('session', 'host', 'platform'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_subscription
     ON lash_trigger_deliveries(subscription_id);

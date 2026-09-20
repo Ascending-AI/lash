@@ -25,28 +25,6 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl LegacyTriggerMutationReceiptInjector for InMemoryTriggerFaultFixture {
-        async fn insert_legacy_receipt(
-            &self,
-            operation_id: &str,
-            request_fingerprint: &str,
-            result_json: &str,
-            created_at_ms: u64,
-        ) {
-            self.store.insert_legacy_mutation_receipt_for_testing(
-                operation_id,
-                request_fingerprint,
-                result_json,
-                created_at_ms,
-            );
-        }
-
-        async fn receipt_exists(&self, operation_id: &str) -> bool {
-            self.store.has_mutation_receipt_for_testing(operation_id)
-        }
-    }
-
-    #[async_trait::async_trait]
     impl TriggerOccurrenceRetentionFaultInjector for InMemoryTriggerFaultFixture {
         async fn fail_occurrence_delete(&self, occurrence_id: &str) {
             self.store
@@ -316,7 +294,6 @@ mod tests {
         (
             (),
             store as Arc<dyn crate::TriggerStore>,
-            Arc::clone(&fixture) as Arc<dyn LegacyTriggerMutationReceiptInjector>,
             fixture as Arc<dyn TriggerOccurrenceRetentionFaultInjector>,
         )
     });

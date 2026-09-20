@@ -1082,9 +1082,12 @@ CREATE TABLE IF NOT EXISTS trigger_deliveries (
 
 CREATE TABLE IF NOT EXISTS trigger_mutation_receipts (
     operation_id    TEXT PRIMARY KEY,
+    owner_kind      TEXT NOT NULL,
+    owner_id        TEXT NOT NULL,
     request_fingerprint    TEXT NOT NULL,
     result_json     TEXT NOT NULL,
-    created_at_ms   INTEGER NOT NULL
+    created_at_ms   INTEGER NOT NULL,
+    CONSTRAINT ck_trigger_receipts_owner_kind CHECK (owner_kind IN ('session', 'host', 'platform'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_process
@@ -1834,6 +1837,14 @@ mod check_constraint_tests {
                  'source', 'key', 'enabled', 7, 0, 0, '{}'
              )",
             "ck_trigger_subscriptions_lifecycle_deleted_at",
+        );
+        assert_check_rejects(
+            &triggers,
+            "INSERT INTO trigger_mutation_receipts (
+                 operation_id, owner_kind, owner_id,
+                 request_fingerprint, result_json, created_at_ms
+             ) VALUES ('bad-owner-kind', 'workflow', 'owner', 'fingerprint', '{}', 0)",
+            "ck_trigger_receipts_owner_kind",
         );
 
         let effects = Connection::open_in_memory().expect("open effect constraint fixture");

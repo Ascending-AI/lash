@@ -76,10 +76,7 @@ mod wake_delivery;
 #[path = "conformance/worklist_collation.rs"]
 mod worklist_collation;
 
-use injectors::{
-    PostgresFenceIntegrityInjector, PostgresLegacyTriggerMutationReceiptInjector,
-    PostgresLineageConformanceInjector,
-};
+use injectors::{PostgresFenceIntegrityInjector, PostgresLineageConformanceInjector};
 use occurrence_listing::PostgresTriggerOccurrenceRetentionFaultInjector;
 use support::{SharedDatabaseLock, database_url};
 
@@ -2235,9 +2232,8 @@ lash_conformance::trigger_retention_fault_tests!({
     reset(&storage).await;
     let pool = storage.pool().clone();
     let store = Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>;
-    let legacy = Arc::new(PostgresLegacyTriggerMutationReceiptInjector { pool: pool.clone() });
     let fault = Arc::new(PostgresTriggerOccurrenceRetentionFaultInjector { pool });
-    (database_lock, store, legacy, fault)
+    (database_lock, store, fault)
 });
 
 #[path = "conformance/process_retention.rs"]
