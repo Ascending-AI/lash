@@ -1,0 +1,141 @@
+name: Toolchain canary
+
+# Weekly early warning that latest stable Rust breaks the lint battery the
+# pinned toolchain keeps green (FIG-1684). With the pin, new-lint fallout is
+# supposed to arrive here — on our schedule, as a filed issue — instead of as
+# trunk redness on release day.
+#
+# This workflow is non-required by construction: it triggers only on schedule
+# and manual dispatch, never on pull_request or merge_group, so it can never
+# hold a merge. It is also the sole workflow allowed to pass an explicit
+# `toolchain:` to the vendored rust-toolchain action — floating is its whole
+# point. Every other workflow resolves the pin via the action default.
+
+on:
+  schedule:
+    # Monday mornings UTC, staggered off the cargo-deny schedule (17 5 * * 1).
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # The report step files and closes drift issues.
+  issues: write
+
+env:
+  CARGO_TERM_COLOR: always
+  LASH_CI_FEATURES: ""
+
+jobs:
+  canary:
+    name: Clippy on latest stable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Install latest stable Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      # The drift signal on a green run: what stable resolved to, against the
+      # pin the workspace actually builds with.
+      - name: Report toolchain drift
+        run: |
+          set -euo pipefail
+          pinned="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+          stable="$(rustc --version | awk '{print $2}')"
+          {
+            echo "### Toolchain canary"
+            echo ""
+            echo "- pinned toolchain: \`${pinned}\`"
+            echo "- resolved stable: \`${stable}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # The same battery the pinned lint job runs on pull requests: format,
+      # workspace clippy, and the slack-clone e2e feature resolution. Output is
+      # teed so the report step can name the offending lints.
+      - name: Lint battery
+        run: |
+          set -o pipefail
+          {
+            cargo fmt --all --check
+            # shellcheck disable=SC2086
+            cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
+            cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
+          } 2>&1 | tee canary.log
+
+      - name: File drift issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          title="Toolchain canary: lint battery fails on latest stable"
+          lints="$(grep -oE 'clippy::[a-z_]+' canary.log | sort -u || true)"
+          body="$(cat <<EOF | sed 's/^          //'
+          The weekly toolchain canary is red on latest stable.
+
+          Run: ${run_url}
+          Resolved toolchain: $(rustc --version)
+          Pinned toolchain: $(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+
+          Lints named in the output:
+
+          \`\`\`
+          ${lints:-none extracted — see the run log}
+          \`\`\`
+
+          Fix forward by bumping the pin (rust-toolchain.toml, the
+          rust-toolchain action default, MODULE.bazel) and eating the lint
+          fallout inside that PR, per CONTRIBUTING.md.
+          EOF
+          )"
+          existing="$(gh issue list --state open --limit 20 \
+            --search "in:title \"${title}\"" --json number \
+            --jq '.[0].number // empty')"
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+          else
+            gh issue create --title "${title}" --body "${body}"
+          fi
+          exit 1
+
+      - name: Close drift issue on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="Toolchain canary: lint battery fails on latest stable"
+          existing="$(gh issue list --state open --limit 20 \
+            --search "in:title \"${title}\"" --json number \
+            --jq '.[0].number // empty')"
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" \
+              --body "Green again on latest stable ($(rustc --version)); closing."
+            gh issue close "${existing}"
+          fi
