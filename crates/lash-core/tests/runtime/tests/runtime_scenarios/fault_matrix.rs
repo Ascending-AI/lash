@@ -144,7 +144,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::TriggerDeliveryRecovery,
         contract: "A trigger delivery reserved before a crash but missing its process row is reconciled into exactly one deterministic process start.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-core",
+            package: "lash-internal-core-worker",
             test_target: None,
             filter: "sweep_reconciles_reserved_trigger_delivery_without_process",
             required_env: None,
@@ -155,7 +155,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::TriggerDeliveryRecovery,
         contract: "Retention prunes trigger delivery rows with their terminal process rows so recovery does not resurrect completed trigger work.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-core",
+            package: "lash-internal-core-worker",
             test_target: None,
             filter: "sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process",
             required_env: None,
