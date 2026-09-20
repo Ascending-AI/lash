@@ -74,7 +74,7 @@ fn transform_final_response(
     detector: &CellDetector,
     mut response: lash_core::LlmResponse,
 ) -> lash_core::LlmResponse {
-    if !detector.cell_closed {
+    if !matches!(detector.scan, CellScan::Closed { .. }) {
         return response;
     }
 
@@ -89,13 +89,27 @@ fn transform_final_response(
     response
 }
 
+/// The scan's three real phases. `pending` exists only while the mask is
+/// still deciding whether held bytes become a start tag, and `body` exists
+/// only once a cell has opened — so stale pre-cell text cannot append into a
+/// body, and a closed cell cannot reopen. The cell-start and cell-end events
+/// are each emitted exactly on the transition that creates the state they
+/// announce.
+enum CellScan {
+    /// Reading prose; `pending` holds bytes withheld while they might still
+    /// become a start tag.
+    Scanning { pending: String },
+    /// Inside a cell; `body` accumulates cell source until the close tag.
+    Body { body: String },
+    /// The close tag completed (or an inline cell arrived whole); `body` is
+    /// the final cell source the splice renders.
+    Closed { body: String },
+}
+
 struct CellDetector {
     dialect: Arc<TypescriptDialect>,
-    pending: String,
-    inside_cell: bool,
-    cell_closed: bool,
+    scan: CellScan,
     visible_prose: String,
-    cell_body: String,
     /// A stream that ended with a response still to come has handed its
     /// accumulated state to phase 2 and must not be read by anything else.
     ///
@@ -118,11 +132,10 @@ impl CellDetector {
     fn with_dialect(dialect: Arc<TypescriptDialect>) -> Self {
         Self {
             dialect,
-            pending: String::new(),
-            inside_cell: false,
-            cell_closed: false,
+            scan: CellScan::Scanning {
+                pending: String::new(),
+            },
             visible_prose: String::new(),
-            cell_body: String::new(),
             stream_ended: false,
         }
     }
@@ -154,16 +167,17 @@ impl CellDetector {
 
     fn reset(&mut self) {
         self.stream_ended = false;
-        self.pending.clear();
-        self.inside_cell = false;
-        self.cell_closed = false;
+        self.scan = CellScan::Scanning {
+            pending: String::new(),
+        };
         self.visible_prose.clear();
-        self.cell_body.clear();
     }
 
     fn splice_into_visible(&self, visible: &str) -> String {
-        debug_assert!(self.cell_closed);
-        self.dialect.render_history_cell(visible, &self.cell_body)
+        let CellScan::Closed { body } = &self.scan else {
+            unreachable!("a splice exists only once the scan has closed");
+        };
+        self.dialect.render_history_cell(visible, body)
     }
 
     fn spliced_response_text(&self) -> String {
@@ -179,32 +193,38 @@ impl CellDetector {
             self.reset();
         }
 
-        if self.cell_closed {
-            return AssistantStreamTransform {
-                chunk: String::new(),
-                reasoning_deltas: Vec::new(),
-                events: Vec::new(),
-                abort_stream: false,
-            };
+        match self.scan {
+            CellScan::Closed { .. } => {
+                return AssistantStreamTransform {
+                    chunk: String::new(),
+                    reasoning_deltas: Vec::new(),
+                    events: Vec::new(),
+                    abort_stream: false,
+                };
+            }
+            CellScan::Body { .. } => {
+                return self.capture_cell_body_chunk(chunk, String::new(), Vec::new());
+            }
+            CellScan::Scanning { .. } => {}
         }
 
-        if self.inside_cell {
-            return self.capture_cell_body_chunk(chunk, String::new(), Vec::new());
-        }
-
-        self.pending.push_str(chunk);
+        let CellScan::Scanning { pending } = &mut self.scan else {
+            unreachable!("closed and body scans returned above");
+        };
+        pending.push_str(chunk);
 
         // `allow_eof` stays false for the same reason it does inside a body: a
         // chunk boundary is not the end of the response, and an inline cell read
         // from a half-arrived line would make the provider's framing decide what
         // executed. [`Self::finish_response`] runs the EOF leg.
-        match complete_cell_start(&self.pending, false, self.dialect.cell_tags()) {
+        match complete_cell_start(pending, false, self.dialect.cell_tags()) {
             Some(StreamedCellStart::Block(span)) => {
-                self.inside_cell = true;
-                let prose_before = self.pending[..span.start_tag_start].to_string();
+                let prose_before = pending[..span.start_tag_start].to_string();
                 self.visible_prose.push_str(&prose_before);
-                let body_suffix = self.pending[span.body_start..span.body_end].to_string();
-                self.pending.clear();
+                let body_suffix = pending[span.body_start..span.body_end].to_string();
+                self.scan = CellScan::Body {
+                    body: String::new(),
+                };
 
                 let events = vec![self.start_event()];
 
@@ -225,8 +245,11 @@ impl CellDetector {
             None => {}
         }
 
-        let safe_len = self.pending.len()
-            - possible_start_tag_suffix_len(&self.pending, self.dialect.cell_tags());
+        let CellScan::Scanning { pending } = &mut self.scan else {
+            unreachable!("cell starts transitioned above");
+        };
+        let safe_len =
+            pending.len() - possible_start_tag_suffix_len(pending, self.dialect.cell_tags());
         if safe_len == 0 {
             return AssistantStreamTransform {
                 chunk: String::new(),
@@ -236,8 +259,8 @@ impl CellDetector {
             };
         }
 
-        let flushed = self.pending[..safe_len].to_string();
-        self.pending = self.pending[safe_len..].to_string();
+        let flushed = pending[..safe_len].to_string();
+        *pending = pending[safe_len..].to_string();
         self.visible_prose.push_str(&flushed);
         AssistantStreamTransform {
             chunk: flushed,
@@ -253,19 +276,22 @@ impl CellDetector {
         visible_chunk: String,
         mut events: Vec<PluginRuntimeEvent>,
     ) -> AssistantStreamTransform {
-        self.cell_body.push_str(chunk);
+        let CellScan::Body { body } = &mut self.scan else {
+            unreachable!("body chunks are captured only inside a cell");
+        };
+        body.push_str(chunk);
         // `allow_eof` stays false: a chunk boundary is not response EOF, which
         // is what makes the mask — not the provider's stop — own the boundary.
-        let abort_stream = if let Some(span) =
-            complete_end_tag_span(&self.cell_body, false, self.dialect.cell_tags())
-        {
-            self.cell_body = self.cell_body[..span.body_end].to_string();
-            self.cell_closed = true;
-            events.push(self.end_event());
-            true
-        } else {
-            false
-        };
+        let abort_stream =
+            if let Some(span) = complete_end_tag_span(body, false, self.dialect.cell_tags()) {
+                body.truncate(span.body_end);
+                let body = std::mem::take(body);
+                self.scan = CellScan::Closed { body };
+                events.push(self.end_event());
+                true
+            } else {
+                false
+            };
 
         AssistantStreamTransform {
             chunk: visible_chunk,
@@ -275,52 +301,57 @@ impl CellDetector {
         }
     }
 
-    /// Consume the inline cell `span` addresses out of [`Self::pending`],
-    /// returning the prose that preceded it on the way.
+    /// Consume the inline cell `span` addresses out of the scan's pending
+    /// text, returning the prose that preceded it on the way.
     fn take_inline_cell(&mut self, span: crate::cell_scan::CellSpan) -> String {
-        let prose_before = self.pending[..span.start_tag_start].to_string();
+        let CellScan::Scanning { pending } = &mut self.scan else {
+            unreachable!("an inline cell is taken only while scanning");
+        };
+        let prose_before = pending[..span.start_tag_start].to_string();
         self.visible_prose.push_str(&prose_before);
-        self.cell_body = self.pending[span.body_start..span.body_end].to_string();
-        self.pending.clear();
-        self.inside_cell = true;
-        self.cell_closed = true;
+        let body = pending[span.body_start..span.body_end].to_string();
+        self.scan = CellScan::Closed { body };
         prose_before
     }
 
     fn finish_response(&mut self) -> Vec<PluginRuntimeEvent> {
-        if self.cell_closed {
-            return Vec::new();
-        }
-        if !self.inside_cell {
-            // No cell has opened and no more text is coming, so a held line that
-            // could still have closed as an inline cell now either is one or is
-            // prose. This is the inline shape's EOF leg, the counterpart of the
-            // one `complete_end_tag_span` has always had for the block shape.
-            let tags = self.dialect.cell_tags();
-            if let Some(StreamedCellStart::Inline(span)) =
-                complete_cell_start(&self.pending, true, tags)
-            {
-                self.take_inline_cell(span);
-                return vec![self.start_event(), self.end_event()];
+        match &mut self.scan {
+            CellScan::Closed { .. } => Vec::new(),
+            CellScan::Scanning { pending } => {
+                // No cell has opened and no more text is coming, so a held line
+                // that could still have closed as an inline cell now either is
+                // one or is prose. This is the inline shape's EOF leg, the
+                // counterpart of the one `complete_end_tag_span` has always had
+                // for the block shape.
+                let tags = self.dialect.cell_tags();
+                if let Some(StreamedCellStart::Inline(span)) =
+                    complete_cell_start(pending, true, tags)
+                {
+                    self.take_inline_cell(span);
+                    return vec![self.start_event(), self.end_event()];
+                }
+                // Prose after all. It was withheld from the live deltas while
+                // the line might still have become a cell, and this hook has no
+                // delta to emit it on; recording it as visible prose is what
+                // keeps the detector's own account of the response whole. The
+                // transcript is unaffected either way — with no cell, the
+                // response passes through untransformed, tail included.
+                let held = std::mem::take(pending);
+                self.visible_prose.push_str(&held);
+                Vec::new()
             }
-            // Prose after all. It was withheld from the live deltas while the
-            // line might still have become a cell, and this hook has no delta to
-            // emit it on; recording it as visible prose is what keeps the
-            // detector's own account of the response whole. The transcript is
-            // unaffected either way — with no cell, the response passes through
-            // untransformed, tail included.
-            let held = std::mem::take(&mut self.pending);
-            self.visible_prose.push_str(&held);
-            return Vec::new();
+            CellScan::Body { body } => {
+                // Genuine response EOF, so a closing tag at the buffer end
+                // counts.
+                let Some(span) = complete_end_tag_span(body, true, self.dialect.cell_tags()) else {
+                    return Vec::new();
+                };
+                body.truncate(span.body_end);
+                let body = std::mem::take(body);
+                self.scan = CellScan::Closed { body };
+                vec![self.end_event()]
+            }
         }
-        // Genuine response EOF, so a closing tag at the buffer end counts.
-        let Some(span) = complete_end_tag_span(&self.cell_body, true, self.dialect.cell_tags())
-        else {
-            return Vec::new();
-        };
-        self.cell_body.truncate(span.body_end);
-        self.cell_closed = true;
-        vec![self.end_event()]
     }
 
     fn start_event(&mut self) -> PluginRuntimeEvent {
@@ -368,7 +399,7 @@ mod tests {
         let mut d = CellDetector::new();
         let t = d.process_chunk("Hi - what can I help with?");
         assert_eq!(t.chunk, "Hi - what can I help with?");
-        assert!(d.pending.is_empty());
+        assert!(pending(&d).is_empty());
     }
 
     #[test]
@@ -376,12 +407,12 @@ mod tests {
         let mut d = CellDetector::new();
         let t = d.process_chunk("Plan.\n<type");
         assert_eq!(t.chunk, "Plan.\n");
-        assert_eq!(d.pending, "<type");
+        assert_eq!(pending(&d), "<type");
 
         let t = d.process_chunk("script>\n");
         assert_eq!(t.chunk, "");
-        assert!(d.inside_cell);
-        assert!(!d.cell_closed);
+        assert!(inside(&d));
+        assert!(!closed(&d));
         assert_eq!(t.events.len(), 1);
         assert!(!t.abort_stream);
     }
@@ -391,13 +422,13 @@ mod tests {
         let mut d = CellDetector::new();
         let t = d.process_chunk("Plan.\n  ");
         assert_eq!(t.chunk, "Plan.\n");
-        assert_eq!(d.pending, "  ");
+        assert_eq!(pending(&d), "  ");
 
         let t = d.process_chunk("<typescript>\nfinish 1");
         assert_eq!(t.chunk, "");
-        assert!(d.inside_cell);
-        assert!(!d.cell_closed);
-        assert_eq!(d.cell_body, "finish 1");
+        assert!(inside(&d));
+        assert!(!closed(&d));
+        assert_eq!(body(&d), "finish 1");
     }
 
     #[test]
@@ -405,8 +436,8 @@ mod tests {
         let mut d = CellDetector::new();
         let t = d.process_chunk("Thinking...\n\n<typescript>\ncode\n```markdown\ninside\n```\n");
         assert_eq!(t.chunk, "Thinking...\n\n");
-        assert!(d.inside_cell);
-        assert_eq!(d.cell_body, "code\n```markdown\ninside\n```\n");
+        assert!(inside(&d));
+        assert_eq!(body(&d), "code\n```markdown\ninside\n```\n");
         assert!(!t.abort_stream);
     }
 
@@ -420,9 +451,7 @@ mod tests {
                 }
             }
             detector.finish_response();
-            detector
-                .cell_closed
-                .then(|| detector.spliced_response_text())
+            closed(&detector).then(|| detector.spliced_response_text())
         }
 
         for raw in [
@@ -459,7 +488,7 @@ mod tests {
         let t = d.process_chunk("finish \"hi\"\n");
         assert_eq!(t.chunk, "");
         assert!(!t.abort_stream);
-        assert_eq!(d.cell_body, "finish \"hi\"\n");
+        assert_eq!(body(&d), "finish \"hi\"\n");
     }
 
     /// A one-line cell is masked, not shown: its source never reaches the
@@ -472,8 +501,8 @@ mod tests {
         let t = d.process_chunk("Checking.\n<typescript>finish 1</typescript>\n");
         assert_eq!(t.chunk, "Checking.\n");
         assert!(t.abort_stream);
-        assert!(d.cell_closed);
-        assert_eq!(d.cell_body, "finish 1");
+        assert!(closed(&d));
+        assert_eq!(body(&d), "finish 1");
         assert_eq!(
             event_names(&t.events),
             vec!["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
@@ -492,11 +521,11 @@ mod tests {
         let t = d.process_chunk("Checking.\n<typescript>finish 1</typescript>");
         assert_eq!(t.chunk, "Checking.\n");
         assert!(!t.abort_stream, "an unfinished line decides nothing yet");
-        assert!(!d.cell_closed);
+        assert!(!closed(&d));
 
         let events = d.finish_response();
-        assert!(d.cell_closed);
-        assert_eq!(d.cell_body, "finish 1");
+        assert!(closed(&d));
+        assert_eq!(body(&d), "finish 1");
         assert_eq!(
             event_names(&events),
             vec!["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
@@ -516,7 +545,7 @@ mod tests {
         let t = d.process_chunk("ish 1</typescript>\n");
         assert_eq!(t.chunk, "");
         assert!(t.abort_stream);
-        assert_eq!(d.cell_body, "finish 1");
+        assert_eq!(body(&d), "finish 1");
     }
 
     /// Held prose reaches the detector's account of the response at EOF instead
@@ -533,8 +562,8 @@ mod tests {
             d.process_chunk(raw);
             let events = d.finish_response();
             assert!(events.is_empty(), "{raw:?} is not a cell");
-            assert!(!d.cell_closed, "{raw:?} is not a cell");
-            assert!(d.pending.is_empty(), "{raw:?} left text held");
+            assert!(!closed(&d), "{raw:?} is not a cell");
+            assert!(pending(&d).is_empty(), "{raw:?} left text held");
             assert_eq!(d.visible_prose, raw, "{raw:?} lost its tail");
         }
     }
@@ -552,9 +581,7 @@ mod tests {
                 }
             }
             detector.finish_response();
-            detector
-                .cell_closed
-                .then(|| detector.spliced_response_text())
+            closed(&detector).then(|| detector.spliced_response_text())
         }
 
         for (raw, expected) in [
@@ -591,7 +618,7 @@ mod tests {
         let mut d = CellDetector::new();
         let t = d.process_chunk("Use <typescript> here.\n");
         assert_eq!(t.chunk, "Use <typescript> here.\n");
-        assert!(!d.inside_cell);
+        assert!(!inside(&d));
         assert!(t.events.is_empty());
     }
 
@@ -601,7 +628,7 @@ mod tests {
         assert_eq!(d.process_chunk("<typescript>").chunk, "");
         let t = d.process_chunk(" here\n");
         assert_eq!(t.chunk, "<typescript> here\n");
-        assert!(!d.inside_cell);
+        assert!(!inside(&d));
     }
 
     #[test]
@@ -620,17 +647,17 @@ mod tests {
         let mut d = CellDetector::new();
         let t = d.process_chunk("Visible.\n<typescript>\nfinish 1");
         assert_eq!(t.chunk, "Visible.\n");
-        assert!(d.inside_cell);
-        assert!(!d.cell_closed);
-        assert_eq!(d.cell_body, "finish 1");
+        assert!(inside(&d));
+        assert!(!closed(&d));
+        assert_eq!(body(&d), "finish 1");
 
         d.reset();
 
         let t = d.process_chunk("Next response.");
         assert_eq!(t.chunk, "Next response.");
-        assert!(!d.inside_cell);
-        assert!(!d.cell_closed);
-        assert!(d.cell_body.is_empty());
+        assert!(!inside(&d));
+        assert!(!closed(&d));
+        assert!(body(&d).is_empty());
     }
 
     #[test]
@@ -639,15 +666,15 @@ mod tests {
         let t = d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(t.abort_stream);
-        assert!(d.cell_closed);
+        assert!(closed(&d));
 
         d.reset();
 
         let t = d.process_chunk("Next response.");
         assert_eq!(t.chunk, "Next response.");
         assert!(!t.abort_stream);
-        assert!(!d.inside_cell);
-        assert!(!d.cell_closed);
+        assert!(!inside(&d));
+        assert!(!closed(&d));
     }
 
     /// The detector is session-scoped, so a turn whose phase 2 never ran must
@@ -656,7 +683,7 @@ mod tests {
     /// A closed cell aborts the stream (`Aborted`) and hands the accumulated
     /// splice to the response hook. If a cancel or a controller error lands
     /// between the phases that hook never runs, and without the stream-ended
-    /// latch the next turn opens with `cell_closed` still true: every chunk is
+    /// latch the next turn opens with the scan still closed: every chunk is
     /// swallowed and the previous turn's cell is spliced into the new response.
     #[test]
     fn stream_ended_without_phase_two_does_not_poison_the_next_turn() {
@@ -664,12 +691,12 @@ mod tests {
         let t = d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(t.abort_stream);
-        assert!(d.cell_closed);
+        assert!(closed(&d));
 
         // The turn dies between the phases: the stream teardown runs, the
         // response hook never does.
         d.note_stream_finished(lash_core::plugin::AssistantStreamFinishReason::Aborted);
-        assert!(d.cell_closed, "phase 2 still owns the splice if it runs");
+        assert!(closed(&d), "phase 2 still owns the splice if it runs");
 
         let t = d.process_chunk("Next turn prose.");
         assert_eq!(
@@ -677,8 +704,8 @@ mod tests {
             "the next turn's prose must reach the user"
         );
         assert!(!t.abort_stream);
-        assert!(!d.cell_closed);
-        assert!(d.cell_body.is_empty());
+        assert!(!closed(&d));
+        assert!(body(&d).is_empty());
         assert_eq!(d.visible_prose, "Next turn prose.");
     }
 
@@ -691,8 +718,8 @@ mod tests {
         d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\n");
         d.note_stream_finished(lash_core::plugin::AssistantStreamFinishReason::Complete);
 
-        assert!(d.cell_closed);
-        assert_eq!(d.cell_body, "finish 1");
+        assert!(closed(&d));
+        assert_eq!(body(&d), "finish 1");
         assert!(d.spliced_response_text().contains("finish 1"));
     }
 
@@ -704,8 +731,8 @@ mod tests {
         let t = d.process_chunk("script>\n");
         assert_eq!(t.chunk, "");
         assert!(t.abort_stream);
-        assert!(d.cell_closed);
-        assert_eq!(d.cell_body, "finish 1");
+        assert!(closed(&d));
+        assert_eq!(body(&d), "finish 1");
         assert_eq!(event_names(&t.events), vec!["rlm_typescript_cell_end"]);
     }
 
@@ -715,8 +742,8 @@ mod tests {
         let t = d.process_chunk("Visible.\n<typescript>\nfinish 1\n</typescript>\nTrailing prose.");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(t.abort_stream);
-        assert!(d.cell_closed);
-        assert_eq!(d.cell_body, "finish 1");
+        assert!(closed(&d));
+        assert_eq!(body(&d), "finish 1");
         assert_eq!(
             event_names(&t.events),
             vec!["rlm_typescript_cell_start", "rlm_typescript_cell_end"]
@@ -778,9 +805,9 @@ mod tests {
         let t = d.process_chunk("Visible.\n<typescript>\nfinish 1");
         assert_eq!(t.chunk, "Visible.\n");
         assert!(!t.abort_stream);
-        assert!(d.inside_cell);
-        assert!(!d.cell_closed);
-        assert_eq!(d.cell_body, "finish 1");
+        assert!(inside(&d));
+        assert!(!closed(&d));
+        assert_eq!(body(&d), "finish 1");
     }
 
     fn stream_chunks(chunks: &[&str]) -> (CellDetector, String) {
@@ -1005,7 +1032,7 @@ mod tests {
         let mut d = CellDetector::new();
         let t = d.process_chunk("<typescript>");
         assert_eq!(t.chunk, "");
-        assert!(!d.inside_cell);
+        assert!(!inside(&d));
         assert_eq!(d.splice_or_visible_for_test(""), "<typescript>");
     }
 
@@ -1016,8 +1043,8 @@ mod tests {
             d.process_chunk("Visible.\n<typescript>\nfinish 1").chunk,
             "Visible.\n"
         );
-        assert!(d.inside_cell);
-        assert!(!d.cell_closed);
+        assert!(inside(&d));
+        assert!(!closed(&d));
 
         let response = response_with_text("Visible.\n<typescript>\nfinish 1");
         let transformed = transform_final_response(&d, response.clone());
@@ -1030,19 +1057,101 @@ mod tests {
         let mut d = CellDetector::new();
         let t = d.process_chunk("%%typescript\nfinish 1\n");
         assert_eq!(t.chunk, "%%typescript\nfinish 1\n");
-        assert!(!d.inside_cell);
+        assert!(!inside(&d));
         assert!(!t.abort_stream);
+    }
+
+    /// The end event is emitted exactly on the transition to `Closed` — once —
+    /// on both the block path and the inline path, and never again when the
+    /// response hook or late chunks revisit the closed scan.
+    #[test]
+    fn cell_end_event_is_emitted_exactly_once_on_inline_and_block_paths() {
+        fn end_count(chunks: &[&str]) -> usize {
+            let mut d = CellDetector::new();
+            let mut names: Vec<String> = Vec::new();
+            for chunk in chunks {
+                names.extend(
+                    event_names(&d.process_chunk(chunk).events)
+                        .into_iter()
+                        .map(str::to_string),
+                );
+            }
+            names.extend(
+                event_names(&d.finish_response())
+                    .into_iter()
+                    .map(str::to_string),
+            );
+            // A second phase-2 pass must not re-emit either.
+            names.extend(
+                event_names(&d.finish_response())
+                    .into_iter()
+                    .map(str::to_string),
+            );
+            names
+                .iter()
+                .filter(|name| name.as_str() == "rlm_typescript_cell_end")
+                .count()
+        }
+
+        // Block path: close tag mid-stream, then a late chunk and phase 2.
+        assert_eq!(
+            end_count(&[
+                "Visible.\n<typescript>\nfinish 1\n</typescript>\n",
+                "trailing chunk after close",
+            ]),
+            1,
+            "block path"
+        );
+        // Inline path: the cell opens and closes in one transition, then EOF.
+        assert_eq!(
+            end_count(&["Checking.\n<typescript>finish 1</typescript>\n"]),
+            1,
+            "inline path"
+        );
+        // Inline at the EOF leg: the same once-only guarantee when the close
+        // is recognized at response end rather than on a chunk.
+        assert_eq!(
+            end_count(&["Checking.\n<typescript>finish 1</typescript>"]),
+            1,
+            "eof inline path"
+        );
     }
 
     impl CellDetector {
         fn splice_or_visible_for_test(&self, visible: &str) -> String {
-            if self.inside_cell {
-                self.splice_into_visible(visible)
-            } else {
-                let mut out = visible.to_string();
-                out.push_str(&self.pending);
-                out
+            match &self.scan {
+                CellScan::Scanning { pending } => {
+                    let mut out = visible.to_string();
+                    out.push_str(pending);
+                    out
+                }
+                CellScan::Body { .. } | CellScan::Closed { .. } => {
+                    self.splice_into_visible(visible)
+                }
             }
+        }
+    }
+
+    /// Discriminant assertions for the scan phases the old flag pair encoded.
+    fn inside(d: &CellDetector) -> bool {
+        !matches!(d.scan, CellScan::Scanning { .. })
+    }
+
+    fn closed(d: &CellDetector) -> bool {
+        matches!(d.scan, CellScan::Closed { .. })
+    }
+
+    fn pending(d: &CellDetector) -> &str {
+        match &d.scan {
+            CellScan::Scanning { pending } => pending,
+            _ => "",
+        }
+    }
+
+    fn body(d: &CellDetector) -> &str {
+        match &d.scan {
+            CellScan::Scanning { .. } => "",
+            CellScan::Body { body } | CellScan::Closed { body } => body,
         }
     }
 
