@@ -586,10 +586,15 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         // supersedes a turn owner, a missing process row proves a process owner
         // was pruned, and only unscoped host puts use age alone.
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query(crate::attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS)
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::attachments::attachment_sql()
+                .manifest_postgres
+                .delete_deleted_session_roots
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         let delete_sql = crate::attachments::forget_aged_uncommitted_attachment_intents_sql(
             self.process_registry_shared,
         );
@@ -909,10 +914,15 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
-    sqlx::query(crate::attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    sqlx::query(
+        crate::attachments::attachment_sql()
+            .manifest_postgres
+            .delete_deleted_session_roots
+            .sql(),
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
     crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
         tx,
         candidates,
@@ -1148,10 +1158,15 @@ pub(crate) async fn delete_process_sessions_tx(
         .await
         .map_err(store_sqlx_error)?;
 
-        sqlx::query(crate::attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        sqlx::query(
+            crate::attachments::attachment_sql()
+                .manifest_postgres
+                .delete_deleted_session_roots
+                .sql(),
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
         crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(
             tx,
             candidates,

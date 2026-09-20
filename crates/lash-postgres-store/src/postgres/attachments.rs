@@ -12,28 +12,39 @@ use lash_store_sql::Dialect;
 use lash_store_sql::attachment::condemnation::CondemnationStatements;
 use lash_store_sql::attachment::manifest::ManifestStatements;
 
-/// FIG-653: graph retention is a prune precondition for committed attachment roots.
-/// Owner-level retention deliberately includes suffix attachments: the manifest
-/// has no node edge. Forks and pins keep these rows until their final prefix dies.
-///
-/// FIG-3399: this statement reads `lash_deleted_sessions` and
-/// `lash_graph_nodes`, which no converted family owns, so the renderer cannot
-/// yet be told about it. It stays a literal here until the cross-family axis
-/// lands.
-pub(crate) const RECLAIM_DELETED_ATTACHMENT_ROOTS: &str =
-    "DELETE FROM lash_attachment_manifest AS manifest
- WHERE EXISTS (SELECT 1 FROM lash_deleted_sessions AS deleted
-               WHERE deleted.session_id = manifest.session_id)
-   AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
-       SELECT 1 FROM lash_graph_nodes AS node
-       WHERE node.session_id = manifest.session_id AND node.tombstoned = FALSE
-   ))";
-
 use crate::*;
 
 lash_store_sql::statements! {
     /// `lash_attachment_manifest` statements only PostgreSQL issues.
     pub(crate) struct ManifestPostgresStatements @ "attachment_manifest" {
+        /// Reclaim every attachment root a deleted session left behind.
+        ///
+        /// FIG-653: graph retention is a prune precondition for committed
+        /// roots, and owner-level retention deliberately includes suffix
+        /// attachments, because the manifest has no node edge — forks and
+        /// pins keep these rows until their final prefix dies.
+        ///
+        /// Forks on the tombstone literal: `graph_nodes.tombstoned` is
+        /// BOOLEAN on PostgreSQL and INTEGER 0/1 on SQLite.
+        delete_deleted_session_roots = "DELETE FROM attachment_manifest AS manifest
+             WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                           WHERE deleted.session_id = manifest.session_id)
+               AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
+                   SELECT 1 FROM graph_nodes AS node
+                   WHERE node.session_id = manifest.session_id AND node.tombstoned = FALSE
+               ))";
+
+        /// Forget `?2` in session `?1` unless a live node still roots it.
+        /// Same tombstone-literal fork as
+        /// [`ManifestPostgresStatements::delete_deleted_session_roots`].
+        forget_for_session = "DELETE FROM attachment_manifest
+             WHERE session_id = ?1 AND attachment_id = ?2 AND (
+                 committed_at_ms IS NULL OR NOT EXISTS (
+                     SELECT 1 FROM graph_nodes AS node
+                     WHERE node.session_id = attachment_manifest.session_id
+                       AND node.tombstoned = FALSE
+                 ))";
+
         /// Every uncommitted intent older than `?1`.
         ///
         /// The ordering is the fork: PostgreSQL reports digest order, SQLite
@@ -568,21 +579,13 @@ impl AttachmentManifest for PostgresSessionStore {
         let session_id = SessionId::from(session_id.to_string());
         let attachment_id = attachment_id.to_string();
         {
-            sqlx::query(
-                "DELETE FROM lash_attachment_manifest
-                 WHERE session_id = $1 AND attachment_id = $2 AND (
-                             committed_at_ms IS NULL OR NOT EXISTS (
-                                 SELECT 1 FROM lash_graph_nodes AS node
-                                 WHERE node.session_id = lash_attachment_manifest.session_id
-                                   AND node.tombstoned = FALSE
-                             ))",
-            )
-            .bind(session_id.as_str())
-            .bind(attachment_id)
-            .execute(&pool)
-            .await
-            .map(|_| ())
-            .map_err(store_sqlx_error)
+            sqlx::query(attachment_sql().manifest_postgres.forget_for_session.sql())
+                .bind(session_id.as_str())
+                .bind(attachment_id)
+                .execute(&pool)
+                .await
+                .map(|_| ())
+                .map_err(store_sqlx_error)
         }
     }
 

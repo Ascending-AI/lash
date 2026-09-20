@@ -56,6 +56,37 @@ lash_store_sql::statements! {
              ORDER BY hash
              FOR UPDATE";
 
+        /// Reclaim the session-delete candidate `?1` if nothing still roots it.
+        ///
+        /// Forks from SQLite's counterpart twice: this backend has no
+        /// `artifact_refs` pointer table to rule out, because its artifact
+        /// bytes live inline in `lash_lashlang_artifacts`, and its head table
+        /// is `lash_sessions` where SQLite's is `session_head`.
+        reclaim_session_candidate = "DELETE FROM blobs AS candidate
+             WHERE candidate.hash = ?1
+               AND NOT EXISTS (
+                   SELECT 1 FROM sessions AS head
+                   WHERE head.checkpoint_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM node_anchors AS anchor
+                   WHERE anchor.checkpoint_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM checkpoint_blob_refs AS edge
+                   WHERE edge.blob_ref = candidate.hash
+                     AND (
+                         EXISTS (
+                             SELECT 1 FROM sessions AS head
+                             WHERE head.checkpoint_ref = edge.checkpoint_ref
+                         )
+                         OR EXISTS (
+                             SELECT 1 FROM node_anchors AS anchor
+                             WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                         )
+                     )
+               )";
+
         /// The stored bytes for every content address in `?1`, in one round
         /// trip. The text-array bind is the fork; SQLite binds a JSON array
         /// and unpacks it with `json_each`.

@@ -39,6 +39,72 @@ lash_store_sql::statements! {
         select_bodies_by_hash = "SELECT hash, content FROM blobs
              WHERE hash IN (SELECT value FROM json_each(?1))";
 
+        /// Reclaim the blob at `?1` once the artifact pointer that named it
+        /// is gone, if nothing else roots it.
+        ///
+        /// Every predicate is an indexed `NOT EXISTS` over exact edges; no
+        /// whole-catalog mark/sweep runs in this transaction. PostgreSQL has
+        /// no counterpart: its artifact bytes live inline in
+        /// `lash_lashlang_artifacts` and never reach this table.
+        reclaim_unowned_artifact = "DELETE FROM blobs AS candidate
+             WHERE candidate.hash = ?1
+               AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM session_head WHERE checkpoint_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM node_anchors WHERE checkpoint_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM checkpoint_blob_refs WHERE blob_ref = candidate.hash)";
+
+        /// Reclaim the session-delete candidate `?1` if nothing still roots it.
+        ///
+        /// Forks from PostgreSQL's counterpart on the artifact clause: only
+        /// SQLite keeps an `artifact_refs` pointer table, so only SQLite has a
+        /// fourth kind of root to rule out. The head table also forks by name,
+        /// `session_head` here and `lash_sessions` there.
+        reclaim_session_candidate = "DELETE FROM blobs AS candidate
+             WHERE candidate.hash = ?1
+               AND NOT EXISTS (
+                   SELECT 1 FROM session_head AS head
+                   WHERE head.checkpoint_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM node_anchors AS anchor
+                   WHERE anchor.checkpoint_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM artifact_refs AS artifact
+                   WHERE artifact.blob_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM checkpoint_blob_refs AS edge
+                   WHERE edge.blob_ref = candidate.hash
+                     AND (
+                         EXISTS (
+                             SELECT 1 FROM session_head AS head
+                             WHERE head.checkpoint_ref = edge.checkpoint_ref
+                         )
+                         OR EXISTS (
+                             SELECT 1 FROM node_anchors AS anchor
+                             WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                         )
+                     )
+               )";
+
+        /// One preflight page of sessions that have published a checkpoint
+        /// root, after session `?1`, at most `?2` rows.
+        ///
+        /// The join is `LEFT` on purpose: an inner join would make a session
+        /// whose manifest blob has gone missing simply disappear from the
+        /// walk — the single most alarming finding a preflight can make,
+        /// rendered as "no such session". PostgreSQL's walk reads its own
+        /// head table, `lash_sessions`, so the two texts fork on the table
+        /// name alone.
+        select_session_checkpoint_page = "SELECT session_head.session_id, session_head.checkpoint_ref, blobs.content
+             FROM session_head
+             LEFT JOIN blobs ON blobs.hash = session_head.checkpoint_ref
+             WHERE session_head.checkpoint_ref IS NOT NULL
+               AND (?1 IS NULL OR session_head.session_id > ?1)
+             ORDER BY session_head.session_id
+             LIMIT ?2";
+
         /// Whether a blob exists at `?1`.
         ///
         /// SQLite alone asks this: it is the session-delete sweep's proof that

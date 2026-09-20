@@ -283,12 +283,7 @@ impl Store {
             params![namespace, artifact_ref],
         )?;
         tx.execute(
-            "DELETE FROM blobs AS candidate
-             WHERE candidate.hash = ?1
-               AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)
-               AND NOT EXISTS (SELECT 1 FROM session_head WHERE checkpoint_ref = candidate.hash)
-               AND NOT EXISTS (SELECT 1 FROM node_anchors WHERE checkpoint_ref = candidate.hash)
-               AND NOT EXISTS (SELECT 1 FROM checkpoint_blob_refs WHERE blob_ref = candidate.hash)",
+            artifact_sql().blobs_sqlite.reclaim_unowned_artifact.sql(),
             params![blob_ref],
         )?;
         Ok(())

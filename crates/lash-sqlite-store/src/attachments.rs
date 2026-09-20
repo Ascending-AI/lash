@@ -20,27 +20,39 @@ use lash_sansio::SessionId;
 use lash_store_sql::attachment::condemnation::CondemnationStatements;
 use lash_store_sql::attachment::manifest::ManifestStatements;
 
-/// FIG-653: graph retention is a prune precondition for committed attachment roots.
-/// Owner-level retention deliberately includes suffix attachments: the manifest
-/// has no node edge. Forks and pins keep these rows until their final prefix dies.
-///
-/// FIG-3399: this statement reads `deleted_sessions` and `graph_nodes`, which
-/// no converted family owns, so the renderer cannot yet be told about it. It
-/// stays a literal here until the cross-family axis lands.
-pub(crate) const RECLAIM_DELETED_ATTACHMENT_ROOTS: &str =
-    "DELETE FROM attachment_manifest AS manifest
- WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
-               WHERE deleted.session_id = manifest.session_id)
-   AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
-       SELECT 1 FROM graph_nodes AS node
-       WHERE node.session_id = manifest.session_id AND node.tombstoned = 0
-   ))";
-
 use super::*;
 
 lash_store_sql::statements! {
     /// `attachment_manifest` statements only SQLite issues.
     pub(crate) struct ManifestSqliteStatements @ "attachment_manifest" {
+        /// Reclaim every attachment root a deleted session left behind.
+        ///
+        /// FIG-653: graph retention is a prune precondition for committed
+        /// roots, and owner-level retention deliberately includes suffix
+        /// attachments, because the manifest has no node edge — forks and
+        /// pins keep these rows until their final prefix dies.
+        ///
+        /// Forks on the tombstone literal: `graph_nodes.tombstoned` is
+        /// INTEGER 0/1 on SQLite and BOOLEAN on PostgreSQL.
+        delete_deleted_session_roots = "DELETE FROM attachment_manifest AS manifest
+             WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
+                           WHERE deleted.session_id = manifest.session_id)
+               AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
+                   SELECT 1 FROM graph_nodes AS node
+                   WHERE node.session_id = manifest.session_id AND node.tombstoned = 0
+               ))";
+
+        /// Forget `?2` in session `?1` unless a live node still roots it.
+        /// Same tombstone-literal fork as
+        /// [`ManifestSqliteStatements::delete_deleted_session_roots`].
+        forget_for_session = "DELETE FROM attachment_manifest
+             WHERE session_id = ?1 AND attachment_id = ?2 AND (
+                 committed_at_ms IS NULL OR NOT EXISTS (
+                     SELECT 1 FROM graph_nodes AS node
+                     WHERE node.session_id = attachment_manifest.session_id
+                       AND node.tombstoned = 0
+                 ))";
+
         /// Every uncommitted intent older than `?1`.
         ///
         /// The ordering is the fork: SQLite reports oldest intent first,
@@ -756,7 +768,13 @@ impl AttachmentManifest for Store {
             let process_registry_attached = self.process_registry_attached;
             self.conn
                 .write(move |tx| {
-                    tx.execute(RECLAIM_DELETED_ATTACHMENT_ROOTS, [])?;
+                    tx.execute(
+                        attachment_sql()
+                            .manifest_sqlite
+                            .delete_deleted_session_roots
+                            .sql(),
+                        [],
+                    )?;
                     // One conditional DELETE composes age with owner-death proof.
                     // The attached process DB makes the NOT EXISTS predicate part
                     // of this same SQLite statement/transaction, avoiding a
@@ -839,13 +857,7 @@ impl AttachmentManifest for Store {
             self.conn
                 .call(move |conn| {
                     conn.execute(
-                        "DELETE FROM attachment_manifest
-                         WHERE session_id = ?1 AND attachment_id = ?2 AND (
-                             committed_at_ms IS NULL OR NOT EXISTS (
-                                 SELECT 1 FROM graph_nodes AS node
-                                 WHERE node.session_id = attachment_manifest.session_id
-                                   AND node.tombstoned = 0
-                             ))",
+                        attachment_sql().manifest_sqlite.forget_for_session.sql(),
                         params![session_id.as_str(), attachment_id.as_str()],
                     )
                 })

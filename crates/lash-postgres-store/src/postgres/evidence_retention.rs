@@ -62,12 +62,16 @@ pub(crate) async fn reclaim(
         .rows_affected() as usize;
         // Terminal markers replace the positive receipt oracle for deleted
         // owners; graph retention independently protects committed attachments.
-        let removed_attachment_root_count =
-            sqlx::query(crate::attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS)
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?
-                .rows_affected() as usize;
+        let removed_attachment_root_count = sqlx::query(
+            crate::attachments::attachment_sql()
+                .manifest_postgres
+                .delete_deleted_session_roots
+                .sql(),
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected() as usize;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core::store::RetentionReport {
             removed_receipt_count,

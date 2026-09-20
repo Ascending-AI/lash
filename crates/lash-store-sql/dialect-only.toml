@@ -20,7 +20,7 @@
 # `converted` is what makes the gate total for what is converted and silent
 # about what is not. FIG-3387 closes it over every family.
 
-converted = ["effect", "wait"]
+converted = ["artifact", "effect", "wait"]
 
 # Production sources that may name a converted family's tables in SQL although
 # they own no statements. Each one needs a reason; the list is not a place to
@@ -67,6 +67,43 @@ scope is live. Asking it as three statements would let a child start between
 them, so the effect family owns the whole predicate and reads the wait
 family's table inside it.
 """
+
+[families.artifact]
+tables = ["blobs", "artifact_refs", "artifact_owners", "artifact_owner_retirements"]
+statement_prefixes = ["blob", "artifact_ref", "artifact_owner", "artifact_owner_retirement"]
+shared = [
+    "crates/lash-store-sql/src/artifact/blobs.rs",
+    "crates/lash-store-sql/src/artifact/refs.rs",
+    "crates/lash-store-sql/src/artifact/owners.rs",
+    "crates/lash-store-sql/src/artifact/owner_retirements.rs",
+]
+# Two owner modules per backend: the artifact tables, and the content-addressed
+# byte store they point at. `blobs` is shared with checkpoint storage and had
+# statements in four PostgreSQL modules before this; giving it a module of its
+# own is what lets the lock order its writers share be written once.
+sqlite = [
+    "crates/lash-sqlite-store/src/artifact_store.rs",
+    "crates/lash-sqlite-store/src/blobs.rs",
+]
+postgres = [
+    "crates/lash-postgres-store/src/postgres/artifact_store.rs",
+    "crates/lash-postgres-store/src/postgres/blobs.rs",
+]
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+[families.artifact.table_modules]
+blobs = "crates/lash-store-sql/src/artifact/blobs.rs"
+artifact_refs = "crates/lash-store-sql/src/artifact/refs.rs"
+artifact_owners = "crates/lash-store-sql/src/artifact/owners.rs"
+artifact_owner_retirements = "crates/lash-store-sql/src/artifact/owner_retirements.rs"
 
 [families.effect]
 tables = ["runtime_effect_replay", "runtime_effect_group", "effect_scope_retirements"]
@@ -276,4 +313,203 @@ reason = """
 The singleton flag is INTEGER 1 on SQLite and BOOLEAN TRUE on PostgreSQL. It is
 the table's only read, which is why await_event_meta owns a name and a column
 list here but no shared statement.
+"""
+
+# ---------------------------------------------------------------------------
+# artifact family
+# ---------------------------------------------------------------------------
+
+[[dialect_only]]
+statement = "artifact_ref.insert_pointer"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = """
+SQLite reaches an artifact's bytes through this pointer table; PostgreSQL
+keeps them inline in lash_lashlang_artifacts and has no pointer row, so the
+whole artifact_refs set exists on one backend only.
+"""
+
+[[dialect_only]]
+statement = "artifact_ref.select_blob_ref"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = """
+Same one-backend pointer table as artifact_ref.insert_pointer.
+"""
+
+[[dialect_only]]
+statement = "artifact_ref.delete_unowned"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = """
+Same one-backend pointer table as artifact_ref.insert_pointer. PostgreSQL's
+counterpart deletes the inline bytes instead, and is named
+artifact_owner.delete_unowned_artifact.
+"""
+
+[[dialect_only]]
+statement = "artifact_ref.select_gc_roots"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = """
+Same one-backend pointer table as artifact_ref.insert_pointer. Only SQLite
+runs a whole-catalog mark/sweep that needs a pointer root set.
+"""
+
+[[dialect_only]]
+statement = "artifact_ref.select_preflight_page"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = """
+Same one-backend pointer table as artifact_ref.insert_pointer. PostgreSQL's
+preflight reads lash_lashlang_artifacts directly and needs no join.
+"""
+
+[[dialect_only]]
+statement = "artifact_owner.transfer_edge"
+backends = ["sqlite"]
+kind = "INSERT then SELECT in one statement"
+reason = """
+SQLite makes 'the destination edge appears only if the source edge was there'
+one statement under its write lock. PostgreSQL reads the source edge first,
+because it holds a per-owner advisory lock anyway and has to tell a missing
+staging edge from an already-completed transfer.
+"""
+
+[[dialect_only]]
+statement = "artifact_owner.select_owned_refs"
+backends = ["sqlite", "postgres"]
+kind = "result ordering"
+reason = """
+PostgreSQL takes a per-artifact advisory lock for each row it reads, so the
+read must hand them over in one stable order. SQLite reclaims each reference
+under the single write lock it already holds and has no lock order to keep.
+"""
+
+[[dialect_only]]
+statement = "artifact_owner.delete_unowned_artifact"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+PostgreSQL stores artifact bytes inline, so reclaiming an unowned artifact
+deletes a lash_lashlang_artifacts row. SQLite deletes the pointer
+(artifact_ref.delete_unowned) and then the blob it named.
+"""
+
+[[dialect_only]]
+statement = "artifact_owner.delete_unowned_artifacts_for_owner"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+The array-bound form of artifact_owner.delete_unowned_artifact, issued once
+after a retirement severs an owner's whole edge set. Same one-backend reason.
+"""
+
+[[dialect_only]]
+statement = "blob.insert_ignore"
+backends = ["sqlite"]
+kind = "bulk bind"
+reason = """
+SQLite writes one row per statement with INSERT OR IGNORE. PostgreSQL writes
+a whole chunk in one round trip through unnest, which is blob.insert_chunk.
+"""
+
+[[dialect_only]]
+statement = "blob.insert_chunk"
+backends = ["postgres"]
+kind = "bulk bind"
+reason = """
+The unnest array bind writes a chunk in one round trip and stays under the
+scalar-parameter ceiling. Its ORDER BY is the global blob lock order every
+writer of this table takes. SQLite's counterpart is blob.insert_ignore.
+"""
+
+[[dialect_only]]
+statement = "blob.select_existing_hashes"
+backends = ["sqlite"]
+kind = "list bind; no row lock"
+reason = """
+SQLite binds a JSON array and unpacks it with json_each, and needs no row
+lock under BEGIN IMMEDIATE. PostgreSQL binds a text array and takes
+FOR KEY SHARE, which is blob.lock_existing_hashes.
+"""
+
+[[dialect_only]]
+statement = "blob.lock_existing_hashes"
+backends = ["postgres"]
+kind = "list bind; FOR KEY SHARE"
+reason = """
+FOR KEY SHARE holds each row against a concurrent delete for the rest of the
+publishing transaction, in the global hash order. SQLite holds the whole
+database under BEGIN IMMEDIATE instead.
+"""
+
+[[dialect_only]]
+statement = "blob.lock_one"
+backends = ["postgres"]
+kind = "FOR KEY SHARE"
+reason = """
+The single-row form of blob.lock_existing_hashes. SQLite needs no counterpart
+for the same reason.
+"""
+
+[[dialect_only]]
+statement = "blob.lock_reclaim_candidates"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+FOR UPDATE rather than FOR KEY SHARE: this caller is about to delete the rows
+it locks, and takes them in the same ascending hash order publication does so
+the two cannot deadlock. SQLite holds the database write lock.
+"""
+
+[[dialect_only]]
+statement = "blob.select_bodies_by_hash"
+backends = ["sqlite", "postgres"]
+kind = "list bind"
+reason = """
+Same json_each/text-array fork as blob.select_existing_hashes. The projection
+itself is one column list, shared.
+"""
+
+[[dialect_only]]
+statement = "blob.select_exists"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite's session-delete sweep proves under its write lock that an enumerated
+reference is not already dangling. PostgreSQL gets the same proof from the row
+lock blob.lock_reclaim_candidates takes, so it has no separate check.
+"""
+
+[[dialect_only]]
+statement = "blob.reclaim_unowned_artifact"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = """
+Only SQLite's artifacts are blobs, so only SQLite reclaims one when its
+pointer goes. PostgreSQL deletes the inline bytes
+(artifact_owner.delete_unowned_artifact) and this table never sees it.
+"""
+
+[[dialect_only]]
+statement = "blob.reclaim_session_candidate"
+backends = ["sqlite", "postgres"]
+kind = "root set differs"
+reason = """
+SQLite has a fourth kind of root to rule out, the artifact_refs pointer, which
+PostgreSQL does not have at all; and the two backends' head tables are
+different relations, session_head and lash_sessions. Neither difference is a
+dialect, so neither can be rendered away.
+"""
+
+[[dialect_only]]
+statement = "blob.select_session_checkpoint_page"
+backends = ["sqlite"]
+kind = "head table differs"
+reason = """
+The preflight walk left-joins the head table so a dangling checkpoint stays
+visible as a row. SQLite's head table is session_head; PostgreSQL's is
+lash_sessions, and its walk reads it from its own preflight module rather than
+as an artifact-family statement.
 """

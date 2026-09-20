@@ -9,6 +9,28 @@ use crate::*;
 lash_store_sql::statements! {
     /// `lash_artifact_owners` statements only PostgreSQL issues.
     pub(crate) struct OwnerPostgresStatements @ "artifact_owner" {
+        /// Drop artifact `?1`/`?2`'s inline bytes once its last owner edge is
+        /// gone. Only PostgreSQL has them: SQLite reaches its bytes through
+        /// the `artifact_refs` pointer table and reclaims a blob instead.
+        delete_unowned_artifact = "DELETE FROM lashlang_artifacts AS artifact
+             WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2
+               AND NOT EXISTS (
+                   SELECT 1 FROM artifact_owners AS owner
+                   WHERE owner.namespace = artifact.namespace
+                     AND owner.artifact_ref = artifact.artifact_ref
+               )";
+
+        /// The same reclaim over every reference in `?2`, issued once after a
+        /// retirement severs an owner's whole edge set.
+        delete_unowned_artifacts_for_owner = "DELETE FROM lashlang_artifacts AS artifact
+             WHERE artifact.namespace = ?1
+               AND artifact.artifact_ref = ANY(?2)
+               AND NOT EXISTS (
+                   SELECT 1 FROM artifact_owners AS owner
+                   WHERE owner.namespace = artifact.namespace
+                     AND owner.artifact_ref = artifact.artifact_ref
+               )";
+
         /// Every artifact owner `?2`/`?3` holds in namespace `?1`, in a
         /// stable order.
         ///
@@ -378,22 +400,12 @@ impl PostgresLashlangArtifactStore {
             .execute(&mut *tx)
             .await
             .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        // FIG-3399: reads `lash_lashlang_artifacts`, which no converted
-        // family owns, so the renderer cannot yet be told about it.
-        sqlx::query(
-            "DELETE FROM lash_lashlang_artifacts AS artifact
-             WHERE artifact.namespace = $1 AND artifact.artifact_ref = $2
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_artifact_owners AS owner
-                   WHERE owner.namespace = artifact.namespace
-                     AND owner.artifact_ref = artifact.artifact_ref
-               )",
-        )
-        .bind(namespace)
-        .bind(artifact_ref)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
+        sqlx::query(artifact_sql().owners_postgres.delete_unowned_artifact.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
         tx.commit()
             .await
             .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))
@@ -447,17 +459,11 @@ impl PostgresLashlangArtifactStore {
             .execute(&mut *tx)
             .await
             .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        // FIG-3399: reads `lash_lashlang_artifacts`, which no converted
-        // family owns, so the renderer cannot yet be told about it.
         sqlx::query(
-            "DELETE FROM lash_lashlang_artifacts AS artifact
-             WHERE artifact.namespace = $1
-               AND artifact.artifact_ref = ANY($2)
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_artifact_owners AS owner
-                   WHERE owner.namespace = artifact.namespace
-                     AND owner.artifact_ref = artifact.artifact_ref
-               )",
+            artifact_sql()
+                .owners_postgres
+                .delete_unowned_artifacts_for_owner
+                .sql(),
         )
         .bind(namespace)
         .bind(&artifact_refs)

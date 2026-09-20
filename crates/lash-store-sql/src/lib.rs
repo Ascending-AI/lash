@@ -104,6 +104,25 @@ pub const TABLES: &[&str] = &[
     wait::waits::TABLE,
     wait::meta::TABLE,
     wait::revoked_sessions::TABLE,
+    // Tables a converted family's statements reach but no converted family
+    // owns yet. The renderer has to know a name to address it, and a
+    // cross-family statement is a statement like any other — it cannot wait
+    // for its neighbour's lane. Each one is a bare name rather than a module
+    // path precisely because no module owns it: when its family converts, its
+    // lane replaces the string with that module's `TABLE` and adds the
+    // `[[cross_family]]` entry the gate then starts demanding.
+    //
+    // `session_head` and `sessions` are one logical table spelled differently
+    // by the two backends (ADR 0098 freezes both names), so both appear; each
+    // is named only by the backend that has it.
+    "checkpoint_blob_refs",
+    "deleted_sessions",
+    "graph_nodes",
+    "lashlang_artifacts",
+    "node_anchors",
+    "runtime_turn_commits",
+    "session_head",
+    "sessions",
 ];
 
 /// Every shared statement this crate owns, across every family.

@@ -363,21 +363,17 @@ fn read_pending_wakes(
 /// most alarming finding a preflight can make, silently rendered as "no such
 /// session". Left-joining keeps the row and lets the missing content be
 /// reported as what it is.
-const SESSION_CHECKPOINTS_SQL: &str = "\
-SELECT session_head.session_id, session_head.checkpoint_ref, blobs.content
-FROM session_head
-LEFT JOIN blobs ON blobs.hash = session_head.checkpoint_ref
-WHERE session_head.checkpoint_ref IS NOT NULL
-  AND (?1 IS NULL OR session_head.session_id > ?1)
-ORDER BY session_head.session_id
-LIMIT ?2";
-
 fn read_session_checkpoints(
     conn: &Connection,
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(SESSION_CHECKPOINTS_SQL)?;
+    let mut statement = conn.prepare(
+        crate::artifact_store::artifact_sql()
+            .blobs_sqlite
+            .select_session_checkpoint_page
+            .sql(),
+    )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
         let session_id = SessionId::from(row.get::<_, String>(0)?);
         let checkpoint_ref: String = row.get(1)?;
@@ -430,7 +426,12 @@ fn read_session_execution_state(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(SESSION_CHECKPOINTS_SQL)?;
+    let mut statement = conn.prepare(
+        crate::artifact_store::artifact_sql()
+            .blobs_sqlite
+            .select_session_checkpoint_page
+            .sql(),
+    )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, Option<Vec<u8>>>(2)?))
     })?;
