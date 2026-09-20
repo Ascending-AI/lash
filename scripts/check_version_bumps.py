@@ -307,6 +307,12 @@ IDENTIFIER_RENAME_BASELINES = {
     # Both HARD review scopes confirmed exact JSON/MessagePack output parity.
     'crates/lash-core/src/runtime/process/model.rs:PROCESS_LEASE_SCHEMA_VERSION': 'sha256:b8ae30a35110ff90e730de2de77f97489b8ff82f3482a5e4ddc3fab1568e674e',
 
+    # FIG-2783: restoring the usage_disposition_json explanation comment added
+    # two `--` lines inside the SQLite CREATE TABLE body. Comments are inert
+    # to SQLite DDL, so the stored catalog is byte-identical and
+    # SCHEMA_VERSION stays 70.
+    'crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION': 'sha256:b35533b82dd6a0ebe7b53aecc81628a7c59963690956e906edb44165af19aaf1',
+
     # FIG-1102: the workbench include! splice became real modules, so every
     # item in state.rs gained pub(crate) and one line was rewrapped. Serde
     # attributes, field and variant names, and constant values are unchanged;
