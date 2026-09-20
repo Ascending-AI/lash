@@ -1137,6 +1137,7 @@ jobs:
         # key stays warm even on a run whose plan skips the other two.
         with:
           save-repository-cache: "true"
+          save-output-base: "true"
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
