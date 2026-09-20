@@ -307,6 +307,10 @@ WORKERS_E2E_JOBS = {
 }
 
 BAZEL_TEST_JOB = "bazel-tests"
+# Both legs of the Bazel partition share one policy: run on trusted rust
+# diffs, skip otherwise. `bazel-tests` carries `//:workspace_tests` minus the
+# tail suite; `bazel-tests-tail` carries `//:workspace_tail_tests`.
+BAZEL_TEST_JOBS = frozenset({BAZEL_TEST_JOB, "bazel-tests-tail"})
 
 
 # Confidence is a separate scheduled/manual workflow. Pin its producer and
@@ -557,7 +561,7 @@ def evaluate_conclusion(
     if workers_e2e_enabled is None:
         workers_e2e_enabled = True
 
-    expected_jobs = UNGATED_JOBS | set(GATED_JOBS) | {BAZEL_TEST_JOB}
+    expected_jobs = UNGATED_JOBS | set(GATED_JOBS) | BAZEL_TEST_JOBS
     problems: list[str] = []
 
     missing = sorted(expected_jobs - set(needs))
@@ -601,7 +605,7 @@ def evaluate_conclusion(
 
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
-        if job == BAZEL_TEST_JOB:
+        if job in BAZEL_TEST_JOBS:
             rust_on = plan_outputs.get("rust") == "true"
             wanted = "success" if bazel_is_trusted and rust_on else "skipped"
             if result != wanted:
