@@ -27,6 +27,13 @@ impl SessionStoreFactory for DelegatingFactory {
         self.inner.open_existing_store(request).await
     }
 
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        self.inner.open_existing_store_by_id(session_id).await
+    }
+
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }

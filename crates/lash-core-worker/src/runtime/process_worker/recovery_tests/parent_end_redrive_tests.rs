@@ -95,6 +95,15 @@ impl SessionStoreFactory for SharedInMemorySessionStoreFactory {
         Ok(Some(self.store(&request.session_id)))
     }
 
+    // The shared map is the catalog: a by-id lookup is the same resolution the
+    // request-shaped seam performs.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+        Ok(Some(self.store(session_id)))
+    }
+
     async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
         Ok(false)
     }

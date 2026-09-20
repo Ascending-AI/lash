@@ -5,18 +5,23 @@
 //! app state, HTTP protocols, auth, and frontend streaming; this crate
 //! owns only the ergonomic core/session/turn API.
 //!
-//! # Two verbs for one session
+//! # Three verbs for one session
 //!
-//! A session id reaches Lash two ways, and the choice is the first thing to
+//! A session id reaches Lash three ways, and the choice is the first thing to
 //! make deliberately:
 //!
 //! * `core.session(id).open().await` — the **live session**
 //!   ([`LashSession`]). It builds a runtime: plugins, tool registry, protocol
 //!   restore, lifecycle events, process admission. Use it to run turns.
 //! * `core.session(id).durable().await` — the **Durable Session**
-//!   ([`DurableSession`]). It builds nothing: the session's queue and settled
-//!   reads, answered from its store, correct while another process holds the
-//!   session's execution lease. Use it to enqueue, list, cancel or reconcile.
+//!   ([`DurableSession`]). It builds nothing and creates nothing: the
+//!   session's queue and settled reads, answered from its store, correct while
+//!   another process holds the session's execution lease. Use it to enqueue,
+//!   list, cancel or reconcile.
+//! * `core.session(id).create().await` — the only verb that **creates**. It
+//!   writes the session's catalog entry and returns its [`DurableSession`],
+//!   still without building a runtime. Use it when a host admits durable input
+//!   for a session whose first turn has not run yet.
 //!
 //! Polling a queue through `open()` costs a whole runtime per poll and, on a
 //! core that does not carry the session's tool sources, orphans them. Reach
@@ -25,7 +30,8 @@
 //! either way.
 //!
 //! A Durable Session never creates: the id must already exist, or the
-//! operation is refused with a typed error. See [`DurableSession`].
+//! operation is refused with a typed error — `create()` is how a host makes it
+//! exist. See [`DurableSession`].
 //!
 //! Every public name has exactly one home. The crate root carries the daily
 //! core/session/turn path; each domain module ([`tools`], [`persistence`],

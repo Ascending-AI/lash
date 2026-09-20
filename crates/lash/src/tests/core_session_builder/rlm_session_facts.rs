@@ -188,7 +188,7 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
     );
     tools.replace("after_refresh");
 
-    let receipt = session
+    session
         .admin()
         .commands()
         .refresh_tool_catalog(
@@ -197,10 +197,26 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
         )
         .await?;
 
-    session
-        .durable()
-        .await_queued_work_batch(&receipt.batch_id)
-        .await?;
+    // Wait on the effect this test asserts — the replaced catalog becoming
+    // live — rather than on the queue row disappearing: a claim hides the row
+    // before the command has run.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if session
+                .admin()
+                .tools()
+                .state()
+                .await
+                .expect("read tool state while the queued command drains")
+                .contains(&lash_core::ToolId::from("tool:after_refresh"))
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the queued catalog refresh applies");
     drop(session);
     let reopened = core
         .session("rlm-typescript-queued-session-command")

@@ -8,11 +8,14 @@
 //! *Durable Session* needs only the session's store, and every operation it
 //! owns stays correct while another process holds the Session Execution Lease.
 //!
-//! Reach one of two ways:
+//! Reach one of three ways:
 //!
 //! * [`SessionBuilder::durable`](crate::SessionBuilder::durable) —
 //!   `core.session(id).durable().await` — acquires the store through the
 //!   catalog's non-creating seam.
+//! * [`SessionBuilder::create`](crate::SessionBuilder::create) —
+//!   `core.session(id).create().await` — writes the session's catalog entry
+//!   first, then hands back this handle. The only verb that creates.
 //! * [`LashSession::durable`](crate::LashSession::durable) — the open
 //!   session's own Session Binding, reusing its owner-issued store and ports.
 //!
@@ -29,7 +32,14 @@
 //! never created fails with [`EmbedError::UnknownSession`], and to a deleted
 //! one with [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
 //! Nothing is stored and no driver is woken in either case. Create the session
-//! first — `core.session(id).open()` — then enqueue.
+//! first — `core.session(id).create()`, or `open()` if a runtime is wanted
+//! anyway — then enqueue.
+//!
+//! A catalog that cannot resolve a session by id at all is a different answer
+//! from a session that is not there: it surfaces as
+//! [`EmbedError::StoreFactory`] carrying the implementor's reason, never as
+//! [`EmbedError::UnknownSession`], so a host is not sent looking for a session
+//! that exists.
 //!
 //! The three settled reads are the exception in *reporting*, not in authority:
 //! [`exists`](DurableSession::exists), [`was_deleted`](DurableSession::was_deleted)
@@ -157,6 +167,12 @@ impl DurableSession {
                 .await
                 .map_err(EmbedError::Store)?
                 .map(|_| Arc::clone(store)),
+            // The seam's two negative answers are kept apart: `Err` is a
+            // catalog that cannot resolve by id, and surfaces as
+            // `StoreFactory` naming that capability; only `Ok(None)` below
+            // becomes "no such session". The method is required on the trait
+            // precisely so an implementor cannot inherit the second answer
+            // while meaning the first.
             DurableAcquisition::Catalog(catalog) => catalog
                 .open_existing_store_by_id(&self.session_id)
                 .await
@@ -342,22 +358,6 @@ impl DurableSession {
     pub async fn abandon_turn_input_claim(&self, claim: &TurnInputClaim) -> Result<()> {
         let store = self.store().await?;
         Ok(self.ops.abandon_turn_input_claim(store, claim).await?)
-    }
-
-    /// Resolve once `batch_id` is no longer pending in the queue store —
-    /// drained by whoever runs queued work (a queued-work runner, a durable
-    /// worker, or a live session's `queued_turn`) or cancelled. This is the
-    /// enqueue-and-observe side of the queue: the caller never claims the work
-    /// itself.
-    ///
-    /// Completion is read from the persistent queue store, so it observes
-    /// drains performed by other session handles and other processes alike.
-    /// There is no built-in deadline — nothing resolves if nothing drains the
-    /// queue, so bound it with `tokio::time::timeout` when the worker may be
-    /// unavailable. A batch id the store has never seen resolves immediately.
-    pub async fn await_queued_work_batch(&self, batch_id: &lash_core::BatchId) -> Result<()> {
-        let store = self.store().await?;
-        Ok(self.ops.await_queued_work_batch(store, batch_id).await?)
     }
 
     /// Read the canonical settled view of this durable session without opening

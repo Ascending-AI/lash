@@ -469,13 +469,22 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         })
     }
 
-    /// Open an existing session when only its durable routing identity is known.
+    /// Open an existing session when only its durable routing identity is
+    /// known, without creating one.
+    ///
+    /// Required, with no default. This is the non-creating acquisition seam a
+    /// **Durable Session** resolves through (ADR 0097), and its two negative
+    /// answers mean opposite things: `Ok(None)` is "this catalog has no such
+    /// session", while `Err` is "this catalog cannot resolve a session by id
+    /// at all". An inherited `Ok(None)` collapses the second into the first,
+    /// so every durable operation on a session that *does* exist would report
+    /// it missing and send the host looking for it. A factory with no by-id
+    /// lookup says so in its error; a decorator forwards to the catalog it
+    /// wraps.
     async fn open_existing_store_by_id(
         &self,
-        _session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
-        Ok(None)
-    }
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String>;
 
     /// Read exact cancellation closure pins before session deletion or
     /// process-scope retirement. Implementors that cannot provide this

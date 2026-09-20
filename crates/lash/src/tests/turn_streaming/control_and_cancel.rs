@@ -435,8 +435,7 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_c
         .build(crate::testing::runtime_lease_owner())?;
     let baseline_builds = builds.load(Ordering::SeqCst);
 
-    crate::tests::create_catalog_session(store_factory.as_ref(), "create-only-factory-idles")
-        .await?;
+    crate::tests::create_catalog_session(&core, "create-only-factory-idles").await?;
     core.session("create-only-factory-idles")
         .durable()
         .await?
@@ -566,8 +565,7 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
     assert_eq!(builds.load(Ordering::SeqCst), 1, "build-time validation");
 
     let entered = first_entered.notified();
-    crate::tests::create_catalog_session(store_factory.as_ref(), "queued-work-hydration-burst")
-        .await?;
+    crate::tests::create_catalog_session(&core, "queued-work-hydration-burst").await?;
     core.session("queued-work-hydration-burst")
         .durable()
         .await?
@@ -1333,71 +1331,6 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         assert!(session.durable().pending_turn_inputs().await?.is_empty());
         Ok(())
     })
-}
-
-#[tokio::test]
-pub(super) async fn await_queued_work_batch_resolves_when_drained() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())
-        .expect("core");
-    let session = core.session("await-queued").open().await?;
-    let receipt = session
-        .admin()
-        .commands()
-        .refresh_tool_catalog("await queued work test", "await-queued-refresh")
-        .await?;
-
-    let waiter_session = session.clone();
-    let waiter_batch = receipt.batch_id.clone();
-    let waiter = tokio::spawn(async move {
-        waiter_session
-            .durable()
-            .await_queued_work_batch(&waiter_batch)
-            .await
-    });
-
-    // Nothing has drained the batch yet, so the waiter must still be pending.
-    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-    assert!(!waiter.is_finished(), "waiter resolved before any drain");
-
-    assert!(
-        session.queued_turn().run().await?.ran().is_none(),
-        "a session-command-only drain should not produce a model turn"
-    );
-
-    tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
-        .await
-        .expect("waiter should resolve after the drain")
-        .expect("waiter task")?;
-    Ok(())
-}
-
-#[tokio::test]
-pub(super) async fn await_queued_work_batch_resolves_immediately_for_unknown_batch() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .build(crate::testing::runtime_lease_owner())
-        .expect("core");
-    let session = core.session("await-unknown").open().await?;
-    tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        session
-            .durable()
-            .await_queued_work_batch(&lash_core::BatchId::from("qwb:never-existed")),
-    )
-    .await
-    .expect("unknown batch must resolve immediately")?;
-    Ok(())
 }
 
 #[tokio::test]

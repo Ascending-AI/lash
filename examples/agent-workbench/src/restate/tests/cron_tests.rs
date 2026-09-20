@@ -1016,6 +1016,28 @@ impl lash::persistence::AttachmentRootSet for ContendedSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
+    // A decorator forwards the non-creating by-id seam, keeping the
+    // contention wrapper on the store it hands back.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
+        Ok(
+            lash::persistence::SessionStoreFactory::open_existing_store_by_id(
+                &self.inner,
+                session_id,
+            )
+            .await?
+            .map(|inner| {
+                Arc::new(ContendedRuntimePersistence {
+                    inner,
+                    contend: Arc::clone(&self.contend),
+                    contended_attempts: Arc::clone(&self.contended_attempts),
+                }) as Arc<dyn lash::persistence::RuntimePersistence>
+            }),
+        )
+    }
+
     async fn create_store(
         &self,
         request: &lash::persistence::SessionStoreCreateRequest,

@@ -15,7 +15,6 @@
 //! session-state encoding marker, so a cursor minted from it reconnects.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::SessionId;
 
@@ -340,30 +339,6 @@ impl DurableSessionOps {
         )
         .await;
         Ok(())
-    }
-
-    /// Resolve once `batch_id` is no longer pending in the queue store.
-    ///
-    /// Completion is read from the persistent queue store, so it observes
-    /// drains performed by other handles and other processes alike. A claim
-    /// can make a batch stop being pending before it completes, so this keeps
-    /// its documented "no longer pending" contract rather than promising
-    /// terminal completion. There is no built-in deadline; a batch id the
-    /// store has never seen resolves immediately.
-    pub async fn await_queued_work_batch(
-        &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
-        batch_id: &str,
-    ) -> Result<(), crate::RuntimeError> {
-        let mut delay = Duration::from_millis(25);
-        loop {
-            let pending = self.queued_work(store).await?;
-            if !pending.iter().any(|batch| batch.batch_id == batch_id) {
-                return Ok(());
-            }
-            tokio::time::sleep(delay).await;
-            delay = (delay * 2).min(Duration::from_millis(400));
-        }
     }
 
     /// Does this session still have durable live session metadata?

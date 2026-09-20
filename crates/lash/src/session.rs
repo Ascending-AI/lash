@@ -181,6 +181,35 @@ impl SessionBuilder {
         ))
     }
 
+    /// Create this session's durable metadata, then return its **Durable
+    /// Session**.
+    ///
+    /// The third terminal verb, and the only one that creates. It writes the
+    /// session's catalog entry with exactly the policy and relation
+    /// [`open`](Self::open) would have used, and stops there: no runtime, no
+    /// Session Execution Lease, no plugin session, no lifecycle event. Use it
+    /// when a host admits durable input for a session whose first turn has not
+    /// run yet — `core.session(id).create().await?.enqueue(input).send().await?`
+    /// — instead of reaching into the catalog with a hand-built request.
+    ///
+    /// Idempotent: creating an id that already exists rebinds it and preserves
+    /// its recorded metadata and Session Relation. Creating a *deleted* id is
+    /// refused with the store's typed
+    /// [`SessionDeleted`](lash_core::StoreError::SessionDeleted); ids are
+    /// single-use.
+    pub async fn create(self) -> Result<DurableSession> {
+        let policy = self.session_policy();
+        let resolved = self.create_store(&policy).await?;
+        let queued = self.core.substrate_slot.ports().await.queued_port();
+        Ok(DurableSession::from_exact_store(
+            self.session_id,
+            resolved.store,
+            queued,
+            Arc::clone(&self.core.live_replay_store),
+            resolved.catalog.or_else(|| self.core.store_factory.clone()),
+        ))
+    }
+
     /// Open with an explicitly supplied runtime state.
     ///
     /// This is for advanced hosts that already own a complete state snapshot.

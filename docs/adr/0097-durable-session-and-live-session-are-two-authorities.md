@@ -31,19 +31,24 @@ never been created silently materialised a session.
 
 ## Decision
 
-The session builder has two terminal verbs.
+The session builder has three terminal verbs, and exactly one of them creates.
 
 * `core.session(id).open()` is unchanged and yields the **live session**.
 * `core.session(id).durable()` yields a **Durable Session**: no Session
   Execution Lease, no plugin session, no tool registry, no lifecycle events, no
-  observer-intent reconcile, no process admission.
+  observer-intent reconcile, no process admission. It never creates.
+* `core.session(id).create()` writes the session's catalog entry — with exactly
+  the policy and relation `open()` would have used — and returns its Durable
+  Session. It builds no runtime either. It is idempotent, preserving the
+  metadata and Session Relation an existing id already carries, and refuses a
+  deleted id with the store's typed `SessionDeleted`.
 
 The Durable Session owns every operation that is correct beside another
 process's writer: enqueue turn input (validation, driver wake and receipt
 preserved), `pending_turn_inputs`, the three pending-input cancels,
-`queued_work`, `cancel_queued_work_batch`, `await_queued_work_batch`, both
-`abandon_*_claim`, `turn_input_applications` and its remote form, and the
-settled `read` / `exists` / `was_deleted`. They no longer exist on
+`queued_work`, `cancel_queued_work_batch`, both `abandon_*_claim`,
+`turn_input_applications` and its remote form, and the settled `read` /
+`exists` / `was_deleted`. They no longer exist on
 `LashSession`, and `LashCore::{enqueue_turn_input, read_session,
 session_exists, session_was_deleted}` no longer exist. There are no forwarding
 shims and no deprecated aliases.
@@ -71,6 +76,14 @@ Administration:
 * `revoke_durable_waits` uses the binding's effect host, not its store.
 * all of `SessionAdmin` drives a live runtime.
 
+`await_queued_work_batch` is **not** part of the handle and was deleted rather
+than moved. It polled `queued_work()`, which hosts already have; its answer —
+"no longer pending" — becomes true as soon as a claim hides the row, before the
+work has run; and it returned the same `()` for drained, cancelled and
+never-existed. The question it looked like it answered ("did my queued command
+take effect") is answered by the Session Observation stream and the read view,
+which are event-driven and carry the outcome.
+
 ### Acquisition never creates
 
 `durable()` resolves an existing store through the catalog's non-creating seam
@@ -81,7 +94,7 @@ to an id that was never created is `EmbedError::UnknownSession`; to a deleted
 one it is `StoreError::SessionDeleted`. Nothing is stored and no driver is
 woken. This is a deliberate behaviour change from `LashCore::enqueue_turn_input`,
 which materialised metadata: a host that enqueued before a first open now
-creates the session first.
+creates the session first, with `create()`.
 
 The three settled reads are an exception in *reporting*, not in authority.
 `exists`, `was_deleted` and `read` exist to answer a question *about* an id, so

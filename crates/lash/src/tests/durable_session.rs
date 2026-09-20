@@ -241,7 +241,7 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     let core = counting_core(Arc::clone(&factory))?;
 
     // Metadata only: created through the catalog, never committed.
-    crate::tests::create_catalog_session(factory.as_ref(), "metadata-only").await?;
+    crate::tests::create_catalog_session(&core, "metadata-only").await?;
     let metadata_only = core.session("metadata-only").durable().await?;
     assert!(metadata_only.exists().await?);
     assert!(metadata_only.pending_turn_inputs().await?.is_empty());
@@ -304,7 +304,7 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         "an absent sqlite id is refused without creating a store"
     );
 
-    crate::tests::create_catalog_session(factory.as_ref(), "sqlite-metadata-only").await?;
+    crate::tests::create_catalog_session(&core, "sqlite-metadata-only").await?;
     let metadata_only = core.session("sqlite-metadata-only").durable().await?;
     assert!(metadata_only.exists().await?);
     metadata_only
@@ -835,6 +835,392 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
         persisted_tool_state_bytes(factory.as_ref(), &session_id).await?,
         tool_state_before,
         "the persisted tool state is byte-identical after a durable poll and cancel"
+    );
+    Ok(())
+}
+
+/// A catalog that creates and deletes but cannot resolve a session by id.
+///
+/// This is the shape a backend without a by-id lookup has to take now that
+/// `open_existing_store_by_id` is required: it states the missing capability
+/// instead of inheriting `Ok(None)`, which would have reported every existing
+/// session as absent.
+struct NoByIdLookupFactory {
+    inner: lash_core::facade_support::InMemorySessionStoreFactory,
+}
+
+const NO_BY_ID_LOOKUP_REASON: &str = "this catalog resolves sessions only by create request";
+
+#[async_trait]
+impl lash_core::AttachmentRootSet for NoByIdLookupFactory {
+    async fn live_attachment_refs(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<
+        std::collections::BTreeSet<lash_core::AttachmentId>,
+        lash_core::StoreError,
+    > {
+        lash_core::AttachmentRootSet::live_attachment_refs(
+            &self.inner,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &lash_core::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        lash_core::AttachmentRootSet::has_live_attachment_ref(
+            &self.inner,
+            id,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+}
+
+#[async_trait]
+impl SessionStoreFactory for NoByIdLookupFactory {
+    async fn create_store(
+        &self,
+        request: &lash_core::SessionStoreCreateRequest,
+    ) -> std::result::Result<Arc<dyn lash_core::RuntimePersistence>, lash_core::StoreError> {
+        self.inner.create_store(request).await
+    }
+
+    async fn open_existing_store_by_id(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+        Err(NO_BY_ID_LOOKUP_REASON.to_string())
+    }
+
+    async fn session_was_deleted(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<bool, String> {
+        lash_core::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
+    }
+
+    async fn delete_session(
+        &self,
+        session_id: &SessionId,
+    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+        self.inner.delete_session(session_id).await
+    }
+}
+
+/// A catalog without the by-id seam must not make an existing session look
+/// absent. Before the seam was required, its inherited `Ok(None)` did exactly
+/// that: every durable operation on a live session reported `UnknownSession`
+/// and sent the host hunting for a session that was there.
+#[tokio::test]
+async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_session() -> Result<()>
+{
+    let factory = Arc::new(NoByIdLookupFactory {
+        inner: lash_core::facade_support::InMemorySessionStoreFactory::new(),
+    });
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&factory) as Arc<dyn SessionStoreFactory>)
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+
+    // The session genuinely exists: this open created it.
+    crate::tests::create_catalog_session(&core, "no-by-id-seam").await?;
+
+    let durable = core.session("no-by-id-seam").durable().await?;
+    let error = durable
+        .enqueue(TurnInput::text(
+            "queued through a catalog with no by-id seam",
+        ))
+        .id("no-by-id-seam-input")
+        .send()
+        .await
+        .expect_err("a catalog that cannot resolve by id refuses the acquisition");
+    match &error {
+        EmbedError::StoreFactory {
+            session_id,
+            message,
+        } => {
+            assert_eq!(session_id.as_str(), "no-by-id-seam");
+            assert!(
+                message.contains(NO_BY_ID_LOOKUP_REASON),
+                "the error names the missing capability, got {message}"
+            );
+        }
+        other => {
+            panic!("a missing by-id seam must not be reported as an absent session, got {other:?}")
+        }
+    }
+    assert!(
+        !matches!(error, EmbedError::UnknownSession { .. }),
+        "an existing session must never be reported as unknown"
+    );
+    Ok(())
+}
+
+/// A held row is still reported, held, through the Durable Session.
+///
+/// The ticket's list contract includes a held input, and "held" is a fact only
+/// a live claimant produces. This gets one without hand-building lease
+/// authority: a queued drain claims the enqueued input and then blocks inside
+/// the provider, and a *second*, separately acquired Durable Session lists the
+/// queue while the claim is live.
+#[tokio::test]
+async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Result<()> {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete({
+            let entered = Arc::clone(&entered);
+            let release = Arc::clone(&release);
+            move |_request| {
+                let entered = Arc::clone(&entered);
+                let release = Arc::clone(&release);
+                async move {
+                    // The drain has claimed the input by the time it asks the
+                    // provider; hold it here so the claim stays live.
+                    entered.notify_one();
+                    release
+                        .acquire()
+                        .await
+                        .expect("release semaphore remains open")
+                        .forget();
+                    Ok(text_response("drained"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session_id = SessionId::from("durable-held-input");
+    let session = core.session(session_id.clone()).open().await?;
+    let accepted = session
+        .durable()
+        .enqueue(TurnInput::text("claimed by the drain"))
+        .id("held-input")
+        .send()
+        .await?;
+
+    let observer = core.session(session_id.clone()).durable().await?;
+    assert!(
+        matches!(
+            observer
+                .pending_turn_inputs()
+                .await?
+                .first()
+                .map(|read| &read.status),
+            Some(lash_core::runtime::PendingTurnInputReadStatus::Pending)
+        ),
+        "before the drain claims it, the row reads as pending"
+    );
+
+    let drain = tokio::spawn({
+        let session = session.clone();
+        async move { session.queued_turn().drain_id("held-drain").run().await }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .expect("the drain reaches the provider with the input claimed");
+
+    let held = observer.pending_turn_inputs().await?;
+    let row = held
+        .iter()
+        .find(|read| read.input.input_id == accepted.input_id)
+        .expect("a held input is still reported by the Durable Session, not hidden");
+    match row.status {
+        lash_core::runtime::PendingTurnInputReadStatus::Held {
+            lease_expires_at_ms,
+        } => assert!(
+            lease_expires_at_ms > 0,
+            "a held row carries the matching live lease's expiry"
+        ),
+        ref other => panic!("the claimed input must read as held, got {other:?}"),
+    }
+
+    release.add_permits(1);
+    drain
+        .await
+        .expect("drain task")?
+        .expect("the queued turn runs");
+    Ok(())
+}
+
+/// `create()` is the one verb that creates, and it creates nothing else: no
+/// runtime, no lease, no lifecycle event.
+#[tokio::test]
+async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
+    let counters = Arc::new(RuntimeBuildCounters::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .plugin(Arc::new(RuntimeBuildProbeFactory {
+            counters: Arc::clone(&counters),
+        }))
+        .process_work(lash_core::ProcessWorkWiring::new(
+            lash_core::facade_support::watch_process_registry(Arc::new(
+                TestLocalProcessRegistry::default(),
+            )
+                as Arc<dyn lash_core::ProcessRegistry>),
+            Arc::new(CountingProcessWork {
+                counters: Arc::clone(&counters),
+            }),
+        ))
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+
+    // Building the core itself materialises its plugin host once; that is the
+    // baseline `create()` must not move.
+    let baseline = counters.snapshot();
+
+    // Enqueue to an id nobody created is refused...
+    assert!(matches!(
+        core.session("created-then-queued")
+            .durable()
+            .await?
+            .enqueue(TurnInput::text("too early"))
+            .send()
+            .await
+            .expect_err("an uncreated id is refused"),
+        EmbedError::UnknownSession { .. }
+    ));
+
+    // ...and `create()` is the explicit two-step's first half.
+    let durable = core.session("created-then-queued").create().await?;
+    let accepted = durable
+        .enqueue(TurnInput::text("queued before the first turn"))
+        .id("created-then-queued-input")
+        .send()
+        .await?;
+    assert_eq!(durable.pending_turn_inputs().await?.len(), 1);
+    assert!(durable.exists().await?);
+
+    assert_eq!(
+        counters.snapshot(),
+        baseline,
+        "create() materialises no plugin session, restores nothing, admits no process"
+    );
+
+    // The session a host creates this way is an ordinary session: opening it
+    // runs the input that was waiting.
+    let session = core.session("created-then-queued").open().await?;
+    let drained = session
+        .queued_turn()
+        .run()
+        .await?
+        .expect("the pending input becomes a turn");
+    assert_eq!(
+        drained.assistant_message(),
+        Some("echo: queued before the first turn")
+    );
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    assert_eq!(
+        session
+            .durable()
+            .turn_input_applications()
+            .await?
+            .iter()
+            .map(|application| application.input_id.to_string())
+            .collect::<Vec<_>>(),
+        vec![accepted.input_id.to_string()],
+        "the created session's queued input settles as a durable application"
+    );
+    Ok(())
+}
+
+/// Creating an id twice is a no-op that keeps the durable facts the first
+/// create recorded, including the Session Relation.
+#[tokio::test]
+async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+    drop(core.session("create-parent").create().await?);
+
+    let first = core
+        .session("create-idempotent")
+        .parent("create-parent")
+        .create()
+        .await?;
+    let accepted = first
+        .enqueue(TurnInput::text("survives the second create"))
+        .id("idempotent-input")
+        .send()
+        .await?;
+
+    // A second create, naming no parent, must not rewrite the relation or drop
+    // the queue.
+    let second = core.session("create-idempotent").create().await?;
+    assert_eq!(
+        second
+            .pending_turn_inputs()
+            .await?
+            .iter()
+            .map(|read| read.input.input_id.to_string())
+            .collect::<Vec<_>>(),
+        vec![accepted.input_id.to_string()],
+        "re-creating an existing id keeps its durable queue"
+    );
+    let reopened = core.session("create-idempotent").open().await?;
+    assert_eq!(
+        reopened.parent_session_id(),
+        Some("create-parent"),
+        "re-creating an existing id preserves its recorded Session Relation"
+    );
+    Ok(())
+}
+
+/// Session ids are single-use, so `create()` refuses a tombstoned one.
+#[tokio::test]
+async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
+    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&factory) as Arc<dyn SessionStoreFactory>)
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+    drop(core.session("create-deleted").create().await?);
+    lash_core::SessionStoreFactory::delete_session(
+        factory.as_ref(),
+        &SessionId::from("create-deleted"),
+    )
+    .await
+    .expect("delete the session");
+
+    let error = core
+        .session("create-deleted")
+        .create()
+        .await
+        .err()
+        .expect("creating a retired id is refused");
+    assert!(
+        matches!(
+            &error,
+            EmbedError::Store(StoreError::SessionDeleted { session_id })
+                if session_id.as_str() == "create-deleted"
+        ),
+        "a retired id reports the tombstone, got {error:?}"
     );
     Ok(())
 }
