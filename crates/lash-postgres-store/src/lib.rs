@@ -667,6 +667,27 @@ impl PostgresStorage {
         SCHEMA_DDL
     }
 
+    /// The DDL that drops every lash-owned object, committed verbatim as
+    /// `crates/lash-postgres-store/teardown.sql` — the counterpart a host
+    /// applies at the reject-and-recreate boundary when [`open`][Self::open]
+    /// refuses an incompatible component stamp and prescribes recreating the
+    /// schema.
+    ///
+    /// The file is generated from the same object list [`schema_ddl`][Self::schema_ddl]
+    /// declares, so a future table, or a future non-table object, cannot be
+    /// added to creation without being added to teardown. Every statement is
+    /// `DROP TABLE IF EXISTS ... CASCADE` — idempotent, order-free, and
+    /// covering the indexes, constraints, and seed rows riding on each table.
+    /// Like the schema DDL, nothing is schema-qualified: it tears down
+    /// whichever schema the session's `search_path` resolves.
+    ///
+    /// Teardown is destructive and unscoped to the `lash_` prefix by design —
+    /// it drops exactly the objects lash provisions, no more and no less, so
+    /// it is safe to run in a schema the host shares with other components.
+    pub fn teardown_ddl() -> &'static str {
+        TEARDOWN_DDL
+    }
+
     /// The component schema version this build implements, as stamped in
     /// `lash_schema_versions`.
     ///

@@ -45,6 +45,14 @@ seed rows a working database needs, including a 32-byte await-event signing
 secret drawn from the server's strong RNG. Hosts copy the bytes; they never
 transcribe them.
 
+`crates/lash-postgres-store/teardown.sql` is the companion artifact for the
+reject-and-recreate boundary: `PostgresStorage::teardown_ddl()` returns it
+verbatim, and it is generated from the same object list `schema.sql` declares,
+so a schema change cannot add an object to creation without adding its drop.
+Every statement is `DROP TABLE IF EXISTS ... CASCADE` — idempotent,
+order-free, and scoped to exactly the objects lash provisions rather than to a
+name prefix, so it is safe in a schema the host shares.
+
 Every open ends in a structural check against a generated expectation artifact,
 `schema-shape.txt`, and hard-fails on mismatch by default.
 

@@ -62,6 +62,72 @@ fn the_published_ddl_is_creation_only_and_unqualified() {
     );
 }
 
+/// The teardown artifact is the same contract the other way: it must be the
+/// exact bytes this build executes, and its statement list must be generated
+/// from the object list `schema.sql` declares — never maintained by hand,
+/// where a future table or a future non-table object could silently escape it.
+#[test]
+fn the_published_teardown_is_generated_from_the_schema_object_list() {
+    let mut drops = Vec::new();
+    for line in crate::PostgresStorage::schema_ddl().lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("CREATE TABLE IF NOT EXISTS ") {
+            let table = rest
+                .split_whitespace()
+                .next()
+                .expect("a CREATE TABLE line must name its table");
+            drops.push(format!("DROP TABLE IF EXISTS {table} CASCADE;"));
+        } else if line.starts_with("CREATE ") {
+            // Indexes ride on their tables and need no drop. Any other kind —
+            // a sequence, a type, a function — must teach the generator how to
+            // drop it here rather than ship a teardown that misses it.
+            assert!(
+                line.starts_with("CREATE INDEX IF NOT EXISTS")
+                    || line.starts_with("CREATE UNIQUE INDEX IF NOT EXISTS"),
+                "schema.sql creates an object teardown does not model: {line}"
+            );
+        }
+    }
+    assert!(
+        !drops.is_empty(),
+        "the schema object list must not be empty"
+    );
+    let expected = format!(
+        "-- lash-postgres-store teardown, component version {SCHEMA_VERSION}.\n\
+         --\n\
+         -- Generated artifact. These bytes are exactly the DDL a host applies to drop\n\
+         -- everything this component owns at the reject-and-recreate boundary;\n\
+         -- `PostgresStorage::teardown_ddl()` returns this file verbatim. Every\n\
+         -- statement is idempotent (`IF EXISTS`), and `CASCADE` releases the intra-lash\n\
+         -- foreign keys so table order carries no meaning. Indexes, constraints, and\n\
+         -- seed rows die with their tables; schema.sql declares no standalone\n\
+         -- sequences, types, or functions, so there is nothing else to drop.\n\
+         --\n\
+         -- Like schema.sql, nothing here is schema-qualified: the file tears down\n\
+         -- whichever schema the session's `search_path` resolves. Regenerate it with\n\
+         -- the schema_shape suite's LASH_UPDATE_TEARDOWN_SQL=1 path, never by hand.\n\
+         --\n\
+         {}\n",
+        drops.join("\n\n")
+    );
+    assert_eq!(crate::PostgresStorage::teardown_ddl(), expected);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("teardown.sql");
+    let published = std::fs::read_to_string(&path).expect("read the committed teardown artifact");
+    if published != expected {
+        if std::env::var("LASH_UPDATE_TEARDOWN_SQL").as_deref() == Ok("1") {
+            std::fs::write(&path, &expected).expect("rewrite the teardown artifact");
+            panic!(
+                "regenerated {} -- rerun the suite to confirm",
+                path.display()
+            );
+        }
+        panic!(
+            "the committed teardown artifact does not match the object list schema.sql declares. \
+             Regenerate it with LASH_UPDATE_TEARDOWN_SQL=1 and review the diff."
+        );
+    }
+}
+
 /// A structural check cannot see a missing row, so the artifact has to carry the
 /// seeds itself — otherwise a host that copies it faithfully still ends up with a
 /// database lash refuses to open.

@@ -2172,3 +2172,50 @@ fn the_ddl_artifacts_component_version_stamps_track_schema_version() {
          LASH_UPDATE_SCHEMA_SQL=1 and review the diff."
     );
 }
+
+/// The ticket's core guarantee: `schema.sql` followed by `teardown.sql` must
+/// leave the catalogue exactly as a pristine schema — no lash-owned table,
+/// index, sequence, view, or leftover relation of any kind survives, which is
+/// what makes a reject-and-recreate actually recreate.
+#[tokio::test]
+async fn schema_ddl_then_teardown_ddl_leaves_a_pristine_schema() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping teardown drift check: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    async fn object_count(pool: &sqlx::PgPool, name: &str) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) \
+             FROM pg_catalog.pg_class c \
+             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1",
+        )
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .expect("count objects in the scratch schema")
+    }
+
+    // Prove the precondition: teardown is only meaningful if provisioning left
+    // objects behind to remove.
+    assert!(
+        object_count(&scratch.pool, &scratch.name).await > 0,
+        "schema.sql must provision objects before teardown can be tested"
+    );
+    scratch.apply(PostgresStorage::teardown_ddl()).await;
+    assert_eq!(
+        object_count(&scratch.pool, &scratch.name).await,
+        0,
+        "teardown.sql must leave the catalogue as a pristine schema"
+    );
+    // Re-applying must be a no-op: a host may run teardown on a schema that was
+    // never provisioned or was already torn down.
+    scratch.apply(PostgresStorage::teardown_ddl()).await;
+    assert_eq!(
+        object_count(&scratch.pool, &scratch.name).await,
+        0,
+        "teardown.sql must be idempotent"
+    );
+    scratch.cleanup().await;
+}
