@@ -1065,19 +1065,21 @@ async fn exact_driver_rejects_another_session_before_store_or_gate_effects() {
 }
 
 #[test]
-fn legacy_cancel_request_without_disposition_defaults_to_defer() {
-    let decoded: TurnCancelRequest = serde_json::from_value(serde_json::json!({
+fn cancel_request_without_disposition_fails_decode() {
+    let missing: Result<TurnCancelRequest, _> = serde_json::from_value(serde_json::json!({
         "address": { "session_id": "legacy-session", "turn_id": "legacy-turn" },
         "request_id": "legacy-request"
-    }))
-    .expect("decode a pre-disposition cancel request");
-    assert_eq!(decoded.undelivered, TurnCancelDisposition::Defer);
+    }));
     assert!(
-        serde_json::to_value(decoded)
-            .expect("encode defaulted request")
-            .get("undelivered")
-            .is_none(),
-        "the legacy Defer default stays sparse on the durable row"
+        missing.is_err(),
+        "a pre-disposition cancel request is refused, not defaulted"
+    );
+    let encoded =
+        serde_json::to_value(request(address("encoded"), "request")).expect("encode request");
+    assert_eq!(
+        encoded.get("undelivered"),
+        Some(&serde_json::json!("defer")),
+        "the disposition is always encoded on the durable row"
     );
 }
 

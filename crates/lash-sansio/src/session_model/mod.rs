@@ -604,9 +604,6 @@ pub enum TurnStop {
 
 /// What cancellation does with active-turn input the cancelled turn did not
 /// deliver.
-///
-/// `Defer` is the compatibility default for requests decoded from durable
-/// records written before this field existed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnCancelDisposition {
