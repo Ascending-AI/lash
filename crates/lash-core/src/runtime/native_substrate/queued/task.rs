@@ -212,7 +212,7 @@ impl QueuedWorkTaskDriver {
     pub(super) async fn next_execution(
         &self,
     ) -> Option<(QueuedWorkDemand, Option<WorkerSlotPermit>)> {
-        if self.inner.scheduler.lock_state().pending.is_empty() {
+        if !self.inner.scheduler.lock_state().has_queued() {
             return None;
         }
         let permit = match self.inner.scheduler.slots.as_ref() {
@@ -236,13 +236,13 @@ impl QueuedWorkTaskDriver {
             drop(permit);
             return None;
         };
-        if let Some(coalesced) = state.rerun.remove(&demand.session_id) {
+        if let Some(coalesced) = state.take_rerun(&demand.session_id) {
             demand.merge(coalesced);
         }
-        self.inner.scheduler.metrics.intake_depth(
-            WorkerSlotKind::QueuedWork,
-            state.pending.len() + state.rerun.len(),
-        );
+        self.inner
+            .scheduler
+            .metrics
+            .intake_depth(WorkerSlotKind::QueuedWork, state.intake_depth());
         Some((demand, permit))
     }
 
@@ -437,8 +437,7 @@ impl QueuedWorkTaskDriver {
             .inner
             .scheduler
             .lock_state()
-            .rerun
-            .remove(&demand.session_id)
+            .take_rerun(&demand.session_id)
         {
             demand.merge(coalesced);
         }

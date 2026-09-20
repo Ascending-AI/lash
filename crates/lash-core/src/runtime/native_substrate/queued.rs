@@ -297,10 +297,10 @@ impl NativeQueuedWork {
         };
         {
             let state = self.inner.scheduler.lock_state();
-            self.inner.scheduler.metrics.intake_depth(
-                WorkerSlotKind::QueuedWork,
-                state.pending.len() + state.rerun.len(),
-            );
+            self.inner
+                .scheduler
+                .metrics
+                .intake_depth(WorkerSlotKind::QueuedWork, state.intake_depth());
         }
         self.inner.scheduler.changed.notify_one();
         if should_start_dispatcher {
