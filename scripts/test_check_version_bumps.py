@@ -188,6 +188,52 @@ pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
 ];
 """
 
+BYTECODE_CONFIG = """
+[[surface]]
+constant = "BYTECODE_FORMAT_VERSION"
+constant_path = "src/lib.rs"
+description = "fixture instruction stream and the enums it encodes"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["src/instruction.rs"]
+symbols = ["Instruction", "IntrinsicOp"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["src/ast.rs"]
+symbols = ["BinaryOp"]
+"""
+
+# The instruction stream carries its operand enums by value, so the vocabulary
+# that decides what a compiled program means is spread across three enums in two
+# files while only the outer one names the stream.
+BYTECODE_INSTRUCTIONS = """
+#[derive(Clone, Copy)]
+pub(crate) enum Instruction {
+    PushConst(usize),
+    Binary(BinaryOp),
+    Intrinsic(IntrinsicOp),
+    Return,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum IntrinsicOp {
+    Len,
+    Slice,
+    Sort,
+    Reverse,
+}
+"""
+
+BYTECODE_OPERATORS = """
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BinaryOp {
+    Add,
+    Subtract,
+}
+"""
+
 # A fixed-size array type puts a semicolon inside brackets, at the top level of
 # the item's own declaration.
 ARRAY_LENGTH_ITEM = """
@@ -675,6 +721,117 @@ class VersionBumpFixtureTest(unittest.TestCase):
                 )
                 self.assertEqual(result.failures[0].base_version, 15)
                 self.assertEqual(result.failures[0].head_version, 15)
+
+    def test_the_bytecode_surface_covers_every_enum_the_stream_encodes(self) -> None:
+        """No enum an instruction carries by value may be guarded by nothing.
+
+        `Instruction::Intrinsic(IntrinsicOp)` carries no discriminant of its
+        own, so the intrinsic vocabulary is an arm set `Instruction`'s own text
+        never mentions; the operator enums are the same shape. The closure is
+        walked out of the guarded item text rather than compared against a list
+        someone kept up to date, because the list going stale silently is the
+        defect this registration closes.
+        """
+        surfaces = MODULE.load_config(REAL_CONFIG)
+        bytecode = next(
+            surface
+            for surface in surfaces
+            if surface.constant == "BYTECODE_FORMAT_VERSION"
+        )
+        item_guards = {
+            guard.paths[0]: guard
+            for guard in bytecode.guards
+            if guard.kind == "rust_items"
+        }
+        instruction_path = "crates/lashlang/src/runtime/instruction.rs"
+        self.assertIn(instruction_path, item_guards)
+        self.assertIn("Instruction", item_guards[instruction_path].symbols)
+
+        declarations: dict[str, str] = {}
+        for path, guard in item_guards.items():
+            source = (Path(MODULE.ROOT) / path).read_text(encoding="utf-8")
+            declared = {
+                match.group(1) for match in MODULE.RUST_SERDE_SHAPE.finditer(source)
+            }
+            declarations.update(MODULE.named_rust_items(source, declared))
+            self.assertLessEqual(set(guard.symbols), declared)
+
+        # A type appears in a payload position: after `(`, `,`, `:` or `<`,
+        # possibly behind a wrapper. A variant name appears after `{` or `}`,
+        # so it is not mistaken for one.
+        payload_type = re.compile(
+            r"[(,:<]\s*(?:Box<|Option<|Vec<|&|\[)*([A-Z][A-Za-z0-9_]*)"
+        )
+        reachable = {"Instruction"}
+        pending = ["Instruction"]
+        while pending:
+            body = declarations[pending.pop()]
+            for match in payload_type.finditer(body):
+                name = match.group(1)
+                if name in declarations and name not in reachable:
+                    reachable.add(name)
+                    pending.append(name)
+
+        self.assertIn("IntrinsicOp", reachable)
+        self.assertIn("BinaryOp", reachable)
+        guarded = {
+            symbol for guard in item_guards.values() for symbol in guard.symbols
+        }
+        self.assertLessEqual(reachable, guarded)
+
+    def test_each_instruction_vocabulary_change_demands_a_bytecode_bump(self) -> None:
+        mutations = {
+            "appended intrinsic": ("    Reverse,\n", "    Reverse,\n    Unique,\n"),
+            "reordered intrinsic arms": ("    Sort,\n    Reverse,\n", "    Reverse,\n    Sort,\n"),
+            "re-payloaded intrinsic": ("    Slice,\n", "    Slice(usize),\n"),
+            "retired intrinsic": ("    Sort,\n", ""),
+        }
+        for name, (before, after) in mutations.items():
+            with self.subTest(name=name):
+                fixture = FixtureRepository(BYTECODE_CONFIG)
+                self.addCleanup(fixture.close)
+                fixture.write_file(
+                    "src/lib.rs", "pub const BYTECODE_FORMAT_VERSION: u32 = 17;\n"
+                )
+                fixture.write_file("src/instruction.rs", BYTECODE_INSTRUCTIONS)
+                fixture.write_file("src/ast.rs", BYTECODE_OPERATORS)
+                base = fixture.commit("base")
+                mutated = BYTECODE_INSTRUCTIONS.replace(before, after)
+                self.assertNotEqual(mutated, BYTECODE_INSTRUCTIONS)
+                fixture.write_file("src/instruction.rs", mutated)
+                head = fixture.commit(f"change {name} without bump")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(len(result.failures), 1)
+                self.assertEqual(
+                    result.failures[0].surface.constant, "BYTECODE_FORMAT_VERSION"
+                )
+                self.assertEqual(result.failures[0].base_version, 17)
+                self.assertEqual(result.failures[0].head_version, 17)
+
+    def test_an_operator_vocabulary_change_demands_a_bytecode_bump(self) -> None:
+        fixture = FixtureRepository(BYTECODE_CONFIG)
+        self.addCleanup(fixture.close)
+        fixture.write_file(
+            "src/lib.rs", "pub const BYTECODE_FORMAT_VERSION: u32 = 17;\n"
+        )
+        fixture.write_file("src/instruction.rs", BYTECODE_INSTRUCTIONS)
+        fixture.write_file("src/ast.rs", BYTECODE_OPERATORS)
+        base = fixture.commit("base")
+        fixture.write_file(
+            "src/ast.rs", BYTECODE_OPERATORS.replace("    Add,\n", "    Add,\n    Power,\n")
+        )
+        head = fixture.commit("add an operator without bump")
+
+        result = self.check(fixture, base, head)
+
+        self.assertEqual(result.errors, ())
+        self.assertEqual(len(result.failures), 1)
+        self.assertEqual(
+            result.failures[0].surface.constant, "BYTECODE_FORMAT_VERSION"
+        )
 
     def test_a_guarded_item_keeps_its_delimiters_apart(self) -> None:
         """A `;` inside brackets is an array length, not the item's terminator."""

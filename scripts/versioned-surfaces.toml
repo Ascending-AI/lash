@@ -762,10 +762,42 @@ constant = "BYTECODE_FORMAT_VERSION"
 constant_path = "crates/lashlang/src/lib.rs"
 description = "compiled Lashlang instruction and durable VM-continuation contract"
 
+# `Instruction` is only the outer half of the instruction stream's vocabulary.
+# `Instruction::Intrinsic(IntrinsicOp)` carries no discriminant of its own, so
+# every builtin the VM dispatches directly is an `IntrinsicOp` arm and nothing
+# else; `Instruction::Binary(BinaryOp)` and its three siblings are the same
+# shape for operators. An arm added to, removed from, or re-payloaded in any of
+# them changes what identical source compiles to -- which is the event this
+# constant names -- while `Instruction`'s own text, and therefore the whole
+# guard, stays byte-identical. Deleting the TypeScript process special forms in
+# #1529 moved this constant for its own reasons; nothing would have required it.
+#
+# The list is the type closure of `Instruction`'s payloads, walked rather than
+# recalled: `Instruction` reaches `IntrinsicOp` and the four operator enums,
+# `IntrinsicOp` reaches `JavaScriptUriCodec` and `BinaryOp`, and those five
+# leaves reach nothing further. `rust_items` does not follow type references, so
+# each is named. The operator enums live in ast.rs and belong here rather than
+# on the semantic-hash surface: `write_binary_op` spells every operator as its
+# own atom (crates/lashlang/src/artifact_write_helpers.rs), so a new operator
+# already mints a distinct module ref and re-minting the published ones would
+# be the false incompatibility, whereas the compiled stream is where an operator
+# edit actually lands.
+#
+# Stated boundary rather than claimed coverage: the `Chunk` side tables an
+# operand indexes (`resource_operation_batches`, `assign_paths`,
+# `format_templates`, `functions`) are reached by index, not by type, and the
+# lowering that decides how many instructions a construct emits is reached by
+# neither. Both stay with the author, as they do for `Instruction` itself. What
+# this adds is the vocabulary encoded IN the stream, which no other guard sees.
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lashlang/src/runtime/instruction.rs"]
-symbols = ["Instruction"]
+symbols = ["Instruction", "IntrinsicOp", "JavaScriptUriCodec"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/ast.rs"]
+symbols = ["BinaryOp", "JavaScriptBinaryOp", "JavaScriptUnaryOp", "UnaryOp"]
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
