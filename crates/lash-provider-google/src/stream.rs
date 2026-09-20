@@ -253,195 +253,6 @@ impl GoogleOAuthProvider {
         }
     }
 
-    fn close_reasoning_stream_part(
-        parts: &[LlmOutputPart],
-        reasoning_stream: &mut Option<ReasoningStreamSink<'_>>,
-    ) {
-        let Some(stream) = reasoning_stream.as_mut() else {
-            return;
-        };
-        let Some(index) = stream.state.open_output_part_index.take() else {
-            return;
-        };
-        if let Some(part @ LlmOutputPart::Reasoning { .. }) = parts.get(index) {
-            stream.events.push(LlmStreamEvent::Part(part.clone()));
-        }
-    }
-
-    fn apply_stream_piece(
-        full: &mut String,
-        text_deltas: &mut Vec<String>,
-        piece: &str,
-    ) -> Option<String> {
-        if piece.is_empty() {
-            return None;
-        }
-        if piece.starts_with(full.as_str()) {
-            let delta = &piece[full.len()..];
-            if !delta.is_empty() {
-                full.push_str(delta);
-                text_deltas.push(delta.to_string());
-                return Some(delta.to_string());
-            }
-            return None;
-        }
-        full.push_str(piece);
-        text_deltas.push(piece.to_string());
-        Some(piece.to_string())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn process_sse_event(
-        &self,
-        raw: &str,
-        full: &mut String,
-        text_deltas: &mut Vec<String>,
-        usage: &mut LlmUsage,
-        tool_call_parts: Option<&mut Vec<LlmOutputPart>>,
-        finish_event: &mut Option<Value>,
-    ) -> Result<(), LlmTransportError> {
-        let mut provider_usage = None;
-        let mut execution_evidence = None;
-        let mut reasoning_deltas = Vec::new();
-        self.process_sse_event_with_text_parts(
-            raw,
-            SseTextPartSink {
-                full,
-                text_deltas,
-                reasoning_deltas: &mut reasoning_deltas,
-                usage,
-                provider_usage: &mut provider_usage,
-                execution_evidence: &mut execution_evidence,
-                tool_call_parts,
-                output_parts: None,
-                reasoning_stream: None,
-                finish_event,
-            },
-            None,
-        )
-    }
-
-    pub(crate) fn process_sse_event_with_text_parts(
-        &self,
-        raw: &str,
-        sink: SseTextPartSink<'_>,
-        origin_model: Option<&str>,
-    ) -> Result<(), LlmTransportError> {
-        let SseTextPartSink {
-            full,
-            text_deltas,
-            reasoning_deltas,
-            usage,
-            provider_usage,
-            execution_evidence,
-            tool_call_parts,
-            output_parts,
-            mut reasoning_stream,
-            finish_event,
-        } = sink;
-        if raw.trim().is_empty() || raw.trim() == "[DONE]" {
-            return Ok(());
-        }
-        let event: Value = serde_json::from_str(raw).map_err(|e| {
-            LlmTransportError::new(format!("Invalid Cloud Code SSE payload: {e}"))
-                .with_retry_verdict(TransportRetryVerdict::NotRetryable)
-        })?;
-        ExecutionEvidence::merge_optional(
-            execution_evidence,
-            Self::execution_evidence_from_value(&event),
-        )
-        .map_err(|error| {
-            LlmTransportError::new(format!("Google stream {error}"))
-                .with_kind(ProviderFailureKind::Stream)
-                .with_adapter_code(TurnFailureCode::from_wire(error.code()))
-        })?;
-        let new_usage = Self::usage_from_event(&event);
-        if new_usage.input_tokens > 0
-            || new_usage.output_tokens > 0
-            || new_usage.cache_read_input_tokens > 0
-            || new_usage.cache_write_input_tokens > 0
-            || new_usage.reasoning_output_tokens > 0
-        {
-            *usage = new_usage;
-            // Keep the raw `usageMetadata` block alongside the normalized
-            // counters, under the same non-zero guard so a trailing empty
-            // block cannot clobber the captured sidecar.
-            *provider_usage = event
-                .get("response")
-                .and_then(|response| response.get("usageMetadata"))
-                .cloned();
-        }
-        let mut output_parts = output_parts;
-        let mut discarded_output_parts = Vec::new();
-        let mut saw_thought_in_event = false;
-        for (piece, signature, is_thought) in Self::text_parts_from_event(&event) {
-            if is_thought {
-                let parts = output_parts
-                    .as_deref_mut()
-                    .unwrap_or(&mut discarded_output_parts);
-                let may_extend_open_stream_part = reasoning_stream
-                    .as_ref()
-                    .is_none_or(|stream| stream.state.open_output_part_index.is_some());
-                let update = self.push_reasoning_piece(
-                    parts,
-                    reasoning_deltas,
-                    piece,
-                    signature,
-                    !saw_thought_in_event && may_extend_open_stream_part,
-                    origin_model,
-                );
-                if let Some(opened_part) = update.opened_part {
-                    Self::close_reasoning_stream_part(parts, &mut reasoning_stream);
-                    if let Some(stream) = reasoning_stream.as_mut() {
-                        stream.state.open_output_part_index = Some(opened_part);
-                    }
-                }
-                if let Some(delta) = update.delta
-                    && let Some(stream) = reasoning_stream.as_mut()
-                {
-                    stream.events.push(LlmStreamEvent::ReasoningDelta(delta));
-                }
-                saw_thought_in_event = true;
-                continue;
-            }
-            if let Some(parts) = output_parts.as_deref() {
-                Self::close_reasoning_stream_part(parts, &mut reasoning_stream);
-            }
-            let Some(delta) = Self::apply_stream_piece(full, text_deltas, &piece) else {
-                continue;
-            };
-            if let Some(parts) = output_parts.as_deref_mut() {
-                parts.push(LlmOutputPart::Text {
-                    text: delta,
-                    response_meta: signature.map(|signature| ResponseTextMeta {
-                        provider_payload: Some(signature),
-                        origin: origin_model.map(|model| self.route_identity_for_model(model)),
-                        ..ResponseTextMeta::default()
-                    }),
-                });
-            }
-        }
-        let tool_calls = self.tool_call_parts_from_event(&event, origin_model);
-        if !tool_calls.is_empty()
-            && let Some(parts) = output_parts.as_deref()
-        {
-            Self::close_reasoning_stream_part(parts, &mut reasoning_stream);
-        }
-        if let Some(parts) = tool_call_parts {
-            parts.extend(tool_calls);
-        }
-        // Capture the last event carrying a non-empty `finishReason` so the
-        // streaming finalizer can derive the terminal reason exactly like the
-        // non-streaming path instead of hardcoding Stop.
-        if Self::finish_reason_str(&event).is_some() {
-            if let Some(parts) = output_parts.as_deref() {
-                Self::close_reasoning_stream_part(parts, &mut reasoning_stream);
-            }
-            *finish_event = Some(event);
-        }
-        Ok(())
-    }
-
     /// The non-empty `finishReason` carried by the first candidate of an event,
     /// honouring the streaming `response.candidates` wrapper as well as the
     /// unwrapped top-level shape.
@@ -550,5 +361,177 @@ impl GoogleOAuthProvider {
             "" => terminal_reason_from_parts(parts),
             _ => LlmTerminalReason::ProviderError,
         }
+    }
+}
+
+/// Owned accumulator for one Cloud Code SSE stream: the running full text,
+/// the assembled output and tool-call parts, the usage snapshot (normalized
+/// plus the raw `usageMetadata` sidecar), the merged execution evidence, the
+/// open reasoning part, and the last finish-bearing event.
+///
+/// Replaces the previous nine-borrow sink. Every event folds through
+/// [`GoogleStreamState::push_event`], so cross-event reasoning coalescing and
+/// prefix trimming run unconditionally — there is no absent-sink mode that
+/// would turn the same bytes into different reasoning deltas.
+#[derive(Default)]
+pub(crate) struct GoogleStreamState {
+    pub full: String,
+    pub usage: LlmUsage,
+    pub provider_usage: Option<Value>,
+    pub execution_evidence: Option<ExecutionEvidence>,
+    pub output_parts: Vec<LlmOutputPart>,
+    pub tool_call_parts: Vec<LlmOutputPart>,
+    pub finish_event: Option<Value>,
+    open_reasoning_part: Option<usize>,
+}
+
+/// What one [`GoogleStreamState::push_event`] call produced: the event's own
+/// visible and reasoning deltas, the reasoning stream emissions (a `Part`
+/// close and `ReasoningDelta`s), and how many tool-call parts the event
+/// appended to the state's `tool_call_parts`.
+#[derive(Default)]
+pub(crate) struct EventDeltas {
+    pub text_deltas: Vec<String>,
+    pub reasoning_deltas: Vec<String>,
+    pub reasoning_events: Vec<LlmStreamEvent>,
+    pub tool_calls_added: usize,
+}
+
+impl GoogleStreamState {
+    /// Fold one raw SSE payload into the stream state, returning just this
+    /// event's deltas. `provider` supplies route-identity stamping on replay
+    /// metadata; `origin_model` is the request's model.
+    pub(crate) fn push_event(
+        &mut self,
+        provider: &GoogleOAuthProvider,
+        raw: &str,
+        origin_model: Option<&str>,
+    ) -> Result<EventDeltas, LlmTransportError> {
+        let mut deltas = EventDeltas::default();
+        if raw.trim().is_empty() || raw.trim() == "[DONE]" {
+            return Ok(deltas);
+        }
+        let event: Value = serde_json::from_str(raw).map_err(|e| {
+            LlmTransportError::new(format!("Invalid Cloud Code SSE payload: {e}"))
+                .with_retry_verdict(TransportRetryVerdict::NotRetryable)
+        })?;
+        ExecutionEvidence::merge_optional(
+            &mut self.execution_evidence,
+            GoogleOAuthProvider::execution_evidence_from_value(&event),
+        )
+        .map_err(|error| {
+            LlmTransportError::new(format!("Google stream {error}"))
+                .with_kind(ProviderFailureKind::Stream)
+                .with_adapter_code(TurnFailureCode::from_wire(error.code()))
+        })?;
+        let new_usage = GoogleOAuthProvider::usage_from_event(&event);
+        if new_usage.input_tokens > 0
+            || new_usage.output_tokens > 0
+            || new_usage.cache_read_input_tokens > 0
+            || new_usage.cache_write_input_tokens > 0
+            || new_usage.reasoning_output_tokens > 0
+        {
+            self.usage = new_usage;
+            // Keep the raw `usageMetadata` block alongside the normalized
+            // counters, under the same non-zero guard so a trailing empty
+            // block cannot clobber the captured sidecar.
+            self.provider_usage = event
+                .get("response")
+                .and_then(|response| response.get("usageMetadata"))
+                .cloned();
+        }
+        let mut saw_thought_in_event = false;
+        for (piece, signature, is_thought) in GoogleOAuthProvider::text_parts_from_event(&event) {
+            if is_thought {
+                let update = provider.push_reasoning_piece(
+                    &mut self.output_parts,
+                    &mut deltas.reasoning_deltas,
+                    piece,
+                    signature,
+                    !saw_thought_in_event && self.open_reasoning_part.is_some(),
+                    origin_model,
+                );
+                if let Some(opened_part) = update.opened_part {
+                    self.close_reasoning_stream_part(&mut deltas.reasoning_events);
+                    self.open_reasoning_part = Some(opened_part);
+                }
+                if let Some(delta) = update.delta {
+                    deltas
+                        .reasoning_events
+                        .push(LlmStreamEvent::ReasoningDelta(delta));
+                }
+                saw_thought_in_event = true;
+                continue;
+            }
+            self.close_reasoning_stream_part(&mut deltas.reasoning_events);
+            let Some(delta) =
+                Self::apply_stream_piece(&mut self.full, &mut deltas.text_deltas, &piece)
+            else {
+                continue;
+            };
+            self.output_parts.push(LlmOutputPart::Text {
+                text: delta,
+                response_meta: signature.map(|signature| ResponseTextMeta {
+                    provider_payload: Some(signature),
+                    origin: origin_model.map(|model| provider.route_identity_for_model(model)),
+                    ..ResponseTextMeta::default()
+                }),
+            });
+        }
+        let tool_calls = provider.tool_call_parts_from_event(&event, origin_model);
+        if !tool_calls.is_empty() {
+            self.close_reasoning_stream_part(&mut deltas.reasoning_events);
+        }
+        deltas.tool_calls_added = tool_calls.len();
+        self.tool_call_parts.extend(tool_calls);
+        // Capture the last event carrying a non-empty `finishReason` so the
+        // streaming finalizer can derive the terminal reason exactly like the
+        // non-streaming path instead of hardcoding Stop.
+        if GoogleOAuthProvider::finish_reason_str(&event).is_some() {
+            self.close_reasoning_stream_part(&mut deltas.reasoning_events);
+            self.finish_event = Some(event);
+        }
+        Ok(deltas)
+    }
+
+    /// Emit the still-open reasoning part as a `Part` event and clear it.
+    /// Stream finalization calls this once more so a part left open by the
+    /// last event reaches the host.
+    pub(crate) fn flush_open_reasoning_part(&mut self) -> Option<LlmStreamEvent> {
+        let index = self.open_reasoning_part.take()?;
+        match self.output_parts.get(index) {
+            Some(part @ LlmOutputPart::Reasoning { .. }) => {
+                Some(LlmStreamEvent::Part(part.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn close_reasoning_stream_part(&mut self, events: &mut Vec<LlmStreamEvent>) {
+        if let Some(event) = self.flush_open_reasoning_part() {
+            events.push(event);
+        }
+    }
+
+    fn apply_stream_piece(
+        full: &mut String,
+        text_deltas: &mut Vec<String>,
+        piece: &str,
+    ) -> Option<String> {
+        if piece.is_empty() {
+            return None;
+        }
+        if piece.starts_with(full.as_str()) {
+            let delta = &piece[full.len()..];
+            if !delta.is_empty() {
+                full.push_str(delta);
+                text_deltas.push(delta.to_string());
+                return Some(delta.to_string());
+            }
+            return None;
+        }
+        full.push_str(piece);
+        text_deltas.push(piece.to_string());
+        Some(piece.to_string())
     }
 }

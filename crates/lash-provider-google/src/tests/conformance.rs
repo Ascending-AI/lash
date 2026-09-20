@@ -230,46 +230,23 @@ impl ProviderNormalizer for GoogleNormalizer {
     }
 
     fn assemble_stream(&self, scenario: Scenario, sse_events: &[String]) -> StreamAssembly {
-        let mut full = String::new();
-        let mut text_deltas = Vec::new();
-        let mut reasoning_deltas = Vec::new();
-        let mut usage = LlmUsage::default();
-        let mut provider_usage = None;
-        let mut execution_evidence = None;
-        let mut output_parts = Vec::new();
-        let mut tool_calls = Vec::new();
-        let mut finish_event = None;
+        let mut state = crate::support::GoogleStreamState::default();
         let stream_events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&stream_events);
         let sender = LlmEventSender::new(move |event| {
             event_sink.lock_recover().push(event);
         });
         for raw in sse_events {
-            let first_new_tool_call = tool_calls.len();
-            GoogleOAuthProvider::for_test()
-                .process_sse_event_with_text_parts(
-                    raw,
-                    crate::support::SseTextPartSink {
-                        full: &mut full,
-                        text_deltas: &mut text_deltas,
-                        reasoning_deltas: &mut reasoning_deltas,
-                        usage: &mut usage,
-                        provider_usage: &mut provider_usage,
-                        execution_evidence: &mut execution_evidence,
-                        tool_call_parts: Some(&mut tool_calls),
-                        output_parts: Some(&mut output_parts),
-                        reasoning_stream: None,
-                        finish_event: &mut finish_event,
-                    },
-                    None,
-                )
+            let first_new_tool_call = state.tool_call_parts.len();
+            state
+                .push_event(&GoogleOAuthProvider::for_test(), raw, None)
                 .expect("google sse event parses");
-            for part in &tool_calls[first_new_tool_call..] {
+            for part in &state.tool_call_parts[first_new_tool_call..] {
                 sender.send(LlmStreamEvent::Part(part.clone()));
             }
         }
-        let mut parts = output_parts;
-        parts.extend(tool_calls);
+        let mut parts = state.output_parts;
+        parts.extend(state.tool_call_parts);
         if matches!(
             scenario,
             Scenario::ReasoningReplayRoundTrip | Scenario::ToolCallReplayRoundTrip
@@ -278,7 +255,7 @@ impl ProviderNormalizer for GoogleNormalizer {
         }
         StreamAssembly {
             parts,
-            usage,
+            usage: state.usage,
             stream_events: stream_events.lock_recover().clone(),
         }
     }
