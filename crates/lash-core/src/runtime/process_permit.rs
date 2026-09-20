@@ -4,6 +4,7 @@ use lash_core_ids::execution_permit as permit;
 /// natively at once.
 pub const DEFAULT_PROCESS_EXECUTION_CONCURRENCY: usize = 64;
 
+pub use permit::SharedNotify;
 pub use permit::release_process_execution_permit_while;
 pub use permit::{ensure_process_execution_permit, inherit_process_execution_permit};
 pub use permit::{scope_process_execution_permit, scope_queued_work_execution_permit};

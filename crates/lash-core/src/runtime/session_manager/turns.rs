@@ -2,6 +2,8 @@ use super::*;
 use crate::TurnId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use lash_sansio::sync::MutexExt;
+#[cfg(loom)]
+use usage::loom_ext::LoomMutexExt as _;
 
 impl ManagedSessionCapability {
     pub(in crate::runtime::session_manager) async fn start_turn(
@@ -163,7 +165,7 @@ mod panic_tests {
 }
 
 type ManagedTurnRegistry = Arc<StdMutex<HashMap<TurnId, ManagedSessionTurn>>>;
-type ChildTurnLiveUsage = Arc<StdMutex<HashMap<TurnId, TokenUsage>>>;
+type ChildTurnLiveUsage = Arc<LiveUsageMutex<HashMap<TurnId, TokenUsage>>>;
 
 /// Process-wide registration nonce source. A nonce identifies one registration
 /// attempt, which `(session_id, turn_id)` cannot: an id pair can be registered,
@@ -193,7 +195,7 @@ struct ManagedTurnLease {
     registration: u64,
     /// Shared with this turn's [`LiveChildUsageForwarder`] so an in-flight child
     /// emit cannot re-create the live-usage entry after release.
-    released: Arc<AtomicBool>,
+    released: Arc<TurnReleasedFlag>,
 }
 
 /// Admission outcome plus the state it was decided from, carried out of the
@@ -370,7 +372,7 @@ impl ManagedTurnLease {
             session_id: SessionId::from(session_id.to_string()),
             turn_id: turn_id.clone(),
             registration,
-            released: Arc::new(AtomicBool::new(false)),
+            released: Arc::new(TurnReleasedFlag::new(false)),
         })
     }
 
@@ -394,7 +396,7 @@ impl ManagedTurnLease {
     /// Flag observed by this turn's live-usage forwarder. Set before the entries
     /// are removed, so any concurrent emit either reported before release or
     /// drops its report instead of resurrecting the entry.
-    fn released_flag(&self) -> Arc<AtomicBool> {
+    fn released_flag(&self) -> Arc<TurnReleasedFlag> {
         Arc::clone(&self.released)
     }
 
@@ -564,7 +566,7 @@ mod tests {
     fn shared_maps() -> (ManagedTurnRegistry, ChildTurnLiveUsage) {
         (
             Arc::new(StdMutex::new(HashMap::new())),
-            Arc::new(StdMutex::new(HashMap::new())),
+            Arc::new(LiveUsageMutex::new(HashMap::new())),
         )
     }
 

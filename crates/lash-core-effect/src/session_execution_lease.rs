@@ -48,10 +48,40 @@
 //! answer it would make the timeline unavailable exactly when it is needed.
 
 use crate::SessionId;
+#[cfg(not(loom))]
 use lash_sansio::sync::MutexExt;
+#[cfg(loom)]
+use loom::sync::Mutex as StdMutex;
+#[cfg(loom)]
+use loom::sync::atomic::AtomicU8;
 use std::sync::Arc;
+/// The lease mutex and release/loss atomics swap to loom's instrumented
+/// equivalents under `--cfg loom` so the guard's compare-and-set release
+/// transition is model-checked (FIG-1161 seam 4).
+#[cfg(not(loom))]
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+#[cfg(not(loom))]
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// `lock_recover` for the loom mutex; `MutexExt` still covers real
+/// `std::sync::Mutex` sites in normal builds.
+#[cfg(loom)]
+mod loom_ext {
+    pub trait LoomMutexExt<T: ?Sized> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T>;
+    }
+
+    impl<T: ?Sized> LoomMutexExt<T> for loom::sync::Mutex<T> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T> {
+            self.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+    }
+}
+
+#[cfg(loom)]
+use loom_ext::LoomMutexExt as _;
 
 use crate::Clock;
 use crate::LeaseTimings;
@@ -756,6 +786,9 @@ fn trace_renewal_install_refused(
         },
     );
 }
+
+#[cfg(all(test, loom))]
+mod loom_tests;
 
 #[cfg(test)]
 mod renewal_install_tests;

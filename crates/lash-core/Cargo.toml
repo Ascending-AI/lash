@@ -57,6 +57,12 @@ futures-util = { workspace = true }
 [dev-dependencies]
 lash-core = { package = "lash-internal-core", path = ".", features = ["testing"] }
 insta = "1"
+# FIG-1161: loom seam tests. The flag is scoped to this crate with
+# `cargo rustc --profile test -- --cfg loom` (a global RUSTFLAGS cannot work:
+# `cfg(loom)` compiles `tokio::net` out and the reqwest/hyper dep closure then
+# fails). loom must therefore resolve for the test target unconditionally;
+# normal builds never see it.
+loom = { workspace = true }
 proptest = "1"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

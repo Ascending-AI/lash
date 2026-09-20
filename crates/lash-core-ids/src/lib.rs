@@ -9,6 +9,12 @@
 pub mod clock;
 pub mod execution_permit;
 pub mod identity_json;
+/// `tokio::sync::Notify` semantics on loom primitives for the `cfg(loom)` seam
+/// tests (FIG-1161). Public only because the `changed`/`dispatcher_changed`
+/// notifier type crosses crate boundaries into `lash-core` and
+/// `lash-core-worker` signatures.
+#[cfg(loom)]
+pub mod loom_notify;
 pub mod operational_metrics;
 pub mod panic_containment;
 #[cfg(feature = "perf-witness")]

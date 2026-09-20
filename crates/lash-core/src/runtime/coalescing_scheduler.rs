@@ -10,11 +10,43 @@
 //! side-scoped `extra` state block; they keep their own dispatch loops because
 //! the loops carry different duties (worklist paging versus exit-on-idle).
 
+#[cfg(not(loom))]
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use lash_core_ids::execution_permit::SharedNotify;
 use lash_core_ids::worker_capacity::{WorkerCapacityMetrics, WorkerSlotKind};
+
+/// The protocol's state mutex swaps to loom's instrumented mutex under
+/// `--cfg loom` so the single-dispatcher latch's interleavings are
+/// model-checked (FIG-1161 seam 3). Public because
+/// [`CoalescingSchedulerHandle::state`] exposes it to the host schedulers.
+#[cfg(not(loom))]
+pub type CoalescingMutex<T> = std::sync::Mutex<T>;
+/// `cfg(loom)` twin of [`CoalescingMutex`].
+#[cfg(loom)]
+pub type CoalescingMutex<T> = loom::sync::Mutex<T>;
+
+/// `lock_recover` for the loom mutex, so the handle's default methods read
+/// identically under both cfgs. Crate-visible so the host schedulers
+/// (`queued/scheduler.rs`, `process_worker`) can lock the same state.
+#[cfg(loom)]
+pub(crate) mod loom_ext {
+    pub trait LoomMutexExt<T: ?Sized> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T>;
+    }
+
+    impl<T: ?Sized> LoomMutexExt<T> for loom::sync::Mutex<T> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T> {
+            self.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+    }
+}
+
+#[cfg(loom)]
+use loom_ext::LoomMutexExt as _;
 
 /// Side-scoped scheduler state that must move under the same lock as the
 /// protocol fields. `()` for hosts with nothing extra.
@@ -203,8 +235,10 @@ pub trait CoalescingSchedulerHandle: Send + Sync + 'static {
     type Work;
     type Extra: CoalescingExtra;
 
-    fn state(&self) -> &Mutex<CoalescingSchedulerState<Self::Key, Self::Work, Self::Extra>>;
-    fn changed(&self) -> &Arc<tokio::sync::Notify>;
+    fn state(
+        &self,
+    ) -> &CoalescingMutex<CoalescingSchedulerState<Self::Key, Self::Work, Self::Extra>>;
+    fn changed(&self) -> &Arc<SharedNotify>;
     fn slot_kind(&self) -> WorkerSlotKind;
     fn metrics(&self) -> &WorkerCapacityMetrics;
 
@@ -349,5 +383,165 @@ mod tests {
             state.queue_idle(),
             "no queued and no running entries is idle"
         );
+    }
+}
+
+/// Loom model checks for the single-dispatcher latch (FIG-1161 seam 3). The
+/// scheduler handle below is a minimal host: the protocol's `state`,
+/// `changed`, and the real `CoalescingSchedulerHandle::complete`/
+/// `park_dispatcher` code run under loom-instrumented primitives; the host's
+/// own dispatch loop is modeled inline because the production loops carry
+/// worklist paging duties outside this seam.
+#[cfg(all(test, loom))]
+mod loom_tests {
+    use super::*;
+    use loom::sync::atomic::{AtomicUsize, Ordering};
+
+    struct LoomScheduler {
+        state: CoalescingMutex<CoalescingSchedulerState<u32, u32>>,
+        changed: Arc<SharedNotify>,
+        metrics: WorkerCapacityMetrics,
+    }
+
+    impl LoomScheduler {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                state: CoalescingMutex::new(CoalescingSchedulerState::default()),
+                changed: Arc::new(SharedNotify::new()),
+                metrics: WorkerCapacityMetrics::default(),
+            })
+        }
+
+        /// The `notify_pending_work` critical section: admit the demand and
+        /// claim the latch under the same lock, then notify outside it so a
+        /// parking dispatcher or a successor claimant observes the change.
+        fn notify(&self, key: u32) -> bool {
+            let claimed = {
+                let mut state = self.state.lock_recover();
+                state.admit(key, key, |_, _| ());
+                state.claim_dispatcher()
+            };
+            self.changed.notify_one();
+            claimed
+        }
+    }
+
+    impl CoalescingSchedulerHandle for LoomScheduler {
+        type Key = u32;
+        type Work = u32;
+        type Extra = ();
+
+        fn state(&self) -> &CoalescingMutex<CoalescingSchedulerState<u32, u32>> {
+            &self.state
+        }
+
+        fn changed(&self) -> &Arc<SharedNotify> {
+            &self.changed
+        }
+
+        fn slot_kind(&self) -> WorkerSlotKind {
+            WorkerSlotKind::QueuedWork
+        }
+
+        fn metrics(&self) -> &WorkerCapacityMetrics {
+            &self.metrics
+        }
+    }
+
+    /// Concurrent notifiers race the latch: exactly one claim succeeds, so
+    /// exactly one dispatcher task would be spawned.
+    #[test]
+    fn concurrent_notifies_claim_exactly_one_dispatcher() {
+        loom::model(|| {
+            let scheduler = LoomScheduler::new();
+            let claims = Arc::new(AtomicUsize::new(0));
+
+            let a = loom::thread::spawn({
+                let scheduler = Arc::clone(&scheduler);
+                let claims = Arc::clone(&claims);
+                move || {
+                    if scheduler.notify(1) {
+                        claims.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            });
+            let b = loom::thread::spawn({
+                let scheduler = Arc::clone(&scheduler);
+                let claims = Arc::clone(&claims);
+                move || {
+                    if scheduler.notify(2) {
+                        claims.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            });
+            if scheduler.notify(3) {
+                claims.fetch_add(1, Ordering::SeqCst);
+            }
+            a.join().expect("notifier thread panicked");
+            b.join().expect("notifier thread panicked");
+
+            assert_eq!(claims.load(Ordering::SeqCst), 1);
+            assert!(scheduler.state.lock_recover().dispatcher_running());
+        });
+    }
+
+    /// A demand arriving while the dispatcher drains races the park path:
+    /// admit-under-lock versus idle-check-and-release-under-lock are
+    /// serialized, so the demand is either drained by the running dispatcher
+    /// or claims a successor. Queued work must never be left with no
+    /// dispatcher.
+    #[test]
+    fn notify_racing_dispatcher_park_never_strands_queued_work() {
+        loom::model(|| {
+            let scheduler = LoomScheduler::new();
+            assert!(scheduler.notify(0), "the first notify owns the latch");
+
+            let notifier = loom::thread::spawn({
+                let scheduler = Arc::clone(&scheduler);
+                move || {
+                    scheduler.notify(1);
+                }
+            });
+
+            // The dispatcher loop's tail: pop and complete until the state is
+            // idle under the lock, then release the latch — the same sequence
+            // `run_dispatcher` and `park_dispatcher` run.
+            let dispatcher = loom::thread::spawn({
+                let scheduler = Arc::clone(&scheduler);
+                move || loop {
+                    enum Step {
+                        Park,
+                        Pop(Option<u32>),
+                    }
+                    let step = {
+                        let mut state = scheduler.state.lock_recover();
+                        if state.queue_idle() {
+                            state.release_dispatcher();
+                            Step::Park
+                        } else {
+                            Step::Pop(state.pop_next())
+                        }
+                    };
+                    match step {
+                        Step::Park => {
+                            scheduler.changed.notify_one();
+                            break;
+                        }
+                        Step::Pop(Some(key)) => scheduler.complete(&key),
+                        // Non-idle with nothing poppable means a running key is
+                        // awaiting completion; yield rather than spin.
+                        Step::Pop(None) => loom::thread::yield_now(),
+                    }
+                }
+            });
+            notifier.join().expect("notifier thread panicked");
+            dispatcher.join().expect("dispatcher thread panicked");
+
+            let state = scheduler.state.lock_recover();
+            assert!(
+                state.queue_idle() || state.dispatcher_running(),
+                "queued demand must never be stranded without a dispatcher"
+            );
+        });
     }
 }

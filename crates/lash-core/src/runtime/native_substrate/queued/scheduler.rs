@@ -1,10 +1,15 @@
 use crate::SessionId;
+#[cfg(loom)]
+use crate::runtime::coalescing_scheduler::loom_ext::LoomMutexExt as _;
+#[cfg(not(loom))]
 use lash_sansio::sync::MutexExt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use lash_core_ids::execution_permit::SharedNotify;
 
 use super::QueuedWorkExecutionConcurrency;
 use crate::runtime::coalescing_scheduler::{
-    CoalescingDispatcherGuard, CoalescingSchedulerHandle, CoalescingSchedulerState,
+    CoalescingDispatcherGuard, CoalescingMutex, CoalescingSchedulerHandle, CoalescingSchedulerState,
 };
 use crate::runtime::worker_capacity::{
     DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
@@ -42,12 +47,22 @@ impl QueuedWorkDemand {
 pub(super) type QueuedWorkExecutionSchedulerState =
     CoalescingSchedulerState<Option<SessionId>, QueuedWorkDemand>;
 
+/// The guard [`QueuedWorkExecutionScheduler::lock_state`] hands out. Under
+/// `--cfg loom` the state mutex is loom's, so the guard is too (FIG-1161).
+#[cfg(not(loom))]
+pub(super) type QueuedSchedulerStateGuard<'a> =
+    std::sync::MutexGuard<'a, QueuedWorkExecutionSchedulerState>;
+/// `cfg(loom)` twin of [`QueuedSchedulerStateGuard`].
+#[cfg(loom)]
+pub(super) type QueuedSchedulerStateGuard<'a> =
+    loom::sync::MutexGuard<'a, QueuedWorkExecutionSchedulerState>;
+
 pub(crate) struct QueuedWorkExecutionScheduler {
     pub(super) slots: Option<Arc<dyn WorkerSlotSupplier>>,
     pub(super) admission_limit: Option<usize>,
     pub(super) metrics: WorkerCapacityMetrics,
-    pub(super) state: Mutex<QueuedWorkExecutionSchedulerState>,
-    pub(super) changed: Arc<tokio::sync::Notify>,
+    pub(super) state: CoalescingMutex<QueuedWorkExecutionSchedulerState>,
+    pub(super) changed: Arc<SharedNotify>,
 }
 
 impl CoalescingSchedulerHandle for QueuedWorkExecutionScheduler {
@@ -55,11 +70,11 @@ impl CoalescingSchedulerHandle for QueuedWorkExecutionScheduler {
     type Work = QueuedWorkDemand;
     type Extra = ();
 
-    fn state(&self) -> &Mutex<QueuedWorkExecutionSchedulerState> {
+    fn state(&self) -> &CoalescingMutex<QueuedWorkExecutionSchedulerState> {
         &self.state
     }
 
-    fn changed(&self) -> &Arc<tokio::sync::Notify> {
+    fn changed(&self) -> &Arc<SharedNotify> {
         &self.changed
     }
 
@@ -94,8 +109,8 @@ impl QueuedWorkExecutionScheduler {
             slots: None,
             admission_limit: None,
             metrics: WorkerCapacityMetrics::default(),
-            state: Mutex::new(QueuedWorkExecutionSchedulerState::default()),
-            changed: Arc::new(tokio::sync::Notify::new()),
+            state: CoalescingMutex::new(QueuedWorkExecutionSchedulerState::default()),
+            changed: Arc::new(SharedNotify::new()),
         }
     }
 
@@ -123,14 +138,12 @@ impl QueuedWorkExecutionScheduler {
             slots: Some(slots),
             admission_limit,
             metrics,
-            state: Mutex::new(QueuedWorkExecutionSchedulerState::default()),
-            changed: Arc::new(tokio::sync::Notify::new()),
+            state: CoalescingMutex::new(QueuedWorkExecutionSchedulerState::default()),
+            changed: Arc::new(SharedNotify::new()),
         }
     }
 
-    pub(super) fn lock_state(
-        &self,
-    ) -> std::sync::MutexGuard<'_, QueuedWorkExecutionSchedulerState> {
+    pub(super) fn lock_state(&self) -> QueuedSchedulerStateGuard<'_> {
         self.state.lock_recover()
     }
 

@@ -41,3 +41,8 @@ tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["v4"] }
+
+# FIG-1161: loom seam tests. Active only under `--cfg loom`; a normal build
+# never resolves this dependency.
+[target.'cfg(loom)'.dependencies]
+loom = { workspace = true }
