@@ -2186,6 +2186,8 @@ mod agent_scenarios;
 #[cfg(feature = "rlm")]
 mod aggregate_await_comprehension;
 #[cfg(feature = "rlm")]
+mod aggregate_oracle;
+#[cfg(feature = "rlm")]
 mod discovery_execution;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
