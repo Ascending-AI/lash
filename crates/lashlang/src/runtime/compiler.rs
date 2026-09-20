@@ -10,7 +10,6 @@
 //! at compile time).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
@@ -44,7 +43,10 @@ use super::{
 pub(crate) struct Compiler {
     module_context: Option<CompiledModuleContext>,
     lashlang_execution: Option<LashlangExecutionCompileContext>,
-    expression_source_spans: FxHashMap<usize, Span>,
+    /// Source spans keyed by [`AstPath`]: stable across the clones deferred
+    /// function compilation makes, which is why no metadata is copied onto a
+    /// clone.
+    expression_source_spans: FxHashMap<AstPath, Span>,
     code: Vec<Instruction>,
     spans: Vec<Option<Span>>,
     constants: Vec<Value>,
@@ -74,12 +76,19 @@ pub(crate) struct Compiler {
 
 struct PendingFunction {
     definition: FunctionExpr,
+    /// The [`AstPath`] of `definition.body` in the program it was compiled
+    /// from — the node's identity, not its address, so it holds for the
+    /// cloned body exactly as it held for the original.
+    body_path: AstPath,
     parameter_model: ClosureParameterModel,
 }
 
 struct LashlangExecutionCompileContext {
     context: LashlangExecutionContext,
-    paths: FxHashMap<usize, LashlangAstPath>,
+    /// `main`-rooted node paths mapped to their execution-site identity.
+    /// Declaration bodies carry no sites, so only [`AstRoot::Main`] paths are
+    /// populated.
+    paths: FxHashMap<AstPath, LashlangAstPath>,
     sites: Vec<Option<LashlangExecutionSite>>,
 }
 

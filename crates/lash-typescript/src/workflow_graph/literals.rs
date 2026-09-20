@@ -40,6 +40,11 @@ impl GraphProjector<'_> {
             Some((relative, body)) => (relative, body),
             None => (Vec::new(), literal.body.as_ref()),
         };
+        // Facts are keyed by the literal's position in `main`, where the
+        // linker lowered it: the body is the literal's child 0, and the
+        // wrapper path descends from there.
+        let mut facts_base = lashlang::AstPath::main(path.to_vec()).child(0);
+        facts_base.steps.extend(wrapper_path.iter().copied());
         WorkflowProcess {
             id: self.node_id(&owner, &[], "process"),
             name: name.clone(),
@@ -49,7 +54,7 @@ impl GraphProjector<'_> {
             params: literal.params.clone(),
             signals: Vec::new(),
             return_ty: None,
-            body: self.project_block(authored, &owner, &wrapper_path, &mut versions),
+            body: self.project_block(authored, &owner, &wrapper_path, &facts_base, &mut versions),
         }
     }
 }

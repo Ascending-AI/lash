@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::UnaryOp;
+use crate::ast::{AstPath, UnaryOp};
 
 /// `process scan(tick: timer.Tick) { finish tick.fired_at }`
 fn scan_tick_process() -> Declaration {
@@ -34,7 +34,7 @@ fn assert_link_and_facet_binding(expr: Expr, expected: TypeExpr) {
         scope.bind(name, any_binding());
     }
     let (_, binding) = linker
-        .lower_expr(&expr, &mut scope)
+        .lower_expr(&expr, &AstPath::main(Vec::new()), &mut scope)
         .expect("the canonical linker walk must lower the expression");
     assert_eq!(binding_type(&binding), expected.clone());
 
@@ -52,9 +52,10 @@ fn assert_link_and_facet_binding(expr: Expr, expected: TypeExpr) {
     let Expr::Block(nodes) = &program.main else {
         unreachable!("Program::block always produces a block")
     };
+    assert_eq!(nodes.len(), 2);
     assert_eq!(
         analysis
-            .facts_for(&nodes[1])
+            .facts_for(&AstPath::main(vec![1]))
             .and_then(|facts| facts.available_variables.get("value")),
         Some(&expected),
     );
@@ -146,7 +147,7 @@ fn canonical_walk_visits_index_and_unary_operands_for_link_and_facets() {
         );
         let analysis = analyze_workflow_program(&program, &full_host_environment());
 
-        let facts = statement_facts(&analysis, &statements(&program)[0]);
+        let facts = statement_facts(&analysis, &statements(&program)[0], &AstPath::main(vec![0]));
         assert!(
             facts.diagnostics.iter().any(|diagnostic| {
                 diagnostic.error.kind() == "unknown_name"
@@ -314,7 +315,7 @@ fn block_statements(expression: &Expr) -> &[Expr] {
     }
 }
 
-/// The facts the projector's facet derivation reads for one expression.
+/// The facts the projector's facet derivation reads for the node at `path`.
 ///
 /// These witnesses carry names the host cannot resolve, which is exactly what
 /// they exist to prove the canonical walk still visits. The lens's canonical
@@ -324,16 +325,17 @@ fn block_statements(expression: &Expr) -> &[Expr] {
 fn statement_facts<'a>(
     analysis: &'a crate::WorkflowLinkAnalysis,
     expression: &Expr,
+    path: &AstPath,
 ) -> &'a super::WorkflowLinkNodeFacts {
     // The projector peels a label before deriving facets, so an annotated
     // statement's facts live on the expression the label carries.
-    let annotated = match expression {
-        Expr::LabelAnnotated { expr, .. } => Some(expr.as_ref()),
+    let annotated_path = match expression {
+        Expr::LabelAnnotated { .. } => Some(path.child(0)),
         _ => None,
     };
-    annotated
-        .and_then(|expr| analysis.facts_for(expr))
-        .or_else(|| analysis.facts_for(expression))
+    annotated_path
+        .and_then(|path| analysis.facts_for(&path))
+        .or_else(|| analysis.facts_for(path))
         .expect("the canonical walk records facts for every statement it visits")
 }
 
@@ -345,14 +347,19 @@ fn assert_available_type(facts: &super::WorkflowLinkNodeFacts, name: &str, expec
     );
 }
 
-fn assert_unknown_child(analysis: &crate::WorkflowLinkAnalysis, statements: &[Expr]) {
+fn assert_unknown_child(
+    analysis: &crate::WorkflowLinkAnalysis,
+    base_path: &AstPath,
+    statements: &[Expr],
+) {
     assert!(
         statements
             .iter()
-            .all(|statement| analysis.facts_for(statement).is_some())
+            .enumerate()
+            .all(|(index, _)| { analysis.facts_for(&base_path.child(index as u32)).is_some() })
     );
-    assert!(statements.iter().any(|statement| {
-        statement_facts(analysis, statement)
+    assert!(statements.iter().enumerate().any(|(index, statement)| {
+        statement_facts(analysis, statement, &base_path.child(index as u32))
             .diagnostics
             .iter()
             .any(|error| error.error.kind() == "unknown_name")
@@ -385,7 +392,7 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
     let analysis = analyze_workflow_program(&program, &environment);
     let nodes = statements(&program);
     assert!(
-        statement_facts(&analysis, &nodes[1])
+        statement_facts(&analysis, &nodes[1], &AstPath::main(vec![1]))
             .diagnostics
             .iter()
             .any(|error| error.error.kind() == "unknown_name")
@@ -398,14 +405,21 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
     else {
         panic!("expected an if")
     };
-    assert_unknown_child(&analysis, block_statements(then_block));
+    assert_unknown_child(
+        &analysis,
+        &AstPath::main(vec![1, 1]),
+        block_statements(then_block),
+    );
     assert!(
         block_statements(else_block)
             .iter()
-            .all(|statement| analysis.facts_for(statement).is_some())
+            .enumerate()
+            .all(|(index, _)| analysis
+                .facts_for(&AstPath::main(vec![1, 2, index as u32]))
+                .is_some())
     );
     assert_available_type(
-        statement_facts(&analysis, &nodes[2]),
+        statement_facts(&analysis, &nodes[2], &AstPath::main(vec![2])),
         "value",
         &TypeExpr::Int,
     );
@@ -431,7 +445,7 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
     let analysis = analyze_workflow_program(&program, &environment);
     let nodes = statements(&program);
     assert!(
-        statement_facts(&analysis, &nodes[1])
+        statement_facts(&analysis, &nodes[1], &AstPath::main(vec![1]))
             .diagnostics
             .iter()
             .any(|error| error.error.kind() == "unknown_name")
@@ -439,9 +453,13 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
     let Expr::While { body, .. } = &nodes[1] else {
         panic!("expected a while")
     };
-    assert_unknown_child(&analysis, block_statements(body));
+    assert_unknown_child(
+        &analysis,
+        &AstPath::main(vec![1, 1]),
+        block_statements(body),
+    );
     assert_available_type(
-        statement_facts(&analysis, &nodes[2]),
+        statement_facts(&analysis, &nodes[2], &AstPath::main(vec![2])),
         "value",
         &TypeExpr::Int,
     );
@@ -468,7 +486,7 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
     let analysis = analyze_workflow_program(&program, &environment);
     let nodes = statements(&program);
     assert!(
-        statement_facts(&analysis, &nodes[1])
+        statement_facts(&analysis, &nodes[1], &AstPath::main(vec![1]))
             .diagnostics
             .iter()
             .any(|error| error.error.kind() == "incompatible_iteration_target")
@@ -477,10 +495,14 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
         panic!("expected a for")
     };
     let body = block_statements(body);
-    assert_unknown_child(&analysis, body);
-    assert_available_type(statement_facts(&analysis, &body[0]), "item", &TypeExpr::Any);
+    assert_unknown_child(&analysis, &AstPath::main(vec![1, 1]), body);
     assert_available_type(
-        statement_facts(&analysis, &nodes[2]),
+        statement_facts(&analysis, &body[0], &AstPath::main(vec![1, 1, 0])),
+        "item",
+        &TypeExpr::Any,
+    );
+    assert_available_type(
+        statement_facts(&analysis, &nodes[2], &AstPath::main(vec![2])),
         "item",
         &TypeExpr::Str,
     );
@@ -524,7 +546,7 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
             &[(&[0], 0, source.len())],
         );
         let analysis = analyze_workflow_program(&program, &environment);
-        let owner = statement_facts(&analysis, &statements(&program)[0]);
+        let owner = statement_facts(&analysis, &statements(&program)[0], &AstPath::main(vec![0]));
         assert_eq!(
             owner.diagnostics.len(),
             1,
@@ -547,9 +569,13 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
     ))]);
     let analysis = analyze_workflow_program(&print_program, &environment);
     assert!(
-        statement_facts(&analysis, &statements(&print_program)[0])
-            .diagnostics
-            .is_empty()
+        statement_facts(
+            &analysis,
+            &statements(&print_program)[0],
+            &AstPath::main(vec![0])
+        )
+        .diagnostics
+        .is_empty()
     );
     assert!(matches!(
         LinkedModule::link(print_program, environment.clone()),
@@ -585,7 +611,7 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
     ] {
         let program = builders::program(vec![statement]);
         let analysis = analyze_workflow_program(&program, &environment);
-        let owner = statement_facts(&analysis, &statements(&program)[0]);
+        let owner = statement_facts(&analysis, &statements(&program)[0], &AstPath::main(vec![0]));
         assert_eq!(
             owner.diagnostics.len(),
             1,
@@ -607,7 +633,7 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
         ),
     )]);
     let analysis = analyze_workflow_program(&program, &environment);
-    let owner = statement_facts(&analysis, &statements(&program)[0]);
+    let owner = statement_facts(&analysis, &statements(&program)[0], &AstPath::main(vec![0]));
     assert_eq!(owner.diagnostics.len(), 1);
     assert_eq!(owner.diagnostics[0].error.kind(), "unknown_name");
     assert_eq!(owner.expected_arguments.len(), 4);
@@ -635,7 +661,12 @@ fn try_keeps_its_compatible_any_binding_while_lowering_its_body() {
     let linker = Linker::new(&empty_program, &environment);
     let mut scope = Scope::new(false, None);
     let (lowered, binding) = linker
-        .lower_expr_expected(&try_expr, &mut scope, Some(&TypeExpr::Bool))
+        .lower_expr_expected(
+            &try_expr,
+            &AstPath::main(Vec::new()),
+            &mut scope,
+            Some(&TypeExpr::Bool),
+        )
         .expect("Try retains its pre-cutover Any result contract");
     assert_eq!(lowered, try_expr);
     assert_eq!(binding_type(&binding), TypeExpr::Any);

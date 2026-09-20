@@ -77,54 +77,47 @@ pub(super) fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<Intrinsic
     })
 }
 
-pub(super) fn expr_key(expr: &Expr) -> usize {
-    expr as *const Expr as usize
-}
-
-pub(super) fn lashlang_execution_paths(program: &Program) -> FxHashMap<usize, LashlangAstPath> {
+/// `main`-rooted execution paths, keyed by [`AstPath`]. `LabelAnnotated` is
+/// transparent to the lashlang path vocabulary — the annotation is the step —
+/// so its inner node maps to the same `LashlangAstPath` its parent does.
+pub(super) fn lashlang_execution_paths(program: &Program) -> FxHashMap<AstPath, LashlangAstPath> {
     let mut paths = FxHashMap::default();
+    let mut ast_path = AstPath::main(Vec::new());
     let mut path = Vec::new();
-    collect_lashlang_execution_paths(&program.main, &mut path, &mut paths);
+    collect_lashlang_execution_paths(&program.main, &mut ast_path, &mut path, &mut paths);
     paths
 }
 
-pub(crate) fn expression_source_spans(program: &Program) -> FxHashMap<usize, Span> {
-    let mut spans = FxHashMap::default();
-    let mut path = Vec::new();
-    collect_expression_source_spans(&program.main, &mut path, &program.spans, &mut spans);
-    spans
-}
-
-fn collect_expression_source_spans(
-    expr: &Expr,
-    path: &mut Vec<u32>,
-    program_spans: &BTreeMap<AstPath, Span>,
-    spans: &mut FxHashMap<usize, Span>,
-) {
-    if let Some(span) = program_spans.get(&AstPath::main(path.clone())).copied() {
-        spans.insert(expr_key(expr), span);
-    }
-    for (index, child) in expr.children().enumerate() {
-        path.push(index as u32);
-        collect_expression_source_spans(child, path, program_spans, spans);
-        path.pop();
-    }
+/// `program.spans` keyed the way the compiler looks them up. Declaration
+/// bodies are included, so a deferred function body's nodes resolve their own
+/// spans without a copy step.
+pub(crate) fn expression_source_spans(program: &Program) -> FxHashMap<AstPath, Span> {
+    program
+        .spans
+        .iter()
+        .map(|(path, span)| (path.clone(), *span))
+        .collect()
 }
 
 fn collect_lashlang_execution_paths(
     expr: &Expr,
+    ast_path: &mut AstPath,
     path: &mut Vec<u32>,
-    paths: &mut FxHashMap<usize, LashlangAstPath>,
+    paths: &mut FxHashMap<AstPath, LashlangAstPath>,
 ) {
-    paths.insert(expr_key(expr), LashlangAstPath::from_indices(path));
+    paths.insert(ast_path.clone(), LashlangAstPath::from_indices(path));
     if let Expr::LabelAnnotated { expr, .. } = expr {
-        collect_lashlang_execution_paths(expr, path, paths);
+        ast_path.steps.push(0);
+        collect_lashlang_execution_paths(expr, ast_path, path, paths);
+        ast_path.steps.pop();
         return;
     }
     for (index, child) in expr.children().enumerate() {
+        ast_path.steps.push(index as u32);
         path.push(index as u32);
-        collect_lashlang_execution_paths(child, path, paths);
+        collect_lashlang_execution_paths(child, ast_path, path, paths);
         path.pop();
+        ast_path.steps.pop();
     }
 }
 

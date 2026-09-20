@@ -21,7 +21,7 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_process_literal(
         &self,
         literal: &crate::ast::ProcessLiteralExpr,
-        original: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
@@ -36,7 +36,7 @@ impl<'module> Linker<'module> {
                 span: scope.span,
             });
         }
-        self.lift_process_literal(literal, original, scope)
+        self.lift_process_literal(literal, path, scope)
     }
 
     /// Hoists one process literal to a declaration and resolves the slot to
@@ -51,15 +51,11 @@ impl<'module> Linker<'module> {
     pub(super) fn lift_process_literal(
         &self,
         literal: &crate::ast::ProcessLiteralExpr,
-        original: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        let span = self
-            .expression_spans
-            .get(&(original as *const Expr as usize))
-            .copied()
-            .or(scope.span);
-        let name = self.lifted_process_name(literal, original);
+        let span = self.expression_span(path).or(scope.span);
+        let name = self.lifted_process_name(literal, path);
         let mut process_scope = Scope::new(true, span);
         let mut seen = BTreeSet::new();
         let mut start_params = literal.params.clone();
@@ -119,7 +115,7 @@ impl<'module> Linker<'module> {
         // live. Kept as the clear it actually is; restoring the outer set is
         // a behaviour change and belongs in its own commit.
         self.inferred_signals.borrow_mut().clear();
-        let lowered = self.lower_expr(&literal.body, &mut process_scope);
+        let lowered = self.lower_expr(&literal.body, &path.child(0), &mut process_scope);
         self.collect_completion.set(previous_completion);
         self.collect_signals.set(previous_signals);
         let signals = self
@@ -135,7 +131,7 @@ impl<'module> Linker<'module> {
         let completion = self
             .completion_facts
             .borrow()
-            .get(&(literal.body.as_ref() as *const Expr as usize))
+            .get(&path.child(0))
             .cloned()
             .unwrap_or_else(Completion::fallthrough);
         let mut outputs = completion.finishes;
@@ -182,14 +178,9 @@ impl<'module> Linker<'module> {
     fn lifted_process_name(
         &self,
         literal: &crate::ast::ProcessLiteralExpr,
-        original: &Expr,
+        path: &AstPath,
     ) -> String {
-        let path = self
-            .expression_paths
-            .get(&(original as *const Expr as usize))
-            .map(AstPath::legacy_steps)
-            .unwrap_or_default();
-        crate::lifted_process_identity(&literal.body, &path)
+        crate::lifted_process_identity(&literal.body, &path.legacy_steps())
     }
 }
 
