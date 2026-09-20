@@ -198,6 +198,27 @@ set Require, where running without a tool silently is the worse failure. There
 are two values on purpose: per-tool "required" declarations wait for a host that
 needs them, and Require is not advertised as a complete runnability check.
 
+#### Only an open may refuse
+
+The policy is an *open* policy. The three installs onto an already-live runtime
+— the host's `restore_tool_state`, a persisted-state install, and the resident
+re-sync — always tolerate, retain the report and return it, on a Require core
+as much as a Tolerate one.
+
+That follows from the mutation order rather than from taste. The installer
+commits the reconciled surface before any policy is consulted, so every refusal
+is a refusal *after* the registry changed. At open that is safe and deliberate:
+the runtime being built is dropped with the error and nothing the host can
+reach ever observed it. On a live runtime the same refusal would skip the tool
+catalog refresh, the plugin-state stamp and the report retention, leaving the
+session holding a registry and a catalog that disagree — and, in the resident
+re-sync's case, failing a mid-turn reload because an MCP server went away,
+which is the exact degradation Tolerate-by-default exists to absorb, arrived at
+at a moment nobody chose to open anything. The type says so: the installer's
+authority is either `Open(policy)` or `LiveInstall`, and `LiveInstall` has
+nowhere to put a policy, so a future install site cannot acquire the power to
+refuse by passing one.
+
 A refusal promises: no config or state commit, no protocol restore, no
 `SessionRestored`, and a released Session Execution Lease (a following open
 acquires it). It does not promise zero side effects. By the time tool state is

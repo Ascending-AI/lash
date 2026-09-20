@@ -394,7 +394,6 @@ impl LashRuntime {
         };
         let mut durable_state = self.state.clone();
         let mut durable_head_revision = durable_state.head_revision;
-        let tool_source_policy = self.host.core.control.tool_source_policy;
         let tracing = self.host.core.tracing.clone();
         let clock = Arc::clone(&self.host.core.clock);
         let mut reloaded_tool_restore = None;
@@ -436,13 +435,15 @@ impl LashRuntime {
                 let report = crate::runtime::tool_restore::install_persisted_tool_state(
                     registry.as_ref(),
                     tool_state,
-                    crate::runtime::tool_restore::ToolRestoreContext {
-                        session_id: &durable_state.session_id,
-                        site: crate::runtime::ToolRestoreSite::ResidentReload,
-                        policy: tool_source_policy,
-                        tracing: &tracing,
-                        clock: clock.as_ref(),
-                    },
+                    // A live runtime mid-turn: a source that went away
+                    // degrades the session, it does not fail the reload
+                    // (FIG-3367).
+                    crate::runtime::tool_restore::ToolRestoreContext::for_live_install(
+                        &durable_state.session_id,
+                        crate::runtime::ToolRestoreSite::ResidentReload,
+                        &tracing,
+                        clock.as_ref(),
+                    ),
                 )
                 .map_err(|err| {
                     (

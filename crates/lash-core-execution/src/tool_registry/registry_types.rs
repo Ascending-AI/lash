@@ -250,13 +250,23 @@ impl ToolRestoreReport {
     }
 }
 
-/// Host policy for opening a session whose persisted tools no live source
+/// Host policy for **opening** a session whose persisted tools no live source
 /// resolves.
 ///
 /// The default is [`Tolerate`](Self::Tolerate): locking a user out of a
 /// conversation is worse than degrading it, so a lost tool is a typed fact the
 /// host receives rather than a refusal. Unattended and fixed-tool deployments
 /// opt into [`Require`](Self::Require).
+///
+/// It governs opening only. Opening a session is the host's claim that it can
+/// run that session, so a refusal there costs nothing: the half-built runtime
+/// is discarded whole. Installing persisted tool state onto a runtime the host
+/// already holds — an explicit `restore_tool_state`, a persisted-state install,
+/// the resident re-sync after an invalidation — always tolerates and reports,
+/// whatever this policy says. Those installs reconcile the live registry before
+/// anything could refuse, so a refusal would leave the session with a changed
+/// registry, a stale tool catalog and no report, which is worse than the
+/// degraded session `Require` exists to prevent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToolSourcePolicy {
     /// Open succeeds and the [`ToolRestoreReport`] is delivered to the host.

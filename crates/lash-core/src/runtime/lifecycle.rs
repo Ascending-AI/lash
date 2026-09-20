@@ -277,13 +277,12 @@ impl LashRuntime {
             tool_restore_report = Some(crate::runtime::tool_restore::install_persisted_tool_state(
                 registry.as_ref(),
                 tool_state,
-                crate::runtime::tool_restore::ToolRestoreContext {
-                    session_id: &state.session_id,
-                    site: crate::runtime::ToolRestoreSite::SessionOpen,
-                    policy: host.core.control.tool_source_policy,
-                    tracing: &host.core.tracing,
-                    clock: host.core.clock.as_ref(),
-                },
+                crate::runtime::tool_restore::ToolRestoreContext::for_open(
+                    &state.session_id,
+                    host.core.control.tool_source_policy,
+                    &host.core.tracing,
+                    host.core.clock.as_ref(),
+                ),
             )?);
         }
         session.refresh_tool_catalog().await?;

@@ -522,33 +522,7 @@ async fn require_refuses_a_resume_that_lost_a_member() {
 /// so the policy has to reach it below the facade.
 #[tokio::test]
 async fn require_refuses_a_managed_child_whose_inherited_snapshot_lost_a_member() {
-    /// A source whose advertised set can be emptied while the runtime lives.
-    struct MutableTools {
-        tools: Mutex<Vec<(&'static str, &'static str)>>,
-    }
-
-    #[async_trait::async_trait]
-    impl lash_core::ToolProvider for MutableTools {
-        fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-            self.tools
-                .lock_recover()
-                .iter()
-                .map(|(id, name)| FixedTools::definition(id, name).manifest())
-                .collect()
-        }
-
-        fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
-            None
-        }
-
-        async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-            lash_core::ToolOutcome::ok(json!({})).into()
-        }
-    }
-
-    let surface = Arc::new(MutableTools {
-        tools: Mutex::new(vec![(ALPHA_ID, ALPHA_NAME)]),
-    });
+    let surface = MutableTools::new(vec![(ALPHA_ID, ALPHA_NAME)]);
     let tools: Arc<dyn lash_core::ToolProvider> =
         Arc::clone(&surface) as Arc<dyn lash_core::ToolProvider>;
     let plugin_host = plugin_host_with_tools(Some(tools));
@@ -584,7 +558,7 @@ async fn require_refuses_a_managed_child_whose_inherited_snapshot_lost_a_member(
     );
 
     // The source goes away; the child inherits a snapshot nothing resolves.
-    *surface.tools.lock_recover() = Vec::new();
+    surface.clear();
 
     let lifecycle = runtime
         .session_lifecycle_service()
@@ -607,5 +581,176 @@ async fn require_refuses_a_managed_child_whose_inherited_snapshot_lost_a_member(
     assert!(
         refusal.contains(ALPHA_ID),
         "the child's refusal names the lost tool: {refusal}"
+    );
+}
+
+/// A source whose advertised set can be emptied while the runtime lives.
+struct MutableTools {
+    tools: Mutex<Vec<(&'static str, &'static str)>>,
+}
+
+impl MutableTools {
+    fn new(tools: Vec<(&'static str, &'static str)>) -> Arc<Self> {
+        Arc::new(Self {
+            tools: Mutex::new(tools),
+        })
+    }
+
+    fn clear(&self) {
+        self.tools.lock_recover().clear();
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for MutableTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        self.tools
+            .lock_recover()
+            .iter()
+            .map(|(id, name)| FixedTools::definition(id, name).manifest())
+            .collect()
+    }
+
+    fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        None
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::ok(json!({})).into()
+    }
+}
+
+/// A live runtime on a **Require** core, holding a snapshot that names alpha,
+/// with alpha's source gone. Everything a live install could be asked to do
+/// happens from here.
+async fn live_require_runtime(
+    session_id: &SessionId,
+    store: &Arc<dyn lash_core::RuntimePersistence>,
+) -> (LashRuntime, Arc<MutableTools>, lash_core::ToolState) {
+    let surface = MutableTools::new(vec![(ALPHA_ID, ALPHA_NAME)]);
+    let tools: Arc<dyn lash_core::ToolProvider> =
+        Arc::clone(&surface) as Arc<dyn lash_core::ToolProvider>;
+    let mut runtime = open_runtime(
+        session_id,
+        store,
+        Some(tools),
+        lash_core::ToolSourcePolicy::Require,
+    )
+    .await
+    .expect("the open itself has nothing to lose yet");
+    runtime.stamp_live_plugin_state();
+    let snapshot = runtime.tool_state().expect("live tool state");
+    assert!(
+        snapshot.contains(&lash_core::ToolId::from(ALPHA_ID)),
+        "precondition: the snapshot names the tool while its source is live"
+    );
+    surface.clear();
+    (runtime, surface, snapshot)
+}
+
+/// `restore_tool_state` is a host asking a session it already holds to install
+/// a snapshot. Under Require it still succeeds: the policy governs opening a
+/// session, not a restore onto a live one. Refusing here would leave the
+/// registry reconciled, the catalog stale and the report unretained.
+#[tokio::test]
+async fn a_host_restore_on_a_require_core_reports_instead_of_refusing() {
+    let session_id = SessionId::from("fig3367-live-host-restore");
+    let store = in_memory_store();
+    let (mut runtime, _surface, snapshot) = live_require_runtime(&session_id, &store).await;
+
+    let report = Box::pin(runtime.restore_tool_state(snapshot))
+        .await
+        .expect("a live host restore never refuses, whatever the open policy is");
+    assert_eq!(
+        report.lost_members,
+        vec![lash_core::ToolId::from(ALPHA_ID)],
+        "the caller is handed the loss"
+    );
+    assert_eq!(
+        runtime
+            .tool_restore_report()
+            .expect("the live runtime retains the report")
+            .lost_members,
+        vec![lash_core::ToolId::from(ALPHA_ID)],
+    );
+    // The steps after the install ran: the catalog no longer serves the
+    // orphan, and the stamped snapshot carries the restore's generation.
+    assert!(
+        !runtime
+            .active_tool_catalog_shared()
+            .expect("active catalog")
+            .iter()
+            .any(|entry| entry.get("name").and_then(serde_json::Value::as_str) == Some(ALPHA_NAME)),
+        "the tool catalog was refreshed against the reconciled registry"
+    );
+    assert_eq!(
+        runtime
+            .state
+            .tool_state_snapshot()
+            .expect("stamped snapshot")
+            .generation(),
+        report.generation,
+        "stamp_live_plugin_state ran after the install"
+    );
+}
+
+/// A mid-turn resident re-sync whose source went away degrades the session; it
+/// does not fail the reload. This is exactly the "the MCP server is down" case
+/// Tolerate-by-default exists for, and it must not become reachable on a
+/// Require core at a moment nobody chose to open anything.
+#[tokio::test]
+async fn a_resident_resync_on_a_require_core_reloads_and_reports() {
+    let session_id = SessionId::from("fig3367-live-resync");
+    let store = in_memory_store();
+    let (mut runtime, _surface, _snapshot) = live_require_runtime(&session_id, &store).await;
+    // The durable head names the tool; the live surface no longer does.
+    Box::pin(
+        runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
+            operation_id: "fig3367-live-resync-commit".to_string(),
+            nodes: vec![lash_core::SessionAppendNode::message(
+                lash_core::PluginMessage::text(
+                    lash_core::session_model::MessageRole::Assistant,
+                    "committed before the source went away",
+                ),
+            )],
+            requires_ancestor_node_id: None,
+        }),
+    )
+    .await
+    .expect("commit a durable head carrying the tool");
+
+    lash_core::testing::invalidate_resident_session_state_for_testing(&mut runtime);
+    Box::pin(runtime.reload_invalidated_resident_session_state_for_session())
+        .await
+        .expect("a lost tool source must not fail an invalidated resident reload");
+
+    assert_eq!(
+        runtime
+            .tool_restore_report()
+            .expect("the re-sync leaves its report where the host reads it")
+            .lost_members,
+        vec![lash_core::ToolId::from(ALPHA_ID)],
+    );
+}
+
+/// Installing a persisted state envelope onto a live runtime is the same
+/// reading: tolerate, retain, report.
+#[tokio::test]
+async fn a_persisted_state_install_on_a_require_core_reports_instead_of_refusing() {
+    let session_id = SessionId::from("fig3367-live-state-install");
+    let store = in_memory_store();
+    let (mut runtime, _surface, _snapshot) = live_require_runtime(&session_id, &store).await;
+
+    let state = runtime.export_persistence_state();
+    runtime
+        .apply_persistence_state(state)
+        .expect("a live persisted-state install never refuses");
+
+    assert_eq!(
+        runtime
+            .tool_restore_report()
+            .expect("the install leaves its report where the host reads it")
+            .lost_members,
+        vec![lash_core::ToolId::from(ALPHA_ID)],
     );
 }

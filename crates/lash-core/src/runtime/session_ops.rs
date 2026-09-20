@@ -80,13 +80,14 @@ impl LashRuntime {
                 let report = crate::runtime::tool_restore::install_persisted_tool_state(
                     registry.as_ref(),
                     tool_state,
-                    crate::runtime::tool_restore::ToolRestoreContext {
-                        session_id: &state.session_id,
-                        site: crate::runtime::ToolRestoreSite::PersistedStateInstall,
-                        policy: self.host.core.control.tool_source_policy,
-                        tracing: &self.host.core.tracing,
-                        clock: self.host.core.clock.as_ref(),
-                    },
+                    // A live runtime: the install tolerates and reports,
+                    // never refuses (FIG-3367).
+                    crate::runtime::tool_restore::ToolRestoreContext::for_live_install(
+                        &state.session_id,
+                        crate::runtime::ToolRestoreSite::PersistedStateInstall,
+                        &self.host.core.tracing,
+                        self.host.core.clock.as_ref(),
+                    ),
                 )?;
                 installed_tool_restore = Some(report);
             }
