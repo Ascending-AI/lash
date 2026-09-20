@@ -20,7 +20,7 @@
 # `converted` is what makes the gate total for what is converted and silent
 # about what is not. FIG-3387 closes it over every family.
 
-converted = ["artifact", "attachment", "effect", "wait"]
+converted = ["artifact", "attachment", "effect", "trigger", "wait"]
 
 # Production sources that may name a converted family's tables in SQL although
 # they own no statements. Each one needs a reason; the list is not a place to
@@ -171,6 +171,44 @@ schema = [
 runtime_effect_replay = "crates/lash-store-sql/src/effect/replay.rs"
 runtime_effect_group = "crates/lash-store-sql/src/effect/group.rs"
 effect_scope_retirements = "crates/lash-store-sql/src/effect/scope_retirement.rs"
+
+[families.trigger]
+tables = [
+    "trigger_subscriptions",
+    "trigger_occurrences",
+    "trigger_deliveries",
+    "trigger_mutation_receipts",
+]
+statement_prefixes = [
+    "trigger_subscription",
+    "trigger_occurrence",
+    "trigger_delivery",
+    "trigger_mutation_receipt",
+    "trigger_retention",
+]
+shared = [
+    "crates/lash-store-sql/src/trigger/deliveries.rs",
+    "crates/lash-store-sql/src/trigger/mutation_receipts.rs",
+    "crates/lash-store-sql/src/trigger/occurrences.rs",
+    "crates/lash-store-sql/src/trigger/subscriptions.rs",
+]
+sqlite = ["crates/lash-sqlite-store/src/triggers.rs"]
+postgres = ["crates/lash-postgres-store/src/postgres/trigger_store.rs"]
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+[families.trigger.table_modules]
+trigger_deliveries = "crates/lash-store-sql/src/trigger/deliveries.rs"
+trigger_mutation_receipts = "crates/lash-store-sql/src/trigger/mutation_receipts.rs"
+trigger_occurrences = "crates/lash-store-sql/src/trigger/occurrences.rs"
+trigger_subscriptions = "crates/lash-store-sql/src/trigger/subscriptions.rs"
 
 [families.wait]
 tables = ["await_event_waits", "await_event_meta", "await_event_revoked_sessions"]
@@ -606,4 +644,155 @@ The preflight walk left-joins the head table so a dangling checkpoint stays
 visible as a row. SQLite's head table is session_head; PostgreSQL's is
 lash_sessions, and its walk reads it from its own preflight module rather than
 as an artifact-family statement.
+"""
+
+# ---------------------------------------------------------------------------
+# trigger family
+# ---------------------------------------------------------------------------
+
+[[dialect_only]]
+statement = "trigger_subscription.select_record_by_id"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = """
+PostgreSQL must take the row's write lock to hold the record it read across the
+mutation that record decides, under READ COMMITTED. SQLite reads it under the
+BEGIN IMMEDIATE write lock it already holds, so the same projection carries no
+suffix.
+"""
+
+[[dialect_only]]
+statement = "trigger_subscription.select_records_for_prune"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = "Same write-lock fork as trigger_subscription.select_record_by_id, over a prune's whole owner scope."
+
+[[dialect_only]]
+statement = "trigger_subscription.select_enabled_for_source"
+backends = ["sqlite", "postgres"]
+kind = "FOR SHARE"
+reason = """
+PostgreSQL holds a share lock on the subscriptions an occurrence fires at, so a
+concurrent mutation cannot retire one between this read and the delivery rows it
+reserves in the same transaction. SQLite holds the database write lock for the
+whole ingress. The optional owner-scope predicate is identical in both.
+"""
+
+[[dialect_only]]
+statement = "trigger_subscription.select_all_for_session_sweep"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite's session delete reads every subscription and decides ownership from the
+decoded record's registrant session, skipping a row whose JSON is malformed with
+a warning rather than failing the sweep. PostgreSQL selects by the owner_scope
+column under FOR UPDATE and has no counterpart operation. Converging the two is
+a behaviour change, not a rendering one, and is deliberately not made here.
+"""
+
+[[dialect_only]]
+statement = "trigger_subscription.select_session_owned_for_update"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = "The PostgreSQL half of the fork named in trigger_subscription.select_all_for_session_sweep."
+
+[[dialect_only]]
+statement = "trigger_subscription.delete_unreferenced_for_owners"
+backends = ["sqlite", "postgres"]
+kind = "array parameter"
+reason = """
+PostgreSQL binds the owner scopes as a real TEXT[] and matches with ANY; SQLite
+has no array type and unnests a JSON array with json_each. The predicate the two
+express is the same.
+"""
+
+[[dialect_only]]
+statement = "trigger_occurrence.select_record_by_idempotency_key"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = """
+PostgreSQL takes the row's write lock so the idempotency comparison holds across
+the insert that follows it under READ COMMITTED; SQLite reads it under BEGIN
+IMMEDIATE.
+"""
+
+[[dialect_only]]
+statement = "trigger_occurrence.delete_orphan_fired"
+backends = ["sqlite", "postgres"]
+kind = "JSON extraction"
+reason = """
+The occurrence outcome lives inside record_json, which SQLite reads with
+json_extract and PostgreSQL with a jsonb #>> path. No durable encoding changes:
+the same document is read two ways because the two engines spell the read
+differently.
+"""
+
+[[dialect_only]]
+statement = "trigger_occurrence.arm_reclaimable_for_candidates"
+backends = ["sqlite", "postgres"]
+kind = "JSON extraction; array parameter"
+reason = """
+Both forks at once: the outcome read of trigger_occurrence.delete_orphan_fired,
+and the candidate set, which PostgreSQL binds as TEXT[] and SQLite unnests from
+a JSON array with json_each.
+"""
+
+[[dialect_only]]
+statement = "trigger_occurrence.select_reclamation_scope"
+backends = ["sqlite", "postgres"]
+kind = "JSON extraction"
+reason = """
+The reclamation sweep's scope aggregate and worklist, forking only on the
+outcome read. Both spellings are named side by side as
+RECLAMATION_SCOPE_COUNTS_SQLITE and RECLAMATION_SCOPE_COUNTS_POSTGRES in
+crates/lash-store-sql/src/trigger/occurrences.rs.
+"""
+
+[[dialect_only]]
+statement = "trigger_occurrence.delete_reclaimable_by_id"
+backends = ["sqlite", "postgres"]
+kind = "JSON extraction"
+reason = "Same outcome-read fork as trigger_occurrence.delete_orphan_fired, re-proving one candidate's eligibility."
+
+[[dialect_only]]
+statement = "trigger_occurrence.prune_non_fired"
+backends = ["sqlite", "postgres"]
+kind = "JSON extraction"
+reason = "Same outcome-read fork as trigger_occurrence.delete_orphan_fired, over the audit-retention cutoff."
+
+[[dialect_only]]
+statement = "trigger_delivery.delete_retention_candidates"
+backends = ["sqlite", "postgres"]
+kind = "array parameter"
+reason = """
+PostgreSQL joins three parallel bound TEXT[]s with UNNEST; SQLite unnests one
+JSON array of candidate objects with json_each and reads the three ids back out
+with json_extract. One statement per backend now serves both callers — the
+retention reconciliation and the delivery-candidate delete issued this text
+twice, verbatim, in each backend.
+"""
+
+[[dialect_only]]
+statement = "trigger_delivery.select_session_owner_scopes"
+backends = ["sqlite", "postgres"]
+kind = "JSON extraction"
+reason = """
+The owning session is read out of the delivery's frozen subscription snapshot,
+with json_extract on SQLite and a jsonb #>> path on PostgreSQL.
+"""
+
+[[dialect_only]]
+statement = "trigger_mutation_receipt.delete_for_session_owners"
+backends = ["sqlite", "postgres"]
+kind = "array parameter"
+reason = "Same array fork as trigger_subscription.delete_unreferenced_for_owners, over receipt owner ids."
+
+[[dialect_only]]
+statement = "trigger_retention.select_session_owner_ids"
+backends = ["sqlite", "postgres"]
+kind = "JSON extraction"
+reason = """
+The family's one cross-table read — subscriptions, deliveries and mutation
+receipts unioned into the session-owner candidate set — forking on the JSON
+extraction in the delivery arm alone.
 """

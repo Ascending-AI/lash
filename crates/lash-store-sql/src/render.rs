@@ -438,6 +438,12 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
     // crate owns (or, after FROM, a parenthesised subquery or a table-valued
     // function).
     let mut expect_table: Option<TablePosition> = None;
+    // Relation names the statement binds for itself: the `scope` of
+    // `WITH scope AS (…)`. They are not tables, they carry no prefix and no
+    // schema qualifier, and a later `FROM scope` must be left alone rather
+    // than refused. A name is bound before it can be referenced, so one
+    // forward pass sees every binding in time.
+    let mut local_relations: Vec<&str> = Vec::new();
     // The identifier immediately before the current one, with nothing but
     // whitespace between them. An upsert's `DO UPDATE SET` spells `UPDATE`
     // where no table follows, so the keyword alone cannot decide.
@@ -544,8 +550,12 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
                     out.push_str(word);
                 } else {
                     out.push_str(word);
+                    if followed_by_as_open_paren(neutral, end) {
+                        local_relations.push(word);
+                    }
                     if let Some(position) = expect_table
                         && !qualified
+                        && !local_relations.contains(&word)
                         && !(position == TablePosition::From
                             && followed_by_open_paren(neutral, end))
                     {
@@ -579,6 +589,9 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
 /// that also introduces subqueries (`FROM (SELECT …)`), table-valued functions
 /// (`FROM json_each(…)`) and `EXTRACT(EPOCH FROM clock_timestamp())`, so only
 /// it tolerates a following `(`.
+///
+/// `UPDATE` names a table except in an upsert's `DO UPDATE SET`, where it
+/// names the conflicting row this statement already declared its table for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TablePosition {
     From,
@@ -696,6 +709,30 @@ fn is_column_reference(text: &str) -> bool {
 fn followed_by_open_paren(text: &str, from: usize) -> bool {
     text[from..]
         .trim_start_matches(|character: char| character.is_ascii_whitespace())
+        .starts_with('(')
+}
+
+/// Whether the identifier that ends at `from` is followed by `AS (` — the one
+/// shape that binds a relation name inside a statement: `WITH scope AS (…)`,
+/// and a derived table's `) AS scope`. A column alias (`COUNT(*) AS n,`) is not
+/// followed by a parenthesis, so it never registers.
+fn followed_by_as_open_paren(text: &str, from: usize) -> bool {
+    let rest = text[from..].trim_start_matches(|character: char| character.is_ascii_whitespace());
+    let Some(after_as) = rest.get(..2) else {
+        return false;
+    };
+    if !after_as.eq_ignore_ascii_case("as") {
+        return false;
+    }
+    let tail = &rest[2..];
+    if tail
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return false;
+    }
+    tail.trim_start_matches(|character: char| character.is_ascii_whitespace())
         .starts_with('(')
 }
 

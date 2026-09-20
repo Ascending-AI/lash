@@ -186,7 +186,7 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
     def test_a_family_removed_from_converted_makes_the_gate_silent_about_it(self) -> None:
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'converted = ["artifact", "attachment", "effect", "wait"]',
+            'converted = ["artifact", "attachment", "effect", "trigger", "wait"]',
             'converted = ["artifact", "attachment", "effect"]',
         )
         self.tree.substitute(

@@ -88,6 +88,7 @@ mod render;
 pub mod artifact;
 pub mod attachment;
 pub mod effect;
+pub mod trigger;
 pub mod wait;
 
 pub use render::{
@@ -109,6 +110,10 @@ pub const TABLES: &[&str] = &[
     effect::replay::TABLE,
     effect::group::TABLE,
     effect::scope_retirement::TABLE,
+    trigger::deliveries::TABLE,
+    trigger::mutation_receipts::TABLE,
+    trigger::occurrences::TABLE,
+    trigger::subscriptions::TABLE,
     wait::waits::TABLE,
     wait::meta::TABLE,
     wait::revoked_sessions::TABLE,
@@ -156,6 +161,10 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(effect::replay::ReplayStatements::NEUTRAL);
     statements.extend_from_slice(effect::group::GroupStatements::NEUTRAL);
     statements.extend_from_slice(effect::scope_retirement::ScopeRetirementStatements::NEUTRAL);
+    statements.extend_from_slice(trigger::deliveries::DeliveryStatements::NEUTRAL);
+    statements.extend_from_slice(trigger::mutation_receipts::MutationReceiptStatements::NEUTRAL);
+    statements.extend_from_slice(trigger::occurrences::OccurrenceStatements::NEUTRAL);
+    statements.extend_from_slice(trigger::subscriptions::SubscriptionStatements::NEUTRAL);
     statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);
     statements.extend_from_slice(wait::revoked_sessions::RevokedSessionStatements::NEUTRAL);
     statements

@@ -10,8 +10,12 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 
 /// Returns the production trigger-subscription listing SQL for conformance assertions.
-pub fn trigger_subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilter) -> String {
-    crate::triggers::list_subscriptions_query(filter).0
+///
+/// The filter is no longer part of the statement: one named statement carries
+/// every optional predicate and the caller binds NULL for the ones it does not
+/// use (FIG-3385), so the same text answers for every filter.
+pub fn trigger_subscription_list_sql(_filter: &lash_core::TriggerSubscriptionFilter) -> String {
+    crate::triggers::subscription_list_sql().to_string()
 }
 
 /// The shared-fragment DDL statements provisioning applies to `database`.
