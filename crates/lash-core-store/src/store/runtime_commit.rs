@@ -152,15 +152,20 @@ pub struct RuntimeCommit {
     pub turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
-    /// turn-owned write-ahead intents before store validation begins.
+    /// turn-owned write-ahead intents before store validation begins. Per ADR
+    /// 0058 this count is a declared estimate, not a store query: replay can
+    /// undercount prior-attempt turn-owned rows, and cancelled or failed puts
+    /// can overcount — that residual is accepted, do not re-engineer it.
     #[serde(default)]
     pub adopted_intent_rows: u64,
     /// Attachment ids explicitly adopted by this commit. In the same
     /// transaction the backend also stamps every uncommitted manifest row owned
     /// by the turn id in `turn_commit.operation`, including ids that appear only in plain tool
-    /// JSON. This list preserves typed-output and cross-turn re-references;
-    /// adoption updates existing rows only and deliberately no-ops when this
-    /// session has no matching intent.
+    /// JSON. This list preserves typed-output and cross-turn re-references.
+    /// Adoption is an upsert keyed on (session, attachment): when this session
+    /// has no manifest row for an adopted id, the backend creates one —
+    /// stamping the commit's intent time and copying the earliest proven
+    /// upload evidence recorded under any session.
     pub committed_attachment_ids: Vec<crate::AttachmentId>,
 }
 
