@@ -232,7 +232,8 @@ async fn execute_orchestration(
     let mut immediate_outcomes = Vec::new();
     let mut parallel_specs = Vec::new();
 
-    for spec in specs.into_iter().take(BATCH_MAX_TOOL_CALLS) {
+    let mut specs = specs.into_iter();
+    for spec in specs.by_ref().take(BATCH_MAX_TOOL_CALLS) {
         if spec.tool == "batch" {
             immediate_outcomes.push(BatchResultRow::failure(
                 spec.index,
@@ -296,21 +297,10 @@ async fn execute_orchestration(
         });
     }
 
-    for overflow_index in BATCH_MAX_TOOL_CALLS
-        ..args
-            .get("tool_calls")
-            .and_then(|value| value.as_array())
-            .map(|value| value.len())
-            .unwrap_or_default()
-    {
+    for spec in specs {
         immediate_outcomes.push(BatchResultRow::failure(
-            overflow_index,
-            args.get("tool_calls")
-                .and_then(|value| value.as_array())
-                .and_then(|items| items.get(overflow_index))
-                .and_then(|item| item.get("tool"))
-                .and_then(|value| value.as_str())
-                .unwrap_or("unknown"),
+            spec.index,
+            spec.tool,
             0,
             serde_json::json!("Maximum of 25 tool calls allowed in batch"),
         ));
