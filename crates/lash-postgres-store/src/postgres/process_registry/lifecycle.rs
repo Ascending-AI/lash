@@ -98,24 +98,14 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record });
         }
-        let released = sqlx::query(
-            "UPDATE lash_process_leases
-             SET lease_owner_id = NULL,
-                 lease_owner_incarnation_id = NULL,
-                 lease_token = NULL,
-                 lease_claimed_at_ms = 0,
-                 lease_expires_at_ms = 0
-             WHERE process_id = $1
-               AND lease_token = $2
-               AND lease_fencing_token = $3",
-        )
-        .bind(process_id)
-        .bind(&lease.lease_token)
-        .bind(lease.fencing_token as i64)
-        .execute(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?
-        .rows_affected();
+        let released = sqlx::query(process_sql().lease.release_completed.sql())
+            .bind(process_id)
+            .bind(&lease.lease_token)
+            .bind(lease.fencing_token as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected();
         if released != 1 {
             // PostgreSQL-only post-write assertion: the row is held under the
             // `FOR UPDATE` taken by `load_process_lease_tx`, so a fence that

@@ -259,8 +259,10 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         sql_counter_value("queued_work_available_at_ms", batch.available_at_ms)?;
     let allocation_floor = if let Some(wake_source) = batch.process_wake_source.as_ref() {
         conn.query_row(
-            "SELECT allocation_floor FROM wake_redelivery_fences
-                 WHERE session_id = ?1 AND process_id = ?2",
+            crate::process_registry::sql::process_sql()
+                .fence
+                .select_floor
+                .sql(),
             params![batch.session_id.as_str(), wake_source.process_id.as_str()],
             |row| row.get::<_, i64>(0),
         )

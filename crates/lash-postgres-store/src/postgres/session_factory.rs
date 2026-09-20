@@ -1,5 +1,108 @@
 use crate::*;
 
+// The session-delete cascade is declared here because this is where it is
+// issued. The statement belongs to the session-core family, which FIG-3382
+// converts; it is named here because two of the twelve tables it deletes from
+// — `wake_redelivery_fences` and `wake_allocation_floors` — belong to the
+// process family, which is converted, and the ownership gate requires every
+// production statement over a converted table to be a named one. FIG-3382
+// takes this declaration over, renames it into the session-core family's
+// prefix, and adds the `[[cross_family]]` entry the gate will then require
+// for the process tables it reaches.
+//
+// It is one statement on purpose: twelve deletes in one round trip, all keyed
+// by the same session array, and splitting them would let a writer land
+// between the parts.
+lash_store_sql::statements! {
+    /// The session-delete cascade. See the module-level note above.
+    pub(crate) struct SessionDeleteStatements @ "wake_redelivery_fence" {
+        /// Delete every row the sessions in `?1` own across the twelve tables
+        /// a session delete reclaims, and report how many rows went.
+        delete_sessions_cascade = "WITH deleted_graph_nodes AS (
+             DELETE FROM graph_nodes
+             WHERE tombstoned = TRUE
+               AND (session_id = ANY(?1)
+                    OR session_id IN (SELECT session_id FROM deleted_sessions))
+             RETURNING node_id
+         ),
+         deleted_queued_work_items AS (
+             DELETE FROM queued_work_items AS item
+             WHERE EXISTS (
+                 SELECT 1 FROM queued_work_batches AS batch
+                 WHERE batch.batch_id = item.batch_id
+                   AND batch.session_id = ANY(?1)
+             )
+             RETURNING item.batch_id
+         ),
+         deleted_queued_work_batches AS (
+             DELETE FROM queued_work_batches
+             WHERE session_id = ANY(?1)
+               AND (SELECT count(*) FROM deleted_queued_work_items) >= 0
+             RETURNING batch_id
+         ),
+         deleted_wake_redelivery_fences AS (
+             DELETE FROM wake_redelivery_fences
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         deleted_wake_allocation_floors AS (
+             DELETE FROM wake_allocation_floors
+             WHERE target_session_id = ANY(?1)
+             RETURNING target_session_id
+         ),
+         deleted_pending_turn_inputs AS (
+             DELETE FROM pending_turn_inputs
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         deleted_turn_cancel_requests AS (
+             DELETE FROM turn_cancel_requests
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         deleted_turn_cancel_closures AS (
+             DELETE FROM turn_cancel_closure_authorizations
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         deleted_turn_cancellation_bindings AS (
+             DELETE FROM turn_cancellation_bindings
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         deleted_session_execution_leases AS (
+             DELETE FROM session_execution_leases
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         deleted_fork_lineage AS (
+             DELETE FROM fork_lineage
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
+         deleted_session_meta AS (
+             DELETE FROM session_meta
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         )
+         SELECT (SELECT count(*) FROM deleted_graph_nodes)
+              + (SELECT count(*) FROM deleted_queued_work_batches)
+              + (SELECT count(*) FROM deleted_wake_redelivery_fences)
+              + (SELECT count(*) FROM deleted_wake_allocation_floors)
+              + (SELECT count(*) FROM deleted_pending_turn_inputs)
+              + (SELECT count(*) FROM deleted_turn_cancel_closures)
+              + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
+              + (SELECT count(*) FROM deleted_session_execution_leases)
+              + (SELECT count(*) FROM deleted_fork_lineage)
+              + (SELECT count(*) FROM deleted_session_meta)";
+    }
+}
+
+static SESSION_DELETE_SQL: std::sync::LazyLock<SessionDeleteStatements> =
+    std::sync::LazyLock::new(|| {
+        SessionDeleteStatements::render(lash_store_sql::Dialect::postgres())
+    });
+
 #[path = "session_factory/artifact_retirement.rs"]
 mod artifact_retirement;
 #[path = "session_factory/store.rs"]
@@ -896,8 +999,14 @@ pub(crate) async fn delete_session_tx(
     for sql in [
         "DELETE FROM lash_queued_work_items WHERE batch_id IN (SELECT batch_id FROM lash_queued_work_batches WHERE session_id = $1)",
         "DELETE FROM lash_queued_work_batches WHERE session_id = $1",
-        "DELETE FROM lash_wake_redelivery_fences WHERE session_id = $1",
-        "DELETE FROM lash_wake_allocation_floors WHERE target_session_id = $1",
+        crate::process_sql::process_sql()
+            .fence
+            .delete_by_session
+            .sql(),
+        crate::process_sql::process_sql()
+            .floor
+            .delete_by_session
+            .sql(),
         "DELETE FROM lash_pending_turn_inputs WHERE session_id = $1",
         "DELETE FROM lash_turn_cancel_requests WHERE session_id = $1",
         // Administration revokes the session's effect authority before store
@@ -1067,96 +1176,18 @@ pub(crate) async fn delete_process_sessions_tx(
             }
         }
 
-        sqlx::query(
-            // Delete-time reclaim covers the batch's tombstoned rows plus any
-            // tombstoned row owned by an already-deleted session. The ancestry
-            // retire above tombstones a node regardless of who owns it, so a batch
-            // can strand a row belonging to a session outside it; that owner is
-            // unbindable, so no session-scoped vacuum could ever reach the row.
-            // Live sessions' rows stay resident for their own vacuum, so this is
-            // not a catalog-wide sweep.
-            "WITH deleted_graph_nodes AS (
-             DELETE FROM lash_graph_nodes
-             WHERE tombstoned = TRUE
-               AND (session_id = ANY($1)
-                    OR session_id IN (SELECT session_id FROM lash_deleted_sessions))
-             RETURNING node_id
-         ),
-         deleted_queued_work_items AS (
-             DELETE FROM lash_queued_work_items AS item
-             WHERE EXISTS (
-                 SELECT 1 FROM lash_queued_work_batches AS batch
-                 WHERE batch.batch_id = item.batch_id
-                   AND batch.session_id = ANY($1)
-             )
-             RETURNING item.batch_id
-         ),
-         deleted_queued_work_batches AS (
-             DELETE FROM lash_queued_work_batches
-             WHERE session_id = ANY($1)
-               AND (SELECT count(*) FROM deleted_queued_work_items) >= 0
-             RETURNING batch_id
-         ),
-         deleted_wake_redelivery_fences AS (
-             DELETE FROM lash_wake_redelivery_fences
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         ),
-         deleted_wake_allocation_floors AS (
-             DELETE FROM lash_wake_allocation_floors
-             WHERE target_session_id = ANY($1)
-             RETURNING target_session_id
-         ),
-         deleted_pending_turn_inputs AS (
-             DELETE FROM lash_pending_turn_inputs
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         ),
-         deleted_turn_cancel_requests AS (
-             DELETE FROM lash_turn_cancel_requests
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         ),
-         deleted_turn_cancel_closures AS (
-             DELETE FROM lash_turn_cancel_closure_authorizations
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         ),
-         deleted_turn_cancellation_bindings AS (
-             DELETE FROM lash_turn_cancellation_bindings
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         ),
-         deleted_session_execution_leases AS (
-             DELETE FROM lash_session_execution_leases
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         ),
-         deleted_fork_lineage AS (
-             DELETE FROM lash_fork_lineage
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         ),
-         deleted_session_meta AS (
-             DELETE FROM lash_session_meta
-             WHERE session_id = ANY($1)
-             RETURNING session_id
-         )
-         SELECT (SELECT count(*) FROM deleted_graph_nodes)
-              + (SELECT count(*) FROM deleted_queued_work_batches)
-              + (SELECT count(*) FROM deleted_wake_redelivery_fences)
-              + (SELECT count(*) FROM deleted_wake_allocation_floors)
-              + (SELECT count(*) FROM deleted_pending_turn_inputs)
-              + (SELECT count(*) FROM deleted_turn_cancel_closures)
-              + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
-              + (SELECT count(*) FROM deleted_session_execution_leases)
-              + (SELECT count(*) FROM deleted_fork_lineage)
-              + (SELECT count(*) FROM deleted_session_meta)",
-        )
-        .bind(&session_id_texts[..])
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        // Delete-time reclaim covers the batch's tombstoned rows plus any
+        // tombstoned row owned by an already-deleted session. The ancestry
+        // retire above tombstones a node regardless of who owns it, so a batch
+        // can strand a row belonging to a session outside it; that owner is
+        // unbindable, so no session-scoped vacuum could ever reach the row.
+        // Live sessions' rows stay resident for their own vacuum, so this is
+        // not a catalog-wide sweep.
+        sqlx::query(SESSION_DELETE_SQL.delete_sessions_cascade.sql())
+            .bind(&session_id_texts[..])
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
 
         sqlx::query(
             crate::attachments::attachment_sql()

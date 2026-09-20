@@ -1106,11 +1106,12 @@ mod preflight;
 mod process_definitions;
 #[path = "postgres/process_helpers.rs"]
 mod process_helpers;
-mod process_lifecycle_sql;
 #[cfg(test)]
 mod process_lifecycle_sql_tests;
 #[path = "postgres/process_registry.rs"]
 mod process_registry;
+#[path = "postgres/process_sql.rs"]
+mod process_sql;
 #[path = "postgres/queued_work.rs"]
 mod queued_work;
 #[path = "postgres/release_stamp.rs"]

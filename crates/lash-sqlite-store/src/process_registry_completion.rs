@@ -121,15 +121,10 @@ pub(super) async fn complete_process_with_lease(
                     });
                 }
                 tx.execute(
-                    "UPDATE process_leases
-                     SET lease_owner_id = NULL,
-                         lease_owner_incarnation_id = NULL,
-                         lease_token = NULL,
-                         lease_claimed_at_ms = 0,
-                         lease_expires_at_ms = 0
-                     WHERE process_id = ?1
-                       AND lease_token = ?2
-                       AND lease_fencing_token = ?3",
+                    crate::process_registry::sql::process_sql()
+                        .lease
+                        .release_completed
+                        .sql(),
                     params![process_id, lease.lease_token, lease.fencing_token as i64],
                 )
                 .map_err(process_sqlite_error)?;

@@ -226,10 +226,18 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
     // than silently swept into the process-status expectation.
     const VOCABULARY_SITE: &str = "CONSTRAINT ck_processes_status CHECK (";
     const FOREIGN_VOCABULARY_SITE: &str = "CONSTRAINT ck_runtime_effect_replay_status CHECK (";
+    // FIG-3384 moved every process-family statement into the family's own
+    // owner module, so that is where the query-site half of this inventory
+    // now lives; the two modules it came from keep only call sites. The law
+    // below is unchanged and still total over the statements.
     let sources = [
         (
             "process_registry.rs",
             include_str!("../../src/process_registry.rs"),
+        ),
+        (
+            "process_registry/sql.rs",
+            include_str!("../../src/process_registry/sql.rs"),
         ),
         (
             "process_registry_change.rs",
@@ -295,9 +303,22 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
             }
         }
     }
+    // Fifteen bound status-set membership sites. Before FIG-3384 there were
+    // six, because the two global listings and the two observer-scoped ones
+    // were templates with an `{extra}` hole that the store filled per call.
+    // The hole is gone: each combination of the optional, index-served
+    // conjuncts is now its own named statement, so the same four listings are
+    // spelled as four plain variants (one site each), four recently-retired
+    // variants (two sites each, one per union arm), one observer listing and
+    // one observer recently-retired listing (two sites). Every one of them is
+    // still a bound parameter rather than a literal, which is what this count
+    // exists to hold.
     assert_eq!(
-        parameterized_sites, 6,
-        "six bound status-set membership sites: three global and three observer-scoped"
+        parameterized_sites,
+        4 + 8 + 1 + 2,
+        "bound status-set membership sites: four plain listings, four \
+         recently-retired listings with a live and a retired arm each, and the \
+         two observer-scoped listings"
     );
     // FIG-2844 generated every query-site predicate from `ProcessStatus`, so
     // the registry sources hold none: the only literals left are the three

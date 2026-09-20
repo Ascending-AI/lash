@@ -1,3 +1,4 @@
+use crate::process_sql::process_sql;
 use crate::*;
 use lash_sansio::ProcessId;
 
@@ -9,17 +10,10 @@ pub(super) async fn filter_unregistered_process_ids(
         return Ok(Vec::new());
     }
     sqlx::query_scalar(
-        "SELECT candidate.process_id
-         FROM UNNEST($1::TEXT[]) WITH ORDINALITY AS candidate(process_id, ordinal)
-         WHERE NOT EXISTS (
-             SELECT 1 FROM lash_processes p
-             WHERE p.process_id = candidate.process_id
-         )
-           AND NOT EXISTS (
-             SELECT 1 FROM lash_process_tombstones t
-             WHERE t.process_id = candidate.process_id
-         )
-         ORDER BY candidate.ordinal ASC",
+        process_sql()
+            .process_postgres
+            .classify_unregistered_candidates
+            .sql(),
     )
     .bind(
         process_ids
@@ -41,17 +35,10 @@ pub(super) async fn filter_tombstoned_process_ids(
         return Ok(Vec::new());
     }
     sqlx::query_scalar(
-        "SELECT candidate.process_id
-         FROM UNNEST($1::TEXT[]) WITH ORDINALITY AS candidate(process_id, ordinal)
-         WHERE EXISTS (
-             SELECT 1 FROM lash_process_tombstones t
-             WHERE t.process_id = candidate.process_id
-         )
-           AND NOT EXISTS (
-             SELECT 1 FROM lash_processes p
-             WHERE p.process_id = candidate.process_id
-         )
-         ORDER BY candidate.ordinal ASC",
+        process_sql()
+            .process_postgres
+            .classify_tombstoned_candidates
+            .sql(),
     )
     .bind(
         process_ids

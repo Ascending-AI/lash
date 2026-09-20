@@ -52,69 +52,26 @@ use sqlx::{Postgres, Transaction};
 /// no report at all for exactly the deployments a preflight is most useful on.
 const UNDEFINED_TABLE: &str = "42P01";
 
-/// Parked segments, ordered by `(process_id, segment_ordinal)` — the table's
-/// primary key, and therefore a total order with no ties to break.
-///
-/// Only `running` and `waiting` processes are joined in. Terminal processes are
-/// excluded at the source rather than filtered afterwards: their handover rows
-/// are historical residue, and listing them on a drain list would send an
-/// operator after continuations that nothing will ever resume.
-///
-/// The `after` filter is a **row-value comparison against the same two columns
-/// the `ORDER BY` uses**, not a comparison of the minted cursor string. That is
-/// the whole paging-exactness argument: the cursor is `process_id` and a padded
-/// ordinal joined by a separator, and string comparison of that join does not
-/// always agree with tuple comparison of its parts — a process id ending in a
-/// character sorting below the separator reverses the two. Comparing the columns
-/// themselves cannot disagree with the ordering of the same columns, under any
-/// collation.
-pub(crate) static PARKED_SEGMENT_SQL: std::sync::LazyLock<String> =
-    std::sync::LazyLock::new(|| {
-        format!(
-            "SELECT
-         handovers.process_id,
-         handovers.segment_ordinal,
-         handovers.handover_json,
-         processes.status,
-         processes.wake_session_id,
-         processes.record_json
-     FROM lash_process_segment_handovers AS handovers
-     JOIN lash_processes AS processes
-         ON processes.process_id = handovers.process_id
-     WHERE {live}
-       AND (
-           $1::text IS NULL
-           OR (handovers.process_id, handovers.segment_ordinal) > ($1::text, $2::bigint)
-       )
-     ORDER BY handovers.process_id, handovers.segment_ordinal
-     LIMIT $3",
-            live = crate::process_lifecycle_sql::live_process_status("processes.status"),
-        )
-    });
-
-/// Undelivered wakes only.
-///
-/// `pending` and `enqueuing` are the two states the delivery loop treats as
-/// still owed — `wake_delivery.rs` reclaims `enqueuing` back to `pending` when a
-/// claim lapses, so a row in either state is one no session has received.
-/// Anything else (`enqueued`, `discarded`) has already left the queue, and
-/// putting it on a drain list would be reporting work that is done.
-pub(crate) static PENDING_WAKE_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    format!(
-        "SELECT
-         delivery_id,
-         process_id,
-         target_session_id,
-         state,
-         delivery_json
-     FROM lash_process_wake_deliveries
-     WHERE {undelivered}
-       AND ($1::text IS NULL OR delivery_id > $1::text)
-     ORDER BY delivery_id
-     LIMIT $2",
-        undelivered = crate::process_lifecycle_sql::undelivered_wake_delivery_state("state"),
-    )
-});
+// Two of this walk's four page statements belong to the process family and are
+// named in its PostgreSQL owner module (FIG-3384):
+//
+// * `process_segment_handover.list_parked_segments` orders parked segments by
+//   `(process_id, segment_ordinal)` — the table's primary key, and therefore a
+//   total order with no ties to break — and joins in only `running` and
+//   `waiting` processes. Terminal processes are excluded at the source rather
+//   than filtered afterwards: their handover rows are historical residue, and
+//   listing them on a drain list would send an operator after continuations
+//   that nothing will ever resume. Its `after` filter is a row-value
+//   comparison against the same two columns the `ORDER BY` uses, not a
+//   comparison of a minted cursor string: string comparison of a joined cursor
+//   does not always agree with tuple comparison of its parts, and comparing
+//   the columns themselves cannot disagree with the ordering of the same
+//   columns under any collation.
+// * `process_wake_delivery.list_undelivered_for_walk` reports only `pending`
+//   and `enqueuing` deliveries — the two states the delivery loop treats as
+//   still owed, since `wake_delivery.rs` reclaims `enqueuing` back to
+//   `pending` when a claim lapses. Anything else has already left the queue,
+//   and putting it on a drain list would be reporting work that is done.
 
 /// The session scan both deep surfaces share.
 ///
@@ -215,12 +172,17 @@ async fn scan_parked_segments(
         }
         None => (None, None),
     };
-    let rows = sqlx::query_as::<_, ParkedSegmentRow>(PARKED_SEGMENT_SQL.as_str())
-        .bind(after_process)
-        .bind(after_ordinal)
-        .bind(row_limit(scan))
-        .fetch_all(pool)
-        .await;
+    let rows = sqlx::query_as::<_, ParkedSegmentRow>(
+        crate::process_sql::process_sql()
+            .handover_postgres
+            .list_parked_segments
+            .sql(),
+    )
+    .bind(after_process)
+    .bind(after_ordinal)
+    .bind(row_limit(scan))
+    .fetch_all(pool)
+    .await;
     let rows = match rows {
         Ok(rows) => rows,
         Err(error) => return read_failure(scan.surface, error),
@@ -259,11 +221,16 @@ async fn scan_pending_wakes(
     pool: &PgPool,
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
-    let rows = sqlx::query_as::<_, PendingWakeRow>(PENDING_WAKE_SQL.as_str())
-        .bind(scan.after.clone())
-        .bind(row_limit(scan))
-        .fetch_all(pool)
-        .await;
+    let rows = sqlx::query_as::<_, PendingWakeRow>(
+        crate::process_sql::process_sql()
+            .wake_postgres
+            .list_undelivered_for_walk
+            .sql(),
+    )
+    .bind(scan.after.clone())
+    .bind(row_limit(scan))
+    .fetch_all(pool)
+    .await;
     let rows = match rows {
         Ok(rows) => rows,
         Err(error) => return read_failure(scan.surface, error),
@@ -636,7 +603,8 @@ fn page_cursor(scan: &DurableScan, last: Option<String>, returned: usize) -> Opt
 ///
 /// The ordinal is zero-padded so the cursor reads in the same order the rows
 /// do, which keeps a cursor an operator sees in a report meaningful rather than
-/// arbitrary. Paging itself never relies on that: see [`PARKED_SEGMENT_SQL`].
+/// arbitrary. Paging itself never relies on that: see the family's
+/// `process_segment_handover.list_parked_segments`.
 fn segment_cursor(process_id: &ProcessId, segment_ordinal: i64) -> String {
     format!("{process_id}:{segment_ordinal:020}")
 }
@@ -666,7 +634,8 @@ fn invalid_cursor(cursor: &str) -> StoreError {
 }
 
 /// `(process_id, segment_ordinal, handover_json, status, wake_session_id,
-/// record_json)`, in the order [`PARKED_SEGMENT_SQL`] selects them.
+/// record_json)`, in the order `process_segment_handover.list_parked_segments`
+/// selects them.
 ///
 /// Rows are decoded positionally rather than through a derived `FromRow`: this
 /// crate does not enable sqlx's `derive` feature, and the alias keeps the column
@@ -674,7 +643,7 @@ fn invalid_cursor(cursor: &str) -> StoreError {
 type ParkedSegmentRow = (String, i64, String, String, Option<String>, String);
 
 /// `(delivery_id, process_id, target_session_id, state, delivery_json)`, in the
-/// order [`PENDING_WAKE_SQL`] selects them.
+/// order `process_wake_delivery.list_undelivered_for_walk` selects them.
 type PendingWakeRow = (String, String, String, String, String);
 
 /// A session that has published a checkpoint root, named rather than positional
@@ -714,7 +683,10 @@ mod tests {
         }
         let plan = sqlx::query_scalar::<_, String>(&format!(
             "EXPLAIN (COSTS OFF) {}",
-            PARKED_SEGMENT_SQL.as_str()
+            crate::process_sql::process_sql()
+                .handover_postgres
+                .list_parked_segments
+                .sql()
         ))
         .bind(None::<String>)
         .bind(0_i64)

@@ -11,6 +11,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::process_registry::sql::process_sql;
 use lash_core::process_registry::ProcessDefinitionRegistrationRefusal;
 use lash_core::process_registry::{
     ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
@@ -115,8 +116,7 @@ impl lash_core::ProcessDefinitionRegistry for SqliteProcessDefinitionRegistry {
                 let now_ms = clock.timestamp_ms();
                 let existing: Option<(i64, String, String)> = tx
                     .query_row(
-                        "SELECT revision, fingerprint, record_json FROM process_definitions \
-                         WHERE owner_scope = ?1 AND name = ?2",
+                        process_sql().definition.select_for_cas.sql(),
                         rusqlite::params![owner_json, name],
                         |row| {
                             Ok((
@@ -159,11 +159,7 @@ impl lash_core::ProcessDefinitionRegistry for SqliteProcessDefinitionRegistry {
                             };
                             let record_json = encode_record(&record)?;
                             tx.execute(
-                                "INSERT INTO process_definitions \
-                                 (definition_id, owner_scope, name, revision, fingerprint, \
-                                  lifecycle, deleted_at_ms, change_seq, created_at_ms, \
-                                  updated_at_ms, record_json) \
-                                 VALUES (?1, ?2, ?3, 1, ?4, 'enabled', NULL, 1, ?5, ?5, ?6)",
+                                process_sql().definition.insert_first_revision.sql(),
                                 rusqlite::params![
                                     definition_id,
                                     owner_json,
@@ -228,10 +224,7 @@ impl lash_core::ProcessDefinitionRegistry for SqliteProcessDefinitionRegistry {
                         new_record.change_seq += 1;
                         let record_json = encode_record(&new_record)?;
                         let updated = tx.execute(
-                            "UPDATE process_definitions SET revision = ?3, fingerprint = ?4, \
-                             lifecycle = 'enabled', deleted_at_ms = NULL, \
-                             change_seq = change_seq + 1, updated_at_ms = ?5, record_json = ?6 \
-                             WHERE owner_scope = ?1 AND name = ?2",
+                            process_sql().definition.update_revision.sql(),
                             rusqlite::params![
                                 owner_json,
                                 name,
@@ -274,10 +267,7 @@ impl lash_core::ProcessDefinitionRegistry for SqliteProcessDefinitionRegistry {
         let owner_json = encode_owner(owner_scope).map_err(sqlite_plugin_error)?;
         self.conn
             .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT record_json FROM process_definitions \
-                     WHERE owner_scope = ?1 ORDER BY name ASC",
-                )?;
+                let mut stmt = conn.prepare(process_sql().definition.list_by_owner_scope.sql())?;
                 let rows =
                     stmt.query_map(rusqlite::params![owner_json], |row| row.get::<_, String>(0))?;
                 let mut records = Vec::new();

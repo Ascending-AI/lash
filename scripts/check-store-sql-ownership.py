@@ -318,6 +318,11 @@ def declared_column_lists(source: str) -> dict[str, str]:
 
 
 FROM_TABLE = re.compile(r"\bFROM\s+(?P<table>\w+)", re.IGNORECASE)
+# `DELETE FROM t` names the relation a statement writes, not a projection out
+# of it. Pairing it with whatever `SELECT` happened to come earlier — a CTE's,
+# or the outer one in a `WITH` — reads a column list out of text that is not a
+# column list at all.
+DELETE_BEFORE_FROM = re.compile(r"\bDELETE\s*$", re.IGNORECASE)
 SELECT_KEYWORD = re.compile(r"\bSELECT\b", re.IGNORECASE)
 INSERT_COLUMNS = re.compile(
     r"\bINSERT\s+INTO\s+(?P<table>\w+)\s*\((?P<columns>[^)]*)\)", re.IGNORECASE | re.DOTALL
@@ -330,11 +335,16 @@ def projections(sql: str, table: str) -> list[str]:
     The read side is found from the `FROM` backwards to its own `SELECT`,
     rather than forwards from a `SELECT`, because a statement that selects out
     of a subquery (`SELECT scope_id, ?2, 0 FROM ( SELECT … FROM t )`) would
-    otherwise pair the outer projection with the inner table.
+    otherwise pair the outer projection with the inner table. A `FROM` that a
+    `DELETE` introduces is skipped for the same reason in reverse: it names
+    what the statement writes, and the nearest earlier `SELECT` — a sibling
+    CTE's, or the `WITH` statement's own — has nothing to do with it.
     """
     found: list[str] = []
     for match in FROM_TABLE.finditer(sql):
         if match.group("table") != table:
+            continue
+        if DELETE_BEFORE_FROM.search(sql[: match.start()]):
             continue
         keywords = list(SELECT_KEYWORD.finditer(sql, 0, match.start()))
         if not keywords:

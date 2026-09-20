@@ -1,50 +1,6 @@
 use super::*;
 
-use crate::process_lifecycle_sql::live_process_status;
-use std::sync::LazyLock;
-
 const CURSOR_BACKEND: &str = "sqlite";
-pub(crate) static COUNT_NON_TERMINAL_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_live_worklist
-     WHERE {}",
-        live_process_status("status")
-    )
-});
-pub(crate) static MAX_WORKLIST_PROCESS_ID_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT MAX(process_id) FROM processes INDEXED BY idx_processes_live_worklist
-     WHERE {}",
-        live_process_status("status")
-    )
-});
-pub(crate) static FIRST_WORKLIST_PAGE_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT record_json FROM processes
-     INDEXED BY idx_processes_live_worklist
-     WHERE {} AND process_id <= ?1
-     ORDER BY process_id ASC LIMIT ?3",
-        live_process_status("status")
-    )
-});
-pub(crate) static CONTINUE_WORKLIST_PAGE_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT record_json FROM processes
-     INDEXED BY idx_processes_live_worklist
-     WHERE {}
-       AND process_id <= ?1 AND process_id > ?2
-     ORDER BY process_id ASC LIMIT ?3",
-        live_process_status("status")
-    )
-});
-pub(crate) static COLLECT_NON_TERMINAL_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT record_json FROM processes
-                         WHERE {}
-                         ORDER BY process_id ASC",
-        live_process_status("status")
-    )
-});
 
 pub(super) async fn count_non_terminal_processes(
     registry: &SqliteProcessRegistry,
@@ -54,7 +10,11 @@ pub(super) async fn count_non_terminal_processes(
         .call(|conn| {
             Ok((|| {
                 let count: i64 = conn
-                    .query_row(COUNT_NON_TERMINAL_SQL.as_str(), [], |row| row.get(0))
+                    .query_row(
+                        process_sql().process_sqlite.count_live_worklist.sql(),
+                        [],
+                        |row| row.get(0),
+                    )
                     .map_err(process_sqlite_error)?;
                 usize::try_from(count).map_err(|_| {
                     lash_core::PluginError::Session(format!(
@@ -75,7 +35,7 @@ pub(super) async fn collect_non_terminal_records(
         .call(|conn| {
             Ok((|| {
                 let mut stmt = conn
-                    .prepare(COLLECT_NON_TERMINAL_SQL.as_str())
+                    .prepare(process_sql().process.collect_non_terminal_records.sql())
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
                     .query_map([], |row| row.get::<_, String>(0))
@@ -114,9 +74,14 @@ pub(super) async fn list_non_terminal_page(
                 let through_process_id = match continuation.as_ref() {
                     Some(cursor) => cursor.through_process_id().to_string(),
                     None => match conn
-                        .query_row(MAX_WORKLIST_PROCESS_ID_SQL.as_str(), [], |row| {
-                            row.get::<_, Option<String>>(0)
-                        })
+                        .query_row(
+                            process_sql()
+                                .process_sqlite
+                                .select_max_worklist_process_id
+                                .sql(),
+                            [],
+                            |row| row.get::<_, Option<String>>(0),
+                        )
                         .map_err(process_sqlite_error)?
                     {
                         Some(process_id) => process_id,
@@ -129,12 +94,13 @@ pub(super) async fn list_non_terminal_page(
                     },
                 };
                 let row_limit = i64::try_from(limit.get().saturating_add(1)).unwrap_or(i64::MAX);
+                let worklist = &process_sql().process_sqlite;
                 let (sql, after_process_id) = match continuation.as_ref() {
                     Some(cursor) => (
-                        CONTINUE_WORKLIST_PAGE_SQL.as_str(),
+                        worklist.list_next_worklist_page.sql(),
                         Some(cursor.after_process_id()),
                     ),
-                    None => (FIRST_WORKLIST_PAGE_SQL.as_str(), None),
+                    None => (worklist.list_first_worklist_page.sql(), None),
                 };
                 let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
                 let rows = stmt
@@ -207,16 +173,17 @@ mod tests {
                     stmt.query_map(params, |row| row.get::<_, String>(3))?
                         .collect::<Result<Vec<_>, _>>()
                 };
+                let worklist = &process_sql().process_sqlite;
                 Ok([
-                    explain(COUNT_NON_TERMINAL_SQL.as_str(), &[])?.join(" | "),
-                    explain(MAX_WORKLIST_PROCESS_ID_SQL.as_str(), &[])?.join(" | "),
+                    explain(worklist.count_live_worklist.sql(), &[])?.join(" | "),
+                    explain(worklist.select_max_worklist_process_id.sql(), &[])?.join(" | "),
                     explain(
-                        FIRST_WORKLIST_PAGE_SQL.as_str(),
+                        worklist.list_first_worklist_page.sql(),
                         &[&"zz", &Option::<String>::None, &65_i64],
                     )?
                     .join(" | "),
                     explain(
-                        CONTINUE_WORKLIST_PAGE_SQL.as_str(),
+                        worklist.list_next_worklist_page.sql(),
                         &[&"zz", &"aa", &65_i64],
                     )?
                     .join(" | "),

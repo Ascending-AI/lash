@@ -52,15 +52,7 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                     );
                     let originator_id = record.originator_id();
                     tx.execute(
-                        "INSERT INTO processes (
-                            process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
-                            identity_kind, identity_label,
-                            created_at_ms, updated_at_ms, last_event_sequence,
-                            change_seq, status,
-                            parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested_at_ms,
-                            record_json
-                         )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                        process_sql().process_sqlite.insert_registration.sql(),
                         params![
                             record.id.as_str(),
                             record.incarnation.registration_sequence() as i64,
@@ -99,8 +91,7 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                     let process_id = record.id.clone();
                     for session_id in &observers {
                         tx.execute(
-                            "INSERT INTO process_observers (session_id, process_id, process_incarnation)
-                             VALUES (?1, ?2, ?3)",
+                            process_sql().observer.insert.sql(),
                             params![
                                 session_id.as_str(),
                                 record.id.as_str(),

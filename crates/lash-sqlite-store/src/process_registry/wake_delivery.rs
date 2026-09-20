@@ -6,9 +6,7 @@ pub(super) fn load_wake_delivery_conn(
 ) -> Result<lash_core::WakeDelivery, lash_core::PluginError> {
     let row = conn
         .query_row(
-            "SELECT state, claim_token, attempts, first_attempt_ms, next_attempt_at_ms,
-                    expires_at_ms, discard_reason, delivery_json
-             FROM process_wake_deliveries WHERE delivery_id = ?1",
+            process_sql().wake_sqlite.select_report.sql(),
             params![delivery_id],
             |row| {
                 Ok((
@@ -60,7 +58,7 @@ pub(super) async fn update_wake_delivery_state(
         Ok(tx_outcome((|| {
             let changed = tx
                 .execute(
-                    crate::process_registry::SETTLE_WAKE_CLAIM_SQL.as_str(),
+                    process_sql().wake.settle_claim.sql(),
                     params![
                         delivery_id,
                         claim_token,
@@ -72,7 +70,7 @@ pub(super) async fn update_wake_delivery_state(
             if changed == 0 {
                 let current = tx
                     .query_row(
-                        "SELECT state FROM process_wake_deliveries WHERE delivery_id = ?1",
+                        process_sql().wake.select_state.sql(),
                         params![delivery_id],
                         |row| row.get::<_, String>(0),
                     )

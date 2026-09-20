@@ -1,5 +1,7 @@
 use super::*;
 
+use sql::list_processes_query;
+
 #[test]
 fn recently_retired_query_uses_bounded_live_and_retired_indexes() {
     let conn = rusqlite::Connection::open_in_memory().expect("open query-plan database");
@@ -8,7 +10,7 @@ fn recently_retired_query_uses_bounded_live_and_retired_indexes() {
     let mut stmt = conn
         .prepare(&format!(
             "EXPLAIN QUERY PLAN {}",
-            LIST_PROCESSES_RECENT_RETIRED_SQL.as_str()
+            process_sql().process_sqlite.list_recent_retired.sql()
         ))
         .expect("prepare recently retired query plan");
     let plan = stmt
@@ -57,7 +59,10 @@ fn observed_recently_retired_query_seeks_recency_before_observer_history() {
     let mut stmt = conn
         .prepare(&format!(
             "EXPLAIN QUERY PLAN {}",
-            LIST_OBSERVED_RECENT_RETIRED_SQL.as_str()
+            process_sql()
+                .registry_sqlite
+                .list_observed_recent_retired
+                .sql()
         ))
         .expect("prepare observed query plan");
     let plan = stmt
@@ -162,7 +167,7 @@ fn an_absent_scope_filter_emits_no_scope_predicate() {
         None,
         None,
     );
-    assert_eq!(sql, LIST_PROCESSES_SQL.as_str());
+    assert_eq!(sql, process_sql().process_sqlite.list.sql());
     assert!(
         !sql.contains("parent_scope_kind") && !sql.contains("cancel_requested_at_ms"),
         "an unpopulated filter must not widen the statement: {sql}"
@@ -179,7 +184,8 @@ fn an_absent_scope_filter_emits_no_scope_predicate() {
 /// equal to the fragment the query generates.
 #[test]
 fn the_pending_cancel_index_predicate_is_the_generated_fragment() {
-    let predicate = nonterminal_process_status("status");
+    let predicate =
+        lash_core::store_backend_support::nonterminal_process_status_predicate_sql("status");
     assert_eq!(
         predicate,
         "status NOT IN ('completed', 'failed', 'cancelled', 'abandoned')"

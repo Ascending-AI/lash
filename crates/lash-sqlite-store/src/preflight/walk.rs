@@ -258,37 +258,17 @@ fn next_cursor(last: Option<String>, scanned_rows: usize, limit: usize) -> Optio
 /// same way the integer does, and driving the `ORDER BY` off the same expression
 /// makes that agreement structural instead of a property two clauses happen to
 /// share.
-pub(crate) static PARKED_SEGMENTS_SQL: std::sync::LazyLock<String> =
-    std::sync::LazyLock::new(|| {
-        format!(
-            "\
-WITH parked AS (
-    SELECT
-        handovers.process_id || ':' || printf('%020d', handovers.segment_ordinal) AS walk_cursor,
-        handovers.process_id    AS process_id,
-        handovers.handover_json AS handover_json,
-        processes.status          AS status,
-        processes.wake_session_id AS wake_session_id,
-        processes.record_json     AS record_json
-    FROM process_segment_handovers AS handovers
-    JOIN processes ON processes.process_id = handovers.process_id
-    WHERE {live}
-)
-SELECT walk_cursor, process_id, handover_json, status, wake_session_id, record_json
-FROM parked
-WHERE ?1 IS NULL OR walk_cursor > ?1
-ORDER BY walk_cursor
-LIMIT ?2",
-            live = crate::process_lifecycle_sql::live_process_status("processes.status"),
-        )
-    });
-
 fn read_parked_segments(
     conn: &Connection,
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(PARKED_SEGMENTS_SQL.as_str())?;
+    let mut statement = conn.prepare(
+        crate::process_registry::sql::process_sql()
+            .handover_sqlite
+            .list_parked_segments
+            .sql(),
+    )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
         Ok(DurableItem {
             surface: DurableSurface::ParkedSegment,
@@ -316,25 +296,17 @@ fn read_parked_segments(
 /// the same pair its `idx_wake_deliveries_pending` partial index is built on. An
 /// `enqueued` or `discarded` delivery has reached its outcome and is not
 /// something a drain has to move.
-pub(crate) static PENDING_WAKES_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    format!(
-        "\
-SELECT delivery_id, process_id, target_session_id, state, delivery_json
-FROM process_wake_deliveries
-WHERE {undelivered}
-  AND (?1 IS NULL OR delivery_id > ?1)
-ORDER BY delivery_id
-LIMIT ?2",
-        undelivered = crate::process_lifecycle_sql::undelivered_wake_delivery_state("state"),
-    )
-});
-
 fn read_pending_wakes(
     conn: &Connection,
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(PENDING_WAKES_SQL.as_str())?;
+    let mut statement = conn.prepare(
+        crate::process_registry::sql::process_sql()
+            .wake_sqlite
+            .list_undelivered_for_walk
+            .sql(),
+    )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
         Ok(DurableItem {
             surface: DurableSurface::PendingWake,

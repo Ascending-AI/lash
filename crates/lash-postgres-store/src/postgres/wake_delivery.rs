@@ -1,74 +1,6 @@
 use super::*;
 
-use crate::process_lifecycle_sql::wake_delivery_state;
-use lash_core::WakeDeliveryState;
-use std::sync::LazyLock;
-
-pub(crate) static RECLAIM_LAPSED_WAKE_CLAIMS_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "UPDATE lash_process_wake_deliveries
-         SET state = {pending}, claim_token = NULL
-         WHERE state = {enqueuing} AND next_attempt_at_ms <= $1",
-        pending = wake_delivery_state(WakeDeliveryState::Pending),
-        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
-    )
-});
-
-pub(crate) static SELECT_CLAIMABLE_WAKE_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT candidate.delivery_id
-         FROM lash_process_wake_deliveries AS candidate
-         WHERE candidate.state = {pending}
-           AND candidate.next_attempt_at_ms <= $2
-           AND NOT EXISTS (
-               SELECT 1
-               FROM lash_process_wake_deliveries AS earlier
-               WHERE earlier.state <> {enqueued}
-                 AND NOT (
-                     earlier.state = {discarded}
-                     AND (
-                         earlier.discard_reason IS NULL
-                         OR earlier.discard_reason = ANY($3::TEXT[])
-                     )
-                 )
-                 AND earlier.target_session_id = candidate.target_session_id
-                 AND earlier.process_id = candidate.process_id
-                 AND earlier.sequence < candidate.sequence
-           )
-         ORDER BY candidate.next_attempt_at_ms ASC,
-                  candidate.target_session_id ASC,
-                  candidate.process_id ASC,
-                  candidate.sequence ASC
-         LIMIT $1
-         FOR UPDATE OF candidate SKIP LOCKED",
-        pending = wake_delivery_state(WakeDeliveryState::Pending),
-        enqueued = wake_delivery_state(WakeDeliveryState::Enqueued),
-        discarded = wake_delivery_state(WakeDeliveryState::Discarded),
-    )
-});
-
-pub(crate) static START_WAKE_ENQUEUING_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "UPDATE lash_process_wake_deliveries
-             SET state = {enqueuing},
-                 claim_token = $4,
-                 attempts = attempts + 1,
-                 first_attempt_ms = COALESCE(first_attempt_ms, $2),
-                 next_attempt_at_ms = $3
-             WHERE delivery_id = $1 AND state = {pending}",
-        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
-        pending = wake_delivery_state(WakeDeliveryState::Pending),
-    )
-});
-
-pub(crate) static SETTLE_WAKE_CLAIM_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "UPDATE lash_process_wake_deliveries
-         SET state = $3, claim_token = NULL, discard_reason = $4
-         WHERE delivery_id = $1 AND state = {enqueuing} AND claim_token = $2",
-        enqueuing = wake_delivery_state(WakeDeliveryState::Enqueuing),
-    )
-});
+use crate::process_sql::process_sql;
 
 pub(super) async fn claim_pending_wake_deliveries(
     registry: &PostgresProcessRegistry,
@@ -79,12 +11,12 @@ pub(super) async fn claim_pending_wake_deliveries(
     }
     let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
     let now = registry.clock.timestamp_ms() as i64;
-    sqlx::query(RECLAIM_LAPSED_WAKE_CLAIMS_SQL.as_str())
+    sqlx::query(process_sql().wake.reclaim_lapsed_claims.sql())
         .bind(now)
         .execute(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
-    let ids = sqlx::query_scalar::<_, String>(SELECT_CLAIMABLE_WAKE_SQL.as_str())
+    let ids = sqlx::query_scalar::<_, String>(process_sql().wake_postgres.select_claimable.sql())
         .bind(limit as i64)
         .bind(now)
         .bind(lash_core::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS)
@@ -94,7 +26,7 @@ pub(super) async fn claim_pending_wake_deliveries(
     let mut deliveries = Vec::with_capacity(ids.len());
     for id in ids {
         let claim_token = uuid::Uuid::new_v4().to_string();
-        sqlx::query(START_WAKE_ENQUEUING_SQL.as_str())
+        sqlx::query(process_sql().wake.start_enqueuing.sql())
             .bind(&id)
             .bind(now)
             .bind(now.saturating_add(registry.wake_delivery_config.enqueuing_stale_after_ms as i64))
@@ -112,16 +44,12 @@ pub(super) async fn load_wake_delivery_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     delivery_id: &str,
 ) -> Result<lash_core::WakeDelivery, PluginError> {
-    let row = sqlx::query(
-        "SELECT delivery_id, state, claim_token, attempts, first_attempt_ms, next_attempt_at_ms,
-                expires_at_ms, discard_reason, delivery_json
-         FROM lash_process_wake_deliveries WHERE delivery_id = $1",
-    )
-    .bind(delivery_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?
-    .ok_or_else(|| registry_transitions::unknown_wake_delivery(delivery_id))?;
+    let row = sqlx::query(process_sql().wake_postgres.select_report.sql())
+        .bind(delivery_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?
+        .ok_or_else(|| registry_transitions::unknown_wake_delivery(delivery_id))?;
     decode_wake_delivery_row(row)
 }
 
@@ -156,7 +84,7 @@ pub(super) async fn update_wake_delivery_state(
 ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
     let state = disposition.state();
     let reason = disposition.discard_reason();
-    let changed = sqlx::query(SETTLE_WAKE_CLAIM_SQL.as_str())
+    let changed = sqlx::query(process_sql().wake.settle_claim.sql())
         .bind(delivery_id)
         .bind(claim_token)
         .bind(state.as_str())
@@ -166,13 +94,11 @@ pub(super) async fn update_wake_delivery_state(
         .map_err(plugin_sqlx_error)?
         .rows_affected();
     if changed == 0 {
-        let current: Option<String> = sqlx::query_scalar(
-            "SELECT state FROM lash_process_wake_deliveries WHERE delivery_id = $1",
-        )
-        .bind(delivery_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let current: Option<String> = sqlx::query_scalar(process_sql().wake.select_state.sql())
+            .bind(delivery_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
         let current =
             current.ok_or_else(|| registry_transitions::unknown_wake_delivery(delivery_id))?;
         let state = registry_transitions::wake_delivery_state_from_label(delivery_id, &current)?;

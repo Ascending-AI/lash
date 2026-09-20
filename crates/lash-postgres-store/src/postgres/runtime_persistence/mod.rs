@@ -278,15 +278,12 @@ async fn enqueue_queued_work_with_outcome_tx(
         if let Some(source_key) = batch.source_key.as_deref() {
             lock_process_wake_source_tx(tx, &batch.session_id, source_key).await?;
         }
-        sqlx::query_scalar::<_, i64>(
-            "SELECT allocation_floor FROM lash_wake_redelivery_fences
-             WHERE session_id = $1 AND process_id = $2",
-        )
-        .bind(batch.session_id.as_str())
-        .bind(wake_source.process_id.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?
+        sqlx::query_scalar::<_, i64>(crate::process_sql::process_sql().fence.select_floor.sql())
+            .bind(batch.session_id.as_str())
+            .bind(wake_source.process_id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
     } else {
         None
     };

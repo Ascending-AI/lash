@@ -99,7 +99,7 @@ fn an_unpopulated_filter_leaves_no_predicate_behind() {
         status: lash_core::ProcessStatusFilter::Any,
         ..lash_core::ProcessListFilter::default()
     });
-    assert_eq!(sql, LIST_PROCESSES_SQL.as_str());
+    assert_eq!(sql, process_sql().process_postgres.list.sql());
     assert!(
         !sql.contains("parent_scope_kind") && !sql.contains("cancel_requested_at_ms"),
         "an absent filter must not widen the statement:\n{sql}"
@@ -110,7 +110,8 @@ fn an_unpopulated_filter_leaves_no_predicate_behind() {
 /// check that keeps it equal to the fragment the query generates.
 #[test]
 fn the_pending_cancel_index_predicate_is_the_generated_fragment() {
-    let predicate = nonterminal_process_status("status");
+    let predicate =
+        lash_core::store_backend_support::nonterminal_process_status_predicate_sql("status");
     assert_eq!(
         predicate,
         "status NOT IN ('completed', 'failed', 'cancelled', 'abandoned')"

@@ -15,17 +15,10 @@ pub(super) async fn filter_unregistered_process_ids(
             Ok((|| {
                 let mut stmt = conn
                     .prepare(
-                        "SELECT candidate.value
-                         FROM json_each(?1) AS candidate
-                         WHERE NOT EXISTS (
-                             SELECT 1 FROM processes p
-                             WHERE p.process_id = candidate.value
-                         )
-                           AND NOT EXISTS (
-                             SELECT 1 FROM process_tombstones t
-                             WHERE t.process_id = candidate.value
-                         )
-                         ORDER BY candidate.key ASC",
+                        process_sql()
+                            .process_sqlite
+                            .classify_unregistered_candidates
+                            .sql(),
                     )
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
@@ -54,17 +47,10 @@ pub(super) async fn filter_tombstoned_process_ids(
             Ok((|| {
                 let mut stmt = conn
                     .prepare(
-                        "SELECT candidate.value
-                         FROM json_each(?1) AS candidate
-                         WHERE EXISTS (
-                             SELECT 1 FROM process_tombstones t
-                             WHERE t.process_id = candidate.value
-                         )
-                           AND NOT EXISTS (
-                             SELECT 1 FROM processes p
-                             WHERE p.process_id = candidate.value
-                         )
-                         ORDER BY candidate.key ASC",
+                        process_sql()
+                            .process_sqlite
+                            .classify_tombstoned_candidates
+                            .sql(),
                     )
                     .map_err(process_sqlite_error)?;
                 let rows = stmt

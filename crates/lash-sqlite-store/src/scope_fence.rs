@@ -408,11 +408,15 @@ fn lift_journal_fences_of_registered_processes(
         else {
             continue;
         };
-        // `processes` belongs to the process-registry family, which this arc
-        // converts in FIG-3384; until then its one schema-qualified read stays
-        // a literal, spelled once as a constant rather than built per scope.
+        // `processes` belongs to the process family, whose statements this
+        // connection reaches through the `process_registry` qualifier it has
+        // attached — the second rendering the family keeps for exactly this
+        // caller.
         let registered: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM process_registry.processes WHERE process_id = ?1)",
+            crate::process_registry::sql::attached_process_sql()
+                .process
+                .exists_by_id
+                .sql(),
             params![process_id.as_str()],
             |row| row.get(0),
         )?;

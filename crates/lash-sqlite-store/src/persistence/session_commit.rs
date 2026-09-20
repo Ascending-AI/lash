@@ -760,25 +760,10 @@ impl SessionCommitStore for Store {
                     for completed in &commit.completed_queue_claims {
                         for batch_id in &completed.batch_ids {
                             tx.execute(
-                                "INSERT INTO wake_redelivery_fences (
-                                    session_id, process_id, allocation_floor
-                                 )
-                                 SELECT batch.session_id,
-                                        json_extract(item.payload_json, '$.wake.process_id'),
-                                        json_extract(item.payload_json, '$.wake.sequence')
-                                 FROM queued_work_batches AS batch
-                                 JOIN queued_work_items AS item
-                                   ON item.batch_id = batch.batch_id
-                                 WHERE batch.session_id = ?1
-                                   AND batch.batch_id = ?2
-                                   AND batch.claim_id = ?3
-                                   AND batch.claim_token = ?4
-                                   AND json_extract(item.payload_json, '$.type') = 'process_wake'
-                                 ON CONFLICT(session_id, process_id) DO UPDATE SET
-                                   allocation_floor = MAX(
-                                       wake_redelivery_fences.allocation_floor,
-                                       excluded.allocation_floor
-                                   )",
+                                crate::process_registry::sql::process_sql()
+                                    .fence_sqlite
+                                    .insert_from_claimed_batch
+                                    .sql(),
                                 params![
                                     completed.session_id.as_str(),
                                     batch_id.as_str(),

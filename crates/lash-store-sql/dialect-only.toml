@@ -20,7 +20,7 @@
 # `converted` is what makes the gate total for what is converted and silent
 # about what is not. FIG-3387 closes it over every family.
 
-converted = ["artifact", "attachment", "effect", "trigger", "wait"]
+converted = ["artifact", "attachment", "effect", "process", "trigger", "wait"]
 
 # Production sources that may name a converted family's tables in SQL although
 # they own no statements. Each one needs a reason; the list is not a place to
@@ -171,6 +171,96 @@ schema = [
 runtime_effect_replay = "crates/lash-store-sql/src/effect/replay.rs"
 runtime_effect_group = "crates/lash-store-sql/src/effect/group.rs"
 effect_scope_retirements = "crates/lash-store-sql/src/effect/scope_retirement.rs"
+
+[families.process]
+tables = [
+    "processes",
+    "process_definitions",
+    "process_events",
+    "process_leases",
+    "process_observers",
+    "process_segment_handovers",
+    "process_tombstones",
+    "process_wake_deliveries",
+    "process_change_clock",
+    "process_artifact_cleanup",
+    "parent_end_plans",
+    "wake_allocation_floors",
+    "wake_redelivery_fences",
+]
+statement_prefixes = [
+    "process",
+    "process_registry",
+    "process_definition",
+    "process_event",
+    "process_lease",
+    "process_observer",
+    "process_segment_handover",
+    "process_tombstone",
+    "process_wake_delivery",
+    "process_change_clock",
+    "process_artifact_cleanup",
+    "parent_end_plan",
+    "wake_allocation_floor",
+    "wake_redelivery_fence",
+]
+shared = [
+    "crates/lash-store-sql/src/process/artifact_cleanup.rs",
+    "crates/lash-store-sql/src/process/definitions.rs",
+    "crates/lash-store-sql/src/process/events.rs",
+    "crates/lash-store-sql/src/process/leases.rs",
+    "crates/lash-store-sql/src/process/observers.rs",
+    "crates/lash-store-sql/src/process/parent_end_plans.rs",
+    "crates/lash-store-sql/src/process/processes.rs",
+    "crates/lash-store-sql/src/process/segment_handovers.rs",
+    "crates/lash-store-sql/src/process/tombstones.rs",
+    "crates/lash-store-sql/src/process/wake_allocation_floors.rs",
+    "crates/lash-store-sql/src/process/wake_deliveries.rs",
+    "crates/lash-store-sql/src/process/wake_redelivery_fences.rs",
+]
+sqlite = ["crates/lash-sqlite-store/src/process_registry/sql.rs"]
+# `session_factory.rs` declares one statement only: the session-delete cascade,
+# which deletes from two of this family's tables among ten of session core's.
+# It belongs to session core; FIG-3382 renames it into that family and adds the
+# `[[cross_family]]` entry the gate will then require.
+postgres = [
+    "crates/lash-postgres-store/src/postgres/process_sql.rs",
+    "crates/lash-postgres-store/src/postgres/session_factory.rs",
+]
+# Provisioning, not persistence: the schema artifacts that create these tables
+# and seed them. No table name, column or durable encoding changes in this arc.
+schema = [
+    "crates/lash-sqlite-store/src/schema.rs",
+    "crates/lash-sqlite-store/src/schema_fragments.rs",
+    "crates/lash-postgres-store/src/postgres/schema.rs",
+    "crates/lash-postgres-store/src/postgres/schema/migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema/historical_migrations.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape.rs",
+    "crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs",
+]
+
+[families.process.table_modules]
+processes = "crates/lash-store-sql/src/process/processes.rs"
+process_definitions = "crates/lash-store-sql/src/process/definitions.rs"
+process_events = "crates/lash-store-sql/src/process/events.rs"
+process_leases = "crates/lash-store-sql/src/process/leases.rs"
+process_observers = "crates/lash-store-sql/src/process/observers.rs"
+process_segment_handovers = "crates/lash-store-sql/src/process/segment_handovers.rs"
+process_tombstones = "crates/lash-store-sql/src/process/tombstones.rs"
+process_wake_deliveries = "crates/lash-store-sql/src/process/wake_deliveries.rs"
+process_change_clock = "crates/lash-store-sql/src/process/change_clock.rs"
+process_artifact_cleanup = "crates/lash-store-sql/src/process/artifact_cleanup.rs"
+parent_end_plans = "crates/lash-store-sql/src/process/parent_end_plans.rs"
+wake_allocation_floors = "crates/lash-store-sql/src/process/wake_allocation_floors.rs"
+wake_redelivery_fences = "crates/lash-store-sql/src/process/wake_redelivery_fences.rs"
+
+# The two columns whose values are domain vocabulary (FIG-2815, FIG-2844): a
+# statement names the predicate as a `{{term(column)}}` token and never spells
+# the labels.
+[families.process.vocabulary_columns]
+processes = ["status"]
+process_wake_deliveries = ["state"]
+
 
 [families.trigger]
 tables = [
@@ -806,4 +896,621 @@ reason = """
 The family's one cross-table read — subscriptions, deliveries and mutation
 receipts unioned into the session-owner candidate set — forking on the JSON
 extraction in the delivery arm alone.
+"""
+
+# ---------------------------------------------------------------------------
+# process family
+# ---------------------------------------------------------------------------
+
+[[dialect_only]]
+statement = "parent_end_plan.delete_reclaimable"
+backends = ["sqlite", "postgres"]
+kind = "table alias"
+reason = """
+PostgreSQL cannot name the table it is deleting from inside a correlated
+subquery without aliasing it, and SQLite cannot use an alias in a DELETE at
+all, so the same predicate is spelled twice.
+"""
+
+[[dialect_only]]
+statement = "process.classify_tombstoned_candidates"
+backends = ["sqlite", "postgres"]
+kind = "bound id list"
+reason = """
+SQLite reads a bound id list with json_each over a JSON array and orders by its
+key; PostgreSQL reads one with UNNEST ... WITH ORDINALITY and orders by the
+ordinal. Same answer, two spellings of "a list of ids, in order".
+"""
+
+[[dialect_only]]
+statement = "process.classify_unregistered_candidates"
+backends = ["sqlite", "postgres"]
+kind = "bound id list"
+reason = "Same bound-id-list fork as process.classify_tombstoned_candidates."
+
+[[dialect_only]]
+statement = "process.count_live_worklist"
+backends = ["sqlite", "postgres"]
+kind = "INDEXED BY"
+reason = """
+SQLite pins the worklist to idx_processes_live_worklist by name rather than
+asking its planner to choose it, so a statistics change cannot silently turn
+the scan into a table scan. PostgreSQL has no such hint and its planner picks
+idx_lash_processes_live_worklist, which its own EXPLAIN witness asserts.
+"""
+
+[[dialect_only]]
+statement = "process.delete_by_ids"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite deletes the process rows as its own statement, under the write lock its
+whole prune runs in. PostgreSQL has no counterpart: the delete is one arm of
+process_registry.prune_rows, which has to see the same snapshot as the
+tombstone and cleanup writes it is gated on.
+"""
+
+[[dialect_only]]
+statement = "process.insert_registration"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+PostgreSQL detects a concurrent registrar with ON CONFLICT DO NOTHING, because
+under READ COMMITTED the read that found no row and this insert take different
+snapshots. SQLite read the absence under the same BEGIN IMMEDIATE lock, so a
+conflict is a defect and the constraint error is kept.
+"""
+
+[[dialect_only]]
+statement = "process.list"
+backends = ["sqlite", "postgres"]
+kind = "JSON pushdown; array parameter"
+reason = """
+The filter pushdown is the fork, and it is total: SQLite compares a status set
+with json_each and a definition with json_type/json_quote against SQLite's own
+JSON coercions, where PostgreSQL uses an array parameter and JSONB operators.
+Both are coarse pushdowns that the Rust predicate then fences exactly.
+"""
+
+[[dialect_only]]
+statement = "process.list_by_parent_scope"
+backends = ["sqlite", "postgres"]
+kind = "JSON pushdown; array parameter"
+reason = """
+Same pushdown fork as process.list, plus the parent-scope conjunct: SQLite
+compares the nullable scope id with IS, PostgreSQL with IS NOT DISTINCT FROM
+over a cast. The conjunct is spelled rather than parameterised because an
+`(?n IS NULL OR ...)` form costs both planners the partial index.
+"""
+
+[[dialect_only]]
+statement = "process.list_pending_cancel"
+backends = ["sqlite", "postgres"]
+kind = "JSON pushdown; array parameter"
+reason = "Same fork as process.list_by_parent_scope, with the pending-cancel conjunct instead."
+
+[[dialect_only]]
+statement = "process.list_by_parent_scope_pending_cancel"
+backends = ["sqlite", "postgres"]
+kind = "JSON pushdown; array parameter"
+reason = "Same fork as process.list_by_parent_scope, with both conjuncts."
+
+[[dialect_only]]
+statement = "process.list_recent_retired"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite splits the recently-retired listing into a live arm and a retired arm
+unioned together, so each lands on its own partial index; PostgreSQL plans the
+single disjunctive form well and keeps one statement (process.list).
+"""
+
+[[dialect_only]]
+statement = "process.list_recent_retired_by_parent_scope"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = "Same union fork as process.list_recent_retired, with the parent-scope conjunct."
+
+[[dialect_only]]
+statement = "process.list_recent_retired_pending_cancel"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = "Same union fork as process.list_recent_retired, with the pending-cancel conjunct."
+
+[[dialect_only]]
+statement = "process.list_recent_retired_by_parent_scope_pending_cancel"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = "Same union fork as process.list_recent_retired, with both conjuncts."
+
+[[dialect_only]]
+statement = "process.list_changes_after"
+backends = ["sqlite", "postgres"]
+kind = "JSON assembly"
+reason = """
+The tombstone arm assembles its payload with json_object on SQLite and
+json_build_object plus a ::TEXT cast on PostgreSQL. The feed's shape, order and
+limit are otherwise identical.
+"""
+
+[[dialect_only]]
+statement = "process.list_first_worklist_page"
+backends = ["sqlite", "postgres"]
+kind = "INDEXED BY"
+reason = """
+Same index-hint fork as process.count_live_worklist. SQLite also binds an
+unused cursor slot so that both of its worklist pages take the same three
+parameters, which PostgreSQL does not.
+"""
+
+[[dialect_only]]
+statement = "process.list_next_worklist_page"
+backends = ["sqlite", "postgres"]
+kind = "INDEXED BY"
+reason = "Same index-hint fork as process.list_first_worklist_page."
+
+[[dialect_only]]
+statement = "process.select_max_worklist_process_id"
+backends = ["sqlite", "postgres"]
+kind = "INDEXED BY"
+reason = "Same index-hint fork as process.count_live_worklist."
+
+[[dialect_only]]
+statement = "process.list_parent_end_children"
+backends = ["sqlite", "postgres"]
+kind = "parameter cast"
+reason = """
+PostgreSQL's cursor parameter carries its type cast, because a bare NULL
+parameter has no type it can compare; SQLite's is untyped.
+"""
+
+[[dialect_only]]
+statement = "process.list_unrecorded_turn_parents"
+backends = ["sqlite", "postgres"]
+kind = "parameter cast"
+reason = "Same cursor-cast fork as process.list_parent_end_children."
+
+[[dialect_only]]
+statement = "process.list_prunable_terminal"
+backends = ["sqlite", "postgres"]
+kind = "parameter cast"
+reason = """
+PostgreSQL's change-sequence bound carries a ::BIGINT cast for the same reason
+the cursors do. The predicate is otherwise identical, vocabulary tokens
+included.
+"""
+
+[[dialect_only]]
+statement = "process.list_prunable_terminal_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+PostgreSQL selects its prune candidates a second time under FOR UPDATE, so the
+rows stay locked from selection through the delete. SQLite holds the database
+write lock for its whole prune transaction and needs no second statement.
+"""
+
+[[dialect_only]]
+statement = "process.select_incarnation"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite reads the live incarnation as its own statement while acknowledging an
+artifact cleanup, under the write lock the whole acknowledgement runs in.
+PostgreSQL folds the same question into the CTE that deletes the cleanup row,
+because it cannot hold the two reads together otherwise.
+"""
+
+[[dialect_only]]
+statement = "process.select_record_json_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+Every decision this store makes about a process is taken from the row it locks
+here. SQLite already holds the database write lock through BEGIN IMMEDIATE, so
+its read of the same projection is the shared process.select_record_json_by_id.
+"""
+
+[[dialect_only]]
+statement = "process_artifact_cleanup.insert"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite writes one cleanup row per pruned candidate. PostgreSQL writes the same
+rows from inside process_registry.prune_rows, derived from the tombstones that
+statement just inserted.
+"""
+
+[[dialect_only]]
+statement = "process_artifact_cleanup.delete_for_incarnation"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite deletes the cleanup row and reads the live incarnation as two statements
+under its write lock; PostgreSQL asks both in one CTE, which is the entry
+below.
+"""
+
+[[dialect_only]]
+statement = "process_artifact_cleanup.delete_for_incarnation_reporting_incarnation"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+The PostgreSQL counterpart of the SQLite pair above: the delete and the
+incarnation read have to see one snapshot, because together they decide between
+"acknowledged", "stale incarnation" and "unknown".
+"""
+
+[[dialect_only]]
+statement = "process_change_clock.bump"
+backends = ["sqlite"]
+kind = "boolean representation"
+reason = """
+The singleton flag is INTEGER 1 on SQLite and BOOLEAN TRUE on PostgreSQL, and
+SQLite reads the bumped value back with a second statement where PostgreSQL
+uses RETURNING.
+"""
+
+[[dialect_only]]
+statement = "process_change_clock.bump_by"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite advances the clock by a whole prune batch before writing its tombstones.
+PostgreSQL does the same bump inside process_registry.prune_rows, where the
+tombstones read it back through a CTE.
+"""
+
+[[dialect_only]]
+statement = "process_change_clock.bump_returning"
+backends = ["postgres"]
+kind = "boolean representation"
+reason = "The PostgreSQL half of the process_change_clock.bump fork."
+
+[[dialect_only]]
+statement = "process_change_clock.select_current"
+backends = ["sqlite"]
+kind = "boolean representation"
+reason = "Singleton-flag fork; PostgreSQL's read takes a row lock, which is the entry below."
+
+[[dialect_only]]
+statement = "process_change_clock.select_current_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+The row lock is what orders two concurrent registrations of one
+content-addressed process id: the winner holds it from its bump until commit,
+so the loser's insert sees the committed row. SQLite serialises its writers
+through one write flow.
+"""
+
+[[dialect_only]]
+statement = "process_change_clock.select_compaction_horizon"
+backends = ["sqlite"]
+kind = "boolean representation"
+reason = "Singleton-flag fork; PostgreSQL's read takes a share lock, which is the entry below."
+
+[[dialect_only]]
+statement = "process_change_clock.select_compaction_horizon_for_share"
+backends = ["postgres"]
+kind = "FOR SHARE"
+reason = """
+A change-feed reader must not have the horizon move past its own cursor between
+this read and the page that follows. SQLite's reader holds the database lock.
+"""
+
+[[dialect_only]]
+statement = "process_change_clock.raise_compaction_horizon"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation"
+reason = """
+The singleton flag forks, and the monotonic maximum is spelled MAX on SQLite
+and GREATEST on PostgreSQL.
+"""
+
+[[dialect_only]]
+statement = "process_event.delete_by_process_ids"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite deletes a prune batch's events as its own statement. PostgreSQL deletes
+them in the first arm of process_registry.prune_rows, because the report's
+event count has to come from the same statement as the row delete.
+"""
+
+[[dialect_only]]
+statement = "process_lease.delete_by_process_ids"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite deletes the dependent lease rows explicitly. PostgreSQL lets the process
+delete inside process_registry.prune_rows cascade them through the existing
+foreign key.
+"""
+
+[[dialect_only]]
+statement = "process_lease.list_by_process_ids"
+backends = ["sqlite", "postgres"]
+kind = "bound id list"
+reason = "Same bound-id-list fork as process.classify_tombstoned_candidates."
+
+[[dialect_only]]
+statement = "process_lease.select_by_process"
+backends = ["sqlite"]
+kind = "FOR UPDATE"
+reason = """
+SQLite reads the lease with no lock suffix: the claim decision runs under BEGIN
+IMMEDIATE. PostgreSQL's read takes the row's write lock, which is the entry
+below. This is a fencing read, relocated with its predicate unchanged for
+FIG-3381.
+"""
+
+[[dialect_only]]
+statement = "process_lease.select_by_process_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = "The PostgreSQL half of the process_lease.select_by_process fork."
+
+[[dialect_only]]
+statement = "process_lease.select_fencing_token"
+backends = ["sqlite"]
+kind = "FOR UPDATE"
+reason = "Same lock fork as process_lease.select_by_process, for the retained fencing token."
+
+[[dialect_only]]
+statement = "process_lease.select_fencing_token_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = "The PostgreSQL half of the process_lease.select_fencing_token fork."
+
+[[dialect_only]]
+statement = "process_lease.upsert_acquired"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+The proposed row is `excluded` on SQLite and `EXCLUDED` on PostgreSQL, so the
+conflict clause's text forks. This is a fencing write, relocated with its
+predicate unchanged for FIG-3381.
+"""
+
+[[dialect_only]]
+statement = "process_observer.delete_by_process_ids"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = "Same explicit-dependent-delete fork as process_lease.delete_by_process_ids."
+
+[[dialect_only]]
+statement = "process_observer.exists"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite asks whether a session observes a process as its own read, under the
+write lock its other half runs in. PostgreSQL asks both halves in one
+statement, because a registration could land between two reads under READ
+COMMITTED.
+"""
+
+[[dialect_only]]
+statement = "process_observer.insert_if_absent"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+INSERT OR IGNORE on SQLite, ON CONFLICT DO NOTHING on PostgreSQL: the same
+idempotent insert, spelled by each dialect's own clause.
+"""
+
+[[dialect_only]]
+statement = "process_observer.list_sessions_for_incarnation"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite narrows the observer list to the incarnation it read under its write
+lock; PostgreSQL reports every incarnation's observers, having refused an
+unknown process first.
+"""
+
+[[dialect_only]]
+statement = "process_observer.list_sessions_for_process"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = "The PostgreSQL counterpart of process_observer.list_sessions_for_incarnation."
+
+[[dialect_only]]
+statement = "process_registry.list_observed"
+backends = ["sqlite", "postgres"]
+kind = "JSON pushdown; array parameter"
+reason = "Same status-set pushdown fork as process.list, over the observer join."
+
+[[dialect_only]]
+statement = "process_registry.list_observed_recent_retired"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite splits the recently-retired observer listing into a live arm and a
+retired arm so each lands on its own partial index; PostgreSQL keeps one
+statement.
+"""
+
+[[dialect_only]]
+statement = "process_registry.observation_and_registration_exist"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+The PostgreSQL counterpart of the SQLite pair process.exists_by_id and
+process_observer.exists: under READ COMMITTED the two questions have to be
+asked in one statement.
+"""
+
+[[dialect_only]]
+statement = "process_registry.prune_rows"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+PostgreSQL performs the whole prune as one statement: the clock bump, the
+tombstones that take their change sequences from it in candidate order, the
+artifact cleanup derived from those tombstones, and the process delete gated on
+both counts matching. SQLite issues the same steps separately under the
+database write lock, which is what makes them atomic there.
+"""
+
+[[dialect_only]]
+statement = "process_segment_handover.insert"
+backends = ["sqlite"]
+kind = "ON CONFLICT"
+reason = """
+SQLite reads the ordinal's absence under the same write lock it inserts under
+and raises the conflict itself, so the insert is plain. PostgreSQL has to
+express that refusal as a conflict clause, which is the entry below.
+"""
+
+[[dialect_only]]
+statement = "process_segment_handover.upsert_identical"
+backends = ["postgres"]
+kind = "ON CONFLICT"
+reason = """
+The conflict clause carries the refusal: a repeat of the same bytes is
+idempotent, a different handover writes no row and the caller raises the
+conflict.
+"""
+
+[[dialect_only]]
+statement = "process_segment_handover.delete_by_process_ids"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = "Same explicit-dependent-delete fork as process_lease.delete_by_process_ids."
+
+[[dialect_only]]
+statement = "process_segment_handover.list_parked_segments"
+backends = ["sqlite", "postgres"]
+kind = "keyset cursor"
+reason = """
+SQLite mints the walk cursor in the projection and compares it as text, so the
+resume filter and the ORDER BY are driven by one expression. PostgreSQL
+compares the two ordered columns as a row value instead, which cannot disagree
+with the ordering of the same columns under any collation. Both page exactly;
+neither spelling is available to the other.
+"""
+
+[[dialect_only]]
+statement = "process_tombstone.insert_from_pruned"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite writes the batch's tombstones from a json_each join that preserves the
+candidate array's order. PostgreSQL writes them inside
+process_registry.prune_rows.
+"""
+
+[[dialect_only]]
+statement = "process_tombstone.select_max_compactable_change_seq"
+backends = ["sqlite", "postgres"]
+kind = "bound id list"
+reason = "Same bound-id-list fork as process.classify_tombstoned_candidates, plus PostgreSQL's ::BIGINT cast."
+
+[[dialect_only]]
+statement = "process_tombstone.delete_compactable"
+backends = ["sqlite", "postgres"]
+kind = "bound id list"
+reason = "Same fork as process_tombstone.select_max_compactable_change_seq; the two statements are one predicate, measured and then applied."
+
+[[dialect_only]]
+statement = "process_wake_delivery.insert_pending"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = "INSERT OR IGNORE on SQLite, ON CONFLICT (delivery_id) DO NOTHING on PostgreSQL."
+
+[[dialect_only]]
+statement = "process_wake_delivery.select_claimable"
+backends = ["sqlite", "postgres"]
+kind = "SKIP LOCKED; bound id list"
+reason = """
+PostgreSQL claims with FOR UPDATE OF candidate SKIP LOCKED so several workers
+take disjoint pages; SQLite serialises claimants through BEGIN IMMEDIATE and
+needs neither clause. The non-blocking discard reasons are an array parameter
+there and a JSON list here.
+"""
+
+[[dialect_only]]
+statement = "process_wake_delivery.select_report"
+backends = ["sqlite", "postgres"]
+kind = "projection"
+reason = """
+SQLite's read is keyed by a value the caller bound and does not report it back;
+PostgreSQL carries the key because the same projection also serves its unkeyed
+listings. Both column lists are declared.
+"""
+
+[[dialect_only]]
+statement = "process_wake_delivery.list_delivery_ids"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite lists delivery ids and reads each delivery back through
+process_wake_delivery.select_report; PostgreSQL reports the rows themselves in
+one statement.
+"""
+
+[[dialect_only]]
+statement = "process_wake_delivery.list_delivery_ids_by_state"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = "Same fork as process_wake_delivery.list_delivery_ids, narrowed to one state."
+
+[[dialect_only]]
+statement = "process_wake_delivery.list_all"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = "The PostgreSQL counterpart of process_wake_delivery.list_delivery_ids."
+
+[[dialect_only]]
+statement = "process_wake_delivery.list_by_state"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = "The PostgreSQL counterpart of process_wake_delivery.list_delivery_ids_by_state."
+
+[[dialect_only]]
+statement = "process_wake_delivery.list_undelivered_for_walk"
+backends = ["sqlite", "postgres"]
+kind = "parameter cast"
+reason = "Same cursor-cast fork as process.list_parent_end_children."
+
+[[dialect_only]]
+statement = "wake_allocation_floor.upsert_max"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+The monotonic maximum is MAX over `excluded` on SQLite and GREATEST over
+`EXCLUDED` on PostgreSQL.
+"""
+
+[[dialect_only]]
+statement = "wake_redelivery_fence.upsert_max"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+PostgreSQL's commit path has already decoded the wakes it is settling and binds
+their values. SQLite derives the same floors from the queued rows it is
+committing, in one statement, which is the entry below.
+"""
+
+[[dialect_only]]
+statement = "wake_redelivery_fence.insert_from_claimed_batch"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+The SQLite counterpart of wake_redelivery_fence.upsert_max: the floors are read
+out of the claimed batch's queued rows with json_extract rather than bound.
+"""
+
+[[dialect_only]]
+statement = "wake_redelivery_fence.delete_sessions_cascade"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+PostgreSQL reclaims a deleted session's rows across twelve tables in one
+statement; SQLite issues the same deletes separately under its write lock. The
+statement belongs to the session-core family and is declared in the module that
+issues it only because two of its tables are the process family's; FIG-3382
+renames it into that family's prefix and adds the cross-family entry the gate
+will then require.
 """

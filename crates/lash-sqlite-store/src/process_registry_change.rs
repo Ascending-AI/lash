@@ -1,4 +1,5 @@
 use super::*;
+use crate::process_registry::sql::process_sql;
 use lash_sansio::ProcessId;
 
 pub(crate) fn max_change_sequence(watermark: lash_core::ProjectionWatermark) -> Option<i64> {
@@ -19,15 +20,10 @@ pub(crate) fn compact_process_tombstones_conn(
             .map_err(process_decode_error)?;
     let compacted_through: Option<i64> = conn
         .query_row(
-            "SELECT MAX(pruned_change_seq) FROM process_tombstones
-             WHERE pruned_at_ms < ?1
-               AND (?2 IS NULL OR pruned_change_seq <= ?2)
-               AND process_id NOT IN (SELECT value FROM json_each(?3))
-               AND NOT EXISTS (
-                   SELECT 1 FROM process_artifact_cleanup AS cleanup
-                   WHERE cleanup.process_id = process_tombstones.process_id
-                     AND cleanup.incarnation = process_tombstones.incarnation
-               )",
+            process_sql()
+                .tombstone_sqlite
+                .select_max_compactable_change_seq
+                .sql(),
             params![
                 cutoff_epoch_ms,
                 max_change_seq,
@@ -38,15 +34,7 @@ pub(crate) fn compact_process_tombstones_conn(
         .map_err(process_sqlite_error)?;
     let deleted = conn
         .execute(
-            "DELETE FROM process_tombstones
-         WHERE pruned_at_ms < ?1
-           AND (?2 IS NULL OR pruned_change_seq <= ?2)
-           AND process_id NOT IN (SELECT value FROM json_each(?3))
-           AND NOT EXISTS (
-               SELECT 1 FROM process_artifact_cleanup AS cleanup
-               WHERE cleanup.process_id = process_tombstones.process_id
-                 AND cleanup.incarnation = process_tombstones.incarnation
-           )",
+            process_sql().tombstone_sqlite.delete_compactable.sql(),
             params![
                 cutoff_epoch_ms,
                 max_change_seq,
@@ -56,11 +44,7 @@ pub(crate) fn compact_process_tombstones_conn(
         .map_err(process_sqlite_error)?;
     if let Some(compacted_through) = compacted_through {
         conn.execute(
-            "UPDATE process_change_clock
-             SET tombstone_compaction_horizon = MAX(
-                 tombstone_compaction_horizon, ?1
-             )
-             WHERE singleton = 1",
+            process_sql().clock_sqlite.raise_compaction_horizon.sql(),
             params![compacted_through],
         )
         .map_err(process_sqlite_error)?;
@@ -88,7 +72,7 @@ fn processes_changed_since_tx(
 ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core::PluginError> {
     let horizon = conn
         .query_row(
-            "SELECT tombstone_compaction_horizon FROM process_change_clock WHERE singleton = 1",
+            process_sql().clock_sqlite.select_compaction_horizon.sql(),
             [],
             |row| row.get::<_, i64>(0),
         )
@@ -108,24 +92,7 @@ fn processes_changed_since_tx(
         return Ok((Vec::new(), cursor));
     }
     let mut stmt = conn
-        .prepare(
-            "SELECT change_seq, kind, payload FROM (
-                 SELECT change_seq, 'upsert' AS kind, record_json AS payload
-                 FROM processes WHERE change_seq > ?1
-                 UNION ALL
-                 SELECT pruned_change_seq, 'deleted' AS kind,
-                        json_object(
-                            'process_id', process_id,
-                            'incarnation', incarnation,
-                            'terminal_label', terminal_label,
-                            'pruned_at_ms', pruned_at_ms,
-                            'pruned_change_seq', pruned_change_seq
-                        ) AS payload
-                 FROM process_tombstones WHERE pruned_change_seq > ?1
-             )
-             ORDER BY change_seq ASC
-             LIMIT ?2",
-        )
+        .prepare(process_sql().process_sqlite.list_changes_after.sql())
         .map_err(process_sqlite_error)?;
     let rows = stmt
         .query_map(
@@ -191,19 +158,15 @@ fn prune_process_rows_conn(
     let process_ids_json = serde_json::to_string(&prunable).map_err(process_decode_error)?;
     let process_count = prunable.len() as i64;
     conn.execute(
-        "UPDATE process_change_clock
-         SET current_seq = current_seq + ?1
-         WHERE singleton = 1",
+        process_sql().clock_sqlite.bump_by.sql(),
         params![process_count],
     )
     .map_err(process_sqlite_error)?;
 
     let final_change_seq = conn
-        .query_row(
-            "SELECT current_seq FROM process_change_clock WHERE singleton = 1",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
+        .query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+            row.get::<_, i64>(0)
+        })
         .map_err(process_sqlite_error)?;
     let first_change_seq = final_change_seq - process_count + 1;
 
@@ -212,17 +175,7 @@ fn prune_process_rows_conn(
     // update and insert per process.
     let inserted_tombstones = conn
         .execute(
-            "INSERT INTO process_tombstones (
-             process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
-         )
-         SELECT process.process_id,
-                process.incarnation,
-                process.status,
-                ?2,
-                ?3 + CAST(candidate.key AS INTEGER)
-         FROM json_each(?1) AS candidate
-         JOIN processes AS process ON process.process_id = candidate.value
-         ORDER BY CAST(candidate.key AS INTEGER)",
+            process_sql().tombstone_sqlite.insert_from_pruned.sql(),
             params![process_ids_json, pruned_at_ms, first_change_seq],
         )
         .map_err(process_sqlite_error)?;
@@ -236,7 +189,7 @@ fn prune_process_rows_conn(
     for process_id in prunable {
         let record_json: String = conn
             .query_row(
-                "SELECT record_json FROM processes WHERE process_id = ?1",
+                process_sql().process.select_record_json_by_id.sql(),
                 params![process_id.as_str()],
                 |row| row.get(0),
             )
@@ -246,8 +199,7 @@ fn prune_process_rows_conn(
         let cleanup = lash_core::ProcessArtifactCleanup::from_record(&record);
         let cleanup_json = serde_json::to_string(&cleanup).map_err(process_decode_error)?;
         conn.execute(
-            "INSERT INTO process_artifact_cleanup (process_id, incarnation, cleanup_json)
-             VALUES (?1, ?2, ?3)",
+            process_sql().cleanup_sqlite.insert.sql(),
             params![
                 process_id.as_str(),
                 cleanup.incarnation.registration_sequence() as i64,
@@ -257,31 +209,24 @@ fn prune_process_rows_conn(
         .map_err(process_sqlite_error)?;
     }
 
+    let sql = process_sql();
     let pruned_events = conn
         .execute(
-            "DELETE FROM process_events
-             WHERE process_id IN (SELECT value FROM json_each(?1))",
+            sql.event_sqlite.delete_by_process_ids.sql(),
             params![process_ids_json],
         )
         .map_err(process_sqlite_error)?;
-    for table in [
-        "process_observers",
-        "process_leases",
-        "process_segment_handovers",
+    for dependent in [
+        sql.observer_sqlite.delete_by_process_ids.sql(),
+        sql.lease_sqlite.delete_by_process_ids.sql(),
+        sql.handover_sqlite.delete_by_process_ids.sql(),
     ] {
-        conn.execute(
-            &format!(
-                "DELETE FROM {table}
-                 WHERE process_id IN (SELECT value FROM json_each(?1))"
-            ),
-            params![process_ids_json],
-        )
-        .map_err(process_sqlite_error)?;
+        conn.execute(dependent, params![process_ids_json])
+            .map_err(process_sqlite_error)?;
     }
     let pruned_processes = conn
         .execute(
-            "DELETE FROM processes
-             WHERE process_id IN (SELECT value FROM json_each(?1))",
+            sql.process_sqlite.delete_by_ids.sql(),
             params![process_ids_json],
         )
         .map_err(process_sqlite_error)?;
@@ -303,25 +248,6 @@ fn prune_process_rows_conn(
 
 /// The prune eligibility predicate: retired rows with no wake still owed and
 /// no parent-end plan outstanding.
-pub(crate) static PRUNABLE_TERMINAL_PROCESS_SQL: std::sync::LazyLock<String> =
-    std::sync::LazyLock::new(|| {
-        format!(
-            "SELECT process_id, record_json FROM processes
-             WHERE {retired}
-               AND updated_at_ms < ?1
-               AND (?2 IS NULL OR change_seq <= ?2)
-               AND NOT EXISTS (
-                   SELECT 1 FROM process_wake_deliveries AS delivery
-                   WHERE delivery.process_id = processes.process_id
-                     AND {undelivered}
-               )
-             ORDER BY process_id ASC",
-            retired = crate::process_lifecycle_sql::retired_process_status("status"),
-            undelivered =
-                crate::process_lifecycle_sql::undelivered_wake_delivery_state("delivery.state"),
-        )
-    });
-
 pub(crate) fn prunable_terminal_process_ids_conn(
     conn: &Connection,
     cutoff: i64,
@@ -330,7 +256,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
 ) -> Result<Vec<ProcessId>, lash_core::PluginError> {
     let max_change_seq = max_change_seq.map(|seq| seq as i64);
     let mut stmt = conn
-        .prepare(PRUNABLE_TERMINAL_PROCESS_SQL.as_str())
+        .prepare(process_sql().process_sqlite.list_prunable_terminal.sql())
         .map_err(process_sqlite_error)?;
     let rows = stmt
         .query_map(params![cutoff, max_change_seq], |row| {
@@ -403,11 +329,9 @@ mod tests {
         let clock_before = registry
             .conn
             .call(|conn| {
-                conn.query_row(
-                    "SELECT current_seq FROM process_change_clock WHERE singleton = 1",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
+                conn.query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+                    row.get::<_, i64>(0)
+                })
             })
             .await
             .expect("read process clock before divergent prune");
@@ -468,11 +392,9 @@ mod tests {
         let clock_after = registry
             .conn
             .call(|conn| {
-                conn.query_row(
-                    "SELECT current_seq FROM process_change_clock WHERE singleton = 1",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
+                conn.query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+                    row.get::<_, i64>(0)
+                })
             })
             .await
             .expect("read process clock after divergent prune");

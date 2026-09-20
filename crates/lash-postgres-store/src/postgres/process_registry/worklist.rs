@@ -1,54 +1,15 @@
 use super::*;
 
-use crate::process_lifecycle_sql::live_process_status;
-use std::sync::LazyLock;
-
 const CURSOR_BACKEND: &str = "postgres";
-pub(crate) static COUNT_NON_TERMINAL_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT COUNT(*) FROM lash_processes WHERE {}",
-        live_process_status("status")
-    )
-});
-pub(crate) static MAX_WORKLIST_PROCESS_ID_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT MAX(process_id) FROM lash_processes WHERE {}",
-        live_process_status("status")
-    )
-});
-pub(crate) static FIRST_WORKLIST_PAGE_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT record_json FROM lash_processes
-     WHERE {} AND process_id <= $1
-     ORDER BY process_id ASC LIMIT $2",
-        live_process_status("status")
-    )
-});
-pub(crate) static CONTINUE_WORKLIST_PAGE_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT record_json FROM lash_processes
-     WHERE {}
-       AND process_id <= $1 AND process_id > $2
-     ORDER BY process_id ASC LIMIT $3",
-        live_process_status("status")
-    )
-});
-pub(crate) static COLLECT_NON_TERMINAL_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT record_json FROM lash_processes
-         WHERE {}
-         ORDER BY process_id ASC",
-        live_process_status("status")
-    )
-});
 
 pub(super) async fn count_non_terminal_processes(
     registry: &PostgresProcessRegistry,
 ) -> Result<usize, PluginError> {
-    let count = sqlx::query_scalar::<_, i64>(COUNT_NON_TERMINAL_SQL.as_str())
-        .fetch_one(&registry.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+    let count =
+        sqlx::query_scalar::<_, i64>(process_sql().process_postgres.count_live_worklist.sql())
+            .fetch_one(&registry.pool)
+            .await
+            .map_err(plugin_sqlx_error)?;
     usize::try_from(count).map_err(|_| {
         PluginError::Session(format!(
             "PostgreSQL non-terminal process count {count} does not fit usize"
@@ -59,7 +20,7 @@ pub(super) async fn count_non_terminal_processes(
 pub(super) async fn collect_non_terminal_records(
     registry: &PostgresProcessRegistry,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
-    let rows = sqlx::query(COLLECT_NON_TERMINAL_SQL.as_str())
+    let rows = sqlx::query(process_sql().process.collect_non_terminal_records.sql())
         .fetch_all(&registry.pool)
         .await
         .map_err(plugin_sqlx_error)?;
@@ -86,10 +47,15 @@ pub(super) async fn list_non_terminal_page(
     }
     let through_process_id = match continuation.as_ref() {
         Some(cursor) => cursor.through_process_id().to_string(),
-        None => match sqlx::query_scalar::<_, Option<String>>(MAX_WORKLIST_PROCESS_ID_SQL.as_str())
-            .fetch_one(&registry.pool)
-            .await
-            .map_err(plugin_sqlx_error)?
+        None => match sqlx::query_scalar::<_, Option<String>>(
+            process_sql()
+                .process_postgres
+                .select_max_worklist_process_id
+                .sql(),
+        )
+        .fetch_one(&registry.pool)
+        .await
+        .map_err(plugin_sqlx_error)?
         {
             Some(process_id) => process_id,
             None => {
@@ -102,7 +68,7 @@ pub(super) async fn list_non_terminal_page(
     };
     let row_limit = i64::try_from(limit.get().saturating_add(1)).unwrap_or(i64::MAX);
     let rows = if let Some(cursor) = continuation.as_ref() {
-        sqlx::query(CONTINUE_WORKLIST_PAGE_SQL.as_str())
+        sqlx::query(process_sql().process_postgres.list_next_worklist_page.sql())
             .bind(&through_process_id)
             .bind(cursor.after_process_id())
             .bind(row_limit)
@@ -110,12 +76,17 @@ pub(super) async fn list_non_terminal_page(
             .await
             .map_err(plugin_sqlx_error)?
     } else {
-        sqlx::query(FIRST_WORKLIST_PAGE_SQL.as_str())
-            .bind(&through_process_id)
-            .bind(row_limit)
-            .fetch_all(&registry.pool)
-            .await
-            .map_err(plugin_sqlx_error)?
+        sqlx::query(
+            process_sql()
+                .process_postgres
+                .list_first_worklist_page
+                .sql(),
+        )
+        .bind(&through_process_id)
+        .bind(row_limit)
+        .fetch_all(&registry.pool)
+        .await
+        .map_err(plugin_sqlx_error)?
     };
     let mut records: Vec<ProcessRecord> = Vec::new();
     for row in rows {
@@ -183,9 +154,10 @@ mod tests {
             .await
             .expect("prefer the worklist index in the empty test database");
 
+        let worklist = &process_sql().process_postgres;
         let max_plan = sqlx::query_scalar::<_, String>(&format!(
             "EXPLAIN (COSTS OFF) {}",
-            MAX_WORKLIST_PROCESS_ID_SQL.as_str()
+            worklist.select_max_worklist_process_id.sql()
         ))
         .fetch_all(&mut *tx)
         .await
@@ -193,15 +165,19 @@ mod tests {
         .join(" | ");
         let count_plan = sqlx::query_scalar::<_, String>(&format!(
             "EXPLAIN (COSTS OFF) {}",
-            COUNT_NON_TERMINAL_SQL.as_str()
+            worklist.count_live_worklist.sql()
         ))
         .fetch_all(&mut *tx)
         .await
         .expect("explain PostgreSQL non-terminal count")
         .join(" | ");
-        let first_plan = explain(&mut tx, FIRST_WORKLIST_PAGE_SQL.as_str(), &["zz"]).await;
-        let continuation_plan =
-            explain(&mut tx, CONTINUE_WORKLIST_PAGE_SQL.as_str(), &["zz", "aa"]).await;
+        let first_plan = explain(&mut tx, worklist.list_first_worklist_page.sql(), &["zz"]).await;
+        let continuation_plan = explain(
+            &mut tx,
+            worklist.list_next_worklist_page.sql(),
+            &["zz", "aa"],
+        )
+        .await;
         tx.rollback().await.expect("rollback explain transaction");
 
         for plan in [&count_plan, &max_plan, &first_plan, &continuation_plan] {

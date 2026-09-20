@@ -6,14 +6,13 @@
 //! `processes` cannot express the fact this table records.
 
 use std::num::NonZeroUsize;
-use std::sync::LazyLock;
 
 use lash_core::{ParentEndPlan, ParentScope, PluginError, ProcessRecord};
 use lash_sansio::ProcessId;
 use rusqlite::{Connection, OptionalExtension, params};
 
+use super::sql::process_sql;
 use super::{SqliteProcessRegistry, process_decode_error, process_sqlite_error, tx_outcome};
-use crate::process_lifecycle_sql::live_process_status;
 
 /// The storage key for a parent scope, refusing `Host`.
 ///
@@ -29,8 +28,8 @@ fn ledger_key(parent: &ParentScope) -> Result<(&'static str, String), PluginErro
     }
 }
 
-/// Settled ledger rows the retention horizon has passed and no live child
-/// still names.
+/// Reclaim settled ledger rows the retention horizon has passed and no live
+/// child still names.
 ///
 /// The row has to outlive its scope — it is what refuses a late `Cancel`
 /// child — so it is reclaimed by retention rather than by the sweep that
@@ -39,27 +38,15 @@ fn ledger_key(parent: &ParentScope) -> Result<(&'static str, String), PluginErro
 /// lash will act on, and without this the table grows by one row per committed
 /// turn forever. A `caller_departed` child is not live by construction: lash
 /// may never act on such a row, so it can never need a parent-end cancel.
-pub(crate) static RECLAIMABLE_PLANS_DELETE: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "DELETE FROM parent_end_plans
-         WHERE settled_at_ms IS NOT NULL
-           AND settled_at_ms < ?1
-           AND NOT EXISTS (
-               SELECT 1 FROM processes AS child
-               WHERE child.parent_scope_kind = parent_end_plans.parent_kind
-                 AND child.parent_scope_id = parent_end_plans.parent_id
-                 AND {live}
-           )",
-        live = live_process_status("child.status")
-    )
-});
-
 pub(crate) fn reclaim_settled_plans_conn(
     conn: &Connection,
     cutoff: i64,
 ) -> Result<usize, PluginError> {
-    conn.execute(&RECLAIMABLE_PLANS_DELETE, params![cutoff])
-        .map_err(process_sqlite_error)
+    conn.execute(
+        process_sql().plan_sqlite.delete_reclaimable.sql(),
+        params![cutoff],
+    )
+    .map_err(process_sqlite_error)
 }
 
 pub(super) fn record_conn(
@@ -69,9 +56,7 @@ pub(super) fn record_conn(
 ) -> Result<(), PluginError> {
     let (kind, id) = ledger_key(parent)?;
     conn.execute(
-        "INSERT INTO parent_end_plans (parent_kind, parent_id, ended_at_ms)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT (parent_kind, parent_id) DO NOTHING",
+        process_sql().plan.insert_if_absent.sql(),
         params![kind, id, ended_at_ms as i64],
     )
     .map_err(process_sqlite_error)?;
@@ -87,11 +72,9 @@ pub(super) fn plan_exists_conn(
     parent: &ParentScope,
 ) -> Result<bool, PluginError> {
     let (kind, id) = ledger_key(parent)?;
-    conn.query_row(
-        "SELECT 1 FROM parent_end_plans WHERE parent_kind = ?1 AND parent_id = ?2",
-        params![kind, id],
-        |_| Ok(()),
-    )
+    conn.query_row(process_sql().plan.exists.sql(), params![kind, id], |_| {
+        Ok(())
+    })
     .optional()
     .map(|row| row.is_some())
     .map_err(process_sqlite_error)
@@ -133,13 +116,7 @@ pub(super) async fn list_pending(
     let rows = registry
         .conn
         .call(move |conn| {
-            let mut statement = conn.prepare(
-                "SELECT parent_kind, parent_id, ended_at_ms, settled_at_ms
-                 FROM parent_end_plans
-                 WHERE settled_at_ms IS NULL
-                 ORDER BY ended_at_ms, parent_kind, parent_id
-                 LIMIT ?1",
-            )?;
+            let mut statement = conn.prepare(process_sql().plan.list_pending.sql())?;
             let rows = statement.query_map(params![limit.get() as i64], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -167,8 +144,7 @@ pub(super) async fn get(
         .conn
         .call(move |conn| {
             conn.query_row(
-                "SELECT ended_at_ms, settled_at_ms FROM parent_end_plans
-                 WHERE parent_kind = ?1 AND parent_id = ?2",
+                process_sql().plan.select_stamps.sql(),
                 params![lookup.0, lookup.1],
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?)),
             )
@@ -191,25 +167,6 @@ pub(super) async fn get(
 /// The predicate is the pending-cancel partial index, so a scope whose
 /// children are all terminal or already cancelled needs no row and is not
 /// reported.
-pub(crate) static UNRECORDED_TURN_PARENTS_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT DISTINCT child.parent_scope_id FROM processes AS child
-                 WHERE child.parent_scope_kind = 'turn'
-                   AND child.on_parent_end = 'cancel'
-                   AND child.cancel_requested_at_ms IS NULL
-                   AND {live}
-                   AND NOT EXISTS (
-                       SELECT 1 FROM parent_end_plans AS plan
-                       WHERE plan.parent_kind = 'turn'
-                         AND plan.parent_id = child.parent_scope_id
-                   )
-                   AND (?1 IS NULL OR child.parent_scope_id > ?1)
-                 ORDER BY child.parent_scope_id
-                 LIMIT ?2",
-        live = live_process_status("child.status")
-    )
-});
-
 pub(super) async fn list_unrecorded_turn_parents(
     registry: &SqliteProcessRegistry,
     after: Option<&str>,
@@ -219,7 +176,12 @@ pub(super) async fn list_unrecorded_turn_parents(
     let ids = registry
         .conn
         .call(move |conn| {
-            let mut statement = conn.prepare(&UNRECORDED_TURN_PARENTS_SQL)?;
+            let mut statement = conn.prepare(
+                process_sql()
+                    .process_sqlite
+                    .list_unrecorded_turn_parents
+                    .sql(),
+            )?;
             let rows = statement.query_map(params![after, limit.get() as i64], |row| {
                 row.get::<_, String>(0)
             })?;
@@ -241,21 +203,6 @@ pub(super) async fn list_unrecorded_turn_parents(
 /// no cancel request yet, and a live status. `caller_departed` is excluded for
 /// the reason it is excluded from every other worklist — lash may never act on
 /// such a row nor assert an outcome for it, and a cancel request is both.
-pub(crate) static PARENT_END_CHILDREN_SQL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "SELECT record_json FROM processes
-     WHERE parent_scope_kind = ?1
-       AND parent_scope_id = ?2
-       AND on_parent_end = 'cancel'
-       AND cancel_requested_at_ms IS NULL
-       AND {live}
-       AND (?3 IS NULL OR process_id > ?3)
-     ORDER BY process_id ASC
-     LIMIT ?4",
-        live = live_process_status("status")
-    )
-});
-
 pub(super) fn children_conn(
     conn: &Connection,
     parent: &ParentScope,
@@ -265,7 +212,7 @@ pub(super) fn children_conn(
     let (kind, id) = ledger_key(parent)?;
     let after = after.map(|value| value.to_string());
     let mut statement = conn
-        .prepare(&PARENT_END_CHILDREN_SQL)
+        .prepare(process_sql().process_sqlite.list_parent_end_children.sql())
         .map_err(process_sqlite_error)?;
     let rows = statement
         .query_map(params![kind, id, after, limit.get() as i64], |row| {
@@ -306,9 +253,7 @@ pub(super) async fn settle(
         .write_flow(move |tx| {
             Ok(tx_outcome(
                 tx.execute(
-                    "UPDATE parent_end_plans SET settled_at_ms = ?3
-                     WHERE parent_kind = ?1 AND parent_id = ?2
-                       AND settled_at_ms IS NULL",
+                    process_sql().plan.settle.sql(),
                     params![kind, id, settled_at_ms as i64],
                 )
                 .map_err(process_sqlite_error)

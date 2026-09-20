@@ -32,9 +32,7 @@ pub(super) async fn claim_process_lease(
                         // Same incarnation re-enters its own live lease:
                         // extend the expiry, keep token and fencing token.
                         tx.execute(
-                            "UPDATE process_leases
-                             SET lease_expires_at_ms = ?2
-                             WHERE process_id = ?1",
+                            process_sql().lease.extend_unfenced.sql(),
                             params![process_id.as_str(), lease.expires_at_epoch_ms as i64],
                         )
                         .map_err(process_sqlite_error)?;
@@ -150,9 +148,7 @@ pub(super) async fn renew_process_lease(
                     ..lease.clone()
                 };
                 tx.execute(
-                    "UPDATE process_leases
-                     SET lease_expires_at_ms = ?2
-                     WHERE process_id = ?1 AND lease_token = ?3",
+                    process_sql().lease.renew_fenced.sql(),
                     params![
                         renewed.process_id.as_str(),
                         renewed.expires_at_epoch_ms as i64,
@@ -198,13 +194,7 @@ pub(super) async fn get_process_leases(
         .call(move |conn| {
             Ok((|| {
                 let mut stmt = conn
-                    .prepare(
-                        "SELECT process_id, lease_owner_id, lease_token,
-                                lease_fencing_token, lease_claimed_at_ms,
-                                lease_expires_at_ms, lease_owner_incarnation_id
-                         FROM process_leases
-                         WHERE process_id IN (SELECT value FROM json_each(?1))",
-                    )
+                    .prepare(process_sql().lease_sqlite.list_by_process_ids.sql())
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
                     .query_map(params![process_ids_json], |row| {
@@ -244,12 +234,7 @@ pub(super) async fn complete_process_lease(
         .conn
         .call(move |conn| {
             conn.execute(
-                "UPDATE process_leases
-                 SET lease_owner_id = NULL,
-                     lease_token = NULL,
-                     lease_claimed_at_ms = 0,
-                     lease_expires_at_ms = 0
-                 WHERE process_id = ?1 AND lease_token = ?2",
+                process_sql().lease.release_claimed.sql(),
                 params![process_id.as_str(), lease_token],
             )
         })

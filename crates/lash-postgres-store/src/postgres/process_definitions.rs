@@ -8,6 +8,7 @@
 //! name slots follow the ADR 0049 deletion frontier; host- and
 //! platform-scoped tombstones are permanent (ADR 0067).
 
+use crate::process_sql::process_sql;
 use crate::*;
 use lash_core::process_registry::{
     ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
@@ -92,14 +93,13 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
-        let existing: Option<(i64, String, String)> = sqlx::query_as(
-            "SELECT revision, fingerprint, record_json FROM lash_process_definitions              WHERE owner_scope = $1 AND name = $2",
-        )
-        .bind(&owner_json)
-        .bind(name)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let existing: Option<(i64, String, String)> =
+            sqlx::query_as(process_sql().definition.select_for_cas.sql())
+                .bind(&owner_json)
+                .bind(name)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
         type PgExisting = Option<(i64, String, String)>;
         let existing: PgExisting = existing;
         let registration: ProcessDefinitionRegistration = match existing {
@@ -134,18 +134,16 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
                 };
                 let record_json = serde_json::to_string(&record)
                     .map_err(|err| PluginError::Session(err.to_string()))?;
-                sqlx::query(
-                    "INSERT INTO lash_process_definitions                      (definition_id, owner_scope, name, revision, fingerprint, lifecycle,                       deleted_at_ms, change_seq, created_at_ms, updated_at_ms, record_json)                      VALUES ($1, $2, $3, 1, $4, 'enabled', NULL, 1, $5, $5, $6)",
-                )
-                .bind(&definition_id)
-                .bind(&owner_json)
-                .bind(name)
-                .bind(&fingerprint)
-                .bind(i64::try_from(now_ms).unwrap_or(0))
-                .bind(&record_json)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?;
+                sqlx::query(process_sql().definition.insert_first_revision.sql())
+                    .bind(&definition_id)
+                    .bind(&owner_json)
+                    .bind(name)
+                    .bind(&fingerprint)
+                    .bind(i64::try_from(now_ms).unwrap_or(0))
+                    .bind(&record_json)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(plugin_sqlx_error)?;
                 ProcessDefinitionRegistration::Admitted(Box::new(record))
             }
             Some((revision, existing_fingerprint, existing_json)) => {
@@ -205,19 +203,17 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
                 new_record.change_seq = new_change_seq;
                 let record_json = serde_json::to_string(&new_record)
                     .map_err(|err| PluginError::Session(err.to_string()))?;
-                let changed = sqlx::query(
-                    "UPDATE lash_process_definitions SET revision = $3, fingerprint = $4,                      lifecycle = 'enabled', deleted_at_ms = NULL, change_seq = change_seq + 1,                      updated_at_ms = $5, record_json = $6                      WHERE owner_scope = $1 AND name = $2",
-                )
-                .bind(&owner_json)
-                .bind(name)
-                .bind(new_revision.cast_signed())
-                .bind(&fingerprint)
-                .bind(i64::try_from(now_ms).unwrap_or(0))
-                .bind(&record_json)
-                .execute(&mut *tx)
-                .await
-                .map_err(plugin_sqlx_error)?
-                .rows_affected();
+                let changed = sqlx::query(process_sql().definition.update_revision.sql())
+                    .bind(&owner_json)
+                    .bind(name)
+                    .bind(new_revision.cast_signed())
+                    .bind(&fingerprint)
+                    .bind(i64::try_from(now_ms).unwrap_or(0))
+                    .bind(&record_json)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(plugin_sqlx_error)?
+                    .rows_affected();
                 if changed != 1 {
                     tx.rollback().await.map_err(plugin_sqlx_error)?;
                     return Err(conflict(
@@ -242,14 +238,12 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
     ) -> Result<Vec<ProcessDefinitionRecord>, PluginError> {
         let owner_json = serde_json::to_string(owner_scope)
             .map_err(|err| PluginError::Session(err.to_string()))?;
-        let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT record_json FROM lash_process_definitions \
-             WHERE owner_scope = $1 ORDER BY name ASC",
-        )
-        .bind(&owner_json)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(plugin_sqlx_error)?;
+        let rows: Vec<(String,)> =
+            sqlx::query_as(process_sql().definition.list_by_owner_scope.sql())
+                .bind(&owner_json)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(plugin_sqlx_error)?;
         let mut records = Vec::with_capacity(rows.len());
         for (record_json,) in rows {
             let record: ProcessDefinitionRecord = serde_json::from_str(&record_json)
