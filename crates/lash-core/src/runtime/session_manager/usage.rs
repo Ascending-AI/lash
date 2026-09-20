@@ -118,11 +118,32 @@ impl UsageCapability {
 pub struct StagedTokenLedger {
     ledger: Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     deltas: Vec<crate::store::RuntimeUsageDelta>,
+    minted: Vec<crate::store::RuntimeUsageDeltaIdentity>,
 }
 
 impl StagedTokenLedger {
     pub fn deltas(&self) -> &[crate::store::RuntimeUsageDelta] {
         &self.deltas
+    }
+
+    /// Rolls back this staging after the durable commit carrying `deltas`
+    /// failed: pending rows this staging claimed are removed from the shared
+    /// ledger, so the journaled effect that recorded them re-records the
+    /// billed usage on replay rather than double-merging a retained row.
+    /// Rows staged under earlier operations keep their identity and stay
+    /// pending for the next boundary.
+    pub fn discard_staged(self) {
+        let minted = self
+            .minted
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let mut ledger = self.ledger.lock_recover();
+        ledger.retain(|pending| {
+            pending
+                .identity
+                .as_ref()
+                .is_none_or(|identity| !minted.contains(identity))
+        });
     }
 
     pub fn confirm_identities(
@@ -194,15 +215,18 @@ pub fn stage_token_ledger_shared(
                 )
             })
         })?;
+    let mut minted = Vec::new();
     for pending in ledger
         .iter_mut()
         .filter(|pending| pending.identity.is_none())
     {
-        pending.identity = Some(crate::store::RuntimeUsageDeltaIdentity::for_entry(
+        let identity = crate::store::RuntimeUsageDeltaIdentity::for_entry(
             operation_storage_key.clone(),
             next_ordinal,
             &pending.entry,
-        ));
+        );
+        minted.push(identity.clone());
+        pending.identity = Some(identity);
         next_ordinal = next_ordinal.checked_add(1).ok_or_else(|| {
             crate::StoreError::Backend(
                 "usage delta ordinal overflowed durable u64 identity".to_string(),
@@ -227,6 +251,7 @@ pub fn stage_token_ledger_shared(
     Ok(StagedTokenLedger {
         ledger: Arc::clone(token_ledger),
         deltas,
+        minted,
     })
 }
 

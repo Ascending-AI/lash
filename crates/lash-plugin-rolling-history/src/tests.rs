@@ -227,6 +227,7 @@ fn build_turn_ctx_with_graph(
                 "direct completions are unavailable in rolling history tests".to_string(),
             ))
         }),
+        system_prompt: None,
     }
 }
 
@@ -273,6 +274,7 @@ fn build_compaction_ctx_with_services(
         )
         .expect("test scoped effect controller"),
         direct_completions,
+        system_prompt: None,
     }
 }
 
@@ -294,11 +296,22 @@ fn llm_completion(text: &str) -> lash_core::plugin::DirectLlmCompletion {
 
 /// Records every raw `LlmRequest` the compaction seam issues so a test can
 /// pin the provider-visible request and prove no child session exists.
-#[derive(Default)]
 struct RecordingLlmCompletions {
     requests: Mutex<Vec<lash_core::LlmRequest>>,
     summary: String,
     error: Option<String>,
+    terminal_reason: lash_sansio::llm::types::LlmTerminalReason,
+}
+
+impl Default for RecordingLlmCompletions {
+    fn default() -> Self {
+        Self {
+            requests: Mutex::new(Vec::new()),
+            summary: String::new(),
+            error: None,
+            terminal_reason: lash_sansio::llm::types::LlmTerminalReason::Stop,
+        }
+    }
 }
 
 impl RecordingLlmCompletions {
@@ -310,7 +323,9 @@ impl RecordingLlmCompletions {
                 if let Some(error) = &captured.error {
                     return Err(PluginError::Session(error.clone()));
                 }
-                Ok(llm_completion(&captured.summary))
+                let mut completion = llm_completion(&captured.summary);
+                completion.response.terminal_reason = captured.terminal_reason;
+                Ok(completion)
             },
         )
     }
@@ -855,6 +870,7 @@ fn transform_state_ctx_with_services(
         )
         .expect("test scoped effect controller"),
         direct_completions: RecordingLlmCompletions::client(&direct),
+        system_prompt: None,
     }
 }
 
@@ -1406,6 +1422,84 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
                         || text.contains("Compacted work summary")
                 ),
             "the prompt keeps its ordinary rolling projection once recovery settled"
+        );
+    }
+}
+
+fn compactable_state(messages: Vec<Message>) -> SessionSnapshot {
+    SessionSnapshot {
+        session_id: SessionId::from("root"),
+        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        session_graph: SessionGraph::from_active_read_state(&messages),
+        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+    }
+}
+
+fn compactable_messages() -> Vec<Message> {
+    vec![
+        text_message("u1", MessageRole::User, "old work"),
+        text_message("a1", MessageRole::Assistant, "assistant old"),
+        text_message("u2", MessageRole::User, "latest request"),
+    ]
+}
+
+#[tokio::test]
+async fn compaction_request_carries_the_core_resolved_system_prompt() {
+    let captured = Arc::new(RecordingLlmCompletions {
+        summary: "summary".to_string(),
+        ..Default::default()
+    });
+    let mut ctx = build_compaction_ctx_with_graph(
+        &SessionId::from("root"),
+        compactable_state(compactable_messages()),
+        None,
+        Arc::new(mock_manager()),
+        Arc::new(RecordingSessionGraph::default()),
+        RecordingLlmCompletions::client(&captured),
+    );
+    ctx.system_prompt = Some(Arc::from("resolved capability+core+session stack"));
+    RollingContextCompactor::new(RollingHistoryConfig)
+        .compact(&ctx)
+        .await
+        .expect("compact")
+        .expect("compaction");
+    let requests = captured.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].instructions.as_deref(),
+        Some("resolved capability+core+session stack"),
+        "the request carries the prompt the core resolved, not a plugin-side rebuild"
+    );
+}
+
+#[tokio::test]
+async fn rolling_compactor_refuses_incomplete_terminal_reasons_as_frame_seed() {
+    for reason in [
+        lash_sansio::llm::types::LlmTerminalReason::OutputLimit,
+        lash_sansio::llm::types::LlmTerminalReason::ContentFilter,
+        lash_sansio::llm::types::LlmTerminalReason::ToolUse,
+        lash_sansio::llm::types::LlmTerminalReason::Cancelled,
+    ] {
+        let captured = Arc::new(RecordingLlmCompletions {
+            summary: "partial summary".to_string(),
+            terminal_reason: reason,
+            ..Default::default()
+        });
+        let ctx = build_compaction_ctx_with_graph(
+            &SessionId::from("root"),
+            compactable_state(compactable_messages()),
+            None,
+            Arc::new(mock_manager()),
+            Arc::new(RecordingSessionGraph::default()),
+            RecordingLlmCompletions::client(&captured),
+        );
+        let err = RollingContextCompactor::new(RollingHistoryConfig)
+            .compact(&ctx)
+            .await
+            .expect_err("an incomplete completion must not seed a durable frame");
+        assert!(
+            err.to_string().contains(reason.code()),
+            "error names the terminal reason: {err}"
         );
     }
 }

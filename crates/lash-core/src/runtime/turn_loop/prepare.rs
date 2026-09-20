@@ -314,23 +314,58 @@ impl LashRuntime {
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
-        let plugin_session = self
-            .session
-            .as_ref()
-            .map(|s| Arc::clone(s.plugins()))
-            .ok_or_else(|| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ContextPrepareTurn,
-                    "runtime session not available",
-                )
-            })?;
+        let session = self.session.as_ref().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::ContextPrepareTurn,
+                "runtime session not available",
+            )
+        })?;
+        let plugin_session = Arc::clone(session.plugins());
         let prepare_phase_turn_id = turn_phase_id(&trace_turn_id, "prepare-turn");
         let prepare_phase_controller = scoped_effect_controller.clone();
+        let prepare_read_view = self.read_view().map_err(|error| {
+            RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
+        })?;
+        // Lazy: resolved only if overflow recovery actually runs — an eager
+        // build would fire plugin prompt hooks on every turn for a prompt
+        // that is almost never sent.
+        let system_prompt: Option<crate::plugin::CompactionSystemPrompt> = {
+            let context_contributions = session.context_prompt_contributions().to_vec();
+            let plugin_session = Arc::clone(&plugin_session);
+            let manager = Arc::clone(&manager);
+            let session_id = self.state.session_id.clone();
+            let read_view = prepare_read_view.clone();
+            let protocol_turn_options = self.protocol_turn_options().clone();
+            let core_prompt = self.host.core.prompt.prompt.clone();
+            let policy_prompt = self.state.effective_policy().prompt.clone();
+            Some(Arc::new(move || {
+                let context_contributions = context_contributions.clone();
+                let plugin_session = Arc::clone(&plugin_session);
+                let manager = Arc::clone(&manager);
+                let session_id = session_id.clone();
+                let read_view = read_view.clone();
+                let protocol_turn_options = protocol_turn_options.clone();
+                let core_prompt = core_prompt.clone();
+                let policy_prompt = policy_prompt.clone();
+                Box::pin(async move {
+                    LashRuntime::compaction_system_prompt(
+                        context_contributions,
+                        plugin_session,
+                        manager,
+                        session_id,
+                        read_view,
+                        protocol_turn_options,
+                        core_prompt,
+                        policy_prompt,
+                    )
+                    .await
+                    .map_err(|err| crate::PluginError::Session(err.to_string()))
+                })
+            }))
+        };
         let turn_ctx = crate::TurnTransformContext {
             session_id: self.state.session_id.clone(),
-            state: self.read_view().map_err(|error| {
-                RuntimeError::new(RuntimeErrorCode::ContextPrepareTurn, error.to_string())
-            })?,
+            state: prepare_read_view,
             prompt_usage: previous_prompt_usage.clone(),
             max_context_tokens: Some(LashRuntime::max_context_tokens(self)),
             sessions: manager.state_service(),
@@ -341,6 +376,7 @@ impl LashRuntime {
                 RuntimeEffectControllerHandle::borrowed(prepare_phase_controller),
                 Some(prepare_phase_turn_id),
             ),
+            system_prompt,
         };
         self.mark_phase_begin(RuntimeTurnPhase::ContextTransform);
         let prepared_context = plugin_session

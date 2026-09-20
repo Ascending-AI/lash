@@ -443,7 +443,7 @@ pub struct PluginSessionContext {
     pub materialization: PluginSessionMaterialization,
     pub extensions: PluginExtensions,
     /// Session id of the caller that created this one. `None` identifies
-    /// a root session; any subagent / compaction / forked-child session
+    /// a root session; any subagent / forked-child session
     /// carries the parent here so plugin factories can gate themselves
     /// on root-only behavior (e.g. `update_plan`'s sticky plan dock).
     pub parent_session_id: Option<SessionId>,
@@ -495,8 +495,8 @@ pub trait SessionPlugin: Send + Sync {
 /// # Cheap-build / stateful-factory contract
 ///
 /// `build(ctx)` **must be cheap**. It runs on the hot path every time
-/// a new session is created (including subagents, forked children,
-/// and compaction children) and any latency here is paid per session.
+/// a new session is created (including subagents and forked children)
+/// and any latency here is paid per session.
 ///
 /// Specifically, `build` must **not**:
 /// - perform any I/O (disk reads, HTTP calls, DB queries),

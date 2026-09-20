@@ -46,8 +46,8 @@ pub use actions::{
 };
 pub use error::{PluginError, durable_identity_conflict, is_durable_identity_conflict};
 pub use history::{
-    CompactionContext, ContextCompaction, ContextCompactor, ContextError, SessionReadView,
-    TurnContextTransform, TurnTransformContext,
+    CompactionContext, CompactionSystemPrompt, ContextCompaction, ContextCompactor, ContextError,
+    SessionReadView, TurnContextTransform, TurnTransformContext,
 };
 pub use hooks::{
     AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
