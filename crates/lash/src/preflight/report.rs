@@ -607,9 +607,6 @@ impl FormatTally {
 pub(super) fn reads_version(expected: FormatVersion, found: u32) -> bool {
     match expected {
         FormatVersion::Counter(version) => found == version,
-        // One-directional by contract: older generations still mean what they
-        // meant, a newer one cannot be given a shape.
-        FormatVersion::ForwardOnly(generation) => found <= generation,
         // An identity is compared as a string elsewhere; a counter found against
         // an identity format is not a comparison this build makes.
         FormatVersion::Identity(_) => false,
@@ -658,24 +655,6 @@ mod tests {
             assert_eq!(row.verdict, ComponentVerdict::Refused, "found {found}");
             assert!(row.refuses_open());
         }
-    }
-
-    #[test]
-    fn a_forward_only_fence_reads_older_generations_and_refuses_newer() {
-        let mut older = FormatTally::default();
-        older.record(1);
-        assert_eq!(
-            tally_row(older, FormatVersion::ForwardOnly(2)).verdict,
-            ComponentVerdict::AllReadable,
-            "rolling back is the supported direction for an immutable body"
-        );
-
-        let mut newer = FormatTally::default();
-        newer.record(3);
-        assert_eq!(
-            tally_row(newer, FormatVersion::ForwardOnly(2)).verdict,
-            ComponentVerdict::Refused
-        );
     }
 
     #[test]

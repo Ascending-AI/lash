@@ -101,9 +101,9 @@
 //! test.
 //!
 //! A shape older than what this build writes therefore belongs in a frozen byte
-//! literal beside the decoder that must keep reading it —
-//! `session_graph_tests.rs::unstamped_conversation_bodies_keep_loading` and
-//! `::unstamped_stored_bodies_keep_loading` are that, for the node body — not in a
+//! literal beside the decoder that must now refuse it —
+//! `session_graph_tests.rs::unstamped_conversation_bodies_are_refused` and
+//! `::unstamped_stored_bodies_are_refused` are that, for the node body — not in a
 //! generated artifact. Read this fixture as "the previous committed writer's
 //! output", which is the drift it exists to catch, and put "some writer, once, long
 //! ago" somewhere regeneration cannot reach.
