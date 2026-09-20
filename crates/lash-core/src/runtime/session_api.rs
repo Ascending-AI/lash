@@ -570,7 +570,13 @@ impl LashRuntime {
             sessions: services.state_service(),
             session_lifecycle: services.lifecycle_service(),
             session_graph: services.graph_service(),
-            scoped_effect_controller,
+            scoped_effect_controller: scoped_effect_controller.clone(),
+            direct_completions: services.direct_completion_client(
+                crate::runtime::RuntimeEffectControllerHandle::Borrowed(
+                    scoped_effect_controller.clone(),
+                ),
+                None,
+            ),
         };
         let Some(compaction) = plugin_session.compact_context(&ctx).await.map_err(|err| {
             PluginOperationInvokeError::Unknown(format!("context compaction failed: {err}"))
@@ -595,6 +601,65 @@ impl LashRuntime {
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         if result.opened {
             self.stamp_live_plugin_state();
+        }
+        // Administrative compaction has no owning turn to settle usage at a
+        // commit (`direct_outcome.rs` stages into the shared ledger only).
+        // Mirror `park()`: if the compaction left pending graph nodes or
+        // usage, persist them at this explicit boundary with the same
+        // content-derived operation so a retried compact_context reuses
+        // byte-identical row identities.
+        let Some(store) = self.services.store.clone() else {
+            return Ok(result.opened);
+        };
+        let pending_usage = self
+            .shared_token_ledger
+            .lock_recover()
+            .iter()
+            .map(|pending| pending.entry.clone())
+            .collect::<Vec<_>>();
+        if !self.state.pending_graph_commit().nodes().is_empty() || !pending_usage.is_empty() {
+            let proposed = super::lifecycle::initial_park_preview(
+                &self.state,
+                &pending_usage,
+                self.host.core.durability.commit_budget,
+            )
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            let operation = super::lifecycle::initial_park_operation(&proposed)
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            let staged =
+                session_manager::stage_token_ledger_shared(&self.shared_token_ledger, &operation)
+                    .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            for delta in staged.deltas() {
+                crate::store::merge_token_ledger_entry_checked(
+                    &mut self.state.token_ledger,
+                    delta.entry.clone(),
+                )
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            }
+            let (commit, persisted_node_ids) =
+                crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
+                    &mut self.state,
+                    staged.deltas(),
+                    operation,
+                    self.host.core.durability.commit_budget,
+                )
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            let commit_result = commit_runtime_state_with_fresh_session_execution_lease(
+                Arc::clone(&store),
+                commit,
+                &self.runtime_lease_owner,
+                &self.runtime_lease_executor_id,
+                self.host.core.control.lease_timings,
+                Arc::clone(&self.host.core.clock),
+            )
+            .await
+            .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            let confirmed_usage = commit_result.committed_usage_delta_identities.clone();
+            staged
+                .confirm_identities(&confirmed_usage)
+                .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
+            self.state.apply_persisted_commit_result(commit_result);
+            self.state.mark_node_ids_persisted(persisted_node_ids);
         }
         Ok(result.opened)
     }

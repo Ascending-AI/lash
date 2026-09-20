@@ -274,7 +274,6 @@ impl LashRuntime {
         events: &dyn EventSink,
         turn_events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-        runtime_internal_trace_turn_id: Option<TurnId>,
         cancel: CancellationToken,
         mut claims: LogicalTurnClaims,
         session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
@@ -282,16 +281,7 @@ impl LashRuntime {
     ) -> Result<AgentFrameRun, RuntimeError> {
         let (follow_protocol_turn_options, follow_turn_context, supplied_trace_turn_id) =
             start.continuation_state();
-        if let Some(expected_trace_turn_id) = runtime_internal_trace_turn_id {
-            if supplied_trace_turn_id != expected_trace_turn_id {
-                return Err(RuntimeError::new(
-                    RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
-                    format!(
-                        "runtime-internal input trace_turn_id `{supplied_trace_turn_id}` does not match admitted child turn id `{expected_trace_turn_id}`"
-                    ),
-                ));
-            }
-        } else if !supplied_trace_turn_id.is_empty()
+        if !supplied_trace_turn_id.is_empty()
             && scoped_effect_controller
                 .execution_scope()
                 .validates_turn_trace_id()

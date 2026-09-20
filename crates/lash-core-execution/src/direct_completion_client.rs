@@ -18,6 +18,7 @@ pub trait DirectCompletionService: Send + Sync {
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
+        caused_by: Option<crate::CausalRef>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError>;
 }
 
@@ -39,6 +40,13 @@ type TestDirectFn = Arc<
         + Sync,
 >;
 
+#[cfg(any(test, feature = "testing"))]
+type TestDirectLlmFn = Arc<
+    dyn Fn(crate::LlmRequest, String) -> Result<crate::DirectLlmCompletion, crate::PluginError>
+        + Send
+        + Sync,
+>;
+
 /// Source of direct (single-shot) LLM completions for plugins and tools.
 ///
 /// In production this is always backed by the runtime session manager; the
@@ -51,6 +59,8 @@ enum DirectCompletionSource<'run> {
     Unavailable(String),
     #[cfg(any(test, feature = "testing"))]
     TestFn(TestDirectFn),
+    #[cfg(any(test, feature = "testing"))]
+    TestLlmFn(TestDirectLlmFn),
 }
 
 #[derive(Clone)]
@@ -97,6 +107,10 @@ impl<'run> DirectCompletionClient<'run> {
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::TestFn(invoke) => {
                 DirectCompletionSource::TestFn(Arc::clone(invoke))
+            }
+            #[cfg(any(test, feature = "testing"))]
+            DirectCompletionSource::TestLlmFn(invoke) => {
+                DirectCompletionSource::TestLlmFn(Arc::clone(invoke))
             }
         };
         Some(DirectCompletionClient {
@@ -176,6 +190,10 @@ impl<'run> DirectCompletionClient<'run> {
             }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::TestFn(invoke) => invoke(request, usage_source.to_string()),
+            #[cfg(any(test, feature = "testing"))]
+            DirectCompletionSource::TestLlmFn(_) => Err(crate::PluginError::Session(
+                "text direct completions are unavailable in this test context".to_string(),
+            )),
         }
     }
 
@@ -195,6 +213,18 @@ impl<'run> DirectCompletionClient<'run> {
         request: crate::LlmRequest,
         usage_source: &str,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
+        self.direct_llm_completion_caused_by(request, usage_source, None)
+            .await
+    }
+
+    /// Same as [`Self::direct_llm_completion`], but records `caused_by` as the
+    /// call's causal trace linkage and folds it into the replay lane.
+    pub async fn direct_llm_completion_caused_by(
+        &self,
+        request: crate::LlmRequest,
+        usage_source: &str,
+        caused_by: Option<crate::CausalRef>,
+    ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         match &self.source {
             DirectCompletionSource::Runtime(source) => {
                 source
@@ -205,6 +235,7 @@ impl<'run> DirectCompletionClient<'run> {
                         source.effect_controller.scoped(),
                         source.turn_id.as_ref(),
                         self.position(None),
+                        caused_by,
                     )
                     .await
             }
@@ -216,6 +247,8 @@ impl<'run> DirectCompletionClient<'run> {
             DirectCompletionSource::TestFn(_) => Err(crate::PluginError::Session(
                 "direct LLM completions are unavailable in this test context".to_string(),
             )),
+            #[cfg(any(test, feature = "testing"))]
+            DirectCompletionSource::TestLlmFn(invoke) => invoke(request, usage_source.to_string()),
         }
     }
 
@@ -238,6 +271,23 @@ impl<'run> DirectCompletionClient<'run> {
     {
         Self {
             source: DirectCompletionSource::TestFn(Arc::new(invoke)),
+            parent_invocation: None,
+            inside_tool_attempt: false,
+        }
+    }
+
+    /// Test seam for the raw `LlmRequest` lane used by callers (such as
+    /// rolling-history compaction) that build the provider request themselves.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn from_llm_fn<F>(invoke: F) -> Self
+    where
+        F: Fn(crate::LlmRequest, String) -> Result<crate::DirectLlmCompletion, crate::PluginError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self {
+            source: DirectCompletionSource::TestLlmFn(Arc::new(invoke)),
             parent_invocation: None,
             inside_tool_attempt: false,
         }

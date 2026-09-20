@@ -49,12 +49,14 @@ impl DirectCompletionService for RuntimeSessionServices {
         effect_controller: crate::ScopedEffectController<'_>,
         turn_id: Option<&crate::TurnId>,
         position: DirectExecutionPosition,
+        caused_by: Option<crate::CausalRef>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         self.direct
             .invoke_direct_llm_completion(
                 self.direct_invocation_context(effect_controller, turn_id, position),
                 request,
                 usage_source,
+                caused_by,
             )
             .await
     }
@@ -311,6 +313,7 @@ impl DirectCompletionCapability {
         context: DirectInvocationContext<'_>,
         request: crate::LlmRequest,
         usage_source: &str,
+        caused_by: Option<crate::CausalRef>,
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         let resolved = context.current.resolve_policy()?;
         if request.scope.request_id.trim().is_empty() {
@@ -318,6 +321,17 @@ impl DirectCompletionCapability {
                 "direct LLM completion request_id must be non-empty for durable replay".to_string(),
             ));
         }
+        let mut request = request;
+        // Same variant validation the text lane applies before the provider
+        // sees the request.
+        request.model_variant = request
+            .model_capability
+            .validate_selection(
+                &request.model,
+                resolved.binding.provider.kind(),
+                &request.model_variant,
+            )
+            .map_err(|error| crate::PluginError::Session(error.message))?;
         let replay = crate::RuntimeReplay {
             key: request.scope.request_id.clone(),
             attribution: None,
@@ -330,12 +344,12 @@ impl DirectCompletionCapability {
                 usage_source,
                 DirectReplayPosition {
                     replay: Some(&replay),
-                    caused_by: None,
+                    caused_by: caused_by.as_ref(),
                     ordinal: 0,
                 },
             )
             .await?;
-        let (response, usage, llm_call) = self.run_direct_effect(&context, plan, None).await?;
+        let (response, usage, llm_call) = self.run_direct_effect(&context, plan, caused_by).await?;
         Ok(crate::DirectLlmCompletion {
             response,
             usage,
