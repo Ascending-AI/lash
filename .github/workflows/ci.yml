@@ -346,6 +346,10 @@ jobs:
         run: |
           # shellcheck disable=SC2086
           if [ "${{ needs.plan.outputs.bazel_trusted }}" = "true" ]; then
+            # trybuild checks the fixture project with `cargo --offline`;
+            # the Cargo leg warms the registry as a side effect of the outer
+            # build, so the Bazel leg has to fetch it explicitly.
+            cargo fetch --locked
             bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
               ${BAZEL_SHARED_CACHE_FLAGS} \
               --remote_download_outputs=toplevel \
