@@ -159,14 +159,13 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
         .complete(|_| async { Ok(text_response("<typescript>\nfinish(42);\n</typescript>")) })
         .build()
         .into_handle();
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .with_native_queued_work()
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::clone(&tools) as Arc<dyn lash_core::ToolProvider>)
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
+        .store_factory(Arc::clone(&store_factory) as Arc<dyn lash_core::SessionStoreFactory>)
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
@@ -188,7 +187,7 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
     );
     tools.replace("after_refresh");
 
-    session
+    let receipt = session
         .admin()
         .commands()
         .refresh_tool_catalog(
@@ -197,36 +196,60 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
         )
         .await?;
 
-    // Wait for the state this test asserts — the replaced catalog visible on a
-    // fresh open — rather than for the queue row to disappear: a claim hides
-    // the row before the command has run, and the drain happens in the native
-    // queued-work driver's own runtime, not in this handle's. Each attempt
-    // drops its handle so the driver can take the lease.
+    // Wait for evidence that the *queued command* was applied, read without a
+    // runtime: the durable head's own tool-state snapshot, and the batch
+    // settling out of the full queued-work listing. A reopen cannot stand in
+    // for either — restoring a session reconciles the live tool surface in
+    // memory, so an `open()` shows `after_refresh` whether or not the command
+    // ever ran. Both halves have teeth: without the enqueue the head never
+    // records the replacement manifest, and with nothing draining the batch
+    // the row never settles.
     drop(session);
-    let reopened = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let session_id = lash_core::SessionId::from("rlm-typescript-queued-session-command");
+    let durable_store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &session_id,
+    )
+    .await
+    .expect("resolve the queued session's store")
+    .expect("the queued session exists");
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
-            let reopened = core
-                .session("rlm-typescript-queued-session-command")
-                .open()
+            let recorded = lash_core::store::load_persisted_session_state(durable_store.as_ref())
                 .await
-                .expect("reopen the queued-command session");
-            if reopened
-                .admin()
-                .tools()
-                .state()
-                .await
-                .expect("read the reopened tool state")
-                .contains(&lash_core::ToolId::from("tool:after_refresh"))
-            {
-                return reopened;
+                .expect("load the durable head")
+                .and_then(|state| {
+                    state.tool_state_snapshot().map(|snapshot| {
+                        snapshot.contains(&lash_core::ToolId::from("tool:after_refresh"))
+                    })
+                })
+                .unwrap_or(false);
+            // `list_queued_work`, not the pending view: the pending view hides
+            // a claimed row and does not show an `AfterCurrentTurnCommit` row
+            // before its delivery condition, so its emptiness is not evidence
+            // that anything ran. The full listing keeps the batch until the
+            // drain settles it (SPEC-PRELUDE, FIG-2875).
+            let drained = !lash_core::store::QueuedWorkStore::list_queued_work(
+                durable_store.as_ref(),
+                &session_id,
+            )
+            .await
+            .expect("read every queued-work row, including claimed ones")
+            .iter()
+            .any(|batch| batch.batch_id == receipt.batch_id);
+            if recorded && drained {
+                return;
             }
-            drop(reopened);
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
     })
     .await
-    .expect("the queued catalog refresh applies and survives a reopen");
+    .expect("the queued catalog refresh drains and commits its replacement manifest");
 
+    let reopened = core
+        .session("rlm-typescript-queued-session-command")
+        .open()
+        .await?;
     assert!(
         reopened
             .admin()
