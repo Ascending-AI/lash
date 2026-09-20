@@ -118,6 +118,21 @@ impl RestateEffectGroupServices {
             wait: RestateEffectGroupWaitServices::default(),
         }
     }
+
+    /// Every service name this bundle's wiring addresses on the endpoint.
+    ///
+    /// The three effect-group services plus the durable-wait pair the
+    /// dispatcher resolves waits and cancellation gates through. Assert the
+    /// set at wiring time with [`crate::assert_services_bound`].
+    pub fn required_service_names() -> Vec<&'static str> {
+        vec![
+            "EffectGroupIndex",
+            "EffectGroupPayload",
+            "EffectGroupDispatch",
+            "LashDurableWaitWorkflow",
+            "LashDurableWaitIndex",
+        ]
+    }
 }
 
 impl std::fmt::Debug for RestateEffectGroupServices {

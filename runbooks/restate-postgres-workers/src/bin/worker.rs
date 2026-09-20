@@ -1080,6 +1080,10 @@ async fn async_main() -> Result<()> {
         .bind(LashDurableWaitIndexImpl.serve())
         .bind(LashProcessAttachImpl.serve())
         .build();
+    deployment
+        .assert_endpoint_bound(&endpoint)
+        .await
+        .context("worker Restate endpoint must bind the lash process service surface")?;
     restate_sdk::http_server::HttpServer::new(endpoint)
         .listen_and_serve(addr)
         .await;
