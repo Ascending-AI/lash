@@ -16,7 +16,7 @@ use rmcp::service::QuitReason;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, timeout};
 
-use super::{McpEntry, McpToolListRefresh, PublishedService, import_tools};
+use super::{McpEntry, McpServerFault, McpToolListRefresh, PublishedService, import_tools};
 use crate::config::McpShutdownPolicy;
 use crate::error::McpError;
 use crate::service_lifecycle::{ConnectingService, StdioChildGuard, connect_service};
@@ -878,7 +878,7 @@ impl LifecycleActor {
 
     fn record_error(&self, error: String) {
         if let Some(entry) = self.entry.upgrade() {
-            *entry.last_error.write_recover() = Some(error);
+            *entry.last_error.write_recover() = Some(McpServerFault::Connection(error));
         }
     }
 
@@ -898,15 +898,15 @@ impl LifecycleActor {
         let Some(entry) = self.entry.upgrade() else {
             return;
         };
-        let previous = entry
-            .last_error
-            .read_recover()
-            .clone()
+        let mut slot = entry.last_error.write_recover();
+        let previous = slot
+            .take()
+            .map(McpServerFault::into_message)
             .unwrap_or_else(|| "unknown connection error".to_string());
-        *entry.last_error.write_recover() = Some(format!(
+        *slot = Some(McpServerFault::ReconnectExhausted(format!(
             "MCP server `{}` reconnect attempts exhausted after {} attempt(s); no background recovery is active; last error: {previous}",
             entry.server_name, self.reconnect_attempts
-        ));
+        )));
         tracing::warn!(
             server = %entry.server_name,
             attempts = self.reconnect_attempts,
@@ -1012,7 +1012,7 @@ async fn reap_child(
             "MCP stdio child PID {pid} abandoned unreaped after bounded lifecycle cleanup: {error}"
         );
         if let Some(entry) = entry.upgrade() {
-            *entry.last_error.write_recover() = Some(reason.clone());
+            *entry.last_error.write_recover() = Some(McpServerFault::Shutdown(reason.clone()));
         }
         tracing::error!(server = %server_name, pid, reason = %reason, "MCP lifecycle actor abandoned a stdio child");
     }
