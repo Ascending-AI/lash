@@ -35,10 +35,13 @@ executor reproduction, and focused Bazel labels.
 
 `analyze` validates generated files and performs Bazel loading and analysis with
 `--nobuild`; it does not run rustc and is not a substitute for `cargo check`.
-`build` compiles and links the requested Bazel labels. `test` without labels
+`build` and `check` compile and link the requested Bazel labels (`check` is the
+full compile proof, not Cargo's metadata-only mode). `test` without labels
 builds and executes `//:dev_tests`, the generated developer suite
 (`//:workspace_tests` minus the two dev-deferred binaries); explicit labels
-remain available for a focused edit loop.
+remain available for a focused edit loop. `clippy` builds a clippy aggregate,
+`doc` renders the `rust_doc` targets into bazel-bin, `run` compiles a binary on
+the pool and starts it locally, and `fmt` is a local `cargo fmt`.
 
 ```sh
 # Analyze the generated graph and reject metadata or module-lock drift.
@@ -56,8 +59,14 @@ kiln test
 # Never starts Postgres, S3, or E2E.
 scripts/dev-test.sh
 
-# Lint the `--workspace --all-targets` shape (170 clippy actions).
-kiln build //:workspace_clippy
+# Lint the `--workspace --all-targets` shape (one clippy action per target).
+kiln clippy
+
+# Render the workspace API docs into bazel-bin.
+kiln doc
+
+# Compile a binary on the pool and start it locally.
+kiln run //crates/lash-sim:lash-sim__bin -- --help
 
 # Compile or run focused targets instead.
 kiln build //crates/lash-core:lash-core
@@ -115,6 +124,7 @@ shared action cache with the equivalent of:
 
 ```sh
 scripts/hermetic-build.sh --shared build
+scripts/hermetic-build.sh --shared clippy
 ```
 
 New agents use `kiln build`, `kiln test`, or focused labels. A golden refresh
