@@ -37,7 +37,7 @@ async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
     };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash trigger store schema"));
-    assert!(message.contains("supports schema version 10"));
+    assert!(message.contains("supports schema version 11"));
     assert!(message.contains("database reports version 1"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md."
