@@ -549,12 +549,7 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         if let Some(claim) = queue_claim {
-            let materialized = claim
-                .materialize_queued_checkpoint_work_with_attachments(
-                    self.host.core.durability.attachment_store.as_ref(),
-                )
-                .await
-                .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err))?;
+            let materialized = claim.materialize_queued_checkpoint_work();
             send_queued_work_started_event(
                 event_tx,
                 crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
@@ -581,8 +576,6 @@ impl RuntimeTurnDriver<'_> {
                     claim,
                 )?;
             } else {
-                committed.extend(materialized.messages);
-                transient_messages.extend(materialized.transient_messages);
                 turn_causes.extend(materialized.turn_causes);
                 self.merge_pending_queue_claim_authority(claim)?;
             }
