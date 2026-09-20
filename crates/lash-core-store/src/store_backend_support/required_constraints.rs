@@ -418,6 +418,32 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
+        &[SqliteConstraintDatabase::EffectReplay],
+        rendered(
+            "runtime_effect_group",
+            "ck_runtime_effect_group_wake",
+            "wake IN ('first', 'first_success', 'all')",
+        ),
+        rendered(
+            "lash_runtime_effect_group",
+            "ck_runtime_effect_group_wake",
+            "wake IN ('first', 'first_success', 'all')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::EffectReplay],
+        rendered(
+            "runtime_effect_group",
+            "ck_runtime_effect_group_loser_disposition",
+            "loser_disposition IN ('run_to_completion', 'cancel')",
+        ),
+        rendered(
+            "lash_runtime_effect_group",
+            "ck_runtime_effect_group_loser_disposition",
+            "loser_disposition IN ('run_to_completion', 'cancel')",
+        ),
+    ),
+    expected_constraint(
         &[SqliteConstraintDatabase::DurableCore],
         rendered(
             "graph_nodes",
