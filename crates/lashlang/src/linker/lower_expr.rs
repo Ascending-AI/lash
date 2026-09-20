@@ -4,42 +4,49 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_expr(
         &self,
         expr: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        self.lower_expr_expected(expr, scope, None)
+        self.lower_expr_expected(expr, path, scope, None)
     }
 
+    /// Lowers `expr`, the node at `path` in `self.program`.
+    ///
+    /// `path` is the node's identity for every side table this walk feeds —
+    /// expected types, completion facts, workflow facts, and the span the
+    /// scope carries — so it must be the [`AstPath`] the node's address in
+    /// `self.program` resolves to, not a made-up walk position.
     pub(super) fn lower_expr_expected(
         &self,
         expr: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
-        let expression_key = expr as *const Expr as usize;
-        self.begin_workflow_node(expr, scope);
+        self.begin_workflow_node(path, scope);
         if let (Some(facts), Some(expected)) = (&self.expected_type_facts, expected) {
             facts
                 .borrow_mut()
                 .by_expression
-                .insert(expression_key, self.resolve_type_aliases(expected));
+                .insert(path.clone(), self.resolve_type_aliases(expected));
         }
         if self.collect_completion.get() {
-            self.completion_facts.borrow_mut().remove(&expression_key);
+            self.completion_facts.borrow_mut().remove(path);
         }
         let previous_span = scope.span;
-        if let Some(span) = self.expression_spans.get(&(expr as *const Expr as usize)) {
-            scope.span = Some(*span);
+        if let Some(span) = self.expression_span(path) {
+            scope.span = Some(span);
         }
-        let result = self.lower_expr_expected_inner(expr, scope, expected);
+        let result = self.lower_expr_expected_inner(expr, path, scope, expected);
         scope.span = previous_span;
         if result.is_ok() && self.collect_completion.get() {
             self.completion_facts
                 .borrow_mut()
-                .entry(expression_key)
+                .entry(path.clone())
                 .or_insert_with(Completion::fallthrough);
         }
         if result.is_ok() {
-            self.finish_workflow_node(expr);
+            self.finish_workflow_node(expr, path);
         }
         result
     }
@@ -66,13 +73,14 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_expr_expected_inner(
         &self,
         expr: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
         self.reject_trigger_event_special_form(expr, scope.span)?;
         self.validate_expected_literals(expr, expected, scope.span)?;
         if let Expr::ProcessLiteral(literal) = expr {
-            return self.lower_process_literal(literal, expr, scope, expected);
+            return self.lower_process_literal(literal, path, scope, expected);
         }
         if matches!(expr, Expr::Variable(_) | Expr::Field { .. })
             && let Some(resource) = self.resolve_module_expr(expr, scope)
@@ -85,9 +93,9 @@ impl<'module> Linker<'module> {
             ));
         }
         match expr {
-            Expr::Block(expressions) => self.lower_block(expr, expressions, scope, expected),
+            Expr::Block(expressions) => self.lower_block(path, expressions, scope, expected),
             Expr::LabelAnnotated { label, expr: inner } => {
-                self.lower_label_annotated(expr, label, inner, scope, expected)
+                self.lower_label_annotated(path, label, inner, scope, expected)
             }
             Expr::Variable(name) => self.lower_variable(name, scope),
             Expr::Null
@@ -102,75 +110,79 @@ impl<'module> Linker<'module> {
                 self.closed_schema_witness_binding(expr)
                     .unwrap_or_else(any_binding),
             )),
-            Expr::Tuple(items) => self.lower_tuple(items, scope, expected),
-            Expr::List(items) => self.lower_list(items, scope, expected),
+            Expr::Tuple(items) => self.lower_tuple(items, path, scope, expected),
+            Expr::List(items) => self.lower_list(items, path, scope, expected),
             Expr::ListComprehension { element, clauses } => {
-                self.lower_list_comprehension(element, clauses, scope)
+                self.lower_list_comprehension(element, clauses, path, scope)
             }
-            Expr::Record(entries) => self.lower_record(entries, scope, expected),
-            Expr::Assign { target, expr } => self.lower_assign(target, expr, scope),
+            Expr::Record(entries) => self.lower_record(entries, path, scope, expected),
+            Expr::Assign { target, expr } => self.lower_assign(target, expr, path, scope),
             Expr::If {
                 condition,
                 then_block,
                 else_block,
-            } => self.lower_if(expr, condition, then_block, else_block, scope, expected),
+            } => self.lower_if(
+                expr, path, condition, then_block, else_block, scope, expected,
+            ),
             Expr::For {
                 binding,
                 iterable,
                 body,
-            } => self.lower_for(expr, binding, iterable, body, scope),
-            Expr::While { condition, body } => self.lower_while(expr, condition, body, scope),
+            } => self.lower_for(expr, path, binding, iterable, body, scope),
+            Expr::While { condition, body } => self.lower_while(expr, path, condition, body, scope),
             Expr::ProcessRef { process } => self.lower_process_ref(process, scope),
             Expr::HostDescriptorConstructor { type_name, input } => {
-                self.lower_host_descriptor_constructor(type_name, input, scope)
+                self.lower_host_descriptor_constructor(type_name, input, path, scope)
             }
             Expr::ResourceRef(resource) => self.lower_resource_ref(resource, scope),
             Expr::ReceiverCall {
                 receiver,
                 operation,
                 args,
-            } => self.lower_receiver_call(receiver, operation, args, scope),
-            Expr::Await(inner) => self.lower_await(inner, scope, expected),
-            Expr::SleepFor(inner) => self.lower_sleep_for(inner, scope),
-            Expr::SleepUntil(inner) => self.lower_sleep_until(inner, scope),
+            } => self.lower_receiver_call(receiver, operation, args, path, scope),
+            Expr::Await(inner) => self.lower_await(inner, path, scope, expected),
+            Expr::SleepFor(inner) => self.lower_sleep_for(inner, path, scope),
+            Expr::SleepUntil(inner) => self.lower_sleep_until(inner, path, scope),
             Expr::WaitSignal { name } => self.lower_wait_signal(name, scope, expected),
-            Expr::ResultUnwrap(inner) => self.lower_result_unwrap(inner, scope, expected),
-            Expr::Print(inner) => self.lower_print(inner, scope),
-            Expr::Yield(inner) => self.lower_yield(inner, scope),
-            Expr::Finish(inner) => self.lower_finish(expr, inner, scope),
-            Expr::Fail(inner) => self.lower_fail(expr, inner, scope),
-            Expr::BuiltinCall { name, args } => self.lower_builtin_call(name, args, scope),
+            Expr::ResultUnwrap(inner) => self.lower_result_unwrap(inner, path, scope, expected),
+            Expr::Print(inner) => self.lower_print(inner, path, scope),
+            Expr::Yield(inner) => self.lower_yield(inner, path, scope),
+            Expr::Finish(inner) => self.lower_finish(path, inner, scope),
+            Expr::Fail(inner) => self.lower_fail(path, inner, scope),
+            Expr::BuiltinCall { name, args } => self.lower_builtin_call(name, args, path, scope),
             Expr::FunctionCall { function, args } => {
-                self.lower_function_call(function, args, scope)
+                self.lower_function_call(function, args, path, scope)
             }
-            Expr::Function(function) => self.lower_function(function, scope),
+            Expr::Function(function) => self.lower_function(function, path, scope),
             // Handled by the expected-type hook at the top of this method;
             // reaching the dispatcher means the hook was bypassed.
             Expr::ProcessLiteral(_) => {
                 unreachable!("a process literal is lowered by the expected-type hook")
             }
-            Expr::Call { function, args } => self.lower_call(function, args, scope),
-            Expr::Map { items, function } => self.lower_map(items, function, scope),
-            Expr::Try(exception) => self.lower_try_expr(exception, scope),
-            Expr::Throw(value) => self.lower_throw_expr(value, scope),
-            Expr::Return(value) => self.lower_return_expr(value, scope),
-            Expr::Field { target, field } => self.lower_field(target, field, scope),
-            Expr::Index { target, index } => self.lower_index(target, index, scope),
-            Expr::Unary { op, expr } => self.lower_unary(op, expr, scope),
-            Expr::Binary { left, op, right } => self.lower_binary(left, op, right, scope),
-            Expr::JavaScriptUnary { op, expr } => self.lower_javascript_unary(op, expr, scope),
+            Expr::Call { function, args } => self.lower_call(function, args, path, scope),
+            Expr::Map { items, function } => self.lower_map(items, function, path, scope),
+            Expr::Try(exception) => self.lower_try_expr(exception, path, scope),
+            Expr::Throw(value) => self.lower_throw_expr(value, path, scope),
+            Expr::Return(value) => self.lower_return_expr(value, path, scope),
+            Expr::Field { target, field } => self.lower_field(target, field, path, scope),
+            Expr::Index { target, index } => self.lower_index(target, index, path, scope),
+            Expr::Unary { op, expr } => self.lower_unary(op, expr, path, scope),
+            Expr::Binary { left, op, right } => self.lower_binary(left, op, right, path, scope),
+            Expr::JavaScriptUnary { op, expr } => {
+                self.lower_javascript_unary(op, expr, path, scope)
+            }
             Expr::JavaScriptBinary { left, op, right } => {
-                self.lower_javascript_binary(left, op, right, scope)
+                self.lower_javascript_binary(left, op, right, path, scope)
             }
             Expr::JavaScriptLogical { left, op, right } => {
-                self.lower_javascript_logical(left, op, right, scope)
+                self.lower_javascript_logical(left, op, right, path, scope)
             }
         }
     }
 
     pub(super) fn lower_block(
         &self,
-        original: &Expr,
+        path: &AstPath,
         expressions: &[Expr],
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
@@ -179,24 +191,26 @@ impl<'module> Linker<'module> {
         let mut last = any_binding();
         let last_index = expressions.len().saturating_sub(1);
         for (index, expression) in expressions.iter().enumerate() {
+            let child_path = path.child(index as u32);
             let before = scope.clone();
             let previous_diagnostic_owner = self
                 .workflow_diagnostic_owner
-                .replace(workflow_diagnostic_owner_key(expression));
+                .replace(workflow_diagnostic_owner_key(expression, &child_path));
             let result = self.lower_expr_expected(
                 expression,
+                &child_path,
                 scope,
                 (index == last_index).then_some(expected).flatten(),
             );
             self.workflow_diagnostic_owner
-                .set(previous_diagnostic_owner);
+                .replace(previous_diagnostic_owner);
             match result {
                 Ok((expr, binding)) => {
                     lowered.push(expr);
                     last = binding;
                 }
                 Err(error) if self.recover_workflow_errors.get() => {
-                    self.record_workflow_error(expression, error);
+                    self.record_workflow_error(expression, &child_path, error);
                     *scope = before;
                     recover_workflow_binding(expression, scope);
                     lowered.push(expression.clone());
@@ -207,14 +221,14 @@ impl<'module> Linker<'module> {
         }
         if self.collect_completion.get() {
             let mut completion = Completion::fallthrough();
-            for expression in expressions {
+            for (index, _) in expressions.iter().enumerate() {
                 if !completion.can_fallthrough {
                     break;
                 }
                 if let Some(child) = self
                     .completion_facts
                     .borrow()
-                    .get(&(expression as *const Expr as usize))
+                    .get(&path.child(index as u32))
                     .cloned()
                 {
                     completion.finishes.extend(child.finishes);
@@ -223,14 +237,14 @@ impl<'module> Linker<'module> {
             }
             self.completion_facts
                 .borrow_mut()
-                .insert(original as *const Expr as usize, completion);
+                .insert(path.clone(), completion);
         }
         Ok((Expr::Block(lowered), last))
     }
 
     pub(super) fn lower_label_annotated(
         &self,
-        original: &Expr,
+        path: &AstPath,
         label: &crate::ast::LabelMetadata,
         expr: &Expr,
         scope: &mut Scope,
@@ -241,18 +255,18 @@ impl<'module> Linker<'module> {
             "label annotations",
             scope.span,
         )?;
-        let inner_key = expr as *const Expr as usize;
-        let (expr, binding) = self.lower_expr_expected(expr, scope, expected)?;
+        let inner_path = path.child(0);
+        let (expr, binding) = self.lower_expr_expected(expr, &inner_path, scope, expected)?;
         if self.collect_completion.get() {
             let completion = self
                 .completion_facts
                 .borrow()
-                .get(&inner_key)
+                .get(&inner_path)
                 .cloned()
                 .unwrap_or_else(Completion::fallthrough);
             self.completion_facts
                 .borrow_mut()
-                .insert(original as *const Expr as usize, completion);
+                .insert(path.clone(), completion);
         }
         Ok((
             Expr::LabelAnnotated {
@@ -301,6 +315,7 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_tuple(
         &self,
         items: &[Expr],
+        path: &AstPath,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
@@ -311,8 +326,13 @@ impl<'module> Linker<'module> {
                 TypeExpr::List(item) => Some(*item),
                 _ => None,
             });
-        for item in items {
-            let (item, binding) = self.lower_expr_expected(item, scope, expected_item.as_ref())?;
+        for (index, item) in items.iter().enumerate() {
+            let (item, binding) = self.lower_expr_expected(
+                item,
+                &path.child(index as u32),
+                scope,
+                expected_item.as_ref(),
+            )?;
             lowered.push(item);
             item_types.push(binding_type(&binding));
         }
@@ -325,6 +345,7 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_list(
         &self,
         items: &[Expr],
+        path: &AstPath,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
@@ -335,8 +356,13 @@ impl<'module> Linker<'module> {
                 TypeExpr::List(item) => Some(*item),
                 _ => None,
             });
-        for item in items {
-            let (item, binding) = self.lower_expr_expected(item, scope, expected_item.as_ref())?;
+        for (index, item) in items.iter().enumerate() {
+            let (item, binding) = self.lower_expr_expected(
+                item,
+                &path.child(index as u32),
+                scope,
+                expected_item.as_ref(),
+            )?;
             lowered.push(item);
             item_types.push(binding_type(&binding));
         }
@@ -350,15 +376,17 @@ impl<'module> Linker<'module> {
         &self,
         element: &Expr,
         clauses: &[ListComprehensionClause],
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         let mut lowered_clauses = Vec::with_capacity(clauses.len());
         let mut previous_bindings = Vec::new();
-        for clause in clauses {
+        for (index, clause) in clauses.iter().enumerate() {
             match clause {
                 ListComprehensionClause::For { binding, iterable } => {
                     self.reject_function_name_binding(binding.as_str(), scope.span)?;
-                    let (iterable, iterable_binding) = self.lower_expr(iterable, scope)?;
+                    let (iterable, iterable_binding) =
+                        self.lower_expr(iterable, &path.child(index as u32), scope)?;
                     let item_ty =
                         self.iterable_item_type(&binding_type(&iterable_binding), scope.span)?;
                     previous_bindings.push((
@@ -371,12 +399,15 @@ impl<'module> Linker<'module> {
                     });
                 }
                 ListComprehensionClause::If { condition } => {
-                    let condition = self.lower_expr(condition, scope)?.0;
+                    let condition = self
+                        .lower_expr(condition, &path.child(index as u32), scope)?
+                        .0;
                     lowered_clauses.push(ListComprehensionClause::If { condition });
                 }
             }
         }
-        let (element, binding) = self.lower_expr(element, scope)?;
+        let (element, binding) =
+            self.lower_expr(element, &path.child(clauses.len() as u32), scope)?;
         for (name, previous) in previous_bindings.into_iter().rev() {
             scope.restore(name.as_str(), previous);
         }
@@ -392,12 +423,13 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_record(
         &self,
         entries: &[(AstString, Expr)],
+        path: &AstPath,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
         let mut lowered = Vec::with_capacity(entries.len());
         let mut fields = Vec::with_capacity(entries.len());
-        for (name, value) in entries {
+        for (index, (name, value)) in entries.iter().enumerate() {
             let expected_field =
                 expected.and_then(|expected| match self.resolve_type_aliases(expected) {
                     TypeExpr::Object(fields) => fields
@@ -406,8 +438,12 @@ impl<'module> Linker<'module> {
                         .map(|field| field.ty),
                     _ => None,
                 });
-            let (value, binding) =
-                self.lower_expr_expected(value, scope, expected_field.as_ref())?;
+            let (value, binding) = self.lower_expr_expected(
+                value,
+                &path.child(index as u32),
+                scope,
+                expected_field.as_ref(),
+            )?;
             fields.push(TypeField {
                 name: name.clone(),
                 ty: binding_type(&binding),
@@ -425,15 +461,20 @@ impl<'module> Linker<'module> {
         &self,
         target: &crate::ast::AssignTarget,
         expr: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         self.reject_function_name_binding(target.root.as_str(), scope.span)?;
         let mut lowered_steps = Vec::with_capacity(target.steps.len());
+        // `Assign` children are the `Index` steps in order, then the value.
+        let mut child_index = 0u32;
         for step in &target.steps {
             lowered_steps.push(match step {
                 AssignPathStep::Field(field) => AssignPathStep::Field(field.clone()),
                 AssignPathStep::Index(index) => {
-                    AssignPathStep::Index(self.lower_expr(index, scope)?.0)
+                    let lowered = self.lower_expr(index, &path.child(child_index), scope)?.0;
+                    child_index += 1;
+                    AssignPathStep::Index(lowered)
                 }
             });
         }
@@ -463,7 +504,12 @@ impl<'module> Linker<'module> {
             }
             (expected, _) => expected.clone(),
         };
-        let (lowered, binding) = self.lower_expr_expected(expr, scope, target_expected.as_ref())?;
+        let (lowered, binding) = self.lower_expr_expected(
+            expr,
+            &path.child(child_index),
+            scope,
+            target_expected.as_ref(),
+        )?;
         if lowered_target.steps.is_empty() {
             // A name bound straight to a process literal names the declaration
             // that literal lifted to, so a later literal's body can resolve it
@@ -488,50 +534,56 @@ impl<'module> Linker<'module> {
         ))
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the walk carries the original node for recovered-error ownership alongside its path"
+    )]
     pub(super) fn lower_if(
         &self,
         original: &Expr,
+        path: &AstPath,
         condition: &Expr,
         then_block: &Expr,
         else_block: &Expr,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
-        let then_key = then_block as *const Expr as usize;
-        let else_key = else_block as *const Expr as usize;
+        let then_path = path.child(1);
+        let else_path = path.child(2);
         let entry_scope = scope.clone();
         let mut condition_scope = entry_scope.clone();
-        let (condition, recovered_header) = match self.lower_expr(condition, &mut condition_scope) {
-            Ok((condition, _)) => (condition, false),
-            Err(error) if self.recover_workflow_errors.get() => {
-                self.record_recovered_workflow_error(original, error);
-                (condition.clone(), true)
-            }
-            Err(error) => return Err(error),
-        };
+        let (condition, recovered_header) =
+            match self.lower_expr(condition, &path.child(0), &mut condition_scope) {
+                Ok((condition, _)) => (condition, false),
+                Err(error) if self.recover_workflow_errors.get() => {
+                    self.record_recovered_workflow_error(original, path, error);
+                    (condition.clone(), true)
+                }
+                Err(error) => return Err(error),
+            };
         let mut then_scope = condition_scope.clone();
         let (then_block, then_binding) =
-            self.lower_expr_expected(then_block, &mut then_scope, expected)?;
+            self.lower_expr_expected(then_block, &then_path, &mut then_scope, expected)?;
         let mut else_scope = condition_scope;
         let (else_block, else_binding) =
-            self.lower_expr_expected(else_block, &mut else_scope, expected)?;
+            self.lower_expr_expected(else_block, &else_path, &mut else_scope, expected)?;
         if self.collect_completion.get() {
             let then_completion = self
                 .completion_facts
                 .borrow()
-                .get(&then_key)
+                .get(&then_path)
                 .cloned()
                 .unwrap_or_else(Completion::fallthrough);
             let else_completion = self
                 .completion_facts
                 .borrow()
-                .get(&else_key)
+                .get(&else_path)
                 .cloned()
                 .unwrap_or_else(Completion::fallthrough);
             let mut finishes = then_completion.finishes;
             finishes.extend(else_completion.finishes);
             self.completion_facts.borrow_mut().insert(
-                original as *const Expr as usize,
+                path.clone(),
                 Completion {
                     finishes,
                     can_fallthrough: then_completion.can_fallthrough
@@ -560,6 +612,7 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_for(
         &self,
         original: &Expr,
+        path: &AstPath,
         binding: &AstString,
         iterable: &Expr,
         body: &Expr,
@@ -569,19 +622,19 @@ impl<'module> Linker<'module> {
         let entry_scope = scope.clone();
         let mut iterable_scope = entry_scope.clone();
         let (iterable, item_ty, recovered_header) =
-            match self.lower_expr(iterable, &mut iterable_scope) {
+            match self.lower_expr(iterable, &path.child(0), &mut iterable_scope) {
                 Ok((iterable, iterable_binding)) => match self
                     .iterable_item_type(&binding_type(&iterable_binding), iterable_scope.span)
                 {
                     Ok(item_ty) => (iterable, item_ty, false),
                     Err(error) if self.recover_workflow_errors.get() => {
-                        self.record_recovered_workflow_error(original, error);
+                        self.record_recovered_workflow_error(original, path, error);
                         (iterable, TypeExpr::Any, true)
                     }
                     Err(error) => return Err(error),
                 },
                 Err(error) if self.recover_workflow_errors.get() => {
-                    self.record_recovered_workflow_error(original, error);
+                    self.record_recovered_workflow_error(original, path, error);
                     (iterable.clone(), TypeExpr::Any, true)
                 }
                 Err(error) => return Err(error),
@@ -589,19 +642,19 @@ impl<'module> Linker<'module> {
         let before_loop = iterable_scope.clone();
         let mut body_scope = iterable_scope;
         let previous = body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
-        let body_key = body as *const Expr as usize;
-        let body = self.lower_expr(body, &mut body_scope)?.0;
+        let body_path = path.child(1);
+        let body = self.lower_expr(body, &body_path, &mut body_scope)?.0;
         if self.collect_completion.get() {
             let mut completion = self
                 .completion_facts
                 .borrow()
-                .get(&body_key)
+                .get(&body_path)
                 .cloned()
                 .unwrap_or_else(Completion::fallthrough);
             completion.can_fallthrough = true;
             self.completion_facts
                 .borrow_mut()
-                .insert(original as *const Expr as usize, completion);
+                .insert(path.clone(), completion);
         }
         body_scope.restore(binding.as_str(), previous);
         if recovered_header {
@@ -622,35 +675,37 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_while(
         &self,
         original: &Expr,
+        path: &AstPath,
         condition: &Expr,
         body: &Expr,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         let entry_scope = scope.clone();
         let mut condition_scope = entry_scope.clone();
-        let (condition, recovered_header) = match self.lower_expr(condition, &mut condition_scope) {
-            Ok((condition, _)) => (condition, false),
-            Err(error) if self.recover_workflow_errors.get() => {
-                self.record_recovered_workflow_error(original, error);
-                (condition.clone(), true)
-            }
-            Err(error) => return Err(error),
-        };
+        let (condition, recovered_header) =
+            match self.lower_expr(condition, &path.child(0), &mut condition_scope) {
+                Ok((condition, _)) => (condition, false),
+                Err(error) if self.recover_workflow_errors.get() => {
+                    self.record_recovered_workflow_error(original, path, error);
+                    (condition.clone(), true)
+                }
+                Err(error) => return Err(error),
+            };
         let before_loop = condition_scope.clone();
         let mut body_scope = condition_scope;
-        let body_key = body as *const Expr as usize;
-        let body = self.lower_expr(body, &mut body_scope)?.0;
+        let body_path = path.child(1);
+        let body = self.lower_expr(body, &body_path, &mut body_scope)?.0;
         if self.collect_completion.get() {
             let mut completion = self
                 .completion_facts
                 .borrow()
-                .get(&body_key)
+                .get(&body_path)
                 .cloned()
                 .unwrap_or_else(Completion::fallthrough);
             completion.can_fallthrough = true;
             self.completion_facts
                 .borrow_mut()
-                .insert(original as *const Expr as usize, completion);
+                .insert(path.clone(), completion);
         }
         if recovered_header {
             *scope = entry_scope;
@@ -689,12 +744,13 @@ impl<'module> Linker<'module> {
         &self,
         type_name: &AstString,
         input: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::HostDescriptorConstructor {
                 type_name: type_name.clone(),
-                input: Box::new(self.lower_expr(input, scope)?.0),
+                input: Box::new(self.lower_expr(input, &path.child(0), scope)?.0),
             },
             Binding::Value(TypeExpr::Ref(type_name.clone())),
         ))
@@ -719,25 +775,34 @@ impl<'module> Linker<'module> {
         receiver: &Expr,
         operation: &AstString,
         args: &[Expr],
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        if let Some(mut path) = module_path_for_expr(receiver) {
-            path.push(operation.clone());
-            if let Some(constructor) = self.surface.resources.resolve_value_constructor(&path) {
+        if let Some(mut module_path) = module_path_for_expr(receiver) {
+            module_path.push(operation.clone());
+            if let Some(constructor) = self
+                .surface
+                .resources
+                .resolve_value_constructor(&module_path)
+            {
                 if args.len() != 1 {
                     return Err(LinkError::IncompatibleConstructorInput {
-                        path: module_path_key(&path),
+                        path: module_path_key(&module_path),
                         expected: format_type_expr(&constructor.input_ty),
                         actual: format!("{} arguments", args.len()),
                         span: scope.span,
                     });
                 }
-                let (input, input_binding) =
-                    self.lower_expr_expected(&args[0], scope, Some(&constructor.input_ty))?;
+                let (input, input_binding) = self.lower_expr_expected(
+                    &args[0],
+                    &path.child(1),
+                    scope,
+                    Some(&constructor.input_ty),
+                )?;
                 let actual_ty = binding_type(&input_binding);
                 if !self.is_type_assignable(&actual_ty, &constructor.input_ty) {
                     return Err(LinkError::IncompatibleConstructorInput {
-                        path: module_path_key(&path),
+                        path: module_path_key(&module_path),
                         expected: format_type_expr(
                             &self.resolve_type_aliases(&constructor.input_ty),
                         ),
@@ -757,21 +822,22 @@ impl<'module> Linker<'module> {
         let resolved_receiver = self
             .resolve_module_operation_expr(receiver, operation)
             .or_else(|| self.resolve_module_expr(receiver, scope));
-        let (lowered_receiver, resource_type, receiver_alias) =
-            if let Some(resource) = resolved_receiver.as_ref() {
-                (
-                    Expr::ResourceRef(resource.clone()),
-                    Some(resource.resource_type.to_string()),
-                    Some(resource.alias.to_string()),
-                )
-            } else {
-                let (lowered_receiver, binding) = self.lower_expr(receiver, scope)?;
-                let resource_type = match binding {
-                    Binding::Resource { resource_type } => Some(resource_type),
-                    _ => None,
-                };
-                (lowered_receiver, resource_type, None)
+        let (lowered_receiver, resource_type, receiver_alias) = if let Some(resource) =
+            resolved_receiver.as_ref()
+        {
+            (
+                Expr::ResourceRef(resource.clone()),
+                Some(resource.resource_type.to_string()),
+                Some(resource.alias.to_string()),
+            )
+        } else {
+            let (lowered_receiver, binding) = self.lower_expr(receiver, &path.child(0), scope)?;
+            let resource_type = match binding {
+                Binding::Resource { resource_type } => Some(resource_type),
+                _ => None,
             };
+            (lowered_receiver, resource_type, None)
+        };
         let Some(resource_type) = resource_type else {
             if let Some(path) = module_path_for_expr(receiver) {
                 let suggestions = self
@@ -837,7 +903,7 @@ impl<'module> Linker<'module> {
         });
         if let Some(trigger_operation) = trigger_operation {
             let (lowered_args, output_ty) =
-                self.lower_trigger_operation_args(trigger_operation, args, scope)?;
+                self.lower_trigger_operation_args(trigger_operation, args, path, scope)?;
             return Ok((
                 Expr::ReceiverCall {
                     receiver: Box::new(lowered_receiver),
@@ -849,9 +915,10 @@ impl<'module> Linker<'module> {
         }
         let mut lowered_args = Vec::with_capacity(args.len());
         let mut arg_types = Vec::with_capacity(args.len());
-        for arg in args {
+        for (index, arg) in args.iter().enumerate() {
             let expected_arg = expected_call_arg_type(&operation_binding.input_ty, args.len());
-            let (arg, binding) = self.lower_expr_expected(arg, scope, expected_arg)?;
+            let (arg, binding) =
+                self.lower_expr_expected(arg, &path.child(index as u32 + 1), scope, expected_arg)?;
             lowered_args.push(arg);
             arg_types.push(binding_type(&binding));
         }
@@ -877,10 +944,11 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_await(
         &self,
         inner: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
-        let (inner, binding) = self.lower_expr_expected(inner, scope, expected)?;
+        let (inner, binding) = self.lower_expr_expected(inner, &path.child(0), scope, expected)?;
         if let Some(actual) = settled_literal_kind(&inner).or_else(|| {
             // A comprehension binding retains its inferred element type even
             // after its local iteration bindings leave scope. Calls are excluded:
@@ -902,11 +970,12 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_sleep_for(
         &self,
         inner: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         self.ensure_feature(self.surface.abilities.sleep, "sleep", scope.span)?;
         Ok((
-            Expr::SleepFor(Box::new(self.lower_expr(inner, scope)?.0)),
+            Expr::SleepFor(Box::new(self.lower_expr(inner, &path.child(0), scope)?.0)),
             Binding::Value(TypeExpr::Null),
         ))
     }
@@ -914,11 +983,12 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_sleep_until(
         &self,
         inner: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         self.ensure_feature(self.surface.abilities.sleep, "sleep", scope.span)?;
         Ok((
-            Expr::SleepUntil(Box::new(self.lower_expr(inner, scope)?.0)),
+            Expr::SleepUntil(Box::new(self.lower_expr(inner, &path.child(0), scope)?.0)),
             Binding::Value(TypeExpr::Null),
         ))
     }
@@ -987,20 +1057,22 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_result_unwrap(
         &self,
         inner: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
         expected: Option<&TypeExpr>,
     ) -> Result<(Expr, Binding), LinkError> {
-        let (inner, binding) = self.lower_expr_expected(inner, scope, expected)?;
+        let (inner, binding) = self.lower_expr_expected(inner, &path.child(0), scope, expected)?;
         Ok((Expr::ResultUnwrap(Box::new(inner)), binding))
     }
 
     pub(super) fn lower_print(
         &self,
         inner: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
-            Expr::Print(Box::new(self.lower_expr(inner, scope)?.0)),
+            Expr::Print(Box::new(self.lower_expr(inner, &path.child(0), scope)?.0)),
             Binding::Value(TypeExpr::Null),
         ))
     }
@@ -1008,44 +1080,44 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_yield(
         &self,
         inner: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
-            Expr::Yield(Box::new(self.lower_expr(inner, scope)?.0)),
+            Expr::Yield(Box::new(self.lower_expr(inner, &path.child(0), scope)?.0)),
             Binding::Value(TypeExpr::Null),
         ))
     }
 
     pub(super) fn lower_finish(
         &self,
-        original: &Expr,
+        path: &AstPath,
         inner: &Expr,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         let expected_return = scope.expected_return.clone();
-        let (inner, binding) = self.lower_expr_expected(inner, scope, expected_return.as_ref())?;
+        let (inner, binding) =
+            self.lower_expr_expected(inner, &path.child(0), scope, expected_return.as_ref())?;
         let finish_ty = binding_type(&binding);
         if self.collect_completion.get() {
-            self.completion_facts.borrow_mut().insert(
-                original as *const Expr as usize,
-                Completion::terminal(vec![finish_ty.clone()]),
-            );
+            self.completion_facts
+                .borrow_mut()
+                .insert(path.clone(), Completion::terminal(vec![finish_ty.clone()]));
         }
         Ok((Expr::Finish(Box::new(inner)), Binding::Value(finish_ty)))
     }
 
     pub(super) fn lower_fail(
         &self,
-        original: &Expr,
+        path: &AstPath,
         inner: &Expr,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        let inner = self.lower_expr(inner, scope)?.0;
+        let inner = self.lower_expr(inner, &path.child(0), scope)?.0;
         if self.collect_completion.get() {
-            self.completion_facts.borrow_mut().insert(
-                original as *const Expr as usize,
-                Completion::terminal(Vec::new()),
-            );
+            self.completion_facts
+                .borrow_mut()
+                .insert(path.clone(), Completion::terminal(Vec::new()));
         }
         Ok((Expr::Fail(Box::new(inner)), Binding::Value(TypeExpr::Null)))
     }
@@ -1054,6 +1126,7 @@ impl<'module> Linker<'module> {
         &self,
         name: &AstString,
         args: &[Expr],
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         // Source spells a call to a declared function exactly like a builtin
@@ -1062,7 +1135,7 @@ impl<'module> Linker<'module> {
         // rejected at collection, so the lookup order here cannot hide a
         // function behind a builtin.
         if self.function_signatures.contains_key(name.as_str()) {
-            return self.lower_function_call(name, args, scope);
+            return self.lower_function_call(name, args, path, scope);
         }
         if !crate::builtins::is_builtin(name.as_str()) {
             if let Some(suggestion) = self
@@ -1085,7 +1158,8 @@ impl<'module> Linker<'module> {
         }
         let lowered_args = args
             .iter()
-            .map(|arg| self.lower_expr(arg, scope))
+            .enumerate()
+            .map(|(index, arg)| self.lower_expr(arg, &path.child(index as u32), scope))
             .collect::<Result<Vec<_>, _>>()?;
         let arg_types = lowered_args
             .iter()
@@ -1115,6 +1189,7 @@ impl<'module> Linker<'module> {
         &self,
         function: &AstString,
         args: &[Expr],
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         let signature = self
@@ -1131,8 +1206,10 @@ impl<'module> Linker<'module> {
             });
         }
         let mut lowered = Vec::with_capacity(args.len());
-        for (arg, (param_name, param_ty)) in args.iter().zip(&signature.params) {
-            let (expr, binding) = self.lower_expr_expected(arg, scope, Some(param_ty))?;
+        for (index, (arg, (param_name, param_ty))) in args.iter().zip(&signature.params).enumerate()
+        {
+            let (expr, binding) =
+                self.lower_expr_expected(arg, &path.child(index as u32), scope, Some(param_ty))?;
             let actual = binding_type(&binding);
             if !self.is_type_assignable(&actual, param_ty) {
                 return Err(LinkError::IncompatibleFunctionArgument {
@@ -1157,6 +1234,7 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_function(
         &self,
         function: &crate::ast::FunctionExpr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         // A capture naming a cell local that was bound to a process literal is
@@ -1207,7 +1285,9 @@ impl<'module> Linker<'module> {
         if let Some(name) = &function.name {
             function_scope.bind(name, any_binding());
         }
-        let body = self.lower_expr(&function.body, &mut function_scope)?.0;
+        let body = self
+            .lower_expr(&function.body, &path.child(0), &mut function_scope)?
+            .0;
         Ok((
             Expr::Function(Box::new(crate::ast::FunctionExpr {
                 name: function.name.clone(),
@@ -1223,14 +1303,19 @@ impl<'module> Linker<'module> {
         &self,
         function: &Expr,
         args: &[Expr],
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Call {
-                function: Box::new(self.lower_expr(function, scope)?.0),
+                function: Box::new(self.lower_expr(function, &path.child(0), scope)?.0),
                 args: args
                     .iter()
-                    .map(|arg| self.lower_expr(arg, scope).map(|value| value.0))
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        self.lower_expr(arg, &path.child(index as u32 + 1), scope)
+                            .map(|value| value.0)
+                    })
                     .collect::<Result<_, _>>()?,
             },
             any_binding(),
@@ -1241,12 +1326,13 @@ impl<'module> Linker<'module> {
         &self,
         items: &Expr,
         function: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Map {
-                items: Box::new(self.lower_expr(items, scope)?.0),
-                function: Box::new(self.lower_expr(function, scope)?.0),
+                items: Box::new(self.lower_expr(items, &path.child(0), scope)?.0),
+                function: Box::new(self.lower_expr(function, &path.child(1), scope)?.0),
             },
             any_binding(),
         ))
@@ -1256,9 +1342,10 @@ impl<'module> Linker<'module> {
         &self,
         target: &Expr,
         field: &AstString,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        let (target, binding) = self.lower_expr(target, scope)?;
+        let (target, binding) = self.lower_expr(target, &path.child(0), scope)?;
         let ty = self.field_type(&binding_type(&binding), field.as_str(), scope.span)?;
         Ok((
             Expr::Field {
@@ -1273,10 +1360,11 @@ impl<'module> Linker<'module> {
         &self,
         target: &Expr,
         index: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        let (target, target_binding) = self.lower_expr(target, scope)?;
-        let index = self.lower_expr(index, scope)?.0;
+        let (target, target_binding) = self.lower_expr(target, &path.child(0), scope)?;
+        let index = self.lower_expr(index, &path.child(1), scope)?.0;
         Ok((
             Expr::Index {
                 target: Box::new(target),
@@ -1290,12 +1378,13 @@ impl<'module> Linker<'module> {
         &self,
         op: &crate::ast::UnaryOp,
         expr: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
             Expr::Unary {
                 op: *op,
-                expr: Box::new(self.lower_expr(expr, scope)?.0),
+                expr: Box::new(self.lower_expr(expr, &path.child(0), scope)?.0),
             },
             Binding::Value(match op {
                 crate::ast::UnaryOp::Not => TypeExpr::Bool,
@@ -1309,10 +1398,11 @@ impl<'module> Linker<'module> {
         left: &Expr,
         op: &crate::ast::BinaryOp,
         right: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        let (left, left_binding) = self.lower_expr(left, scope)?;
-        let (right, right_binding) = self.lower_expr(right, scope)?;
+        let (left, left_binding) = self.lower_expr(left, &path.child(0), scope)?;
+        let (right, right_binding) = self.lower_expr(right, &path.child(1), scope)?;
         self.validate_binary_operands(
             *op,
             &binding_type(&left_binding),
@@ -1332,15 +1422,20 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_try_expr(
         &self,
         exception: &crate::ast::TryExpr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         let before = scope.clone();
         let mut try_scope = before.clone();
-        let body = self.lower_expr(&exception.body, &mut try_scope)?.0;
+        let body = self
+            .lower_expr(&exception.body, &path.child(0), &mut try_scope)?
+            .0;
         let catch = if let Some(catch) = &exception.catch {
             let mut catch_scope = before.clone();
             let previous = catch_scope.bind(&catch.binding, any_binding());
-            let body = self.lower_expr(&catch.body, &mut catch_scope)?.0;
+            let body = self
+                .lower_expr(&catch.body, &path.child(1), &mut catch_scope)?
+                .0;
             catch_scope.restore(&catch.binding, previous);
             scope.join_branches(try_scope, catch_scope);
             Some(crate::ast::CatchClause {
@@ -1351,11 +1446,12 @@ impl<'module> Linker<'module> {
             *scope = try_scope;
             None
         };
+        let finally_index = u32::from(exception.catch.is_some()) + 1;
         let finally = exception
             .finally
             .as_ref()
             .map(|finally| {
-                self.lower_expr(finally, scope)
+                self.lower_expr(finally, &path.child(finally_index), scope)
                     .map(|value| Box::new(value.0))
             })
             .transpose()?;
@@ -1372,10 +1468,11 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_throw_expr(
         &self,
         value: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
-            Expr::Throw(Box::new(self.lower_expr(value, scope)?.0)),
+            Expr::Throw(Box::new(self.lower_expr(value, &path.child(0), scope)?.0)),
             any_binding(),
         ))
     }
@@ -1383,127 +1480,13 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_return_expr(
         &self,
         value: &Expr,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
         Ok((
-            Expr::Return(Box::new(self.lower_expr(value, scope)?.0)),
+            Expr::Return(Box::new(self.lower_expr(value, &path.child(0), scope)?.0)),
             any_binding(),
         ))
-    }
-
-    pub(super) fn lower_javascript_unary(
-        &self,
-        op: &crate::ast::JavaScriptUnaryOp,
-        expr: &Expr,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        let ty = match op {
-            crate::ast::JavaScriptUnaryOp::Not => TypeExpr::Bool,
-            crate::ast::JavaScriptUnaryOp::TypeOf => TypeExpr::Str,
-            crate::ast::JavaScriptUnaryOp::Plus | crate::ast::JavaScriptUnaryOp::Negate => {
-                TypeExpr::Float
-            }
-        };
-        Ok((
-            Expr::JavaScriptUnary {
-                op: *op,
-                expr: Box::new(self.lower_expr(expr, scope)?.0),
-            },
-            Binding::Value(ty),
-        ))
-    }
-
-    pub(super) fn lower_javascript_binary(
-        &self,
-        left: &Expr,
-        op: &crate::ast::JavaScriptBinaryOp,
-        right: &Expr,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        let ty = match op {
-            crate::ast::JavaScriptBinaryOp::StrictEqual
-            | crate::ast::JavaScriptBinaryOp::StrictNotEqual
-            | crate::ast::JavaScriptBinaryOp::LooseEqual
-            | crate::ast::JavaScriptBinaryOp::LooseNotEqual
-            | crate::ast::JavaScriptBinaryOp::Less
-            | crate::ast::JavaScriptBinaryOp::LessEqual
-            | crate::ast::JavaScriptBinaryOp::Greater
-            | crate::ast::JavaScriptBinaryOp::GreaterEqual => TypeExpr::Bool,
-            _ => TypeExpr::Any,
-        };
-        Ok((
-            Expr::JavaScriptBinary {
-                left: Box::new(self.lower_expr(left, scope)?.0),
-                op: *op,
-                right: Box::new(self.lower_expr(right, scope)?.0),
-            },
-            Binding::Value(ty),
-        ))
-    }
-
-    pub(super) fn lower_javascript_logical(
-        &self,
-        left: &Expr,
-        op: &crate::ast::JavaScriptLogicalOp,
-        right: &Expr,
-        scope: &mut Scope,
-    ) -> Result<(Expr, Binding), LinkError> {
-        Ok((
-            Expr::JavaScriptLogical {
-                left: Box::new(self.lower_expr(left, scope)?.0),
-                op: *op,
-                right: Box::new(self.lower_expr(right, scope)?.0),
-            },
-            any_binding(),
-        ))
-    }
-
-    pub(super) fn resolve_module_expr(
-        &self,
-        expr: &Expr,
-        scope: &Scope,
-    ) -> Option<ResourceRefExpr> {
-        let path = module_path_for_expr(expr)?;
-        if path
-            .first()
-            .and_then(|root| scope.get_str(root.as_str()))
-            .is_some()
-        {
-            return None;
-        }
-        self.surface.resources.resolve_module_path(&path)
-    }
-
-    pub(super) fn resolve_module_operation_expr(
-        &self,
-        receiver: &Expr,
-        operation: &AstString,
-    ) -> Option<ResourceRefExpr> {
-        // Exact host operation paths occupy the module namespace even when a
-        // live value shares their root. Other expressions retain lexical
-        // shadowing through `resolve_module_expr`.
-        let path = module_path_for_expr(receiver)?;
-        let resource = self.surface.resources.resolve_module_path(&path)?;
-        self.surface.resources.resolve_module_operation(
-            resource.resource_type.as_str(),
-            resource.alias.as_str(),
-            operation.as_str(),
-        )?;
-        Some(resource)
-    }
-
-    pub(super) fn reject_trigger_event_special_form(
-        &self,
-        expr: &Expr,
-        span: Option<Span>,
-    ) -> Result<(), LinkError> {
-        if is_trigger_event_projection_expr(expr) {
-            return Err(LinkError::TriggerEventProjection { span });
-        }
-        if is_trigger_event_expr(expr) {
-            return Err(LinkError::TriggerEventOutsideInputs { span });
-        }
-        Ok(())
     }
 }
 

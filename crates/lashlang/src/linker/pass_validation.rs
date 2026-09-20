@@ -47,24 +47,29 @@ impl<'module> Linker<'module> {
         }
     }
 
+    /// `call_path` is the [`AstPath`] of the `ReceiverCall` `args` belong to:
+    /// `args[i]` is the call's `i + 1`-th child, and the fields the special
+    /// forms pick out of `args[0]` are that record's children.
     pub(super) fn lower_trigger_operation_args(
         &self,
         operation: crate::TriggerHostOperation,
         args: &[Expr],
+        call_path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Vec<Expr>, TypeExpr), LinkError> {
         match operation {
             crate::TriggerHostOperation::Register
             | crate::TriggerHostOperation::Update
             | crate::TriggerHostOperation::Revive => {
-                self.lower_trigger_registration_args(operation, args, scope)
+                self.lower_trigger_registration_args(operation, args, call_path, scope)
             }
             crate::TriggerHostOperation::List => {
                 let call = crate::list_call_args(args)
                     .map_err(|_| LinkError::InvalidTriggerList { span: scope.span })?;
                 let mut entries = Vec::with_capacity(call.entries.len());
                 for (name, expr) in call.entries {
-                    let (expr, binding) = self.lower_expr(expr, scope)?;
+                    let expr_path = child_ast_path(&args[0], &call_path.child(1), expr);
+                    let (expr, binding) = self.lower_expr(expr, &expr_path, scope)?;
                     let filter_ty = binding_type(&binding);
                     match name.as_str() {
                         "target" => {
@@ -104,11 +109,16 @@ impl<'module> Linker<'module> {
         &self,
         operation: crate::TriggerHostOperation,
         args: &[Expr],
+        call_path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Vec<Expr>, TypeExpr), LinkError> {
         let call = crate::register_call_args(args)
             .map_err(|_| LinkError::InvalidTriggerRegistration { span: scope.span })?;
-        let (source, source_binding) = self.lower_expr(call.source, scope)?;
+        // `call`'s fields all point into `args[0]`, the registration record.
+        let record_path = call_path.child(1);
+        let field_path = |field: &Expr| child_ast_path(&args[0], &record_path, field);
+        let (source, source_binding) =
+            self.lower_expr(call.source, &field_path(call.source), scope)?;
         let source_ty = binding_type(&source_binding);
         let event_ty = self
             .surface
@@ -118,8 +128,12 @@ impl<'module> Linker<'module> {
                 source_ty: format_type_expr(&source_ty),
                 span: scope.span,
             })?;
-        let (target, target_binding) =
-            self.lower_expr_expected(call.target, scope, Some(&process_unknown_type()))?;
+        let (target, target_binding) = self.lower_expr_expected(
+            call.target,
+            &field_path(call.target),
+            scope,
+            Some(&process_unknown_type()),
+        )?;
         let target_ty = binding_type(&target_binding);
         let params = self.trigger_target_params(&target_ty, scope.span)?;
         let process = trigger_target_process_label(call.target);
@@ -130,6 +144,7 @@ impl<'module> Linker<'module> {
                 &params,
                 &event_ty,
                 inputs,
+                &field_path(inputs),
                 scope,
             )?,
             None => {
@@ -142,12 +157,16 @@ impl<'module> Linker<'module> {
             ("inputs".into(), inputs),
         ];
         if let Some(name) = call.name {
-            entries.push(("name".into(), self.lower_expr(name, scope)?.0));
+            entries.push((
+                "name".into(),
+                self.lower_expr(name, &field_path(name), scope)?.0,
+            ));
         }
         if let Some(subscription_key) = call.subscription_key {
             entries.push((
                 "subscription_key".into(),
-                self.lower_expr(subscription_key, scope)?.0,
+                self.lower_expr(subscription_key, &field_path(subscription_key), scope)?
+                    .0,
             ));
         }
         if matches!(
@@ -158,8 +177,13 @@ impl<'module> Linker<'module> {
                 .ok_or(LinkError::InvalidTriggerRegistration { span: scope.span })?;
             entries.push((
                 "expected_revision".into(),
-                self.lower_expr_expected(expected_revision, scope, Some(&TypeExpr::Int))?
-                    .0,
+                self.lower_expr_expected(
+                    expected_revision,
+                    &field_path(expected_revision),
+                    scope,
+                    Some(&TypeExpr::Int),
+                )?
+                .0,
             ));
         }
         Ok((vec![Expr::Record(entries)], operation.output_ty()))
@@ -217,6 +241,7 @@ impl<'module> Linker<'module> {
         params: &[ProcessParam],
         event_ty: &TypeExpr,
         inputs: &Expr,
+        inputs_path: &AstPath,
         scope: &mut Scope,
     ) -> Result<Expr, LinkError> {
         let Expr::Record(entries) = inputs else {
@@ -225,7 +250,7 @@ impl<'module> Linker<'module> {
         let mut seen = BTreeSet::new();
         let mut saw_event = false;
         let mut lowered = Vec::with_capacity(entries.len());
-        for (name, value) in entries {
+        for (index, (name, value)) in entries.iter().enumerate() {
             if !seen.insert(name.to_string()) {
                 return Err(LinkError::DuplicateTriggerInput {
                     input: name.to_string(),
@@ -258,8 +283,12 @@ impl<'module> Linker<'module> {
                 lowered.push((name.clone(), crate::trigger_event_placeholder_expr()));
                 continue;
             }
-            let (lowered_value, binding) =
-                self.lower_expr_expected(value, scope, Some(&param.ty))?;
+            let (lowered_value, binding) = self.lower_expr_expected(
+                value,
+                &inputs_path.child(index as u32),
+                scope,
+                Some(&param.ty),
+            )?;
             self.validate_process_arg_binding(
                 process,
                 name.as_str(),
@@ -345,6 +374,7 @@ impl<'module> Linker<'module> {
     pub(super) fn infer_process_output(
         &self,
         process: &ProcessDecl,
+        path: &AstPath,
         span: Option<Span>,
     ) -> Result<TypeExpr, LinkError> {
         let mut scope = Scope::new(true, span);
@@ -356,13 +386,13 @@ impl<'module> Linker<'module> {
         scope.bind("inputs", Binding::Value(process_input_record_type(process)));
         self.completion_facts.borrow_mut().clear();
         self.collect_completion.set(true);
-        let result = self.lower_expr(&process.body, &mut scope);
+        let result = self.lower_expr(&process.body, path, &mut scope);
         self.collect_completion.set(false);
         result?;
         let completion = self
             .completion_facts
             .borrow()
-            .get(&(&process.body as *const Expr as usize))
+            .get(path)
             .cloned()
             .unwrap_or_else(Completion::fallthrough);
         let mut outputs = completion.finishes;

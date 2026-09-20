@@ -188,12 +188,12 @@ impl<'a> GraphProjector<'a> {
 
     fn project(&self) -> WorkflowGraph {
         let mut declarations = Vec::with_capacity(self.program.declarations.len());
-        for declaration in &self.program.declarations {
+        for (index, declaration) in self.program.declarations.iter().enumerate() {
             match declaration {
                 Declaration::Type(ty) => declarations.push(WorkflowDeclaration::Type(ty.clone())),
-                Declaration::Process(process) => {
-                    declarations.push(WorkflowDeclaration::Process(self.project_process(process)))
-                }
+                Declaration::Process(process) => declarations.push(WorkflowDeclaration::Process(
+                    self.project_process(process, index as u32),
+                )),
                 Declaration::Function(function) => {
                     declarations.push(WorkflowDeclaration::Function(function.clone()))
                 }
@@ -214,7 +214,13 @@ impl<'a> GraphProjector<'a> {
             ));
         }
         let mut versions = VersionState::default();
-        let main = self.project_block(&self.program.main, "main", &[], &mut versions);
+        let main = self.project_block(
+            &self.program.main,
+            "main",
+            &[],
+            &lashlang::AstPath::main(Vec::new()),
+            &mut versions,
+        );
         WorkflowGraph {
             schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
             facet_schema_version: self
@@ -225,7 +231,11 @@ impl<'a> GraphProjector<'a> {
         }
     }
 
-    fn project_process(&self, process: &ProcessDecl) -> WorkflowProcess {
+    /// `declaration_index` is the process's slot in `program.declarations`:
+    /// the linker's fact tables are keyed by [`lashlang::AstPath`], so looking
+    /// a body node's facts up takes the declaration root plus the steps the
+    /// projection already tracks.
+    fn project_process(&self, process: &ProcessDecl, declaration_index: u32) -> WorkflowProcess {
         let owner = format!("process:{}", process.name);
         let (display_name, description, name_source) = match &process.label {
             Some(label) => (
@@ -258,17 +268,35 @@ impl<'a> GraphProjector<'a> {
             // wrapper's own AST path so node identity and execution-site
             // correlation stay keyed on the real path (FIG-3033).
             body: match process_run_body_path(process) {
-                Some((path, body)) => self.project_block(body, &owner, &path, &mut versions),
-                None => self.project_block(&process.body, &owner, &[], &mut versions),
+                Some((path, body)) => self.project_block(
+                    body,
+                    &owner,
+                    &path,
+                    &lashlang::AstPath::declaration(declaration_index, path.clone()),
+                    &mut versions,
+                ),
+                None => self.project_block(
+                    &process.body,
+                    &owner,
+                    &[],
+                    &lashlang::AstPath::declaration(declaration_index, Vec::new()),
+                    &mut versions,
+                ),
             },
         }
     }
 
+    /// `facts_base` is the [`lashlang::AstPath`] of `expr` itself: `base_path`
+    /// carries the owner-relative steps that node identity and spans are
+    /// keyed on, while `facts_base` carries the rooted path the linker's fact
+    /// tables are keyed on. The two stay in lockstep — every step pushed onto
+    /// `base_path` is pushed onto `facts_base` too.
     fn project_block(
         &self,
         expr: &Expr,
         owner: &str,
         base_path: &[u32],
+        facts_base: &lashlang::AstPath,
         versions: &mut VersionState,
     ) -> WorkflowSubgraph {
         // The lowerer wraps every authored statement block as
@@ -279,9 +307,11 @@ impl<'a> GraphProjector<'a> {
         // drops the trailing completion value.
         let mut expr = expr;
         let mut base_path = base_path.to_vec();
+        let mut facts_base = facts_base.clone();
         let mut unwrapped = false;
         while let Some(inner) = printer::block_wrapper_inner(expr) {
             base_path = lashlang::child_path(&base_path, 0);
+            facts_base = facts_base.child(0);
             expr = inner;
             unwrapped = true;
         }
@@ -298,6 +328,7 @@ impl<'a> GraphProjector<'a> {
         self.project_statements(
             expressions,
             owner,
+            &facts_base,
             &base_path,
             indexed.then_some(0),
             versions,
@@ -312,6 +343,7 @@ impl<'a> GraphProjector<'a> {
         &self,
         expressions: &[Expr],
         owner: &str,
+        facts_base: &lashlang::AstPath,
         base_path: &[u32],
         start: Option<usize>,
         versions: &mut VersionState,
@@ -320,8 +352,11 @@ impl<'a> GraphProjector<'a> {
         let mut previous_effect: Option<WorkflowNodeId> = None;
         for (index, expression) in expressions.iter().enumerate() {
             let mut path = base_path.to_vec();
+            let mut facts_path = facts_base.clone();
             if let Some(start) = start {
-                path.push((start + index) as u32);
+                let step = (start + index) as u32;
+                path.push(step);
+                facts_path = facts_path.child(step);
             }
             // A statement the lowerer wrapped to give it a value is projected
             // as the statement itself, one AST step further down.
@@ -333,9 +368,10 @@ impl<'a> GraphProjector<'a> {
                 )
             {
                 path = lashlang::child_path(&path, 0);
+                facts_path = facts_path.child(0);
                 expression = statement;
             }
-            let node = self.project_node(expression, owner, &path, versions);
+            let node = self.project_node(expression, owner, &path, &facts_path, versions);
             add_dependency_edges(&mut subgraph.edges, &node, expression, versions);
             if node_is_sequenced(&node) {
                 if let Some(previous) = &previous_effect {
@@ -353,21 +389,30 @@ impl<'a> GraphProjector<'a> {
         subgraph
     }
 
+    /// `facts_path` is `expression`'s [`lashlang::AstPath`]; a peeled label
+    /// moves it to the inner node, matching where the linker recorded facts.
     fn project_node(
         &self,
         expression: &Expr,
         owner: &str,
         path: &[u32],
+        facts_path: &lashlang::AstPath,
         versions: &mut VersionState,
     ) -> WorkflowNode {
         let (label, expression) = peel_label(expression);
+        let facts_path = if label.is_some() {
+            facts_path.child(0)
+        } else {
+            facts_path.clone()
+        };
         let source_span = if owner == "main" {
             self.spans.get(path).copied()
         } else {
             None
         };
         let available_variables: Vec<String> = versions.known.iter().cloned().collect();
-        let (kind, derived_name, outputs) = self.project_kind(expression, owner, path, versions);
+        let (kind, derived_name, outputs) =
+            self.project_kind(expression, owner, path, &facts_path, versions);
         let id = self.node_id(owner, path, kind_tag(&kind));
         let (name, description, name_source) = match label {
             Some(label) => (
@@ -380,7 +425,7 @@ impl<'a> GraphProjector<'a> {
         let execution_sites = lashlang::execution_sites(expression, owner, path, label);
         let type_facets = lashlang::projected_node_type_facets(
             self.analysis,
-            expression,
+            &facts_path,
             &available_variables,
             &id,
         );
@@ -398,11 +443,14 @@ impl<'a> GraphProjector<'a> {
         }
     }
 
+    /// `facts_path` is `expression`'s [`lashlang::AstPath`]; nested blocks are
+    /// reached by appending the same child steps `value_path` records.
     fn project_kind(
         &self,
         expression: &Expr,
         owner: &str,
         path: &[u32],
+        facts_path: &lashlang::AstPath,
         versions: &mut VersionState,
     ) -> (WorkflowNodeKind, String, Vec<VariableVersion>) {
         if let Some((target, value)) = printer::assignment_sugar(expression) {
@@ -416,6 +464,13 @@ impl<'a> GraphProjector<'a> {
             );
         }
         let (binding, value, value_path) = assignment_parts(expression, path);
+        // `value` sits at `value_path` relative to `path`; the same child
+        // steps reach it under `facts_path`.
+        let value_facts_path = {
+            let mut facts = facts_path.clone();
+            facts.steps.extend(&value_path[path.len()..]);
+            facts
+        };
         if let Expr::Assign { target, expr } = expression
             && (!target.is_simple() || versions.is_known(target.root.as_str()))
         {
@@ -440,12 +495,14 @@ impl<'a> GraphProjector<'a> {
                     then_block,
                     owner,
                     &lashlang::child_path(&value_path, 1),
+                    &value_facts_path.child(1),
                     &mut then_versions,
                 );
                 let else_graph = self.project_block(
                     else_block,
                     owner,
                     &lashlang::child_path(&value_path, 2),
+                    &value_facts_path.child(2),
                     &mut else_versions,
                 );
                 let mut outputs = assignment_output(binding.as_ref(), versions);
@@ -500,19 +557,28 @@ impl<'a> GraphProjector<'a> {
                 };
                 let mut body_versions = versions.clone();
                 body_versions.shadow(loop_binding);
+                let body_facts_base = value_facts_path.child(1);
                 let body_graph = match rest {
-                    None => self.project_block(body, owner, &body_base, &mut body_versions),
+                    None => self.project_block(
+                        body,
+                        owner,
+                        &body_base,
+                        &body_facts_base,
+                        &mut body_versions,
+                    ),
                     Some([single]) if matches!(single, Expr::Block(_)) => self.project_block(
                         single,
                         owner,
                         &lashlang::child_path(&body_base, body_start),
+                        &body_facts_base.child(body_start),
                         &mut body_versions,
                     ),
                     Some(rest) => self.project_statements(
                         rest,
                         owner,
+                        &body_facts_base,
                         &body_base,
-                        Some(body_start),
+                        Some(body_start as usize),
                         &mut body_versions,
                     ),
                 };
@@ -533,6 +599,7 @@ impl<'a> GraphProjector<'a> {
                     body,
                     owner,
                     &lashlang::child_path(&value_path, 1),
+                    &value_facts_path.child(1),
                     &mut body_versions,
                 );
                 let outputs = loop_outputs(body, None, versions);
@@ -556,6 +623,7 @@ impl<'a> GraphProjector<'a> {
                     element,
                     owner,
                     &lashlang::child_path(&value_path, clauses.len() as u32),
+                    &value_facts_path.child(clauses.len() as u32),
                     &mut element_versions,
                 );
                 let outputs = assignment_output(binding.as_ref(), versions);

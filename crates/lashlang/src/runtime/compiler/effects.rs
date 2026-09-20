@@ -3,13 +3,16 @@ use super::*;
 use super::entry::ListComprehensionElement;
 
 impl Compiler {
+    /// `path` is the path of `expr`, the node under the `LabelAnnotated`
+    /// the caller matched on.
     pub(super) fn try_compile_label_as_effect_step(
         &mut self,
         expr: &Expr,
         label: &LabelMetadata,
         leave_value: bool,
+        path: &AstPath,
     ) -> bool {
-        let Some(site) = self.labeled_effect_site(expr, label) else {
+        let Some(site) = self.labeled_effect_site(expr, label, path) else {
             return false;
         };
         match expr {
@@ -18,8 +21,9 @@ impl Compiler {
                 expr,
                 leave_value,
                 site,
+                path,
             ),
-            _ => self.compile_expr_with_forced_effect_site(expr, site),
+            _ => self.compile_expr_with_forced_effect_site(expr, site, path),
         }
     }
 
@@ -27,36 +31,51 @@ impl Compiler {
         &self,
         expr: &Expr,
         label: &LabelMetadata,
+        path: &AstPath,
     ) -> Option<LashlangExecutionSite> {
         if label_attaches_to_concrete_node(expr) {
-            self.concrete_labeled_effect_site(expr)
+            self.concrete_labeled_effect_site(expr, path)
         } else {
-            self.labeled_step_execution_site(expr, label.title.as_str())
+            self.labeled_step_execution_site(path, label.title.as_str())
         }
     }
 
-    fn concrete_labeled_effect_site(&self, expr: &Expr) -> Option<LashlangExecutionSite> {
+    /// `Assign`, `Await`, and `ResultUnwrap` forward their label to the
+    /// concrete node inside; its path is the respective child of `path`.
+    fn concrete_labeled_effect_site(
+        &self,
+        expr: &Expr,
+        path: &AstPath,
+    ) -> Option<LashlangExecutionSite> {
         match expr {
-            Expr::Assign { expr, .. } | Expr::Await(expr) | Expr::ResultUnwrap(expr) => {
-                self.concrete_labeled_effect_site(expr)
+            Expr::Assign { target, expr } => self.concrete_labeled_effect_site(
+                expr,
+                &path.child(Self::assign_value_index(target) as u32),
+            ),
+            Expr::Await(expr) | Expr::ResultUnwrap(expr) => {
+                self.concrete_labeled_effect_site(expr, &path.child(0))
             }
-            _ => self.lashlang_execution_site_for_expr(expr),
+            _ => self.lashlang_execution_site_for_expr(expr, path),
         }
     }
 
+    /// `path` is the `Assign` node's path: the target's dynamic index steps
+    /// come first in `children()` order, the value last.
     fn compile_assignment_expr_with_forced_effect_site(
         &mut self,
         target: &AssignTarget,
         expr: &Expr,
         leave_value: bool,
         site: LashlangExecutionSite,
+        path: &AstPath,
     ) -> bool {
         if !expr_supports_forced_effect_site(expr) {
             return false;
         }
+        let value_path = path.child(Self::assign_value_index(target) as u32);
         if target.is_simple() {
             let slot = self.push_slot(&target.root);
-            if !self.compile_expr_with_forced_effect_site(expr, site) {
+            if !self.compile_expr_with_forced_effect_site(expr, site, &value_path) {
                 return false;
             }
             self.code.push(Instruction::StoreName(slot));
@@ -66,12 +85,14 @@ impl Compiler {
         }
 
         let slot = self.push_slot(&target.root);
+        let mut index_child = 0usize;
         for step in &target.steps {
             if let AssignPathStep::Index(index) = step {
-                self.compile_expr(index);
+                self.compile_expr(index, &path.child(index_child as u32));
+                index_child += 1;
             }
         }
-        if !self.compile_expr_with_forced_effect_site(expr, site) {
+        if !self.compile_expr_with_forced_effect_site(expr, site, &value_path) {
             return false;
         }
         let path = self.push_assign_path(&target.steps);
@@ -85,14 +106,16 @@ impl Compiler {
         &mut self,
         expr: &Expr,
         site: LashlangExecutionSite,
+        path: &AstPath,
     ) -> bool {
-        self.compile_awaitable_effect_expr(expr, Some(site))
+        self.compile_awaitable_effect_expr(expr, Some(site), path)
     }
 
     pub(super) fn compile_awaitable_effect_expr(
         &mut self,
         expr: &Expr,
         forced_site: Option<LashlangExecutionSite>,
+        path: &AstPath,
     ) -> bool {
         match expr {
             Expr::ReceiverCall {
@@ -100,14 +123,22 @@ impl Compiler {
                 operation,
                 args,
             } => {
-                let instruction = self.compile_receiver_call_expr(receiver, operation, args, false);
-                self.mark_awaitable_effect_site(instruction, forced_site, expr);
+                let instruction =
+                    self.compile_receiver_call_expr(receiver, operation, args, false, path);
+                self.mark_awaitable_effect_site(instruction, forced_site, expr, path);
                 true
             }
-            Expr::Await(handle) => self.compile_await_handle_expr(handle, false, forced_site),
+            Expr::Await(handle) => {
+                self.compile_await_handle_expr(handle, false, forced_site, &path.child(0))
+            }
             Expr::ResultUnwrap(inner) => {
                 if let Expr::Await(handle) = inner.as_ref() {
-                    return self.compile_await_handle_expr(handle, true, forced_site);
+                    return self.compile_await_handle_expr(
+                        handle,
+                        true,
+                        forced_site,
+                        &path.child(0).child(0),
+                    );
                 }
                 if let Expr::ReceiverCall {
                     receiver,
@@ -115,9 +146,19 @@ impl Compiler {
                     args,
                 } = inner.as_ref()
                 {
-                    let instruction =
-                        self.compile_receiver_call_expr(receiver, operation, args, true);
-                    self.mark_awaitable_effect_site(instruction, forced_site, inner);
+                    let instruction = self.compile_receiver_call_expr(
+                        receiver,
+                        operation,
+                        args,
+                        true,
+                        &path.child(0),
+                    );
+                    self.mark_awaitable_effect_site(
+                        instruction,
+                        forced_site,
+                        inner,
+                        &path.child(0),
+                    );
                     return true;
                 }
                 false
@@ -131,8 +172,9 @@ impl Compiler {
         handle: &Expr,
         unwrap_result: bool,
         forced_site: Option<LashlangExecutionSite>,
+        path: &AstPath,
     ) -> bool {
-        if self.compile_aggregate_await_expr(handle, unwrap_result, forced_site.clone()) {
+        if self.compile_aggregate_await_expr(handle, unwrap_result, forced_site.clone(), path) {
             return true;
         }
         match handle {
@@ -142,8 +184,8 @@ impl Compiler {
                 args,
             } => {
                 let instruction =
-                    self.compile_receiver_call_expr(receiver, operation, args, unwrap_result);
-                self.mark_awaitable_effect_site(instruction, forced_site, handle);
+                    self.compile_receiver_call_expr(receiver, operation, args, unwrap_result, path);
+                self.mark_awaitable_effect_site(instruction, forced_site, handle, path);
             }
             Expr::ResultUnwrap(inner) => {
                 if let Expr::ReceiverCall {
@@ -152,18 +194,28 @@ impl Compiler {
                     args,
                 } = inner.as_ref()
                 {
-                    let instruction =
-                        self.compile_receiver_call_expr(receiver, operation, args, true);
-                    self.mark_awaitable_effect_site(instruction, forced_site, inner);
+                    let instruction = self.compile_receiver_call_expr(
+                        receiver,
+                        operation,
+                        args,
+                        true,
+                        &path.child(0),
+                    );
+                    self.mark_awaitable_effect_site(
+                        instruction,
+                        forced_site,
+                        inner,
+                        &path.child(0),
+                    );
                 } else {
-                    self.compile_expr(inner);
+                    self.compile_expr(inner, &path.child(0));
                     let instruction = self.code.len();
                     self.code.push(Instruction::AwaitHandleUnwrap);
                     self.mark_forced_lashlang_execution_site(instruction, forced_site);
                 }
             }
             _ => {
-                self.compile_expr(handle);
+                self.compile_expr(handle, path);
                 let instruction = self.code.len();
                 self.code.push(if unwrap_result {
                     Instruction::AwaitHandleUnwrap
@@ -181,20 +233,30 @@ impl Compiler {
         handle: &Expr,
         aggregate_unwrap: bool,
         forced_site: Option<LashlangExecutionSite>,
+        path: &AstPath,
     ) -> bool {
         if let Expr::ListComprehension { element, clauses } = handle
             && let Some(leaf) = comprehension_call_leaf(element)
         {
+            // The leaf call is the element node, unwrapping `?` once.
+            let element_path = path.child(clauses.len() as u32);
+            let call_path = if leaf.unwrap {
+                element_path.child(0)
+            } else {
+                element_path
+            };
             self.compile_list_comprehension(
                 ListComprehensionElement::DeferredCall {
                     receiver: leaf.receiver,
                     args: leaf.args,
+                    call_path: call_path.clone(),
                 },
                 clauses,
+                path,
             );
             let operation = self.push_name(leaf.operation);
-            let site = self.lashlang_execution_site_for_expr(leaf.call);
-            let source_span = self.expression_source_span(leaf.call);
+            let site = self.lashlang_execution_site_for_expr(leaf.call, &call_path);
+            let source_span = self.expression_source_span(&call_path);
             let batch =
                 self.push_resource_operation_list_batch(CompiledResourceOperationListBatch {
                     operation,
@@ -207,7 +269,7 @@ impl Compiler {
             let instruction = self.code.len();
             self.code
                 .push(Instruction::ResourceOperationListBatch(batch));
-            self.mark_instruction_source_span(instruction, handle);
+            self.mark_instruction_source_span(instruction, path);
             self.mark_forced_lashlang_execution_site(instruction, forced_site);
             return true;
         }
@@ -220,7 +282,8 @@ impl Compiler {
 
         let mut leaves = Vec::with_capacity(leaf_count);
         let mut stack_value_count = 0;
-        let shape = self.compile_aggregate_await_shape(handle, &mut leaves, &mut stack_value_count);
+        let shape =
+            self.compile_aggregate_await_shape(handle, path, &mut leaves, &mut stack_value_count);
         // Only a batch that can propagate a leaf's rejection selects by
         // settlement order. `allSettled` reports every leaf as a record and
         // never unwraps one, so it must not validate — let alone die on —
@@ -235,7 +298,7 @@ impl Compiler {
         });
         let instruction = self.code.len();
         self.code.push(Instruction::ResourceOperationBatch(batch));
-        self.mark_instruction_source_span(instruction, handle);
+        self.mark_instruction_source_span(instruction, path);
         self.mark_forced_lashlang_execution_site(instruction, forced_site);
         true
     }
@@ -247,6 +310,7 @@ impl Compiler {
     fn compile_aggregate_await_shape(
         &mut self,
         expr: &Expr,
+        path: &AstPath,
         leaves: &mut Vec<CompiledResourceOperationBatchLeaf>,
         stack_value_count: &mut usize,
     ) -> CompiledAggregateAwaitShape {
@@ -255,10 +319,12 @@ impl Compiler {
                 let mut element_leaves = Vec::new();
                 let mut element_value_count = 0;
                 let mut element_shape = None;
+                let element_path = path.child(clauses.len() as u32);
                 self.compile_list_comprehension_with(
                     &mut |compiler| {
                         element_shape = Some(compiler.compile_aggregate_await_shape(
                             element,
+                            &element_path,
                             &mut element_leaves,
                             &mut element_value_count,
                         ));
@@ -267,6 +333,7 @@ impl Compiler {
                             .push(Instruction::BuildTuple(element_value_count));
                     },
                     clauses,
+                    path,
                 );
                 let stack_index = *stack_value_count;
                 *stack_value_count += 1;
@@ -288,6 +355,7 @@ impl Compiler {
                 args,
             } => self.compile_aggregate_await_leaf(
                 expr,
+                path,
                 receiver,
                 operation,
                 args,
@@ -306,6 +374,7 @@ impl Compiler {
                 };
                 self.compile_aggregate_await_leaf(
                     expr,
+                    path,
                     receiver,
                     operation,
                     args,
@@ -317,7 +386,15 @@ impl Compiler {
             Expr::Tuple(items) => {
                 let values = items
                     .iter()
-                    .map(|item| self.compile_aggregate_await_shape(item, leaves, stack_value_count))
+                    .enumerate()
+                    .map(|(index, item)| {
+                        self.compile_aggregate_await_shape(
+                            item,
+                            &path.child(index as u32),
+                            leaves,
+                            stack_value_count,
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
                 CompiledAggregateAwaitShape::Tuple(values)
@@ -325,7 +402,15 @@ impl Compiler {
             Expr::List(items) => {
                 let values = items
                     .iter()
-                    .map(|item| self.compile_aggregate_await_shape(item, leaves, stack_value_count))
+                    .enumerate()
+                    .map(|(index, item)| {
+                        self.compile_aggregate_await_shape(
+                            item,
+                            &path.child(index as u32),
+                            leaves,
+                            stack_value_count,
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
                 CompiledAggregateAwaitShape::List(values)
@@ -333,15 +418,21 @@ impl Compiler {
             Expr::Record(entries) => {
                 let values = entries
                     .iter()
-                    .map(|(_, value)| {
-                        self.compile_aggregate_await_shape(value, leaves, stack_value_count)
+                    .enumerate()
+                    .map(|(index, (_, value))| {
+                        self.compile_aggregate_await_shape(
+                            value,
+                            &path.child(index as u32),
+                            leaves,
+                            stack_value_count,
+                        )
                     })
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
                 let keys = self.push_key_list(entries.iter().map(|(key, _)| key.as_str()));
                 CompiledAggregateAwaitShape::Record { keys, values }
             }
-            _ => self.compile_aggregate_await_value(expr, stack_value_count),
+            _ => self.compile_aggregate_await_value(expr, path, stack_value_count),
         }
     }
 
@@ -349,9 +440,12 @@ impl Compiler {
         clippy::too_many_arguments,
         reason = "aggregate await leaves mirror receiver-call syntax"
     )]
+    /// `site_path` is `site_expr`'s path; the receiver call it wraps (through
+    /// `ResultUnwrap` when `unwrap` holds) is `call_path` below.
     fn compile_aggregate_await_leaf(
         &mut self,
         site_expr: &Expr,
+        site_path: &AstPath,
         receiver: &Expr,
         operation: &str,
         args: &[Expr],
@@ -359,18 +453,23 @@ impl Compiler {
         leaves: &mut Vec<CompiledResourceOperationBatchLeaf>,
         stack_value_count: &mut usize,
     ) -> CompiledAggregateAwaitShape {
+        let call_path = if unwrap {
+            site_path.child(0)
+        } else {
+            site_path.clone()
+        };
         let receiver_stack_index = *stack_value_count;
-        self.compile_expr(receiver);
-        for arg in args {
-            self.compile_expr(arg);
+        self.compile_expr(receiver, &call_path.child(0));
+        for (index, arg) in args.iter().enumerate() {
+            self.compile_expr(arg, &call_path.child(index as u32 + 1));
         }
         let operation_index = self.push_name(operation);
         let descriptor_expr = match site_expr {
             Expr::ResultUnwrap(inner) => inner.as_ref(),
             _ => site_expr,
         };
-        let site = self.lashlang_execution_site_for_descriptor(site_expr, descriptor_expr);
-        let source_span = self.expression_source_span(site_expr);
+        let site = self.lashlang_execution_site_for_descriptor(site_path, descriptor_expr);
+        let source_span = self.expression_source_span(site_path);
         let leaf_index = leaves.len();
         leaves.push(CompiledResourceOperationBatchLeaf {
             operation: operation_index,
@@ -387,10 +486,11 @@ impl Compiler {
     fn compile_aggregate_await_value(
         &mut self,
         expr: &Expr,
+        path: &AstPath,
         stack_value_count: &mut usize,
     ) -> CompiledAggregateAwaitShape {
         let value_index = *stack_value_count;
-        self.compile_expr(expr);
+        self.compile_expr(expr, path);
         *stack_value_count += 1;
         CompiledAggregateAwaitShape::Value(value_index)
     }
@@ -400,9 +500,11 @@ impl Compiler {
         instruction: usize,
         forced_site: Option<LashlangExecutionSite>,
         site_expr: &Expr,
+        site_path: &AstPath,
     ) {
-        let site = forced_site.or_else(|| self.lashlang_execution_site_for_expr(site_expr));
-        self.mark_instruction_source_span(instruction, site_expr);
+        let site =
+            forced_site.or_else(|| self.lashlang_execution_site_for_expr(site_expr, site_path));
+        self.mark_instruction_source_span(instruction, site_path);
         self.mark_forced_lashlang_execution_site(instruction, site);
     }
 
@@ -440,10 +542,11 @@ impl Compiler {
         operation: &str,
         args: &[Expr],
         unwrap: bool,
+        call_path: &AstPath,
     ) -> usize {
-        self.compile_expr(receiver);
-        for arg in args {
-            self.compile_expr(arg);
+        self.compile_expr(receiver, &call_path.child(0));
+        for (index, arg) in args.iter().enumerate() {
+            self.compile_expr(arg, &call_path.child(index as u32 + 1));
         }
         let operation = self.push_name(operation);
         let instruction = self.code.len();
@@ -467,7 +570,11 @@ impl Compiler {
         index
     }
 
-    pub(super) fn compile_condition_jump_if_false(&mut self, condition: &Expr) -> usize {
+    pub(super) fn compile_condition_jump_if_false(
+        &mut self,
+        condition: &Expr,
+        path: &AstPath,
+    ) -> usize {
         if !contains_type_literal(condition)
             && let Some(value) = self.fold_compile_time_expr(condition)
         {
@@ -519,8 +626,8 @@ impl Compiler {
                 });
                 return index;
             }
-            self.compile_expr(left);
-            self.compile_expr(right);
+            self.compile_expr(left, &path.child(0));
+            self.compile_expr(right, &path.child(1));
             let index = self.code.len();
             self.code.push(Instruction::JumpIfCompareFalse {
                 op: *op,
@@ -529,7 +636,7 @@ impl Compiler {
             return index;
         }
 
-        self.compile_expr(condition);
+        self.compile_expr(condition, path);
         self.emit_jump_if_false()
     }
 

@@ -60,6 +60,16 @@ impl AstPath {
         }
     }
 
+    /// The path of this node's `index`-th `children()` element.
+    pub fn child(&self, index: u32) -> Self {
+        let mut steps = self.steps.clone();
+        steps.push(index);
+        Self {
+            root: self.root,
+            steps,
+        }
+    }
+
     /// The flat encoding the lifted-process name hash predates this type on:
     /// `main` paths are the bare steps; declaration paths are prefixed with
     /// `u32::MAX` and the declaration index. Kept for that hash only — a

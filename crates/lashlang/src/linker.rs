@@ -9,8 +9,8 @@ use crate::artifact::{
     HostRequirements, ModuleArtifact, host_requirements_for_program_with_catalog,
 };
 use crate::ast::{
-    AssignPathStep, AstPath, AstRoot, AstString, Declaration, Expr, ListComprehensionClause,
-    ProcessDecl, ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TypeExpr, TypeField,
+    AssignPathStep, AstPath, AstString, Declaration, Expr, ListComprehensionClause, ProcessDecl,
+    ProcessParam, ProcessSignalDecl, Program, ResourceRefExpr, TypeExpr, TypeField,
     format_type_expr,
 };
 use crate::span::Span;
@@ -30,6 +30,8 @@ pub use errors::LinkError;
 mod pass_setup;
 use pass_setup::{Binding, Linker, function_signature};
 mod lower_expr;
+mod lower_javascript;
+mod module_resolution;
 mod pass_validation;
 mod process_literal;
 use pass_validation::validate_trigger_operation_subscription_key;
@@ -48,14 +50,17 @@ use type_helpers::{
 mod facets;
 pub use facets::analyze_workflow_program;
 use facets::{
-    declaration_span, program_node_maps, recover_workflow_binding, workflow_diagnostic_owner_key,
+    child_ast_path, declaration_span, recover_workflow_binding, workflow_diagnostic_owner_key,
 };
 #[cfg(test)]
 mod tests;
 
+/// Facts the workflow projector reads back for one node, keyed by the node's
+/// [`AstPath`] in the program the walk ran on. Paths — not addresses — are
+/// what survive a clone of the tree.
 #[derive(Clone, Debug, Default)]
 pub struct WorkflowLinkAnalysis {
-    nodes: BTreeMap<usize, WorkflowLinkNodeFacts>,
+    nodes: BTreeMap<AstPath, WorkflowLinkNodeFacts>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -79,5 +84,5 @@ pub(crate) struct WorkflowLinkExpectedArgument {
 
 #[derive(Debug, Default)]
 struct ExpectedTypeFacts {
-    by_expression: BTreeMap<usize, TypeExpr>,
+    by_expression: BTreeMap<AstPath, TypeExpr>,
 }
