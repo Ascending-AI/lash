@@ -1,6 +1,5 @@
 use crate::ProcessId;
 use lash_sansio::sync::MutexExt;
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -16,8 +15,7 @@ use super::{ManagedLeaseMap, TestLocalProcessRegistry};
 impl Default for TestLocalProcessRegistry {
     fn default() -> Self {
         Self {
-            transaction: Arc::new(Mutex::new(())),
-            managed: Arc::new(Mutex::new(HashMap::new())),
+            state: Arc::new(Mutex::new(super::types::RegistryState::default())),
             process_read_error: Arc::new(Mutex::new(None)),
             process_read_error_after: Arc::new(Mutex::new(None)),
             process_events_read_error: Arc::new(Mutex::new(None)),
@@ -30,29 +28,17 @@ impl Default for TestLocalProcessRegistry {
             external_ref_write_error: Arc::new(Mutex::new(None)),
             cancel_request_write_error: Arc::new(Mutex::new(None)),
             process_lease_release_error: Arc::new(Mutex::new(None)),
-            next_change_seq: Arc::new(Mutex::new(0)),
-            tombstone_compaction_horizon: Arc::new(Mutex::new(0)),
-            observers: Arc::new(Mutex::new(HashMap::<_, HashSet<_>>::new())),
-            wake_targets: Arc::new(Mutex::new(HashMap::new())),
-            tombstones: Arc::new(Mutex::new(HashMap::new())),
-            artifact_cleanup: Arc::new(Mutex::new(HashMap::new())),
-            leases: Arc::new(Mutex::new(HashMap::new())),
             process_lease_point_reads: Arc::new(Mutex::new(0)),
             process_lease_batch_reads: Arc::new(Mutex::new(0)),
-            handovers: Arc::new(Mutex::new(HashMap::new())),
-            tool_intent_submissions: Arc::new(Mutex::new(HashMap::new())),
             execution_write_pause: Arc::new(std::sync::Mutex::new(None)),
             wake_mark_pause: Arc::new(std::sync::Mutex::new(None)),
             append_target_snapshot_pause: Arc::new(std::sync::Mutex::new(None)),
             append_outbox_pause: Arc::new(std::sync::Mutex::new(None)),
             prune_managed_removal_pause: Arc::new(std::sync::Mutex::new(None)),
             wake_delivery_config: super::super::WakeDeliveryConfig::default(),
-            wake_deliveries: Arc::new(Mutex::new(HashMap::new())),
-            wake_allocation_floors: Arc::new(Mutex::new(HashMap::new())),
             worklist_page_reads: Arc::new(Mutex::new(Vec::new())),
             worklist_page_error_plan: Arc::new(Mutex::new(None)),
             worklist_page_pause: Arc::new(std::sync::Mutex::new(None)),
-            parent_end_plans: Arc::new(Mutex::new(HashMap::new())),
             clock: Arc::new(crate::SystemClock),
             scope_fence_hosts: super::super::ProcessScopeFenceHosts::default(),
         }
@@ -78,7 +64,8 @@ impl TestLocalProcessRegistry {
         &self,
         wake: crate::ProcessWakeDelivery,
     ) -> Result<(), PluginError> {
-        self.insert_wake_delivery(Some(&wake)).await
+        self.write(async |state| self.insert_wake_delivery(state, Some(&wake)))
+            .await
     }
 
     /// Inject worklist page-read errors after the given successful reads.
@@ -172,9 +159,9 @@ impl TestLocalProcessRegistry {
     /// Forces an otherwise-invalid discarded wake without a reason so shared conformance can
     /// verify how every registry treats legacy or corrupt nullable rows.
     pub async fn discard_wake_without_reason_for_testing(&self, delivery_id: &str) {
-        let _transaction = self.transaction.lock().await;
-        let mut deliveries = self.wake_deliveries.lock().await;
-        let delivery = deliveries
+        let mut state = self.state.lock().await;
+        let delivery = state
+            .wake_deliveries
             .get_mut(delivery_id)
             .expect("force reasonless discard for an existing wake delivery");
         assert_eq!(
@@ -216,15 +203,14 @@ impl TestLocalProcessRegistry {
     }
 
     pub fn transaction_is_locked_for_testing(&self) -> bool {
-        self.transaction.try_lock().is_err()
+        self.state.try_lock().is_err()
     }
 
     pub async fn replace_process_projection_for_testing(&self, record: ProcessRecord) {
-        let _transaction = self.transaction.lock().await;
+        let mut state = self.state.lock().await;
         let process_id = record.id.clone();
-        self.managed
-            .lock()
-            .await
+        state
+            .managed
             .get_mut(&process_id)
             .expect("replace projection for registered process")
             .record = record;
@@ -443,24 +429,24 @@ async fn finish_fixture_write<T>(
 /// The registry's side of a host binding: no fence file (the in-memory fence
 /// set is the host's), and the managed map as registration truth.
 pub(super) fn registry_binding(
-    managed: &Arc<Mutex<super::types::ManagedProcessMap>>,
+    state: &Arc<Mutex<super::types::RegistryState>>,
 ) -> crate::ProcessRegistryBinding {
     crate::ProcessRegistryBinding {
         fence_database: None,
         registrations: Arc::new(ManagedRegistrationProbe {
-            managed: Arc::clone(managed),
+            state: Arc::clone(state),
         }),
     }
 }
 
 /// The in-memory registry's registration truth for a bound effect host.
 struct ManagedRegistrationProbe {
-    managed: Arc<Mutex<super::types::ManagedProcessMap>>,
+    state: Arc<Mutex<super::types::RegistryState>>,
 }
 
 #[async_trait::async_trait]
 impl crate::ProcessRegistrationProbe for ManagedRegistrationProbe {
     async fn process_is_registered(&self, process_id: &ProcessId) -> Result<bool, PluginError> {
-        Ok(self.managed.lock().await.contains_key(process_id))
+        Ok(self.state.lock().await.managed.contains_key(process_id))
     }
 }

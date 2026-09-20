@@ -35,10 +35,11 @@ pub(super) async fn list_non_terminal_page(
             actual: cursor.backend().to_string(),
         });
     }
-    let managed = registry.managed.lock().await;
+    let state = registry.state.lock().await;
     let through_process_id = match continuation.as_ref() {
         Some(cursor) => cursor.through_process_id().to_string(),
-        None => match managed
+        None => match state
+            .managed
             .values()
             .filter(|record| !record.record.status.is_retired())
             .map(|record| record.record.id.as_str())
@@ -56,7 +57,8 @@ pub(super) async fn list_non_terminal_page(
     let after_process_id = continuation
         .as_ref()
         .map(ProcessWorklistCursor::after_process_id);
-    let mut records: Vec<ProcessRecord> = managed
+    let mut records: Vec<ProcessRecord> = state
+        .managed
         .values()
         .filter(|record| !record.record.status.is_retired())
         .filter(|record| record.record.id.as_str() <= through_process_id.as_str())

@@ -51,39 +51,60 @@ mod retention;
 mod support;
 mod types;
 mod worklist;
+use local_helpers::{insert_process, next_change_seq, process_miss};
 pub use registration_refusals::{
     REFUSAL_FIXTURE_PROCESS_ID as PROCESS_REFUSAL_FIXTURE_PROCESS_ID,
     accepted_process_registration, refused_process_registrations,
 };
 pub use support::TestProcessRegistryWriteExt;
 use support::{ExecutionWritePause, process_lease_expired, validate_in_memory_execution_authority};
-use types::{ManagedLeaseMap, ManagedProcessRecord};
+use types::{ManagedLeaseMap, ManagedProcessRecord, RegistryState};
 pub use types::{RawProcessRegistryStateForTesting, TestLocalProcessRegistry};
+
+/// A validated event append: the plan plus the scheduling coordinates the
+/// apply step needs. Splitting plan from apply lets `complete_process_with_lease`
+/// run its lease check between them without duplicating the preamble.
+struct PlannedManagedEventAppend {
+    prepared: super::ProcessEventAppendPlan,
+    wake_session_id: Option<SessionId>,
+    sequence: u64,
+}
 
 impl TestLocalProcessRegistry {
     async fn append_managed_event(
         &self,
-        record: &mut ManagedProcessRecord,
+        state: &mut RegistryState,
+        process_id: &ProcessId,
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
+        let planned = self
+            .plan_managed_event_append(state, process_id, request)
+            .await?;
+        self.apply_managed_event_append(state, process_id, planned)
+            .await
+    }
+
+    async fn plan_managed_event_append(
+        &self,
+        state: &RegistryState,
+        process_id: &ProcessId,
+        request: ProcessEventAppendRequest,
+    ) -> Result<PlannedManagedEventAppend, PluginError> {
+        let record = state
+            .managed
+            .get(process_id)
+            .expect("event appends target a managed row");
         let replay_lookup = request
             .replay
             .as_ref()
             .and_then(|replay| record.keyed_events.get(replay.key.as_str()))
             .cloned();
         let last_sequence = record.events.last().map(|event| event.sequence);
-        let wake_session_id = self
-            .wake_targets
-            .lock()
-            .await
-            .get(&record.record.id)
-            .cloned();
+        let wake_session_id = state.wake_targets.get(process_id).cloned();
         let sender_floor = match wake_session_id.as_ref() {
-            Some(target_session_id) => self
+            Some(target_session_id) => state
                 .wake_allocation_floors
-                .lock()
-                .await
-                .get(&(target_session_id.clone(), record.record.id.clone()))
+                .get(&(target_session_id.clone(), process_id.clone()))
                 .copied(),
             None => None,
         };
@@ -99,18 +120,40 @@ impl TestLocalProcessRegistry {
             now,
             wake_session_id.as_ref(),
         )?;
-        match prepared {
+        Ok(PlannedManagedEventAppend {
+            prepared,
+            wake_session_id,
+            sequence,
+        })
+    }
+
+    async fn apply_managed_event_append(
+        &self,
+        state: &mut RegistryState,
+        process_id: &ProcessId,
+        planned: PlannedManagedEventAppend,
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
+        match planned.prepared {
             super::ProcessEventAppendPlan::Replay {
                 event,
                 repair_record,
                 wake_delivery,
                 ..
             } => {
-                self.insert_wake_delivery(wake_delivery.as_ref()).await?;
+                self.insert_wake_delivery(state, wake_delivery.as_ref())?;
                 if let Some(repaired) = repair_record {
+                    let change_seq = next_change_seq(state);
+                    let record = state
+                        .managed
+                        .get_mut(process_id)
+                        .expect("event appends target a managed row");
                     record.record = repaired;
-                    record.change_seq = self.next_change_seq().await;
+                    record.change_seq = change_seq;
                 }
+                let record = state
+                    .managed
+                    .get(process_id)
+                    .expect("event appends target a managed row");
                 Ok(ProcessEventAppendReceipt {
                     last_event_sequence: record.record.last_event_sequence,
                     realization: crate::StoreRealization::Coalesced,
@@ -124,16 +167,21 @@ impl TestLocalProcessRegistry {
                 wake_delivery,
                 ..
             } => {
-                self.insert_wake_delivery(wake_delivery.as_ref()).await?;
-                self.advance_wake_allocation_floor(
-                    wake_session_id.as_ref(),
-                    &record.record.id,
-                    sequence,
-                )
-                .await;
+                self.insert_wake_delivery(state, wake_delivery.as_ref())?;
+                Self::advance_wake_allocation_floor(
+                    state,
+                    planned.wake_session_id.as_ref(),
+                    process_id,
+                    planned.sequence,
+                );
                 self.pause_append_after_outbox().await;
+                let change_seq = next_change_seq(state);
+                let record = state
+                    .managed
+                    .get_mut(process_id)
+                    .expect("event appends target a managed row");
                 record.record = projected_record;
-                record.change_seq = self.next_change_seq().await;
+                record.change_seq = change_seq;
                 record.events.push(event.clone());
                 if let Some(replay) = event.invocation.replay.clone() {
                     record.keyed_events.insert(replay.key, event.clone());
@@ -148,24 +196,24 @@ impl TestLocalProcessRegistry {
         }
     }
 
-    async fn insert_wake_delivery(
+    fn insert_wake_delivery(
         &self,
+        state: &mut RegistryState,
         wake: Option<&super::ProcessWakeDelivery>,
     ) -> Result<(), PluginError> {
         let Some(wake) = wake else {
             return Ok(());
         };
         let delivery = super::WakeDelivery::pending(wake.clone(), self.wake_delivery_config)?;
-        self.wake_deliveries
-            .lock()
-            .await
+        state
+            .wake_deliveries
             .entry(delivery.delivery_id.clone())
             .or_insert(delivery);
         Ok(())
     }
 
-    async fn advance_wake_allocation_floor(
-        &self,
+    fn advance_wake_allocation_floor(
+        state: &mut RegistryState,
         target_session_id: Option<&SessionId>,
         process_id: &ProcessId,
         sequence: u64,
@@ -173,9 +221,8 @@ impl TestLocalProcessRegistry {
         let Some(target_session_id) = target_session_id else {
             return;
         };
-        self.wake_allocation_floors
-            .lock()
-            .await
+        state
+            .wake_allocation_floors
             .insert((target_session_id.clone(), process_id.clone()), sequence);
     }
 }
@@ -209,17 +256,16 @@ impl super::registry::ProcessQuery for TestLocalProcessRegistry {
         if let Some(record) = self.process_read_override.lock().await.take() {
             return Ok(Some(record));
         }
-        if let Some(record) = self.managed.lock().await.get(process_id) {
+        let state = self.state.lock().await;
+        if let Some(record) = state.managed.get(process_id) {
             return Ok(Some(record.record.clone()));
         }
-        if self
+        if state
             .tombstones
-            .lock()
-            .await
             .keys()
             .any(|(tombstoned_process_id, _)| tombstoned_process_id == process_id)
         {
-            return Err(self.process_miss(process_id).await);
+            return Err(process_miss(&state, process_id));
         }
         Ok(None)
     }
@@ -228,8 +274,9 @@ impl super::registry::ProcessQuery for TestLocalProcessRegistry {
         &self,
         filter: &ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
-        let managed = self.managed.lock().await;
-        let mut records = managed
+        let state = self.state.lock().await;
+        let mut records = state
+            .managed
             .values()
             .map(|record| record.record.clone())
             .filter(|record| filter.matches_record(record))
@@ -243,8 +290,8 @@ impl super::registry::ProcessQuery for TestLocalProcessRegistry {
         cursor: ProcessChangeCursor,
         limit: usize,
     ) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let horizon = *self.tombstone_compaction_horizon.lock().await;
+        let state = self.state.lock().await;
+        let horizon = state.tombstone_compaction_horizon;
         if cursor.store_sequence() < horizon {
             return Err(PluginError::ProcessChangeCursorPruned {
                 requested_cursor: cursor,
@@ -254,8 +301,8 @@ impl super::registry::ProcessQuery for TestLocalProcessRegistry {
         if limit == 0 {
             return Ok((Vec::new(), cursor));
         }
-        let managed = self.managed.lock().await;
-        let mut rows = managed
+        let mut rows = state
+            .managed
             .values()
             .filter(|record| record.change_seq > cursor.store_sequence())
             .map(|record| {
@@ -268,11 +315,9 @@ impl super::registry::ProcessQuery for TestLocalProcessRegistry {
                 )
             })
             .collect::<Vec<_>>();
-        drop(managed);
         rows.extend(
-            self.tombstones
-                .lock()
-                .await
+            state
+                .tombstones
                 .values()
                 .filter(|tombstone| tombstone.pruned_change_seq > cursor.store_sequence())
                 .map(|tombstone| {
@@ -308,15 +353,16 @@ impl super::registry::ProcessQuery for TestLocalProcessRegistry {
     }
 
     async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
-        let managed = self.managed.lock().await;
+        let state = self.state.lock().await;
         Ok(ProcessLiveReferenceView::from_records(
-            managed.values().map(|record| &record.record),
+            state.managed.values().map(|record| &record.record),
         ))
     }
 
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {
-        let managed = self.managed.lock().await;
-        Ok(managed
+        let state = self.state.lock().await;
+        Ok(state
+            .managed
             .values()
             .filter(|record| !record.record.status.is_retired())
             .count())
@@ -330,23 +376,16 @@ impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
         registration: ProcessRegistration,
         observers: &[SessionId],
     ) -> Result<crate::ProcessRegistrationOutcome, PluginError> {
-        let _transaction = self.transaction.lock().await;
         let process_id = registration.id.clone();
-        let managed_before = self.managed.lock().await.clone();
-        let observers_before = self.observers.lock().await.clone();
-        let wake_targets_before = self.wake_targets.lock().await.clone();
-        let result = async {
-            let inserted = self.insert_process(registration, observers).await?;
+        self.write(async |state| {
+            let inserted = insert_process(self, state, registration, observers)?;
             if !inserted.is_created() {
                 return Ok(inserted);
             }
-            let mut managed = self.managed.lock().await;
-            let record = managed
-                .get_mut(&process_id)
-                .expect("registration inserted process");
             for session_id in observers {
                 self.append_managed_event(
-                    record,
+                    state,
+                    &process_id,
                     ProcessEventAppendRequest::observer_added(
                         &process_id,
                         session_id,
@@ -355,27 +394,25 @@ impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
                 )
                 .await?;
             }
-            let record = record.record.clone();
-            drop(managed);
+            let record = state
+                .managed
+                .get(&process_id)
+                .expect("registration inserted process")
+                .record
+                .clone();
             // Same critical section as the insert: a fence that cannot be
-            // lifted fails the registration and the maps roll back below.
+            // lifted fails the registration and the staged state is dropped.
             self.scope_fence_hosts
                 .reinstate_process_scope(&process_id)
                 .await?;
             Ok(crate::ProcessRegistrationOutcome::created(record))
-        }
-        .await;
-        if result.is_err() {
-            *self.managed.lock().await = managed_before;
-            *self.observers.lock().await = observers_before;
-            *self.wake_targets.lock().await = wake_targets_before;
-        }
-        result
+        })
+        .await
     }
 
     fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
         self.scope_fence_hosts
-            .bind(effect_host, support::registry_binding(&self.managed));
+            .bind(effect_host, support::registry_binding(&self.state));
     }
 
     async fn set_external_ref(
@@ -383,24 +420,31 @@ impl super::registry::ProcessRegistrar for TestLocalProcessRegistry {
         process_id: &ProcessId,
         external_ref: ProcessExternalRef,
     ) -> Result<ProcessRecord, PluginError> {
-        let _transaction = self.transaction.lock().await;
         if let Some(error) = self.external_ref_write_error.lock().await.take() {
             return Err(error);
         }
-        let mut managed = self.managed.lock().await;
-        let Some(record) = managed.get_mut(process_id) else {
-            return Err(self.process_miss(process_id).await);
-        };
-        match prepare_process_transition(
-            &record.record,
-            ProcessTransition::SetExternalRef(external_ref),
-        )? {
-            ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
-            ProcessTransitionPlan::Append(request) => {
-                self.append_managed_event(record, *request).await?;
+        self.write(async |state| {
+            let Some(record) = state.managed.get(process_id) else {
+                return Err(process_miss(state, process_id));
+            };
+            match prepare_process_transition(
+                &record.record,
+                ProcessTransition::SetExternalRef(external_ref),
+            )? {
+                ProcessTransitionPlan::Unchanged => return Ok(record.record.clone()),
+                ProcessTransitionPlan::Append(request) => {
+                    self.append_managed_event(state, process_id, *request)
+                        .await?;
+                }
             }
-        }
-        Ok(record.record.clone())
+            Ok(state
+                .managed
+                .get(process_id)
+                .expect("event appends target a managed row")
+                .record
+                .clone())
+        })
+        .await
     }
 }
 
@@ -412,36 +456,26 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         process_id: &ProcessId,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let managed_before = self.managed.lock().await.clone();
-        let observers_before = self.observers.lock().await.clone();
-        let result = async {
-            let mut managed = self.managed.lock().await;
-            let Some(record) = managed.get_mut(process_id) else {
-                return Err(self.process_miss(process_id).await);
-            };
-            let inserted = self
+        self.write(async |state| {
+            if !state.managed.contains_key(process_id) {
+                return Err(process_miss(state, process_id));
+            }
+            let inserted = state
                 .observers
-                .lock()
-                .await
                 .entry(session_id.clone())
                 .or_default()
                 .insert(process_id.clone());
             if inserted {
                 self.append_managed_event(
-                    record,
+                    state,
+                    process_id,
                     ProcessEventAppendRequest::observer_added(process_id, session_id, &by),
                 )
                 .await?;
             }
             Ok(())
-        }
-        .await;
-        if result.is_err() {
-            *self.managed.lock().await = managed_before;
-            *self.observers.lock().await = observers_before;
-        }
-        result
+        })
+        .await
     }
 
     async fn remove_observer(
@@ -450,35 +484,25 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         process_id: &ProcessId,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let managed_before = self.managed.lock().await.clone();
-        let observers_before = self.observers.lock().await.clone();
-        let result = async {
-            let mut managed = self.managed.lock().await;
-            let Some(record) = managed.get_mut(process_id) else {
-                return Err(self.process_miss(process_id).await);
-            };
-            let removed = self
+        self.write(async |state| {
+            if !state.managed.contains_key(process_id) {
+                return Err(process_miss(state, process_id));
+            }
+            let removed = state
                 .observers
-                .lock()
-                .await
                 .get_mut(session_id)
                 .is_some_and(|processes| processes.remove(process_id));
             if removed {
                 self.append_managed_event(
-                    record,
+                    state,
+                    process_id,
                     ProcessEventAppendRequest::observer_removed(process_id, session_id, &by),
                 )
                 .await?;
             }
             Ok(())
-        }
-        .await;
-        if result.is_err() {
-            *self.managed.lock().await = managed_before;
-            *self.observers.lock().await = observers_before;
-        }
-        result
+        })
+        .await
     }
 
     async fn transfer_observers(
@@ -488,17 +512,13 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         process_ids: &[ProcessId],
         by: ProcessObserverBy,
     ) -> Result<(), PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let managed_before = self.managed.lock().await.clone();
-        let observers_before = self.observers.lock().await.clone();
-        let result = async {
+        self.write(async |state| {
             for process_id in process_ids {
-                let mut managed = self.managed.lock().await;
-                let Some(record) = managed.get_mut(process_id) else {
-                    return Err(self.process_miss(process_id).await);
-                };
-                let mut observers = self.observers.lock().await;
-                let removed = observers
+                if !state.managed.contains_key(process_id) {
+                    return Err(process_miss(state, process_id));
+                }
+                let removed = state
+                    .observers
                     .get_mut(from_session_id)
                     .is_some_and(|processes| processes.remove(process_id));
                 if !removed {
@@ -506,30 +526,27 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
                         "process `{process_id}` is not observed by session `{from_session_id}`"
                     )));
                 }
-                observers
+                state
+                    .observers
                     .entry(to_session_id.clone())
                     .or_default()
                     .insert(ProcessId::from(process_id.clone().to_string()));
-                drop(observers);
                 self.append_managed_event(
-                    record,
+                    state,
+                    process_id,
                     ProcessEventAppendRequest::observer_removed(process_id, from_session_id, &by),
                 )
                 .await?;
                 self.append_managed_event(
-                    record,
+                    state,
+                    process_id,
                     ProcessEventAppendRequest::observer_added(process_id, to_session_id, &by),
                 )
                 .await?;
             }
             Ok(())
-        }
-        .await;
-        if result.is_err() {
-            *self.managed.lock().await = managed_before;
-            *self.observers.lock().await = observers_before;
-        }
-        result
+        })
+        .await
     }
 
     async fn list_observed_by(
@@ -537,17 +554,14 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         session_id: &SessionId,
         filter: &ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
-        let process_ids = self
+        let state = self.state.lock().await;
+        let mut records = state
             .observers
-            .lock()
-            .await
             .get(session_id)
             .cloned()
-            .unwrap_or_default();
-        let managed = self.managed.lock().await;
-        let mut records = process_ids
+            .unwrap_or_default()
             .into_iter()
-            .filter_map(|process_id| managed.get(&process_id).map(|row| row.record.clone()))
+            .filter_map(|process_id| state.managed.get(&process_id).map(|row| row.record.clone()))
             .filter(|record| filter.matches_record(record))
             .collect::<Vec<_>>();
         records.sort_by(|left, right| left.id.cmp(&right.id));
@@ -558,13 +572,12 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         &self,
         process_id: &ProcessId,
     ) -> Result<Vec<SessionId>, PluginError> {
-        if !self.managed.lock().await.contains_key(process_id) {
-            return Err(self.process_miss(process_id).await);
+        let state = self.state.lock().await;
+        if !state.managed.contains_key(process_id) {
+            return Err(process_miss(&state, process_id));
         }
-        let mut sessions = self
+        let mut sessions = state
             .observers
-            .lock()
-            .await
             .iter()
             .filter(|(_, processes)| processes.contains(process_id))
             .map(|(session_id, _)| session_id.clone())
@@ -578,89 +591,85 @@ impl super::registry::ProcessObserverRegistry for TestLocalProcessRegistry {
         process_id: &ProcessId,
         target: Option<&str>,
     ) -> Result<(), PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut managed = self.managed.lock().await;
-        let Some(record) = managed.get_mut(process_id) else {
-            return Err(self.process_miss(process_id).await);
-        };
-        let old_target = self.wake_targets.lock().await.get(process_id).cloned();
-        if old_target.as_deref() == target {
-            return Ok(());
-        }
-        self.append_managed_event(
-            record,
-            ProcessEventAppendRequest::subscription_retargeted(process_id, target),
-        )
-        .await?;
-        let mut wake_targets = self.wake_targets.lock().await;
-        match target {
-            Some(target) => {
-                wake_targets.insert(process_id.clone(), SessionId::from(target));
+        self.write(async |state| {
+            if !state.managed.contains_key(process_id) {
+                return Err(process_miss(state, process_id));
             }
-            None => {
-                wake_targets.remove(process_id);
+            let old_target = state.wake_targets.get(process_id).cloned();
+            if old_target.as_deref() == target {
+                return Ok(());
             }
-        }
-        drop(wake_targets);
-        if let Some(old_target) = old_target {
-            for delivery in self.wake_deliveries.lock().await.values_mut() {
-                if delivery.state() == super::WakeDeliveryState::Pending
-                    && delivery.wake.process_id == process_id
-                    && delivery.wake.target_session_id == old_target
-                {
-                    delivery.disposition = super::WakeDeliveryDisposition::Discarded {
-                        reason: super::WakeDiscardReason::Retargeted,
-                    };
+            self.append_managed_event(
+                state,
+                process_id,
+                ProcessEventAppendRequest::subscription_retargeted(process_id, target),
+            )
+            .await?;
+            match target {
+                Some(target) => {
+                    state
+                        .wake_targets
+                        .insert(process_id.clone(), SessionId::from(target));
+                }
+                None => {
+                    state.wake_targets.remove(process_id);
                 }
             }
-        }
-        Ok(())
+            if let Some(old_target) = old_target {
+                for delivery in state.wake_deliveries.values_mut() {
+                    if delivery.state() == super::WakeDeliveryState::Pending
+                        && delivery.wake.process_id == process_id
+                        && delivery.wake.target_session_id == old_target
+                    {
+                        delivery.disposition = super::WakeDeliveryDisposition::Discarded {
+                            reason: super::WakeDiscardReason::Retargeted,
+                        };
+                    }
+                }
+            }
+            Ok(())
+        })
+        .await
     }
 
     async fn delete_session_process_state(
         &self,
         session_id: &SessionId,
     ) -> Result<ProcessSessionDeleteReport, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let removed_observer_count = self
-            .observers
-            .lock()
-            .await
-            .remove(session_id)
-            .map_or(0, |processes| processes.len());
-        let cleared_processes = self
-            .wake_targets
-            .lock()
-            .await
-            .iter()
-            .filter(|(_, target)| target.as_str() == session_id)
-            .map(|(process_id, _)| process_id.clone())
-            .collect::<Vec<_>>();
-        self.wake_targets
-            .lock()
-            .await
-            .retain(|_, target| target != session_id);
-        self.wake_allocation_floors
-            .lock()
-            .await
-            .retain(|(target_session_id, _), _| target_session_id != session_id);
-        let mut discarded_wake_delivery_count = 0;
-        for delivery in self.wake_deliveries.lock().await.values_mut() {
-            if delivery.state() == super::WakeDeliveryState::Pending
-                && delivery.wake.target_session_id == session_id
-            {
-                delivery.disposition = super::WakeDeliveryDisposition::Discarded {
-                    reason: super::WakeDiscardReason::TargetGone,
-                };
-                discarded_wake_delivery_count += 1;
+        self.write(async |state| {
+            let removed_observer_count = state
+                .observers
+                .remove(session_id)
+                .map_or(0, |processes| processes.len());
+            let cleared_processes = state
+                .wake_targets
+                .iter()
+                .filter(|(_, target)| target.as_str() == session_id)
+                .map(|(process_id, _)| process_id.clone())
+                .collect::<Vec<_>>();
+            state.wake_targets.retain(|_, target| target != session_id);
+            state
+                .wake_allocation_floors
+                .retain(|(target_session_id, _), _| target_session_id != session_id);
+            let mut discarded_wake_delivery_count = 0;
+            for delivery in state.wake_deliveries.values_mut() {
+                if delivery.state() == super::WakeDeliveryState::Pending
+                    && delivery.wake.target_session_id == session_id
+                {
+                    delivery.disposition = super::WakeDeliveryDisposition::Discarded {
+                        reason: super::WakeDiscardReason::TargetGone,
+                    };
+                    discarded_wake_delivery_count += 1;
+                }
             }
-        }
-        Ok(ProcessSessionDeleteReport {
-            session_id: session_id.clone(),
-            removed_observer_count,
-            discarded_wake_delivery_count,
-            cleared_subscription_count: cleared_processes.len(),
+            Ok(ProcessSessionDeleteReport {
+                session_id: session_id.clone(),
+                removed_observer_count,
+                discarded_wake_delivery_count,
+                cleared_subscription_count: cleared_processes.len(),
+            })
         })
+        .await
     }
 }
 
@@ -670,16 +679,17 @@ impl super::registry::ProcessToolIntents for TestLocalProcessRegistry {
         &self,
         submission: crate::ToolIntentSubmissionRecord,
     ) -> Result<crate::ToolIntentSubmissionAdmission, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let replay_key = submission.identity.replay_key.clone();
-        let mut submissions = self.tool_intent_submissions.lock().await;
-        if let Some(existing) = submissions.get(&replay_key) {
-            return Ok(crate::ToolIntentSubmissionAdmission::Existing(Box::new(
-                existing.clone(),
-            )));
-        }
-        submissions.insert(replay_key, submission);
-        Ok(crate::ToolIntentSubmissionAdmission::Admitted)
+        self.write(async |state| {
+            let replay_key = submission.identity.replay_key.clone();
+            if let Some(existing) = state.tool_intent_submissions.get(&replay_key) {
+                return Ok(crate::ToolIntentSubmissionAdmission::Existing(Box::new(
+                    existing.clone(),
+                )));
+            }
+            state.tool_intent_submissions.insert(replay_key, submission);
+            Ok(crate::ToolIntentSubmissionAdmission::Admitted)
+        })
+        .await
     }
 
     async fn complete_tool_intent_submission(
@@ -687,15 +697,19 @@ impl super::registry::ProcessToolIntents for TestLocalProcessRegistry {
         replay_key: &str,
         outcome: crate::ToolIntentExecutionOutcome,
     ) -> Result<crate::ToolIntentSubmissionRecord, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut submissions = self.tool_intent_submissions.lock().await;
-        let submission = submissions.get_mut(replay_key).ok_or_else(|| {
-            PluginError::Session(format!("unknown tool-intent submission `{replay_key}`"))
-        })?;
-        if submission.outcome.is_none() {
-            submission.outcome = Some(outcome);
-        }
-        Ok(submission.clone())
+        self.write(async |state| {
+            let submission = state
+                .tool_intent_submissions
+                .get_mut(replay_key)
+                .ok_or_else(|| {
+                    PluginError::Session(format!("unknown tool-intent submission `{replay_key}`"))
+                })?;
+            if submission.outcome.is_none() {
+                submission.outcome = Some(outcome);
+            }
+            Ok(submission.clone())
+        })
+        .await
     }
 }
 
@@ -712,73 +726,73 @@ impl super::registry::ProcessWakeOutbox for TestLocalProcessRegistry {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        let _transaction = self.transaction.lock().await;
-        let now = self.clock.timestamp_ms();
-        let mut deliveries = self.wake_deliveries.lock().await;
-        for delivery in deliveries.values_mut() {
-            if delivery.state() == super::WakeDeliveryState::Enqueuing
-                && delivery.next_attempt_at_ms <= now
-            {
-                delivery.disposition = super::WakeDeliveryDisposition::Pending;
+        self.write(async |state| {
+            let now = self.clock.timestamp_ms();
+            let deliveries = &mut state.wake_deliveries;
+            for delivery in deliveries.values_mut() {
+                if delivery.state() == super::WakeDeliveryState::Enqueuing
+                    && delivery.next_attempt_at_ms <= now
+                {
+                    delivery.disposition = super::WakeDeliveryDisposition::Pending;
+                }
             }
-        }
-        let mut ids = deliveries
-            .values()
-            .filter(|delivery| delivery.state() == super::WakeDeliveryState::Pending)
-            .filter(|delivery| delivery.next_attempt_at_ms <= now)
-            .filter(|candidate| {
-                !deliveries.values().any(|earlier| {
-                    let discarded_non_blocking = match &earlier.disposition {
-                        super::WakeDeliveryDisposition::Discarded { reason } => {
-                            !reason.blocks_ordering_group()
-                        }
-                        super::WakeDeliveryDisposition::DiscardedUnattributed => true,
-                        _ => false,
-                    };
-                    earlier.state() != super::WakeDeliveryState::Enqueued
-                        && !discarded_non_blocking
-                        && earlier.wake.target_session_id == candidate.wake.target_session_id
-                        && earlier.wake.process_id == candidate.wake.process_id
-                        && earlier.wake.sequence < candidate.wake.sequence
+            let mut ids = deliveries
+                .values()
+                .filter(|delivery| delivery.state() == super::WakeDeliveryState::Pending)
+                .filter(|delivery| delivery.next_attempt_at_ms <= now)
+                .filter(|candidate| {
+                    !deliveries.values().any(|earlier| {
+                        let discarded_non_blocking = match &earlier.disposition {
+                            super::WakeDeliveryDisposition::Discarded { reason } => {
+                                !reason.blocks_ordering_group()
+                            }
+                            super::WakeDeliveryDisposition::DiscardedUnattributed => true,
+                            _ => false,
+                        };
+                        earlier.state() != super::WakeDeliveryState::Enqueued
+                            && !discarded_non_blocking
+                            && earlier.wake.target_session_id == candidate.wake.target_session_id
+                            && earlier.wake.process_id == candidate.wake.process_id
+                            && earlier.wake.sequence < candidate.wake.sequence
+                    })
                 })
-            })
-            .map(|delivery| {
-                (
-                    delivery.next_attempt_at_ms,
-                    delivery.wake.target_session_id.clone(),
-                    delivery.wake.process_id.clone(),
-                    delivery.wake.sequence,
-                    delivery.delivery_id.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-        ids.sort();
-        ids.truncate(limit);
-        Ok(ids
-            .into_iter()
-            .filter_map(|(_, _, _, _, id)| {
-                let delivery = deliveries.get_mut(&id)?;
-                delivery.disposition = super::WakeDeliveryDisposition::Enqueuing {
-                    claim_token: uuid::Uuid::new_v4().to_string(),
-                };
-                delivery.attempts = delivery.attempts.saturating_add(1);
-                delivery.first_attempt_ms.get_or_insert(now);
-                delivery.next_attempt_at_ms =
-                    now.saturating_add(self.wake_delivery_config.enqueuing_stale_after_ms);
-                Some(delivery.clone())
-            })
-            .collect())
+                .map(|delivery| {
+                    (
+                        delivery.next_attempt_at_ms,
+                        delivery.wake.target_session_id.clone(),
+                        delivery.wake.process_id.clone(),
+                        delivery.wake.sequence,
+                        delivery.delivery_id.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            ids.sort();
+            ids.truncate(limit);
+            Ok(ids
+                .into_iter()
+                .filter_map(|(_, _, _, _, id)| {
+                    let delivery = deliveries.get_mut(&id)?;
+                    delivery.disposition = super::WakeDeliveryDisposition::Enqueuing {
+                        claim_token: uuid::Uuid::new_v4().to_string(),
+                    };
+                    delivery.attempts = delivery.attempts.saturating_add(1);
+                    delivery.first_attempt_ms.get_or_insert(now);
+                    delivery.next_attempt_at_ms =
+                        now.saturating_add(self.wake_delivery_config.enqueuing_stale_after_ms);
+                    Some(delivery.clone())
+                })
+                .collect())
+        })
+        .await
     }
 
     async fn list_wake_deliveries(
         &self,
         state: Option<super::WakeDeliveryState>,
     ) -> Result<Vec<super::WakeDelivery>, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut deliveries = self
+        let registry_state = self.state.lock().await;
+        let mut deliveries = registry_state
             .wake_deliveries
-            .lock()
-            .await
             .values()
             .filter(|delivery| state.is_none_or(|state| delivery.state() == state))
             .cloned()
@@ -788,10 +802,9 @@ impl super::registry::ProcessWakeOutbox for TestLocalProcessRegistry {
     }
 
     async fn wake_delivery_report(&self) -> Result<super::WakeDeliveryReport, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let deliveries = self.wake_deliveries.lock().await;
+        let state = self.state.lock().await;
         Ok(super::WakeDeliveryReport::from_deliveries(
-            deliveries.values(),
+            state.wake_deliveries.values(),
         ))
     }
 
@@ -805,23 +818,24 @@ impl super::registry::ProcessWakeOutbox for TestLocalProcessRegistry {
             pause.validated.notify_one();
             pause.resume.notified().await;
         }
-        let _transaction = self.transaction.lock().await;
-        let mut deliveries = self.wake_deliveries.lock().await;
-        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
-            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
-        })?;
-        if !matches!(
-            &delivery.disposition,
-            super::WakeDeliveryDisposition::Enqueuing {
-                claim_token: current
-            } if current == claim_token
-        ) {
-            return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
-                state: delivery.state(),
-            });
-        }
-        delivery.disposition = super::WakeDeliveryDisposition::Enqueued;
-        Ok(super::WakeDeliveryClaimOutcome::Applied)
+        self.write(async |state| {
+            let delivery = state.wake_deliveries.get_mut(delivery_id).ok_or_else(|| {
+                PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
+            })?;
+            if !matches!(
+                &delivery.disposition,
+                super::WakeDeliveryDisposition::Enqueuing {
+                    claim_token: current
+                } if current == claim_token
+            ) {
+                return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
+                    state: delivery.state(),
+                });
+            }
+            delivery.disposition = super::WakeDeliveryDisposition::Enqueued;
+            Ok(super::WakeDeliveryClaimOutcome::Applied)
+        })
+        .await
     }
 
     async fn discard_wake_delivery(
@@ -830,45 +844,47 @@ impl super::registry::ProcessWakeOutbox for TestLocalProcessRegistry {
         claim_token: &str,
         reason: super::WakeDiscardReason,
     ) -> Result<super::WakeDeliveryClaimOutcome, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut deliveries = self.wake_deliveries.lock().await;
-        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
-            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
-        })?;
-        if !matches!(
-            &delivery.disposition,
-            super::WakeDeliveryDisposition::Enqueuing {
-                claim_token: current
-            } if current == claim_token
-        ) {
-            return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
-                state: delivery.state(),
-            });
-        }
-        delivery.disposition = super::WakeDeliveryDisposition::Discarded { reason };
-        Ok(super::WakeDeliveryClaimOutcome::Applied)
+        self.write(async |state| {
+            let delivery = state.wake_deliveries.get_mut(delivery_id).ok_or_else(|| {
+                PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
+            })?;
+            if !matches!(
+                &delivery.disposition,
+                super::WakeDeliveryDisposition::Enqueuing {
+                    claim_token: current
+                } if current == claim_token
+            ) {
+                return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
+                    state: delivery.state(),
+                });
+            }
+            delivery.disposition = super::WakeDeliveryDisposition::Discarded { reason };
+            Ok(super::WakeDeliveryClaimOutcome::Applied)
+        })
+        .await
     }
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut deliveries = self.wake_deliveries.lock().await;
-        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
-            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
-        })?;
-        if delivery.state() != super::WakeDeliveryState::Discarded {
-            return Err(PluginError::Session(format!(
-                "wake delivery `{delivery_id}` is not discarded"
-            )));
-        }
-        delivery.disposition = super::WakeDeliveryDisposition::Pending;
-        delivery.attempts = 0;
-        delivery.first_attempt_ms = None;
-        delivery.next_attempt_at_ms = self.clock.timestamp_ms();
-        delivery.expires_at_ms = self
-            .clock
-            .timestamp_ms()
-            .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
-        Ok(())
+        self.write(async |state| {
+            let delivery = state.wake_deliveries.get_mut(delivery_id).ok_or_else(|| {
+                PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
+            })?;
+            if delivery.state() != super::WakeDeliveryState::Discarded {
+                return Err(PluginError::Session(format!(
+                    "wake delivery `{delivery_id}` is not discarded"
+                )));
+            }
+            delivery.disposition = super::WakeDeliveryDisposition::Pending;
+            delivery.attempts = 0;
+            delivery.first_attempt_ms = None;
+            delivery.next_attempt_at_ms = self.clock.timestamp_ms();
+            delivery.expires_at_ms = self
+                .clock
+                .timestamp_ms()
+                .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
+            Ok(())
+        })
+        .await
     }
 
     async fn defer_wake_delivery(
@@ -877,31 +893,31 @@ impl super::registry::ProcessWakeOutbox for TestLocalProcessRegistry {
         claim_token: &str,
         next_attempt_at_ms: u64,
     ) -> Result<super::WakeDeliveryClaimOutcome, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut deliveries = self.wake_deliveries.lock().await;
-        let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
-            PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
-        })?;
-        if !matches!(
-            &delivery.disposition,
-            super::WakeDeliveryDisposition::Enqueuing {
-                claim_token: current
-            } if current == claim_token
-        ) {
-            return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
-                state: delivery.state(),
-            });
-        }
-        delivery.disposition = super::WakeDeliveryDisposition::Pending;
-        delivery.next_attempt_at_ms = next_attempt_at_ms;
-        Ok(super::WakeDeliveryClaimOutcome::Applied)
+        self.write(async |state| {
+            let delivery = state.wake_deliveries.get_mut(delivery_id).ok_or_else(|| {
+                PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
+            })?;
+            if !matches!(
+                &delivery.disposition,
+                super::WakeDeliveryDisposition::Enqueuing {
+                    claim_token: current
+                } if current == claim_token
+            ) {
+                return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
+                    state: delivery.state(),
+                });
+            }
+            delivery.disposition = super::WakeDeliveryDisposition::Pending;
+            delivery.next_attempt_at_ms = next_attempt_at_ms;
+            Ok(super::WakeDeliveryClaimOutcome::Applied)
+        })
+        .await
     }
 }
 impl TestLocalProcessRegistry {
-    async fn processes_with_pending_deliveries(&self) -> HashSet<ProcessId> {
-        self.wake_deliveries
-            .lock()
-            .await
+    fn processes_with_pending_deliveries(state: &RegistryState) -> HashSet<ProcessId> {
+        state
+            .wake_deliveries
             .values()
             .filter(|delivery| {
                 matches!(
@@ -952,9 +968,10 @@ impl super::registry::ProcessRegistryTestSupport for TestLocalProcessRegistry {
         process_id: &ProcessId,
     ) -> Result<Option<u64>, PluginError> {
         Ok(self
-            .wake_allocation_floors
+            .state
             .lock()
             .await
+            .wake_allocation_floors
             .get(&(target_session_id.clone(), process_id.clone()))
             .copied())
     }
