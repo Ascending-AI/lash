@@ -1,0 +1,192 @@
+name: Cache warm
+
+# GitHub Actions caches are branch-scoped: a workflow run restores entries
+# written on its own branch or on the default branch, and nothing else. ci.yml
+# deliberately has no `push` trigger, so the three GitHub-side caches it
+# consumes are written only under `pull_request` head refs and transient
+# `gh-readonly-queue/*` merge refs — every one of them invisible to the next
+# run. Measured 2026-09-20: every PR's `Test Cargo workspace partition` missed
+# its restore-keys and cold-compiled ~370 crates (~4 min), and the Bazel
+# repository cache and output base missed on the same runs.
+#
+# This workflow is the sole main-scoped writer of those three keys, the same
+# role seal-cache.yml plays for `linux-seal-2`. It is manual like every other
+# heavy job in this repository: nothing runs automatically on a push to main.
+# Dispatch it after a change to the key inputs (Cargo.lock, workspace
+# manifests, `rust-toolchain*`, `.cargo/**`, `MODULE.bazel*`, `.bazelversion`,
+# the toolchain/mold/install-tools actions, or this workflow); a source-only
+# change keeps the key prefixes and restores a tree the build warms
+# incrementally.
+#
+# Nothing here is gating. Each job uses `actions/cache` (restore-then-save)
+# under the exact keys ci.yml computes — the key expressions below must equal
+# the ones in `ci.yml` and `bazel-shared-cache/action.yml` or this writes
+# caches nothing reads.
+on:
+  workflow_dispatch:
+
+# Only the newest tree is worth warming; an older run's key is already stale.
+concurrency:
+  group: ci-cache-warm-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Mirror ci.yml's workflow-level env: RUSTFLAGS and LASH_CI_FEATURES are part
+  # of the workspace-tests cache's settings digest, so they must resolve to the
+  # same values here or the saved key differs from the one the partition
+  # computes.
+  LASH_CI_FEATURES: ""
+  RUSTFLAGS: -C link-arg=-fuse-ld=mold
+
+jobs:
+  # Warms `bazel-repository-v1` (the fetched module/crate repository cache) and
+  # `bazel-output-v1` (the server's output base) under main scope. The build
+  # runs on the remote pool; what the cache actually carries is the local
+  # fetch, analysis and bookkeeping state the pool cannot provide.
+  warm-bazel:
+    name: Warm Bazel caches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: build-cache
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Configure Bazel shared cache
+        uses: ./.github/actions/bazel-shared-cache
+        with:
+          save-repository-cache: "true"
+          save-output-base: "true"
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      # Analysing the clippy and test rule graphs populates the output base
+      # with the skyframe state and action bookkeeping the real jobs reuse;
+      # the compilations themselves execute on the pool.
+      - name: Warm the output base
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            --remote_download_outputs=minimal \
+            //:workspace_clippy //:feature_lane_clippy //:workspace_tests
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+  # Warms `workspace-tests-v2` under main scope — the `target/debug` subtrees
+  # the `Test Cargo workspace partition` job restores. Builds the same scope
+  # the trusted leg builds: agent-workbench's test binaries.
+  warm-workspace-tests:
+    name: Warm workspace-test build cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force "${GITHUB_SHA}"
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Restore cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: linux-tests
+          cache-targets: false
+
+      - name: Resolve workspace test cache inputs
+        id: workspace-test-cache-inputs
+        run: |
+          compiler_digest="$(rustc -vV | sha256sum | cut -d ' ' -f 1)"
+          settings_digest="$(printf '%s\0%s\0' "${RUSTFLAGS}" "${LASH_CI_FEATURES}" | sha256sum | cut -d ' ' -f 1)"
+          source_digest="$(python3 scripts/ci_workspace_cache.py digest)"
+          {
+            echo "compiler=${compiler_digest}"
+            echo "settings=${settings_digest}"
+            echo "source=${source_digest}"
+          } >> "${GITHUB_OUTPUT}"
+
+      # Same key expression and paths as ci.yml's `workspace-tests` job.
+      - name: Restore and save workspace test build outputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: |
+            target/debug/.fingerprint
+            target/debug/build
+            target/debug/deps
+            target/debug/examples
+            target/workspace-test-cache/source-mtimes.json
+          key: >-
+            workspace-tests-v2-${{ runner.os }}-${{ runner.arch }}-${{
+            steps.workspace-test-cache-inputs.outputs.compiler }}-${{
+            steps.workspace-test-cache-inputs.outputs.settings }}-${{
+            hashFiles('Cargo.lock', 'Cargo.toml', '**/Cargo.toml', '.cargo/**', 'rust-toolchain*', '.github/actions/rust-toolchain/**', '.github/actions/setup-mold/**', '.github/actions/install-tools/**')
+            }}-${{ steps.workspace-test-cache-inputs.outputs.source }}
+          restore-keys: |
+            workspace-tests-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.workspace-test-cache-inputs.outputs.compiler }}-${{ steps.workspace-test-cache-inputs.outputs.settings }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', '**/Cargo.toml', '.cargo/**', 'rust-toolchain*', '.github/actions/rust-toolchain/**', '.github/actions/setup-mold/**', '.github/actions/install-tools/**') }}-
+
+      - name: Restore unchanged source mtimes
+        continue-on-error: true
+        run: python3 scripts/ci_workspace_cache.py restore target/workspace-test-cache/source-mtimes.json
+
+      - name: Snapshot source mtimes
+        run: python3 scripts/ci_workspace_cache.py snapshot target/workspace-test-cache/source-mtimes.json
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
+      - name: Build the workspace-test scope
+        run: |
+          # shellcheck disable=SC2086
+          cargo build --locked ${LASH_CI_FEATURES} --package agent-workbench --tests
