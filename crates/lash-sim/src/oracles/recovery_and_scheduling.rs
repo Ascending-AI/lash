@@ -419,7 +419,7 @@ pub fn scheduler_owned_runtime_completions(events: &[DeliveredBoundary]) -> Orac
             .filter(|event| event.kind == kind && !is_suspend_resume(event))
         {
             saw_kind = true;
-            let Some(completion) = event.payload.get("runtime_completion") else {
+            let Some(completion) = event.payload.get(PendingRuntimeBoundary::PAYLOAD_KEY) else {
                 return OracleVerdict::failed(
                     SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
                     format!(

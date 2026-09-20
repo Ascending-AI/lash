@@ -284,10 +284,14 @@ pub struct PendingRuntimeBoundary {
 }
 
 impl PendingRuntimeBoundary {
+    /// The payload key under which the scheduler embeds this evidence on a
+    /// delivered completion. The only place the wire name is written.
+    pub const PAYLOAD_KEY: &'static str = "runtime_completion";
+
     /// Read the scheduler-owned pending evidence carried by a delivered
     /// completion's payload; absent or malformed evidence reports `None`.
     pub fn from_payload(payload: &Value) -> Option<Self> {
-        serde_json::from_value(payload.get("runtime_completion")?.clone()).ok()
+        serde_json::from_value(payload.get(Self::PAYLOAD_KEY)?.clone()).ok()
     }
 }
 
@@ -403,7 +407,7 @@ impl RuntimeCompletionQueue {
         };
         let mut payload_object = event.payload.as_object().cloned().unwrap_or_default();
         payload_object.insert(
-            "runtime_completion".to_string(),
+            PendingRuntimeBoundary::PAYLOAD_KEY.to_string(),
             serde_json::to_value(&pending)
                 .expect("pending runtime boundary evidence is serializable"),
         );
