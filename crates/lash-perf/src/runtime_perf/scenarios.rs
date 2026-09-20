@@ -797,9 +797,22 @@ impl RuntimePerfScenario {
     }
 
     pub(crate) fn has_guard_budget(self) -> bool {
-        !self.is_durable()
-            && self.contention_workers().is_none()
-            && self.settlement_children().is_none()
+        match self {
+            // The durable SQLite turns run on every host that can open a
+            // scratch database, so their allocation ceilings are measurable
+            // and pinned like any ephemeral scenario. The PostgreSQL mirrors
+            // stay unbudgeted: their numbers cannot be produced off CI, and a
+            // ceiling nobody can measure locally is a rerun generator.
+            Self::DurableStandardToolTurnSqlite
+            | Self::DurableRlmCheckpointTurnSqlite
+            | Self::DurableAgentChildTurnSqlite
+            | Self::DurableCheckpointCurveSqlite => true,
+            _ => {
+                !self.is_durable()
+                    && self.contention_workers().is_none()
+                    && self.settlement_children().is_none()
+            }
+        }
     }
 
     pub(crate) fn contention_workers(self) -> Option<usize> {

@@ -155,7 +155,11 @@ impl std::fmt::Display for ToolSourceKey {
 #[derive(Clone)]
 pub(super) struct ToolRegistryState {
     pub(super) generation: u64,
-    pub(super) surface: ToolSurface,
+    /// The admitted surface behind an `Arc`: every mutation installs a
+    /// freshly reconciled surface rather than editing in place, so cloning
+    /// the state — the per-pin snapshot and the optimistic-CAS retry copy —
+    /// is a refcount bump instead of a deep copy of every manifest.
+    pub(super) surface: Arc<ToolSurface>,
     pub(super) next_live_source_id: u64,
 }
 

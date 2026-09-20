@@ -52,6 +52,38 @@ pub(super) fn export_tool_state_entries(surface: &ToolSurface) -> BTreeMap<ToolI
         .collect()
 }
 
+/// Whether a surface and a persisted entry set agree on the fields
+/// `export_tool_state_entries` compares. Used instead of materializing the
+/// export when only the difference matters.
+pub(super) fn surface_matches_state_entries(
+    surface: &ToolSurface,
+    entries: &BTreeMap<ToolId, ToolStateEntry>,
+) -> bool {
+    surface.by_id.len() == entries.len()
+        && surface.by_id.iter().all(|(id, entry)| {
+            entries.get(id).is_some_and(|stored| {
+                stored.manifest == entry.manifest
+                    && stored.orphaned == entry.is_orphaned()
+                    && stored.member == entry.member
+                    && stored.registration_kind == entry.kind
+            })
+        })
+}
+
+/// Whether two surfaces agree on the fields `export_tool_state_entries`
+/// exposes. The binding is registry-internal and intentionally excluded.
+pub(super) fn surfaces_publicly_equal(left: &ToolSurface, right: &ToolSurface) -> bool {
+    left.by_id.len() == right.by_id.len()
+        && left.by_id.iter().all(|(id, entry)| {
+            right.by_id.get(id).is_some_and(|other| {
+                other.manifest == entry.manifest
+                    && other.member == entry.member
+                    && other.is_orphaned() == entry.is_orphaned()
+                    && other.kind == entry.kind
+            })
+        })
+}
+
 /// Which side defines the set of ids at the registry's reconciliation seam.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ReconcileMode {
@@ -171,7 +203,7 @@ pub(super) fn reconcile_tool_state_entries(
         }
     }
 
-    let changed = export_tool_state_entries(&surface) != *entries;
+    let changed = !surface_matches_state_entries(&surface, entries);
     Ok(ReconciledTools {
         surface,
         unresolved,
