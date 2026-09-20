@@ -80,7 +80,7 @@ impl ToolRegistry {
                 granted_sources: None,
                 state: ToolRegistryState {
                     generation: 0,
-                    surface: ToolSurface::default(),
+                    surface: Arc::default(),
                     next_live_source_id: 0,
                 },
             })),
@@ -146,7 +146,7 @@ impl ToolRegistry {
             }
             let generation = reconciled_generation(authority.state.generation, true)?;
             authority.commit()?;
-            authority.state.surface = rebound.surface;
+            authority.state.surface = Arc::new(rebound.surface);
             authority.state.surface.debug_assert_invariant();
             authority.state.generation = generation;
             return Ok(generation);
@@ -229,7 +229,7 @@ impl ToolRegistry {
             }
             let generation = reconciled_generation(snapshot.generation(), rebound.changed)?;
             authority.commit()?;
-            authority.state.surface = rebound.surface;
+            authority.state.surface = Arc::new(rebound.surface);
             authority.state.surface.debug_assert_invariant();
             authority.state.generation = generation;
             return Ok(ToolRestoreReport {
@@ -285,8 +285,7 @@ impl ToolRegistry {
         if !authority.sources.contains_key(&source_key) {
             return Err(ReconfigureError::UnknownSource(source_id.to_string()));
         }
-        let mut surface = authority.state.surface.clone();
-        let previous = export_tool_state_entries(&surface);
+        let mut surface = (*authority.state.surface).clone();
         let removed_ids = surface
             .by_id
             .iter()
@@ -308,8 +307,8 @@ impl ToolRegistry {
             *entry = orphan;
         }
         surface.debug_assert_invariant();
-        let public_changed = export_tool_state_entries(&surface) != previous;
-        let private_changed = surface != authority.state.surface;
+        let public_changed = !surfaces_publicly_equal(&authority.state.surface, &surface);
+        let private_changed = surface != *authority.state.surface;
         debug_assert!(!public_changed || private_changed);
         let generation = reconciled_generation(authority.state.generation, public_changed)?;
 
@@ -320,7 +319,7 @@ impl ToolRegistry {
             .as_mut()
             .and_then(|sources| sources.remove(&source_key));
         if private_changed {
-            authority.state.surface = surface;
+            authority.state.surface = Arc::new(surface);
             authority.state.generation = generation;
         }
         drop(authority);
@@ -358,41 +357,38 @@ impl ToolRegistry {
                     .iter()
                     .map(|(id, entry)| (id.clone(), entry.member))
                     .collect::<BTreeMap<_, _>>();
-                let previous = export_tool_state_entries(&next_state.surface);
+                let next_surface = Arc::make_mut(&mut next_state.surface);
                 for manifest in manifests.iter().cloned() {
                     let id = manifest.id.clone();
                     insert_advertised_entry(
-                        &mut next_state.surface,
+                        next_surface,
                         &source_key,
                         source.registration_kind(),
                         manifest,
                         Some(&source_key),
                     )?;
                     if let Some(member) = curated.get(&id)
-                        && let Some(entry) = next_state.surface.get_mut(&id)
+                        && let Some(entry) = next_surface.get_mut(&id)
                     {
                         entry.member = *member;
                     }
                 }
-                next_state.surface.debug_assert_invariant();
-                Ok::<_, ReconfigureError>(
-                    export_tool_state_entries(&next_state.surface) != previous,
-                )
+                next_surface.debug_assert_invariant();
+                Ok::<_, ReconfigureError>(())
             })();
-            let public_changed = match rebuilt {
-                Ok(changed) => changed,
-                Err(error) => {
-                    if self.inputs_changed(write_revision) {
-                        continue;
-                    }
-                    return Err(error);
+            if let Err(error) = rebuilt {
+                if self.inputs_changed(write_revision) {
+                    continue;
                 }
-            };
+                return Err(error);
+            }
 
             let mut authority = self.inner.write_recover();
             if authority.write_revision != write_revision {
                 continue;
             }
+            let public_changed =
+                !surfaces_publicly_equal(&authority.state.surface, &next_state.surface);
             let private_changed = authority.state.surface != next_state.surface;
             debug_assert!(!public_changed || private_changed);
             let generation = reconciled_generation(authority.state.generation, public_changed)?;
@@ -464,7 +460,7 @@ impl ToolRegistry {
             if authority.write_revision != write_revision {
                 continue;
             }
-            let private_changed = authority.state.surface != reconciled.surface;
+            let private_changed = *authority.state.surface != reconciled.surface;
             debug_assert!(!reconciled.changed || private_changed);
             let generation = reconciled_generation(authority.state.generation, reconciled.changed)?;
             authority.commit()?;
@@ -472,7 +468,7 @@ impl ToolRegistry {
                 .sources
                 .insert(source_key.clone(), Arc::clone(&source));
             if private_changed {
-                authority.state.surface = reconciled.surface;
+                authority.state.surface = Arc::new(reconciled.surface);
                 authority.state.surface.debug_assert_invariant();
                 authority.state.generation = generation;
             }
@@ -521,8 +517,7 @@ impl ToolRegistry {
             };
             let advertised_ids = captures
                 .values()
-                .flat_map(|capture| capture.advertised_tools())
-                .map(|manifest| manifest.id)
+                .flat_map(|capture| capture.advertised_ids())
                 .collect::<BTreeSet<_>>();
             let unresolved_known_ids = snapshot
                 .entries()
@@ -562,12 +557,12 @@ impl ToolRegistry {
             if authority.write_revision != write_revision {
                 continue;
             }
-            let private_changed = authority.state.surface != reconciled.surface;
+            let private_changed = *authority.state.surface != reconciled.surface;
             debug_assert!(!reconciled.changed || private_changed);
             let generation = reconciled_generation(authority.state.generation, reconciled.changed)?;
             if private_changed {
                 authority.commit()?;
-                authority.state.surface = reconciled.surface;
+                authority.state.surface = Arc::new(reconciled.surface);
                 authority.state.surface.debug_assert_invariant();
                 authority.state.generation = generation;
             }
@@ -609,7 +604,7 @@ impl ToolRegistry {
                 granted_sources: None,
                 state: ToolRegistryState {
                     generation,
-                    surface: rebound.surface,
+                    surface: Arc::new(rebound.surface),
                     next_live_source_id: 0,
                 },
             })),

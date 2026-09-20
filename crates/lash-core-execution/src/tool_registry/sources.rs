@@ -35,6 +35,10 @@ impl ToolSourceExecutor for InternalProcessToolSource {
         vec![self.definition.manifest()]
     }
 
+    fn advertised_ids(&self) -> BTreeSet<ToolId> {
+        BTreeSet::from([self.definition.manifest().id])
+    }
+
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
         (self.definition.manifest().name == name).then(|| self.definition.contract())
     }
@@ -86,6 +90,10 @@ impl ToolSourceExecutor for OrchestratingToolSource {
 
     fn advertised_tools(&self) -> Vec<ToolManifest> {
         vec![self.definition.manifest()]
+    }
+
+    fn advertised_ids(&self) -> BTreeSet<ToolId> {
+        BTreeSet::from([self.definition.manifest().id])
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
@@ -204,6 +212,10 @@ impl ToolSourceCapture for ToolProviderSourceCapture {
             .values()
             .map(|(manifest, _)| manifest.clone())
             .collect()
+    }
+
+    fn advertised_ids(&self) -> BTreeSet<ToolId> {
+        self.index.by_id.keys().cloned().collect()
     }
 
     fn freeze(
@@ -450,6 +462,10 @@ impl ToolSourceExecutor for PinnedToolProviderSource {
             .filter(|(id, _)| self.advertised_ids.contains(*id))
             .map(|(_, route)| route.manifest.clone())
             .collect()
+    }
+
+    fn advertised_ids(&self) -> BTreeSet<ToolId> {
+        self.advertised_ids.clone()
     }
 
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {

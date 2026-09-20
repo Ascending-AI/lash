@@ -33,6 +33,15 @@ impl ToolSourceHandle {
 
 pub(crate) trait ToolSourceCapture: Send + 'static {
     fn advertised_tools(&self) -> Vec<ToolManifest>;
+    /// The ids in the captured advertisement. Implementors that already index
+    /// by id override this to avoid materializing every manifest when callers
+    /// need only the key set.
+    fn advertised_ids(&self) -> BTreeSet<ToolId> {
+        self.advertised_tools()
+            .into_iter()
+            .map(|manifest| manifest.id)
+            .collect()
+    }
     fn freeze(
         self: Box<Self>,
         known_resident_ids: &BTreeSet<ToolId>,
@@ -46,6 +55,10 @@ struct FrozenToolSourceCapture {
 impl ToolSourceCapture for FrozenToolSourceCapture {
     fn advertised_tools(&self) -> Vec<ToolManifest> {
         self.source.advertised_tools()
+    }
+
+    fn advertised_ids(&self) -> BTreeSet<ToolId> {
+        self.source.advertised_ids()
     }
 
     fn freeze(
@@ -91,6 +104,15 @@ pub(crate) trait ToolSourceExecutor: Send + Sync + 'static {
         ToolRegistrationKind::Leaf
     }
     fn advertised_tools(&self) -> Vec<ToolManifest>;
+    /// The ids this source advertises. Implementors that already index by id
+    /// override this to avoid materializing every manifest when callers need
+    /// only the key set.
+    fn advertised_ids(&self) -> BTreeSet<ToolId> {
+        self.advertised_tools()
+            .into_iter()
+            .map(|manifest| manifest.id)
+            .collect()
+    }
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
         self.advertised_tools()
             .into_iter()

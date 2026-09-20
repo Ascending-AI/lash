@@ -37,7 +37,8 @@ mod restore_execute;
 use rebind::insert_result_entry;
 use rebind::{
     ReconcileMode, export_tool_state_entries, insert_advertised_entry,
-    manifest_with_compact_contract, reconcile_tool_state_entries, validate_unique_manifests,
+    manifest_with_compact_contract, reconcile_tool_state_entries, surfaces_publicly_equal,
+    validate_unique_manifests,
 };
 #[cfg(test)]
 mod pinning_tests;
