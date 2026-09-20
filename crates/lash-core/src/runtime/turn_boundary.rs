@@ -597,6 +597,11 @@ impl TurnBoundary {
         if let Some(store) = store {
             let graph = state.pending_graph_commit();
             let committed_attachment_ids = committed_attachment_ids(state, tool_calls, omitted);
+            // ADR 0058: this deduped union of explicit ids and recorded
+            // write-ahead intent ids is a declared estimate, not the stamped
+            // row count — replay can undercount prior-attempt rows, and
+            // cancelled or failed puts can overcount. That residual is
+            // accepted; admission never queries the store.
             let adopted_intent_rows = committed_attachment_ids
                 .iter()
                 .cloned()

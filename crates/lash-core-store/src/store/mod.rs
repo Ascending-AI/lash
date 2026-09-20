@@ -849,8 +849,17 @@ impl RuntimeCommit {
         attachment_ids: impl IntoIterator<Item = crate::AttachmentId>,
     ) -> Self {
         self.committed_attachment_ids = attachment_ids.into_iter().collect();
+        // Adoption is keyed on (session, attachment), so duplicate ids stamp
+        // one manifest row — count unique ids. This builder only knows the
+        // explicit list; the production path recomputes the count as the
+        // deduped union with the turn's recorded write-ahead intents and
+        // overwrites this value (runtime/turn_boundary.rs). ADR 0058 accepts
+        // the remaining residual against the stamped row count — admission
+        // never queries the store.
         self.adopted_intent_rows = self
             .committed_attachment_ids
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
             .len()
             .try_into()
             .unwrap_or(u64::MAX);
