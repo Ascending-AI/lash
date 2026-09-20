@@ -209,20 +209,22 @@ impl TypescriptDialect {
             let lines = operations
                 .iter()
                 .map(|operation| {
-                    format!(
-                        "{}_{}(input: {}): Promise<{}>; // await {}.{}(input)\n{}",
+                    let signature = format!(
+                        "{}.{}(input: {}): Promise<{}>; // lashlang `{}_{}`",
                         operation.alias,
                         operation.operation,
                         typescript_type(operation.input).replace("Record<string, never>", "{}"),
                         typescript_type(operation.output),
                         operation.alias,
                         operation.operation,
-                        crate::protocol::prompt::host_operation_description(
-                            &operation.alias,
-                            &operation.operation
-                        )
-                        .unwrap_or("")
-                    )
+                    );
+                    match crate::protocol::prompt::host_operation_description(
+                        &operation.alias,
+                        &operation.operation,
+                    ) {
+                        Some(description) => format!("{signature}\n{description}"),
+                        None => signature,
+                    }
                 })
                 .collect::<Vec<_>>()
                 .join("\n    ");
@@ -432,8 +434,11 @@ impl TypescriptDialect {
         );
         let example =
             "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
+        // `tools` and `host_surface` either carry their own leading `\n\n` or
+        // are empty, so they append directly — an unconditional separator here
+        // leaves stray blank lines where a skipped block would have gone.
         Ok(format!(
-            "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}\n\n{tools}{host_surface}"
+            "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}{tools}{host_surface}"
         ))
     }
 
@@ -675,7 +680,25 @@ mod tests {
             section.contains("`cron.Schedule` is a `triggers.register` `source`"),
             "the trigger source names the tool that consumes it: {section}"
         );
-        assert!(section.contains("triggers.list"), "{section}");
+        // Host Surface operations spell the call the model actually types —
+        // `module.operation(input): Promise<…>`, the same form the **Tools**
+        // section uses — with the lashlang identifier demoted to a comment.
+        assert!(
+            section.contains("triggers.register(input:"),
+            "the callable signature leads: {section}"
+        );
+        assert!(section.contains("triggers.list(input:"), "{section}");
+        assert!(
+            !code_lines.contains("triggers_register("),
+            "the internal `triggers_register` name must not be the signature: {section}"
+        );
+        // Skipped blocks join out cleanly: no run of blank lines where an
+        // absent `### Processes` (or empty Tools/Host Surface) would leave a
+        // gap.
+        assert!(
+            !section.contains("\n\n\n"),
+            "a skipped block must not leave blank residue: {section}"
+        );
         // The process surface is the catalogue now (FIG-2999): an empty
         // catalogue renders no process vocabulary at all.
         assert!(!section.contains("defineProcess"), "{section}");
