@@ -1512,15 +1512,26 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
         .session_lifecycle_service()
         .expect("session lifecycle");
     surface.replace(vec![curated.clone(), discovered.clone(), hidden.clone()]);
+    let parent_snapshot = manager
+        .snapshot_session(&SessionId::from("fork-parent"))
+        .await
+        .expect("parent snapshot");
+    let plugin_init = manager
+        .session_plugin_init(&SessionId::from("fork-parent"))
+        .await
+        .expect("plugin init");
     let handle = lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child_session(
                 "fork-parent",
-                lash_core::SessionStartPoint::CurrentSession,
+                lash_core::SessionStartPoint::Snapshot {
+                    snapshot: Box::new(parent_snapshot),
+                },
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("fork-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork)
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init)
             .with_tool_access(
                 lash_core::SessionToolAccess::ambient()
                     .with_hidden_tools([hidden.name])
@@ -1624,9 +1635,8 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
     );
 
     let child = parent
-        .fork_for_child_session(
+        .fork_for_session(
             "broader-child",
-            Some(SessionId::from("narrow-parent")),
             lash_core::plugin::SessionCreationConfig::default(),
         )
         .expect("fork with broader child authority");

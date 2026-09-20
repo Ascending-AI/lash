@@ -115,6 +115,16 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
             .apply_tool_state(&self.services.managed, session_id, snapshot)
             .await
     }
+
+    async fn session_plugin_init(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<crate::SessionPluginInit, crate::PluginError> {
+        self.services
+            .current
+            .plugin_init_by_id(&self.services.managed, session_id)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -123,18 +133,18 @@ impl crate::plugin::SessionLifecycleService for RuntimeSessionLifecycleService {
         &self,
         request: SessionCreateRequest,
     ) -> Result<SessionHandle, crate::PluginError> {
-        Box::pin(self.services.managed.create_session(
-            &self.services.current,
-            &self.services.usage,
-            request,
-        ))
+        Box::pin(
+            self.services
+                .managed
+                .create_session(&self.services.current, request),
+        )
         .await
     }
 
     async fn close_session(&self, session_id: &SessionId) -> Result<(), crate::PluginError> {
         self.services
             .managed
-            .close_session(&self.services.current, &self.services.usage, session_id)
+            .close_session(&self.services.current, session_id)
             .await
     }
 

@@ -208,7 +208,7 @@ pub use usage_activity::*;
 // tag, so its record is refused rather than defaulted, and it refuses a record
 // carrying the tag; peers must adopt 80. The label change only widens the
 // accepted set, so it rides this window rather than taking one of its own.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 81;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 82;
 
 /// One versioned remote-protocol message.
 ///

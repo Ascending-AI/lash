@@ -1,13 +1,11 @@
 use super::create_plan::{SessionCreatePlan, resolve_session_create_plan};
 use super::materialize::{MaterializedSession, materialize_session_create_plan};
 use super::*;
-use lash_sansio::sync::MutexExt;
 
 impl ManagedSessionCapability {
     async fn register_materialized_session(
         &self,
         current: &CurrentSessionCapability,
-        usage: &UsageCapability,
         plan: SessionCreatePlan,
         mut materialized: MaterializedSession,
     ) -> Result<SessionHandle, crate::PluginError> {
@@ -69,12 +67,6 @@ impl ManagedSessionCapability {
             SessionId::from(plan.session_id.clone().to_string()),
             RuntimeHandle::new(materialized.runtime),
         );
-        if let Some(source) = &plan.usage_source {
-            usage
-                .child_sources
-                .lock_recover()
-                .insert(plan.session_id.clone(), SessionId::from(source.clone()));
-        }
         Ok(SessionHandle {
             session_id: plan.session_id,
             parent_session_id: plan.parent_session_id,
@@ -86,18 +78,16 @@ impl ManagedSessionCapability {
     pub(in crate::runtime::session_manager) async fn create_session(
         &self,
         current: &CurrentSessionCapability,
-        usage: &UsageCapability,
         request: SessionCreateRequest,
     ) -> Result<SessionHandle, crate::PluginError> {
         let plan = resolve_session_create_plan(self, current, request).await?;
         let materialized = materialize_session_create_plan(current, &plan).await?;
-        Box::pin(self.register_materialized_session(current, usage, plan, materialized)).await
+        Box::pin(self.register_materialized_session(current, plan, materialized)).await
     }
 
     pub(in crate::runtime::session_manager) async fn close_session(
         &self,
         current: &CurrentSessionCapability,
-        usage: &UsageCapability,
         session_id: &SessionId,
     ) -> Result<(), crate::PluginError> {
         if session_id == current.session_id {
@@ -128,7 +118,6 @@ impl ManagedSessionCapability {
             )));
         }
         self.registry.lock().await.remove(session_id);
-        usage.child_sources.lock_recover().remove(session_id);
         current.plugins.host().unregister_session(session_id)?;
         Ok(())
     }

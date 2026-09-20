@@ -197,6 +197,31 @@ impl CurrentSessionCapability {
         Ok(generation)
     }
 
+    /// Capture the spawn-time [`crate::SessionPluginInit`] for a peer fork of
+    /// the named resident session. This is the only read of the source
+    /// session a fork performs — the payload it returns is what the journaled
+    /// creation request carries, so materialization never touches the live
+    /// session again.
+    pub(in crate::runtime::session_manager) async fn plugin_init_by_id(
+        &self,
+        managed: &ManagedSessionCapability,
+        session_id: &SessionId,
+    ) -> Result<crate::SessionPluginInit, crate::PluginError> {
+        if session_id == self.session_id {
+            return self.plugins.capture_fork_init();
+        }
+        let runtime = {
+            let registry = managed.registry.lock().await;
+            registry.get(session_id).cloned()
+        }
+        .ok_or_else(|| crate::PluginError::Session(format!("unknown session `{session_id}`")))?;
+        let runtime = runtime.runtime.lock().await;
+        let session = runtime.session.as_ref().ok_or_else(|| {
+            crate::PluginError::Session(format!("session `{session_id}` has no plugin session"))
+        })?;
+        session.plugins().capture_fork_init()
+    }
+
     pub(in crate::runtime::session_manager) async fn emit_trace_event(
         &self,
         context: lash_trace::TraceContext,

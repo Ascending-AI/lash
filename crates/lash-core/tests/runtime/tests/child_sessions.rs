@@ -144,6 +144,10 @@ async fn inherited_child_session_carries_parent_tool_state() {
         .await
         .expect("apply dynamic state");
 
+    let plugin_init = manager
+        .session_plugin_init(&SessionId::from("root"))
+        .await
+        .expect("plugin init");
     let handle = lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child_session(
@@ -152,7 +156,8 @@ async fn inherited_child_session_carries_parent_tool_state() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("dynamic-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
         )
         .await
         .expect("child session");
@@ -172,7 +177,105 @@ async fn inherited_child_session_carries_parent_tool_state() {
 }
 
 #[tokio::test]
-async fn existing_session_start_propagates_unknown_checkpoint_component_into_child_first_root() {
+async fn parent_fork_without_plugin_init_is_refused() {
+    let runtime = TestRuntime::new(mock_provider(Vec::new())).build().await;
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+
+    let err = lifecycle
+        .create_session(
+            lash_core::SessionCreateRequest::child_session(
+                "root",
+                lash_core::SessionStartPoint::Empty,
+                lash_core::PluginOptions::default(),
+            )
+            .with_session_id("fork-without-init")
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork),
+        )
+        .await
+        .expect_err("a ParentFork without the captured payload must be refused");
+
+    assert!(
+        format!("{err}").contains("captured plugin init"),
+        "expected a missing-capture refusal, got {err}"
+    );
+}
+
+#[tokio::test]
+async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
+    let plugin_host =
+        lash_core::testing::test_plugin_host(vec![Arc::new(StaticPluginFactory::new(
+            "memory_probe",
+            lash_core::facade_support::PluginSpec::new()
+                .with_tool_provider(Arc::new(MemoryProbeTool)),
+        ))]);
+    let plugin_session = plugin_host.build_session("root").expect("plugins");
+    let mut runtime = LashRuntime::from_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        lash_core::testing::runtime_internals::RuntimeServices::new(plugin_session),
+        RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        )),
+        lash_core::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("runtime");
+    set_runtime_provider(&mut runtime, mock_provider(Vec::new()).into_handle());
+    let manager = runtime.session_state_service().expect("session manager");
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+
+    // Capture before the parent mutates its tool state.
+    let plugin_init = manager
+        .session_plugin_init(&SessionId::from("root"))
+        .await
+        .expect("plugin init");
+
+    let mut snapshot = manager
+        .tool_state(&SessionId::from("root"))
+        .await
+        .expect("tool state");
+    snapshot
+        .set_membership(&lash_core::ToolId::from("tool:memory_probe"), false)
+        .expect("opt out of parent tool");
+    manager
+        .apply_tool_state(&SessionId::from("root"), snapshot)
+        .await
+        .expect("apply dynamic state");
+
+    let handle = lifecycle
+        .create_session(
+            lash_core::SessionCreateRequest::child_session(
+                "root",
+                lash_core::SessionStartPoint::Empty,
+                lash_core::PluginOptions::default(),
+            )
+            .with_session_id("spawn-time-child")
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
+        )
+        .await
+        .expect("child session");
+
+    let catalog = manager
+        .tool_catalog(&handle.session_id)
+        .await
+        .expect("tool catalog");
+    let tool_names = catalog
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(|value| value.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        tool_names.contains(&"memory_probe"),
+        "the peer must initialize from the spawn-time capture, not the mutated parent: {tool_names:?}"
+    );
+}
+
+#[tokio::test]
+async fn snapshot_start_propagates_unknown_checkpoint_component_into_child_first_root() {
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let host = test_host_config().with_session_store_factory(factory.clone());
     let runtime = TestRuntime::new(mock_provider(Vec::new()))
@@ -211,11 +314,16 @@ async fn existing_session_start_propagates_unknown_checkpoint_component_into_chi
         source_handle.publish_from(&source_runtime);
     }
 
+    let manager = runtime.session_state_service().expect("session state");
+    let source_snapshot = manager
+        .snapshot_session(&source.session_id)
+        .await
+        .expect("source snapshot");
     let child = lifecycle
         .create_session(
             lash_core::SessionCreateRequest::root(
-                lash_core::SessionStartPoint::ExistingSession {
-                    session_id: source.session_id,
+                lash_core::SessionStartPoint::Snapshot {
+                    snapshot: Box::new(source_snapshot),
                 },
                 lash_core::PluginOptions::default(),
             )
@@ -223,7 +331,7 @@ async fn existing_session_start_propagates_unknown_checkpoint_component_into_chi
             .with_plugin_source(lash_core::SessionPluginSource::CurrentHostFresh),
         )
         .await
-        .expect("child inherits the complete resident component set");
+        .expect("child inherits the complete snapshot component set");
     let child_handle = runtime
         .managed_sessions
         .lock()
@@ -239,7 +347,7 @@ async fn existing_session_start_propagates_unknown_checkpoint_component_into_chi
     let carried = first_root
         .components
         .get("extension/future-component")
-        .expect("unknown component survives ExistingSession inheritance");
+        .expect("unknown component survives Snapshot inheritance");
 
     assert_eq!(carried.blob_ref(), Some(&unknown_ref));
     assert_eq!(carried.body(), None, "unknown component remains ref-only");
@@ -308,6 +416,12 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&SessionId::from("root"))
+        .await
+        .expect("plugin init");
     let child = lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child_session(
@@ -316,7 +430,8 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("attachment-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
         )
         .await
         .expect("durable child session");
@@ -435,6 +550,12 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&SessionId::from("root"))
+        .await
+        .expect("plugin init");
     let child = lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child_session(
@@ -443,7 +564,8 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("process-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
         )
         .await
         .expect("durable child session");
@@ -549,6 +671,10 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
             .contains(&lash_core::ToolId::from("tool:memory_probe"))
     );
 
+    let plugin_init = manager
+        .session_plugin_init(&SessionId::from("root"))
+        .await
+        .expect("plugin init");
     let handle = lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child_session(
@@ -557,7 +683,8 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("filtered-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork)
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init)
             .with_tool_access(
                 lash_core::SessionToolAccess::ambient()
                     .with_hidden_tools(["memory_probe"])
@@ -622,6 +749,343 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
     );
 }
 
+#[tokio::test]
+async fn child_usage_stays_on_the_child_sessions_own_ledger() {
+    let transport = mock_openai_compatible_provider(vec![
+        // The parent's own turn reports the parent's usage.
+        MockCall {
+            stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
+                input_tokens: 11,
+                output_tokens: 3,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 0,
+            })],
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "parent first".to_string(),
+                    response_meta: None,
+                }],
+                execution_evidence: Some(lash_core::ExecutionEvidence {
+                    served_model: Some("parent-first".to_string()),
+                    reasoning_output_tokens: Some(0),
+                    ..Default::default()
+                }),
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+        // The managed child turn reports usage on the child's own session.
+        MockCall {
+            stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
+                input_tokens: 7,
+                output_tokens: 2,
+                cache_read_input_tokens: 4,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 1,
+            })],
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "child session".to_string(),
+                    response_meta: None,
+                }],
+                execution_evidence: Some(lash_core::ExecutionEvidence {
+                    served_model: Some("child-only".to_string()),
+                    reasoning_output_tokens: Some(99),
+                    ..Default::default()
+                }),
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+        // A second parent turn after the child session has closed.
+        MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "done".to_string(),
+                    response_meta: None,
+                }],
+                execution_evidence: Some(lash_core::ExecutionEvidence {
+                    served_model: Some("parent-second".to_string()),
+                    reasoning_output_tokens: Some(7),
+                    ..Default::default()
+                }),
+                ..LlmResponse::default()
+            }),
+        },
+    ]);
+    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(EmptyTools);
+    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+
+    let first_parent = runtime
+        .stream_turn(
+            TurnInput::text("run child"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope(&SessionId::from("root"), &TurnId::from("usage-parent-1")),
+            ),
+        )
+        .await
+        .expect("first parent turn");
+    assert!(matches!(
+        &first_parent.outcome,
+        TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
+    ));
+
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&lash_core::SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
+    lifecycle
+        .create_session(
+            lash_core::SessionCreateRequest::child_session(
+                runtime.session_id(),
+                lash_core::SessionStartPoint::Empty,
+                lash_core::PluginOptions::default(),
+            )
+            .with_session_id("subagent-child")
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
+        )
+        .await
+        .expect("child session");
+    let child_session_id = SessionId::from("subagent-child");
+    let child_turn_id = TurnId::from("subagent-child-turn");
+    let child_turn = lifecycle
+        .start_turn(
+            lash_core::facade_support::SessionTurnRequest::new(
+                &child_session_id,
+                &child_turn_id,
+                TurnInput::text("run the child turn"),
+                named_turn_scope(&child_session_id, &child_turn_id),
+            )
+            .expect("child turn request"),
+        )
+        .await
+        .expect("child turn");
+    assert!(matches!(
+        &child_turn.outcome,
+        TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
+    ));
+    lifecycle
+        .close_session(&child_session_id)
+        .await
+        .expect("close child session");
+
+    let second_parent = runtime
+        .stream_turn(
+            TurnInput::text("finish up"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope(&SessionId::from("root"), &TurnId::from("usage-parent-2")),
+            ),
+        )
+        .await
+        .expect("second parent turn");
+
+    // Child usage is not folded into the parent's report: it holds only the
+    // parent's own calls, and no source carries the child's tokens.
+    let usage = runtime.usage_report();
+    assert_eq!(usage.by_source["turn"].usage.input_tokens, 11);
+    assert_eq!(usage.by_source["turn"].usage.output_tokens, 3);
+    assert!(
+        !usage.by_source.contains_key("subagent"),
+        "child usage must not fold into the parent report: {usage:?}"
+    );
+
+    let parent_evidence = first_parent
+        .llm_calls
+        .iter()
+        .chain(second_parent.llm_calls.iter())
+        .map(|call| {
+            call.attempts[0]
+                .evidence
+                .as_ref()
+                .expect("parent attempt evidence")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parent_evidence[0].served_model.as_deref(),
+        Some("parent-first")
+    );
+    assert_eq!(parent_evidence[0].reasoning_output_tokens, Some(0));
+    assert_eq!(
+        parent_evidence[1].served_model.as_deref(),
+        Some("parent-second")
+    );
+    assert_eq!(parent_evidence[1].reasoning_output_tokens, Some(7));
+    assert!(
+        parent_evidence
+            .iter()
+            .all(|evidence| evidence.served_model.as_deref() != Some("child-only"))
+    );
+
+    // The child's usage survives on its own durable ledger after the child
+    // session has closed — a cold reopen of the child store reads it back
+    // with no parent involvement.
+    let child_ledger = durable_token_ledger(&runtime, "subagent-child").await;
+    let child_usage = lash_core::facade_support::SessionUsageReport::from_entries(&child_ledger);
+    let child_totals = child_usage
+        .by_source
+        .values()
+        .map(|row| &row.usage)
+        .fold(lash_core::TokenUsage::default(), |acc, usage| {
+            acc.saturating_add(usage).0
+        });
+    assert_eq!(child_totals.input_tokens, 7);
+    assert_eq!(child_totals.output_tokens, 2);
+    assert_eq!(child_totals.cache_read_input_tokens, 4);
+    assert_eq!(child_totals.reasoning_output_tokens, 1);
+}
+
+/// Reads a closed session's durable token ledger straight from the session
+/// store factory — a cold reopen with no resident runtime involved.
+async fn durable_token_ledger(
+    runtime: &LashRuntime,
+    session_id: &str,
+) -> Vec<lash_core::TokenLedgerEntry> {
+    let store = runtime
+        .host
+        .session_store_factory
+        .as_ref()
+        .expect("session store factory")
+        .open_existing_store_by_id(&SessionId::from(session_id))
+        .await
+        .expect("open child store")
+        .expect("child store exists");
+    store
+        .load_session()
+        .await
+        .expect("load child session")
+        .expect("persisted child session")
+        .token_ledger
+}
+
+#[tokio::test]
+async fn cached_only_child_usage_stays_on_the_child_ledger() {
+    let transport = mock_provider(vec![
+        MockCall {
+            stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
+                input_tokens: 5,
+                output_tokens: 1,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 0,
+            })],
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "parent".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+        MockCall {
+            stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_input_tokens: 9,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 0,
+            })],
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "cached child".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        },
+    ]);
+    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(EmptyTools);
+    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+
+    runtime
+        .stream_turn(
+            TurnInput::text("run parent"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("child-session-event-parent"),
+                ),
+            ),
+        )
+        .await
+        .expect("parent turn");
+
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&lash_core::SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
+    lifecycle
+        .create_session(
+            lash_core::SessionCreateRequest::child_session(
+                runtime.session_id(),
+                lash_core::SessionStartPoint::Empty,
+                lash_core::PluginOptions::default(),
+            )
+            .with_session_id("subagent-child")
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
+        )
+        .await
+        .expect("child session");
+    let child_session_id = SessionId::from("subagent-child");
+    let child_turn_id = TurnId::from("subagent-child-turn");
+    lifecycle
+        .start_turn(
+            lash_core::facade_support::SessionTurnRequest::new(
+                &child_session_id,
+                &child_turn_id,
+                TurnInput::text("run the child turn"),
+                named_turn_scope(&child_session_id, &child_turn_id),
+            )
+            .expect("child turn request"),
+        )
+        .await
+        .expect("child turn");
+    lifecycle
+        .close_session(&child_session_id)
+        .await
+        .expect("close child session");
+
+    let usage = runtime.usage_report();
+    assert_eq!(usage.by_source["turn"].usage.input_tokens, 5);
+    assert_eq!(usage.by_source["turn"].usage.output_tokens, 1);
+    assert!(
+        !usage.by_source.contains_key("subagent"),
+        "child usage must not fold into the parent report: {usage:?}"
+    );
+
+    let child_ledger = durable_token_ledger(&runtime, "subagent-child").await;
+    let child_usage = lash_core::facade_support::SessionUsageReport::from_entries(&child_ledger);
+    let child_totals = child_usage
+        .by_source
+        .values()
+        .map(|row| &row.usage)
+        .fold(lash_core::TokenUsage::default(), |acc, usage| {
+            acc.saturating_add(usage).0
+        });
+    assert_eq!(child_totals.input_tokens, 0);
+    assert_eq!(child_totals.output_tokens, 0);
+    assert_eq!(child_totals.cache_read_input_tokens, 9);
+    assert_eq!(child_totals.reasoning_output_tokens, 0);
+}
+
 /// Tool that parks the turn that calls it: it reports that it started, then
 /// never returns. It is the controlled await a cancelled managed child turn is
 /// dropped at.
@@ -665,22 +1129,32 @@ fn child_turn_usage_event() -> LlmStreamEvent {
     })
 }
 
-fn child_source_input_tokens(runtime: &LashRuntime) -> i64 {
-    runtime
-        .shared_token_ledger
-        .lock_recover()
-        .iter()
-        .map(|entry| entry.usage.input_tokens)
+async fn managed_session_input_tokens(runtime: &LashRuntime, session_id: &str) -> i64 {
+    let handle = runtime
+        .managed_sessions
+        .lock()
+        .await
+        .get(&SessionId::from(session_id))
+        .cloned()
+        .expect("managed session runtime");
+    handle
+        .runtime
+        .lock()
+        .await
+        .usage_report()
+        .by_source
+        .values()
+        .map(|row| row.usage.input_tokens)
         .sum()
 }
 
 /// Cancelling the process that drives a managed child turn drops the
-/// `start_turn` future at whichever await it is parked on. That must release the
-/// turn's registration and its live-usage entry: a ghost registration would
-/// refuse `close_session` for the session's whole lifetime and reject every
-/// later turn on it as "already has a running turn".
+/// `start_turn` future at whichever await it is parked on. That must release
+/// the turn's registration: a ghost registration would refuse `close_session`
+/// for the session's whole lifetime and reject every later turn on it as
+/// "already has a running turn".
 #[tokio::test]
-async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage() {
+async fn cancelled_managed_child_turn_releases_its_registration() {
     let transport = mock_provider(vec![
         // Gated child turn: one provider round-trip reports usage, then the
         // tool call parks the turn.
@@ -729,6 +1203,12 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&lash_core::SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
     lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child_session(
@@ -737,7 +1217,8 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("cancelled-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
         )
         .await
         .expect("child session");
@@ -766,21 +1247,25 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         runtime.managed_turns.lock_recover().contains_key(turn_id),
         "the parked child turn must be registered while it runs"
     );
-    assert_eq!(
-        child_source_input_tokens(&runtime),
-        5,
-        "the parked child turn must have reported live usage before cancellation"
-    );
 
     // The cancellation: the owning process drops the child-turn future.
     drop(turn);
 
+    assert_eq!(
+        managed_session_input_tokens(&runtime, "cancelled-child").await,
+        0,
+        "usage lands at turn finish, so a dropped child turn reports nothing"
+    );
     assert!(
         runtime.managed_turns.lock_recover().is_empty(),
         "a cancelled child turn must not leave a ghost registration behind"
     );
-    // The live-usage entry is keyed by turn id, so a stranded entry would
-    // swallow this turn's usage as already reported.
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&lash_core::SessionId::from(runtime.session_id()))
+        .await
+        .expect("plugin init");
     lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child_session(
@@ -789,7 +1274,8 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("retry-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
         )
         .await
         .expect("retry child session");
@@ -804,9 +1290,14 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
     ));
     assert_eq!(
-        child_source_input_tokens(&runtime),
-        10,
-        "the retried turn's live usage must be reported against a reclaimed entry"
+        managed_session_input_tokens(&runtime, "retry-child").await,
+        5,
+        "the retried turn's usage lands on its own session's ledger"
+    );
+    assert_eq!(
+        managed_session_input_tokens(&runtime, "cancelled-child").await,
+        0,
+        "a different session's turn must not leak usage into the cancelled child's ledger"
     );
 
     let recovered_session_id = SessionId::from("cancelled-child");
@@ -820,8 +1311,8 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         "cancelled child recovered"
     );
     assert_eq!(
-        child_source_input_tokens(&runtime),
-        15,
+        managed_session_input_tokens(&runtime, "cancelled-child").await,
+        5,
         "the recovered child's turn must report usage normally"
     );
 

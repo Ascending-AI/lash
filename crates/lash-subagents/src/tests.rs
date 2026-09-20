@@ -130,10 +130,9 @@ impl Capability for CustomRequestCapability {
             .map_err(|error| error.to_string())?;
         let request = lash_core::SessionCreateRequest::child(
             ctx.parent_session_id,
-            lash_core::SessionStartPoint::CurrentSession,
+            lash_core::SessionStartPoint::Empty,
             ctx.base_policy(),
             lash_core::PluginOptions::default(),
-            "custom-subagent",
         )
         .with_plugin_source(lash_core::SessionPluginSource::CurrentHostFresh)
         .with_tool_access(tool_access);
@@ -174,9 +173,8 @@ fn capability_can_build_complete_spawn_request() {
 
     assert!(matches!(
         &request.start,
-        lash_core::SessionStartPoint::CurrentSession
+        lash_core::SessionStartPoint::Empty
     ));
-    assert_eq!(request.usage_source.as_deref(), Some("custom-subagent"));
     assert!(request.tool_access.hidden_tools().contains("base_hidden"));
     assert!(request.tool_access.hidden_tools().contains("custom_hidden"));
     assert_eq!(

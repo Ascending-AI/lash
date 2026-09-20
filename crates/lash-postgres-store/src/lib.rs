@@ -387,7 +387,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `owner_kind`/`owner_id` columns with a named owner-kind CHECK (FIG-1956),
 // deleting the `_owner_scope_namespace` JSON encoding entirely.
 // Component-104 catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 105;
+// Version 106 (FIG-3376) moves the durable `SessionCreateRequest` stored in
+// process rows, trigger targets, and effect payloads to the spawn-time
+// plugin-init cutover and drops `usage_source`. Component-105 catalogs are
+// rejected and recreated.
+const SCHEMA_VERSION: i32 = 106;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

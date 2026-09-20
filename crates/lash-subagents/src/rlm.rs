@@ -121,28 +121,39 @@ impl RlmSubagentToolsProvider {
             .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
         let child_session_id = SessionId::from(format!("session:subagent:{}", call.call_id));
         let parent_session_id = SessionId::from(context.session_id());
-        let create_request = Box::new(
-            build_spawn_create_request(SpawnCreateRequestInput {
-                registry: &self.registry,
-                parent_session_id: &parent_session_id,
-                current_snapshot,
-                session_spec: &self.session_spec,
-                tool_access: &self.tool_access,
-                final_answer_format: self.final_answer_format.clone(),
-                capability_name: &capability_name,
-                output_schema: output_schema.clone(),
-                seed,
-                parent_subagent: self.parent_subagent.as_ref(),
-                caused_by: context
-                    .tool_call_id()
-                    .map(|call_id| lash_core::CausalRef::ToolCall {
-                        session_id: parent_session_id.clone(),
-                        call_id: call_id.to_string(),
-                    }),
-            })
-            .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?
-            .with_session_id(child_session_id),
-        );
+        let mut create_request = build_spawn_create_request(SpawnCreateRequestInput {
+            registry: &self.registry,
+            parent_session_id: &parent_session_id,
+            current_snapshot,
+            session_spec: &self.session_spec,
+            tool_access: &self.tool_access,
+            final_answer_format: self.final_answer_format.clone(),
+            capability_name: &capability_name,
+            output_schema: output_schema.clone(),
+            seed,
+            parent_subagent: self.parent_subagent.as_ref(),
+            caused_by: context
+                .tool_call_id()
+                .map(|call_id| lash_core::CausalRef::ToolCall {
+                    session_id: parent_session_id.clone(),
+                    call_id: call_id.to_string(),
+                }),
+        })
+        .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
+        // A `ParentFork` peer initializes from this spawn-time capture alone;
+        // it is journaled inside the durable creation request so a worker
+        // restart rebuilds the child identically without reading the parent.
+        if matches!(
+            create_request.plugin_source,
+            lash_core::SessionPluginSource::ParentFork
+        ) {
+            let plugin_init = context
+                .session_plugin_init()
+                .await
+                .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
+            create_request = create_request.with_plugin_init(plugin_init);
+        }
+        let create_request = Box::new(create_request.with_session_id(child_session_id));
         let turn_input = turn_input_for_task(render_task_prompt(&task, output_schema.as_ref()));
         // Mint the child's process identity here, in the prepared (journaled)
         // payload, so it is stable across replay — the durable layer keys the

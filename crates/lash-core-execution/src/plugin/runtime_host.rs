@@ -49,6 +49,19 @@ pub trait SessionStateService: Send + Sync {
         Ok(std::sync::Arc::new(self.tool_catalog(session_id).await?))
     }
 
+    /// Capture the spawn-time [`SessionPluginInit`] payload a
+    /// `ParentFork` creation request must carry. The capture reads the named
+    /// resident session exactly once; the request then travels durably and
+    /// materialization never reads the live session again.
+    async fn session_plugin_init(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<SessionPluginInit, PluginError> {
+        Err(PluginError::Session(
+            "session plugin init capture is unavailable in this runtime".to_string(),
+        ))
+    }
+
     async fn tool_state(&self, _session_id: &SessionId) -> Result<crate::ToolState, PluginError> {
         Err(PluginError::Session(
             "tool state is unavailable in this session".to_string(),

@@ -1063,15 +1063,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -1960,15 +1951,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -2680,15 +2662,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -3294,15 +3267,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -3720,15 +3684,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -4299,15 +4254,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -4770,15 +4716,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -5575,15 +5512,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -6011,15 +5939,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -6911,15 +6830,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -9587,15 +9497,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -10416,15 +10317,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -12497,15 +12389,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -14595,15 +14478,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -16514,15 +16388,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -19595,15 +19460,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -41891,15 +41747,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -42030,15 +41877,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,
@@ -42169,15 +42007,6 @@
             "passed": true
           },
           "usage": {
-            "child_usage_entry_count": 0,
-            "child_usage_total": {
-              "cache_read_input_tokens": 0,
-              "cache_write_input_tokens": 0,
-              "input_tokens": 0,
-              "output_tokens": 0,
-              "reasoning_output_tokens": 0,
-              "total_tokens": 0
-            },
             "negative_fields": [],
             "non_negative": true,
             "passed": true,

@@ -1649,7 +1649,6 @@ pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTu
         },
         execution: TurnExecutionMetrics::default(),
         token_usage: TokenUsage::default(),
-        children_usage: Vec::new(),
         llm_calls: Vec::new(),
         tool_calls: Vec::new(),
         omitted: None,

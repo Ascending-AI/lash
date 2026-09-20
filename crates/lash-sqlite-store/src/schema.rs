@@ -1025,7 +1025,10 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// Version 40 names the formerly-anonymous CHECKs (FIG-3261) so the
 /// required-constraints gate can see them; a pre-40 registry is rejected at
 /// open and recreated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 40;
+/// Version 41 (FIG-3376) moves the durable `SessionCreateRequest` stored in
+/// process payloads to the spawn-time plugin-init cutover and drops
+/// `usage_source`; a pre-41 registry is rejected at open and recreated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 41;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1116,7 +1119,10 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // `owner_kind`/`owner_id` columns with a named owner-kind CHECK, deleting the
 // `_owner_scope_namespace` JSON encoding entirely. Existing trigger stores
 // are rejected rather than migrated.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 10;
+// Version 11 (FIG-3376) moves the `SessionCreateRequest` carried in trigger
+// targets to the spawn-time plugin-init cutover and drops `usage_source`;
+// existing trigger stores are rejected rather than migrated.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 11;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
@@ -1278,7 +1284,10 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// vocabularies at the DDL level (FIG-2811): both columns held closed enums
 /// enforced only at read time. A pre-25 journal is rejected at open and
 /// recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 25;
+/// Version 26 (FIG-3376) moves the `SessionCreateRequest` carried in effect
+/// payloads to the spawn-time plugin-init cutover and drops `usage_source`;
+/// a pre-26 journal is rejected at open and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 26;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

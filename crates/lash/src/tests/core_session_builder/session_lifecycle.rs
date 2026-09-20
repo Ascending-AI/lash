@@ -2149,7 +2149,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
     let tier = lash_subagents::TierCapability::new(
         "inherited",
         None,
-        lash_subagents::TierPluginSource::CurrentSessionFork,
+        lash_subagents::TierPluginSource::ParentFork,
     );
     let parent_snapshot = state.to_snapshot();
     let session_spec = lash_core::facade_support::SessionSpec::inherit();

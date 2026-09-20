@@ -13,7 +13,6 @@ pub(in crate::runtime::session_manager) struct SessionCreatePlan {
     pub(in crate::runtime::session_manager) plugin_source: crate::SessionPluginSource,
     pub(in crate::runtime::session_manager) context_overlay: crate::SessionContextOverlay,
     pub(in crate::runtime::session_manager) protocol_request: SessionCreateRequest,
-    pub(in crate::runtime::session_manager) usage_source: Option<String>,
 }
 
 pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
@@ -73,7 +72,6 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
         plugin_config,
         plugin_source: request.plugin_source,
         context_overlay: request.context_overlay.clone(),
-        usage_source: request.usage_source.clone(),
         protocol_request: request,
     })
 }
@@ -89,13 +87,6 @@ async fn resolve_start_state(
             session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(current.policy.clone())
         },
-        SessionStartPoint::CurrentSession => current.snapshot.to_runtime_state(),
-        SessionStartPoint::ExistingSession { session_id } => current
-            .resident_state_by_id(managed, session_id)
-            .await
-            .ok_or_else(|| {
-                crate::PluginError::Session(format!("unknown session `{session_id}`"))
-            })?,
         SessionStartPoint::Snapshot { snapshot } => {
             let mut state = current
                 .resident_state_by_id(managed, &snapshot.session_id)
@@ -165,7 +156,6 @@ fn build_runtime_state(
     base.reset_initial_agent_frame_with_clock(
         crate::AgentFrameAssignment::from_session_request_facts(
             request.plugin_options.clone(),
-            request.usage_source.clone(),
             policy.clone(),
         ),
         base.protocol_turn_options.clone(),

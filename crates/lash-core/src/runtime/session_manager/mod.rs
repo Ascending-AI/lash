@@ -19,10 +19,7 @@ mod turns;
 mod usage;
 
 pub use crate::direct_completion_client::DirectCompletionClient;
-pub(in crate::runtime) use usage::ChildUsageEventRelay;
-pub(in crate::runtime::session_manager) use usage::{
-    ChannelEventSink, LiveChildUsageForwarder, LiveUsageMutex, TurnReleasedFlag, subtract_usage,
-};
+pub(in crate::runtime::session_manager) use usage::ChannelEventSink;
 #[cfg(any(test, feature = "testing"))]
 pub use usage::{
     PendingTokenLedgerEntry, StagedTokenLedger, record_reconciled_usage_shared,
@@ -112,15 +109,6 @@ pub(in crate::runtime) struct UsageCapability {
     /// `LashRuntime`. All managers created from the same runtime
     /// write to the same Arc. Drained at turn-commit time.
     token_ledger: Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
-    /// Maps child session_id → usage_source label.
-    child_sources: Arc<std::sync::Mutex<HashMap<SessionId, SessionId>>>,
-    /// Tracks live child-turn usage already bubbled into the shared
-    /// token ledger so child turn completion can reconcile final usage
-    /// without double counting.
-    child_turn_live_usage: Arc<LiveUsageMutex<HashMap<TurnId, TokenUsage>>>,
-    /// Optional relay for bubbling child-session token usage into the
-    /// parent turn's live event stream.
-    child_usage_event_relay: Option<ChildUsageEventRelay>,
     /// Out-of-turn managers persist drained usage back into the
     /// current session graph. Turn-time managers leave the shared
     /// ledger alone so the parent turn can commit it once.
@@ -295,16 +283,9 @@ impl ProcessCapability {
 }
 
 impl UsageCapability {
-    fn new(
-        runtime: &LashRuntime,
-        persist_to_store: bool,
-        child_usage_event_relay: Option<ChildUsageEventRelay>,
-    ) -> Self {
+    fn new(runtime: &LashRuntime, persist_to_store: bool) -> Self {
         Self {
             token_ledger: Arc::clone(&runtime.shared_token_ledger),
-            child_sources: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            child_turn_live_usage: Arc::new(LiveUsageMutex::new(HashMap::new())),
-            child_usage_event_relay,
             persist_to_store,
         }
     }
@@ -409,7 +390,6 @@ impl RuntimeSessionServices {
     pub(super) fn new(
         runtime: &LashRuntime,
         persist_usage_to_store: bool,
-        child_usage_event_relay: Option<ChildUsageEventRelay>,
         held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<Self, PluginOperationInvokeError> {
         if !persist_usage_to_store {
@@ -417,12 +397,7 @@ impl RuntimeSessionServices {
                 "turn-scoped session services require the turn's graph append draft".to_string(),
             ));
         }
-        Self::with_scope(
-            runtime,
-            None,
-            child_usage_event_relay,
-            held_session_execution_lease,
-        )
+        Self::with_scope(runtime, None, held_session_execution_lease)
     }
 
     #[doc(hidden)]
@@ -430,21 +405,19 @@ impl RuntimeSessionServices {
         runtime: &LashRuntime,
         persist_usage_to_store: bool,
     ) -> Result<Self, PluginOperationInvokeError> {
-        Self::new(runtime, persist_usage_to_store, None, None)
+        Self::new(runtime, persist_usage_to_store, None)
     }
 
     /// Turn-scoped services: usage stays in the shared ledger and graph
     /// appends ride `turn_graph_appends`, both committed once by the turn.
     pub(super) fn for_turn(
         runtime: &LashRuntime,
-        child_usage_event_relay: Option<ChildUsageEventRelay>,
         held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         turn_graph_appends: &TurnGraphAppendDraft,
     ) -> Result<Self, PluginOperationInvokeError> {
         Self::with_scope(
             runtime,
             Some(turn_graph_appends),
-            child_usage_event_relay,
             held_session_execution_lease,
         )
     }
@@ -452,7 +425,6 @@ impl RuntimeSessionServices {
     fn with_scope(
         runtime: &LashRuntime,
         turn_graph_appends: Option<&TurnGraphAppendDraft>,
-        child_usage_event_relay: Option<ChildUsageEventRelay>,
         held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<Self, PluginOperationInvokeError> {
         let Some(session) = runtime.session.as_ref() else {
@@ -470,7 +442,7 @@ impl RuntimeSessionServices {
             ),
             managed: ManagedSessionCapability::new(runtime),
             processes: ProcessCapability::new(runtime),
-            usage: UsageCapability::new(runtime, persist_usage_to_store, child_usage_event_relay),
+            usage: UsageCapability::new(runtime, persist_usage_to_store),
             direct: DirectCompletionCapability,
             direct_replay_ordinals: Arc::new(std::sync::Mutex::new(
                 std::collections::BTreeMap::new(),
@@ -528,8 +500,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
         &crate::SystemClock,
     );
     let services = Arc::new(
-        RuntimeSessionServices::new(&runtime, true, None, None)
-            .expect("mixed-envelope session services"),
+        RuntimeSessionServices::new(&runtime, true, None).expect("mixed-envelope session services"),
     );
     let graph = services.graph_service();
     let request = crate::AppendSessionNodesRequest {
@@ -562,7 +533,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
         .await
         .expect("refresh between lost response and retry");
     let retry_services = Arc::new(
-        RuntimeSessionServices::new(&runtime, true, None, None)
+        RuntimeSessionServices::new(&runtime, true, None)
             .expect("mixed-envelope retry session services"),
     );
     let replay = retry_services
@@ -680,8 +651,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
         .await
         .expect("refresh before ordinal-reuse sequence");
     let ordinal_services = Arc::new(
-        RuntimeSessionServices::new(&runtime, true, None, None)
-            .expect("ordinal-reuse session services"),
+        RuntimeSessionServices::new(&runtime, true, None).expect("ordinal-reuse session services"),
     );
     let first_usage = crate::TokenUsage {
         input_tokens: 13,
@@ -838,7 +808,7 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     .await
     .expect("cancelled usage runtime");
     let services = Arc::new(
-        RuntimeSessionServices::new(&runtime, true, None, None)
+        RuntimeSessionServices::new(&runtime, true, None)
             .expect("cancelled usage session services"),
     );
     let usage = crate::TokenUsage {

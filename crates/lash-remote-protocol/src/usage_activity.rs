@@ -1,6 +1,5 @@
 //! Token usage accounting and the streaming turn-activity event vocabulary.
 
-use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -39,53 +38,6 @@ impl RemoteUsage {
         self.reasoning_output_tokens = self
             .reasoning_output_tokens
             .saturating_add(other.reasoning_output_tokens);
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteTokenLedgerEntry {
-    pub source: String,
-    pub model: String,
-    pub usage: RemoteUsage,
-    /// Whether this row is provider-reported usage, a typed hole left by
-    /// interrupted attempts, or a reconciliation correction. Absent means
-    /// reported, so pre-window-57 rows decode unchanged.
-    #[serde(
-        default,
-        skip_serializing_if = "RemoteLedgerUsageDisposition::is_reported"
-    )]
-    pub usage_disposition: RemoteLedgerUsageDisposition,
-}
-
-/// Wire mirror of [`lash_core::LedgerUsageDisposition`].
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RemoteLedgerUsageDisposition {
-    #[default]
-    Reported,
-    /// Window 57 carries the hole *descriptors*, not a count: a remote consumer
-    /// reconstructs the same outstanding attempts the durable row does.
-    Unreported {
-        attempts: Vec<RemoteUnreportedLedgerAttempt>,
-    },
-    Reconciled {
-        call_id: String,
-        attempt_ordinal: u32,
-    },
-}
-
-/// Wire mirror of [`lash_core::UnreportedLedgerAttempt`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteUnreportedLedgerAttempt {
-    pub call_id: String,
-    pub attempt_ordinal: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation_id: Option<String>,
-}
-
-impl RemoteLedgerUsageDisposition {
-    pub fn is_reported(&self) -> bool {
-        matches!(self, Self::Reported)
     }
 }
 
@@ -240,14 +192,6 @@ pub enum RemoteTurnEvent {
         value: serde_json::Value,
     },
     Usage {
-        protocol_iteration: usize,
-        usage: RemoteUsage,
-        cumulative: RemoteUsage,
-    },
-    ChildUsage {
-        session_id: SessionId,
-        source: String,
-        model: String,
         protocol_iteration: usize,
         usage: RemoteUsage,
         cumulative: RemoteUsage,

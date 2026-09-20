@@ -563,15 +563,22 @@ async fn require_refuses_a_managed_child_whose_inherited_snapshot_lost_a_member(
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&lash_core::SessionId::from("fig3367-child-parent"))
+        .await
+        .expect("plugin init");
     let refusal = match lifecycle
         .create_session(
             lash_core::SessionCreateRequest::child_session(
                 "fig3367-child-parent",
-                lash_core::SessionStartPoint::CurrentSession,
+                lash_core::SessionStartPoint::Empty,
                 lash_core::PluginOptions::default(),
             )
             .with_session_id("fig3367-child")
-            .with_plugin_source(lash_core::SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(lash_core::SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
         )
         .await
     {

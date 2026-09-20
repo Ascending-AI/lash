@@ -27,12 +27,7 @@ impl RuntimeSessionServices {
         // carries only persisted policy, so fill an omitted provider_id from
         // the parent runtime policy before the child session is built.
         self.inherit_session_turn_provider_id(&mut create_request);
-        let child = match Box::pin(self.managed.create_session(
-            &self.current,
-            &self.usage,
-            create_request,
-        ))
-        .await
+        let child = match Box::pin(self.managed.create_session(&self.current, create_request)).await
         {
             Ok(child) => child,
             Err(err) => {
@@ -174,7 +169,7 @@ impl RuntimeSessionServices {
                 .await?;
         }
         self.managed
-            .close_session(&self.current, &self.usage, child_session_id)
+            .close_session(&self.current, child_session_id)
             .await
             .map_err(crate::ProcessInfraError::new)?;
         let Some(factory) = self.current.host.session_store_factory.as_ref() else {
@@ -265,7 +260,7 @@ impl RuntimeSessionServices {
         }
         let _ = self
             .managed
-            .close_session(&self.current, &self.usage, child_session_id)
+            .close_session(&self.current, child_session_id)
             .await;
         if cancellation.is_cancelled() {
             self.reclaim_cancelled_child_session(process_id, child_session_id)
@@ -745,13 +740,20 @@ mod tests {
             .await
             .expect("materialize unrelated durable session");
         let foreign_process_id = ProcessId::from(format!("process:subagent:foreign-{case}"));
+        let foreign_plugin_init = runtime
+            .session_state_service()
+            .expect("session state")
+            .session_plugin_init(&SessionId::from(runtime.session_id()))
+            .await
+            .expect("plugin init");
         let foreign_create_request = crate::SessionCreateRequest::child_session(
             runtime.session_id(),
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::default(),
         )
         .with_session_id(&foreign_session_id)
-        .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork);
+        .with_plugin_source(crate::SessionPluginSource::ParentFork)
+        .with_plugin_init(foreign_plugin_init);
         let foreign_registration = crate::ProcessRegistration::new(
             &foreign_process_id,
             crate::ProcessInput::SessionTurn {
@@ -789,13 +791,20 @@ mod tests {
                 .is_some(),
             "ownership refusal must leave the unrelated parent session durable and reopenable"
         );
+        let plugin_init = runtime
+            .session_state_service()
+            .expect("session state")
+            .session_plugin_init(&SessionId::from(runtime.session_id()))
+            .await
+            .expect("plugin init");
         let create_request = crate::SessionCreateRequest::child_session(
             runtime.session_id(),
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::default(),
         )
         .with_session_id(&child_session_id)
-        .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork);
+        .with_plugin_source(crate::SessionPluginSource::ParentFork)
+        .with_plugin_init(plugin_init);
         let registration = crate::ProcessRegistration::new(
             &process_id,
             crate::ProcessInput::SessionTurn {
@@ -983,13 +992,20 @@ mod tests {
                 )
                 .await;
                 let services = runtime.runtime_session_services().unwrap();
+                let plugin_init = runtime
+                    .session_state_service()
+                    .expect("session state")
+                    .session_plugin_init(&SessionId::from(runtime.session_id()))
+                    .await
+                    .expect("plugin init");
                 let request = crate::SessionCreateRequest::child_session(
                     runtime.session_id(),
                     crate::SessionStartPoint::Empty,
                     crate::PluginOptions::default(),
                 )
                 .with_session_id("permit-child")
-                .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork);
+                .with_plugin_source(crate::SessionPluginSource::ParentFork)
+                .with_plugin_init(plugin_init);
                 let registration = crate::ProcessRegistration::new(
                     "permit-process",
                     crate::ProcessInput::SessionTurn {

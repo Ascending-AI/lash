@@ -866,7 +866,6 @@ impl AgentSessionTurnProcessScenario {
             lash_core::SessionStartPoint::Empty,
             child_policy,
             lash_core::PluginOptions::default(),
-            "agent-scenario-session-turn",
         )
         .with_session_id(self.child_session_id.clone())
     }

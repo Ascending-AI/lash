@@ -261,7 +261,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 89;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 90;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -470,6 +470,11 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (
             crate::WANING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             88,
+            89,
+        ),
+        (
+            crate::EBBING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            89,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -1781,7 +1786,6 @@ fn assert_graph_payloads(nodes: &[lash_core::SessionNodeRecord]) {
                 assignment.policy.turn_budget,
                 lash_core::TurnBudget::Unbounded
             );
-            assert_eq!(assignment.usage_source, None);
             assert_eq!(
                 serde_json::to_value(&assignment.plugin_options)
                     .expect("encode frame plugin options"),

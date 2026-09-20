@@ -1008,6 +1008,7 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
 /// Binding, records the Child relation, carries the provider pin, and runs a
 /// turn — there is no second session model behind a child-admin facade.
 #[tokio::test]
+
 async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
     let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))

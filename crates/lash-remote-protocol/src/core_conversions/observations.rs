@@ -404,21 +404,6 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 usage: usage.into(),
                 cumulative: cumulative.into(),
             }),
-            lash_core::TurnEvent::ChildUsage {
-                session_id,
-                source,
-                model,
-                protocol_iteration,
-                usage,
-                cumulative,
-            } => Ok(Self::ChildUsage {
-                session_id,
-                source,
-                model,
-                protocol_iteration,
-                usage: usage.into(),
-                cumulative: cumulative.into(),
-            }),
             lash_core::TurnEvent::RetryStatus {
                 wait_seconds,
                 attempt,

@@ -487,14 +487,12 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         .find(|node| node.node_id == previous_frame_node_id_value)
         .expect("current frame node");
     let crate::SessionNodePayload::FrameOpen {
-        assignment,
         protocol_turn_options,
         ..
     } = &mut previous.payload
     else {
         panic!("current frame id must identify FrameOpen");
     };
-    assignment.usage_source = Some("root-assignment".to_string());
     *protocol_turn_options =
         crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "mode": "test" }));
     state.protocol_turn_options = protocol_turn_options.clone();
@@ -526,10 +524,6 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
     assert_eq!(
         current.previous_frame_node_id.as_deref(),
         previous_frame_node_id.as_deref()
-    );
-    assert_eq!(
-        current.assignment.usage_source.as_deref(),
-        Some("root-assignment")
     );
     assert_eq!(
         current.protocol_turn_options.payload,

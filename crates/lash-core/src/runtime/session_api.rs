@@ -412,20 +412,16 @@ impl LashRuntime {
             }
             ResidentSessionState::Valid => {}
         }
-        Ok(Arc::new(RuntimeSessionServices::new(
-            self, true, None, None,
-        )?))
+        Ok(Arc::new(RuntimeSessionServices::new(self, true, None)?))
     }
 
     pub(super) fn runtime_session_services_for_turn(
         &self,
-        child_usage_event_relay: Option<ChildUsageEventRelay>,
         held_session_execution_lease: Option<&SessionExecutionLeaseGuard>,
         turn_graph_appends: &TurnGraphAppendDraft,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::for_turn(
             self,
-            child_usage_event_relay,
             held_session_execution_lease,
             turn_graph_appends,
         )?))
@@ -438,7 +434,6 @@ impl LashRuntime {
         Ok(Arc::new(RuntimeSessionServices::new(
             self,
             true,
-            None,
             held_session_execution_lease,
         )?))
     }

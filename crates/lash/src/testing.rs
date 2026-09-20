@@ -854,7 +854,6 @@ finish("registered");
                         lash_core::SessionStartPoint::Empty,
                         child_policy,
                         lash_core::PluginOptions::default(),
-                        "rebuild-conformance",
                     )),
                     turn_input: Box::new(lash_core::TurnInput::text("run child")),
                     output_contract: lash_core::ToolOutputContract::Static,

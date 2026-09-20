@@ -62,9 +62,7 @@ pub struct RuntimeUsageInvariantFacts {
     pub turn_usage: RuntimeUsageTotals,
     pub total_usage: RuntimeUsageTotals,
     pub token_ledger_total: RuntimeUsageTotals,
-    pub child_usage_total: RuntimeUsageTotals,
     pub token_ledger_entry_count: usize,
-    pub child_usage_entry_count: usize,
     pub usage_event_count: usize,
     pub usage_event_cumulative_totals: Vec<RuntimeUsageTotals>,
     pub non_negative: bool,
@@ -446,16 +444,13 @@ pub fn runtime_usage_invariant_facts(
     activities: &[lash::TurnActivity],
 ) -> RuntimeUsageInvariantFacts {
     let turn_usage = RuntimeUsageTotals::from_usage(&result.usage);
-    let total_usage = RuntimeUsageTotals::from_usage(&result.total_usage().0);
+    let total_usage = turn_usage.clone();
     let token_ledger_total =
         RuntimeUsageTotals::sum(result.state.token_ledger.iter().map(|entry| &entry.usage));
-    let child_usage_total =
-        RuntimeUsageTotals::sum(result.children_usage.iter().map(|entry| &entry.usage));
     let usage_event_cumulative_totals = activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            lash::TurnEvent::Usage { cumulative, .. }
-            | lash::TurnEvent::ChildUsage { cumulative, .. } => {
+            lash::TurnEvent::Usage { cumulative, .. } => {
                 Some(RuntimeUsageTotals::from_usage(cumulative))
             }
             _ => None,
@@ -474,21 +469,9 @@ pub fn runtime_usage_invariant_facts(
         &token_ledger_total,
         &mut negative_fields,
     );
-    collect_negative_usage_fields(
-        "child_usage_total",
-        &child_usage_total,
-        &mut negative_fields,
-    );
     for (index, entry) in result.state.token_ledger.iter().enumerate() {
         collect_negative_usage_fields(
             &format!("token_ledger[{index}]"),
-            &RuntimeUsageTotals::from_usage(&entry.usage),
-            &mut negative_fields,
-        );
-    }
-    for (index, entry) in result.children_usage.iter().enumerate() {
-        collect_negative_usage_fields(
-            &format!("children_usage[{index}]"),
             &RuntimeUsageTotals::from_usage(&entry.usage),
             &mut negative_fields,
         );
@@ -498,9 +481,7 @@ pub fn runtime_usage_invariant_facts(
         turn_usage,
         total_usage,
         token_ledger_total,
-        child_usage_total,
         token_ledger_entry_count: result.state.token_ledger.len(),
-        child_usage_entry_count: result.children_usage.len(),
         usage_event_count: usage_event_cumulative_totals.len(),
         usage_event_cumulative_totals,
         non_negative,
@@ -751,7 +732,6 @@ mod tests {
                     state: lash_core::facade_support::OutputState::Usable,
                 },
                 usage: Default::default(),
-                children_usage: Vec::new(),
                 llm_calls: Vec::new(),
                 failure_evidence: Vec::new(),
                 tool_calls: Vec::new(),

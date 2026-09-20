@@ -616,6 +616,12 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&SessionId::from("parent-session"))
+        .await
+        .expect("plugin init");
     let child = lifecycle
         .create_session(
             SessionCreateRequest::child_session(
@@ -624,7 +630,8 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
                 PluginOptions::default(),
             )
             .with_session_id("panicking-child")
-            .with_plugin_source(SessionPluginSource::CurrentSessionFork),
+            .with_plugin_source(SessionPluginSource::ParentFork)
+            .with_plugin_init(plugin_init),
         )
         .await
         .expect("create child");

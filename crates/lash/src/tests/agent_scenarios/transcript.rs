@@ -206,7 +206,6 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Optio
         | lash_core::TurnEvent::ReasoningDelta { .. }
         | lash_core::TurnEvent::ModelCallRecorded { .. }
         | lash_core::TurnEvent::Usage { .. }
-        | lash_core::TurnEvent::ChildUsage { .. }
         | lash_core::TurnEvent::PluginRuntime { .. } => return None,
     })
 }

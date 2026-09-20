@@ -692,11 +692,12 @@ pub use plugin::{
     AppendSessionNodesRequest, FrameNodeId, FrameNodeIdError, KeyRejection, PluginError,
     PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEdit,
     PluginStateError, PluginStateStore, ProcessEngineContributionContext,
-    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
-    SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginSource,
-    SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService,
-    SessionToolAccess, SessionToolAccessError, SubagentSessionContext, SwitchAgentFrameRequest,
-    durable_identity_conflict, is_durable_identity_conflict,
+    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SESSION_PLUGIN_INIT_MAX_BYTES,
+    SessionContextOverlay, SessionCreateRequest, SessionGraphService, SessionLineage,
+    SessionPluginInit, SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot,
+    SessionStartPoint, SessionStateService, SessionToolAccess, SessionToolAccessError,
+    SubagentSessionContext, SwitchAgentFrameRequest, durable_identity_conflict,
+    is_durable_identity_conflict,
 };
 pub use plugin::{OpenAgentFrameRequest, OpenAgentFrameResult};
 pub use provider::{

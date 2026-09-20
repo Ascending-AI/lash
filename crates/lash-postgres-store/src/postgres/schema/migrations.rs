@@ -9,10 +9,13 @@ use super::*;
 /// it was the store-version window's floor move (FIG-2082), which retired
 /// every migration arm below component 101 rather than a relation — component
 /// 104 adds only CHECK constraints to `lash_runtime_effect_group` (FIG-2811),
-/// and component 105 adds NOT NULL owner columns to
-/// `lash_trigger_mutation_receipts` (FIG-1956), which a component-101 or -102
-/// catalog simply lacks rather than contradicts. Component 104 is therefore
-/// retained as the refusal-only endpoint and no row targets component 105.
+/// component 105 adds NOT NULL owner columns to
+/// `lash_trigger_mutation_receipts` (FIG-1956), and component 106 is the
+/// creation-request cutover (FIG-3376), which moved the session-node body and
+/// payload generations without touching the relational DDL. A component-101
+/// or -102 catalog simply lacks those additions rather than contradicts them.
+/// Component 105 is therefore retained as the refusal-only endpoint and no
+/// row targets component 106.
 ///
 /// Component 102's child table is why the cutover is a refusal rather than a
 /// creation migration: a component-101 store recorded the evidence as two
@@ -23,9 +26,9 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
         from: 101,
-        to: 104,
+        to: 105,
         // The lists are keyed to the floor, not to one generation: a relation
-        // or column introduced after 104 belongs here too, so the fixture
+        // or column introduced after 105 belongs here too, so the fixture
         // rebuilds the published component-101 catalog by removing them.
         source_missing_tables: &["lash_turn_cancel_affected_inputs"],
         source_missing_columns: &[
@@ -36,26 +39,48 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_relations: &["lash_turn_cancel_affected_inputs"],
         statements: &[],
     },
-    // Component 102 to 104 moved no shape — the cancellation affected-input
-    // child table landed *at* component 102 — so a component-102 catalog lacks
-    // nothing the endpoint carries.
+    // Component 102 to 105 moved no shape the endpoint models beyond what the
+    // 101 arm already lists — the cancellation affected-input child table
+    // landed *at* component 102 — so a component-102 catalog lacks nothing
+    // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 104,
+        to: 105,
         source_missing_tables: &[],
-        source_missing_columns: &[],
+        source_missing_columns: &[
+            ("lash_trigger_mutation_receipts", "owner_kind"),
+            ("lash_trigger_mutation_receipts", "owner_id"),
+        ],
         source_missing_guards: &[],
         introduced_relations: &[],
         statements: &[],
     },
-    // The immediate predecessor of the retained generation: component 103 to
-    // 104 added only CHECK constraints, so a component-103 catalog lacks no
-    // relation or column the endpoint carries.
+    // Component 103 to 105: 104 added only CHECK constraints (unmodeled) and
+    // 105 added the owner columns, so a component-103 catalog lacks exactly
+    // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 104,
+        to: 105,
         source_missing_tables: &[],
-        source_missing_columns: &[],
+        source_missing_columns: &[
+            ("lash_trigger_mutation_receipts", "owner_kind"),
+            ("lash_trigger_mutation_receipts", "owner_id"),
+        ],
+        source_missing_guards: &[],
+        introduced_relations: &[],
+        statements: &[],
+    },
+    // The immediate predecessor of the retained generation: component 104 to
+    // 105 added the owner columns, which this catalog models, so a
+    // component-104 catalog lacks exactly those columns.
+    SchemaMigration {
+        from: 104,
+        to: 105,
+        source_missing_tables: &[],
+        source_missing_columns: &[
+            ("lash_trigger_mutation_receipts", "owner_kind"),
+            ("lash_trigger_mutation_receipts", "owner_id"),
+        ],
         source_missing_guards: &[],
         introduced_relations: &[],
         statements: &[],
