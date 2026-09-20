@@ -14,7 +14,7 @@ pub(crate) fn rlm_tool_catalog(
     dialect: &TypescriptDialect,
 ) -> Result<ToolCatalogContribution, PluginError> {
     let _build_tool_catalog = lash_core::facade_support::build_tool_catalog;
-    validate_rlm_language_bindings(&ctx)?;
+    validate_rlm_language_bindings(&ctx.tools)?;
     validate_dialect_neutral_tool_prose(&ctx, dialect)?;
     Ok(ToolCatalogContribution::default())
 }
@@ -428,8 +428,8 @@ fn prose_token_occurrences(text: &str) -> Vec<ProseTokenOccurrence> {
     occurrences
 }
 
-fn validate_rlm_language_bindings(ctx: &ToolCatalogContext) -> Result<(), PluginError> {
-    for tool in &ctx.tools {
+fn validate_rlm_language_bindings(tools: &[lash_core::ToolManifest]) -> Result<(), PluginError> {
+    for tool in tools {
         if tool.activation == ToolActivation::Internal {
             continue;
         }
