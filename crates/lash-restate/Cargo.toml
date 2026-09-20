@@ -48,7 +48,7 @@ lash-typescript = { workspace = true }
 lash-llm-tools = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true }
-lash-protocol-standard = { workspace = true, features = ["lashlang"] }
+lash-protocol-standard = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }

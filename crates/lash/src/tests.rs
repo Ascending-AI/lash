@@ -26,9 +26,9 @@ use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, ResponseTextMeta,
 };
-use lash_core::{LlmOutputPart, SessionExecutionLeaseObservation, StoreError};
-#[cfg(feature = "rlm")]
-use lash_lashlang_runtime::ToolDefinitionBindingExt;
+use lash_core::{
+    LlmOutputPart, SessionExecutionLeaseObservation, StoreError, ToolDefinitionBindingExt,
+};
 use tokio::sync::{Mutex as TokioMutex, oneshot};
 
 static TEST_SESSION_LEASE_TOKEN: AtomicUsize = AtomicUsize::new(1);
@@ -1705,20 +1705,11 @@ fn long_text_tool_definition() -> lash_core::ToolDefinition {
     )
 }
 
-#[cfg(feature = "rlm")]
 fn test_tool_definition_with_tool_binding(
     definition: lash_core::ToolDefinition,
     name: impl Into<String>,
 ) -> lash_core::ToolDefinition {
-    definition.with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], name))
-}
-
-#[cfg(not(feature = "rlm"))]
-fn test_tool_definition_with_tool_binding(
-    definition: lash_core::ToolDefinition,
-    _name: impl Into<String>,
-) -> lash_core::ToolDefinition {
-    definition
+    definition.with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 
 struct SurfacePluginFactory;

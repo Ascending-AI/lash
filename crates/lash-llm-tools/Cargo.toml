@@ -19,7 +19,6 @@ doctest = false
 
 [features]
 default = []
-lashlang = ["lash-tool-support/lashlang"]
 
 [lints]
 workspace = true

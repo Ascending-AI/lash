@@ -252,6 +252,10 @@ pub mod tools {
         ToolChildProcessStarted, facade_support::OrchestratingToolDef,
         facade_support::ToolInvocation, facade_support::ToolInvocationReply,
     };
+    /// The dialect-agnostic tool binding and its one setter. The manifest key
+    /// is lash's internal projection — hosts never read or write it, and which
+    /// dialect executes a bound tool is decided inside lash.
+    pub use lash_core::{TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
     pub use lash_core::{
         ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,
         facade_support::SupersededToolIdentity, facade_support::ToolRestoreReport,
@@ -263,8 +267,8 @@ pub mod tools {
     pub use lash_lashlang_runtime::{
         CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
         DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, RemoteToolGrantBindingExt,
-        TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt, ToolManifestBindingExt,
-        catalogue_preview_contribution, catalogue_preview_contribution_for_entries,
+        ToolBindingResolutionExt, ToolManifestBindingExt, catalogue_preview_contribution,
+        catalogue_preview_contribution_for_entries,
         catalogue_preview_contribution_for_entries_with_options,
         catalogue_preview_contribution_for_manifests, catalogue_preview_contribution_with_options,
         catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
