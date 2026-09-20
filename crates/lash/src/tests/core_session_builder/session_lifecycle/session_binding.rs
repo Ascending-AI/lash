@@ -84,10 +84,13 @@ async fn catalog_and_administration_are_typed_unavailable_without_a_root_catalog
     ));
 }
 
+/// FIG-3373: the store requirement is admission law on the ordinary open
+/// path, not a property of a creation API — a `.parent(..)` open is refused
+/// exactly as a root open is when the core has no session store.
 #[tokio::test]
-async fn every_created_session_requires_a_store_regardless_of_relation() -> Result<()> {
+async fn every_opened_session_requires_a_store_regardless_of_relation() -> Result<()> {
     let core = core_without_session_store();
-    let parent = core
+    let _parent = core
         .session("explicit-parent-store")
         .store(Arc::new(
             lash_core::facade_support::InMemorySessionStore::default(),
@@ -95,45 +98,22 @@ async fn every_created_session_requires_a_store_regardless_of_relation() -> Resu
         .open()
         .await?;
 
-    for (session_id, relation) in [
-        (
-            "created-root-without-catalog",
-            lash_core::SessionRelation::Root,
-        ),
-        (
-            "created-child-without-catalog",
-            lash_core::SessionRelation::Child {
-                parent_session_id: parent.session_id(),
-                caused_by: None,
-            },
-        ),
-    ] {
-        let error = parent
-            .admin()
-            .children()
-            .create_session(SessionCreateRequest {
-                session_id: Some(session_id.into()),
-                relation,
-                start: lash_core::SessionStartPoint::Empty,
-                policy: None,
-                plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
-                initial_nodes: Vec::new(),
-                observed_processes: Vec::new(),
-                tool_access: lash_core::SessionToolAccess::default(),
-                subagent: None,
-                context_overlay: lash_core::SessionContextOverlay::default(),
-                plugin_options: lash_core::PluginOptions::default(),
-                usage_source: None,
-            })
-            .await
-            .expect_err("session creation without a catalog must be refused");
-        assert!(matches!(
-            error,
-            EmbedError::Plugin(lash_core::PluginError::MissingSessionStore {
-                session_id: ref missing,
-            }) if missing.as_ref() == session_id
-        ));
-    }
+    let root_error = match core.session("created-root-without-catalog").open().await {
+        Ok(_) => panic!("root open without a store must be refused"),
+        Err(error) => error,
+    };
+    assert!(matches!(root_error, EmbedError::MissingSessionStore));
+
+    let child_error = match core
+        .session("created-child-without-catalog")
+        .parent("explicit-parent-store")
+        .open()
+        .await
+    {
+        Ok(_) => panic!("related open without a store must be refused"),
+        Err(error) => error,
+    };
+    assert!(matches!(child_error, EmbedError::MissingSessionStore));
     Ok(())
 }
 
@@ -308,54 +288,26 @@ async fn exact_opened_store_and_session_creation_catalog_remain_distinct() -> Re
             .is_some()
     );
 
-    session
-        .admin()
-        .children()
-        .create_session(SessionCreateRequest {
-            session_id: Some("explicit-root-child".into()),
-            relation: lash_core::SessionRelation::Child {
-                parent_session_id: "explicit-root-store".into(),
-                caused_by: None,
-            },
-            start: lash_core::SessionStartPoint::Empty,
-            policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
-            initial_nodes: Vec::new(),
-            observed_processes: Vec::new(),
-            tool_access: lash_core::SessionToolAccess::default(),
-            subagent: None,
-            context_overlay: lash_core::SessionContextOverlay::default(),
-            plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
-        })
+    let child = core
+        .session("explicit-root-child")
+        .parent("explicit-root-store")
+        .open()
         .await?;
+    assert_eq!(child.parent_session_id(), Some("explicit-root-store"));
 
-    session
-        .admin()
-        .children()
-        .create_session(SessionCreateRequest {
-            session_id: Some("explicit-root-related-root".into()),
-            relation: lash_core::SessionRelation::Root,
-            start: lash_core::SessionStartPoint::Empty,
-            policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
-            initial_nodes: Vec::new(),
-            observed_processes: Vec::new(),
-            tool_access: lash_core::SessionToolAccess::default(),
-            subagent: None,
-            context_overlay: lash_core::SessionContextOverlay::default(),
-            plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
-        })
-        .await?;
-
-    assert_eq!(
-        creation_catalog.session_ids(),
-        vec![
-            "explicit-root-child".to_string(),
-            "explicit-root-related-root".to_string(),
-        ],
-        "the creation catalog is selected by the creation boundary, not relation kind"
+    assert!(
+        root_catalog
+            .open_existing_store_by_id(&lash_core::SessionId::from("explicit-root-child"))
+            .await
+            .expect("read root catalog")
+            .is_some(),
+        "a `.parent(..)` open is admitted through the core store factory like \
+         every other facade open"
+    );
+    assert!(
+        creation_catalog.session_ids().is_empty(),
+        "the session-creation catalog serves the internal creation boundary, \
+         not facade opens"
     );
     Ok(())
 }

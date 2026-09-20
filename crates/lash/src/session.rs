@@ -94,6 +94,11 @@ impl SessionBuilder {
     }
 
     /// Configures the parent and returns the updated builder.
+    ///
+    /// This is the only facade path to a related session (ADR 0089): the
+    /// session that opens is an ordinary session with its own Session Binding
+    /// and its own usage ledger — rolling related sessions together is host
+    /// policy, not a facade service.
     pub fn parent(mut self, parent_session_id: impl Into<SessionId>) -> Self {
         self.parent_session_id = Some(parent_session_id.into());
         self

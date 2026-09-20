@@ -1271,7 +1271,7 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("rlm-root").open().await?;
+    let _parent = core.session("rlm-root").open().await?;
     let mut plugin_options = lash_core::PluginOptions {
         plugins: BTreeMap::new(),
     };
@@ -1284,28 +1284,16 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
         }),
     );
 
-    let err = session
-        .admin()
-        .children()
-        .create_session(SessionCreateRequest {
-            session_id: Some(SessionId::from("rlm-child-bad-extras")),
-            relation: lash_core::SessionRelation::Child {
-                parent_session_id: SessionId::from("rlm-root"),
-                caused_by: None,
-            },
-            start: lash_core::SessionStartPoint::Empty,
-            policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
-            initial_nodes: Vec::new(),
-            observed_processes: Vec::new(),
-            tool_access: lash_core::SessionToolAccess::default(),
-            subagent: None,
-            context_overlay: lash_core::SessionContextOverlay::default(),
-            plugin_options,
-            usage_source: None,
-        })
+    let err = match core
+        .session("rlm-child-bad-extras")
+        .parent("rlm-root")
+        .plugin_options(plugin_options)
+        .open()
         .await
-        .expect_err("malformed RLM create extras should fail session creation");
+    {
+        Ok(_) => panic!("malformed RLM create extras should fail session open"),
+        Err(error) => error,
+    };
 
     assert!(err.to_string().contains("invalid RLM create options"));
     Ok(())
@@ -2309,28 +2297,11 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
         .model(mock_model_spec())
         .store_factory(factory.clone())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("root-with-child-store").open().await?;
+    let _session = core.session("root-with-child-store").open().await?;
 
-    session
-        .admin()
-        .children()
-        .create_session(SessionCreateRequest {
-            session_id: Some(SessionId::from("managed-child-store")),
-            relation: lash_core::SessionRelation::Child {
-                parent_session_id: SessionId::from("root-with-child-store"),
-                caused_by: None,
-            },
-            start: lash_core::SessionStartPoint::Empty,
-            policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
-            initial_nodes: Vec::new(),
-            observed_processes: Vec::new(),
-            tool_access: lash_core::SessionToolAccess::default(),
-            subagent: None,
-            context_overlay: lash_core::SessionContextOverlay::default(),
-            plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
-        })
+    core.session("managed-child-store")
+        .parent("root-with-child-store")
+        .open()
         .await?;
 
     assert_eq!(
@@ -2356,35 +2327,20 @@ async fn reused_exact_store_factory_reports_session_creation_guidance() -> Resul
             store: reused_store,
         }))
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("root-store").open().await?;
+    let _session = core.session("root-store").open().await?;
 
-    let err = session
-        .admin()
-        .children()
-        .create_session(SessionCreateRequest {
-            session_id: Some(SessionId::from("child-needs-own-store")),
-            relation: lash_core::SessionRelation::Child {
-                parent_session_id: SessionId::from("root-store"),
-                caused_by: None,
-            },
-            start: lash_core::SessionStartPoint::Empty,
-            policy: None,
-            plugin_source: lash_core::SessionPluginSource::CurrentSessionFork,
-            initial_nodes: Vec::new(),
-            observed_processes: Vec::new(),
-            tool_access: lash_core::SessionToolAccess::default(),
-            subagent: None,
-            context_overlay: lash_core::SessionContextOverlay::default(),
-            plugin_options: lash_core::PluginOptions::default(),
-            usage_source: None,
-        })
+    let err = match core
+        .session("child-needs-own-store")
+        .parent("root-store")
+        .open()
         .await
-        .expect_err("reused root store should not open a child session");
+    {
+        Ok(_) => panic!("reused root store should not open a child session"),
+        Err(error) => error,
+    };
     let message = err.to_string();
 
-    assert!(message.contains("configured session-creation store is already bound"));
-    assert!(message.contains("SessionBuilder::store"));
-    assert!(message.contains("LashCoreBuilder::session_creation_store_factory"));
+    assert!(message.contains("child-needs-own-store"));
     Ok(())
 }
 

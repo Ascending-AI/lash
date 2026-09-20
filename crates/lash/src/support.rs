@@ -30,16 +30,16 @@ pub(crate) use lash_core::TestLocalProcessRegistry;
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{
     AttachmentStore, LlmCallRecord, Message, PluginMessage, PluginOptions, ProcessRegistry,
-    ProtocolTurnOptions, RuntimeErrorCode, RuntimePersistence, SessionCreateRequest, SessionCursor,
-    SessionError, SessionProcessEventKind, SessionReadView, SessionScope, SessionSnapshot,
-    SessionStoreFactory, SessionToolAccess, ToolCallRecord, ToolManifest, ToolProvider, ToolState,
-    TurnCancelOriginHint, facade_support::AssembledTurn, facade_support::EventSink,
-    facade_support::PluginFactory, facade_support::ProviderHandle, facade_support::SessionHandle,
-    facade_support::SessionObservation, facade_support::SessionObservationSubscription,
-    facade_support::SessionResume, facade_support::SessionUsageReport,
-    facade_support::TerminationPolicy, facade_support::ToolRestoreReport,
-    facade_support::ToolSourceHandle, facade_support::TurnActivitySink,
-    facade_support::TurnExecutionMetrics, facade_support::TurnOutcome,
+    ProtocolTurnOptions, RuntimeErrorCode, RuntimePersistence, SessionCursor, SessionError,
+    SessionProcessEventKind, SessionReadView, SessionScope, SessionSnapshot, SessionStoreFactory,
+    SessionToolAccess, ToolCallRecord, ToolManifest, ToolProvider, ToolState, TurnCancelOriginHint,
+    facade_support::AssembledTurn, facade_support::EventSink, facade_support::PluginFactory,
+    facade_support::ProviderHandle, facade_support::SessionObservation,
+    facade_support::SessionObservationSubscription, facade_support::SessionResume,
+    facade_support::SessionUsageReport, facade_support::TerminationPolicy,
+    facade_support::ToolRestoreReport, facade_support::ToolSourceHandle,
+    facade_support::TurnActivitySink, facade_support::TurnExecutionMetrics,
+    facade_support::TurnOutcome,
 };
 pub(crate) use lash_core::{InputItem, TokenLedgerEntry, TokenUsage};
 pub(crate) use lash_core::{PromptContribution, PromptLayer, PromptSlot, PromptTemplate};
