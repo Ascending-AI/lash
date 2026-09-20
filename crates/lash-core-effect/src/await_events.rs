@@ -2,23 +2,93 @@
 //! host and controller.
 
 use crate::SessionId;
-use lash_sansio::sync::{MutexExt, RwLockExt};
+use lash_sansio::sync::MutexExt;
+#[cfg(not(loom))]
+use lash_sansio::sync::RwLockExt;
+#[cfg(loom)]
+use loom::sync::RwLock;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+/// The session-shard map lock swaps to loom's instrumented `RwLock` under
+/// `--cfg loom` (FIG-1161 seam 5).
+#[cfg(not(loom))]
+use std::sync::RwLock;
 use std::time::Instant;
 
+#[cfg(loom)]
+use crate::loom_notify::Notify;
 use hmac::{Hmac, Mac};
+/// The per-entry notifier swaps to the crate-local loom shim under
+/// `--cfg loom` so a `notify_waiters` landing between a waiter's pending
+/// check and its subscription is explored by the model.
+#[cfg(not(loom))]
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::RuntimeError;
 
 use crate::promise_semantics::{
-    PromiseState, PromiseTransition, SessionRevocationTransition, WaitStopReason, cancel_sweep,
-    constant_time_eq, derive_key_id, resolve, revoke_session, session_allows_access, sign_material,
-    turn_control_wait_stop,
+    PromiseState, PromiseTransition, SessionRevocationTransition, cancel_sweep, constant_time_eq,
+    derive_key_id, resolve, revoke_session, session_allows_access, sign_material,
 };
+// Only the cancellation/deadline arms of the wait loop — which `cfg(loom)`
+// replaces with a deterministic direct await — consume these.
+#[cfg(not(loom))]
+use crate::promise_semantics::{WaitStopReason, turn_control_wait_stop};
 use crate::{AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ResolveOutcome};
+
+/// `lock_recover`/`read_recover`/`write_recover` for the loom primitives this
+/// file swaps to under `--cfg loom` (FIG-1161 seam 5). `MutexExt` still
+/// covers the real `std::sync::Mutex` fields (`revoked_session_order`,
+/// `retired_scopes`, `after_pending`).
+#[cfg(loom)]
+mod loom_ext {
+    pub trait LoomMutexExt<T> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T>;
+    }
+
+    impl<T> LoomMutexExt<T> for loom::sync::Mutex<T> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T> {
+            self.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+    }
+
+    pub trait LoomRwLockExt<T> {
+        fn read_recover(&self) -> loom::sync::RwLockReadGuard<'_, T>;
+        fn write_recover(&self) -> loom::sync::RwLockWriteGuard<'_, T>;
+    }
+
+    impl<T> LoomRwLockExt<T> for loom::sync::RwLock<T> {
+        fn read_recover(&self) -> loom::sync::RwLockReadGuard<'_, T> {
+            self.read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+
+        fn write_recover(&self) -> loom::sync::RwLockWriteGuard<'_, T> {
+            self.write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+    }
+}
+
+#[cfg(loom)]
+use loom_ext::{LoomMutexExt as _, LoomRwLockExt as _};
+
+/// The per-session shard mutex swaps to loom's instrumented `Mutex` under
+/// `--cfg loom` so the register-under-lock ordering is model-checked.
+#[cfg(not(loom))]
+type ShardMutex<T> = std::sync::Mutex<T>;
+/// `cfg(loom)` twin of [`ShardMutex`].
+#[cfg(loom)]
+type ShardMutex<T> = loom::sync::Mutex<T>;
+
+/// The guard [`AwaitEventRegistry::locked_state`] hands out.
+#[cfg(not(loom))]
+type ShardGuard<'a> = std::sync::MutexGuard<'a, AwaitEventRegistryState>;
+/// `cfg(loom)` twin of [`ShardGuard`].
+#[cfg(loom)]
+type ShardGuard<'a> = loom::sync::MutexGuard<'a, AwaitEventRegistryState>;
 
 type HmacSha256 = Hmac<sha2::Sha256>;
 
@@ -124,7 +194,7 @@ impl AwaitEventRegistryState {
     }
 }
 
-type AwaitEventRegistryShard = Arc<std::sync::Mutex<AwaitEventRegistryState>>;
+type AwaitEventRegistryShard = Arc<ShardMutex<AwaitEventRegistryState>>;
 
 #[derive(Debug)]
 pub struct AwaitEventRegistry {
@@ -165,7 +235,7 @@ impl AwaitEventRegistry {
         Self {
             secret: uuid::Uuid::new_v4().as_bytes().to_vec(),
             session_shards: RwLock::new(HashMap::new()),
-            unscoped_shard: Arc::new(std::sync::Mutex::new(AwaitEventRegistryState::new())),
+            unscoped_shard: Arc::new(ShardMutex::new(AwaitEventRegistryState::new())),
             revoked_session_order: std::sync::Mutex::new(VecDeque::new()),
             retired_scopes: std::sync::Mutex::new(HashSet::new()),
             completed_turn_control_key_limit,
@@ -185,7 +255,7 @@ impl AwaitEventRegistry {
         Arc::clone(
             shards
                 .entry(SessionId::from(session_id.to_string()))
-                .or_insert_with(|| Arc::new(std::sync::Mutex::new(AwaitEventRegistryState::new()))),
+                .or_insert_with(|| Arc::new(ShardMutex::new(AwaitEventRegistryState::new()))),
         )
     }
 
@@ -233,9 +303,7 @@ impl AwaitEventRegistry {
         }
     }
 
-    fn locked_state(
-        shard: &AwaitEventRegistryShard,
-    ) -> std::sync::MutexGuard<'_, AwaitEventRegistryState> {
+    fn locked_state(shard: &AwaitEventRegistryShard) -> ShardGuard<'_> {
         shard.lock_recover()
     }
 
@@ -559,33 +627,48 @@ impl AwaitEventRegistry {
             if let Some(after_pending) = self.after_pending.lock_recover().take() {
                 after_pending(self, key);
             }
-            let deadline = async {
-                if let Some(deadline) = deadline {
-                    clock.sleep_until(deadline).await;
-                } else {
-                    // This arm must never resolve; a resolvable default would silently give a no-deadline waiter a timeout it never had.
-                    std::future::pending().await
-                }
-            };
-            tokio::pin!(deadline);
-            tokio::select! {
-                _ = cancel.cancelled() => {
-                    if let Some((code, message)) =
-                        turn_control_wait_stop(&key.wait, WaitStopReason::Cancelled)
-                    {
-                        return Err(RuntimeError::new(code, message));
+            #[cfg(loom)]
+            {
+                // `tokio::select!` randomizes arm poll order, which makes the
+                // loom model non-deterministic and breaks path replay. The
+                // seam under test is the notification arm — the loom models
+                // never cancel the token or set a deadline — so awaiting
+                // `notified` directly exercises the same ordering.
+                let _ = cancel;
+                let _ = deadline;
+                let _ = clock;
+                notified.as_mut().await;
+            }
+            #[cfg(not(loom))]
+            {
+                let deadline = async {
+                    if let Some(deadline) = deadline {
+                        clock.sleep_until(deadline).await;
+                    } else {
+                        // This arm must never resolve; a resolvable default would silently give a no-deadline waiter a timeout it never had.
+                        std::future::pending().await
                     }
-                    let _ = self.resolve(key, Resolution::Cancelled)?;
-                }
-                _ = &mut deadline => {
-                    if let Some((code, message)) =
-                        turn_control_wait_stop(&key.wait, WaitStopReason::TimedOut)
-                    {
-                        return Err(RuntimeError::new(code, message));
+                };
+                tokio::pin!(deadline);
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        if let Some((code, message)) =
+                            turn_control_wait_stop(&key.wait, WaitStopReason::Cancelled)
+                        {
+                            return Err(RuntimeError::new(code, message));
+                        }
+                        let _ = self.resolve(key, Resolution::Cancelled)?;
                     }
-                    let _ = self.resolve(key, Resolution::Timeout)?;
+                    _ = &mut deadline => {
+                        if let Some((code, message)) =
+                            turn_control_wait_stop(&key.wait, WaitStopReason::TimedOut)
+                        {
+                            return Err(RuntimeError::new(code, message));
+                        }
+                        let _ = self.resolve(key, Resolution::Timeout)?;
+                    }
+                    _ = &mut notified => {}
                 }
-                _ = &mut notified => {}
             }
         }
     }
@@ -1147,5 +1230,99 @@ mod tests {
             operations as f64 / elapsed.as_secs_f64(),
         );
         assert!(elapsed < Duration::from_secs(60));
+    }
+}
+
+/// FIG-1161 seam 5, model-checked: the waiter registers its `Notify`
+/// subscription (`Notified::enable`) while the shard lock is still held, so
+/// a resolver or revoker that notifies under the same lock cannot land in
+/// the gap between the pending check and the registration. Loom must
+/// explore every interleaving; the waiter must observe the terminal (or the
+/// revocation error) in all of them — a lost wake would leave
+/// `loom::future::block_on` parked forever and deadlock the model.
+#[cfg(all(test, loom))]
+mod loom_tests {
+    use super::*;
+
+    fn loom_key(registry: &AwaitEventRegistry, session_id: &str) -> AwaitEventKey {
+        registry
+            .key_for(
+                &ExecutionScope::turn(&SessionId::from(session_id), &crate::TurnId::from("turn")),
+                AwaitEventWaitIdentity::tool_completion("tool"),
+            )
+            .expect("key derivation")
+    }
+
+    #[test]
+    fn resolution_racing_waiter_registration_is_never_stranded() {
+        loom::model(|| {
+            let registry = Arc::new(AwaitEventRegistry::new());
+            let key = loom_key(&registry, "loom-resolve");
+
+            let resolver = {
+                let registry = Arc::clone(&registry);
+                let key = key.clone();
+                loom::thread::spawn(move || {
+                    registry
+                        .resolve(&key, Resolution::Ok(serde_json::json!("done")))
+                        .expect("resolve");
+                })
+            };
+            let waiter = {
+                let registry = Arc::clone(&registry);
+                loom::thread::spawn(move || {
+                    loom::future::block_on(registry.await_resolution_inner(
+                        &key,
+                        CancellationToken::new(),
+                        None,
+                        &crate::SystemClock,
+                    ))
+                })
+            };
+
+            let observed = waiter.join().expect("waiter thread");
+            resolver.join().expect("resolver thread");
+            assert!(
+                matches!(observed, Ok(Resolution::Ok(_))),
+                "the waiter must observe the terminal resolution in every \
+                 interleaving: {observed:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn revocation_racing_waiter_registration_always_wakes_the_waiter() {
+        loom::model(|| {
+            let registry = Arc::new(AwaitEventRegistry::new());
+            let key = loom_key(&registry, "loom-revoke");
+
+            let revoker = {
+                let registry = Arc::clone(&registry);
+                loom::thread::spawn(move || {
+                    registry
+                        .revoke_session(&SessionId::from("loom-revoke"))
+                        .expect("revoke session");
+                })
+            };
+            let waiter = {
+                let registry = Arc::clone(&registry);
+                loom::thread::spawn(move || {
+                    loom::future::block_on(registry.await_resolution_inner(
+                        &key,
+                        CancellationToken::new(),
+                        None,
+                        &crate::SystemClock,
+                    ))
+                })
+            };
+
+            let observed = waiter.join().expect("waiter thread");
+            revoker.join().expect("revoker thread");
+            assert!(
+                observed.is_err(),
+                "a revoked session's waiter must stop with an error in every \
+                 interleaving: {observed:?}"
+            );
+        });
     }
 }

@@ -51,3 +51,10 @@ tokio = { workspace = true, features = ["test-util"] }
 
 [package.metadata.cargo-shear]
 ignored-paths = ["src/runtime/native_substrate/worklist.rs"]
+
+# FIG-1161: the shared coalescing protocol exposes loom-instrumented types
+# under `--cfg loom`; this crate implements `CoalescingSchedulerHandle`, so it
+# needs loom in scope to typecheck in that configuration. A normal build never
+# resolves this dependency.
+[target.'cfg(loom)'.dependencies]
+loom = { workspace = true }

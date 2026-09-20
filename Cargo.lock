@@ -1352,6 +1352,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "generator"
+version = "0.8.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54ade96dc9003043bce7c035c85a9df5a858bfb2039c5a2e6fdf00f324f6c551"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows-link",
+ "windows-result",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2093,6 +2108,7 @@ dependencies = [
  "lash-internal-core-store",
  "lash-internal-sansio",
  "lash-internal-trace",
+ "loom",
  "proptest",
  "rmp-serde",
  "schemars 0.8.22",
@@ -2117,6 +2133,7 @@ dependencies = [
  "lash-internal-core-memory",
  "lash-internal-core-store",
  "lash-internal-sansio",
+ "loom",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2166,6 +2183,7 @@ dependencies = [
  "chrono",
  "lash-internal-sansio",
  "lash-internal-trace",
+ "loom",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2247,6 +2265,7 @@ dependencies = [
  "lash-internal-core-store",
  "lash-internal-sansio",
  "lash-internal-trace",
+ "loom",
  "serde_json",
  "thiserror",
  "tokio",
@@ -2972,6 +2991,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "loom"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "419e0dc8046cb947daa77eb95ae174acfbddb7673b4151f56d1eed8e93fbfaca"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "pin-utils",
+ "scoped-tls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3375,6 +3408,12 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pin-utils"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pkg-config"

@@ -2,6 +2,42 @@ use super::*;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
 
+/// FIG-1161 seam 2: the live-usage map and release flag this forwarder shares
+/// with `ManagedTurnLease` swap to loom primitives under `--cfg loom` so the
+/// flag-under-mutex ordering is model-checked. The aliases are deliberately
+/// separate from `StdMutex` so the swap stays scoped to this seam's state.
+#[cfg(not(loom))]
+pub(in crate::runtime::session_manager) type LiveUsageMutex<T> = std::sync::Mutex<T>;
+/// `cfg(loom)` twin of [`LiveUsageMutex`].
+#[cfg(loom)]
+pub(in crate::runtime::session_manager) type LiveUsageMutex<T> = loom::sync::Mutex<T>;
+
+/// The release flag shared between the lease and this forwarder.
+#[cfg(not(loom))]
+pub(in crate::runtime::session_manager) type TurnReleasedFlag = std::sync::atomic::AtomicBool;
+/// `cfg(loom)` twin of [`TurnReleasedFlag`].
+#[cfg(loom)]
+pub(in crate::runtime::session_manager) type TurnReleasedFlag = loom::sync::atomic::AtomicBool;
+
+/// `lock_recover` for the loom mutex, so call sites read identically under
+/// both cfgs. `MutexExt` still covers the real `std::sync::Mutex` in scope.
+#[cfg(loom)]
+pub(in crate::runtime::session_manager) mod loom_ext {
+    pub trait LoomMutexExt<T: ?Sized> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T>;
+    }
+
+    impl<T: ?Sized> LoomMutexExt<T> for loom::sync::Mutex<T> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T> {
+            self.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+    }
+}
+
+#[cfg(loom)]
+use loom_ext::LoomMutexExt as _;
+
 #[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "testing"), derive(serde::Serialize))]
 pub struct PendingTokenLedgerEntry {
@@ -41,13 +77,13 @@ pub(in crate::runtime::session_manager) struct LiveChildUsageForwarder {
     pub(in crate::runtime::session_manager) token_ledger:
         Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
     pub(in crate::runtime::session_manager) child_turn_live_usage:
-        Arc<std::sync::Mutex<HashMap<TurnId, TokenUsage>>>,
+        Arc<LiveUsageMutex<HashMap<TurnId, TokenUsage>>>,
     pub(in crate::runtime::session_manager) relay: Option<ChildUsageEventRelay>,
     /// Set by the turn's `ManagedTurnLease` when it releases the live-usage
     /// entry. An emit still in flight at that moment must not report, because
     /// `entry(..).or_default()` would resurrect the released entry with a zero
     /// baseline and re-record the full cumulative usage.
-    pub(in crate::runtime::session_manager) turn_released: Arc<AtomicBool>,
+    pub(in crate::runtime::session_manager) turn_released: Arc<TurnReleasedFlag>,
 }
 
 #[derive(Clone, Default)]
@@ -648,5 +684,113 @@ mod staging_tests {
         let pending = ledger.lock_recover();
         assert_eq!(pending.len(), 1);
         assert!(pending[0].identity.is_some());
+    }
+}
+
+/// Loom model checks for the flag-under-mutex ordering between a child-usage
+/// emit and `ManagedTurnLease::release` (FIG-1161 seam 2). The release side
+/// is modeled by the lease's own sequence — `released.swap(true)` followed by
+/// the locked `remove` — because driving the real lease would pull the whole
+/// turn registry into the model.
+#[cfg(all(test, loom))]
+mod loom_tests {
+    use super::*;
+
+    fn forwarder(
+        live_usage: &Arc<LiveUsageMutex<HashMap<TurnId, TokenUsage>>>,
+        turn_released: &Arc<TurnReleasedFlag>,
+    ) -> (
+        LiveChildUsageForwarder,
+        Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
+    ) {
+        let token_ledger = Arc::new(std::sync::Mutex::new(Vec::new()));
+        (
+            LiveChildUsageForwarder {
+                turn_id: TurnId::from("turn"),
+                session_id: SessionId::from("session"),
+                source: "source".to_string(),
+                model: "model".to_string(),
+                token_ledger: Arc::clone(&token_ledger),
+                child_turn_live_usage: Arc::clone(live_usage),
+                relay: None,
+                turn_released: Arc::clone(turn_released),
+            },
+            token_ledger,
+        )
+    }
+
+    fn usage() -> TokenUsage {
+        TokenUsage {
+            input_tokens: 10,
+            output_tokens: 4,
+            ..TokenUsage::default()
+        }
+    }
+
+    /// An emit racing release either reports before the flag is set — the
+    /// lease then removes the counted entry — or observes the flag under the
+    /// lock and drops its report. The entry must never be resurrected and the
+    /// ledger must see at most the one pre-release delta.
+    #[test]
+    fn emit_racing_release_never_resurrects_or_double_counts() {
+        loom::model(|| {
+            let live_usage = Arc::new(LiveUsageMutex::new(HashMap::new()));
+            let turn_released = Arc::new(TurnReleasedFlag::new(false));
+            let (forwarder, token_ledger) = forwarder(&live_usage, &turn_released);
+            let turn_id = TurnId::from("turn");
+
+            let released = Arc::clone(&turn_released);
+            let live = Arc::clone(&live_usage);
+            let releaser = loom::thread::spawn(move || {
+                // `ManagedTurnLease::release` order: flag first, then the
+                // removal under the same lock the emit checks the flag under.
+                released.swap(true, Ordering::AcqRel);
+                live.lock_recover().remove(&turn_id);
+            });
+
+            let cumulative = usage();
+            loom::future::block_on(forwarder.relay_token_usage_with_after_live_accounting(
+                0,
+                &usage(),
+                &cumulative,
+                // Yield inside the awaited continuation so loom also explores
+                // release landing between live accounting and the ledger write.
+                async { loom::thread::yield_now() },
+            ));
+            releaser.join().expect("releaser thread panicked");
+
+            assert!(
+                live_usage
+                    .lock_recover()
+                    .get(&TurnId::from("turn"))
+                    .is_none(),
+                "a released live-usage entry must never be resurrected"
+            );
+            assert!(
+                token_ledger.lock_recover().len() <= 1,
+                "at most one pre-release delta may reach the ledger"
+            );
+        });
+    }
+
+    /// Once the flag is set, a later emit is dropped entirely: no live-usage
+    /// entry and no ledger row.
+    #[test]
+    fn emit_after_release_reports_nothing() {
+        loom::model(|| {
+            let live_usage = Arc::new(LiveUsageMutex::new(HashMap::new()));
+            let turn_released = Arc::new(TurnReleasedFlag::new(true));
+            let (forwarder, token_ledger) = forwarder(&live_usage, &turn_released);
+
+            loom::future::block_on(forwarder.relay_token_usage_with_after_live_accounting(
+                0,
+                &usage(),
+                &usage(),
+                std::future::ready(()),
+            ));
+
+            assert!(live_usage.lock_recover().is_empty());
+            assert!(token_ledger.lock_recover().is_empty());
+        });
     }
 }

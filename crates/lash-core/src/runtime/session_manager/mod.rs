@@ -21,7 +21,7 @@ mod usage;
 pub use crate::direct_completion_client::DirectCompletionClient;
 pub(in crate::runtime) use usage::ChildUsageEventRelay;
 pub(in crate::runtime::session_manager) use usage::{
-    ChannelEventSink, LiveChildUsageForwarder, subtract_usage,
+    ChannelEventSink, LiveChildUsageForwarder, LiveUsageMutex, TurnReleasedFlag, subtract_usage,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use usage::{
@@ -117,7 +117,7 @@ pub(in crate::runtime) struct UsageCapability {
     /// Tracks live child-turn usage already bubbled into the shared
     /// token ledger so child turn completion can reconcile final usage
     /// without double counting.
-    child_turn_live_usage: Arc<std::sync::Mutex<HashMap<TurnId, TokenUsage>>>,
+    child_turn_live_usage: Arc<LiveUsageMutex<HashMap<TurnId, TokenUsage>>>,
     /// Optional relay for bubbling child-session token usage into the
     /// parent turn's live event stream.
     child_usage_event_relay: Option<ChildUsageEventRelay>,
@@ -304,7 +304,7 @@ impl UsageCapability {
         Self {
             token_ledger: Arc::clone(&runtime.shared_token_ledger),
             child_sources: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            child_turn_live_usage: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            child_turn_live_usage: Arc::new(LiveUsageMutex::new(HashMap::new())),
             child_usage_event_relay,
             persist_to_store,
         }

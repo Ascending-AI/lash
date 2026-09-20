@@ -12,6 +12,11 @@ pub mod core_internal {
 }
 mod await_event_support;
 mod await_events;
+/// `tokio::sync::Notify` semantics on loom primitives for the `cfg(loom)`
+/// seam tests (FIG-1161 seam 5). Crate-private: the registry's notifier is a
+/// private field, so nothing outside this crate sees the type.
+#[cfg(loom)]
+mod loom_notify;
 mod native_await_event_authority;
 pub use await_event_resolver::AwaitEventResolver;
 pub(crate) use lash_core_ids::clock::Clock;
