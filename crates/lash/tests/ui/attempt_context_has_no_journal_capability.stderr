@@ -8,7 +8,19 @@ error[E0599]: no method named `cancel` found for struct `AttemptProcessReads` in
  --> tests/ui/attempt_context_has_no_journal_capability.rs:3:33
   |
 3 |     let _ = context.processes().cancel("process-1").await;
-  |                                 ^^^^^^ method not found in `AttemptProcessReads`
+  |                                 ^^^^^^
+  |
+help: there is a method `conceal` with a similar name, but with different arguments
+ --> $CARGO/yansi-$VERSION/src/macros.rs
+  |
+  |         $($q)* fn $prop(self: $r $($(,$a: $T)+)?) -> $R;
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+ ::: $CARGO/yansi-$VERSION/src/paint.rs
+  |
+  |     properties!(signature(&Self) -> Painted<&Self>);
+  |     ----------------------------------------------- in this macro invocation
+  = note: this error originates in the macro `signature` which comes from the expansion of the macro `properties` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0599]: no method named `signal` found for struct `AttemptProcessReads` in the current scope
  --> tests/ui/attempt_context_has_no_journal_capability.rs:4:33
