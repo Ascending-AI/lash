@@ -383,7 +383,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // vocabularies at the DDL level (FIG-2811): both were unconstrained TEXT
 // whose closed enum was enforced only at read time. Component-103 catalogs
 // are rejected and recreated.
-const SCHEMA_VERSION: i32 = 104;
+// Version 105 gives the trigger mutation-receipt table typed NOT NULL
+// `owner_kind`/`owner_id` columns with a named owner-kind CHECK (FIG-1956),
+// deleting the `_owner_scope_namespace` JSON encoding entirely.
+// Component-104 catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 105;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -1110,7 +1110,11 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // `deleted_at_ms` column paired to it by CHECK, so the three legal states are
 // the only representable ones and the deletion time stops living solely inside
 // `record_json`. Existing trigger stores are rejected rather than migrated.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 9;
+// Version 10 (FIG-1956) gives the mutation-receipt table typed NOT NULL
+// `owner_kind`/`owner_id` columns with a named owner-kind CHECK, deleting the
+// `_owner_scope_namespace` JSON encoding entirely. Existing trigger stores
+// are rejected rather than migrated.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 10;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
