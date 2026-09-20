@@ -436,14 +436,8 @@ impl Heap {
         program: lash_regress::Regex,
     ) -> Result<(), RuntimeError> {
         let object = self
-            .slots
-            .get_mut(
-                *self
-                    .id_to_slot
-                    .get(&id)
-                    .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?,
-            )
-            .and_then(Option::as_mut)
+            .entries
+            .get_mut(&id)
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
         let HeapObject::RegExp(regexp) = &mut object.object else {
             return Err(RuntimeError::ValidationFailed {
@@ -662,15 +656,9 @@ impl Heap {
         id: HeapId,
         object: HeapObject,
     ) -> Result<(), RuntimeError> {
-        let slot = self
-            .id_to_slot
-            .get(&id)
-            .copied()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
         let old_bytes = self
-            .slots
-            .get(slot)
-            .and_then(Option::as_ref)
+            .entries
+            .get(&id)
             .map(|entry| entry.logical_bytes)
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
         let new_bytes = object.logical_bytes();
@@ -684,8 +672,9 @@ impl Heap {
                 attempted: next_live,
             });
         }
-        let entry = self.slots[slot]
-            .as_mut()
+        let entry = self
+            .entries
+            .get_mut(&id)
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
         let old_children = entry.object.child_refs();
         let new_children = object.child_refs();

@@ -68,7 +68,7 @@ pub(crate) fn refresh_record(record: &mut Record, bindings: &ProjectedBindings) 
 /// Heap objects are reachable state too: under reference semantics `x = [report]`
 /// stores the projection inside a heap list, not inside the slot value.
 pub(crate) fn refresh_heap(heap: &mut Heap, bindings: &ProjectedBindings) {
-    for entry in heap.slots.iter_mut().flatten() {
+    for entry in heap.entries.values_mut() {
         match &mut entry.object {
             HeapObject::Tuple(values) | HeapObject::List(values) => {
                 refresh_values(values, bindings)

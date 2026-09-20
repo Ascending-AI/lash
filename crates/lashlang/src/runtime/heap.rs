@@ -60,17 +60,17 @@ pub(crate) enum HeapObject {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HeapEntry {
-    pub(crate) id: HeapId,
     pub(crate) object: HeapObject,
     pub(crate) logical_bytes: u64,
 }
 
 #[derive(Debug)]
 pub(crate) struct Heap {
-    pub(crate) slots: Vec<Option<HeapEntry>>,
-    pub(crate) id_to_slot: BTreeMap<HeapId, usize>,
+    /// The one id-to-object mapping. Iteration order is id order, which is
+    /// also allocation order: ids are never reused, so a swept id is simply
+    /// absent and a fresh insert lands past every live key.
+    pub(crate) entries: BTreeMap<HeapId, HeapEntry>,
     parents: FxHashMap<HeapId, Vec<HeapId>>,
-    pub(crate) free_slots: Vec<usize>,
     pub(crate) next_id: u64,
     pub(crate) allocations: u64,
     pub(crate) live_logical_bytes: u64,
@@ -100,10 +100,8 @@ pub(crate) struct HeapRestoreWire {
 impl Default for Heap {
     fn default() -> Self {
         Self {
-            slots: Vec::new(),
-            id_to_slot: BTreeMap::new(),
+            entries: BTreeMap::new(),
             parents: FxHashMap::default(),
-            free_slots: Vec::new(),
             next_id: 1,
             allocations: 0,
             live_logical_bytes: 0,
@@ -189,13 +187,13 @@ impl Heap {
                 .live_logical_bytes
                 .checked_add(logical_bytes)
                 .ok_or_else(|| "heap live logical byte counter overflowed".to_string())?;
-            let slot = heap.slots.len();
-            heap.slots.push(Some(HeapEntry {
+            heap.entries.insert(
                 id,
-                object,
-                logical_bytes,
-            }));
-            heap.id_to_slot.insert(id, slot);
+                HeapEntry {
+                    object,
+                    logical_bytes,
+                },
+            );
         }
         if heap.live_logical_bytes != wire.live_logical_bytes {
             return Err("heap live logical byte counter does not match its objects".to_string());
@@ -203,7 +201,7 @@ impl Heap {
         for root in roots {
             heap.validate_resolvable_refs(root)?;
         }
-        for entry in heap.slots.iter().flatten() {
+        for entry in heap.entries.values() {
             for value in entry.object.values() {
                 heap.validate_resolvable_refs(value)?;
             }
@@ -318,14 +316,15 @@ impl Heap {
     }
 
     pub(crate) fn get(&self, id: HeapId) -> Result<&HeapObject, RuntimeError> {
-        let slot = self
-            .id_to_slot
+        self.entries
             .get(&id)
-            .copied()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
-        self.slots[slot]
-            .as_ref()
             .map(|entry| &entry.object)
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })
+    }
+
+    fn entry_mut(&mut self, id: HeapId) -> Result<&mut HeapEntry, RuntimeError> {
+        self.entries
+            .get_mut(&id)
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })
     }
 
@@ -373,25 +372,20 @@ impl Heap {
 
     fn commit_precharged_object(&mut self, object: HeapObject, logical_bytes: u64) -> Value {
         let id = HeapId::from_counter(self.next_id);
-        // IDs name exactly one object for their entire lifetime. Reusing a
-        // vacant storage slot therefore never reuses or rewinds the ID.
+        // IDs name exactly one object for their entire lifetime: a swept id is
+        // simply absent from the map, so an insert can never collide with or
+        // rewind one.
         self.next_id += 1;
         self.allocations = self.allocations.saturating_add(1);
         self.live_logical_bytes = self.live_logical_bytes.saturating_add(logical_bytes);
         let children = object.child_refs();
-        let entry = HeapEntry {
+        self.entries.insert(
             id,
-            object,
-            logical_bytes,
-        };
-        let slot = if let Some(slot) = self.free_slots.pop() {
-            self.slots[slot] = Some(entry);
-            slot
-        } else {
-            self.slots.push(Some(entry));
-            self.slots.len() - 1
-        };
-        self.id_to_slot.insert(id, slot);
+            HeapEntry {
+                object,
+                logical_bytes,
+            },
+        );
         for child in children {
             let parents = self.parents.entry(child).or_default();
             if !parents.contains(&id) {
@@ -773,7 +767,7 @@ impl Heap {
     fn debug_assert_byte_accounting(&self) {
         debug_assert_eq!(
             self.live_logical_bytes,
-            self.slots.iter().flatten().fold(0_u64, |total, entry| total
+            self.entries.values().fold(0_u64, |total, entry| total
                 .saturating_add(entry.logical_bytes)),
             "live logical bytes must equal the sum of the charged object sizes"
         );
@@ -782,7 +776,7 @@ impl Heap {
     fn debug_assert_boundary_cache_invariant(&self) {
         debug_assert!(self.boundary_refs.iter().all(|(identity, id)| {
             self.materialized.contains_key(id)
-                && self.id_to_slot.contains_key(id)
+                && self.entries.contains_key(id)
                 && self.boundary_identities.get(id) == Some(identity)
         }));
         debug_assert_eq!(self.boundary_refs.len(), self.boundary_identities.len());
@@ -1092,14 +1086,7 @@ impl Heap {
                 attempted: next_live,
             });
         }
-        let slot = self
-            .id_to_slot
-            .get(&id)
-            .copied()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
-        let entry = self.slots[slot]
-            .as_mut()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let entry = self.entry_mut(id)?;
         let HeapObject::List(values) = &mut entry.object else {
             return Err(RuntimeError::ValidationFailed {
                 reason: "TS_METHOD_UNSUPPORTED: receiver has the wrong heap kind".to_string(),
@@ -1127,14 +1114,8 @@ impl Heap {
     /// Reading the recorded figure keeps the memory pre-checks that used to
     /// re-price a whole object O(1) on the append path.
     pub(crate) fn object_logical_bytes(&self, id: HeapId) -> Result<u64, RuntimeError> {
-        let slot = self
-            .id_to_slot
+        self.entries
             .get(&id)
-            .copied()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
-        self.slots
-            .get(slot)
-            .and_then(Option::as_ref)
             .map(|entry| entry.logical_bytes)
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })
     }
@@ -1162,25 +1143,18 @@ impl Heap {
                 attempted: next_live,
             });
         }
-        let slot = self
-            .id_to_slot
-            .get(id)
-            .copied()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
-        let entry = self.slots[slot]
-            .as_mut()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let entry = self.entry_mut(*id)?;
         let HeapObject::List(values) = &mut entry.object else {
             return Err(RuntimeError::PushUnsupported);
         };
         values.push(item);
+        entry.logical_bytes = entry.logical_bytes.saturating_add(added_bytes);
         for child in children {
             let parents = self.parents.entry(child).or_default();
             if !parents.contains(id) {
                 parents.push(*id);
             }
         }
-        entry.logical_bytes = entry.logical_bytes.saturating_add(added_bytes);
         self.live_logical_bytes = next_live;
         self.invalidate_materialized_reaching(*id);
         self.debug_assert_byte_accounting();
@@ -1265,14 +1239,7 @@ impl Heap {
         }
 
         let children = copies.iter().flat_map(value_refs).collect::<Vec<_>>();
-        let slot = self
-            .id_to_slot
-            .get(id)
-            .copied()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
-        let entry = self.slots[slot]
-            .as_mut()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
+        let entry = self.entry_mut(*id)?;
         let HeapObject::List(values) = &mut entry.object else {
             return Err(RuntimeError::PushUnsupported);
         };
@@ -1290,13 +1257,6 @@ impl Heap {
         Ok(Value::Ref(*id))
     }
 
-    /// The `expect` stays: the slot index resolved and the entry kind
-    /// checked above, so the heap slot exists at all three reads (each
-    /// site's message states it).
-    #[expect(
-        clippy::expect_used,
-        reason = "slot index resolved and kind checked above"
-    )]
     pub(crate) fn add_assign_index_number(
         &mut self,
         target: &Value,
@@ -1308,11 +1268,6 @@ impl Heap {
                 actual: super::value_type_name(target).to_string(),
             });
         };
-        let slot = self
-            .id_to_slot
-            .get(id)
-            .copied()
-            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?;
         enum Target {
             List {
                 index: usize,
@@ -1323,8 +1278,9 @@ impl Heap {
                 old_member_bytes: u64,
             },
         }
-        let (target_kind, current) = match &self.slots[slot]
-            .as_ref()
+        let (target_kind, current) = match &self
+            .entries
+            .get(id)
             .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?
             .object
         {
@@ -1396,9 +1352,10 @@ impl Heap {
                     .saturating_add(value_logical_bytes(&value)),
             ),
         };
-        let entry_bytes = self.slots[slot]
-            .as_ref()
-            .expect("heap slot exists")
+        let entry_bytes = self
+            .entries
+            .get(id)
+            .ok_or(RuntimeError::DanglingHeapReference { id: id.get() })?
             .logical_bytes
             .saturating_sub(old_member_bytes)
             .saturating_add(new_member_bytes);
@@ -1416,10 +1373,7 @@ impl Heap {
         collect_value_refs(&current_member, &mut replaced_children);
         let mut added_children = Vec::new();
         collect_value_refs(&value, &mut added_children);
-        match (
-            &mut self.slots[slot].as_mut().expect("heap slot exists").object,
-            target_kind,
-        ) {
+        match (&mut self.entry_mut(*id)?.object, target_kind) {
             (HeapObject::List(values), Target::List { index, .. }) => {
                 values[index] = value.clone();
             }
@@ -1429,8 +1383,7 @@ impl Heap {
             _ => unreachable!("object kind was checked"),
         }
         self.retarget_parent_edges(*id, &replaced_children, &added_children);
-        let entry = self.slots[slot].as_mut().expect("heap slot exists");
-        entry.logical_bytes = entry_bytes;
+        self.entry_mut(*id)?.logical_bytes = entry_bytes;
         self.live_logical_bytes = next_live;
         self.invalidate_materialized_reaching(*id);
         self.debug_assert_byte_accounting();
@@ -1556,9 +1509,6 @@ impl Heap {
         }
     }
 
-    /// The `expect` stays: the entry slot was marked live during this
-    /// collect before being taken (the site's message states it).
-    #[expect(clippy::expect_used, reason = "slot was marked live this collect")]
     pub(crate) fn collect<'a>(&mut self, roots: impl IntoIterator<Item = &'a Value>) {
         let mut marked = BTreeSet::new();
         let mut pending = Vec::new();
@@ -1573,20 +1523,24 @@ impl Heap {
                 pending.extend(object.child_refs());
             }
         }
-        for slot in 0..self.slots.len() {
-            let Some(entry) = self.slots[slot].as_ref() else {
-                continue;
-            };
-            if marked.contains(&entry.id) {
-                continue;
+        let mut dead = Vec::new();
+        for (id, entry) in &self.entries {
+            if !marked.contains(id) {
+                dead.push((*id, entry.object.child_refs(), entry.logical_bytes));
             }
-            let entry = self.slots[slot].take().expect("live heap slot was checked");
-            self.retarget_parent_edges(entry.id, &entry.object.child_refs(), &[]);
-            self.parents.remove(&entry.id);
-            self.id_to_slot.remove(&entry.id);
-            self.forget(entry.id);
-            self.live_logical_bytes = self.live_logical_bytes.saturating_sub(entry.logical_bytes);
-            self.free_slots.push(slot);
+        }
+        // Forget the dead ids' boundary and materialization bookkeeping while
+        // the map is still whole: the cache invariant asserts over every
+        // remaining boundary reference, so it must never observe a half-swept
+        // heap.
+        for (id, _, _) in &dead {
+            self.forget(*id);
+        }
+        self.entries.retain(|id, _| marked.contains(id));
+        for (id, children, logical_bytes) in dead {
+            self.retarget_parent_edges(id, &children, &[]);
+            self.parents.remove(&id);
+            self.live_logical_bytes = self.live_logical_bytes.saturating_sub(logical_bytes);
         }
         self.debug_assert_byte_accounting();
         if self.allocations >= self.next_collection_at {
@@ -1600,9 +1554,7 @@ impl Heap {
     }
 
     pub(crate) fn objects_in_id_order(&self) -> impl Iterator<Item = (HeapId, &HeapObject)> {
-        self.id_to_slot
-            .iter()
-            .filter_map(|(id, slot)| self.slots[*slot].as_ref().map(|entry| (*id, &entry.object)))
+        self.entries.iter().map(|(id, entry)| (*id, &entry.object))
     }
 
     pub(crate) fn restore_collection_schedule(&mut self) {
@@ -1675,10 +1627,8 @@ fn value_refs(value: &Value) -> Vec<HeapId> {
 impl Clone for Heap {
     fn clone(&self) -> Self {
         Self {
-            slots: self.slots.clone(),
-            id_to_slot: self.id_to_slot.clone(),
+            entries: self.entries.clone(),
             parents: self.parents.clone(),
-            free_slots: self.free_slots.clone(),
             next_id: self.next_id,
             allocations: self.allocations,
             live_logical_bytes: self.live_logical_bytes,

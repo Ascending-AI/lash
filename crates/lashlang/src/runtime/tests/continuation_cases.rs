@@ -1200,8 +1200,8 @@ async fn determinism_process_probe() {
     // only that field so the cross-process probe compares the VM/heap wire.
     continuation.active_execution_elapsed = std::time::Duration::ZERO;
     assert!(continuation.heap.allocation_counter() > 1_024);
-    assert!(continuation.heap.storage_slot_count() > 3);
-    assert!(continuation.heap.vacant_slot_count() > 0);
+    assert!(continuation.heap.live_object_count() > 3);
+    assert!(continuation.heap.swept_object_count() > 0);
     let continuation =
         serde_json::to_vec(&continuation).expect("probe continuation should serialize");
     let restored_continuation: VmContinuation =

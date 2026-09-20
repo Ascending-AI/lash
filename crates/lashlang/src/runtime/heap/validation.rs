@@ -94,7 +94,7 @@ impl Heap {
     /// on attacker-supplied bytes.
     pub(crate) fn max_value_depth(&self, roots: &PersistedRoots<'_>) -> usize {
         let mut object_depth = BTreeMap::<HeapId, usize>::new();
-        for start in self.id_to_slot.keys().copied() {
+        for start in self.entries.keys().copied() {
             if object_depth.contains_key(&start) {
                 continue;
             }
@@ -178,7 +178,7 @@ impl Heap {
         // Iterative three-color traversal: repeated finished nodes are aliases;
         // an edge to a visiting node is a cycle.
         let mut colors = BTreeMap::<HeapId, u8>::new();
-        for start in self.id_to_slot.keys().copied() {
+        for start in self.entries.keys().copied() {
             if colors.get(&start) == Some(&2) {
                 continue;
             }
@@ -231,7 +231,7 @@ impl Heap {
                 .map_err(|_| format!("dangling heap reference {}", id.get()))?;
             pending.extend(object.child_refs());
         }
-        if reachable.len() != self.id_to_slot.len() {
+        if reachable.len() != self.entries.len() {
             return Err("heap wire must not contain unreachable objects".to_string());
         }
         Ok(())
