@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lash_provider_auth::{
     Credential, CredentialManager, CredentialRefresher, RefreshCause, classify_oauth_refresh_error,
@@ -25,9 +25,70 @@ pub(crate) struct UploadedAttachmentCacheKey {
     pub(crate) hash: String,
 }
 
+/// Gemini Files deletes uploads server-side after 48 hours; entries expire
+/// well before that so a dead URI is never served from this cache.
+const UPLOADED_ATTACHMENT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Process-wide bound on distinct (provider, credential, project, MIME,
+/// content) upload entries retained; oldest insertion is evicted past it.
+const UPLOADED_ATTACHMENT_CACHE_CAPACITY: usize = 1024;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct UploadedAttachmentRef {
     pub(crate) uri: String,
+    pub(crate) uploaded_at: Instant,
+}
+
+/// Bounded, expiring cache of uploaded Gemini Files URIs. Entries expire after
+/// [`UPLOADED_ATTACHMENT_TTL`] and are also removed explicitly when a request
+/// proves a cached URI dead (the provider's inline-retry path).
+#[derive(Debug, Default)]
+pub(crate) struct UploadedAttachmentCache {
+    entries: HashMap<UploadedAttachmentCacheKey, UploadedAttachmentRef>,
+}
+
+impl UploadedAttachmentCache {
+    pub(crate) fn get(
+        &mut self,
+        key: &UploadedAttachmentCacheKey,
+        now: Instant,
+    ) -> Option<UploadedAttachmentRef> {
+        match self.entries.get(key) {
+            Some(entry) if now.duration_since(entry.uploaded_at) < UPLOADED_ATTACHMENT_TTL => {
+                Some(entry.clone())
+            }
+            Some(_) => {
+                self.entries.remove(key);
+                None
+            }
+            None => None,
+        }
+    }
+
+    pub(crate) fn insert(
+        &mut self,
+        key: UploadedAttachmentCacheKey,
+        entry: UploadedAttachmentRef,
+        now: Instant,
+    ) {
+        self.entries.retain(|_, existing| {
+            now.duration_since(existing.uploaded_at) < UPLOADED_ATTACHMENT_TTL
+        });
+        if self.entries.len() >= UPLOADED_ATTACHMENT_CACHE_CAPACITY
+            && let Some(oldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, existing)| existing.uploaded_at)
+                .map(|(oldest, _)| oldest.clone())
+        {
+            self.entries.remove(&oldest);
+        }
+        self.entries.insert(key, entry);
+    }
+
+    pub(crate) fn remove(&mut self, key: &UploadedAttachmentCacheKey) {
+        self.entries.remove(key);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -117,12 +178,10 @@ impl GoogleOAuthProvider {
         )
     }
 
-    pub(crate) fn uploaded_attachment_cache()
-    -> &'static tokio::sync::Mutex<HashMap<UploadedAttachmentCacheKey, UploadedAttachmentRef>> {
-        static CACHE: OnceLock<
-            tokio::sync::Mutex<HashMap<UploadedAttachmentCacheKey, UploadedAttachmentRef>>,
-        > = OnceLock::new();
-        CACHE.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
+    pub(crate) fn uploaded_attachment_cache() -> &'static tokio::sync::Mutex<UploadedAttachmentCache>
+    {
+        static CACHE: OnceLock<tokio::sync::Mutex<UploadedAttachmentCache>> = OnceLock::new();
+        CACHE.get_or_init(|| tokio::sync::Mutex::new(UploadedAttachmentCache::default()))
     }
 
     /// Construct a provider from current tokens and the host's named Google

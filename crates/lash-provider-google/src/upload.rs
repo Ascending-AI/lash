@@ -65,7 +65,7 @@ impl GoogleOAuthProvider {
         project_id: Option<&str>,
         attachment_ref: &lash_core::AttachmentRef,
         bytes: &[u8],
-    ) -> Result<UploadedAttachmentRef, LlmTransportError> {
+    ) -> Result<(UploadedAttachmentRef, UploadedAttachmentCacheKey), LlmTransportError> {
         let key = Self::upload_cache_key(
             credential_scope_seed,
             project_id,
@@ -75,10 +75,9 @@ impl GoogleOAuthProvider {
         if let Some(existing) = Self::uploaded_attachment_cache()
             .lock()
             .await
-            .get(&key)
-            .cloned()
+            .get(&key, std::time::Instant::now())
         {
-            return Ok(existing);
+            return Ok((existing, key));
         }
 
         let uploaded = self
@@ -90,11 +89,12 @@ impl GoogleOAuthProvider {
                 &Self::uploaded_attachment_filename(&key),
             )
             .await?;
-        Self::uploaded_attachment_cache()
-            .lock()
-            .await
-            .insert(key, uploaded.clone());
-        Ok(uploaded)
+        Self::uploaded_attachment_cache().lock().await.insert(
+            key.clone(),
+            uploaded.clone(),
+            std::time::Instant::now(),
+        );
+        Ok((uploaded, key))
     }
 
     async fn upload_attachment(
@@ -232,7 +232,10 @@ impl GoogleOAuthProvider {
             );
         };
 
-        Ok(UploadedAttachmentRef { uri })
+        Ok(UploadedAttachmentRef {
+            uri,
+            uploaded_at: std::time::Instant::now(),
+        })
     }
 
     #[expect(
@@ -245,9 +248,15 @@ impl GoogleOAuthProvider {
         credential_scope_seed: &str,
         project_id: Option<&str>,
         req: &LlmRequest,
-    ) -> Result<(Vec<(AttachmentSource, Value)>, bool), LlmTransportError> {
+    ) -> Result<
+        (
+            Vec<(AttachmentSource, Value)>,
+            Vec<UploadedAttachmentCacheKey>,
+        ),
+        LlmTransportError,
+    > {
         let mut parts = Vec::with_capacity(req.attachments().len());
-        let mut used_uploaded_files = false;
+        let mut uploaded_keys = Vec::new();
 
         for source in &req.attachments() {
             if let AttachmentSource::Stored { attachment_ref } = source {
@@ -264,8 +273,8 @@ impl GoogleOAuthProvider {
                     )
                     .await
                 {
-                    Ok(uploaded) => {
-                        used_uploaded_files = true;
+                    Ok((uploaded, key)) => {
+                        uploaded_keys.push(key);
                         parts.push((
                             (*source).clone(),
                             json!({
@@ -286,7 +295,7 @@ impl GoogleOAuthProvider {
             }
         }
 
-        Ok((parts, used_uploaded_files))
+        Ok((parts, uploaded_keys))
     }
 }
 

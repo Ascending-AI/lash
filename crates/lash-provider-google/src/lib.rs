@@ -19,6 +19,8 @@ mod support;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod upload;
+#[cfg(test)]
+mod upload_cache_tests;
 
 pub use config::{GoogleOAuthClient, GoogleOAuthProvider};
 
