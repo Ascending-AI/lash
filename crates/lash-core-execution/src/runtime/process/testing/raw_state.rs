@@ -2,13 +2,15 @@ use super::*;
 
 impl TestLocalProcessRegistry {
     pub async fn raw_state_for_testing(&self) -> RawProcessRegistryStateForTesting {
-        let managed = self.managed.lock().await;
-        let mut records = managed
+        let state = self.state.lock().await;
+        let mut records = state
+            .managed
             .values()
             .map(|entry| (entry.record.clone(), entry.change_seq))
             .collect::<Vec<_>>();
         records.sort_by(|left, right| left.0.id.cmp(&right.0.id));
-        let mut events = managed
+        let mut events = state
+            .managed
             .iter()
             .flat_map(|(process_id, entry)| {
                 entry
@@ -23,7 +25,8 @@ impl TestLocalProcessRegistry {
                 .cmp(&right.0)
                 .then_with(|| left.1.sequence.cmp(&right.1.sequence))
         });
-        let process_incarnations = managed
+        let process_incarnations = state
+            .managed
             .iter()
             .map(|(process_id, entry)| {
                 (
@@ -32,10 +35,9 @@ impl TestLocalProcessRegistry {
                 )
             })
             .collect::<HashMap<_, _>>();
-        drop(managed);
 
-        let observers = self.observers.lock().await;
-        let mut observer_rows = observers
+        let mut observer_rows = state
+            .observers
             .iter()
             .flat_map(|(session_id, process_ids)| {
                 process_ids.iter().cloned().map(|process_id| {
@@ -48,31 +50,12 @@ impl TestLocalProcessRegistry {
             })
             .collect::<Vec<_>>();
         observer_rows.sort();
-        drop(observers);
 
-        let mut leases = self
-            .leases
-            .lock()
-            .await
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut leases = state.leases.values().cloned().collect::<Vec<_>>();
         leases.sort_by(|left, right| left.process_id.cmp(&right.process_id));
-        let mut wake_deliveries = self
-            .wake_deliveries
-            .lock()
-            .await
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut wake_deliveries = state.wake_deliveries.values().cloned().collect::<Vec<_>>();
         wake_deliveries.sort_by(|left, right| left.delivery_id.cmp(&right.delivery_id));
-        let mut tombstones = self
-            .tombstones
-            .lock()
-            .await
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut tombstones = state.tombstones.values().cloned().collect::<Vec<_>>();
         // One process id owns one tombstone per incarnation, so the process id
         // alone is not a total order. The SQL registries observe
         // `ORDER BY process_id, incarnation`; the map behind this projection is
@@ -83,10 +66,8 @@ impl TestLocalProcessRegistry {
                 .cmp(&right.process_id)
                 .then_with(|| left.incarnation.cmp(&right.incarnation))
         });
-        let mut wake_allocation_floors = self
+        let mut wake_allocation_floors = state
             .wake_allocation_floors
-            .lock()
-            .await
             .iter()
             .map(|((session_id, process_id), sequence)| {
                 (session_id.clone(), process_id.clone(), *sequence)
@@ -120,7 +101,8 @@ mod tests {
         let registry = TestLocalProcessRegistry::default();
         let process_id = ProcessId::from("shared-name");
         {
-            let mut tombstones = registry.tombstones.lock().await;
+            let mut state = registry.state.lock().await;
+            let tombstones = &mut state.tombstones;
             // Sixteen incarnations: a `HashMap` ordering that happens to come
             // out ascending by chance is a 1-in-16! event.
             for sequence in 1..=16_u64 {

@@ -3,6 +3,7 @@ use std::num::NonZeroUsize;
 use crate::{ParentEndPlan, ParentScope, PluginError, ProcessId, ProcessRecord};
 
 use super::TestLocalProcessRegistry;
+use super::types::RegistryState;
 
 /// The ledger key: the scope's storage kind and id.
 ///
@@ -25,19 +26,13 @@ fn ledger_key(parent: &ParentScope) -> Result<(String, String), PluginError> {
 /// The SQL tiers run the same anti-join inside their prune transaction. The
 /// row has to outlive its scope — it is what refuses a late `Cancel` child —
 /// so retention, not the sweep, is what reclaims it; without this the ledger
-/// grows by one row per committed turn forever. Takes only the ledger and
-/// `managed` locks: the caller already holds the transaction lock.
-pub(super) async fn reclaim_settled_plans_locked(
-    registry: &TestLocalProcessRegistry,
-    cutoff_epoch_ms: u64,
-) {
-    let managed = registry.managed.lock().await;
-    let mut plans = registry.parent_end_plans.lock().await;
-    plans.retain(|key, plan| {
+/// grows by one row per committed turn forever.
+pub(super) fn reclaim_settled_plans(state: &mut RegistryState, cutoff_epoch_ms: u64) {
+    state.parent_end_plans.retain(|key, plan| {
         let reclaimable = plan
             .settled_at_ms
             .is_some_and(|settled_at_ms| settled_at_ms < cutoff_epoch_ms)
-            && !managed.values().any(|managed| {
+            && !state.managed.values().any(|managed| {
                 managed.record.status.is_live()
                     && ledger_key(&managed.record.lifecycle.parent)
                         .is_ok_and(|child_key| child_key == *key)
@@ -48,10 +43,10 @@ pub(super) async fn reclaim_settled_plans_locked(
 
 /// The scope a terminal process row ends, written in the same critical section
 /// as the terminal append so the sweep can never see the terminal fact without
-/// the ledger row. Takes only the ledger lock: the caller already holds the
-/// transaction and `managed` locks.
-pub(super) async fn record_terminal_locked(
-    registry: &TestLocalProcessRegistry,
+/// the ledger row.
+pub(super) fn record_terminal_locked(
+    state: &mut RegistryState,
+    ended_at_ms: u64,
     record: &ProcessRecord,
 ) {
     let parent = ParentScope::Process {
@@ -61,17 +56,11 @@ pub(super) async fn record_terminal_locked(
     let Ok(key) = ledger_key(&parent) else {
         return;
     };
-    let ended_at_ms = registry.clock.timestamp_ms();
-    registry
-        .parent_end_plans
-        .lock()
-        .await
-        .entry(key)
-        .or_insert(ParentEndPlan {
-            parent,
-            ended_at_ms,
-            settled_at_ms: None,
-        });
+    state.parent_end_plans.entry(key).or_insert(ParentEndPlan {
+        parent,
+        ended_at_ms,
+        settled_at_ms: None,
+    });
 }
 
 pub(super) async fn record(
@@ -79,28 +68,29 @@ pub(super) async fn record(
     parent: &ParentScope,
 ) -> Result<(), PluginError> {
     let key = ledger_key(parent)?;
-    let _transaction = registry.transaction.lock().await;
-    let ended_at_ms = registry.clock.timestamp_ms();
     registry
-        .parent_end_plans
-        .lock()
+        .write(async |state| {
+            let ended_at_ms = registry.clock.timestamp_ms();
+            state
+                .parent_end_plans
+                .entry(key)
+                .or_insert_with(|| ParentEndPlan {
+                    parent: parent.clone(),
+                    ended_at_ms,
+                    settled_at_ms: None,
+                });
+            Ok(())
+        })
         .await
-        .entry(key)
-        .or_insert_with(|| ParentEndPlan {
-            parent: parent.clone(),
-            ended_at_ms,
-            settled_at_ms: None,
-        });
-    Ok(())
 }
 
 pub(super) async fn list_pending(
     registry: &TestLocalProcessRegistry,
     limit: NonZeroUsize,
 ) -> Result<Vec<ParentEndPlan>, PluginError> {
-    let _transaction = registry.transaction.lock().await;
-    let plans = registry.parent_end_plans.lock().await;
-    let mut pending = plans
+    let state = registry.state.lock().await;
+    let mut pending = state
+        .parent_end_plans
         .iter()
         .filter(|(_, plan)| plan.settled_at_ms.is_none())
         .collect::<Vec<_>>();
@@ -125,8 +115,8 @@ pub(super) async fn get(
     let Ok(key) = ledger_key(parent) else {
         return Ok(None);
     };
-    let _transaction = registry.transaction.lock().await;
-    Ok(registry.parent_end_plans.lock().await.get(&key).cloned())
+    let state = registry.state.lock().await;
+    Ok(state.parent_end_plans.get(&key).cloned())
 }
 
 /// Turn scopes with live `Cancel` children and no ledger row yet.
@@ -139,10 +129,9 @@ pub(super) async fn list_unrecorded_turn_parents(
     after: Option<&str>,
     limit: NonZeroUsize,
 ) -> Result<Vec<ParentScope>, PluginError> {
-    let _transaction = registry.transaction.lock().await;
-    let plans = registry.parent_end_plans.lock().await;
-    let managed = registry.managed.lock().await;
-    let mut candidates = managed
+    let state = registry.state.lock().await;
+    let mut candidates = state
+        .managed
         .values()
         .filter(|managed| {
             managed.record.lifecycle.on_parent_end == crate::OnParentEnd::Cancel
@@ -156,7 +145,7 @@ pub(super) async fn list_unrecorded_turn_parents(
             if after.is_some_and(|after| key.1.as_str() <= after) {
                 return None;
             }
-            (!plans.contains_key(&key)).then(|| (key.1, parent.clone()))
+            (!state.parent_end_plans.contains_key(&key)).then(|| (key.1, parent.clone()))
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|(left, _), (right, _)| left.cmp(right));
@@ -174,9 +163,9 @@ pub(super) async fn children(
     after: Option<&ProcessId>,
     limit: NonZeroUsize,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
-    let _transaction = registry.transaction.lock().await;
-    let managed = registry.managed.lock().await;
-    let mut matched = managed
+    let state = registry.state.lock().await;
+    let mut matched = state
+        .managed
         .iter()
         .filter(|(process_id, managed)| {
             after.is_none_or(|after| *process_id > after)
@@ -200,20 +189,23 @@ pub(super) async fn settle(
     parent: &ParentScope,
 ) -> Result<(), PluginError> {
     let key = ledger_key(parent)?;
-    let _transaction = registry.transaction.lock().await;
-    let settled_at_ms = registry.clock.timestamp_ms();
-    if let Some(plan) = registry.parent_end_plans.lock().await.get_mut(&key) {
-        plan.settled_at_ms.get_or_insert(settled_at_ms);
-    }
-    Ok(())
+    registry
+        .write(async |state| {
+            let settled_at_ms = registry.clock.timestamp_ms();
+            if let Some(plan) = state.parent_end_plans.get_mut(&key) {
+                plan.settled_at_ms.get_or_insert(settled_at_ms);
+            }
+            Ok(())
+        })
+        .await
 }
 
-impl TestLocalProcessRegistry {
-    /// Ledger read that assumes the caller already holds the transaction and
-    /// `managed` locks, so registration can fence a late child without
-    /// releasing the critical section it registers in.
-    pub(super) async fn parent_end_plan_for(&self, parent: &ParentScope) -> Option<ParentEndPlan> {
-        let key = ledger_key(parent).ok()?;
-        self.parent_end_plans.lock().await.get(&key).cloned()
-    }
+/// Ledger read against staged state, so registration can fence a late child
+/// inside the same write transaction it registers in.
+pub(super) fn parent_end_plan(
+    state: &RegistryState,
+    parent: &ParentScope,
+) -> Option<ParentEndPlan> {
+    let key = ledger_key(parent).ok()?;
+    state.parent_end_plans.get(&key).cloned()
 }

@@ -10,12 +10,13 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
         super::super::validate_generic_process_event_append(&request)?;
-        let _transaction = self.transaction.lock().await;
-        let mut managed = self.managed.lock().await;
-        let Some(record) = managed.get_mut(process_id) else {
-            return Err(self.process_miss(process_id).await);
-        };
-        self.append_managed_event(record, request).await
+        self.write(async |state| {
+            if !state.managed.contains_key(process_id) {
+                return Err(process_miss(state, process_id));
+            }
+            self.append_managed_event(state, process_id, request).await
+        })
+        .await
     }
 
     async fn append_event_ref(
@@ -24,18 +25,20 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
         super::super::validate_generic_process_event_append(&request)?;
-        let _transaction = self.transaction.lock().await;
-        let mut managed = self.managed.lock().await;
-        let Some(record) = managed.get_mut(&process_ref.process_id) else {
-            return Err(self.process_miss(&process_ref.process_id).await);
-        };
-        if record.record.incarnation != process_ref.incarnation {
-            return Err(super::registry_transitions::process_incarnation_superseded(
-                process_ref,
-                record.record.incarnation,
-            ));
-        }
-        self.append_managed_event(record, request).await
+        self.write(async |state| {
+            let Some(record) = state.managed.get(&process_ref.process_id) else {
+                return Err(process_miss(state, &process_ref.process_id));
+            };
+            if record.record.incarnation != process_ref.incarnation {
+                return Err(super::registry_transitions::process_incarnation_superseded(
+                    process_ref,
+                    record.record.incarnation,
+                ));
+            }
+            self.append_managed_event(state, &process_ref.process_id, request)
+                .await
+        })
+        .await
     }
 
     async fn append_event_with_authority(
@@ -44,24 +47,22 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessEventAppendReceipt, PluginError> {
-        let _transaction = self.transaction.lock().await;
-        let mut managed = self.managed.lock().await;
-        let Some(record) = managed.get_mut(process_id) else {
-            return Err(self.process_miss(process_id).await);
-        };
-        let leases = self.leases.lock().await;
-        validate_in_memory_execution_authority(
-            &leases,
-            process_id,
-            &record.record,
-            authority,
-            None,
-            self.clock.timestamp_ms(),
-        )?;
-        self.pause_execution_write_after_validation().await;
-        let result = self.append_managed_event(record, request).await;
-        drop(leases);
-        result
+        self.write(async |state| {
+            let Some(record) = state.managed.get(process_id) else {
+                return Err(process_miss(state, process_id));
+            };
+            validate_in_memory_execution_authority(
+                &state.leases,
+                process_id,
+                &record.record,
+                authority,
+                None,
+                self.clock.timestamp_ms(),
+            )?;
+            self.pause_execution_write_after_validation().await;
+            self.append_managed_event(state, process_id, request).await
+        })
+        .await
     }
 
     async fn events_after(
@@ -69,13 +70,12 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         process_id: &ProcessId,
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
-        let _transaction = self.transaction.lock().await;
         if let Some(error) = self.process_events_read_error.lock().await.take() {
             return Err(error);
         }
-        let managed = self.managed.lock().await;
-        let Some(record) = managed.get(process_id) else {
-            return Err(self.process_miss(process_id).await);
+        let state = self.state.lock().await;
+        let Some(record) = state.managed.get(process_id) else {
+            return Err(process_miss(&state, process_id));
         };
         Ok(record
             .events
@@ -90,13 +90,12 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         process_ref: &crate::ProcessRef,
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
-        let _transaction = self.transaction.lock().await;
         if let Some(error) = self.process_events_read_error.lock().await.take() {
             return Err(error);
         }
-        let managed = self.managed.lock().await;
-        let Some(record) = managed.get(&process_ref.process_id) else {
-            return Err(self.process_miss(&process_ref.process_id).await);
+        let state = self.state.lock().await;
+        let Some(record) = state.managed.get(&process_ref.process_id) else {
+            return Err(process_miss(&state, &process_ref.process_id));
         };
         if record.record.incarnation != process_ref.incarnation {
             return Err(super::registry_transitions::process_incarnation_superseded(
@@ -118,13 +117,12 @@ impl super::super::registry::ProcessEventLog for TestLocalProcessRegistry {
         event_type: &str,
         up_to_sequence: u64,
     ) -> Result<u64, PluginError> {
-        let _transaction = self.transaction.lock().await;
         if let Some(error) = self.process_events_read_error.lock().await.take() {
             return Err(error);
         }
-        let managed = self.managed.lock().await;
-        let Some(record) = managed.get(&process_ref.process_id) else {
-            return Err(self.process_miss(&process_ref.process_id).await);
+        let state = self.state.lock().await;
+        let Some(record) = state.managed.get(&process_ref.process_id) else {
+            return Err(process_miss(&state, &process_ref.process_id));
         };
         if record.record.incarnation != process_ref.incarnation {
             return Err(super::registry_transitions::process_incarnation_superseded(
