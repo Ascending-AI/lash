@@ -5,7 +5,7 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::{EffectAddress, ExecutionScope};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 // schema_fragments.rs carries the table sets shared between databases; the
 // declarations are parsed out of the concatenated source so a table moved into
@@ -169,6 +169,58 @@ const fn pair(sqlite_table: &'static str, postgres_table: &'static str) -> Table
     }
 }
 
+/// A per-column nullability divergence between the two backends, declared
+/// with both sides' actual values and the reason the divergence exists -- the
+/// same declaration discipline `Parity::Divergent` applies to column presence
+/// and `EXPECTED_CONSTRAINTS` applies to CHECK constraints. A divergence that
+/// is fixed must have its row removed: the gate fails on stale declarations.
+struct NullabilityDivergence {
+    sqlite_table: &'static str,
+    column: &'static str,
+    sqlite_nullable: bool,
+    postgres_nullable: bool,
+    reason: &'static str,
+}
+
+const NULLABILITY_DIVERGENCES: &[NullabilityDivergence] = &[
+    NullabilityDivergence {
+        sqlite_table: "deleted_sessions",
+        column: "created_at_ms",
+        sqlite_nullable: false,
+        postgres_nullable: true,
+        reason: "Postgres enumeration columns were added by ALTER TABLE ... ADD COLUMN, \
+                 which cannot take NOT NULL; legacy rows keep NULL where no source \
+                 evidence exists (component-58 migration comment)",
+    },
+    NullabilityDivergence {
+        sqlite_table: "deleted_sessions",
+        column: "head_revision",
+        sqlite_nullable: false,
+        postgres_nullable: true,
+        reason: "Postgres enumeration columns were added by ALTER TABLE ... ADD COLUMN, \
+                 which cannot take NOT NULL; legacy rows keep NULL where no source \
+                 evidence exists (component-58 migration comment)",
+    },
+    NullabilityDivergence {
+        sqlite_table: "deleted_sessions",
+        column: "relation_kind",
+        sqlite_nullable: false,
+        postgres_nullable: true,
+        reason: "Postgres enumeration columns were added by ALTER TABLE ... ADD COLUMN, \
+                 which cannot take NOT NULL; legacy rows keep NULL where no source \
+                 evidence exists (component-58 migration comment)",
+    },
+    NullabilityDivergence {
+        sqlite_table: "session_meta",
+        column: "created_at_ms",
+        sqlite_nullable: false,
+        postgres_nullable: true,
+        reason: "Postgres enumeration columns were added by ALTER TABLE ... ADD COLUMN, \
+                 which cannot take NOT NULL; legacy rows keep NULL where no source \
+                 evidence exists (component-58 migration comment)",
+    },
+];
+
 fn consume_keyword<'a>(source: &'a str, keyword: &str) -> Option<&'a str> {
     let source = source.trim_start();
     let candidate = source.get(..keyword.len())?;
@@ -254,6 +306,60 @@ fn sqlite_table_columns(source: &str, table: &str) -> BTreeSet<String> {
 }
 
 fn postgres_table_columns(source: &str, table: &str) -> BTreeSet<String> {
+    postgres_table_nullability(source, table)
+        .into_keys()
+        .collect()
+}
+
+/// Maps each column of a SQLite table to `true` when it is nullable. A column
+/// counts as non-nullable when its line carries `NOT NULL` or `PRIMARY KEY`,
+/// or when a table-level `PRIMARY KEY (...)` clause names it.
+fn sqlite_table_nullability(source: &str, table: &str) -> BTreeMap<String, bool> {
+    let body = ddl_table_body(source, table)
+        .unwrap_or_else(|| panic!("SQLite schema is missing registered table `{table}`"));
+    let mut nullable = BTreeMap::new();
+    let mut primary_key_columns = Vec::new();
+    for line in body.lines() {
+        let line = line.split_once("--").map_or(line, |(code, _)| code);
+        let Some(name) = consume_identifier(line) else {
+            continue;
+        };
+        let upper_name = name.to_ascii_uppercase();
+        if matches!(
+            upper_name.as_str(),
+            "UNIQUE" | "FOREIGN" | "CHECK" | "CONSTRAINT" | "ON"
+        ) {
+            continue;
+        }
+        let upper = line.to_ascii_uppercase();
+        if upper_name == "PRIMARY" {
+            if let Some((_, list)) = line.split_once('(')
+                && let Some((columns, _)) = list.split_once(')')
+            {
+                primary_key_columns.extend(
+                    columns
+                        .split(',')
+                        .map(|column| column.trim().trim_matches('"').to_string()),
+                );
+            }
+            continue;
+        }
+        nullable.insert(
+            name,
+            !(upper.contains("NOT NULL") || upper.contains("PRIMARY KEY")),
+        );
+    }
+    for column in primary_key_columns {
+        if let Some(entry) = nullable.get_mut(&column) {
+            *entry = false;
+        }
+    }
+    nullable
+}
+
+/// Maps each column of a Postgres table to `true` when the published shape
+/// marks it `nullable`.
+fn postgres_table_nullability(source: &str, table: &str) -> BTreeMap<String, bool> {
     let declaration = format!("table {table}\n");
     source
         .split_once(&declaration)
@@ -262,9 +368,19 @@ fn postgres_table_columns(source: &str, table: &str) -> BTreeSet<String> {
         .lines()
         .take_while(|line| !line.starts_with("table "))
         .filter_map(|line| {
-            line.strip_prefix("  column ")
-                .and_then(|line| line.split_whitespace().next())
-                .map(str::to_string)
+            let rest = line.strip_prefix("  column ")?;
+            let mut tokens = rest.split_whitespace();
+            let name = tokens.next()?.to_string();
+            let _type = tokens.next();
+            let nullable = match tokens.next() {
+                Some("nullable") => true,
+                Some("not-null") => false,
+                other => panic!(
+                    "Postgres column `{table}.{name}` carries an unrecognised nullability marker \
+                     {other:?}"
+                ),
+            };
+            Some((name, nullable))
         })
         .collect()
 }
@@ -513,10 +629,110 @@ fn validate_registry(sqlite_source: &str, postgres_source: &str) -> Result<(), S
         }
     }
 
+    validate_nullability(
+        sqlite_source,
+        postgres_source,
+        &sqlite_tables,
+        &postgres_tables,
+        &mut failures,
+    );
+
     if failures.is_empty() {
         Ok(())
     } else {
         Err(failures.join("\n"))
+    }
+}
+
+/// Compares nullability on every column a paired row shares across the two
+/// backends. Each mismatch must be declared in `NULLABILITY_DIVERGENCES` with
+/// the correct direction and a reason; a declaration whose columns no longer
+/// disagree is itself a failure, so the list cannot go stale.
+fn validate_nullability(
+    sqlite_source: &str,
+    postgres_source: &str,
+    sqlite_tables: &BTreeSet<String>,
+    postgres_tables: &BTreeSet<String>,
+    failures: &mut Vec<String>,
+) {
+    let mut declared = BTreeSet::new();
+    for divergence in NULLABILITY_DIVERGENCES {
+        if !declared.insert((divergence.sqlite_table, divergence.column)) {
+            failures.push(format!(
+                "NULLABILITY_DIVERGENCES duplicates {}.{}",
+                divergence.sqlite_table, divergence.column
+            ));
+        }
+    }
+
+    for row in TABLE_REGISTRY {
+        let (Some(sqlite_table), Some(postgres_table)) = (row.sqlite_table, row.postgres_table)
+        else {
+            continue;
+        };
+        if !sqlite_tables.contains(sqlite_table) || !postgres_tables.contains(postgres_table) {
+            continue;
+        }
+        let row_name = row_name(row);
+        let sqlite_columns = sqlite_table_nullability(sqlite_source, sqlite_table);
+        let postgres_columns = postgres_table_nullability(postgres_source, postgres_table);
+
+        // The nullability scraper must see exactly the columns the name
+        // scraper reports; otherwise a parser drift could skip a column and
+        // let a real mismatch pass unseen.
+        let sqlite_names = sqlite_table_columns(sqlite_source, sqlite_table);
+        if sqlite_columns.keys().cloned().collect::<BTreeSet<_>>() != sqlite_names {
+            failures.push(format!(
+                "{row_name} nullability scrape disagrees with the column scrape on SQLite \
+                 table `{sqlite_table}`; fix the scraper"
+            ));
+            continue;
+        }
+
+        let mut actual: BTreeMap<&str, (bool, bool)> = BTreeMap::new();
+        for (column, sqlite_nullable) in &sqlite_columns {
+            if let Some(postgres_nullable) = postgres_columns.get(column.as_str())
+                && postgres_nullable != sqlite_nullable
+            {
+                actual.insert(column.as_str(), (*sqlite_nullable, *postgres_nullable));
+            }
+        }
+
+        for divergence in NULLABILITY_DIVERGENCES
+            .iter()
+            .filter(|divergence| divergence.sqlite_table == sqlite_table)
+        {
+            match actual.get(divergence.column) {
+                Some(&(sqlite_nullable, postgres_nullable))
+                    if sqlite_nullable == divergence.sqlite_nullable
+                        && postgres_nullable == divergence.postgres_nullable => {}
+                Some(&(sqlite_nullable, postgres_nullable)) => failures.push(format!(
+                    "{row_name} column `{}` is declared divergent with \
+                     sqlite_nullable={}, postgres_nullable={} but actually \
+                     sqlite_nullable={sqlite_nullable}, \
+                     postgres_nullable={postgres_nullable}; edit the declaration",
+                    divergence.column, divergence.sqlite_nullable, divergence.postgres_nullable
+                )),
+                None => failures.push(format!(
+                    "{row_name} column `{}` is declared divergent ({}) but the backends now \
+                     agree or the column is not shared; remove the declaration",
+                    divergence.column, divergence.reason
+                )),
+            }
+        }
+
+        for (column, (sqlite_nullable, postgres_nullable)) in &actual {
+            if !NULLABILITY_DIVERGENCES.iter().any(|divergence| {
+                divergence.sqlite_table == sqlite_table && divergence.column == *column
+            }) {
+                failures.push(format!(
+                    "{row_name} column `{column}` disagrees on nullability \
+                     (sqlite_nullable={sqlite_nullable}, \
+                     postgres_nullable={postgres_nullable}); declare it in \
+                     NULLABILITY_DIVERGENCES with its reason or align the DDL"
+                ));
+            }
+        }
     }
 }
 
@@ -1011,6 +1227,59 @@ fn schema_congruence_identical_row_rejects_a_fabricated_difference() {
         "unexpected fabricated-difference failure: {failure}"
     );
     assert!(failure.contains("injected_column"));
+}
+
+#[test]
+fn schema_congruence_rejects_an_undeclared_nullability_divergence() {
+    // `blobs.content` is NOT NULL on both backends; relaxing only the SQLite
+    // side must fail the gate and name the column.
+    let fabricated_sqlite =
+        SQLITE_SCHEMA_SOURCE.replacen("    content BLOB NOT NULL\n);", "    content BLOB\n);", 1);
+    assert_ne!(fabricated_sqlite, SQLITE_SCHEMA_SOURCE);
+
+    let failure = validate_registry(&fabricated_sqlite, POSTGRES_SCHEMA_SHAPE)
+        .expect_err("an undeclared nullability divergence must fail the gate");
+    assert!(
+        failure.contains("column `content` disagrees on nullability"),
+        "unexpected nullability failure: {failure}"
+    );
+    assert!(
+        failure.contains("sqlite_table=Some(\"blobs\"), postgres_table=Some(\"lash_blobs\")"),
+        "nullability failure must name the registry row: {failure}"
+    );
+
+    // The reverse direction is gated too: `graph_nodes.parent_node_id` is
+    // nullable on both backends; tightening only the Postgres side must fail.
+    let fabricated_postgres = POSTGRES_SCHEMA_SHAPE.replacen(
+        "  column parent_node_id text nullable",
+        "  column parent_node_id text not-null",
+        1,
+    );
+    assert_ne!(fabricated_postgres, POSTGRES_SCHEMA_SHAPE);
+    let failure = validate_registry(SQLITE_SCHEMA_SOURCE, &fabricated_postgres)
+        .expect_err("a Postgres-side nullability change must fail the gate");
+    assert!(
+        failure.contains("column `parent_node_id` disagrees on nullability"),
+        "unexpected Postgres-side nullability failure: {failure}"
+    );
+}
+
+#[test]
+fn schema_congruence_declared_nullability_divergences_are_not_stale() {
+    // Removing a real divergence from the SQLite DDL (making it agree with
+    // Postgres) must fail the gate: the declaration would be a lie.
+    let aligned_sqlite = SQLITE_SCHEMA_SOURCE.replacen(
+        "    relation_kind     TEXT NOT NULL,\n    parent_session_id TEXT\n);",
+        "    relation_kind     TEXT,\n    parent_session_id TEXT\n);",
+        1,
+    );
+    assert_ne!(aligned_sqlite, SQLITE_SCHEMA_SOURCE);
+    let failure = validate_registry(&aligned_sqlite, POSTGRES_SCHEMA_SHAPE)
+        .expect_err("resolving a declared divergence must fail until the declaration is removed");
+    assert!(
+        failure.contains("column `relation_kind` is declared divergent"),
+        "unexpected stale-declaration failure: {failure}"
+    );
 }
 
 #[test]
