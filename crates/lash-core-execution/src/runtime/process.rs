@@ -3,6 +3,7 @@ mod awaiter;
 mod definition_ref;
 mod engine;
 mod events;
+pub(crate) mod identity_projection;
 mod lease_serde;
 #[cfg(test)]
 mod lease_serde_tests;

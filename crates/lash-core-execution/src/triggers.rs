@@ -13,6 +13,7 @@ mod router;
 #[cfg(test)]
 mod tests;
 
+use crate::runtime::process::identity_projection::project_process_payload_leaf;
 pub use memory::InMemoryTriggerStore;
 #[cfg(any(test, feature = "testing"))]
 pub use memory::RawTriggerStateForTesting;
@@ -26,10 +27,7 @@ use mutation::{
 pub use mutation::{evaluate_trigger_mutation, evaluate_trigger_mutation_with_incarnation};
 pub use router::*;
 use router::{default_enabled, reserve_in_memory_for_occurrence};
-use router::{
-    project_trigger_actor, project_trigger_draft, project_trigger_owner,
-    project_trigger_payload_leaf,
-};
+use router::{project_trigger_actor, project_trigger_draft, project_trigger_owner};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerEvent {
@@ -1573,7 +1571,7 @@ fn trigger_command_preimage(command: &TriggerCommand) -> Vec<u8> {
             ] {
                 fingerprint.optional(value, |fingerprint, value| fingerprint.string(value));
             }
-            fingerprint.optional(target.as_ref(), project_trigger_payload_leaf);
+            fingerprint.optional(target.as_ref(), project_process_payload_leaf);
             fingerprint.optional(*enabled, |fingerprint, enabled| {
                 fingerprint.tag(u8::from(enabled));
             });

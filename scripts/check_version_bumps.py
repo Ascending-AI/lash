@@ -260,6 +260,20 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+    # FIG-2888: the four duplicated identity-projection helpers (event type,
+    # value selector, payload leaf, schema leaf) moved once into
+    # runtime/process/identity_projection.rs and were renamed
+    # project_{trigger,registration}_* -> project_process_*. The projection
+    # bodies are byte-identical on both sides, so every emitted preimage is
+    # unchanged; PROCESS_REGISTRATION_FAMILY_VERSION stays 7,
+    # TRIGGER_COMMAND_FAMILY_VERSION stays 8,
+    # TRIGGER_DEFINITION_FAMILY_VERSION stays 5, and
+    # TRIGGER_SOURCE_FAMILY_VERSION stays 1.
+    'crates/lash-core-execution/src/runtime/process/validation.rs:PROCESS_REGISTRATION_FAMILY_VERSION': 'sha256:50b03d274e75d04f2efe06774b5160589504f4180a967b45f910e80136a81752',
+    'crates/lash-core-execution/src/triggers.rs:TRIGGER_COMMAND_FAMILY_VERSION': 'sha256:84b30afdb8f8c0e9e0641d7d2d8de59b96a9f52ce556b151962e26a0789a6db3',
+    'crates/lash-core-execution/src/triggers/router.rs:TRIGGER_DEFINITION_FAMILY_VERSION': 'sha256:801fd8f9f95a618b9fada3e0d840c414a2b72b80034413c649542d75a860f48d',
+    'crates/lash-core-execution/src/triggers/router.rs:TRIGGER_SOURCE_FAMILY_VERSION': 'sha256:e66f2481ca9987331d4a66480d87afa5bf5e5f79e5a147c0494dc062e97d97cb',
+
     # FIG-3239: ResponseTextMeta.phase retyped Option<String> ->
     # Option<ResponsePhase>. Serde and the commit-identity preimage emit the
     # same two wire strings ('commentary'/'final_answer'), so both guarded
