@@ -51,6 +51,8 @@ use super::store::{RuntimePerfStore, RuntimePerfStoreTiming};
 
 mod types;
 pub(crate) use types::*;
+mod scaffold;
+pub(crate) use scaffold::*;
 mod phase_probe;
 pub(crate) use phase_probe::*;
 mod contention;
