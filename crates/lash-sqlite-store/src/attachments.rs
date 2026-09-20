@@ -34,6 +34,23 @@ use lash_sansio::sync::MutexExt;
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 
+/// The [`PersistedArtifactKind`] a pointer-table row carries, derived from the
+/// row's own namespace key — the namespace is the sole owner of the
+/// payload-family fact (FIG-1949). A new namespace must extend this match; an
+/// unknown namespace fails the caller rather than inheriting a sibling's label.
+pub(crate) fn artifact_namespace_kind(
+    namespace: &str,
+) -> Result<PersistedArtifactKind, StoreError> {
+    match namespace {
+        MODULE_ARTIFACT_NAMESPACE => Ok(PersistedArtifactKind::LashlangModule),
+        PROCESS_ENV_NAMESPACE => Ok(PersistedArtifactKind::ProcessExecutionEnv),
+        unknown => Err(stored_data_corrupt(
+            "artifact_refs namespace",
+            format!("unknown artifact namespace `{unknown}`"),
+        )),
+    }
+}
+
 /// Adopt stored references under the boundary transaction.
 ///
 /// Validate every digest for upload evidence first, so a batch containing one
