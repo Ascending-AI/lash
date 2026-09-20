@@ -703,9 +703,12 @@ CREATE TABLE lash_durable_read_fixture.lash_trigger_deliveries (
 
 CREATE TABLE lash_durable_read_fixture.lash_trigger_mutation_receipts (
     operation_id text NOT NULL,
+    owner_kind text NOT NULL,
+    owner_id text NOT NULL,
     request_fingerprint text NOT NULL,
     result_json text NOT NULL,
-    created_at_ms bigint NOT NULL
+    created_at_ms bigint NOT NULL,
+    CONSTRAINT ck_trigger_receipts_owner_kind CHECK ((owner_kind = ANY (ARRAY['session'::text, 'host'::text, 'platform'::text])))
 );
 
 
@@ -1138,7 +1141,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 104);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 105);
 
 
 --
@@ -1191,7 +1194,7 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_deliveries VALUES ('trigger:d
 -- Data for Name: lash_trigger_mutation_receipts; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_trigger_mutation_receipts VALUES ('trigger-operation:v2:sha256:ceaf4a8ee4eaf66757ce28d468501b1145742e592a340e71c44b25370fe88c55', 'trigger-command:v2:sha256:a7e181ae63bed3a3dfe5601cd8ad3008de85724068b6adfb415689b17eff6762', '{"Ok":{"_owner_scope_namespace":"session:durable-read-fixture","receipt":{"definition_fingerprint":"trigger-definition:v2:sha256:74421411540f63d31fd15f082f4bb5137efb34fd15aefd981ae018edd6c705f4","disposition":"created","enabled":true,"incarnation":"durable-read-trigger-incarnation","owner_scope":{"session_id":"durable-read-fixture","type":"session"},"record_snapshot":{"created_at_ms":1700000000000,"definition_fingerprint":"trigger-definition:v2:sha256:74421411540f63d31fd15f082f4bb5137efb34fd15aefd981ae018edd6c705f4","enabled":true,"env_ref":"process-env:v3:sha256:3889c03ef030a2c50f57de91cb03927423b8a83a5c9f29bbf8a5be3b9722b1b7","event_types":[],"incarnation":"durable-read-trigger-incarnation","input_template":{"event":{"type":"event"}},"name":"Durable read trigger","owner_scope":{"session_id":"durable-read-fixture","type":"session"},"payload_schema":{"schema":{"additionalProperties":false,"properties":{"value":{"type":"integer"}},"required":["value"],"type":"object"}},"registrant":{"session_id":"durable-read-fixture","type":"session"},"revision":1,"source":{"fixture":"source"},"source_key":"fixture-source","source_type":"fixture.event","subscription_id":"trigger-subscription:v2:sha256:530ed2c8eec64b2e09849d1934965864f8786aac9d617c6e048188487e0392bb","subscription_key":"durable-read-trigger","target":{"kind":"durable-read-trigger-target","payload":{"fixture":"trigger"},"type":"engine"},"target_identity":{"definition":{"fixture":"trigger"},"kind":"durable-read-trigger-target","label":"Durable read trigger target"},"target_label":"Durable read trigger target","tombstoned":false,"updated_at_ms":1700000000000,"wake_target":{"session_id":"durable-read-fixture"}},"revision":1,"subscription_id":"trigger-subscription:v2:sha256:530ed2c8eec64b2e09849d1934965864f8786aac9d617c6e048188487e0392bb","subscription_key":"durable-read-trigger"},"type":"mutation"}}', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_trigger_mutation_receipts VALUES ('trigger-operation:v2:sha256:ceaf4a8ee4eaf66757ce28d468501b1145742e592a340e71c44b25370fe88c55', 'session', 'durable-read-fixture', 'trigger-command:v2:sha256:a7e181ae63bed3a3dfe5601cd8ad3008de85724068b6adfb415689b17eff6762', '{"Ok":{"_owner_scope_namespace":"session:durable-read-fixture","receipt":{"definition_fingerprint":"trigger-definition:v2:sha256:74421411540f63d31fd15f082f4bb5137efb34fd15aefd981ae018edd6c705f4","disposition":"created","enabled":true,"incarnation":"durable-read-trigger-incarnation","owner_scope":{"session_id":"durable-read-fixture","type":"session"},"record_snapshot":{"created_at_ms":1700000000000,"definition_fingerprint":"trigger-definition:v2:sha256:74421411540f63d31fd15f082f4bb5137efb34fd15aefd981ae018edd6c705f4","enabled":true,"env_ref":"process-env:v3:sha256:3889c03ef030a2c50f57de91cb03927423b8a83a5c9f29bbf8a5be3b9722b1b7","event_types":[],"incarnation":"durable-read-trigger-incarnation","input_template":{"event":{"type":"event"}},"name":"Durable read trigger","owner_scope":{"session_id":"durable-read-fixture","type":"session"},"payload_schema":{"schema":{"additionalProperties":false,"properties":{"value":{"type":"integer"}},"required":["value"],"type":"object"}},"registrant":{"session_id":"durable-read-fixture","type":"session"},"revision":1,"source":{"fixture":"source"},"source_key":"fixture-source","source_type":"fixture.event","subscription_id":"trigger-subscription:v2:sha256:530ed2c8eec64b2e09849d1934965864f8786aac9d617c6e048188487e0392bb","subscription_key":"durable-read-trigger","target":{"kind":"durable-read-trigger-target","payload":{"fixture":"trigger"},"type":"engine"},"target_identity":{"definition":{"fixture":"trigger"},"kind":"durable-read-trigger-target","label":"Durable read trigger target"},"target_label":"Durable read trigger target","tombstoned":false,"updated_at_ms":1700000000000,"wake_target":{"session_id":"durable-read-fixture"}},"revision":1,"subscription_id":"trigger-subscription:v2:sha256:530ed2c8eec64b2e09849d1934965864f8786aac9d617c6e048188487e0392bb","subscription_key":"durable-read-trigger"},"type":"mutation"}}', 1700000000000);
 
 
 --

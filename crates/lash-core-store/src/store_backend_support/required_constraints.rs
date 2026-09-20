@@ -405,6 +405,19 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         ),
     ),
     expected_constraint(
+        &[SqliteConstraintDatabase::Triggers],
+        rendered(
+            "trigger_mutation_receipts",
+            "ck_trigger_receipts_owner_kind",
+            "owner_kind IN ('session', 'host', 'platform')",
+        ),
+        rendered(
+            "lash_trigger_mutation_receipts",
+            "ck_trigger_receipts_owner_kind",
+            "owner_kind IN ('session', 'host', 'platform')",
+        ),
+    ),
+    expected_constraint(
         &[SqliteConstraintDatabase::EffectReplay],
         rendered(
             "runtime_effect_replay",

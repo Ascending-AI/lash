@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 104
+version 105
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -398,6 +398,8 @@ table lash_trigger_deliveries
 table lash_trigger_mutation_receipts
   column created_at_ms bigint not-null
   column operation_id text not-null
+  column owner_id text not-null
+  column owner_kind text not-null
   column request_fingerprint text not-null
   column result_json text not-null
   primary-key (operation_id)

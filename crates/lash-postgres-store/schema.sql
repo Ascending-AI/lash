@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 104.
+-- lash-postgres-store schema, component version 105.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -730,9 +730,12 @@ CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
 );
 CREATE TABLE IF NOT EXISTS lash_trigger_mutation_receipts (
     operation_id TEXT PRIMARY KEY,
+    owner_kind TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
     request_fingerprint TEXT NOT NULL,
     result_json TEXT NOT NULL,
-    created_at_ms BIGINT NOT NULL
+    created_at_ms BIGINT NOT NULL,
+    CONSTRAINT ck_trigger_receipts_owner_kind CHECK (owner_kind IN ('session', 'host', 'platform'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_subscription
     ON lash_trigger_deliveries(subscription_id);
@@ -780,7 +783,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 104)
+VALUES ('lash-postgres-store', 105)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (
