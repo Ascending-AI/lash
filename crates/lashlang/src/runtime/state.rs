@@ -58,19 +58,42 @@ pub struct GlobalPatchOutcome {
     pub unchanged: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct State {
-    pub(super) globals: Record,
+/// Which record owns a [`State`]/[`Snapshot`]'s bindings.
+///
+/// A `Plain` state has never executed: the record is the only one there is
+/// and it owns itself. A `HeapBacked` state is one the runtime has touched:
+/// the runtime roots own the bindings and `projected` is their lossy host
+/// view, produced by [`host_view`]. The distinction is deliberately sticky —
+/// a heap that has allocated stays heap-backed even with empty roots, so
+/// ownership never moves back to the view mid-session. Storing the mode as a
+/// value keeps each form's fields out of the other's reach: a plain state
+/// cannot name a dead heap, and a heap-backed state cannot mistake the view
+/// for the owner.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum StateMode {
+    // Both arms are boxed so `State` stays pointer-sized in either mode.
+    Plain(Box<Record>),
+    HeapBacked(Box<HeapBackedState>),
+}
+
+/// The parts only a heap-backed [`State`]/[`Snapshot`] has: the owning
+/// runtime roots, their host-view projection, and the heap they reach into.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct HeapBackedState {
     pub(super) runtime_globals: Record,
+    pub(super) projected: Record,
     pub(super) heap: Heap,
 }
 
-impl PartialEq for State {
-    fn eq(&self, other: &Self) -> bool {
-        self.globals == other.globals
-            && self.runtime_globals == other.runtime_globals
-            && self.heap == other.heap
+impl Default for StateMode {
+    fn default() -> Self {
+        Self::Plain(Box::default())
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct State {
+    pub(super) mode: StateMode,
 }
 
 impl State {
@@ -79,7 +102,10 @@ impl State {
     }
 
     pub fn globals(&self) -> &Record {
-        &self.globals
+        match &self.mode {
+            StateMode::Plain(globals) => globals,
+            StateMode::HeapBacked(backed) => &backed.projected,
+        }
     }
 
     pub fn set_default(
@@ -130,23 +156,26 @@ impl State {
             .is_empty()
     }
 
-    /// Whether the runtime roots own the bindings, rather than the host view.
-    ///
-    /// A heapless state has never executed, so `globals` is the only record
-    /// there is and it owns itself. The inference is deliberately sticky: a
-    /// heap that has allocated stays heap-backed, so ownership never moves back
-    /// to the view mid-session.
-    fn heap_backed(&self) -> bool {
-        !self.runtime_globals.is_empty() || self.heap.has_runtime_state()
+    /// The runtime roots while heap-backed; `None` while the state is plain.
+    #[cfg(test)]
+    pub(super) fn runtime_globals(&self) -> Option<&Record> {
+        match &self.mode {
+            StateMode::HeapBacked(backed) => Some(&backed.runtime_globals),
+            StateMode::Plain(_) => None,
+        }
     }
 
+    /// Whether `name` is bound, read from the record that owns the binding.
+    ///
+    /// When the state is heap-backed the runtime roots own the bindings and
+    /// `globals` is a lossy projection of them, so asking the projection
+    /// reports a live binding as absent — which is how a default used to
+    /// overwrite one and a removal used to go unreported.
     fn binding_exists(&self, name: &str) -> bool {
-        binding_exists(
-            self.heap_backed(),
-            &self.globals,
-            &self.runtime_globals,
-            name,
-        )
+        match &self.mode {
+            StateMode::Plain(globals) => globals.get(name).is_some(),
+            StateMode::HeapBacked(backed) => backed.runtime_globals.get(name).is_some(),
+        }
     }
 
     /// Applies a batch of global patches as one transaction.
@@ -169,54 +198,70 @@ impl State {
         if patch.is_empty() {
             return Ok(GlobalPatchOutcome::default());
         }
-        let heap_backed = self.heap_backed();
-        let mut globals = self.globals.clone();
-        let mut runtime_globals = self.runtime_globals.clone();
-        let mut heap = self.heap.clone();
         let mut outcome = GlobalPatchOutcome::default();
-        for operation in patch {
-            match operation {
-                GlobalPatch::SetDefault { name, .. }
-                    if binding_exists(heap_backed, &globals, &runtime_globals, &name) =>
-                {
-                    outcome.unchanged.push(name);
-                }
-                GlobalPatch::Insert { name, value } | GlobalPatch::SetDefault { name, value } => {
-                    if heap_backed {
-                        runtime_globals.remove(&name);
-                        let runtime_value = heap.isolate_value(&value)?;
-                        runtime_globals.insert(name.clone(), runtime_value);
-                        // The view is a projection of the record just written,
-                        // so the write goes through the projection's rule
-                        // rather than around it.
-                        globals.remove(&name);
-                        if let Some(value) = host_visible(value) {
-                            globals.insert(name.clone(), value);
+        match &mut self.mode {
+            StateMode::Plain(globals) => {
+                let mut staged = globals.clone();
+                for operation in patch {
+                    match operation {
+                        GlobalPatch::SetDefault { name, .. } if staged.get(&name).is_some() => {
+                            outcome.unchanged.push(name);
                         }
-                    } else {
-                        globals.insert(name.clone(), value);
-                    }
-                    outcome.inserted.push(name);
-                }
-                GlobalPatch::Remove { name } => {
-                    let existed = binding_exists(heap_backed, &globals, &runtime_globals, &name);
-                    globals.remove(&name);
-                    if heap_backed {
-                        runtime_globals.remove(&name);
-                    }
-                    if existed {
-                        outcome.removed.push(name);
+                        GlobalPatch::Insert { name, value }
+                        | GlobalPatch::SetDefault { name, value } => {
+                            staged.insert(name.clone(), value);
+                            outcome.inserted.push(name);
+                        }
+                        GlobalPatch::Remove { name } => {
+                            if staged.remove(&name).is_some() {
+                                outcome.removed.push(name);
+                            }
+                        }
                     }
                 }
+                *globals = staged;
+            }
+            StateMode::HeapBacked(backed) => {
+                let mut staged_roots = backed.runtime_globals.clone();
+                let mut staged_view = backed.projected.clone();
+                let mut staged_heap = backed.heap.clone();
+                for operation in patch {
+                    match operation {
+                        GlobalPatch::SetDefault { name, .. }
+                            if staged_roots.get(&name).is_some() =>
+                        {
+                            outcome.unchanged.push(name);
+                        }
+                        GlobalPatch::Insert { name, value }
+                        | GlobalPatch::SetDefault { name, value } => {
+                            staged_roots.remove(&name);
+                            let runtime_value = staged_heap.isolate_value(&value)?;
+                            staged_roots.insert(name.clone(), runtime_value);
+                            // The view is a projection of the record just
+                            // written, so the write goes through the
+                            // projection's rule rather than around it.
+                            staged_view.remove(&name);
+                            if let Some(value) = host_visible(value) {
+                                staged_view.insert(name.clone(), value);
+                            }
+                            outcome.inserted.push(name);
+                        }
+                        GlobalPatch::Remove { name } => {
+                            let existed = staged_roots.remove(&name).is_some();
+                            staged_view.remove(&name);
+                            if existed {
+                                outcome.removed.push(name);
+                            }
+                        }
+                    }
+                }
+                let roots = staged_roots.values().cloned().collect::<Vec<_>>();
+                staged_heap.collect(roots.iter());
+                backed.runtime_globals = staged_roots;
+                backed.projected = staged_view;
+                backed.heap = staged_heap;
             }
         }
-        if heap_backed {
-            let roots = runtime_globals.values().cloned().collect::<Vec<_>>();
-            heap.collect(roots.iter());
-        }
-        self.globals = globals;
-        self.runtime_globals = runtime_globals;
-        self.heap = heap;
         Ok(outcome)
     }
 
@@ -228,21 +273,25 @@ impl State {
     /// collection cycle had not reached yet, and `decode(encode(snapshot))`
     /// could not equal `snapshot`.
     pub fn snapshot(&self) -> Snapshot {
-        let mut heap = self.heap.clone();
-        let roots = self.runtime_globals.values().cloned().collect::<Vec<_>>();
-        heap.collect(roots.iter());
-        Snapshot {
-            globals: self.globals.clone(),
-            runtime_globals: self.runtime_globals.clone(),
-            heap,
-        }
+        let mode = match &self.mode {
+            StateMode::Plain(globals) => StateMode::Plain(globals.clone()),
+            StateMode::HeapBacked(backed) => {
+                let mut heap = backed.heap.clone();
+                let roots = backed.runtime_globals.values().cloned().collect::<Vec<_>>();
+                heap.collect(roots.iter());
+                StateMode::HeapBacked(Box::new(HeapBackedState {
+                    runtime_globals: backed.runtime_globals.clone(),
+                    projected: backed.projected.clone(),
+                    heap,
+                }))
+            }
+        };
+        Snapshot { mode }
     }
 
     pub fn from_snapshot(snapshot: Snapshot) -> Self {
         Self {
-            globals: snapshot.globals,
-            runtime_globals: snapshot.runtime_globals,
-            heap: snapshot.heap,
+            mode: snapshot.mode,
         }
     }
 
@@ -258,22 +307,34 @@ impl State {
         // roots first narrows validation to the graph this program can actually
         // observe, so a dead closure from the previous cell cannot fail the
         // next one with `UnknownFunction` or `ClosureCaptureCountMismatch`.
-        let root_values = self.runtime_globals.values().cloned().collect::<Vec<_>>();
-        self.heap.collect(root_values.iter());
-        self.heap.validate_closures(&program.chunk.functions)?;
+        if let StateMode::HeapBacked(backed) = &mut self.mode {
+            let root_values = backed.runtime_globals.values().cloned().collect::<Vec<_>>();
+            backed.heap.collect(root_values.iter());
+            backed.heap.validate_closures(&program.chunk.functions)?;
+        }
         Ok(())
     }
 
+    /// Hands the owning record and the heap to an execution.
+    ///
+    /// A plain state lends its one record and a fresh heap. A heap-backed
+    /// state lends the runtime roots and the heap, and what remains behind is
+    /// plain: the host view outlives the roots it was projected from, so it
+    /// becomes the state's owned record until `install_runtime` brings the
+    /// roots back.
     pub(super) fn take_runtime(&mut self) -> (Record, Heap) {
-        let globals = if self.runtime_globals.is_empty()
-            && !self.heap.has_runtime_state()
-            && !self.globals.is_empty()
-        {
-            std::mem::take(&mut self.globals)
-        } else {
-            std::mem::take(&mut self.runtime_globals)
-        };
-        (globals, std::mem::take(&mut self.heap))
+        match std::mem::take(&mut self.mode) {
+            StateMode::Plain(globals) => (*globals, Heap::default()),
+            StateMode::HeapBacked(backed) => {
+                let HeapBackedState {
+                    runtime_globals,
+                    projected,
+                    heap,
+                } = *backed;
+                self.mode = StateMode::Plain(Box::new(projected));
+                (runtime_globals, heap)
+            }
+        }
     }
 
     pub(super) fn install_runtime(
@@ -298,30 +359,19 @@ impl State {
         for symbol in closure_rooted {
             runtime_globals.remove_symbol(symbol);
         }
-        let globals = host_view(&runtime_globals, &mut heap)?;
-        self.globals = globals;
-        self.runtime_globals = runtime_globals;
-        self.heap = heap;
+        let projected = host_view(&runtime_globals, &mut heap)?;
+        // A run that leaves no roots and never allocated never went
+        // heap-backed: the projected view (which is then empty) is the record.
+        self.mode = if runtime_globals.is_empty() && !heap.has_runtime_state() {
+            StateMode::Plain(Box::new(projected))
+        } else {
+            StateMode::HeapBacked(Box::new(HeapBackedState {
+                runtime_globals,
+                projected,
+                heap,
+            }))
+        };
         Ok(())
-    }
-}
-
-/// Whether `name` is bound, read from the record that owns the binding.
-///
-/// When the state is heap-backed the runtime roots own the bindings and
-/// `globals` is a lossy projection of them, so asking the projection reports a
-/// live binding as absent — which is how a default used to overwrite one and a
-/// removal used to go unreported.
-fn binding_exists(
-    heap_backed: bool,
-    globals: &Record,
-    runtime_globals: &Record,
-    name: &str,
-) -> bool {
-    if heap_backed {
-        runtime_globals.get(name).is_some()
-    } else {
-        globals.get(name).is_some()
     }
 }
 
@@ -365,36 +415,30 @@ fn host_visible(value: Value) -> Option<Value> {
     (!super::value_contains_tool_handle(&value)).then_some(value)
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Snapshot {
-    globals: Record,
-    runtime_globals: Record,
-    heap: Heap,
-}
-
-impl PartialEq for Snapshot {
-    fn eq(&self, other: &Self) -> bool {
-        self.globals == other.globals
-            && self.runtime_globals == other.runtime_globals
-            && self.heap == other.heap
-    }
+    mode: StateMode,
 }
 
 impl Snapshot {
     pub fn new(globals: Record) -> Self {
         Self {
-            globals,
-            runtime_globals: Record::new(),
-            heap: Heap::default(),
+            mode: StateMode::Plain(Box::new(globals)),
         }
     }
 
     pub fn globals(&self) -> &Record {
-        &self.globals
+        match &self.mode {
+            StateMode::Plain(globals) => globals,
+            StateMode::HeapBacked(backed) => &backed.projected,
+        }
     }
 
     pub fn into_globals(self) -> Record {
-        self.globals
+        match self.mode {
+            StateMode::Plain(globals) => *globals,
+            StateMode::HeapBacked(backed) => backed.projected,
+        }
     }
     /// Encodes this snapshot as canonical, named-field MessagePack.
     ///
@@ -570,29 +614,31 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
     type Error = ContinuationError;
 
     fn try_from(snapshot: &Snapshot) -> Result<Self, Self::Error> {
-        let mut globals = snapshot.globals.iter().collect::<Vec<_>>();
-        globals.sort_unstable_by_key(|(name, _)| *name);
-        if snapshot.runtime_globals.is_empty() && !snapshot.heap.has_runtime_state() {
-            return Ok(Self {
-                version: LASHLANG_SNAPSHOT_VERSION,
-                globals: Some(
-                    globals
-                        .into_iter()
-                        .map(|(name, value)| {
-                            let location = child_location("globals", name);
-                            Ok(CanonicalBinding {
-                                name: name.to_string(),
-                                value: CanonicalValue::from_heapless_runtime(value, &location, 0)?,
+        let (runtime_globals, mut heap) = match &snapshot.mode {
+            StateMode::Plain(globals) => {
+                let mut globals = globals.iter().collect::<Vec<_>>();
+                globals.sort_unstable_by_key(|(name, _)| *name);
+                return Ok(Self {
+                    version: LASHLANG_SNAPSHOT_VERSION,
+                    globals: Some(
+                        globals
+                            .into_iter()
+                            .map(|(name, value)| {
+                                let location = child_location("globals", name);
+                                Ok(CanonicalBinding {
+                                    name: name.to_string(),
+                                    value: CanonicalValue::from_heapless_runtime(
+                                        value, &location, 0,
+                                    )?,
+                                })
                             })
-                        })
-                        .collect::<Result<_, ContinuationError>>()?,
-                ),
-                heap: None,
-            });
-        }
-
-        let mut heap = snapshot.heap.clone();
-        let runtime_globals = snapshot.runtime_globals.clone();
+                            .collect::<Result<_, ContinuationError>>()?,
+                    ),
+                    heap: None,
+                });
+            }
+            StateMode::HeapBacked(backed) => (backed.runtime_globals.clone(), backed.heap.clone()),
+        };
         let root_values = runtime_globals.values().cloned().collect::<Vec<_>>();
         heap.collect(root_values.iter());
         // The writer checks the same ownership invariant the reader enforces, in
@@ -661,9 +707,7 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
     fn try_from(snapshot: CanonicalSnapshot) -> Result<Self, Self::Error> {
         match (snapshot.globals, snapshot.heap) {
             (Some(globals), None) => Ok(Self {
-                globals: bindings_into_record(globals, "globals", false)?,
-                runtime_globals: Record::new(),
-                heap: Heap::default(),
+                mode: StateMode::Plain(Box::new(bindings_into_record(globals, "globals", false)?)),
             }),
             (None, Some(heap_wire)) => {
                 let CanonicalHeap {
@@ -713,13 +757,22 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                 // The view is not on the wire, so it is re-derived here — by
                 // the same single projection the live install path uses, or a
                 // restored state would not equal the state that was captured.
-                let globals = host_view(&runtime_globals, &mut heap)
+                let projected = host_view(&runtime_globals, &mut heap)
                     .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
-                Ok(Self {
-                    globals,
-                    runtime_globals,
-                    heap,
-                })
+                // An empty heap form decodes to a plain state, exactly as the
+                // field-era code did: re-encoding it produces the globals
+                // arm, so the fixed-point check still refuses the wire as
+                // non-canonical rather than accepting it as heap-backed.
+                let mode = if runtime_globals.is_empty() && !heap.has_runtime_state() {
+                    StateMode::Plain(Box::new(projected))
+                } else {
+                    StateMode::HeapBacked(Box::new(HeapBackedState {
+                        runtime_globals,
+                        projected,
+                        heap,
+                    }))
+                };
+                Ok(Self { mode })
             }
             _ => Err(SnapshotDecodeError::InvalidEncoding(
                 "snapshot must contain exactly one of globals or heap".to_string(),

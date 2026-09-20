@@ -33,9 +33,11 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
         let mut runtime_globals = Record::new();
         runtime_globals.insert("f".to_string(), closure);
         let snapshot = Snapshot {
-            globals: Record::new(),
-            runtime_globals,
-            heap,
+            mode: StateMode::HeapBacked(Box::new(HeapBackedState {
+                runtime_globals,
+                projected: Record::new(),
+                heap,
+            })),
         };
         let bytes = snapshot
             .to_canonical_bytes()
@@ -63,9 +65,11 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
     let mut runtime_globals = Record::new();
     runtime_globals.insert("f".to_string(), closure);
     let bytes = Snapshot {
-        globals: Record::new(),
-        runtime_globals,
-        heap,
+        mode: StateMode::HeapBacked(Box::new(HeapBackedState {
+            runtime_globals,
+            projected: Record::new(),
+            heap,
+        })),
     }
     .to_canonical_bytes()
     .expect("program-independent snapshot encoding accepts function metadata");
@@ -740,9 +744,11 @@ fn a_snapshot_one_version_ahead_with_unknown_variant_is_refused_as_version_misma
     let mut roots = Record::new();
     roots.insert("rejection".to_string(), error);
     let snapshot = Snapshot {
-        globals: Record::new(),
-        runtime_globals: roots,
-        heap,
+        mode: StateMode::HeapBacked(Box::new(HeapBackedState {
+            runtime_globals: roots,
+            projected: Record::new(),
+            heap,
+        })),
     };
     let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
     let mut future_bytes = bytes.clone();
@@ -807,9 +813,11 @@ fn a_minted_error_brand_ships_by_name_and_round_trips_at_the_current_version() {
     let mut roots = Record::new();
     roots.insert("rejection".to_string(), error);
     let snapshot = Snapshot {
-        globals: Record::new(),
-        runtime_globals: roots,
-        heap,
+        mode: StateMode::HeapBacked(Box::new(HeapBackedState {
+            runtime_globals: roots,
+            projected: Record::new(),
+            heap,
+        })),
     };
 
     let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
@@ -1254,33 +1262,39 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     roots.insert("date".to_string(), date);
     roots.insert("error".to_string(), error);
     let snapshot = Snapshot {
-        globals: Record::new(),
-        runtime_globals: roots,
-        heap,
+        mode: StateMode::HeapBacked(Box::new(HeapBackedState {
+            runtime_globals: roots,
+            projected: Record::new(),
+            heap,
+        })),
     };
 
     let bytes = snapshot.to_canonical_bytes().expect("encode snapshot");
     let restored = Snapshot::from_canonical_bytes(&bytes).expect("decode snapshot");
+    let StateMode::HeapBacked(backed) = &restored.mode else {
+        panic!("a rooted snapshot restores heap-backed")
+    };
+    let runtime_globals = &backed.runtime_globals;
+    let heap = &backed.heap;
     assert_eq!(
-        restored.runtime_globals.get("map"),
-        restored.runtime_globals.get("map_alias"),
+        runtime_globals.get("map"),
+        runtime_globals.get("map_alias"),
         "two roots to one Map must still alias"
     );
-    let Value::Ref(map_id) = restored.runtime_globals["map"] else {
+    let Value::Ref(map_id) = runtime_globals["map"] else {
         unreachable!()
     };
-    let entries = restored
-        .heap
+    let entries = heap
         .map_entries(map_id)
         .expect("Map entries")
         .expect("Map kind");
     assert_eq!(entries[0].0, Value::String("first".into()));
     assert_eq!(entries[1].0, Value::String("second".into()));
-    let Value::Ref(restored_regexp) = restored.runtime_globals["regexp"] else {
+    let Value::Ref(restored_regexp) = runtime_globals["regexp"] else {
         unreachable!()
     };
-    let regexp_slot = restored.heap.id_to_slot[&restored_regexp];
-    let HeapObject::RegExp(regexp) = &restored.heap.slots[regexp_slot]
+    let regexp_slot = heap.id_to_slot[&restored_regexp];
+    let HeapObject::RegExp(regexp) = &heap.slots[regexp_slot]
         .as_ref()
         .expect("restored RegExp slot")
         .object
@@ -1292,11 +1306,11 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
         regexp.compiled_program.is_none(),
         "compiled matcher cache must never be serialized"
     );
-    let Value::Ref(restored_match) = restored.runtime_globals["regexp_match"] else {
+    let Value::Ref(restored_match) = runtime_globals["regexp_match"] else {
         unreachable!()
     };
-    let match_slot = restored.heap.id_to_slot[&restored_match];
-    let HeapObject::RegExpMatch(regexp_match) = &restored.heap.slots[match_slot]
+    let match_slot = heap.id_to_slot[&restored_match];
+    let HeapObject::RegExpMatch(regexp_match) = &heap.slots[match_slot]
         .as_ref()
         .expect("restored RegExp match slot")
         .object
@@ -1505,11 +1519,20 @@ fn state_rooting(name: &str, object: HeapObject) -> (State, Value) {
     (state, value)
 }
 
+/// The roots only a heap-backed mode carries — tests reach them through the
+/// mode rather than a field.
+fn heap_backed_roots(state: &State) -> &Record {
+    let StateMode::HeapBacked(backed) = &state.mode else {
+        panic!("expected a heap-backed state")
+    };
+    &backed.runtime_globals
+}
+
 /// The precondition every test below rests on: the host view is a lossy
 /// projection, so a live binding can be absent from it.
 fn assert_binding_is_owned_but_unprojected(state: &State, label: &str, name: &str, value: &Value) {
     assert_eq!(
-        state.runtime_globals.get(name),
+        heap_backed_roots(state).get(name),
         Some(value),
         "{label}: the runtime roots must own the binding"
     );
@@ -1534,7 +1557,7 @@ fn a_default_leaves_a_binding_the_host_view_omits_alone() {
             "{label}: a default must not bind a name the runtime roots already hold"
         );
         assert_eq!(
-            state.runtime_globals.get("kept"),
+            heap_backed_roots(&state).get("kept"),
             Some(&value),
             "{label}: the live binding must survive the default untouched"
         );
@@ -1552,7 +1575,7 @@ fn removing_a_binding_the_host_view_omits_reports_it_removed() {
             "{label}: removing a live binding must report it removed"
         );
         assert!(
-            state.runtime_globals.get("kept").is_none(),
+            heap_backed_roots(&state).get("kept").is_none(),
             "{label}: the runtime roots must no longer hold the binding"
         );
     }
@@ -1617,7 +1640,7 @@ fn a_host_write_the_view_cannot_carry_leaves_the_view_a_projection() {
 
     assert!(!replaced, "the name was unbound before the write");
     assert!(
-        state.runtime_globals.get("pending").is_some(),
+        heap_backed_roots(&state).get("pending").is_some(),
         "the runtime roots own the binding the host wrote"
     );
     assert!(
@@ -1632,4 +1655,83 @@ fn a_host_write_the_view_cannot_carry_leaves_the_view_a_projection() {
     let decoded = Snapshot::from_canonical_bytes(&bytes)
         .expect("a host-written handle-bearing binding decodes");
     assert_eq!(decoded, snapshot, "decode(encode(s)) must equal s");
+}
+
+/// The mode is a value, so it must survive the wire as a value: a plain
+/// snapshot decodes plain and a heap-backed snapshot decodes heap-backed.
+#[test]
+fn the_state_mode_survives_a_snapshot_round_trip_in_both_directions() {
+    let mut plain = State::new();
+    plain
+        .insert_global("x", Value::Number(1.0))
+        .expect("seeding a global stays within the heap bound");
+    assert!(matches!(plain.mode, StateMode::Plain(_)));
+    let plain_snapshot = plain.snapshot();
+    let plain_bytes = plain_snapshot
+        .to_canonical_bytes()
+        .expect("a plain snapshot encodes");
+    let decoded = Snapshot::from_canonical_bytes(&plain_bytes).expect("a plain snapshot decodes");
+    assert!(
+        matches!(decoded.mode, StateMode::Plain(_)),
+        "a globals wire must not come back heap-backed"
+    );
+    assert_eq!(decoded, plain_snapshot);
+    assert_eq!(State::from_snapshot(decoded), plain);
+
+    let (heap_backed, _) = state_rooting(
+        "kept",
+        HeapObject::Map(MapObject {
+            entries: Vec::new(),
+        }),
+    );
+    assert!(matches!(heap_backed.mode, StateMode::HeapBacked(_)));
+    let heap_snapshot = heap_backed.snapshot();
+    let heap_bytes = heap_snapshot
+        .to_canonical_bytes()
+        .expect("a heap-backed snapshot encodes");
+    let decoded =
+        Snapshot::from_canonical_bytes(&heap_bytes).expect("a heap-backed snapshot decodes");
+    assert!(
+        matches!(decoded.mode, StateMode::HeapBacked(_)),
+        "a heap wire must not come back plain"
+    );
+    assert_eq!(decoded, heap_snapshot);
+    assert_eq!(State::from_snapshot(decoded), heap_backed);
+}
+
+/// Taking a heap-backed state's runtime leaves a plain state holding the
+/// host view: the projection outlives the roots it was projected from, and a
+/// second take hands out that record with a fresh heap.
+#[test]
+fn taking_the_runtime_leaves_the_host_view_as_a_plain_state() {
+    let (mut state, _) = state_rooting(
+        "kept",
+        HeapObject::Map(MapObject {
+            entries: Vec::new(),
+        }),
+    );
+    state
+        .insert_global("visible", Value::Number(7.0))
+        .expect("a host-visible write stays within the heap bound");
+
+    let (roots, heap) = state.take_runtime();
+    assert!(heap.has_runtime_state(), "the taken heap is the live one");
+    assert!(roots.get("kept").is_some());
+    assert!(roots.get("visible").is_some());
+
+    let StateMode::Plain(view) = &state.mode else {
+        panic!("the state left behind must be plain")
+    };
+    assert_eq!(view.get("visible"), Some(&Value::Number(7.0)));
+    assert!(
+        view.get("kept").is_none(),
+        "the view still omits what the host cannot see"
+    );
+
+    let (globals, heap) = state.take_runtime();
+    assert_eq!(globals.get("visible"), Some(&Value::Number(7.0)));
+    assert!(
+        !heap.has_runtime_state(),
+        "a second take hands out a fresh heap, not the live one"
+    );
 }

@@ -358,8 +358,8 @@ async fn while_runs_inside_process_body() {
     let compiled = crate::compile_process(&program, "count_to").expect("process should compile");
     let mut state = State::new();
     state
-        .globals
-        .insert("limit".to_string(), Value::Number(4.0));
+        .insert_global("limit", Value::Number(4.0))
+        .expect("seeding a global stays within the heap bound");
 
     let outcome = execute_compiled_process(&compiled, &mut state, &RecordingProcessHost::default())
         .await
