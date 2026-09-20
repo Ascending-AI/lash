@@ -393,10 +393,14 @@ impl SessionAdmin {
         payload: serde_json::Value,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEvent> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        let session_id = SessionId::from(runtime.session_id());
-        let processes = runtime.process_service()?;
+        let (session_id, processes) = {
+            let writer = self.runtime.writer();
+            let runtime = writer.lock().await;
+            (
+                SessionId::from(runtime.session_id()),
+                runtime.process_service()?,
+            )
+        };
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         processes
             .validate_visible(&session_id, std::slice::from_ref(process_id), scope.clone())
@@ -421,10 +425,14 @@ impl SessionAdmin {
         process_ids: Vec<ProcessId>,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<()> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        let session_id = SessionId::from(runtime.session_id());
-        let processes = runtime.process_service()?;
+        let (session_id, processes) = {
+            let writer = self.runtime.writer();
+            let runtime = writer.lock().await;
+            (
+                SessionId::from(runtime.session_id()),
+                runtime.process_service()?,
+            )
+        };
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         processes
             .transfer(&session_id, to_session_id, process_ids, scope)
@@ -708,10 +716,14 @@ impl SessionAdmin {
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessHandleView> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        let session_id = SessionId::from(runtime.session_id());
-        let processes = runtime.process_service()?;
+        let (session_id, processes) = {
+            let writer = self.runtime.writer();
+            let runtime = writer.lock().await;
+            (
+                SessionId::from(runtime.session_id()),
+                runtime.process_service()?,
+            )
+        };
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         let summary = processes
             .start_from_request(&session_id, request, scope)
@@ -738,10 +750,14 @@ impl SessionAdmin {
         process_id: &ProcessId,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessCancelReceipt> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        let session_id = SessionId::from(runtime.session_id());
-        let processes = runtime.process_service()?;
+        let (session_id, processes) = {
+            let writer = self.runtime.writer();
+            let runtime = writer.lock().await;
+            (
+                SessionId::from(runtime.session_id()),
+                runtime.process_service()?,
+            )
+        };
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         processes
             .validate_visible(&session_id, std::slice::from_ref(process_id), scope.clone())
@@ -763,10 +779,14 @@ impl SessionAdmin {
         &self,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<Vec<lash_core::ProcessCancelReceipt>> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        let session_id = SessionId::from(runtime.session_id());
-        let processes = runtime.process_service()?;
+        let (session_id, processes) = {
+            let writer = self.runtime.writer();
+            let runtime = writer.lock().await;
+            (
+                SessionId::from(runtime.session_id()),
+                runtime.process_service()?,
+            )
+        };
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         let summaries = processes
             .cancel_all_visible(&session_id, scope)
