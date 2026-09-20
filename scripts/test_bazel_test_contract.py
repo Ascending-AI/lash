@@ -34,6 +34,19 @@ def generated_list(name: str) -> list[str]:
     return ast.literal_eval(match.group(1))
 
 
+def generated_batches() -> dict[str, list[str]]:
+    """`WORKSPACE_TEST_BATCHES`: batch label -> member test labels."""
+    source = (ROOT / "tools/bazel/workspace_targets.bzl").read_text(encoding="utf-8")
+    match = re.search(
+        r"^WORKSPACE_TEST_BATCHES = (\{.*?^\})$",
+        source,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError("missing generated dict WORKSPACE_TEST_BATCHES")
+    return ast.literal_eval(match.group(1))
+
+
 def inventory_targets() -> list[dict[str, object]]:
     inventory = json.loads(
         (ROOT / "tools/bazel/target-inventory.json").read_text(encoding="utf-8")
@@ -158,6 +171,22 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertEqual(all_labels, bazel_labels | cargo_labels | deferred_labels)
         self.assertEqual(all_labels, set(generated_list("WORKSPACE_TEST_TARGETS")))
 
+        # FIG-3365: batched members ride inside their package's `:test_batch`
+        # action. This reconciliation is what makes a silently dropped member
+        # a CI failure: every coverage-listed member either appears in the
+        # suite itself or inside exactly one batch, and every batch sits in
+        # the suite.
+        batches = generated_batches()
+        batched = {member for members in batches.values() for member in members}
+        suite_labels = set(generated_list("WORKSPACE_TEST_SUITE_LABELS"))
+        self.assertFalse(batched - bazel_labels)
+        self.assertEqual(bazel_labels - batched, suite_labels - set(batches))
+        self.assertLessEqual(set(batches), suite_labels)
+        for members in batches.values():
+            self.assertGreaterEqual(len(members), 2)
+        dev_suite = set(generated_list("WORKSPACE_DEV_SUITE_LABELS"))
+        self.assertEqual((dev_labels - batched) | set(batches), dev_suite)
+
         by_label = {target["label"]: target for target in targets}
         self.assertTrue(
             all(
@@ -217,9 +246,9 @@ class BazelTestContractTests(unittest.TestCase):
     def test_workspace_suite_and_cli_default_to_the_generated_partition(self) -> None:
         root_build = (ROOT / "BUILD.bazel").read_text(encoding="utf-8")
         self.assertIn('name = "workspace_tests"', root_build)
-        self.assertIn("tests = WORKSPACE_BAZEL_TEST_TARGETS", root_build)
+        self.assertIn("tests = WORKSPACE_TEST_SUITE_LABELS", root_build)
         self.assertIn('name = "dev_tests"', root_build)
-        self.assertIn("tests = WORKSPACE_DEV_TEST_TARGETS", root_build)
+        self.assertIn("tests = WORKSPACE_DEV_SUITE_LABELS", root_build)
 
         with tempfile.TemporaryDirectory() as temporary:
             args_log = pathlib.Path(temporary) / "args"

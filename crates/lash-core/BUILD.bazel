@@ -318,6 +318,21 @@ filegroup(
     srcs = ["tests/support/queued_claim_atomicity.rs"],
 )
 
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    tests = [
+        ":integration_boundary__test",
+        ":lash-core__unit_test",
+        ":panic_containment__test",
+        ":runtime_effect__test",
+        ":runtime_lifecycle__test",
+        ":tool_execution_grant_layout__test",
+        ":turn_event_schema__test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

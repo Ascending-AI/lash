@@ -206,6 +206,17 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    tests = [
+        ":durable_read_fixture__test",
+        ":lash-sqlite-store__unit_test",
+        ":process_change_horizon__test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

@@ -11,8 +11,9 @@ load(
     "WORKSPACE_COMPILE_TARGETS",
     "WORKSPACE_BAZEL_TEST_TARGETS",
     "WORKSPACE_DEFERRED_TEST_TARGETS",
-    "WORKSPACE_DEV_TEST_TARGETS",
+    "WORKSPACE_DEV_SUITE_LABELS",
     "WORKSPACE_RUST_SOURCE_TARGETS",
+    "WORKSPACE_TEST_SUITE_LABELS",
     "WORKSPACE_TEST_TARGETS",
 )
 
@@ -33,10 +34,13 @@ filegroup(
 
 # The generated suite is the complete deterministic/default-feature test
 # partition. Cargo-owned labels carry `manual`, so `bazel test //...` and this
-# focused aggregate execute the same safe set.
+# focused aggregate execute the same safe set. `WORKSPACE_TEST_SUITE_LABELS`
+# is the member list with each package's plain tests swapped for its
+# `:test_batch` aggregate (FIG-3365) -- the batch runs the identical binaries
+# under one shared runfiles tree; member targets stay individually runnable.
 test_suite(
     name = "workspace_tests",
-    tests = WORKSPACE_BAZEL_TEST_TARGETS,
+    tests = WORKSPACE_TEST_SUITE_LABELS,
 )
 
 # The feature-coverage lanes of scripts/feature-coverage.toml, compiled at each
@@ -70,7 +74,7 @@ test_suite(
 # stress binary). `//:workspace_tests` remains the PR partition CI runs.
 test_suite(
     name = "dev_tests",
-    tests = WORKSPACE_DEV_TEST_TARGETS,
+    tests = WORKSPACE_DEV_SUITE_LABELS,
 )
 
 # Runtime inputs for the few tests whose asserted contract spans package

@@ -247,6 +247,20 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    tests = [
+        ":lash-sim__bin__unit_test",
+        ":logical_turn__test",
+        ":process_lifecycle_vocabulary__test",
+        ":retention_classification__test",
+        ":schema_congruence__test",
+        ":signal_replay_key_constructor__test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

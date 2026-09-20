@@ -544,6 +544,24 @@ ui_fixtures_test(
     tags = ["manual"],
 )
 
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    tests = [
+        ":embed_plugins__test",
+        ":facade_inventory__test",
+        ":integrator_facade__test",
+        ":lash__unit_test",
+        ":one_home__test",
+        ":process_scope_fence__test",
+        ":runtime_operation_retirement__test",
+        ":stores_evidence__test",
+        ":testing_conformance__test",
+        ":tool_intent_ingress_observability__test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

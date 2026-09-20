@@ -150,6 +150,17 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    tests = [
+        ":integration__test",
+        ":lash-regress__unit_test",
+        ":unicode_property_escapes__test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
