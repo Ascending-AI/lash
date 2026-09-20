@@ -10,10 +10,7 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
-use self::recovery::{
-    RecoveryBackendError, RecoveryClaimDisposition, RecoveryCompletionDisposition,
-    RecoveryReadDisposition, RecoveryReleaseDisposition,
-};
+use self::recovery::{RecoveryBackendError, RecoveryReadDisposition};
 use self::registration::registration_from_record;
 
 mod drain;
@@ -937,50 +934,15 @@ impl DurableProcessWorker {
 
     /// Terminalize one of this host's started OwnerBound rows as
     /// `Abandoned{OwnerDrain}` under a freshly claimed drain lease. Returns
-    /// a typed disposition distinguishing an acknowledged terminal write from
-    /// contention, absence, peer settlement, lease loss, and backend failure.
+    /// `Ok(())` for an acknowledged terminal write and the attempt outcome —
+    /// contention, absence, peer settlement, lease loss, or backend failure —
+    /// for anything else.
     async fn drain_one_owner_bound(
         &self,
         process_id: &ProcessId,
         owner: crate::LeaseOwnerIdentity,
-    ) -> RecoveryCompletionDisposition {
-        let lease_ttl_ms = self.lease_timings().ttl_ms();
-        let drain_owner = self.recovery_lease_owner();
-        let lease = match self
-            .claim_for_recovery(process_id, &drain_owner, lease_ttl_ms)
-            .await
-        {
-            RecoveryClaimDisposition::Acquired(lease) => lease,
-            RecoveryClaimDisposition::Busy => return RecoveryCompletionDisposition::Busy,
-            RecoveryClaimDisposition::BackendError(error) => {
-                return RecoveryCompletionDisposition::BackendError(error);
-            }
-        };
-        let current = match self.read_for_recovery(process_id).await {
-            RecoveryReadDisposition::Found(current) => *current,
-            RecoveryReadDisposition::Absent => {
-                return match self.release_for_recovery(&lease).await {
-                    RecoveryReleaseDisposition::Released => RecoveryCompletionDisposition::Absent,
-                    RecoveryReleaseDisposition::BackendError(error) => {
-                        RecoveryCompletionDisposition::BackendError(error)
-                    }
-                };
-            }
-            RecoveryReadDisposition::BackendError(error) => {
-                let _ = self.release_or_log(&lease).await;
-                return RecoveryCompletionDisposition::BackendError(error);
-            }
-        };
-        if current.is_terminal() {
-            return match self.release_for_recovery(&lease).await {
-                RecoveryReleaseDisposition::Released => {
-                    RecoveryCompletionDisposition::SettledByPeer(current.status)
-                }
-                RecoveryReleaseDisposition::BackendError(error) => {
-                    RecoveryCompletionDisposition::BackendError(error)
-                }
-            };
-        }
+    ) -> Result<(), ProcessRecoveryAttemptOutcome> {
+        let (lease, _current) = self.claim_live_row_for_recovery(process_id).await?;
         let evidence = AbandonEvidence {
             writer: AbandonWriter::OwnerDrain,
             owner: Some(owner),
@@ -1042,57 +1004,17 @@ impl DurableProcessWorker {
             return ProcessRecoveryOutcome::LeftToOwner;
         }
 
-        let lease_ttl_ms = self.lease_timings().ttl_ms();
-        let owner = self.recovery_lease_owner();
-        // Claim the single-owner lease. A live holder or a claim error leaves
-        // the row to its owner until the lease TTL expires.
-        let lease = match self
-            .claim_for_recovery(&process_id, &owner, lease_ttl_ms)
-            .await
-        {
-            RecoveryClaimDisposition::Acquired(lease) => lease,
-            RecoveryClaimDisposition::Busy => {
-                return ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Busy);
-            }
-            RecoveryClaimDisposition::BackendError(error) => {
-                return ProcessRecoveryOutcome::Deferred(error.into_public());
-            }
+        let (lease, record) = match self.claim_live_row_for_recovery(&process_id).await {
+            Ok(claimed) => claimed,
+            Err(disposition) => return ProcessRecoveryOutcome::Deferred(disposition),
         };
-        // Terminal between the list and the claim. Idempotent by process_id: do
-        // not re-execute or re-terminalize a finished process.
-        let record = match self.read_for_recovery(&process_id).await {
-            RecoveryReadDisposition::Found(record) => *record,
-            RecoveryReadDisposition::Absent => {
-                return self
-                    .release_or_outcome(
-                        &lease,
-                        ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Absent),
-                    )
-                    .await;
-            }
-            RecoveryReadDisposition::BackendError(error) => {
-                let _ = self.release_or_log(&lease).await;
-                return ProcessRecoveryOutcome::Deferred(error.into_public());
-            }
-        };
-        if record.is_terminal() {
-            let terminal_status = record.status;
-            return self
-                .release_or_outcome(
-                    &lease,
-                    ProcessRecoveryOutcome::Deferred(
-                        ProcessRecoveryAttemptOutcome::SettledByPeer { terminal_status },
-                    ),
-                )
-                .await;
-        }
         if record.disposition == RecoveryContract::Rerunnable
             && let (Some(max_attempts), Some(started)) =
                 (record.max_attempts, record.first_started.as_deref())
             && started.attempt >= max_attempts
         {
-            return self
-                .complete_and_release(
+            return ProcessRecoveryOutcome::from_completion(
+                self.complete_and_release(
                     &lease,
                     &process_id,
                     ProcessAwaitOutput::Abandoned {
@@ -1104,8 +1026,8 @@ impl DurableProcessWorker {
                         control: None,
                     },
                 )
-                .await
-                .into_outcome();
+                .await,
+            );
         }
 
         match record.disposition {
@@ -1134,8 +1056,8 @@ impl DurableProcessWorker {
                     None
                 };
                 match evidence {
-                    Some(evidence) => self
-                        .complete_and_release(
+                    Some(evidence) => ProcessRecoveryOutcome::from_completion(
+                        self.complete_and_release(
                             &lease,
                             &process_id,
                             ProcessAwaitOutput::Abandoned {
@@ -1143,8 +1065,8 @@ impl DurableProcessWorker {
                                 control: None,
                             },
                         )
-                        .await
-                        .into_outcome(),
+                        .await,
+                    ),
                     None => {
                         self.release_or_outcome(&lease, ProcessRecoveryOutcome::LeftToOwner)
                             .await
@@ -1175,62 +1097,27 @@ impl DurableProcessWorker {
         &self,
         process_id: &ProcessId,
     ) -> ProcessRecoveryOutcome {
-        let lease_ttl_ms = self.lease_timings().ttl_ms();
-        let owner = self.recovery_lease_owner();
-        let lease = match self
-            .claim_for_recovery(process_id, &owner, lease_ttl_ms)
-            .await
-        {
-            RecoveryClaimDisposition::Acquired(lease) => lease,
-            RecoveryClaimDisposition::Busy => {
-                return ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Busy);
-            }
-            RecoveryClaimDisposition::BackendError(error) => {
-                return ProcessRecoveryOutcome::Deferred(error.into_public());
-            }
+        let (lease, _current) = match self.claim_live_row_for_recovery(process_id).await {
+            Ok(claimed) => claimed,
+            Err(disposition) => return ProcessRecoveryOutcome::Deferred(disposition),
         };
-        let current = match self.read_for_recovery(process_id).await {
-            RecoveryReadDisposition::Found(current) => *current,
-            RecoveryReadDisposition::Absent => {
-                return self
-                    .release_or_outcome(
-                        &lease,
-                        ProcessRecoveryOutcome::Deferred(ProcessRecoveryAttemptOutcome::Absent),
-                    )
-                    .await;
-            }
-            RecoveryReadDisposition::BackendError(error) => {
-                let _ = self.release_or_log(&lease).await;
-                return ProcessRecoveryOutcome::Deferred(error.into_public());
-            }
-        };
-        if current.is_terminal() {
-            let terminal_status = current.status;
-            return self
-                .release_or_outcome(
-                    &lease,
-                    ProcessRecoveryOutcome::Deferred(
-                        ProcessRecoveryAttemptOutcome::SettledByPeer { terminal_status },
-                    ),
-                )
-                .await;
-        }
         let evidence = AbandonEvidence {
             writer: AbandonWriter::ReconciledRequest,
             // Externally-owned work has no lash execution owner to name.
             owner: None,
             epoch_ms: self.now_ms(),
         };
-        self.complete_and_release(
-            &lease,
-            process_id,
-            ProcessAwaitOutput::Abandoned {
-                evidence: Box::new(evidence),
-                control: None,
-            },
+        ProcessRecoveryOutcome::from_completion(
+            self.complete_and_release(
+                &lease,
+                process_id,
+                ProcessAwaitOutput::Abandoned {
+                    evidence: Box::new(evidence),
+                    control: None,
+                },
+            )
+            .await,
         )
-        .await
-        .into_outcome()
     }
 
     /// (Re-)run a claimed row under its renewed lease and write the terminal
