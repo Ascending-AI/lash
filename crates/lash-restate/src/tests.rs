@@ -81,6 +81,7 @@ fn test_restate_await_event_key(
     restate_await_event_key_for_authority(&test_restate_authority_id(), scope, wait)
 }
 
+mod bindings;
 mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
 mod effect_group_shape;
