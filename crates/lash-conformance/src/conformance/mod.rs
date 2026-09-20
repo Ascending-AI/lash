@@ -64,6 +64,7 @@ mod process_trigger_retention;
 pub mod registration_macro_support;
 mod release_stamp;
 mod retention;
+mod run_shape;
 mod runtime_persistence;
 mod runtime_persistence_state_machine;
 mod session_delete_blob_reclaim;
