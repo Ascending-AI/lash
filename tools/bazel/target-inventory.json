@@ -17612,7 +17612,11 @@
           "label": "//crates/lash-conformance:lash-conformance__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -17655,7 +17659,11 @@
           "label": "//crates/lash-core-effect:lash-core-effect__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -17711,7 +17719,11 @@
           "label": "//crates/lash-core-execution:lash-core-execution__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -17752,7 +17764,11 @@
           "label": "//crates/lash-core-ids:lash-core-ids__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -17795,7 +17811,11 @@
           "label": "//crates/lash-core-llm:lash-core-llm__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -17835,7 +17855,11 @@
           "label": "//crates/lash-core-memory:lash-core-memory__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -17881,7 +17905,11 @@
           "label": "//crates/lash-core-store:lash-core-store__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -17927,7 +17955,11 @@
           "label": "//crates/lash-core-worker:lash-core-worker__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -18037,7 +18069,19 @@
           "label": "//crates/lash-core:turn_event_schema__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-core:test_batch",
+        "members": [
+          "//crates/lash-core:integration_boundary__test",
+          "//crates/lash-core:lash-core__unit_test",
+          "//crates/lash-core:panic_containment__test",
+          "//crates/lash-core:runtime_effect__test",
+          "//crates/lash-core:runtime_lifecycle__test",
+          "//crates/lash-core:tool_execution_grant_layout__test",
+          "//crates/lash-core:turn_event_schema__test"
+        ]
+      }
     },
     {
       "declared_features": [],
@@ -18065,7 +18109,11 @@
           "label": "//crates/lash-http-transport:lash-http-transport__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -18104,7 +18152,11 @@
           "label": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -18139,7 +18191,11 @@
           "label": "//crates/lash-llm-tools:lash-llm-tools__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -18182,7 +18238,14 @@
           "label": "//crates/lash-llm-transport:property__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-llm-transport:test_batch",
+        "members": [
+          "//crates/lash-llm-transport:lash-llm-transport__unit_test",
+          "//crates/lash-llm-transport:property__test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -18247,7 +18310,11 @@
           "label": "//crates/lash-perf:lash-perf__bin__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -18294,7 +18361,11 @@
           "label": "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -18329,7 +18400,11 @@
           "label": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [],
@@ -18356,7 +18431,11 @@
           "label": "//crates/lash-plugin-rolling-history:lash-plugin-rolling-history__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [],
@@ -18382,7 +18461,11 @@
           "label": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -18523,7 +18606,11 @@
             "manual"
           ]
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -18590,7 +18677,14 @@
           "label": "//crates/lash-protocol-rlm:protocol_drivers__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-protocol-rlm:test_batch",
+        "members": [
+          "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+          "//crates/lash-protocol-rlm:protocol_drivers__test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -18646,7 +18740,16 @@
           "label": "//crates/lash-protocol-standard:protocol_scenarios__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-protocol-standard:test_batch",
+        "members": [
+          "//crates/lash-protocol-standard:embedded_builder__test",
+          "//crates/lash-protocol-standard:lash-protocol-standard__unit_test",
+          "//crates/lash-protocol-standard:native_tools__test",
+          "//crates/lash-protocol-standard:protocol_scenarios__test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -18696,7 +18799,15 @@
           "label": "//crates/lash-provider-anthropic:property__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-provider-anthropic:test_batch",
+        "members": [
+          "//crates/lash-provider-anthropic:charge_safety__test",
+          "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test",
+          "//crates/lash-provider-anthropic:property__test"
+        ]
+      }
     },
     {
       "declared_features": [],
@@ -18729,7 +18840,11 @@
           "label": "//crates/lash-provider-auth:lash-provider-auth__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -18782,7 +18897,15 @@
           "label": "//crates/lash-provider-google:property__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-provider-google:test_batch",
+        "members": [
+          "//crates/lash-provider-google:charge_safety__test",
+          "//crates/lash-provider-google:lash-provider-google__unit_test",
+          "//crates/lash-provider-google:property__test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -18836,7 +18959,14 @@
           "label": "//crates/lash-provider-openai:codex_websocket_runtime__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-provider-openai:test_batch",
+        "members": [
+          "//crates/lash-provider-openai:codex_websocket_runtime__test",
+          "//crates/lash-provider-openai:lash-provider-openai__unit_test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -18892,7 +19022,15 @@
             "pr-deferred"
           ]
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-regress:test_batch",
+        "members": [
+          "//crates/lash-regress:integration__test",
+          "//crates/lash-regress:lash-regress__unit_test",
+          "//crates/lash-regress:unicode_property_escapes__test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -18927,7 +19065,11 @@
           "label": "//crates/lash-remote-protocol:lash-remote-protocol__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [],
@@ -18982,7 +19124,11 @@
           "label": "//crates/lash-restate:lash-restate__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [],
@@ -19006,7 +19152,11 @@
           "label": "//crates/lash-rlm-types:lash-rlm-types__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -19043,7 +19193,11 @@
             "manual"
           ]
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -19076,7 +19230,11 @@
           "label": "//crates/lash-sansio:lash-sansio__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [],
@@ -19201,7 +19359,18 @@
           "label": "//crates/lash-sim:stack_policy__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-sim:test_batch",
+        "members": [
+          "//crates/lash-sim:lash-sim__bin__unit_test",
+          "//crates/lash-sim:logical_turn__test",
+          "//crates/lash-sim:process_lifecycle_vocabulary__test",
+          "//crates/lash-sim:retention_classification__test",
+          "//crates/lash-sim:schema_congruence__test",
+          "//crates/lash-sim:signal_replay_key_constructor__test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -19281,7 +19450,15 @@
           "label": "//crates/lash-sqlite-store:durable_read_fixture__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-sqlite-store:test_batch",
+        "members": [
+          "//crates/lash-sqlite-store:durable_read_fixture__test",
+          "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",
+          "//crates/lash-sqlite-store:process_change_horizon__test"
+        ]
+      }
     },
     {
       "declared_features": [],
@@ -19316,7 +19493,11 @@
           "label": "//crates/lash-subagents:lash-subagents__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -19347,7 +19528,11 @@
           "label": "//crates/lash-tool-support:lash-tool-support__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -19388,7 +19573,14 @@
           "label": "//crates/lash-trace:schema__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash-trace:test_batch",
+        "members": [
+          "//crates/lash-trace:lash-trace__unit_test",
+          "//crates/lash-trace:schema__test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -19436,7 +19628,11 @@
             "no-remote-exec"
           ]
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -19585,7 +19781,22 @@
             "manual"
           ]
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lash:test_batch",
+        "members": [
+          "//crates/lash:embed_plugins__test",
+          "//crates/lash:facade_inventory__test",
+          "//crates/lash:integrator_facade__test",
+          "//crates/lash:lash__unit_test",
+          "//crates/lash:one_home__test",
+          "//crates/lash:process_scope_fence__test",
+          "//crates/lash:runtime_operation_retirement__test",
+          "//crates/lash:stores_evidence__test",
+          "//crates/lash:testing_conformance__test",
+          "//crates/lash:tool_intent_ingress_observability__test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -19701,7 +19912,18 @@
             "manual"
           ]
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//crates/lashlang:test_batch",
+        "members": [
+          "//crates/lashlang:benchmark_contract__test",
+          "//crates/lashlang:diagnostic_locations__test",
+          "//crates/lashlang:integration__test",
+          "//crates/lashlang:lashlang__unit_test",
+          "//crates/lashlang:property__test",
+          "//crates/lashlang:stack_budget__test"
+        ]
+      }
     },
     {
       "declared_features": [
@@ -19753,7 +19975,11 @@
           "label": "//examples/agent-service:fresh_boot__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -19827,7 +20053,11 @@
           "label": "//examples/agent-workbench:agent-workbench__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [
@@ -19915,7 +20145,11 @@
           "label": "//examples/slack-clone:mcp__test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [],
@@ -19951,7 +20185,11 @@
           "label": "//examples/toolbench:toolbench__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     },
     {
       "declared_features": [],
@@ -20036,7 +20274,14 @@
             "manual"
           ]
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//examples/workflow-graph-roundtrip:test_batch",
+        "members": [
+          "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
+          "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test"
+        ]
+      }
     },
     {
       "declared_features": [],
@@ -20161,7 +20406,16 @@
           "label": "//runbooks/restate-postgres-workers:lash-e2e-worker__bin",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": "//runbooks/restate-postgres-workers:test_batch",
+        "members": [
+          "//runbooks/restate-postgres-workers:lash-e2e-mock-provider__bin__unit_test",
+          "//runbooks/restate-postgres-workers:lash-e2e-process-operator-flow__bin__unit_test",
+          "//runbooks/restate-postgres-workers:lash-e2e-runner__bin__unit_test",
+          "//runbooks/restate-postgres-workers:restate-postgres-workers__unit_test"
+        ]
+      }
     },
     {
       "declared_features": [],
@@ -20193,7 +20447,11 @@
           "label": "//runbooks/rlm-smoke:rlm-smoke__unit_test",
           "tags": []
         }
-      ]
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
     }
   ]
 }

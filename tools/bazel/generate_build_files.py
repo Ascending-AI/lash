@@ -511,6 +511,10 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
     library_crate = library["name"] if library else None
     chunks = [GENERATED_HEADER, LOAD, "package(default_visibility = [\"//visibility:public\"])\n\n"]
     inventory_targets = []
+    # FIG-3365: plain libtest binaries (no args/env/shards/timeout/policy
+    # tags) join the package's `lash_batch_test` instead of paying a runfiles
+    # forest and TestRunner action each.
+    batch_members = []
 
     has_build_script = any("custom-build" in target["kind"] for target in package["targets"])
     if has_build_script:
@@ -622,6 +626,18 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 + f"    version = {quote(version)},\n"
                 + ")\n\n"
             )
+            if (
+                not unit_args
+                and not unit_test_env
+                and not unit_shards
+                and not unit_timeout
+                and not unit_tags
+            ):
+                # FIG-3365: a plain unit test -- no args, env, sharding,
+                # timeout, or policy tags -- rides the package's shared
+                # `lash_batch_test` instead of paying its own runfiles forest
+                # and test-runner action.
+                batch_members.append(f":{primary_target}__unit_test")
             unit_inventory = {
                 "cargo": library["name"],
                 "kind": "unit-test",
@@ -754,6 +770,14 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 '    tags = ["manual"],\n'
                 ")\n\n"
             )
+        if (
+            kind == "test"
+            and not target_args
+            and not test_env
+            and not target_shards
+            and not target_tags
+        ):
+            batch_members.append(f":{name}")
         target_inventory = {
             "cargo": target["name"],
             "kind": kind,
@@ -819,6 +843,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             if bin_unit_cargo_reason:
                 bin_unit_inventory["cargo_only"] = bin_unit_cargo_reason
             inventory_targets.append(bin_unit_inventory)
+            if not bin_unit_skips and not bin_unit_tags:
+                batch_members.append(f":{name}__unit_test")
 
     if package["name"] == "lash-internal-core":
         chunks.append(
@@ -846,6 +872,19 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             ")\n\n"
         )
 
+    # One batch is only worth its wrapper action when it replaces at least
+    # two per-test runfiles forests.
+    batch_label = None
+    if len(batch_members) >= 2:
+        batch_label = f"//{package_dir}:test_batch"
+        chunks.append(
+            'load("//tools/bazel:test_batch.bzl", "lash_batch_test")\n\n'
+            "lash_batch_test(\n"
+            '    name = "test_batch",\n'
+            f"    tests = {string_list(sorted(batch_members))},\n"
+            ")\n\n"
+        )
+
     chunks.append(
         "filegroup(\n"
         "    name = \"rust_sources\",\n"
@@ -869,6 +908,14 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         "package": package["name"],
         "resolved_features": features,
         "targets": inventory_targets,
+        "test_batch": {
+            "label": batch_label,
+            "members": (
+                sorted(f"//{package_dir}{member}" for member in batch_members)
+                if batch_label
+                else []
+            ),
+        },
     }
 
 
@@ -943,6 +990,14 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             for target in executable_tests
             if "manual" not in target["tags"] and "pr-deferred" not in target["tags"]
         ),
+        # FIG-3365: what `//:workspace_tests` literally contains. Member-level
+        # coverage is `WORKSPACE_BAZEL_TEST_TARGETS`; this list swaps each
+        # package's plain tests for its `:test_batch` aggregate, so the
+        # partition pays one runfiles forest per package instead of one per
+        # binary. `WORKSPACE_TEST_BATCHES` is the contract-test handle for
+        # reconciling members to batches.
+        "WORKSPACE_TEST_SUITE_LABELS": None,  # computed below
+        "WORKSPACE_DEV_SUITE_LABELS": None,  # computed below
         "WORKSPACE_DEV_TEST_TARGETS": sorted(
             target["label"]
             for target in executable_tests
@@ -962,9 +1017,27 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             target["label"] for target in executable_tests
         ),
     }
+    batches = {
+        item["test_batch"]["label"]: item["test_batch"]["members"]
+        for item in inventory
+        if item["test_batch"]["label"]
+    }
+    batched_members = {member for members in batches.values() for member in members}
+    groups["WORKSPACE_TEST_SUITE_LABELS"] = sorted(
+        set(groups["WORKSPACE_BAZEL_TEST_TARGETS"]) - batched_members | set(batches)
+    )
+    groups["WORKSPACE_DEV_SUITE_LABELS"] = sorted(
+        set(groups["WORKSPACE_DEV_TEST_TARGETS"]) - batched_members | set(batches)
+    )
     bzl = [GENERATED_HEADER]
     for name, values in groups.items():
         bzl.append(f"{name} = {string_list(values, indent=4)}\n\n")
+    bzl.append("WORKSPACE_TEST_BATCHES = {\n")
+    for label in sorted(batches):
+        bzl.append(
+            f"    {quote(label)}: {string_list(batches[label], indent=8)},\n"
+        )
+    bzl.append("}\n\n")
     outputs[ROOT / "tools/bazel/workspace_targets.bzl"] = "".join(bzl).rstrip() + "\n"
     feature_chunks, feature_bzl, feature_units = feature_lane_outputs(metadata)
     for package in inventory:

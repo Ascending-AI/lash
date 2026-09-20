@@ -289,6 +289,20 @@ filegroup(
     srcs = ["tests/fixtures/module-artifact-old.json"],
 )
 
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    tests = [
+        ":benchmark_contract__test",
+        ":diagnostic_locations__test",
+        ":integration__test",
+        ":lashlang__unit_test",
+        ":property__test",
+        ":stack_budget__test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

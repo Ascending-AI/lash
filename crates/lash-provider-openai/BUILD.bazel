@@ -72,6 +72,16 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    tests = [
+        ":codex_websocket_runtime__test",
+        ":lash-provider-openai__unit_test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
