@@ -328,7 +328,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
                     .session_meta
                     .lock_recover()
                     .as_ref()
-                    .is_some_and(|meta| &meta.session_id == session_id)
+                    .is_some_and(|meta| meta.session_id == *session_id)
             })
             .cloned()
             .map(|store| store as Arc<dyn crate::store::RuntimePersistence>))

@@ -197,31 +197,36 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
         )
         .await?;
 
-    // Wait on the effect this test asserts — the replaced catalog becoming
-    // live — rather than on the queue row disappearing: a claim hides the row
-    // before the command has run.
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    // Wait for the state this test asserts — the replaced catalog visible on a
+    // fresh open — rather than for the queue row to disappear: a claim hides
+    // the row before the command has run, and the drain happens in the native
+    // queued-work driver's own runtime, not in this handle's. Each attempt
+    // drops its handle so the driver can take the lease.
+    drop(session);
+    let reopened = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
-            if session
+            let reopened = core
+                .session("rlm-typescript-queued-session-command")
+                .open()
+                .await
+                .expect("reopen the queued-command session");
+            if reopened
                 .admin()
                 .tools()
                 .state()
                 .await
-                .expect("read tool state while the queued command drains")
+                .expect("read the reopened tool state")
                 .contains(&lash_core::ToolId::from("tool:after_refresh"))
             {
-                return;
+                return reopened;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            drop(reopened);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("the queued catalog refresh applies");
-    drop(session);
-    let reopened = core
-        .session("rlm-typescript-queued-session-command")
-        .open()
-        .await?;
+    .expect("the queued catalog refresh applies and survives a reopen");
+
     assert!(
         reopened
             .admin()
