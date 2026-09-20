@@ -274,12 +274,16 @@ IDENTIFIER_RENAME_BASELINES = {
     'crates/lash-core-execution/src/triggers/router.rs:TRIGGER_DEFINITION_FAMILY_VERSION': 'sha256:801fd8f9f95a618b9fada3e0d840c414a2b72b80034413c649542d75a860f48d',
     'crates/lash-core-execution/src/triggers/router.rs:TRIGGER_SOURCE_FAMILY_VERSION': 'sha256:e66f2481ca9987331d4a66480d87afa5bf5e5f79e5a147c0494dc062e97d97cb',
 
-    # FIG-3239: ResponseTextMeta.phase retyped Option<String> ->
-    # Option<ResponsePhase>. Serde and the commit-identity preimage emit the
-    # same two wire strings ('commentary'/'final_answer'), so both guarded
-    # bytes are identical; APPEND_REQUEST_IDENTITY_ENCODING_VERSION stays 4
-    # and SESSION_NODE_BODY_SCHEMA_VERSION stays 14.
-    'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:8442357a587b70a4ba0a3622c05364272cba7c7afd04b9bd7c89ac949cb7880d',
+    # FIG-2887: the append-request projection's fifteen private push_* framers
+    # became projections onto IdentityEncoder (frozen unframed family, ADR
+    # 0097), and the guard re-pointed at the shared encoder methods. The
+    # v1/v2/v4 golden corpora prove every emitted byte is identical, so
+    # APPEND_REQUEST_IDENTITY_ENCODING_VERSION stays 4.
+    # History of the readings this entry supersedes --
+    #   FIG-3239: ResponseTextMeta.phase retyped Option<String> ->
+    #     Option<ResponsePhase>; serde and the preimage emit the same two wire
+    #     strings ('commentary'/'final_answer') at v4.
+    'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:89d1b1134c8191113dd4425a8e6e74d4a642b391118cf34106774a5260421dcb',
     'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:3b61169b1d807e9c468856385c2f3af0aca1f02c55bb37a043b0f0296fe0acf8',
 
     # FIG-2784 pass 1 (#1502): `push_causal_ref` in commit_identity.rs gained a

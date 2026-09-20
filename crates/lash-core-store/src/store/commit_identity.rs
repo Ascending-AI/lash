@@ -1,3 +1,13 @@
+//! Durable commit-operation identity: the append-request receipt hash, the
+//! whole-commit intent hash, and history node id derivation.
+//!
+//! The three families minted here (`lash.append-request`, `lash.intent`,
+//! `lash.history-node`) are grandfathered frozen-unframed families: their
+//! preimages are built with `IdentityEncoder` but carry no framing header,
+//! because the minted digests are persisted equality-compared evidence that
+//! predates the framed identity kit. ADR 0097 is the authority; the golden
+//! corpora in this module pin the exact bytes.
+
 use super::*;
 use crate::ProcessId;
 use crate::SessionId;
@@ -16,6 +26,15 @@ pub struct OperationId {
 
 pub(super) const LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 1;
 pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 4;
+
+/// Frozen durable-identity family domains minted by this module (ADR 0097).
+/// These are `FAMILY_DOMAINS`-registered names whose preimages carry no
+/// framing header: the digests they produce are persisted opaque evidence
+/// compared by exact equality, so the grammar is frozen byte-for-byte. The
+/// `lash-*/vN` hash labels are registered separately in `BLAKE3_DOMAINS`.
+const APPEND_REQUEST_IDENTITY_DOMAIN: &str = "lash.append-request";
+const TURN_COMMIT_IDENTITY_DOMAIN: &str = "lash.intent";
+const HISTORY_NODE_IDENTITY_DOMAIN: &str = "lash.history-node";
 
 /// Shared backend-independent decision for an existing runtime commit receipt.
 ///
@@ -209,51 +228,30 @@ pub(super) fn validate_receipt_identity(commit: &RuntimeCommit) -> Result<(), St
     }
 }
 
-fn push_len_prefixed(encoded: &mut Vec<u8>, bytes: &[u8]) {
-    encoded.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
-    encoded.extend_from_slice(bytes);
-}
-
-fn push_string(encoded: &mut Vec<u8>, value: &str) {
-    push_len_prefixed(encoded, value.as_bytes());
-}
-
-fn push_optional<T: ?Sized>(
-    encoded: &mut Vec<u8>,
-    value: Option<&T>,
-    push: impl FnOnce(&mut Vec<u8>, &T),
-) {
+/// Tagged-binary JSON grammar frozen into the append-request preimage (ADR
+/// 0097). This predates `identity_json`'s normalized serde leaf and produces
+/// different bytes — it type-tags every level and keeps `i64`/`u64`/`f64`
+/// numbers distinct without leaning on serde_json's number rendering — so the
+/// two encodings cannot be unified without moving the minted digests. The
+/// golden corpora below pin the exact byte grammar.
+fn push_json_value(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    value: &serde_json::Value,
+) -> Result<(), StoreError> {
     match value {
-        Some(value) => {
-            encoded.push(1);
-            push(encoded, value);
-        }
-        None => encoded.push(0),
-    }
-}
-
-fn push_slice<T>(encoded: &mut Vec<u8>, values: &[T], push: impl Fn(&mut Vec<u8>, &T)) {
-    encoded.extend_from_slice(&(values.len() as u64).to_be_bytes());
-    for value in values {
-        push(encoded, value);
-    }
-}
-
-fn push_json_value(encoded: &mut Vec<u8>, value: &serde_json::Value) -> Result<(), StoreError> {
-    match value {
-        serde_json::Value::Null => encoded.push(0),
-        serde_json::Value::Bool(false) => encoded.push(1),
-        serde_json::Value::Bool(true) => encoded.push(2),
+        serde_json::Value::Null => identity.tag(0),
+        serde_json::Value::Bool(false) => identity.tag(1),
+        serde_json::Value::Bool(true) => identity.tag(2),
         serde_json::Value::Number(number) => {
             if let Some(value) = number.as_i64() {
-                encoded.push(3);
-                encoded.extend_from_slice(&value.to_be_bytes());
+                identity.tag(3);
+                identity.i64(value);
             } else if let Some(value) = number.as_u64() {
-                encoded.push(4);
-                encoded.extend_from_slice(&value.to_be_bytes());
+                identity.tag(4);
+                identity.u64(value);
             } else if let Some(value) = number.as_f64() {
-                encoded.push(5);
-                encoded.extend_from_slice(&value.to_bits().to_be_bytes());
+                identity.tag(5);
+                identity.u64(value.to_bits());
             } else {
                 return Err(StoreError::Backend(format!(
                     "append identity cannot encode JSON number `{number}`"
@@ -261,32 +259,35 @@ fn push_json_value(encoded: &mut Vec<u8>, value: &serde_json::Value) -> Result<(
             }
         }
         serde_json::Value::String(value) => {
-            encoded.push(6);
-            push_string(encoded, value);
+            identity.tag(6);
+            identity.string(value);
         }
         serde_json::Value::Array(values) => {
-            encoded.push(7);
-            encoded.extend_from_slice(&(values.len() as u64).to_be_bytes());
+            identity.tag(7);
+            identity.u64(values.len() as u64);
             for value in values {
-                push_json_value(encoded, value)?;
+                push_json_value(identity, value)?;
             }
         }
         serde_json::Value::Object(values) => {
-            encoded.push(8);
-            encoded.extend_from_slice(&(values.len() as u64).to_be_bytes());
+            identity.tag(8);
+            identity.u64(values.len() as u64);
             let mut fields = values.iter().collect::<Vec<_>>();
             fields.sort_unstable_by_key(|(name, _)| *name);
             for (name, value) in fields {
-                push_string(encoded, name);
-                push_json_value(encoded, value)?;
+                identity.string(name);
+                push_json_value(identity, value)?;
             }
         }
     }
     Ok(())
 }
 
-fn push_message_role(encoded: &mut Vec<u8>, role: crate::MessageRole) {
-    encoded.push(match role {
+fn push_message_role(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    role: crate::MessageRole,
+) {
+    identity.tag(match role {
         crate::MessageRole::User => 0,
         crate::MessageRole::Assistant => 1,
         crate::MessageRole::System => 2,
@@ -297,47 +298,49 @@ fn push_message_role(encoded: &mut Vec<u8>, role: crate::MessageRole) {
 /// An `EffectAddress` cannot be built without an admitted execution scope, and
 /// the scope is what carries the journal identity read back here.
 #[expect(clippy::expect_used, reason = "the address carries the scope")]
-fn push_causal_ref(encoded: &mut Vec<u8>, caused_by: &crate::CausalRef) {
+fn push_causal_ref(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    caused_by: &crate::CausalRef,
+) {
     match caused_by {
         crate::CausalRef::Turn {
             session_id,
             turn_id,
         } => {
-            encoded.push(0);
-            push_string(encoded, session_id);
-            push_string(encoded, turn_id);
+            identity.tag(0);
+            identity.string(session_id);
+            identity.string(turn_id);
         }
         crate::CausalRef::Effect { address } => {
-            encoded.push(1);
-            push_string(
-                encoded,
+            identity.tag(1);
+            identity.string(
                 address
                     .execution_scope
                     .journal_identity()
                     .expect("causal effect address contains a valid execution scope")
                     .key(),
             );
-            push_string(encoded, &address.replay_key);
+            identity.string(&address.replay_key);
         }
         crate::CausalRef::ToolCall {
             session_id,
             call_id,
         } => {
-            encoded.push(2);
-            push_string(encoded, session_id);
-            push_string(encoded, call_id);
+            identity.tag(2);
+            identity.string(session_id);
+            identity.string(call_id);
         }
         crate::CausalRef::Process { process_id } => {
-            encoded.push(3);
-            push_string(encoded, process_id);
+            identity.tag(3);
+            identity.string(process_id);
         }
         crate::CausalRef::ProcessEvent {
             process_id,
             sequence,
         } => {
-            encoded.push(4);
-            push_string(encoded, process_id);
-            encoded.extend_from_slice(&sequence.to_be_bytes());
+            identity.tag(4);
+            identity.string(process_id);
+            identity.u64(*sequence);
         }
         crate::CausalRef::TriggerOccurrence {
             occurrence_id,
@@ -345,40 +348,41 @@ fn push_causal_ref(encoded: &mut Vec<u8>, caused_by: &crate::CausalRef) {
             subscription_incarnation,
             subscription_revision,
         } => {
-            encoded.push(5);
-            push_string(encoded, occurrence_id);
-            push_optional(encoded, subscription_id.as_ref(), |encoded, value| {
-                push_string(encoded, value)
+            identity.tag(5);
+            identity.string(occurrence_id);
+            identity.optional(subscription_id.as_ref(), |identity, value| {
+                identity.string(value)
             });
-            push_optional(
-                encoded,
-                subscription_incarnation.as_ref(),
-                |encoded, value| push_string(encoded, value),
-            );
-            push_optional(encoded, subscription_revision.as_ref(), |encoded, value| {
-                encoded.extend_from_slice(&value.to_be_bytes())
+            identity.optional(subscription_incarnation.as_ref(), |identity, value| {
+                identity.string(value)
+            });
+            identity.optional(subscription_revision.as_ref(), |identity, value| {
+                identity.u64(*value)
             });
         }
         crate::CausalRef::SessionNode {
             session_id,
             node_id,
         } => {
-            encoded.push(6);
-            push_string(encoded, session_id);
-            push_string(encoded, node_id);
+            identity.tag(6);
+            identity.string(session_id);
+            identity.string(node_id);
         }
     }
 }
 
-fn push_message_origin(encoded: &mut Vec<u8>, origin: &crate::MessageOrigin) {
+fn push_message_origin(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    origin: &crate::MessageOrigin,
+) {
     match origin {
         crate::MessageOrigin::Plugin {
             plugin_id,
             transient,
         } => {
-            encoded.push(0);
-            push_string(encoded, plugin_id);
-            encoded.push(u8::from(*transient));
+            identity.tag(0);
+            identity.string(plugin_id);
+            identity.u8(u8::from(*transient));
         }
         crate::MessageOrigin::Process {
             process_id,
@@ -387,51 +391,49 @@ fn push_message_origin(encoded: &mut Vec<u8>, origin: &crate::MessageOrigin) {
             wake_id,
             caused_by,
         } => {
-            encoded.push(1);
-            push_string(encoded, process_id);
-            push_string(encoded, event_type);
-            encoded.extend_from_slice(&sequence.to_be_bytes());
-            push_optional(encoded, wake_id.as_ref(), |encoded, value| {
-                push_string(encoded, value)
-            });
-            push_optional(encoded, caused_by.as_ref(), push_causal_ref);
+            identity.tag(1);
+            identity.string(process_id);
+            identity.string(event_type);
+            identity.u64(*sequence);
+            identity.optional(wake_id.as_ref(), |identity, value| identity.string(value));
+            identity.optional(caused_by.as_ref(), push_causal_ref);
         }
         crate::MessageOrigin::TurnInput { turn_id, input_id } => {
-            encoded.push(2);
-            push_string(encoded, turn_id);
-            push_optional(encoded, input_id.as_ref(), |encoded, value| {
-                push_string(encoded, value)
-            });
+            identity.tag(2);
+            identity.string(turn_id);
+            identity.optional(input_id.as_ref(), |identity, value| identity.string(value));
         }
         crate::MessageOrigin::TurnOutput { turn_id, source } => {
-            encoded.push(3);
-            push_string(encoded, turn_id);
+            identity.tag(3);
+            identity.string(turn_id);
             match source {
-                crate::TurnOutputSource::Runtime => encoded.push(0),
+                crate::TurnOutputSource::Runtime => identity.tag(0),
                 crate::TurnOutputSource::Plugin { plugin_id } => {
-                    encoded.push(1);
-                    push_string(encoded, plugin_id);
+                    identity.tag(1);
+                    identity.string(plugin_id);
                 }
             }
         }
     }
 }
 
-fn push_attachment_type_metadata(encoded: &mut Vec<u8>, metadata: &crate::AttachmentTypeMetadata) {
+fn push_attachment_type_metadata(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    metadata: &crate::AttachmentTypeMetadata,
+) {
     match metadata {
         crate::AttachmentTypeMetadata::Image { width, height } => {
-            encoded.push(0);
-            push_optional(encoded, width.as_ref(), |encoded, value| {
-                encoded.extend_from_slice(&value.to_be_bytes())
-            });
-            push_optional(encoded, height.as_ref(), |encoded, value| {
-                encoded.extend_from_slice(&value.to_be_bytes())
-            });
+            identity.tag(0);
+            identity.optional(width.as_ref(), |identity, value| identity.u32(*value));
+            identity.optional(height.as_ref(), |identity, value| identity.u32(*value));
         }
     }
 }
 
-fn push_attachment_ref(encoded: &mut Vec<u8>, attachment: &crate::AttachmentRef) {
+fn push_attachment_ref(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    attachment: &crate::AttachmentRef,
+) {
     let crate::AttachmentRef {
         id,
         media_type,
@@ -439,34 +441,31 @@ fn push_attachment_ref(encoded: &mut Vec<u8>, attachment: &crate::AttachmentRef)
         type_metadata,
         label,
     } = attachment;
-    push_string(encoded, id.as_str());
-    push_string(encoded, media_type.as_str());
-    encoded.extend_from_slice(&byte_len.to_be_bytes());
-    push_optional(
-        encoded,
-        type_metadata.as_ref(),
-        push_attachment_type_metadata,
-    );
-    push_optional(encoded, label.as_ref(), |encoded, value| {
-        push_string(encoded, value)
-    });
+    identity.string(id.as_str());
+    identity.string(media_type.as_str());
+    identity.u64(*byte_len);
+    identity.optional(type_metadata.as_ref(), push_attachment_type_metadata);
+    identity.optional(label.as_ref(), |identity, value| identity.string(value));
 }
 
-fn push_attachment_source(encoded: &mut Vec<u8>, source: &crate::AttachmentSource) {
+fn push_attachment_source(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    source: &crate::AttachmentSource,
+) {
     match source {
         crate::AttachmentSource::Inline { media_type, bytes } => {
-            encoded.push(0);
-            push_string(encoded, media_type.as_str());
-            push_len_prefixed(encoded, bytes);
+            identity.tag(0);
+            identity.string(media_type.as_str());
+            identity.bytes(bytes);
         }
         crate::AttachmentSource::Stored { attachment_ref } => {
-            encoded.push(1);
-            push_attachment_ref(encoded, attachment_ref);
+            identity.tag(1);
+            push_attachment_ref(identity, attachment_ref);
         }
         crate::AttachmentSource::ExternalUrl { media_type, url } => {
-            encoded.push(2);
-            push_string(encoded, media_type.as_str());
-            push_string(encoded, url);
+            identity.tag(2);
+            identity.string(media_type.as_str());
+            identity.string(url);
         }
         crate::AttachmentSource::ProviderFile {
             provider_scope,
@@ -477,19 +476,19 @@ fn push_attachment_source(encoded: &mut Vec<u8>, source: &crate::AttachmentSourc
                 provider,
                 credential_scope,
             } = provider_scope;
-            encoded.push(3);
-            push_string(encoded, provider);
-            push_string(encoded, credential_scope);
-            push_string(encoded, id);
-            push_optional(encoded, media_type.as_ref(), |encoded, value| {
-                push_string(encoded, value.as_str())
+            identity.tag(3);
+            identity.string(provider);
+            identity.string(credential_scope);
+            identity.string(id);
+            identity.optional(media_type.as_ref(), |identity, value| {
+                identity.string(value.as_str())
             });
         }
     }
 }
 
-fn push_part_kind(encoded: &mut Vec<u8>, kind: crate::PartKind) {
-    encoded.push(match kind {
+fn push_part_kind(identity: &mut crate::stable_identity::IdentityEncoder, kind: crate::PartKind) {
+    identity.tag(match kind {
         crate::PartKind::Text => 0,
         crate::PartKind::Attachment => 1,
         crate::PartKind::Code => 2,
@@ -502,36 +501,37 @@ fn push_part_kind(encoded: &mut Vec<u8>, kind: crate::PartKind) {
     });
 }
 
-fn push_prune_state(encoded: &mut Vec<u8>, state: &crate::PruneState) {
+fn push_prune_state(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    state: &crate::PruneState,
+) {
     match state {
-        crate::PruneState::Intact => encoded.push(0),
-        crate::PruneState::Cleared => encoded.push(1),
+        crate::PruneState::Intact => identity.tag(0),
+        crate::PruneState::Cleared => identity.tag(1),
         crate::PruneState::Deleted {
             breadcrumb,
             archive_hash,
         } => {
-            encoded.push(2);
-            push_string(encoded, breadcrumb);
-            push_string(encoded, archive_hash);
+            identity.tag(2);
+            identity.string(breadcrumb);
+            identity.string(archive_hash);
         }
         crate::PruneState::Summarized {
             summary,
             archive_hash,
         } => {
-            encoded.push(3);
-            push_string(encoded, summary);
-            push_string(encoded, archive_hash);
+            identity.tag(3);
+            identity.string(summary);
+            identity.string(archive_hash);
         }
     }
 }
 
-fn push_route(encoded: &mut Vec<u8>, route: &lash_sansio::llm::types::ProviderRouteIdentity) {
-    push_string(encoded, &route.provider);
-    push_string(encoded, &route.endpoint);
-    push_string(encoded, &route.model);
-}
-
-fn push_part(encoded: &mut Vec<u8>, part: &crate::Part, encoding_version: u32) {
+fn push_part(
+    identity: &mut crate::stable_identity::IdentityEncoder,
+    part: &crate::Part,
+    encoding_version: u32,
+) {
     let crate::Part {
         id,
         kind,
@@ -545,37 +545,31 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part, encoding_version: u32) {
         response_meta,
         ..
     } = part;
-    push_string(encoded, id);
-    push_part_kind(encoded, *kind);
-    push_string(encoded, content);
-    push_optional(encoded, attachment.as_ref(), |encoded, attachment| {
+    identity.string(id);
+    push_part_kind(identity, *kind);
+    identity.string(content);
+    identity.optional(attachment.as_ref(), |identity, attachment| {
         let lash_sansio::PartAttachment { source } = attachment;
-        push_attachment_source(encoded, source)
+        push_attachment_source(identity, source)
     });
-    push_optional(encoded, tool_call_id.as_ref(), |encoded, value| {
-        push_string(encoded, value)
+    identity.optional(tool_call_id.as_ref(), |identity, value| {
+        identity.string(value)
     });
-    push_optional(encoded, tool_name.as_ref(), |encoded, value| {
-        push_string(encoded, value)
-    });
-    push_optional(encoded, tool_replay.as_ref(), |encoded, replay| {
+    identity.optional(tool_name.as_ref(), |identity, value| identity.string(value));
+    identity.optional(tool_replay.as_ref(), |identity, replay| {
         let lash_sansio::llm::types::ProviderReplayMeta {
             item_id,
             opaque,
             origin,
         } = replay;
-        push_optional(encoded, item_id.as_ref(), |encoded, value| {
-            push_string(encoded, value)
-        });
-        push_optional(encoded, opaque.as_ref(), |encoded, value| {
-            push_string(encoded, value)
-        });
+        identity.optional(item_id.as_ref(), |identity, value| identity.string(value));
+        identity.optional(opaque.as_ref(), |identity, value| identity.string(value));
         if encoding_version == APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
-            push_optional(encoded, origin.as_ref(), push_route);
+            identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
         }
     });
-    push_prune_state(encoded, prune_state);
-    push_optional(encoded, reasoning_meta.as_ref(), |encoded, replay| {
+    push_prune_state(identity, prune_state);
+    identity.optional(reasoning_meta.as_ref(), |identity, replay| {
         let lash_sansio::llm::types::ProviderReasoningReplay {
             item_id,
             encrypted_content,
@@ -584,24 +578,18 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part, encoding_version: u32) {
             summary,
             origin,
         } = replay;
-        push_optional(encoded, item_id.as_ref(), |encoded, value| {
-            push_string(encoded, value)
+        identity.optional(item_id.as_ref(), |identity, value| identity.string(value));
+        identity.optional(encrypted_content.as_ref(), |identity, value| {
+            identity.string(value)
         });
-        push_optional(encoded, encrypted_content.as_ref(), |encoded, value| {
-            push_string(encoded, value)
-        });
-        push_optional(encoded, signature.as_ref(), |encoded, value| {
-            push_string(encoded, value)
-        });
-        encoded.push(u8::from(*redacted));
-        push_slice(encoded, summary, |encoded, value| {
-            push_string(encoded, value)
-        });
+        identity.optional(signature.as_ref(), |identity, value| identity.string(value));
+        identity.u8(u8::from(*redacted));
+        identity.sequence(summary, |identity, value| identity.string(value));
         if encoding_version == APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
-            push_optional(encoded, origin.as_ref(), push_route);
+            identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
         }
     });
-    push_optional(encoded, response_meta.as_ref(), |encoded, response| {
+    identity.optional(response_meta.as_ref(), |identity, response| {
         let lash_sansio::llm::types::ResponseTextMeta {
             id,
             status,
@@ -617,7 +605,7 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part, encoding_version: u32) {
             (*phase).map(|phase| phase.as_str()),
             provider_payload.as_deref(),
         ] {
-            push_optional(encoded, value, push_string);
+            identity.optional(value, crate::stable_identity::IdentityEncoder::string);
         }
         if encoding_version == LEGACY_APPEND_REQUEST_IDENTITY_ENCODING_VERSION {
             // ResponseTextMeta carried provider/model before the unified
@@ -631,10 +619,10 @@ fn push_part(encoded: &mut Vec<u8>, part: &crate::Part, encoding_version: u32) {
                 .as_ref()
                 .map(String::as_str)
                 .or_else(|| origin.as_ref().map(|route| route.model.as_ref()));
-            push_optional(encoded, provider, push_string);
-            push_optional(encoded, model, push_string);
+            identity.optional(provider, crate::stable_identity::IdentityEncoder::string);
+            identity.optional(model, crate::stable_identity::IdentityEncoder::string);
         } else {
-            push_optional(encoded, origin.as_ref(), push_route);
+            identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
         }
     });
 }
@@ -643,7 +631,8 @@ fn append_node_identity_bytes_with_version(
     node: &crate::SessionAppendNode,
     encoding_version: u32,
 ) -> Result<Vec<u8>, StoreError> {
-    let mut encoded = Vec::new();
+    let mut identity =
+        crate::stable_identity::IdentityEncoder::new_unframed(APPEND_REQUEST_IDENTITY_DOMAIN);
     match node {
         crate::SessionAppendNode::Message { message } => {
             let crate::PluginMessage {
@@ -654,31 +643,29 @@ fn append_node_identity_bytes_with_version(
                 parts,
                 attachments,
             } = message;
-            encoded.push(0);
-            push_optional(&mut encoded, id.as_ref(), |encoded, value| {
-                push_string(encoded, value)
+            identity.tag(0);
+            identity.optional(id.as_ref(), |identity, value| identity.string(value));
+            push_message_role(&mut identity, *role);
+            identity.string(content);
+            identity.optional(origin.as_ref(), push_message_origin);
+            identity.sequence(parts, |identity, part| {
+                push_part(identity, part, encoding_version)
             });
-            push_message_role(&mut encoded, *role);
-            push_string(&mut encoded, content);
-            push_optional(&mut encoded, origin.as_ref(), push_message_origin);
-            push_slice(&mut encoded, parts, |encoded, part| {
-                push_part(encoded, part, encoding_version)
-            });
-            push_slice(&mut encoded, attachments, push_attachment_source);
+            identity.sequence(attachments, push_attachment_source);
         }
         crate::SessionAppendNode::ProtocolEvent { event } => {
             let crate::ProtocolEvent { plugin_id, payload } = event;
-            encoded.push(1);
-            push_string(&mut encoded, plugin_id);
-            push_json_value(&mut encoded, payload)?;
+            identity.tag(1);
+            identity.string(plugin_id);
+            push_json_value(&mut identity, payload)?;
         }
         crate::SessionAppendNode::Plugin { plugin_type, body } => {
-            encoded.push(2);
-            push_string(&mut encoded, plugin_type);
-            push_json_value(&mut encoded, body)?;
+            identity.tag(2);
+            identity.string(plugin_type);
+            push_json_value(&mut identity, body)?;
         }
     }
-    Ok(encoded)
+    Ok(identity.finish())
 }
 
 #[cfg(test)]
@@ -733,6 +720,10 @@ pub(super) fn append_request_identity_encoding_version(nodes: &[crate::SessionAp
 /// No domain string, encoding version, node id, timestamp, head, or other
 /// environmental value is included. The version lives beside the digest in
 /// the receipt so a future encoder can fall back to exact commit hashes.
+///
+/// The preimage is minted through `IdentityEncoder::new_unframed`: the family
+/// predates the framed-identity kit and its digest bytes are frozen
+/// equality-compared evidence, so the header can never be added (ADR 0097).
 fn append_request_identity_bytes(
     operation: &OperationId,
     requested_ancestor_node_id: Option<&str>,
@@ -740,21 +731,18 @@ fn append_request_identity_bytes(
 ) -> Result<Vec<u8>, StoreError> {
     let encoding_version = append_request_identity_encoding_version(nodes);
     let operation_key = operation.storage_key()?;
-    let mut encoded = Vec::new();
-    push_len_prefixed(&mut encoded, operation_key.as_bytes());
-    match requested_ancestor_node_id {
-        Some(ancestor) => {
-            encoded.push(1);
-            push_len_prefixed(&mut encoded, ancestor.as_bytes());
-        }
-        None => encoded.push(0),
-    }
-    encoded.extend_from_slice(&(nodes.len() as u64).to_be_bytes());
+    let mut identity =
+        crate::stable_identity::IdentityEncoder::new_unframed(APPEND_REQUEST_IDENTITY_DOMAIN);
+    identity.bytes(operation_key.as_bytes());
+    identity.optional(requested_ancestor_node_id, |identity, ancestor| {
+        identity.string(ancestor)
+    });
+    identity.u64(nodes.len() as u64);
     for node in nodes {
         let semantic_node = append_node_identity_bytes_with_version(node, encoding_version)?;
-        push_len_prefixed(&mut encoded, &semantic_node);
+        identity.bytes(&semantic_node);
     }
-    Ok(encoded)
+    Ok(identity.finish())
 }
 
 pub(super) fn append_request_identity_hash(
@@ -1129,9 +1117,11 @@ mod append_request_identity_tests {
                 )
             })
             .chain(causal_cases.iter().enumerate().map(|(index, causal)| {
-                let mut encoded = Vec::new();
-                push_causal_ref(&mut encoded, causal);
-                (causal_names[index], hex(&encoded))
+                let mut identity = crate::stable_identity::IdentityEncoder::new_unframed(
+                    APPEND_REQUEST_IDENTITY_DOMAIN,
+                );
+                push_causal_ref(&mut identity, causal);
+                (causal_names[index], hex(&identity.finish()))
             }))
             .chain(whole_requests)
             .chain(std::iter::once(empty_request))
@@ -1597,6 +1587,12 @@ impl<'a> From<&'a crate::QueuedWorkPayload> for QueuedPayloadIntent<'a> {
     }
 }
 
+/// Whole-commit hash. The intent projection round-trips through a fixed-shape
+/// `Value` tree whose map keys are already canonically ordered, so
+/// `identity_json`'s normalization for caller-supplied `Value` trees has
+/// nothing to reduce here — and swapping leaf encodings would move the minted
+/// digest regardless. The serialized leaf is framed `len || bytes` into the
+/// frozen `lash.intent` preimage (ADR 0097).
 pub(super) fn turn_commit_hash(commit: &RuntimeCommit) -> Result<String, StoreError> {
     let projection = RuntimeCommitIntent::from(commit);
     let semantic_commit = serde_json::to_value(&projection).map_err(|err| {
@@ -1607,26 +1603,25 @@ pub(super) fn turn_commit_hash(commit: &RuntimeCommit) -> Result<String, StoreEr
             "failed to serialize runtime turn commit hash: {err}"
         ))
     })?;
-    Ok(domain_hash("lash-intent/v2", &[encoded.as_bytes()]))
-}
-
-fn domain_hash(domain: &str, components: &[&[u8]]) -> String {
-    let mut hasher = lash_sansio::core_support::Blake3DomainHasher::new(domain);
-    for component in components {
-        hasher.update((component.len() as u64).to_be_bytes());
-        hasher.update(component);
-    }
-    hasher.finalize_hex()
+    let mut identity =
+        crate::stable_identity::IdentityEncoder::new_unframed(TURN_COMMIT_IDENTITY_DOMAIN);
+    identity.bytes(encoded.as_bytes());
+    Ok(crate::stable_hash::blake3_hex(
+        "lash-intent/v2",
+        &identity.finish(),
+    ))
 }
 
 #[cfg(test)]
 mod blake3_vector_tests {
-    use super::domain_hash;
-
     #[test]
     fn commit_identity_v2_blake3_vector_is_pinned() {
+        let mut identity = crate::stable_identity::IdentityEncoder::new_unframed(
+            super::TURN_COMMIT_IDENTITY_DOMAIN,
+        );
+        identity.bytes(b"lash-commit-vector");
         assert_eq!(
-            domain_hash("lash-intent/v2", &[b"lash-commit-vector"]),
+            crate::stable_hash::blake3_hex("lash-intent/v2", &identity.finish()),
             "120001d338cb60a97d39d2f223d690a8f7548bf8e42beb0a3d7c03a36b477443"
         );
     }
@@ -1645,15 +1640,13 @@ pub fn derive_history_node_id(
     let operation = crate::stable_hash::stable_json_string(&operation).map_err(|err| {
         StoreError::Backend(format!("failed to encode node operation identity: {err}"))
     })?;
+    let mut identity =
+        crate::stable_identity::IdentityEncoder::new_unframed(HISTORY_NODE_IDENTITY_DOMAIN);
+    identity.bytes(session_id.as_bytes());
+    identity.bytes(operation.as_bytes());
+    identity.bytes(&ordinal.to_be_bytes());
     Ok(crate::NodeId::new(format!(
         "n_{}",
-        domain_hash(
-            "lash-history-node/v3",
-            &[
-                session_id.as_bytes(),
-                operation.as_bytes(),
-                &ordinal.to_be_bytes(),
-            ],
-        )
+        crate::stable_hash::blake3_hex("lash-history-node/v3", &identity.finish())
     )))
 }
