@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use super::*;
+use crate::scheduler::PendingRuntimeBoundary;
 use crate::trace::value_digest;
 
 /// Anti-vacuity: across the whole generated seed set, the interleaving,
@@ -487,7 +488,12 @@ async fn run_generated_evidence_profile(
         .count();
     let scheduler_owned_runtime_completions = event_lines
         .iter()
-        .filter(|line| line.event.payload.get("runtime_completion").is_some())
+        .filter(|line| {
+            line.event
+                .payload
+                .get(PendingRuntimeBoundary::PAYLOAD_KEY)
+                .is_some()
+        })
         .count();
     let scenario_contract_oracles = oracle_verdicts
         .iter()
@@ -689,7 +695,12 @@ async fn run_generated_search_profile(
         scheduler_owned_runtime_completions += trace
             .events
             .iter()
-            .filter(|event| event.payload.get("runtime_completion").is_some())
+            .filter(|event| {
+                event
+                    .payload
+                    .get(PendingRuntimeBoundary::PAYLOAD_KEY)
+                    .is_some()
+            })
             .count();
         observe_runtime_provider_matrix(&mut provider_matrix_by_kind, trace.events.iter());
         let seed_interleaving_depth = peak_concurrent_live_turns(&trace.events);
