@@ -2688,18 +2688,21 @@ derive_mutation_jobs() {{
         check_job = workflow_job_block(workflow, "check")
         self.assertNotIn("cargo check --workspace --all-targets --locked", check_job)
         self.assertNotIn("--doc ", check_job)
-        # The trusted path builds the ui harness under Bazel's shared remote
-        # cache (content-keyed: warm merge-group runs download it rather than
-        # recompiling the facade into target-seal) and runs it through
-        # run-seal-harness.sh, which stages the Cargo fingerprint layout
-        # trybuild resolves the fixture feature set from. The Cargo command
-        # stays as the untrusted/fork leg, so both spellings are pinned here.
+        # The trusted path is pure Bazel (FIG-3364): `ui__test` builds under
+        # the shared remote cache (which also proves the compile-pass modules
+        # still compile) and `ui_fixtures` runs every tests/ui/*.stderr
+        # fixture through the toolchain rustc directly, so the seal lane no
+        # longer pays trybuild's nested `cargo check` of the dependency graph.
+        # The Cargo command stays as the untrusted/fork leg, so both spellings
+        # are pinned here.
         self.assertIn(
             "cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui",
             check_job,
         )
-        self.assertIn("//crates/lash:ui__test //crates/lash:ui__test__cargo_fingerprint", check_job)
-        self.assertIn("run-seal-harness.sh", check_job)
+        self.assertIn("//crates/lash:ui__test", check_job)
+        self.assertIn("//crates/lash:ui_fixtures", check_job)
+        self.assertNotIn("run-seal-harness", check_job)
+        self.assertNotIn("cargo fetch", check_job)
         for foreign in (
             "cargo check -p agent-service --features restate --all-targets --locked",
             "cargo check -p lash-runtime --no-default-features --locked",
