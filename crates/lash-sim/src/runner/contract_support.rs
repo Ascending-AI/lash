@@ -22,6 +22,36 @@ pub(super) async fn append_contract_execution_boundaries(
     Ok(())
 }
 
+/// One registered fixed contract execution: the semantic oracle id it proves,
+/// the spec row it mirrors, the generated-run boundary it anchors to, and the
+/// executor that reproduces its result. Registration is a const slice per
+/// suite, so replaying one execution is a lookup plus one call.
+pub(super) struct FixedContractRow<E> {
+    pub(super) semantic_oracle: &'static str,
+    pub(super) source_path: &'static str,
+    pub(super) source_scenario: &'static str,
+    pub(super) anchor: FixedContractAnchor,
+    pub(super) execute: E,
+}
+
+/// How a fixed contract execution anchors into the generated boundary stream.
+#[derive(Clone, Copy)]
+pub(super) enum FixedContractAnchor {
+    /// `generated_anchor` records the first successful provider boundary.
+    RecordedProvider,
+    /// `generated_anchor` additionally records the real provider-parser
+    /// mutation boundary carrying this mutation name.
+    RecordedProviderMutation(&'static str),
+    /// `generated_anchor` records the tool boundary plus the same-actor
+    /// provider continuation that follows it.
+    RecordedToolThenProvider,
+    /// The actor is the first successful provider boundary's alias; no
+    /// `generated_anchor` evidence is emitted.
+    ProviderActor,
+}
+
+pub(super) type TurnMachineContractExecutor = fn() -> Result<Value, FixedScriptRunnerError>;
+
 async fn contract_execution_boundaries(
     events: &[crate::scheduler::DeliveredBoundary],
     checkpoint_writes: &CheckpointWriteCollector,
@@ -33,18 +63,23 @@ async fn contract_execution_boundaries(
         .unwrap_or(0)
         .saturating_add(1);
     let mut proof_events = Vec::new();
-    for execution in standard_protocol_contract_executions()? {
-        proof_events.push(standard_protocol_execution_boundary(
-            events, next_at, execution,
+    for row in STANDARD_CONTRACT_ROWS {
+        let execution = contract_execution_payload(row, (row.execute)()?)?;
+        proof_events.push(fixed_contract_execution_boundary(
+            events, next_at, row, execution,
         )?);
         next_at = next_at.saturating_add(1);
     }
-    for execution in rlm_protocol_contract_executions()? {
-        proof_events.push(rlm_protocol_execution_boundary(events, next_at, execution)?);
+    for row in RLM_CONTRACT_ROWS {
+        let execution = contract_execution_payload(row, (row.execute)()?)?;
+        proof_events.push(fixed_contract_execution_boundary(
+            events, next_at, row, execution,
+        )?);
         next_at = next_at.saturating_add(1);
     }
     for execution in agent_contract_executions().await? {
-        let boundary = agent_contract_execution_boundary(events, next_at, execution.payload)?;
+        let boundary =
+            fixed_contract_execution_boundary(events, next_at, execution.row, execution.payload)?;
         for mut write in execution.checkpoint_writes {
             write.attribution = Some(crate::store::CheckpointAttribution {
                 session_id: SessionId::from(boundary.actor_alias.clone()),
@@ -72,20 +107,16 @@ async fn contract_execution_boundaries(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-fn standard_protocol_execution_boundary(
+fn fixed_contract_execution_boundary<E>(
     events: &[crate::scheduler::DeliveredBoundary],
     at: u64,
+    row: &FixedContractRow<E>,
     mut execution: Value,
 ) -> Result<BoundaryEvent, FixedScriptRunnerError> {
-    let contract = execution
-        .get("contract")
-        .and_then(Value::as_str)
-        .unwrap_or("standard.protocol.contract");
+    let contract = row.semantic_oracle;
     let proof_id = contract.replace(['.', '_'], "-");
-    match contract {
-        "standard.initial_request_projection"
-        | "standard.empty_response_finishes"
-        | "standard.streamed_text_finalizes_once" => {
+    let actor_alias = match row.anchor {
+        FixedContractAnchor::RecordedProvider => {
             let provider = first_successful_provider(events).ok_or_else(|| {
                 FixedScriptRunnerError::Assertion(format!(
                     "could not anchor {contract} execution to a successful generated provider boundary"
@@ -102,15 +133,9 @@ fn standard_protocol_execution_boundary(
                         "provider_sequence": provider.sequence,
                     }),
                 );
-            Ok(contract_execution_boundary(
-                &provider.actor_alias,
-                &proof_id,
-                at,
-                execution,
-            ))
+            provider.actor_alias.clone()
         }
-        "standard.provider_error_without_checkpoint" => {
-            let mutation = "rate_limit_error_envelope";
+        FixedContractAnchor::RecordedProviderMutation(mutation) => {
             let provider = first_successful_provider(events).ok_or_else(|| {
                 FixedScriptRunnerError::Assertion(format!(
                     "could not anchor {contract} execution to a successful generated provider boundary"
@@ -153,17 +178,9 @@ fn standard_protocol_execution_boundary(
                         "actor": provider.actor_alias,
                     }),
                 );
-            Ok(contract_execution_boundary(
-                &provider.actor_alias,
-                &proof_id,
-                at,
-                execution,
-            ))
+            provider.actor_alias.clone()
         }
-        "standard.native_tool_loop_reenters_model"
-        | "standard.parallel_tool_results_checkpoint_once"
-        | "standard.tool_failure_feedback_reenters_model"
-        | "standard.max_turns_after_tool_result" => {
+        FixedContractAnchor::RecordedToolThenProvider => {
             let Some((tool, provider)) = generated_tool_then_same_actor_provider(events) else {
                 return Err(FixedScriptRunnerError::Assertion(format!(
                     "could not anchor {contract} execution to tool result and same-actor provider continuation"
@@ -184,17 +201,23 @@ fn standard_protocol_execution_boundary(
                             && provider.sequence > tool.sequence,
                     }),
                 );
-            Ok(contract_execution_boundary(
-                &tool.actor_alias,
-                &proof_id,
-                at,
-                execution,
-            ))
+            tool.actor_alias.clone()
         }
-        other => Err(FixedScriptRunnerError::Assertion(format!(
-            "no Standard contract execution boundary anchor registered for `{other}`"
-        ))),
-    }
+        FixedContractAnchor::ProviderActor => first_successful_provider(events)
+            .ok_or_else(|| {
+                FixedScriptRunnerError::Assertion(format!(
+                    "could not anchor {contract} execution to a successful generated provider boundary"
+                ))
+            })?
+            .actor_alias
+            .clone(),
+    };
+    Ok(contract_execution_boundary(
+        &actor_alias,
+        &proof_id,
+        at,
+        execution,
+    ))
 }
 
 fn generated_tool_then_same_actor_provider(
@@ -228,54 +251,6 @@ fn generated_tool_then_same_actor_provider(
         })
 }
 
-fn agent_contract_execution_boundary(
-    events: &[crate::scheduler::DeliveredBoundary],
-    at: u64,
-    execution: Value,
-) -> Result<BoundaryEvent, FixedScriptRunnerError> {
-    let provider = first_successful_provider(events).ok_or_else(|| {
-        FixedScriptRunnerError::Assertion(
-            "could not anchor Agent contract execution to a successful generated provider boundary"
-                .to_string(),
-        )
-    })?;
-    let proof_id = execution
-        .get("contract")
-        .and_then(Value::as_str)
-        .unwrap_or("agent.contract")
-        .replace(['.', '_'], "-");
-    Ok(contract_execution_boundary(
-        &provider.actor_alias,
-        &proof_id,
-        at,
-        execution,
-    ))
-}
-
-fn rlm_protocol_execution_boundary(
-    events: &[crate::scheduler::DeliveredBoundary],
-    at: u64,
-    execution: Value,
-) -> Result<BoundaryEvent, FixedScriptRunnerError> {
-    let provider = first_successful_provider(events).ok_or_else(|| {
-        FixedScriptRunnerError::Assertion(
-            "could not anchor RLM protocol contract execution to a successful generated provider boundary"
-                .to_string(),
-        )
-    })?;
-    let proof_id = execution
-        .get("contract")
-        .and_then(Value::as_str)
-        .unwrap_or("rlm.protocol.contract")
-        .replace(['.', '_'], "-");
-    Ok(contract_execution_boundary(
-        &provider.actor_alias,
-        &proof_id,
-        at,
-        execution,
-    ))
-}
-
 fn contract_execution_boundary(
     actor_alias: &str,
     proof_id: &str,
@@ -298,34 +273,27 @@ fn contract_execution_boundary(
 }
 
 pub(crate) fn replay_contract_execution(contract: &str) -> Result<Value, FixedScriptRunnerError> {
-    match contract {
-        other if other.starts_with("standard.") => standard_protocol_contract_executions()?
-            .into_iter()
-            .find(|execution| execution.get("contract").and_then(Value::as_str) == Some(other))
-            .ok_or_else(|| {
-                FixedScriptRunnerError::Assertion(format!(
-                    "no replayable fixed Standard contract execution registered for `{other}`"
-                ))
-            }),
-        other if other.starts_with("rlm.") => rlm_protocol_contract_executions()?
-            .into_iter()
-            .find(|execution| execution.get("contract").and_then(Value::as_str) == Some(other))
-            .ok_or_else(|| {
-                FixedScriptRunnerError::Assertion(format!(
-                    "no replayable fixed RLM contract execution registered for `{other}`"
-                ))
-            }),
-        other if other.starts_with("agent.") => replay_agent_contract_execution(other),
-        other => Err(FixedScriptRunnerError::Assertion(format!(
-            "contract execution replay is not registered for `{other}`"
-        ))),
+    if let Some(row) = STANDARD_CONTRACT_ROWS
+        .iter()
+        .chain(RLM_CONTRACT_ROWS)
+        .find(|row| row.semantic_oracle == contract)
+    {
+        return contract_execution_payload(row, (row.execute)()?);
     }
+    if let Ok(row) = agent_contract_row(contract) {
+        return replay_agent_contract_execution(row);
+    }
+    Err(FixedScriptRunnerError::Assertion(format!(
+        "contract execution replay is not registered for `{contract}`"
+    )))
 }
 
-fn replay_agent_contract_execution(contract: &str) -> Result<Value, FixedScriptRunnerError> {
-    let contract = contract.to_string();
-    let runner = agent_contract_runner(&contract)?;
-    run_on_sim_harness_stack(
+fn replay_agent_contract_execution(
+    row: &'static AgentContractRow,
+) -> Result<Value, FixedScriptRunnerError> {
+    let contract = row.semantic_oracle;
+    let runner = row.execute;
+    let result = run_on_sim_harness_stack(
         format!("replay-{contract}-contract"),
         SIM_HARNESS_STACK_LIMIT_BYTES,
         move || {
@@ -335,25 +303,27 @@ fn replay_agent_contract_execution(contract: &str) -> Result<Value, FixedScriptR
                 .map_err(FixedScriptRunnerError::Io)?;
             runner(&runtime)
         },
-    )
+    )?;
+    contract_execution_payload(row, result)
 }
 
-pub(super) fn contract_execution_payload(
-    contract: &'static str,
-    source_path: &'static str,
-    source_scenario: &'static str,
+pub(super) fn contract_execution_payload<E>(
+    row: &FixedContractRow<E>,
     result: Value,
 ) -> Result<Value, FixedScriptRunnerError> {
     let result_body = serde_json::to_vec(&result)?;
     let result_sha256 = sha256_hex(&result_body);
-    let source_material = format!("{source_path}:{source_scenario}:{result_sha256}");
+    let source_material = format!(
+        "{}:{}:{result_sha256}",
+        row.source_path, row.source_scenario
+    );
     let source_hash = sha256_hex(source_material.as_bytes());
     Ok(json!({
-        "contract": contract,
+        "contract": row.semantic_oracle,
         "source": {
             "kind": "fixed_dst_api_execution",
-            "path": source_path,
-            "scenario": source_scenario,
+            "path": row.source_path,
+            "scenario": row.source_scenario,
             "source_hash": source_hash,
             "result_sha256": result_sha256,
         },
