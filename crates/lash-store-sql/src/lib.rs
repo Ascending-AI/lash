@@ -80,6 +80,8 @@
 
 mod render;
 
+pub mod artifact;
+pub mod attachment;
 pub mod effect;
 pub mod wait;
 
@@ -90,12 +92,37 @@ pub use render::{Dialect, Placeholder, RenderError, Vocabulary, VocabularyTerm, 
 /// The renderer refuses a statement that names a table outside this list, so
 /// the list is also the boundary of what neutral SQL may talk about.
 pub const TABLES: &[&str] = &[
+    artifact::blobs::TABLE,
+    artifact::owner_retirements::TABLE,
+    artifact::owners::TABLE,
+    artifact::refs::TABLE,
+    attachment::condemnation::TABLE,
+    attachment::manifest::TABLE,
     effect::replay::TABLE,
     effect::group::TABLE,
     effect::scope_retirement::TABLE,
     wait::waits::TABLE,
     wait::meta::TABLE,
     wait::revoked_sessions::TABLE,
+    // Tables a converted family's statements reach but no converted family
+    // owns yet. The renderer has to know a name to address it, and a
+    // cross-family statement is a statement like any other — it cannot wait
+    // for its neighbour's lane. Each one is a bare name rather than a module
+    // path precisely because no module owns it: when its family converts, its
+    // lane replaces the string with that module's `TABLE` and adds the
+    // `[[cross_family]]` entry the gate then starts demanding.
+    //
+    // `session_head` and `sessions` are one logical table spelled differently
+    // by the two backends (ADR 0098 freezes both names), so both appear; each
+    // is named only by the backend that has it.
+    "checkpoint_blob_refs",
+    "deleted_sessions",
+    "graph_nodes",
+    "lashlang_artifacts",
+    "node_anchors",
+    "runtime_turn_commits",
+    "session_head",
+    "sessions",
 ];
 
 /// Every shared statement this crate owns, across every family.
@@ -106,6 +133,11 @@ pub const TABLES: &[&str] = &[
 #[must_use]
 pub fn all_statements() -> Vec<Statement> {
     let mut statements = Vec::new();
+    statements.extend_from_slice(artifact::blobs::BlobStatements::NEUTRAL);
+    statements.extend_from_slice(artifact::owners::OwnerStatements::NEUTRAL);
+    statements.extend_from_slice(artifact::owner_retirements::OwnerRetirementStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::manifest::ManifestStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);
     statements.extend_from_slice(effect::EffectJournalStatements::NEUTRAL);
     statements.extend_from_slice(effect::replay::ReplayStatements::NEUTRAL);
     statements.extend_from_slice(effect::group::GroupStatements::NEUTRAL);

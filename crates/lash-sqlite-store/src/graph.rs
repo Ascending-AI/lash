@@ -11,7 +11,7 @@
 //! up front, replacing the prior store `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK`
 //! ceremony.
 
-use super::attachments::artifact_namespace_kind;
+use super::artifact_store::artifact_namespace_kind;
 use super::*;
 use lash_sansio::SessionId;
 
@@ -247,7 +247,10 @@ impl Store {
         let mut roots = Vec::new();
         let mut stmt = conn
             .prepare(
-                "SELECT namespace, blob_ref FROM artifact_refs ORDER BY namespace, artifact_ref",
+                crate::artifact_store::artifact_sql()
+                    .refs
+                    .select_gc_roots
+                    .sql(),
             )
             .map_err(sqlite_error)?;
         let rows = stmt
@@ -294,7 +297,10 @@ impl Store {
             // aborts rather than deleting live data.
             let bytes: Option<Vec<u8>> = tx
                 .query_row(
-                    "SELECT content FROM blobs WHERE hash = ?1",
+                    crate::artifact_store::artifact_sql()
+                        .blobs
+                        .select_content
+                        .sql(),
                     params![current.blob_ref.as_str()],
                     |row| row.get::<_, Vec<u8>>(0),
                 )
@@ -328,7 +334,12 @@ impl Store {
         .map_err(sqlite_error)?;
         let all_hashes = {
             let mut stmt = tx
-                .prepare("SELECT hash FROM blobs ORDER BY hash ASC")
+                .prepare(
+                    crate::artifact_store::artifact_sql()
+                        .blobs
+                        .select_all_hashes
+                        .sql(),
+                )
                 .map_err(sqlite_error)?;
             let rows = stmt
                 .query_map([], |row| row.get::<_, String>(0))
@@ -340,8 +351,14 @@ impl Store {
             if retained.contains_key(hash) {
                 continue;
             }
-            tx.execute("DELETE FROM blobs WHERE hash = ?1", params![hash])
-                .map_err(sqlite_error)?;
+            tx.execute(
+                crate::artifact_store::artifact_sql()
+                    .blobs
+                    .delete_by_hash
+                    .sql(),
+                params![hash],
+            )
+            .map_err(sqlite_error)?;
             deleted_blob_count += 1;
         }
         Ok(GcReport {
@@ -355,7 +372,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::attachments::{MODULE_ARTIFACT_NAMESPACE, PROCESS_ENV_NAMESPACE};
+    use crate::artifact_store::{MODULE_ARTIFACT_NAMESPACE, PROCESS_ENV_NAMESPACE};
 
     /// A pointer-table row's retained label comes from its own namespace key:
     /// a non-manifest namespace cannot inherit the module label (FIG-1949).

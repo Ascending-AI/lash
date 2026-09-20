@@ -137,8 +137,13 @@ pub(crate) async fn reclaim(
             // The permanent terminal marker proves intent-owner death even after
             // the positive supersession receipt is gone. Retained graph prefixes
             // protect committed attachments independently of receipt retention.
-            let removed_attachment_root_count =
-                tx.execute(attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS, [])?;
+            let removed_attachment_root_count = tx.execute(
+                crate::attachments::attachment_sql()
+                    .manifest_sqlite
+                    .delete_deleted_session_roots
+                    .sql(),
+                [],
+            )?;
             Ok(lash_core::store::RetentionReport {
                 removed_receipt_count,
                 removed_usage_delta_count,

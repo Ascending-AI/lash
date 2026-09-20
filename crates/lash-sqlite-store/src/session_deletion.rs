@@ -123,7 +123,10 @@ pub(super) async fn delete_session_from_catalog(
             for blob_ref in &candidates {
                 let exists = tx
                     .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)",
+                        crate::artifact_store::artifact_sql()
+                            .blobs_sqlite
+                            .select_exists
+                            .sql(),
                         params![blob_ref],
                         |row| row.get::<_, bool>(0),
                     )
@@ -220,8 +223,14 @@ pub(super) async fn delete_session_from_catalog(
                 )
                 .map_err(sqlite_error)?;
             }
-            tx.execute(attachments::RECLAIM_DELETED_ATTACHMENT_ROOTS, [])
-                .map_err(sqlite_error)?;
+            tx.execute(
+                crate::attachments::attachment_sql()
+                    .manifest_sqlite
+                    .delete_deleted_session_roots
+                    .sql(),
+                [],
+            )
+            .map_err(sqlite_error)?;
             if let Some(checkpoint_ref) = checkpoint_ref.as_ref() {
                 // Sever this root's outgoing projection before any blob delete
                 // when the owner transaction removed its final head/anchor.
@@ -247,34 +256,10 @@ pub(super) async fn delete_session_from_catalog(
             for blob_ref in candidates {
                 let deleted = tx
                     .execute(
-                        "DELETE FROM blobs AS candidate
-                         WHERE candidate.hash = ?1
-                           AND NOT EXISTS (
-                               SELECT 1 FROM session_head AS head
-                               WHERE head.checkpoint_ref = candidate.hash
-                           )
-                           AND NOT EXISTS (
-                               SELECT 1 FROM node_anchors AS anchor
-                               WHERE anchor.checkpoint_ref = candidate.hash
-                           )
-                           AND NOT EXISTS (
-                               SELECT 1 FROM artifact_refs AS artifact
-                               WHERE artifact.blob_ref = candidate.hash
-                           )
-                           AND NOT EXISTS (
-                               SELECT 1 FROM checkpoint_blob_refs AS edge
-                               WHERE edge.blob_ref = candidate.hash
-                                 AND (
-                                     EXISTS (
-                                         SELECT 1 FROM session_head AS head
-                                         WHERE head.checkpoint_ref = edge.checkpoint_ref
-                                     )
-                                     OR EXISTS (
-                                         SELECT 1 FROM node_anchors AS anchor
-                                         WHERE anchor.checkpoint_ref = edge.checkpoint_ref
-                                     )
-                                 )
-                           )",
+                        crate::artifact_store::artifact_sql()
+                            .blobs_sqlite
+                            .reclaim_session_candidate
+                            .sql(),
                         params![blob_ref],
                     )
                     .map_err(sqlite_error)?;

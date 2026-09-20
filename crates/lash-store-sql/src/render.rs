@@ -339,6 +339,10 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
     // crate owns (or, after FROM, a parenthesised subquery or a table-valued
     // function).
     let mut expect_table: Option<TablePosition> = None;
+    // The identifier immediately before the current one, with nothing but
+    // whitespace between them. An upsert's `DO UPDATE SET` spells `UPDATE`
+    // where no table follows, so the keyword alone cannot decide.
+    let mut previous_word: Option<&str> = None;
 
     while index < bytes.len() {
         let byte = bytes[index];
@@ -346,14 +350,17 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
             b'\'' => {
                 index = copy_delimited(neutral, index, b'\'', true, "string literal", &mut out)?;
                 expect_table = None;
+                previous_word = None;
             }
             b'"' => {
                 index = copy_delimited(neutral, index, b'"', true, "quoted identifier", &mut out)?;
                 expect_table = None;
+                previous_word = None;
             }
             b'`' => {
                 index = copy_delimited(neutral, index, b'`', false, "quoted identifier", &mut out)?;
                 expect_table = None;
+                previous_word = None;
             }
             b'[' => {
                 index = copy_until(
@@ -365,6 +372,7 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
                     "[",
                 )?;
                 expect_table = None;
+                previous_word = None;
             }
             b'-' if bytes.get(index + 1) == Some(&b'-') => {
                 let end = neutral[index..]
@@ -400,6 +408,7 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
                 out.push_str(&neutral[start..end]);
                 index = end;
                 expect_table = None;
+                previous_word = None;
             }
             b'$' => return Err(RenderError::DollarPlaceholder { at: index }),
             b'{' => {
@@ -440,7 +449,8 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
                         });
                     }
                 }
-                expect_table = table_position(word);
+                expect_table = table_position(word, previous_word);
+                previous_word = Some(word);
                 index = end;
             }
             _ => {
@@ -451,6 +461,7 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
                 index += character.len_utf8();
                 if !character.is_whitespace() {
                     expect_table = None;
+                    previous_word = None;
                 }
             }
         }
@@ -468,13 +479,19 @@ enum TablePosition {
     Other,
 }
 
-fn table_position(word: &str) -> Option<TablePosition> {
+/// Whether `word` opens a table position, given the identifier before it.
+///
+/// `previous` decides one case: an upsert's `ON CONFLICT … DO UPDATE SET`
+/// writes `UPDATE` with no table after it, because the table is the one the
+/// insert already named. Every other `UPDATE` is a statement head and does
+/// take a table.
+fn table_position(word: &str, previous: Option<&str>) -> Option<TablePosition> {
     if word.eq_ignore_ascii_case("from") {
         Some(TablePosition::From)
-    } else if word.eq_ignore_ascii_case("into")
-        || word.eq_ignore_ascii_case("update")
-        || word.eq_ignore_ascii_case("join")
-    {
+    } else if word.eq_ignore_ascii_case("update") {
+        let upsert_action = previous.is_some_and(|before| before.eq_ignore_ascii_case("do"));
+        (!upsert_action).then_some(TablePosition::Other)
+    } else if word.eq_ignore_ascii_case("into") || word.eq_ignore_ascii_case("join") {
         Some(TablePosition::Other)
     } else {
         None

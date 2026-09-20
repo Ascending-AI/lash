@@ -350,18 +350,12 @@ async fn put_checkpoint_blobs_tx(
             .iter()
             .map(|(_, content)| content.as_slice())
             .collect::<Vec<_>>();
-        sqlx::query(
-            "INSERT INTO lash_blobs (hash, content)
-             SELECT hash, content
-               FROM unnest($1::text[], $2::bytea[]) AS blob(hash, content)
-              ORDER BY hash
-             ON CONFLICT (hash) DO NOTHING",
-        )
-        .bind(hashes)
-        .bind(contents)
-        .execute(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        sqlx::query(crate::blobs::blob_sql().postgres.insert_chunk.sql())
+            .bind(hashes)
+            .bind(contents)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
     }
     Ok(())
 }
@@ -370,7 +364,7 @@ async fn get_blob_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blob_ref: &BlobRef,
 ) -> Result<Option<Vec<u8>>, StoreError> {
-    sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
+    sqlx::query_scalar(crate::blobs::blob_sql().shared.select_content.sql())
         .bind(blob_ref.as_str())
         .fetch_optional(&mut **tx)
         .await
@@ -387,12 +381,11 @@ pub(crate) async fn lock_checkpoint_blob_tx(
     blob_ref: &str,
     component_key: Option<&str>,
 ) -> Result<(), StoreError> {
-    let exists =
-        sqlx::query_scalar::<_, bool>("SELECT TRUE FROM lash_blobs WHERE hash = $1 FOR KEY SHARE")
-            .bind(blob_ref)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+    let exists = sqlx::query_scalar::<_, bool>(crate::blobs::blob_sql().postgres.lock_one.sql())
+        .bind(blob_ref)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
     if exists.is_some() {
         return Ok(());
     }
@@ -420,10 +413,7 @@ async fn lock_checkpoint_blobs_tx(
     for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
         locked.extend(
             sqlx::query_scalar::<_, String>(
-                "SELECT hash FROM lash_blobs
-                 WHERE hash = ANY($1::text[])
-                 ORDER BY hash
-                 FOR KEY SHARE",
+                crate::blobs::blob_sql().postgres.lock_existing_hashes.sql(),
             )
             .bind(chunk)
             .fetch_all(&mut **tx)
@@ -459,11 +449,16 @@ async fn checkpoint_component_bodies_tx(
     let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
     let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
     for chunk in blob_refs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
-        let rows = sqlx::query("SELECT hash, content FROM lash_blobs WHERE hash = ANY($1::text[])")
-            .bind(chunk)
-            .fetch_all(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        let rows = sqlx::query(
+            crate::blobs::blob_sql()
+                .postgres
+                .select_bodies_by_hash
+                .sql(),
+        )
+        .bind(chunk)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
         for row in rows {
             bodies.insert(row.get::<String, _>(0), row.get::<Vec<u8>, _>(1));
         }
@@ -854,10 +849,10 @@ pub(crate) async fn commit_attachment_refs_tx(
     for id in &ids {
         crate::attachments::lock_attachment_fence_tx(tx, id.as_str()).await?;
         let deleting = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                SELECT 1 FROM lash_attachment_condemnations
-                WHERE attachment_id = $1 AND phase = 'deleting'
-             )",
+            crate::attachments::attachment_sql()
+                .condemnation_postgres
+                .select_deleting
+                .sql(),
         )
         .bind(id.as_str())
         .fetch_one(&mut **tx)
@@ -869,8 +864,10 @@ pub(crate) async fn commit_attachment_refs_tx(
             });
         }
         let written_at_ms = sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT MIN(written_at_ms) FROM lash_attachment_manifest
-             WHERE attachment_id = $1 AND written_at_ms IS NOT NULL",
+            crate::attachments::attachment_sql()
+                .manifest
+                .select_earliest_written_at
+                .sql(),
         )
         .bind(id.as_str())
         .fetch_one(&mut **tx)
@@ -887,8 +884,10 @@ pub(crate) async fn commit_attachment_refs_tx(
         // The fresh committed root supersedes an unarmed, unclaimed
         // condemnation. A restoring writer's claim is left for that writer.
         sqlx::query(
-            "DELETE FROM lash_attachment_condemnations
-             WHERE attachment_id = $1 AND phase = 'condemned' AND write_token IS NULL",
+            crate::attachments::attachment_sql()
+                .condemnation
+                .delete_unclaimed_condemned
+                .sql(),
         )
         .bind(id.as_str())
         .execute(&mut **tx)
@@ -897,12 +896,10 @@ pub(crate) async fn commit_attachment_refs_tx(
         // Copy the evidence onto the adopter's row so it outlives the uploader's
         // intent being forgotten.
         sqlx::query(
-            "INSERT INTO lash_attachment_manifest
-             (attachment_id, session_id, canonical_uri, intent_at_ms, written_at_ms, committed_at_ms)
-             VALUES ($2, $3, $4, $1, $5, $1)
-             ON CONFLICT (session_id, attachment_id) DO UPDATE
-             SET committed_at_ms = COALESCE(lash_attachment_manifest.committed_at_ms, EXCLUDED.committed_at_ms),
-                 written_at_ms = COALESCE(lash_attachment_manifest.written_at_ms, EXCLUDED.written_at_ms)",
+            crate::attachments::attachment_sql()
+                .manifest
+                .upsert_adopted
+                .sql(),
         )
         .bind(now_epoch_ms as i64)
         .bind(id.as_str())

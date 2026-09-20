@@ -10,7 +10,110 @@
 //! durable root.
 
 use super::*;
+use crate::artifact_store::artifact_sql;
 use lash_sansio::SessionId;
+
+lash_store_sql::statements! {
+    /// `blobs` statements only SQLite issues.
+    pub(crate) struct BlobSqliteStatements @ "blob" {
+        /// Store `?2` at content address `?1`, keeping what is already there.
+        ///
+        /// `INSERT OR IGNORE` is the fork, and it is a fork of shape rather
+        /// than of meaning: PostgreSQL writes a whole chunk in one round trip
+        /// through `unnest` and spells the same idempotence as
+        /// `ON CONFLICT DO NOTHING`. The bytes are content-addressed, so a
+        /// conflict is always the same bytes.
+        insert_ignore = "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, ?2)";
+
+        /// Which of the content addresses in the JSON array `?1` exist.
+        ///
+        /// The `json_each` table-valued function is the fork: it is how SQLite
+        /// binds a list to one statement, where PostgreSQL binds a text array.
+        /// PostgreSQL's counterpart also takes `FOR KEY SHARE`, which SQLite
+        /// does not need under `BEGIN IMMEDIATE`.
+        select_existing_hashes = "SELECT hash FROM blobs
+             WHERE hash IN (SELECT value FROM json_each(?1))";
+
+        /// The stored bytes for every content address in the JSON array `?1`.
+        /// Same `json_each` fork as select_existing_hashes.
+        select_bodies_by_hash = "SELECT hash, content FROM blobs
+             WHERE hash IN (SELECT value FROM json_each(?1))";
+
+        /// Reclaim the blob at `?1` once the artifact pointer that named it
+        /// is gone, if nothing else roots it.
+        ///
+        /// Every predicate is an indexed `NOT EXISTS` over exact edges; no
+        /// whole-catalog mark/sweep runs in this transaction. PostgreSQL has
+        /// no counterpart: its artifact bytes live inline in
+        /// `lash_lashlang_artifacts` and never reach this table.
+        reclaim_unowned_artifact = "DELETE FROM blobs AS candidate
+             WHERE candidate.hash = ?1
+               AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM session_head WHERE checkpoint_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM node_anchors WHERE checkpoint_ref = candidate.hash)
+               AND NOT EXISTS (SELECT 1 FROM checkpoint_blob_refs WHERE blob_ref = candidate.hash)";
+
+        /// Reclaim the session-delete candidate `?1` if nothing still roots it.
+        ///
+        /// Forks from PostgreSQL's counterpart on the artifact clause: only
+        /// SQLite keeps an `artifact_refs` pointer table, so only SQLite has a
+        /// fourth kind of root to rule out. The head table also forks by name,
+        /// `session_head` here and `lash_sessions` there.
+        reclaim_session_candidate = "DELETE FROM blobs AS candidate
+             WHERE candidate.hash = ?1
+               AND NOT EXISTS (
+                   SELECT 1 FROM session_head AS head
+                   WHERE head.checkpoint_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM node_anchors AS anchor
+                   WHERE anchor.checkpoint_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM artifact_refs AS artifact
+                   WHERE artifact.blob_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM checkpoint_blob_refs AS edge
+                   WHERE edge.blob_ref = candidate.hash
+                     AND (
+                         EXISTS (
+                             SELECT 1 FROM session_head AS head
+                             WHERE head.checkpoint_ref = edge.checkpoint_ref
+                         )
+                         OR EXISTS (
+                             SELECT 1 FROM node_anchors AS anchor
+                             WHERE anchor.checkpoint_ref = edge.checkpoint_ref
+                         )
+                     )
+               )";
+
+        /// One preflight page of sessions that have published a checkpoint
+        /// root, after session `?1`, at most `?2` rows.
+        ///
+        /// The join is `LEFT` on purpose: an inner join would make a session
+        /// whose manifest blob has gone missing simply disappear from the
+        /// walk — the single most alarming finding a preflight can make,
+        /// rendered as "no such session". PostgreSQL's walk reads its own
+        /// head table, `lash_sessions`, so the two texts fork on the table
+        /// name alone.
+        select_session_checkpoint_page = "SELECT session_head.session_id, session_head.checkpoint_ref, blobs.content
+             FROM session_head
+             LEFT JOIN blobs ON blobs.hash = session_head.checkpoint_ref
+             WHERE session_head.checkpoint_ref IS NOT NULL
+               AND (?1 IS NULL OR session_head.session_id > ?1)
+             ORDER BY session_head.session_id
+             LIMIT ?2";
+
+        /// Whether a blob exists at `?1`.
+        ///
+        /// SQLite alone asks this: it is the session-delete sweep's proof that
+        /// an enumerated reference is not already dangling, taken under the
+        /// write lock. PostgreSQL gets the same proof from the row lock its
+        /// candidate read takes, so it has no separate existence check.
+        select_exists = "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)";
+    }
+}
 
 /// Versioned BLAKE3 content address that keys every row in the `blobs` table.
 fn blob_content_hash(content: &[u8]) -> String {
@@ -66,7 +169,7 @@ impl Store {
     ) -> Result<(), StoreError> {
         let stored = encode_artifact_blob(&descriptor, profile, content)?;
         conn.execute(
-            "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, ?2)",
+            artifact_sql().blobs_sqlite.insert_ignore.sql(),
             params![blob_ref.as_str(), stored],
         )
         .map_err(sqlite_error)?;
@@ -213,10 +316,7 @@ impl Store {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
             let mut statement = conn
-                .prepare(
-                    "SELECT hash FROM blobs
-                     WHERE hash IN (SELECT value FROM json_each(?1))",
-                )
+                .prepare(artifact_sql().blobs_sqlite.select_existing_hashes.sql())
                 .map_err(sqlite_error)?;
             let rows = statement
                 .query_map(params![encoded], |row| row.get::<_, String>(0))
@@ -242,10 +342,7 @@ impl Store {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
             let mut statement = conn
-                .prepare(
-                    "SELECT hash, content FROM blobs
-                     WHERE hash IN (SELECT value FROM json_each(?1))",
-                )
+                .prepare(artifact_sql().blobs_sqlite.select_bodies_by_hash.sql())
                 .map_err(sqlite_error)?;
             let rows = statement
                 .query_map(params![encoded], |row| {
@@ -267,7 +364,7 @@ impl Store {
     ) -> Result<Option<Vec<u8>>, StoreError> {
         let bytes: Option<Vec<u8>> = conn
             .query_row(
-                "SELECT content FROM blobs WHERE hash = ?1",
+                artifact_sql().blobs.select_content.sql(),
                 params![blob_ref.as_str()],
                 |row| row.get(0),
             )

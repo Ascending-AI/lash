@@ -178,24 +178,20 @@ fn read_page(
 /// artifact reference remains visible as a named item. The blob envelope is
 /// storage bookkeeping; `logical_json_payload` removes it before the shared
 /// preflight extractor verifies the module identity.
-const MODULE_ARTIFACTS_SQL: &str = "\
-SELECT refs.artifact_ref, refs.blob_ref, blobs.content
-FROM artifact_refs AS refs
-LEFT JOIN blobs ON blobs.hash = refs.blob_ref
-WHERE refs.namespace = ?1
-  AND (?2 IS NULL OR refs.artifact_ref > ?2)
-ORDER BY refs.artifact_ref
-LIMIT ?3";
-
 fn read_module_artifacts(
     conn: &Connection,
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(MODULE_ARTIFACTS_SQL)?;
+    let mut statement = conn.prepare(
+        crate::artifact_store::artifact_sql()
+            .refs
+            .select_preflight_page
+            .sql(),
+    )?;
     let rows = statement.query_map(
         params![
-            crate::attachments::MODULE_ARTIFACT_NAMESPACE,
+            crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
             after,
             limit_binding(limit)
         ],
@@ -367,21 +363,17 @@ fn read_pending_wakes(
 /// most alarming finding a preflight can make, silently rendered as "no such
 /// session". Left-joining keeps the row and lets the missing content be
 /// reported as what it is.
-const SESSION_CHECKPOINTS_SQL: &str = "\
-SELECT session_head.session_id, session_head.checkpoint_ref, blobs.content
-FROM session_head
-LEFT JOIN blobs ON blobs.hash = session_head.checkpoint_ref
-WHERE session_head.checkpoint_ref IS NOT NULL
-  AND (?1 IS NULL OR session_head.session_id > ?1)
-ORDER BY session_head.session_id
-LIMIT ?2";
-
 fn read_session_checkpoints(
     conn: &Connection,
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(SESSION_CHECKPOINTS_SQL)?;
+    let mut statement = conn.prepare(
+        crate::artifact_store::artifact_sql()
+            .blobs_sqlite
+            .select_session_checkpoint_page
+            .sql(),
+    )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
         let session_id = SessionId::from(row.get::<_, String>(0)?);
         let checkpoint_ref: String = row.get(1)?;
@@ -434,7 +426,12 @@ fn read_session_execution_state(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(SESSION_CHECKPOINTS_SQL)?;
+    let mut statement = conn.prepare(
+        crate::artifact_store::artifact_sql()
+            .blobs_sqlite
+            .select_session_checkpoint_page
+            .sql(),
+    )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, Option<Vec<u8>>>(2)?))
     })?;
@@ -524,7 +521,12 @@ struct ManifestComponentProbe {
 }
 
 fn load_blob(conn: &Connection, blob_ref: &str) -> rusqlite::Result<Option<Vec<u8>>> {
-    let mut statement = conn.prepare("SELECT content FROM blobs WHERE hash = ?1")?;
+    let mut statement = conn.prepare(
+        crate::artifact_store::artifact_sql()
+            .blobs
+            .select_content
+            .sql(),
+    )?;
     let mut rows = statement.query(params![blob_ref])?;
     match rows.next()? {
         Some(row) => Ok(Some(row.get(0)?)),

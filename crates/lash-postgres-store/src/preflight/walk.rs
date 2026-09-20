@@ -137,12 +137,6 @@ const MODULE_ARTIFACT_SQL: &str = "SELECT artifact_ref, artifact_bytes
      ORDER BY artifact_ref
      LIMIT $3";
 
-/// Fetch a page's blobs in one round trip.
-///
-/// One statement per session would turn a hundred-session page into a hundred
-/// round trips against a server the host has not decided to depend on yet.
-const BLOBS_BY_HASH_SQL: &str = "SELECT hash, content FROM lash_blobs WHERE hash = ANY($1::text[])";
-
 /// Read one page of one surface.
 ///
 /// The entry point [`crate::PostgresStorePreflight`] delegates to; every branch
@@ -527,10 +521,18 @@ async fn fetch_blobs(
     if hashes.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
-    let rows = sqlx::query_as::<_, (String, Vec<u8>)>(BLOBS_BY_HASH_SQL)
-        .bind(hashes)
-        .fetch_all(&mut **snapshot)
-        .await?;
+    // One statement per session would turn a hundred-session page into a
+    // hundred round trips against a server the host has not decided to depend
+    // on yet.
+    let rows = sqlx::query_as::<_, (String, Vec<u8>)>(
+        crate::blobs::blob_sql()
+            .postgres
+            .select_bodies_by_hash
+            .sql(),
+    )
+    .bind(hashes)
+    .fetch_all(&mut **snapshot)
+    .await?;
     Ok(rows.into_iter().collect())
 }
 

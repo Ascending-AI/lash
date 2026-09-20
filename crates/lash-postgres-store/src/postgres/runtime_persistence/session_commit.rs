@@ -866,12 +866,10 @@ impl SessionCommitStore for PostgresSessionStore {
         .await?;
         if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
             sqlx::query(
-                "UPDATE lash_attachment_manifest
-                     SET committed_at_ms = COALESCE(committed_at_ms, $1)
-                     WHERE session_id = $2
-                       AND owner_kind = $4
-                       AND owner_id = $3
-                       AND committed_at_ms IS NULL",
+                crate::attachments::attachment_sql()
+                    .manifest
+                    .commit_owned
+                    .sql(),
             )
             .bind(now as i64)
             .bind(commit.session_id.as_str())

@@ -36,10 +36,10 @@ pub(crate) async fn lock_session_blob_candidates_tx(
     // blob row in the complete union is locked by ascending content hash before
     // any owner edge is severed.
     let locked = sqlx::query_scalar::<_, String>(
-        "SELECT hash FROM lash_blobs
-         WHERE hash = ANY($1::TEXT[])
-         ORDER BY hash
-         FOR UPDATE",
+        crate::blobs::blob_sql()
+            .postgres
+            .lock_reclaim_candidates
+            .sql(),
     )
     .bind(&candidate_vec)
     .fetch_all(&mut **tx)
@@ -88,30 +88,10 @@ pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
     // same deterministic order after every dead root's edges are gone.
     for blob_ref in candidates {
         let deleted = sqlx::query(
-            "DELETE FROM lash_blobs AS candidate
-             WHERE candidate.hash = $1
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_sessions AS head
-                   WHERE head.checkpoint_ref = candidate.hash
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_node_anchors AS anchor
-                   WHERE anchor.checkpoint_ref = candidate.hash
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_checkpoint_blob_refs AS edge
-                   WHERE edge.blob_ref = candidate.hash
-                     AND (
-                         EXISTS (
-                             SELECT 1 FROM lash_sessions AS head
-                             WHERE head.checkpoint_ref = edge.checkpoint_ref
-                         )
-                         OR EXISTS (
-                             SELECT 1 FROM lash_node_anchors AS anchor
-                             WHERE anchor.checkpoint_ref = edge.checkpoint_ref
-                         )
-                     )
-               )",
+            crate::blobs::blob_sql()
+                .postgres
+                .reclaim_session_candidate
+                .sql(),
         )
         .bind(&blob_ref)
         .execute(&mut **tx)
