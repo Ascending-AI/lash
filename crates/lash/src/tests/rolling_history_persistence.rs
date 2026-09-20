@@ -354,7 +354,7 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
         assert_eq!(view.messages().len(), 1);
         assert!(
             view.messages()[0].parts[0]
-                .content
+                .content()
                 .contains(expected_summary)
         );
     }
@@ -807,7 +807,7 @@ async fn rolling_history_compaction_accepts_parent_turn_authority() -> Result<()
     assert_eq!(session.read_view().messages().len(), 1);
     assert!(
         session.read_view().messages()[0].parts[0]
-            .content
+            .content()
             .contains("turn-authorized summary")
     );
     Ok(())
@@ -886,7 +886,7 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
     assert_eq!(session.read_view().messages().len(), 1);
     assert!(
         session.read_view().messages()[0].parts[0]
-            .content
+            .content()
             .contains("second summary")
     );
     Ok(())
@@ -953,7 +953,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         durable_message
             .parts
             .iter()
-            .any(|part| part.attachment.is_some()),
+            .any(|part| part.attachment().is_some()),
         "durable transcript keeps the original attachment"
     );
     assert_eq!(

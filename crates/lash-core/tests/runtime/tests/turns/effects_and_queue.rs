@@ -2275,7 +2275,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
                     && message
                         .parts
                         .iter()
-                        .all(|part| part.content.trim().is_empty()))
+                        .all(|part| part.content().trim().is_empty()))
             }),
         "empty wake turns must not synthesize blank user history"
     );

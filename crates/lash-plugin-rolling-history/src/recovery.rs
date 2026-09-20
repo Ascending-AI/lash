@@ -62,7 +62,7 @@ pub(crate) fn recovery_record_payload(message: &Message) -> Option<&str> {
         return None;
     }
     message.parts.iter().find_map(|part| {
-        let text = part.content.as_str();
+        let text = part.content();
         [
             OVERFLOW_RECOVERY_MARKER,
             OVERFLOW_RECOVERY_COMPLETED,
@@ -152,19 +152,18 @@ pub(crate) fn elide_oversized_parts(messages: &mut [Message]) -> usize {
     let mut elided = 0usize;
     for message in messages {
         for part in std::sync::Arc::make_mut(&mut message.parts).iter_mut() {
-            if approx_token_count(&part.content) < OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS {
+            if approx_token_count(part.content()) < OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS {
                 continue;
             }
-            let head: &str = if let Some((index, _)) = part
-                .content
+            if let Some((index, _)) = part
+                .content()
                 .char_indices()
                 .nth(OVERFLOW_RECOVERY_ELIDED_RETAINED_CHARS)
             {
-                &part.content[..index]
-            } else {
-                &part.content
-            };
-            part.content = format!("{head}{OVERFLOW_ELIDED_PART_PLACEHOLDER}");
+                part.content_mut().truncate(index);
+            }
+            part.content_mut()
+                .push_str(OVERFLOW_ELIDED_PART_PLACEHOLDER);
             elided += 1;
         }
     }
@@ -416,8 +415,12 @@ pub(crate) async fn run_overflow_recovery(
                 .parts
                 .iter()
                 .map(|part| {
-                    approx_token_count(&part.content)
-                        + if part.attachment.is_some() { 1_200 } else { 0 }
+                    approx_token_count(part.content())
+                        + if part.attachment().is_some() {
+                            1_200
+                        } else {
+                            0
+                        }
                 })
                 .sum::<usize>()
         })

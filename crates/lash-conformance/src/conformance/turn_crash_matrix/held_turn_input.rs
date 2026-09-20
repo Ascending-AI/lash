@@ -171,7 +171,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
             .messages()
             .iter()
             .flat_map(|message| message.parts.iter())
-            .filter(|part| part.content == expected)
+            .filter(|part| part.content() == expected)
             .count();
         assert_eq!(
             count, 1,

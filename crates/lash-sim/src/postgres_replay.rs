@@ -858,7 +858,7 @@ async fn run_provider_turn_task(
             "single_active_agent_frame": agent_frame_invariant.passed,
             "usage_monotonic": usage_invariant.passed,
             "transcript_contains_provider_output": read_view.messages().iter().any(|message| {
-                message.parts.iter().any(|part| part.content.contains(expected_text))
+                message.parts.iter().any(|part| part.content().contains(expected_text))
             }),
             "activity_count_nonzero": !output.activities.is_empty(),
         },

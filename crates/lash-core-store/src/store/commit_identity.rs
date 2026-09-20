@@ -532,31 +532,18 @@ fn push_part(
     part: &crate::Part,
     encoding_version: u32,
 ) {
-    let crate::Part {
-        id,
-        kind,
-        content,
-        attachment,
-        tool_call_id,
-        tool_name,
-        tool_replay,
-        prune_state,
-        reasoning_meta,
-        response_meta,
-        ..
-    } = part;
-    identity.string(id);
-    push_part_kind(identity, *kind);
-    identity.string(content);
-    identity.optional(attachment.as_ref(), |identity, attachment| {
+    identity.string(part.id());
+    push_part_kind(identity, part.kind());
+    identity.string(part.content());
+    identity.optional(part.attachment(), |identity, attachment| {
         let lash_sansio::PartAttachment { source } = attachment;
         push_attachment_source(identity, source)
     });
-    identity.optional(tool_call_id.as_ref(), |identity, value| {
+    identity.optional(part.tool_call_id(), |identity, value| {
         identity.string(value)
     });
-    identity.optional(tool_name.as_ref(), |identity, value| identity.string(value));
-    identity.optional(tool_replay.as_ref(), |identity, replay| {
+    identity.optional(part.tool_name(), |identity, value| identity.string(value));
+    identity.optional(part.tool_replay(), |identity, replay| {
         let lash_sansio::llm::types::ProviderReplayMeta {
             item_id,
             opaque,
@@ -568,8 +555,8 @@ fn push_part(
             identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
         }
     });
-    push_prune_state(identity, prune_state);
-    identity.optional(reasoning_meta.as_ref(), |identity, replay| {
+    push_prune_state(identity, part.prune_state());
+    identity.optional(part.reasoning_meta(), |identity, replay| {
         let lash_sansio::llm::types::ProviderReasoningReplay {
             item_id,
             encrypted_content,
@@ -589,7 +576,7 @@ fn push_part(
             identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
         }
     });
-    identity.optional(response_meta.as_ref(), |identity, response| {
+    identity.optional(part.response_meta(), |identity, response| {
         let lash_sansio::llm::types::ResponseTextMeta {
             id,
             status,
@@ -683,19 +670,13 @@ pub(super) fn append_request_identity_encoding_version(nodes: &[crate::SessionAp
                     ..
                 })
             ) || message.parts.iter().any(|part| {
-                part.tool_replay
-                    .as_ref()
+                part.tool_replay()
                     .and_then(|replay| replay.origin.as_ref())
                     .or_else(|| {
-                        part.reasoning_meta
-                            .as_ref()
+                        part.reasoning_meta()
                             .and_then(|replay| replay.origin.as_ref())
                     })
-                    .or_else(|| {
-                        part.response_meta
-                            .as_ref()
-                            .and_then(|meta| meta.origin.as_ref())
-                    })
+                    .or_else(|| part.response_meta().and_then(|meta| meta.origin.as_ref()))
                     .is_some()
             })
         }
@@ -958,6 +939,22 @@ mod append_request_identity_tests {
                 "parts": [
                     {
                         "id": "p0", "kind": "ToolCall", "content": "tool-call",
+                        "tool_call_id": "call-id",
+                        "tool_name": "tool-name",
+                        "tool_replay": {"item_id": "item-id", "opaque": "opaque"},
+                        "prune_state": {"Deleted": {"breadcrumb": "crumb", "archive_hash": "archive"}}
+                    },
+                    {
+                        "id": "p1", "kind": "Text", "content": "text",
+                        "response_meta": {
+                            "id": "response-id", "status": "complete", "phase": "final_answer",
+                            "provider_payload": "payload",
+                            "origin_provider": "provider", "origin_model": "model"
+                        },
+                        "prune_state": "Intact"
+                    },
+                    {
+                        "id": "p2", "kind": "Attachment", "content": "attachment",
                         "attachment": {"source": {
                             "source": "stored",
                             "attachment_ref": {
@@ -967,29 +964,26 @@ mod append_request_identity_tests {
                                 "label": "attachment-label"
                             }
                         }},
-                        "tool_call_id": "call-id",
-                        "tool_name": "tool-name",
-                        "tool_replay": {"item_id": "item-id", "opaque": "opaque"},
-                        "prune_state": {"Deleted": {"breadcrumb": "crumb", "archive_hash": "archive"}},
+                        "prune_state": "Cleared"
+                    },
+                    {"id": "p3", "kind": "Code", "content": "code", "prune_state": {"Summarized": {"summary": "short", "archive_hash": "hash"}}},
+                    {"id": "p4", "kind": "Output", "content": "output", "prune_state": "Intact"},
+                    {"id": "p5", "kind": "Error", "content": "error", "prune_state": "Intact"},
+                    {"id": "p6", "kind": "Prose", "content": "prose", "prune_state": "Intact"},
+                    {
+                        "id": "p7", "kind": "ToolResult", "content": "tool-result",
+                        "tool_call_id": "call-id", "tool_name": "tool-name",
+                        "prune_state": "Intact"
+                    },
+                    {
+                        "id": "p8", "kind": "Reasoning", "content": "reasoning",
                         "reasoning_meta": {
                             "item_id": "reason-id", "encrypted_content": "encrypted",
                             "signature": "signature", "redacted": true,
                             "summary": ["summary-a", "summary-b"]
                         },
-                        "response_meta": {
-                            "id": "response-id", "status": "complete", "phase": "final_answer",
-                            "provider_payload": "payload",
-                            "origin_provider": "provider", "origin_model": "model"
-                        }
-                    },
-                    {"id": "p1", "kind": "Text", "content": "text", "prune_state": "Intact"},
-                    {"id": "p2", "kind": "Attachment", "content": "attachment", "prune_state": "Cleared"},
-                    {"id": "p3", "kind": "Code", "content": "code", "prune_state": {"Summarized": {"summary": "short", "archive_hash": "hash"}}},
-                    {"id": "p4", "kind": "Output", "content": "output", "prune_state": "Intact"},
-                    {"id": "p5", "kind": "Error", "content": "error", "prune_state": "Intact"},
-                    {"id": "p6", "kind": "Prose", "content": "prose", "prune_state": "Intact"},
-                    {"id": "p7", "kind": "ToolResult", "content": "tool-result", "prune_state": "Intact"},
-                    {"id": "p8", "kind": "Reasoning", "content": "reasoning", "prune_state": "Intact"}
+                        "prune_state": "Intact"
+                    }
                 ],
                 "attachments": [
                     {"source": "inline", "media_type": "application/octet-stream", "bytes": [0, 255]},
@@ -1182,39 +1176,55 @@ mod append_request_identity_tests {
             "message": {
                 "role": "Assistant",
                 "content": "route-owned replay",
-                "parts": [{
-                    "id": "p0",
-                    "kind": "ToolCall",
-                    "content": "tool",
-                    "tool_replay": {
-                        "item_id": "tool-item",
-                        "opaque": "tool-opaque",
-                        "origin": {
-                            "provider": "openai-compatible",
-                            "endpoint": "https://gateway.example/v1",
-                            "model": "shared-model"
-                        }
+                "parts": [
+                    {
+                        "id": "p0",
+                        "kind": "ToolCall",
+                        "content": "tool",
+                        "tool_call_id": "call-id",
+                        "tool_name": "tool-name",
+                        "tool_replay": {
+                            "item_id": "tool-item",
+                            "opaque": "tool-opaque",
+                            "origin": {
+                                "provider": "openai-compatible",
+                                "endpoint": "https://gateway.example/v1",
+                                "model": "shared-model"
+                            }
+                        },
+                        "prune_state": "Intact"
                     },
-                    "reasoning_meta": {
-                        "signature": "reasoning-signature",
-                        "origin": {
-                            "provider": "openai-compatible",
-                            "endpoint": "https://gateway.example/v1",
-                            "model": "shared-model"
-                        }
+                    {
+                        "id": "p1",
+                        "kind": "Reasoning",
+                        "content": "reasoning",
+                        "reasoning_meta": {
+                            "signature": "reasoning-signature",
+                            "origin": {
+                                "provider": "openai-compatible",
+                                "endpoint": "https://gateway.example/v1",
+                                "model": "shared-model"
+                            }
+                        },
+                        "prune_state": "Intact"
                     },
-                    "response_meta": {
-                        "id": "response-id",
-                        "status": "completed",
-                        "phase": "final_answer",
-                        "origin": {
-                            "provider": "openai-compatible",
-                            "endpoint": "https://gateway.example/v1",
-                            "model": "shared-model"
-                        }
-                    },
-                    "prune_state": "Intact"
-                }]
+                    {
+                        "id": "p2",
+                        "kind": "Prose",
+                        "content": "response",
+                        "response_meta": {
+                            "id": "response-id",
+                            "status": "completed",
+                            "phase": "final_answer",
+                            "origin": {
+                                "provider": "openai-compatible",
+                                "endpoint": "https://gateway.example/v1",
+                                "model": "shared-model"
+                            }
+                        },
+                        "prune_state": "Intact"
+                    }
+                ]
             }
         }));
         assert_eq!(

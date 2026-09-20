@@ -176,7 +176,7 @@ pub(crate) fn chat_message_from_committed(message: &lash::messages::Message) -> 
         attachments: message
             .parts
             .iter()
-            .filter_map(|part| part.attachment.as_ref()?.source.stored_ref())
+            .filter_map(|part| part.attachment()?.source.stored_ref())
             .map(|attachment| ChatAttachment::from_id(attachment.id.to_string()))
             .collect(),
         provenance: match message.origin.as_ref() {
@@ -223,8 +223,8 @@ pub(crate) fn committed_chat_text(message: &lash::messages::Message) -> String {
     message
         .parts
         .iter()
-        .filter(|part| !matches!(part.kind, lash::messages::PartKind::Reasoning))
-        .map(|part| part.content.as_str())
+        .filter(|part| !matches!(part.kind(), lash::messages::PartKind::Reasoning))
+        .map(|part| part.content())
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -253,7 +253,8 @@ pub(crate) fn is_rlm_assistant_prose_message(message: &lash::messages::Message) 
     is_durable_internal_rlm_message(message)
         && lash::message_role(message) == "assistant"
         && message.parts.iter().any(|part| {
-            matches!(part.kind, lash::messages::PartKind::Prose) && !part.content.trim().is_empty()
+            matches!(part.kind(), lash::messages::PartKind::Prose)
+                && !part.content().trim().is_empty()
         })
 }
 
@@ -349,12 +350,12 @@ pub(crate) fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> V
         .parts
         .iter()
         .filter(|part| {
-            matches!(part.kind, lash::messages::PartKind::Reasoning)
-                && !part.content.trim().is_empty()
+            matches!(part.kind(), lash::messages::PartKind::Reasoning)
+                && !part.content().trim().is_empty()
         })
         .map(|part| TranscriptRow::Reasoning {
-            id: part.id.clone(),
-            text: part.content.clone(),
+            id: part.id().to_string(),
+            text: part.content().to_string(),
         })
         .collect()
 }

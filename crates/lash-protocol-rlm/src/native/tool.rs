@@ -42,14 +42,14 @@ pub(super) enum NativeAction {
 pub(super) fn normalize(parts: &[Part]) -> NativeAction {
     let calls = parts
         .iter()
-        .filter(|p| p.kind == PartKind::ToolCall)
+        .filter(|p| p.kind() == PartKind::ToolCall)
         .collect::<Vec<_>>();
     let malformed = |decision, copy: &str| NativeAction::Malformed {
         decision,
         repair_copy: copy.to_string(),
     };
     let mut ids = std::collections::HashSet::new();
-    if calls.iter().any(|p| !ids.insert(p.tool_call_id.as_deref())) {
+    if calls.iter().any(|p| !ids.insert(p.tool_call_id())) {
         return malformed(
             "retry_duplicate_call_id",
             "No code executed: duplicate call ids. Send exactly one execute_code call with a unique id.",
@@ -64,13 +64,13 @@ pub(super) fn normalize(parts: &[Part]) -> NativeAction {
     let Some(call) = calls.first() else {
         return NativeAction::ProseOnly;
     };
-    if call.tool_name.as_deref() != Some(NATIVE_EXECUTE_TOOL_NAME) {
+    if call.tool_name() != Some(NATIVE_EXECUTE_TOOL_NAME) {
         return malformed(
             "retry_unknown_tool",
             "No code executed: unknown tool. Call execute_code; invoke host operations and finish inside code.",
         );
     }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&call.content) else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(call.content()) else {
         return malformed(
             "retry_invalid_arguments",
             "No code executed: arguments must be valid JSON with exactly one string property, code.",

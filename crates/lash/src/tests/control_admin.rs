@@ -97,7 +97,7 @@ impl lash_core::facade_support::ContextCompactor for FixedCompactor {
             ctx.state
                 .messages()
                 .iter()
-                .any(|message| message.parts[0].content.contains("old durable request"))
+                .any(|message| message.parts[0].content().contains("old durable request"))
         );
         Ok(Some(lash_core::facade_support::ContextCompaction::new(
             vec![lash_core::SessionAppendNode::message(
@@ -181,9 +181,9 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
                 .nearest_frame_node_id(Some(&node.node_id))
                 .map(lash_core::NodeId::as_str)
                 == previous_frame_node_id.as_deref()
-                && node
-                    .message()
-                    .is_some_and(|message| message.parts[0].content.contains("old durable request"))
+                && node.message().is_some_and(|message| {
+                    message.parts[0].content().contains("old durable request")
+                })
         }),
         "initial frame should contain the original request"
     );
@@ -201,7 +201,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     let read_view = session.read_view();
     assert_eq!(read_view.messages().len(), 1);
     assert_eq!(
-        read_view.messages()[0].parts[0].content,
+        read_view.messages()[0].parts[0].content(),
         "Compaction summary:\nold durable request summarized"
     );
     assert!(matches!(
@@ -250,9 +250,9 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
                 .nearest_frame_node_id(Some(&node.node_id))
                 .map(lash_core::NodeId::as_str)
                 == previous_frame_node_id.as_deref()
-                && node
-                    .message()
-                    .is_some_and(|message| message.parts[0].content.contains("old durable request"))
+                && node.message().is_some_and(|message| {
+                    message.parts[0].content().contains("old durable request")
+                })
         }),
         "previous frame content should remain durable after compaction"
     );
@@ -265,7 +265,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
                 == after.current_frame_node_id.as_deref()
                 && node.message().is_some_and(|message| {
                     message.parts[0]
-                        .content
+                        .content()
                         .contains("old durable request summarized")
                 })
         }),

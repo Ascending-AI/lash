@@ -609,7 +609,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 };
                 CompletedToolCall {
                     call_id: call.call_id,
-                    tool_name: call.tool_name,
+                    tool_name: call.tool_name.clone(),
                     args: call.args,
                     output,
                     model_return,
@@ -877,17 +877,18 @@ mod tests {
                     actual.iter().zip(expected.iter()).enumerate()
                 {
                     assert_eq!(
-                        actual.kind, *expected_kind,
+                        actual.kind(),
+                        *expected_kind,
                         "kind at {position} in sequence {encoded} len {len}"
                     );
-                    match actual.kind {
+                    match actual.kind() {
                         PartKind::ToolCall => assert_eq!(
-                            actual.tool_name.as_deref(),
+                            actual.tool_name().as_deref(),
                             Some(marker.as_str()),
                             "tool marker at {position} in sequence {encoded} len {len}"
                         ),
                         _ => assert!(
-                            actual.content.contains(marker),
+                            actual.content().contains(marker),
                             "content marker at {position} in sequence {encoded} len {len}: {actual:?}"
                         ),
                     }
@@ -1360,7 +1361,7 @@ mod tests {
             stored
                 .parts
                 .iter()
-                .map(|part| part.kind)
+                .map(|part| part.kind())
                 .collect::<Vec<_>>(),
             [PartKind::Prose, PartKind::Reasoning, PartKind::Prose]
         );
@@ -1369,11 +1370,11 @@ mod tests {
             .iter()
             .filter(|part| {
                 matches!(
-                    part.kind,
+                    part.kind(),
                     PartKind::Prose | PartKind::Text | PartKind::Attachment | PartKind::ToolResult
                 )
             })
-            .map(|part| part.content.as_str())
+            .map(|part| part.content())
             .collect::<Vec<_>>()
             .join("");
         assert_eq!(finish_text, &rendered_text);
@@ -1506,11 +1507,11 @@ mod tests {
 
         assert_eq!(parts.len(), 1, "single attachment yields single part");
         let part = &parts[0];
-        assert!(matches!(part.kind, PartKind::Attachment));
-        assert_eq!(part.content, "");
-        assert_eq!(part.tool_call_id.as_deref(), Some("call-9"));
-        assert_eq!(part.tool_name.as_deref(), Some("screenshot"));
-        let part_attachment = part.attachment.as_ref().expect("attachment present");
+        assert!(matches!(part.kind(), PartKind::Attachment));
+        assert_eq!(part.content(), "");
+        assert_eq!(part.tool_call_id().as_deref(), Some("call-9"));
+        assert_eq!(part.tool_name().as_deref(), Some("screenshot"));
+        let part_attachment = part.attachment().expect("attachment present");
         assert_eq!(part_attachment.source, attachment);
     }
 
@@ -1535,15 +1536,15 @@ mod tests {
             3,
             "text + attachment + text yields three parts"
         );
-        assert!(matches!(parts[0].kind, PartKind::ToolResult));
-        assert!(parts[0].content.starts_with("[\"before\""));
-        assert!(matches!(parts[1].kind, PartKind::Attachment));
+        assert!(matches!(parts[0].kind(), PartKind::ToolResult));
+        assert!(parts[0].content().starts_with("[\"before\""));
+        assert!(matches!(parts[1].kind(), PartKind::Attachment));
         assert_eq!(
-            parts[1].attachment.as_ref().expect("attachment").source,
+            parts[1].attachment().expect("attachment").source,
             attachment
         );
-        assert!(matches!(parts[2].kind, PartKind::ToolResult));
-        assert!(parts[2].content.ends_with("\"after\"]"));
+        assert!(matches!(parts[2].kind(), PartKind::ToolResult));
+        assert!(parts[2].content().ends_with("\"after\"]"));
     }
 }
 

@@ -390,10 +390,10 @@ fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
         .parts
         .iter()
         .filter_map(|part| {
-            let attachment = part.attachment.as_ref()?;
+            let attachment = part.attachment()?;
             let (media_type, label, source, reference) = attachment_summary(&attachment.source);
             Some(RlmAttachmentRef {
-                id: part.id.clone(),
+                id: part.id().to_string(),
                 media_type,
                 label,
                 source,
@@ -420,8 +420,8 @@ fn message_history_text(message: &Message) -> String {
     let chunks = message
         .parts
         .iter()
-        .filter(|part| matches!(part.kind, PartKind::Text | PartKind::Prose))
-        .map(|part| part.content.trim())
+        .filter(|part| matches!(part.kind(), PartKind::Text | PartKind::Prose))
+        .map(|part| part.content().trim())
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     chunks.join("\n\n")

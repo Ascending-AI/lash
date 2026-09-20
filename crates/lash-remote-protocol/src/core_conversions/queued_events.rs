@@ -154,18 +154,19 @@ impl From<lash_core::PluginMessage> for RemotePluginMessage {
 
 impl From<lash_core::Part> for RemotePart {
     fn from(value: lash_core::Part) -> Self {
-        // Part is non-exhaustive outside its owning crate; project its public fields.
+        // Part is non-exhaustive outside its owning crate; project through
+        // its public accessors.
         Self {
-            id: value.id,
-            kind: value.kind.into(),
-            content: value.content,
-            attachment: value.attachment.map(Into::into),
-            tool_call_id: value.tool_call_id,
-            tool_name: value.tool_name,
-            tool_replay: value.tool_replay.map(Into::into),
-            prune_state: value.prune_state.into(),
-            reasoning_meta: value.reasoning_meta.map(Into::into),
-            response_meta: value.response_meta.map(Into::into),
+            id: value.id().to_string(),
+            kind: value.kind().into(),
+            content: value.content().to_string(),
+            attachment: value.attachment().cloned().map(Into::into),
+            tool_call_id: value.tool_call_id().map(str::to_string),
+            tool_name: value.tool_name().map(str::to_string),
+            tool_replay: value.tool_replay().cloned().map(Into::into),
+            prune_state: value.prune_state().clone().into(),
+            reasoning_meta: value.reasoning_meta().cloned().map(Into::into),
+            response_meta: value.response_meta().cloned().map(Into::into),
         }
     }
 }

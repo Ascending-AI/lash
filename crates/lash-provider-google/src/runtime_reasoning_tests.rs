@@ -168,8 +168,8 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
         .messages()
         .iter()
         .flat_map(|message| message.parts.iter())
-        .filter(|part| part.kind == lash_core::PartKind::Reasoning)
-        .map(|part| part.content.as_str())
+        .filter(|part| part.kind() == lash_core::PartKind::Reasoning)
+        .map(|part| part.content())
         .collect::<Vec<_>>();
 
     assert_eq!(activities, ["same reasoning", "same reasoning"]);
@@ -264,8 +264,8 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
         .messages()
         .iter()
         .flat_map(|message| message.parts.iter())
-        .filter(|part| part.kind == lash_core::PartKind::Reasoning)
-        .map(|part| part.content.as_str())
+        .filter(|part| part.kind() == lash_core::PartKind::Reasoning)
+        .map(|part| part.content())
         .collect::<Vec<_>>();
 
     assert_eq!(activities, ["visible reasoning"]);

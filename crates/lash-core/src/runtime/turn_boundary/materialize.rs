@@ -76,8 +76,7 @@ pub(super) fn committed_attachment_ids(
     {
         for part in message.parts.iter() {
             if let Some(attachment_ref) = part
-                .attachment
-                .as_ref()
+                .attachment()
                 .and_then(|attachment| attachment.source.stored_ref())
             {
                 attachment_ids.insert(attachment_ref.id.clone());
@@ -348,7 +347,7 @@ mod tests {
                 source: crate::TurnOutputSource::Runtime,
             })
         );
-        assert_eq!(terminal.parts[0].content, "first response");
+        assert_eq!(terminal.parts[0].content(), "first response");
     }
 
     #[test]

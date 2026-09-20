@@ -256,8 +256,8 @@ pub(crate) fn assistant_reasoning_texts(machine: &TurnMachine) -> Vec<String> {
             message
                 .parts
                 .iter()
-                .filter(|part| matches!(part.kind, PartKind::Reasoning))
-                .map(|part| part.content.clone())
+                .filter(|part| matches!(part.kind(), PartKind::Reasoning))
+                .map(|part| part.content().to_string())
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
@@ -284,8 +284,8 @@ pub(crate) fn assistant_visible_texts(machine: &TurnMachine) -> Vec<String> {
             message
                 .parts
                 .iter()
-                .filter(|part| matches!(part.kind, PartKind::Text | PartKind::Prose))
-                .map(|part| part.content.clone())
+                .filter(|part| matches!(part.kind(), PartKind::Text | PartKind::Prose))
+                .map(|part| part.content().to_string())
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
@@ -768,7 +768,7 @@ impl RlmProtocolExpectations {
                         && message
                             .parts
                             .iter()
-                            .any(|part| part.content.contains(expected))
+                            .any(|part| part.content().contains(expected))
                 }) || run
                     .llm_requests
                     .iter()
@@ -788,7 +788,7 @@ impl RlmProtocolExpectations {
                         && message
                             .parts
                             .iter()
-                            .any(|part| part.content.contains(omitted))
+                            .any(|part| part.content().contains(omitted))
                 }),
                 "{scenario_name} found unexpected system feedback containing `{omitted}`"
             );

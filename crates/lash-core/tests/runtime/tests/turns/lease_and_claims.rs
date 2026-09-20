@@ -263,7 +263,7 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
             .iter()
             .filter(|message| message.role == MessageRole::Assistant)
             .flat_map(|message| message.parts.iter())
-            .all(|part| !part.content.contains("partial provider text")),
+            .all(|part| !part.content().contains("partial provider text")),
         "cancelled streamed partial must not be committed to read-view history"
     );
 }
@@ -361,7 +361,7 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
         active_conversation_messages(&assembled.state)
             .iter()
             .flat_map(|message| message.parts.iter())
-            .all(|part| !part.content.contains("must_not_run"))
+            .all(|part| !part.content().contains("must_not_run"))
     );
     let failed_attempt = &assembled.llm_calls[0].attempts[0];
     assert_eq!(
@@ -667,7 +667,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
         active_conversation_messages(&assembled.state)
             .iter()
             .flat_map(|message| message.parts.iter())
-            .all(|part| !part.content.contains("discarded")),
+            .all(|part| !part.content().contains("discarded")),
         "a failed partial response remains preview output, not committed history"
     );
     let calls = &assembled.llm_calls;
@@ -792,7 +792,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
             .messages()
             .iter()
             .flat_map(|message| message.parts.iter())
-            .all(|part| !part.content.contains("discarded")),
+            .all(|part| !part.content().contains("discarded")),
         "durable failure evidence remains outside model context"
     );
 }
@@ -2149,7 +2149,7 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
         active_conversation_messages(&successor_turn.state)
             .iter()
             .flat_map(|message| message.parts.iter())
-            .filter(|part| part.content == "committed under head CAS")
+            .filter(|part| part.content() == "committed under head CAS")
             .count(),
         1,
         "the successor must reload exactly one predecessor tail that landed after takeover"

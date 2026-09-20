@@ -185,7 +185,7 @@ async fn persisted_provider_response(
             message
                 .parts
                 .iter()
-                .any(|part| part.response_meta.is_some())
+                .any(|part| part.response_meta().is_some())
         })
         .expect("provider-bearing assistant message persisted")
         .parts
@@ -206,7 +206,7 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
         final_response
             .parts
             .iter()
-            .map(|part| part.kind)
+            .map(|part| part.kind())
             .collect::<Vec<_>>(),
         [PartKind::Reasoning, PartKind::Prose]
     );
@@ -214,7 +214,7 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
         tool_calling_response
             .parts
             .iter()
-            .map(|part| part.kind)
+            .map(|part| part.kind())
             .collect::<Vec<_>>(),
         [PartKind::Reasoning, PartKind::Prose, PartKind::ToolCall]
     );
@@ -222,8 +222,11 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
     assert_eq!(tool_calling_response.provider_calls, 2);
 
     let persisted_tool_call = &tool_calling_response.parts[2];
-    assert_eq!(persisted_tool_call.tool_call_id.as_deref(), Some("call-1"));
-    assert_eq!(persisted_tool_call.tool_name.as_deref(), Some("lookup"));
+    assert_eq!(
+        persisted_tool_call.tool_call_id().as_deref(),
+        Some("call-1")
+    );
+    assert_eq!(persisted_tool_call.tool_name().as_deref(), Some("lookup"));
 
     let expected_reasoning_meta = ProviderReasoningReplay {
         item_id: Some("reasoning-1".to_string()),
@@ -235,16 +238,14 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
         )),
         ..ProviderReasoningReplay::default()
     };
-    assert!(final_response.parts[0].reasoning_meta.is_some());
+    assert!(final_response.parts[0].reasoning_meta().is_some());
     let final_reasoning_meta = final_response.parts[0]
-        .reasoning_meta
-        .as_ref()
+        .reasoning_meta()
         .expect("final response reasoning metadata persisted");
     assert_eq!(final_reasoning_meta, &expected_reasoning_meta);
-    assert!(tool_calling_response.parts[0].reasoning_meta.is_some());
+    assert!(tool_calling_response.parts[0].reasoning_meta().is_some());
     let tool_calling_reasoning_meta = tool_calling_response.parts[0]
-        .reasoning_meta
-        .as_ref()
+        .reasoning_meta()
         .expect("tool-calling response reasoning metadata persisted");
     assert_eq!(tool_calling_reasoning_meta, &expected_reasoning_meta);
     assert_eq!(final_reasoning_meta, tool_calling_reasoning_meta);
@@ -261,16 +262,14 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
         )),
         ..ResponseTextMeta::default()
     };
-    assert!(final_response.parts[1].response_meta.is_some());
+    assert!(final_response.parts[1].response_meta().is_some());
     let final_response_meta = final_response.parts[1]
-        .response_meta
-        .as_ref()
+        .response_meta()
         .expect("final response text metadata persisted");
     assert_eq!(final_response_meta, &expected_response_meta);
-    assert!(tool_calling_response.parts[1].response_meta.is_some());
+    assert!(tool_calling_response.parts[1].response_meta().is_some());
     let tool_calling_response_meta = tool_calling_response.parts[1]
-        .response_meta
-        .as_ref()
+        .response_meta()
         .expect("tool-calling response text metadata persisted");
     assert_eq!(tool_calling_response_meta, &expected_response_meta);
     assert_eq!(final_response_meta, tool_calling_response_meta);

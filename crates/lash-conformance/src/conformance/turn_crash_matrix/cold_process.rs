@@ -618,7 +618,7 @@ pub async fn cold_process_real_turn_driver(
                                     .messages
                                     .iter()
                                     .flat_map(|message| message.parts.iter())
-                                    .filter(|part| part.content == "trace turn complete")
+                                    .filter(|part| part.content() == "trace turn complete")
                                     .count()
                             })
                             .unwrap_or(0);
@@ -726,7 +726,7 @@ pub async fn cold_process_real_turn_driver(
         .messages
         .iter()
         .flat_map(|message| message.parts.iter())
-        .filter(|part| part.content == "trace turn complete")
+        .filter(|part| part.content() == "trace turn complete")
         .count();
     let pending_input_count = reader
         .list_pending_turn_inputs(&identity.session_id)

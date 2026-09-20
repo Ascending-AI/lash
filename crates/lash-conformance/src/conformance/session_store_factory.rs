@@ -246,7 +246,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         view.messages().iter().all(|message| message
             .parts
             .iter()
-            .all(|part| !part.content.contains(partial_text))),
+            .all(|part| !part.content().contains(partial_text))),
         "settlement evidence has no graph/message path into prompt assembly"
     );
     assert_eq!(

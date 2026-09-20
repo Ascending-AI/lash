@@ -116,8 +116,8 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
         .messages()
         .iter()
         .flat_map(|message| message.parts.iter())
-        .filter(|part| matches!(part.kind, lash_core::PartKind::Reasoning))
-        .map(|part| part.content.as_str())
+        .filter(|part| matches!(part.kind(), lash_core::PartKind::Reasoning))
+        .map(|part| part.content())
         .collect::<Vec<_>>();
     assert_eq!(
         durable_reasoning,
@@ -601,7 +601,7 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
                     ) && message
                         .parts
                         .iter()
-                        .any(|part| part.content.contains(MARKER))
+                        .any(|part| part.content().contains(MARKER))
                 }
                 lash_core::SessionHistoryRecord::Protocol(event) => matches!(
                     lash_protocol_rlm::decode_rlm_protocol_event(event),
@@ -660,7 +660,7 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
                     lash_core::SessionHistoryRecord::Conversation(message) => message
                         .parts
                         .iter()
-                        .any(|part| part.content.contains(MARKER)),
+                        .any(|part| part.content().contains(MARKER)),
                     lash_core::SessionHistoryRecord::Protocol(event) => matches!(
                         lash_protocol_rlm::decode_rlm_protocol_event(event),
                         Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
