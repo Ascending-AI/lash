@@ -359,7 +359,9 @@ language semantics:
   interleaving and shared-mutation order can differ. The census records it as
   `registered-deviation:TS_ASYNC_MAP_SEQUENTIAL_V1` on the
   `typescript async-array-callbacks` row, so the deviation is indexed where
-  every other ruling is indexed rather than living only in this list.
+  every other ruling is indexed rather than living only in this list. That row
+  indexes the deviation; the callback semantics themselves are pinned by the
+  async-driver tests, not by the census.
 - Direct `globalThis.name` reads and writes, including replacement from inside
   a function, plus nested-path mutation, membership, and deletion share the
   same durable session slots as top-level bindings. Nested-function replacement

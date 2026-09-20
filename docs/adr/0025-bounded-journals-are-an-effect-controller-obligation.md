@@ -200,9 +200,9 @@ tool result into a deterministic failure.
 
 ## Outstanding tool children at a boundary (FIG-3392)
 
-**Not yet implemented.** FIG-3397 lands reattachment and the admission bound;
-the contract is
-[docs/design/effect-group-tool-children.md](../design/effect-group-tool-children.md).
+**Decided, not yet implemented.** FIG-3397 lands reattachment and the admission
+bound; the full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
 Effect groups made it possible for a boundary to arrive while independently
 durable children are still running, and the obvious rule — *never segment while
@@ -231,13 +231,38 @@ Restate, attach is by invocation id and is bounded by journal and idempotency
 retention (both default to 24 hours on the server), so **an expired attachment is
 a typed recovery failure, never permission to rerun the child's side effect**.
 
-**A group's open admits two dimensions, before it dispatches anything.** Width
-alone does not bound an opener: aggregate width *and* retained outstanding work,
-nested groups included, are admitted as a typed refusal of the whole open, with
-command headroom left for the close and handover the group will need. The
-controller's budget stays the controller's — `crates/lash-restate/src/controller/mod.rs`
-carries `segment_effect_budget` as a construction-time option — and admission
-must not spend all of it on children.
+**A group's open admits retained work, before it dispatches anything, and
+outstanding work is the wrong half.** Width alone bounds nothing, and neither
+does "outstanding": width-two races whose losers finish promptly accumulate
+unlimited settled rows and retained results while almost nothing is outstanding.
+The bound is therefore over **retained work per exact logical opener** — nested,
+accepted-unclaimed, running, closing **and settled-but-still-required** children
+and group metadata — counting unique executions separately from operand
+positions, reserved atomically at acceptance, reused by replay, and released only
+when a child's recovery and consumer dependencies are discharged. Refusal is of
+the whole open, before dispatch, and accepted work is never retroactively refused
+by a changed budget.
+
+**A completed group may retire as a whole while its opener remains live**, once
+no replay or continuation needs it and an existing identity fence prevents
+resurrection; otherwise a days-long opener could never reclaim anything. Retiring
+the live opener's whole scope to retire one group is not available.
+
+**Backend command headroom is a per executing controller/segment bound**, not one
+counter spanning a days-long opener. Admission includes a finite
+controller-specific upper bound for parent-side dispatch, observation,
+cancellation, incorporation and handover commands. The controller's budget stays
+the controller's — `crates/lash-restate/src/controller/mod.rs` carries
+`segment_effect_budget` as a construction-time option — and **FIG-3397 names those
+accounting units and their release conditions**.
+
+The **close deadline** takes the same construction-time shape, beside that budget.
+It is an **attempt-local drain budget** that starts when an attempt's cancel
+decision commits, so a slow sibling cannot consume another child's budget. On
+expiry the attempt is logically cancelled while the opener's closing state stays
+recorded and discoverable by the existing work driver; finalization does not
+commit an ordinary terminal that would fence out the remaining obligations.
+**Changing the budget never changes committed obligations.**
 
 **Mid-aggregate VM suspension is not assumed.** A resumable mid-aggregate frame
 is required only if command accounting shows a bounded aggregate cannot meet the

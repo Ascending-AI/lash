@@ -20,12 +20,13 @@ dialect; there is no second surface to be at parity with. Every reference to
 "Lashlang" below names the IR and VM that this dialect lowers into, never a
 second authored language.
 
-Amended 2026-09-21 (FIG-3392): opener-close cancellation of an unfinished tool
-call is recorded as a **host lifetime contract**, and the Node oracle for
-lifetime comparisons keeps the host alive after an async function returns. See
-["Opener close is a host lifetime contract"](#opener-close-is-a-host-lifetime-contract-fig-3392)
-below. Not yet implemented; the contract is
-[docs/design/effect-group-tool-children.md](../design/effect-group-tool-children.md).
+Amended 2026-09-21 (FIG-3392): two **host lifetime contracts** are recorded —
+opener-close cancellation of an unfinished tool call, and an await that nothing
+can resolve — with a Node oracle that keeps the host alive after an async
+function returns. Neither is a deviation-register entry. See
+["Two host lifetime contracts"](#two-host-lifetime-contracts-fig-3392) below.
+Decided, not yet implemented; the full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
 ## Context
 
@@ -286,50 +287,76 @@ knows the dialect, rather than read from the VM's reference-semantics flag at ru
 time. That flag answers a heap-ownership question, and one predicate answering
 two questions is the defect shape that cost an earlier layer three rounds.
 
-### Opener close is a host lifetime contract (FIG-3392)
+### Two host lifetime contracts (FIG-3392)
 
-**Not yet implemented.** `Promise.race` and `Promise.any` are still refused at
-lowering with `"Unsupported: Promise.{method} requires durable
-partial-settlement ordering (FIG-1416)."`, so nothing below describes `main`.
-The contract is
-[docs/design/effect-group-tool-children.md](../design/effect-group-tool-children.md);
+**Decided, not yet implemented.** `Promise.race` and `Promise.any` are still
+refused at lowering with `"Unsupported: Promise.{method} requires durable
+partial-settlement ordering (FIG-1416)."` The full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md);
 [ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)
-carries the matching amendment.
+carries the matching group-side amendment.
+
+A **host lifetime contract** is not a deviation. The deviation register below
+covers operations whose *meaning* departs from ECMA-262. Both rules here keep the
+program's meaning exactly and describe what happens to the host that was running
+it — a subject ECMA-262 does not address at all, since it has neither a `finish`,
+nor a host shutdown, nor a process. Neither becomes a register entry.
+
+#### 1. Opener close cancels an unfinished arm
 
 **Selection never cancels.** While the opener lives, `all`, `race` and `any`
-leave every losing arm running, which is ECMA-262's meaning and is not a
-deviation. A program cannot observe anything different from Node here.
+leave every losing arm running, which is ECMA-262's meaning.
 
-**At opener end an unfinished arm is cancelled, and that is a lifetime contract
-rather than a change to `race`.** `finish`, host shutdown and turn cancellation
-are not ECMA-262 concepts; ECMA-262 has nothing to say about what happens to a
-pending promise when the host that owns it stops. So the comparison cannot be
-made against the specification, and it must not be made against Node *process
-death* either — a process that exits kills its pending work, which would flatter
-lash by hiding the real difference.
+**At opener end an unfinished arm is cancelled.** The comparison cannot be made
+against the specification, and it must not be made against Node *process death*
+either — a process that exits kills its pending work, which would flatter lash by
+hiding the difference. **The Node oracle therefore keeps the host alive after the
+function returns:** in a still-running Node process, returning from an async
+function does not cancel a losing timer or socket, and that arm's later write can
+land after the caller returned. Lash suppresses that write at opener close.
 
-**The Node oracle therefore keeps the host alive after the function returns.**
-The honest comparison is: in a still-running Node process, returning from an
-async function does not cancel a losing timer or socket, and that arm's later
-write can land after the caller returned. Lash suppresses that write at opener
-end. Stating it that way names a real divergence; stating it against process
-exit would state a false equivalence.
+This statement concerns **cancellation only**. It claims no general Node
+scheduling or lifetime equivalence — source-order intent head-of-line blocking
+and the registered sequential async-map deviation can already produce observable
+ordering differences while the opener is live — and opener close fences further
+unprotected Lash semantic writes without guaranteeing that external I/O already
+issued stops.
 
 **An attempt whose final result already committed is exempt.** Its declared
-intents are realized before the opener settles, and they survive a crash in that
-window. Cancellation stops delivery of a *result*, never a side effect already
-performed — [ADR 0042](0042-tool-attempts-are-atomic.md) already makes
+intents are realized before the opener settles and survive a crash in that window
+(ADR 0099 §4). Cancellation stops delivery of a *result*, never a side effect
+already performed — [ADR 0042](0042-tool-attempts-are-atomic.md) already makes
 in-attempt effects at-least-once.
 
-**Work that must outlive the opener is a process the program named.**
-`processes.start` plus `processes.await` is the surface, and cancelling a losing
-`processes.await` releases the wait without cancelling the process
+**Work that must outlive the opener is a process the program named.** A losing
+`processes.await` stays admitted while the opener lives; opener close releases
+the wait without cancelling the process
 ([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)).
 
-When FIG-3397 lands, this becomes an entry in the executable deviation register
-in `crates/lash-typescript/README.md`, and register entry 15 (aggregate
-rejection timing) retires in the same change, as ADR 0065's consequences already
-anticipate. Neither move happens ahead of the code.
+#### 2. An await that nothing can resolve ends the cell
+
+`Promise.race([])` returns a forever-pending promise in ECMA-262, and **the
+dialect keeps exactly that meaning**: there is no exception to catch, no
+synthesized rejection, and no registered deviation. Because the dialect awaits
+aggregates in place, zero operands open no group at all — ADR 0065 already
+refuses empty groups — so the host detects an await nothing can resolve and
+**fails the cell with a typed host-level unsettled-await error**.
+
+That is the analogue of Node exiting with code 13 on an unsettled top-level
+await: the program's semantics are ECMA's, and the host's lifetime ends rather
+than parking a durable execution forever. FIG-3397 names the error code.
+
+The other empty aggregates need no host rule: `Promise.all([])` and
+`Promise.allSettled([])` return `[]`, and `Promise.any([])` rejects with an
+`AggregateError` whose `errors` is empty, all as ECMA-262 specifies.
+
+#### Register bookkeeping
+
+Neither contract above enters the numbered register. What does move when
+FIG-3397 lands is register entry 15 (aggregate rejection timing), which retires
+in that change because every aggregate is then on first-settlement wake — as ADR
+0065's consequences already anticipate. That move does not happen ahead of the
+code.
 
 ### Parser: SWC, pinned, behind a lash-owned adapter
 

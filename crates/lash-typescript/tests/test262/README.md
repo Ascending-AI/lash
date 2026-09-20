@@ -19,7 +19,9 @@ A deviation reason is spelled `registered-deviation:<NAME>`, naming an entry in
 the deviation register in the crate README. It is the only way a row can record
 "the dialect accepts this construct and diverges in a named, documented way":
 `accepted` must carry reason `-`, and `rejected` must name a real `TS_*`
-diagnostic that some path actually produces.
+diagnostic that some path actually produces. Such a row **indexes** a deviation
+so no ruling is unrecorded; it is not executable evidence of the behaviour it
+names, and the tests that pin that behaviour live elsewhere in the crate.
 
 A `rejected` row also carries a fifth column, the **probe**: a source that must
 reject with exactly the diagnostic the row names. Naming a diagnostic is a claim

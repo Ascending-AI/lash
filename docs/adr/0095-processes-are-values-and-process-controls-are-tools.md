@@ -205,8 +205,8 @@ one recorded settlement order and no phases.
 
 ## Amendment: "never a batch child" becomes the Durable Wait child contract (FIG-3392)
 
-**Not yet implemented.** FIG-3397 lands it; the contract is
-[docs/design/effect-group-tool-children.md](../design/effect-group-tool-children.md).
+**Decided, not yet implemented.** FIG-3397 lands it; the full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
 "One handle kind, and await is a Durable Wait" above says `processes.await` "is
 never a batch child". That sentence was written against the **atomic** batch,
@@ -234,13 +234,23 @@ is still resolved by attaching to the process;
 holds the equivalence it documents today, that "`await processes.await({ handle
 })` answers exactly what `await handle`".
 
-**Cancelling the wait releases the wait and never the process.** A losing
-`processes.await` inside a `race` is cancelled at opener close like any other
-unfinished arm, and the process it observed keeps running under its
-[ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)
-lifecycle, with its own captured environment, journal, cancel protocol and
-terminal delivery. This is the ruled answer to "I want work that outlives the
-turn": name a process, and race the wait rather than the work.
+**Selection does not cancel the wait; opener close does.** A winning timer in
+`race([processes.await(job), sleep(10_000)])` leaves the losing wait **admitted
+while the opener remains live**, and a live opener that crashes must recover it.
+Opener close then cancels and releases that wait **without requesting
+cancellation of `job`**. The process's eventual lifetime is still this ADR's and
+[ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)'s,
+through its own Parent Scope and Lifecycle Policy: surviving wait cancellation
+does not guarantee surviving parent end. This is the ruled answer to "I want work
+that outlives the turn": name a process, and race the wait rather than the work.
+
+**A process terminal and a cancellation of the wait are different facts.** A
+process terminal — success, failure, or cancellation of the process — travels as
+a payload and is converted at the await site:
+`crates/lash-restate/src/process/mod.rs` encodes every `ProcessAwaitOutput`
+through `Resolution::Ok`, while `Resolution::Cancelled` is *wait* cancellation and
+becomes a distinct `process_await_cancelled` failure. Cancelling the wait is host
+cancellation and must never be rendered as a fabricated process terminal.
 
 The refusal of a **raw** handle at an element position is unchanged —
 `crates/lashlang/src/runtime/vm/pending_tools.rs` keeps the repair "a process

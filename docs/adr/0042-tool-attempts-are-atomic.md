@@ -6,11 +6,14 @@ ADR 0094 replaces the parent-end policy and settlement design described below.
 The atomic-attempt and recorded-intent decisions remain accepted.
 
 Amended 2026-09-21 (FIG-3392): the phase between "final attempt recorded" and
-"declarations drained" is named as a protected lifecycle phase with an explicit
-arbitration against cancellation, and the coordination around an atomic attempt
-is placed at handler level on a child's own admitted controller. See
+"declarations drained" is named as a protected lifecycle phase, with the final
+record and the cancel disposition arbitrated at **one** durable linearization
+point, and the coordination around an atomic attempt is placed at handler level
+on a child's own admitted controller. See
 ["The protected phase, and where coordination runs"](#the-protected-phase-and-where-coordination-runs-fig-3392)
-at the end of this ADR. Not yet implemented outside the in-process batch path.
+at the end of this ADR; the full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
+Decided, not yet implemented outside the in-process batch path.
 
 Tool implementations are opaque host code. Lash cannot reliably discover,
 name, order, or replay every network call, database write, timer, or other side
@@ -307,9 +310,9 @@ and cannot be recorded as a `CommandFailed` tool-intent refusal.
 ## The protected phase, and where coordination runs (FIG-3392)
 
 **Partly implemented.** The protected phase exists today in the in-process batch
-path; the arbitration below and the handler-level driver are FIG-2266's and
-FIG-3396's work. The contract is
-[docs/design/effect-group-tool-children.md](../design/effect-group-tool-children.md).
+path; the durable arbitration below and the handler-level driver are FIG-3396's
+and FIG-2266's work. The full contract is
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
 ### "Records the final attempt first, then drains its declarations" is a phase
 
@@ -319,31 +322,39 @@ recorded fact exists and its declared consequences do not yet. That window is a
 **protected lifecycle phase**, not an implementation interval, and this ADR now
 says what happens when something else arrives during it.
 
-The code already takes the protection seriously on the in-process path.
+**Cancellation requests are not cancellation decisions.** The final-attempt
+record and the cancel disposition compete at **one durable, fenced linearization
+point**, and exactly one may commit. Arrival, recording and fence closure are
+different events, and naming a single point is what keeps them from producing two
+winners:
+
+- **A winning final record retains settlement ownership.** Its declarations are
+  drained and its projection recorded before the enclosing scope may report
+  success, whether the opener is live or closing.
+- **A winning cancel disposition refuses any subsequent attempt-final record**,
+  typed, with no journal write. Signalling the body and the bounded grace follow
+  the decision and cannot reverse it; grace expiry never changes the winner.
+- **A final record found after recovery is protected even if its in-memory commit
+  notification was never published.** Worker loss during the phase is not
+  cancellation: recovery finishes the drain.
+- **Cancellation forbids new unprotected semantic admission under the cancelled
+  invocation.** It does not undo already-admitted commands and does not cancel
+  committed descendant obligations — which matters because `batch` and
+  `spawn_agent` have no `ToolAttempt` frame of their own, so an uncommitted
+  orchestrator can already hold committed descendants. Orchestrating children are
+  classified by their retained command and child obligations, never by an invented
+  outer attempt.
+
+The code takes the protection seriously on the in-process path, and that path is
+local rather than durable — which is precisely the gap.
 `crates/lash-core-execution/src/session/tool_execution/batch.rs` short-circuits
 its own cancel grace with `if final_result_committed.is_committed() { return
 tool_call.await; }`, and
-`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`
-publishes that signal where the terminal is sealed — `begin_final_drain`
-"Publishes this child's committed final result and waits for its turn to drain
-the declared intents".
-
-The arbitration, stated once:
-
-- **A cancellation that arrives while an attempt is uncommitted wins.** The
-  attempt is cancelled and no declarations are realized.
-- **A commit that lands before the cancel fence closes wins,** and the winning
-  commit **retains settlement ownership**: its declarations are drained and its
-  projection recorded before the enclosing scope may report success.
-- **A cancellation that arrives after a commit is refused, not queued.** An
-  implementation that defers it until the drain finishes has reintroduced the
-  loss the phase exists to prevent.
-- **A completion that arrives after the fence closed is a typed late-completion
-  refusal with no journal write,** and the refusal's evidence outlives the
-  group's retirement.
-- **Worker loss during the phase is not cancellation.** Recovery finishes the
-  drain. A recorded declaration is never destroyed because the worker that
-  recorded it died.
+`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs` publishes
+that signal where the terminal is sealed — `begin_final_drain` "Publishes this
+child's committed final result and waits for its turn to drain the declared
+intents". That is a watch-channel send followed by a gate wait: correct in one
+process, and not an arbitration primitive across a crash.
 
 This does not weaken the at-least-once disclaimer below: an *unrecorded*
 completion still means the whole attempt runs again, and opaque in-attempt I/O
@@ -357,14 +368,17 @@ ordinal-addressed journal* — is unchanged, and it decides where a tool child's
 coordination lives. Retry, completion-key derivation, deferred await and the
 orchestrating lane are **coordination**; they run at handler level on the
 child's own admitted controller. Only the atomic attempt runs inside the
-recorded body.
+recorded body. On Restate the recorded body is a `ctx.run` closure, and the rule
+is decisive there: the closure may emit no journal command, so a driver built
+inside it could not coordinate at all.
 
-On Restate the recorded body is a `ctx.run` closure, and two facts make the
-placement mandatory rather than stylistic: nothing inside the closure may emit a
-command, and **no SDK can interrupt a closure that is already executing** — the
-cancel signal is observable at handler level and not inside a running `ctx.run`.
-A driver built inside the closure therefore could neither coordinate nor be
-cancelled.
+A second, weaker argument is often overstated, so state it precisely. In the
+pinned `restate-sdk` 0.11.1, a run future in its `ClosureRunning` state polls the
+closure without observing SDK cancellation at that point; cancellation is checked
+before the closure starts. That is this SDK on this path, not a universal claim
+about every SDK, and **explicit cooperative cancellation inside opaque work
+remains possible and is how a running attempt is cancelled** (ADR 0099 §4). The
+structural reason is the one that decides placement.
 
 One resolver answers "what runs this child" for first dispatch and for recovery
 alike ([ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)'s
