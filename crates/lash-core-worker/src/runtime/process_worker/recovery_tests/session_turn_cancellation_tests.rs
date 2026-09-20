@@ -83,7 +83,7 @@ async fn repeated_session_turn_cleanup_failure_is_faulted_per_attempt_then_aband
                 // dispatcher task is gone".
                 let idle = {
                     let state = worker.execution_scheduler.state.lock_recover();
-                    state.active == 0 && matches!(state.extra, ProcessWorklistScan::Idle)
+                    state.running_count() == 0 && matches!(state.extra, ProcessWorklistScan::Idle)
                 };
                 if idle {
                     break;

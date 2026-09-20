@@ -543,9 +543,10 @@ async fn public_single_pass_handle_never_eagerly_rehydrates_a_positive_peek() {
         !state.dispatcher_running(),
         "the dispatcher retires after the single pass"
     );
-    assert_eq!(state.active, 0);
-    assert!(state.pending.is_empty());
-    assert!(state.rerun.is_empty());
+    assert!(
+        state.queue_idle(),
+        "no queued and no running entries remain after the retired pass"
+    );
     drop(state);
     assert_eq!(
         handle.hydrations.load(Ordering::SeqCst),
@@ -553,6 +554,49 @@ async fn public_single_pass_handle_never_eagerly_rehydrates_a_positive_peek() {
         "a retired single pass must not rehydrate a positive peek"
     );
     assert_eq!(handle.peeks.load(Ordering::SeqCst), 1);
+}
+
+struct DrainOnceRunHandle {
+    runs: AtomicUsize,
+    completed: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl QueuedWorkRunHandle for DrainOnceRunHandle {
+    async fn run_queued_work(
+        &self,
+        _request: QueuedWorkRunRequest,
+    ) -> Result<(), QueuedWorkRunError> {
+        self.runs.fetch_add(1, Ordering::SeqCst);
+        self.completed.notify_one();
+        Ok(())
+    }
+}
+
+/// Once every demand has run to completion there are no queued and no running
+/// entries left, so the dispatcher task ends instead of staying resident.
+#[tokio::test]
+async fn dispatcher_terminates_when_no_queued_and_no_running_entries_remain() {
+    let handle = Arc::new(DrainOnceRunHandle {
+        runs: AtomicUsize::new(0),
+        completed: tokio::sync::Notify::new(),
+    });
+    let driver = NativeQueuedWork::new(handle.clone());
+    driver.notify_pending_work(Some(&SessionId::from("session-done")), "queued_turn_input");
+
+    tokio::time::timeout(Duration::from_secs(1), handle.completed.notified())
+        .await
+        .expect("the admitted demand runs");
+
+    let wake_tasks = driver.inner.wake_tasks.clone();
+    wake_tasks.close();
+    tokio::time::timeout(Duration::from_secs(5), wake_tasks.wait())
+        .await
+        .expect("the dispatcher exits once the schedule is empty");
+
+    let state = driver.inner.scheduler.lock_state();
+    assert!(!state.dispatcher_running());
+    assert!(state.queue_idle());
 }
 
 struct ContendedRunHandle {

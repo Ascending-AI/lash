@@ -283,7 +283,14 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
         .expect("the next drive reports its own admission");
     wait_for_terminal_count(&registry, 3, "retry after continuation exhaustion").await;
     assert_eq!(retry_runs.load(Ordering::SeqCst), 2);
-    assert_eq!(worker.execution_scheduler.state.lock_recover().active, 0);
+    assert_eq!(
+        worker
+            .execution_scheduler
+            .state
+            .lock_recover()
+            .running_count(),
+        0
+    );
 }
 
 #[tokio::test]

@@ -333,13 +333,9 @@ impl ProcessExecutionScheduler {
     }
 
     fn complete_execution(&self, process_id: &ProcessId) {
-        self.complete(process_id, |process_id| {
-            tracing::warn!(
-                process_id = process_id.as_str(),
-                event = "process_execution.scheduler_accounting",
-                "process execution completed without an active scheduler entry"
-            );
-        });
+        // A completion with no running entry cannot be produced by the
+        // protocol: a task exists only for a popped (running) record.
+        self.complete(process_id);
     }
 }
 

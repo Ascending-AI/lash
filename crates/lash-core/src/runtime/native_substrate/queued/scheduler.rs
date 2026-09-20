@@ -79,14 +79,9 @@ pub(super) struct QueuedWorkExecutionTaskCompletion {
 
 impl Drop for QueuedWorkExecutionTaskCompletion {
     fn drop(&mut self) {
-        self.scheduler.complete(&self.session_id, |session_id| {
-            tracing::warn!(
-                target: "lash_core::queued_work",
-                session_id = session_id.as_ref().map(SessionId::as_str),
-                event = "queued_work.scheduler_accounting",
-                "queued-work execution completed without an active scheduler entry"
-            );
-        });
+        // A completion with no running entry cannot be produced by the
+        // protocol: a task exists only for a popped (running) demand.
+        self.scheduler.complete(&self.session_id);
     }
 }
 
