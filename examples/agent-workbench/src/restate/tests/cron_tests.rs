@@ -1111,6 +1111,20 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         lash::persistence::SessionStoreFactory::open_existing_store(&self.inner, request).await
     }
 
+    // A Durable Session acquires by id; the fixture's meta loss must be
+    // visible through that seam too, not hidden behind an unimplemented
+    // default that reports the session as absent.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
+        if self.absent_session_ids.lock_recover().contains(session_id) {
+            return Ok(None);
+        }
+        lash::persistence::SessionStoreFactory::open_existing_store_by_id(&self.inner, session_id)
+            .await
+    }
+
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         lash::persistence::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
     }

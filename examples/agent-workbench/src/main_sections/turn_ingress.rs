@@ -100,9 +100,18 @@ pub(crate) async fn admit_turn_input(
     surface: &str,
 ) -> Result<TurnInputReceipt, AppError> {
     let source_id = format!("workbench-turn-input-{}", uuid::Uuid::new_v4());
-    // The Durable Session never creates (ADR 0097): this ingress is for a
-    // session the workbench already created, and an unknown or retired id is
-    // refused here instead of quietly materialising session metadata.
+    // The Durable Session never creates (ADR 0097), and the workbench admits
+    // input for a session whose first turn may not have run yet, so the
+    // catalog entry is created here — explicitly, through the workbench's own
+    // store factory — instead of being materialised as a side effect of the
+    // enqueue. `create_store` is idempotent for an id that already exists.
+    state
+        .session_store_factory
+        .create_store(&state_store_request(state, session_id))
+        .await
+        .map_err(|error| {
+            state.session_admission_error(session_id, surface, lash::EmbedError::Store(error))
+        })?;
     let acceptance = state
         .core
         .session(session_id.clone())
