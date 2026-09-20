@@ -392,7 +392,6 @@ pub mod facade_support {
     pub use crate::triggers::deterministic_occurrence_id;
     pub use crate::triggers::deterministic_subscription_id;
     pub use crate::triggers::empty_trigger_source_key;
-    pub use crate::triggers::encode_trigger_effect_result_receipt;
     pub use crate::triggers::evaluate_trigger_mutation;
     pub use crate::triggers::evaluate_trigger_mutation_with_incarnation;
     pub use crate::triggers::evaluate_trigger_prune;

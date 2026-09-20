@@ -383,11 +383,15 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // vocabularies at the DDL level (FIG-2811): both were unconstrained TEXT
 // whose closed enum was enforced only at read time. Component-103 catalogs
 // are rejected and recreated.
-// Version 105 (FIG-3376) moves the durable `SessionCreateRequest` stored in
+// Version 105 gives the trigger mutation-receipt table typed NOT NULL
+// `owner_kind`/`owner_id` columns with a named owner-kind CHECK (FIG-1956),
+// deleting the `_owner_scope_namespace` JSON encoding entirely.
+// Component-104 catalogs are rejected and recreated.
+// Version 106 (FIG-3376) moves the durable `SessionCreateRequest` stored in
 // process rows, trigger targets, and effect payloads to the spawn-time
-// plugin-init cutover and drops `usage_source`. Component-104 catalogs are
+// plugin-init cutover and drops `usage_source`. Component-105 catalogs are
 // rejected and recreated.
-const SCHEMA_VERSION: i32 = 105;
+const SCHEMA_VERSION: i32 = 106;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

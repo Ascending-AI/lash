@@ -66,10 +66,13 @@ const POST_FLOOR_TABLES: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
 /// guards drop with it, and component 102 added no index over a table the floor
 /// already had.
 const POST_FLOOR_INDEXES: [&str; 0] = [];
-/// The columns absent from component 101: none — component 102 moved the
-/// affected-input evidence into a child table rather than adding columns to a
-/// table the floor already had.
-const POST_FLOOR_COLUMNS: [(&str, &str); 0] = [];
+/// The columns absent from component 101: the trigger mutation-receipt owner
+/// columns component 105 installed (FIG-1956) — the receipts table itself
+/// predates the floor, so its post-floor columns drop by name.
+const POST_FLOOR_COLUMNS: [(&str, &str); 2] = [
+    ("lash_trigger_mutation_receipts", "owner_kind"),
+    ("lash_trigger_mutation_receipts", "owner_id"),
+];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
 const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
@@ -78,10 +81,10 @@ const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
 ///
-/// Empty under the component-104 boundary: the retained generation is 103, whose
-/// immediate predecessor 102 carried an identical catalog (103 moved the floor,
-/// not a relation), so the component-102 divergent fixture has no post-stamp
-/// artifact to enumerate.
+/// Empty under the component-105 boundary: the retained generation is 104,
+/// whose immediate predecessor 103's arm introduced no relation (104 added
+/// CHECK constraints only), so the component-103 divergent fixture has no
+/// post-stamp artifact to enumerate.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation

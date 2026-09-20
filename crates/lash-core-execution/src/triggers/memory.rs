@@ -14,7 +14,7 @@ pub struct InMemoryTriggerStore {
 #[cfg(any(test, feature = "testing"))]
 pub struct RawTriggerStateForTesting {
     pub subscriptions: Vec<TriggerSubscriptionRecord>,
-    pub mutation_receipts: Vec<(String, String, TriggerEffectResult, u64)>,
+    pub mutation_receipts: Vec<(String, String, String, String, TriggerEffectResult, u64)>,
     pub occurrences: Vec<TriggerOccurrenceRecord>,
     pub deliveries: Vec<(String, String, ProcessId, u64, TriggerSubscriptionRecord)>,
 }
@@ -53,9 +53,11 @@ impl InMemoryTriggerStore {
             .mutation_receipts
             .iter()
             .map(
-                |(operation_id, (_, request_fingerprint, result, created_at_ms))| {
+                |(operation_id, (owner_scope, request_fingerprint, result, created_at_ms))| {
                     (
                         operation_id.clone(),
+                        owner_scope.owner_kind_column().to_string(),
+                        owner_scope.owner_id_column().to_string(),
                         request_fingerprint.clone(),
                         result.clone(),
                         *created_at_ms,
@@ -83,35 +85,6 @@ impl InMemoryTriggerStore {
             occurrences,
             deliveries,
         }
-    }
-
-    /// Insert one receipt encoded exactly as an older SQL backend stored it.
-    #[cfg(any(test, feature = "testing"))]
-    #[expect(
-        clippy::expect_used,
-        reason = "test-only accessor: a missing subscription row or an undecodable fixture is a broken test setup"
-    )]
-    pub fn insert_legacy_mutation_receipt_for_testing(
-        &self,
-        operation_id: impl Into<String>,
-        request_fingerprint: impl Into<String>,
-        result_json: &str,
-        created_at_ms: u64,
-    ) {
-        let result = serde_json::from_str(result_json).expect("decode legacy trigger receipt");
-        self.state.lock_recover().mutation_receipts.insert(
-            operation_id.into(),
-            (None, request_fingerprint.into(), result, created_at_ms),
-        );
-    }
-
-    /// Report whether one raw receipt remains in the in-memory store.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn has_mutation_receipt_for_testing(&self, operation_id: &str) -> bool {
-        self.state
-            .lock_recover()
-            .mutation_receipts
-            .contains_key(operation_id)
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -188,7 +161,7 @@ impl Default for InMemoryTriggerStore {
 pub(super) struct InMemoryTriggerEventState {
     pub(super) subscriptions: BTreeMap<String, TriggerSubscriptionRecord>,
     pub(super) mutation_receipts:
-        BTreeMap<String, (Option<String>, String, TriggerEffectResult, u64)>,
+        BTreeMap<String, (TriggerOwnerScope, String, TriggerEffectResult, u64)>,
     pub(super) occurrences: BTreeMap<String, TriggerOccurrenceRecord>,
     pub(super) occurrence_id_by_idempotency_key: BTreeMap<String, String>,
     pub(super) occurrence_reclaimable_at_ms: BTreeMap<String, u64>,
@@ -459,10 +432,7 @@ impl TriggerStore for InMemoryTriggerStore {
             state
                 .mutation_receipts
                 .values()
-                .filter_map(|(owner_scope, _, _, _)| owner_scope.as_deref())
-                .filter_map(|owner_scope| {
-                    owner_scope.strip_prefix("session:").map(SessionId::from)
-                }),
+                .filter_map(|(owner_scope, _, _, _)| owner_scope.session_id().cloned()),
         );
         Ok(session_ids.into_iter().collect())
     }
@@ -564,15 +534,11 @@ impl TriggerStore for InMemoryTriggerStore {
         staged
             .mutation_receipts
             .retain(|_, (owner_scope, _, _, _)| {
-                let Some(owner_scope) = owner_scope.as_deref() else {
+                let Some(session_id) = owner_scope.session_id() else {
                     return true;
                 };
-                let Some(session_id) = owner_scope.strip_prefix("session:") else {
-                    return true;
-                };
-                let session_id = SessionId::from(session_id);
-                !deleted_session_ids.contains(&session_id)
-                    || retained_delivery_session_ids.contains(&session_id)
+                !deleted_session_ids.contains(session_id)
+                    || retained_delivery_session_ids.contains(session_id)
             });
 
         let report = TriggerRetentionReconciliationReport {
@@ -703,19 +669,12 @@ impl TriggerStore for InMemoryTriggerStore {
         let before = state.mutation_receipts.len();
         state
             .mutation_receipts
-            .retain(
-                |_, (owner_scope, _, _, created_at_ms)| match owner_scope.as_deref() {
-                    Some("host") => *created_at_ms >= cutoff_epoch_ms,
-                    Some(owner_scope)
-                        if owner_scope
-                            .strip_prefix("host:")
-                            .is_some_and(|binding_id| !binding_id.is_empty()) =>
-                    {
-                        *created_at_ms >= cutoff_epoch_ms
-                    }
-                    Some(_) | None => true,
-                },
-            );
+            .retain(|_, (owner_scope, _, _, created_at_ms)| match owner_scope {
+                TriggerOwnerScope::Host { .. } | TriggerOwnerScope::Platform => {
+                    *created_at_ms >= cutoff_epoch_ms
+                }
+                TriggerOwnerScope::Session { .. } => true,
+            });
         Ok(before.saturating_sub(state.mutation_receipts.len()))
     }
 
@@ -774,12 +733,12 @@ fn execute_in_memory_trigger_command(
         }));
     }
 
-    let owner_scope = command.owner_scope().namespace();
+    let owner_scope = command.owner_scope().clone();
     let result = apply_in_memory_trigger_command(state, command, now);
     if is_mutation {
         state.mutation_receipts.insert(
             receipt_id,
-            (Some(owner_scope), request_fingerprint, result.clone(), now),
+            (owner_scope, request_fingerprint, result.clone(), now),
         );
     }
     Ok(result)

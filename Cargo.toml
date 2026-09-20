@@ -219,6 +219,9 @@ form_urlencoded = "1"
 hmac = "0.12"
 httpdate = "1"
 jsonschema = { version = "0.18", default-features = false }
+# Loom is pulled in per-crate under `[target.'cfg(loom)'.dependencies]` only;
+# it never enters a normal build (FIG-1161).
+loom = { version = "0.7", features = ["futures"] }
 object_store = { version = "0.13.2", default-features = false }
 percent-encoding = "2.3"
 # Assertion diffs for the conformance laws: a failed store law prints a

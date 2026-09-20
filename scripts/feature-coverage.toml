@@ -228,8 +228,12 @@ features = [
   "lash-internal-postgres-store/testing:off",
   "lash-internal-s3-store/testing:on",
   "lash-internal-s3-store/testing:off",
+  "lash-internal-conformance/lashlang:on",
+  "lash-internal-conformance/lashlang:off",
 ]
 commands = [
+  ["cargo", "check", "-p", "lash-internal-conformance", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-conformance", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--tests", "--no-default-features", "--features", "lashlang", "--locked"],

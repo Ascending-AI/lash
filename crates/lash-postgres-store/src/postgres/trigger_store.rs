@@ -182,17 +182,15 @@ impl TriggerStore for PostgresTriggerStore {
         }
         sqlx::query(
             "INSERT INTO lash_trigger_mutation_receipts (
-                operation_id, request_fingerprint, result_json, created_at_ms
-             ) VALUES ($1, $2, $3, $4)",
+                operation_id, owner_kind, owner_id,
+                request_fingerprint, result_json, created_at_ms
+             ) VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(&receipt_id)
+        .bind(receipt_owner_scope.owner_kind_column())
+        .bind(receipt_owner_scope.owner_id_column())
         .bind(&request_fingerprint)
-        .bind(
-            lash_core::facade_support::encode_trigger_effect_result_receipt(
-                &receipt_owner_scope,
-                &result,
-            )?,
-        )
+        .bind(serde_json::to_string(&result).map_err(process_decode_error)?)
         .bind(now as i64)
         .execute(&mut *tx)
         .await
@@ -489,21 +487,9 @@ impl TriggerStore for PostgresTriggerStore {
                  FROM lash_trigger_deliveries
                  WHERE subscription_snapshot_json::jsonb #>> '{owner_scope,type}' = 'session'
                  UNION
-                 SELECT COALESCE(
-                     result_json::jsonb #>> '{Ok,_owner_scope_namespace}',
-                     result_json::jsonb #>> '{Err,_owner_scope_namespace}',
-                     CASE
-                         WHEN result_json::jsonb #>> '{Ok,receipt,owner_scope,type}' = 'session'
-                         THEN 'session:' ||
-                              (result_json::jsonb #>> '{Ok,receipt,owner_scope,session_id}')
-                     END,
-                     CASE
-                         WHEN result_json::jsonb #>> '{Ok,receipts,0,owner_scope,type}' = 'session'
-                         THEN 'session:' ||
-                              (result_json::jsonb #>> '{Ok,receipts,0,owner_scope,session_id}')
-                     END
-                 ) AS owner_scope
+                 SELECT 'session:' || owner_id
                  FROM lash_trigger_mutation_receipts
+                 WHERE owner_kind = 'session'
              ) AS trigger_owner_scopes
              WHERE owner_scope LIKE 'session:%'
              ORDER BY owner_scope",
@@ -596,10 +582,10 @@ impl TriggerStore for PostgresTriggerStore {
         let blocked_owner_scopes = blocked_owner_scopes
             .into_iter()
             .collect::<std::collections::HashSet<_>>();
-        let receipt_owner_scopes = deleted_owner_scopes
+        let receipt_owner_ids = deleted_owner_scopes
             .iter()
             .filter(|owner_scope| !blocked_owner_scopes.contains(*owner_scope))
-            .cloned()
+            .map(|owner_scope| owner_scope["session:".len()..].to_string())
             .collect::<Vec<_>>();
 
         let reclaimed_subscription_count = if deleted_owner_scopes.is_empty() {
@@ -619,27 +605,15 @@ impl TriggerStore for PostgresTriggerStore {
             .map_err(plugin_sqlx_error)?
             .rows_affected() as usize
         };
-        let reclaimed_mutation_receipt_count = if receipt_owner_scopes.is_empty() {
+        let reclaimed_mutation_receipt_count = if receipt_owner_ids.is_empty() {
             0
         } else {
             sqlx::query(
                 "DELETE FROM lash_trigger_mutation_receipts
-                 WHERE COALESCE(
-                     result_json::jsonb #>> '{Ok,_owner_scope_namespace}',
-                     result_json::jsonb #>> '{Err,_owner_scope_namespace}',
-                     CASE
-                         WHEN result_json::jsonb #>> '{Ok,receipt,owner_scope,type}' = 'session'
-                         THEN 'session:' ||
-                              (result_json::jsonb #>> '{Ok,receipt,owner_scope,session_id}')
-                     END,
-                     CASE
-                         WHEN result_json::jsonb #>> '{Ok,receipts,0,owner_scope,type}' = 'session'
-                         THEN 'session:' ||
-                              (result_json::jsonb #>> '{Ok,receipts,0,owner_scope,session_id}')
-                     END
-                 ) = ANY($1::TEXT[])",
+                 WHERE owner_kind = 'session'
+                   AND owner_id = ANY($1::TEXT[])",
             )
-            .bind(&receipt_owner_scopes)
+            .bind(&receipt_owner_ids)
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?
@@ -838,43 +812,9 @@ impl TriggerStore for PostgresTriggerStore {
     async fn prune_mutation_receipts(&self, cutoff_epoch_ms: u64) -> Result<usize, PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         Ok(sqlx::query(
-            "WITH classified_receipts AS (
-                     SELECT operation_id,
-                            COALESCE(
-                                result_json::jsonb #>> '{Ok,_owner_scope_namespace}',
-                                result_json::jsonb #>> '{Err,_owner_scope_namespace}',
-                                CASE result_json::jsonb #>> '{Ok,receipt,owner_scope,type}'
-                                    WHEN 'session' THEN 'session:' ||
-                                        (result_json::jsonb #>>
-                                            '{Ok,receipt,owner_scope,session_id}')
-                                    WHEN 'host' THEN 'host:' ||
-                                        (result_json::jsonb #>>
-                                            '{Ok,receipt,owner_scope,binding_id}')
-                                    WHEN 'platform' THEN 'host'
-                                END,
-                                CASE result_json::jsonb #>> '{Ok,receipts,0,owner_scope,type}'
-                                    WHEN 'session' THEN 'session:' ||
-                                        (result_json::jsonb #>>
-                                            '{Ok,receipts,0,owner_scope,session_id}')
-                                    WHEN 'host' THEN 'host:' ||
-                                        (result_json::jsonb #>>
-                                            '{Ok,receipts,0,owner_scope,binding_id}')
-                                    WHEN 'platform' THEN 'host'
-                                END
-                            ) AS owner_scope
-                     FROM lash_trigger_mutation_receipts
-                     WHERE created_at_ms < $1
-                 )
-                 DELETE FROM lash_trigger_mutation_receipts AS receipt
-                 USING classified_receipts
-                 WHERE receipt.operation_id = classified_receipts.operation_id
-                   AND (
-                       classified_receipts.owner_scope = 'host'
-                       OR (
-                           left(classified_receipts.owner_scope, 5) = 'host:'
-                           AND length(classified_receipts.owner_scope) > 5
-                       )
-                   )",
+            "DELETE FROM lash_trigger_mutation_receipts
+             WHERE created_at_ms < $1
+               AND owner_kind IN ('host', 'platform')",
         )
         .bind(cutoff_epoch_ms)
         .execute(&self.pool)

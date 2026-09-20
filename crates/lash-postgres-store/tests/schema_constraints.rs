@@ -405,6 +405,15 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     assert_check_rejects(
         &mut connection,
+        "INSERT INTO lash_trigger_mutation_receipts (
+             operation_id, owner_kind, owner_id,
+             request_fingerprint, result_json, created_at_ms
+         ) VALUES ('bad-owner-kind', 'workflow', 'owner', 'fingerprint', '{}', 0)",
+        "ck_trigger_receipts_owner_kind",
+    )
+    .await;
+    assert_check_rejects(
+        &mut connection,
         "INSERT INTO lash_runtime_effect_replay (
              scope_id, replay_key, envelope_hash, envelope_json, status,
              created_at_ms, updated_at_ms

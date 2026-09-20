@@ -341,15 +341,15 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     }
                     tx.execute(
                         "INSERT INTO trigger_mutation_receipts (
-                            operation_id, request_fingerprint, result_json, created_at_ms
-                         ) VALUES (?1, ?2, ?3, ?4)",
+                            operation_id, owner_kind, owner_id,
+                            request_fingerprint, result_json, created_at_ms
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                         params![
                             operation_id.as_str(),
+                            owner_scope.owner_kind_column(),
+                            owner_scope.owner_id_column(),
                             request_fingerprint.as_str(),
-                            lash_core::facade_support::encode_trigger_effect_result_receipt(
-                                &owner_scope,
-                                &result,
-                            )?,
+                            Self::encode_json(&result)?,
                             now as i64,
                         ],
                     )
@@ -726,37 +726,9 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                            '$.owner_scope.type'
                                        ) = 'session'
                                  UNION
-                                 SELECT COALESCE(
-                                     json_extract(
-                                         result_json,
-                                         '$.Ok._owner_scope_namespace'
-                                     ),
-                                     json_extract(
-                                         result_json,
-                                         '$.Err._owner_scope_namespace'
-                                     ),
-                                     CASE
-                                         WHEN json_extract(
-                                                  result_json,
-                                                  '$.Ok.receipt.owner_scope.type'
-                                              ) = 'session'
-                                         THEN 'session:' || json_extract(
-                                                  result_json,
-                                                  '$.Ok.receipt.owner_scope.session_id'
-                                              )
-                                     END,
-                                     CASE
-                                         WHEN json_extract(
-                                                  result_json,
-                                                  '$.Ok.receipts[0].owner_scope.type'
-                                              ) = 'session'
-                                         THEN 'session:' || json_extract(
-                                                  result_json,
-                                                  '$.Ok.receipts[0].owner_scope.session_id'
-                                              )
-                                     END
-                                 ) AS owner_scope
+                                 SELECT 'session:' || owner_id
                                  FROM trigger_mutation_receipts
+                                 WHERE owner_kind = 'session'
                              )
                              WHERE owner_scope LIKE 'session:%'
                              ORDER BY owner_scope",
@@ -838,12 +810,12 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
                     rows.collect::<Result<std::collections::HashSet<_>, _>>()?
                 };
-                let receipt_owner_scopes = deleted_owner_scopes
+                let receipt_owner_ids = deleted_owner_scopes
                     .iter()
                     .filter(|owner_scope| !blocked_owner_scopes.contains(*owner_scope))
-                    .cloned()
+                    .map(|owner_scope| owner_scope["session:".len()..].to_string())
                     .collect::<Vec<_>>();
-                let receipt_owner_scopes_json = serde_json::to_string(&receipt_owner_scopes)
+                let receipt_owner_ids_json = serde_json::to_string(&receipt_owner_ids)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
 
                 let reclaimed_subscription_count = tx.execute(
@@ -858,31 +830,9 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                 )?;
                 let reclaimed_mutation_receipt_count = tx.execute(
                     "DELETE FROM trigger_mutation_receipts
-                     WHERE COALESCE(
-                         json_extract(result_json, '$.Ok._owner_scope_namespace'),
-                         json_extract(result_json, '$.Err._owner_scope_namespace'),
-                         CASE
-                             WHEN json_extract(
-                                      result_json,
-                                      '$.Ok.receipt.owner_scope.type'
-                                  ) = 'session'
-                             THEN 'session:' || json_extract(
-                                      result_json,
-                                      '$.Ok.receipt.owner_scope.session_id'
-                                  )
-                         END,
-                         CASE
-                             WHEN json_extract(
-                                      result_json,
-                                      '$.Ok.receipts[0].owner_scope.type'
-                                  ) = 'session'
-                             THEN 'session:' || json_extract(
-                                      result_json,
-                                      '$.Ok.receipts[0].owner_scope.session_id'
-                                  )
-                         END
-                     ) IN (SELECT value FROM json_each(?1))",
-                    params![&receipt_owner_scopes_json],
+                     WHERE owner_kind = 'session'
+                       AND owner_id IN (SELECT value FROM json_each(?1))",
+                    params![&receipt_owner_ids_json],
                 )?;
 
                 tx.commit()?;
@@ -1119,57 +1069,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             .call(move |conn| {
                 conn.execute(
                     "DELETE FROM trigger_mutation_receipts
-                     WHERE operation_id IN (
-                         SELECT operation_id
-                         FROM (
-                             SELECT operation_id,
-                                    COALESCE(
-                                        json_extract(
-                                            result_json,
-                                            '$.Ok._owner_scope_namespace'
-                                        ),
-                                        json_extract(
-                                            result_json,
-                                            '$.Err._owner_scope_namespace'
-                                        ),
-                                        CASE json_extract(
-                                            result_json,
-                                            '$.Ok.receipt.owner_scope.type'
-                                        )
-                                            WHEN 'session' THEN 'session:' || json_extract(
-                                                result_json,
-                                                '$.Ok.receipt.owner_scope.session_id'
-                                            )
-                                            WHEN 'host' THEN 'host:' || json_extract(
-                                                result_json,
-                                                '$.Ok.receipt.owner_scope.binding_id'
-                                            )
-                                            WHEN 'platform' THEN 'host'
-                                        END,
-                                        CASE json_extract(
-                                            result_json,
-                                            '$.Ok.receipts[0].owner_scope.type'
-                                        )
-                                            WHEN 'session' THEN 'session:' || json_extract(
-                                                result_json,
-                                                '$.Ok.receipts[0].owner_scope.session_id'
-                                            )
-                                            WHEN 'host' THEN 'host:' || json_extract(
-                                                result_json,
-                                                '$.Ok.receipts[0].owner_scope.binding_id'
-                                            )
-                                            WHEN 'platform' THEN 'host'
-                                        END
-                                    ) AS owner_scope
-                             FROM trigger_mutation_receipts
-                             WHERE created_at_ms < ?1
-                         ) AS classified_receipts
-                         WHERE owner_scope = 'host'
-                            OR (
-                                substr(owner_scope, 1, 5) = 'host:'
-                                AND length(owner_scope) > 5
-                            )
-                     )",
+                     WHERE created_at_ms < ?1
+                       AND owner_kind IN ('host', 'platform')",
                     params![cutoff_epoch_ms],
                 )
             })

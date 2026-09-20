@@ -1,8 +1,10 @@
 use crate::ProcessId;
 use crate::SessionId;
 use lash_core::runtime::coalescing_scheduler::{
-    CoalescingDispatcherGuard, CoalescingExtra, CoalescingSchedulerHandle, CoalescingSchedulerState,
+    CoalescingDispatcherGuard, CoalescingExtra, CoalescingMutex, CoalescingSchedulerHandle,
+    CoalescingSchedulerState,
 };
+use lash_core::runtime::process_permit::SharedNotify;
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -296,11 +298,31 @@ impl Drop for ProcessWorkerLifetime {
 type ProcessExecutionSchedulerState =
     CoalescingSchedulerState<ProcessId, ProcessRecord, ProcessWorklistScan>;
 
+/// `lock_recover` for the loom mutex the shared protocol's state swaps to
+/// under `--cfg loom` (FIG-1161). Module-local like every other seam shim;
+/// `MutexExt` still covers the real `std::sync::Mutex` sites in this file.
+#[cfg(loom)]
+mod loom_ext {
+    pub trait LoomMutexExt<T: ?Sized> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T>;
+    }
+
+    impl<T: ?Sized> LoomMutexExt<T> for loom::sync::Mutex<T> {
+        fn lock_recover(&self) -> loom::sync::MutexGuard<'_, T> {
+            self.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+    }
+}
+
+#[cfg(loom)]
+use loom_ext::LoomMutexExt as _;
+
 struct ProcessExecutionScheduler {
     slots: Arc<dyn super::WorkerSlotSupplier>,
     metrics: WorkerCapacityMetrics,
-    state: std::sync::Mutex<ProcessExecutionSchedulerState>,
-    changed: Arc<tokio::sync::Notify>,
+    state: CoalescingMutex<ProcessExecutionSchedulerState>,
+    changed: Arc<SharedNotify>,
     shutdown: CancellationToken,
 }
 
@@ -326,8 +348,8 @@ impl ProcessExecutionScheduler {
         Self {
             slots,
             metrics,
-            state: std::sync::Mutex::new(ProcessExecutionSchedulerState::default()),
-            changed: Arc::new(tokio::sync::Notify::new()),
+            state: CoalescingMutex::new(ProcessExecutionSchedulerState::default()),
+            changed: Arc::new(SharedNotify::new()),
             shutdown: CancellationToken::new(),
         }
     }
@@ -346,12 +368,12 @@ impl CoalescingSchedulerHandle for ProcessExecutionScheduler {
 
     fn state(
         &self,
-    ) -> &std::sync::Mutex<CoalescingSchedulerState<ProcessId, ProcessRecord, ProcessWorklistScan>>
+    ) -> &CoalescingMutex<CoalescingSchedulerState<ProcessId, ProcessRecord, ProcessWorklistScan>>
     {
         &self.state
     }
 
-    fn changed(&self) -> &Arc<tokio::sync::Notify> {
+    fn changed(&self) -> &Arc<SharedNotify> {
         &self.changed
     }
 

@@ -3,58 +3,13 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use lash_conformance::{
-    LegacyTriggerMutationReceiptInjector, TriggerOccurrenceRetentionFaultInjector,
-};
+use lash_conformance::TriggerOccurrenceRetentionFaultInjector;
 use lash_core::{ProcessRegistry, TriggerStore};
 use lash_sansio::sync::MutexExt;
 use lash_sqlite_store::{SqliteProcessRegistry, SqliteSessionStoreFactory, SqliteTriggerStore};
 
 struct SqliteTriggerOccurrenceRetentionFaultInjector {
     path: PathBuf,
-}
-
-struct SqliteLegacyTriggerMutationReceiptInjector {
-    path: PathBuf,
-}
-
-#[async_trait::async_trait]
-impl LegacyTriggerMutationReceiptInjector for SqliteLegacyTriggerMutationReceiptInjector {
-    async fn insert_legacy_receipt(
-        &self,
-        operation_id: &str,
-        request_fingerprint: &str,
-        result_json: &str,
-        created_at_ms: u64,
-    ) {
-        let conn = rusqlite::Connection::open(&self.path)
-            .expect("open SQLite legacy trigger receipt fixture");
-        conn.execute(
-            "INSERT INTO trigger_mutation_receipts (
-                operation_id, request_fingerprint, result_json, created_at_ms
-             ) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![
-                operation_id,
-                request_fingerprint,
-                result_json,
-                i64::try_from(created_at_ms).expect("legacy receipt timestamp fits SQLite")
-            ],
-        )
-        .expect("insert SQLite legacy trigger receipt");
-    }
-
-    async fn receipt_exists(&self, operation_id: &str) -> bool {
-        let conn = rusqlite::Connection::open(&self.path)
-            .expect("open SQLite legacy trigger receipt fixture");
-        conn.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM trigger_mutation_receipts WHERE operation_id = ?1
-             )",
-            rusqlite::params![operation_id],
-            |row| row.get(0),
-        )
-        .expect("inspect SQLite legacy trigger receipt")
-    }
 }
 
 #[async_trait::async_trait]
@@ -86,9 +41,8 @@ lash_conformance::trigger_retention_fault_tests!({
     let dir = tempfile::tempdir().expect("SQLite trigger retention tempdir");
     let path = dir.path().join("trigger-retention.db");
     let store = super::open_trigger_store(&path);
-    let legacy = Arc::new(SqliteLegacyTriggerMutationReceiptInjector { path: path.clone() });
     let fault = Arc::new(SqliteTriggerOccurrenceRetentionFaultInjector { path });
-    (dir, store, legacy, fault)
+    (dir, store, fault)
 });
 
 lash_conformance::process_trigger_retention_tests!({

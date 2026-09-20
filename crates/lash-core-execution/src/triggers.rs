@@ -824,6 +824,26 @@ impl TriggerOwnerScope {
             Self::Host { .. } | Self::Platform => None,
         }
     }
+
+    /// The durable owner-kind vocabulary both backends store in `owner_kind`
+    /// and constrain by `CHECK` (FIG-1956).
+    pub fn owner_kind_column(&self) -> &'static str {
+        match self {
+            Self::Session { .. } => "session",
+            Self::Host { .. } => "host",
+            Self::Platform => "platform",
+        }
+    }
+
+    /// The durable owner id stored beside [`Self::owner_kind_column`]: the
+    /// session id, the host binding id, or the fixed `platform` sentinel.
+    pub fn owner_id_column(&self) -> &str {
+        match self {
+            Self::Session { session_id } => session_id.as_str(),
+            Self::Host { binding_id } => binding_id,
+            Self::Platform => "platform",
+        }
+    }
 }
 
 /// The durable lifecycle of one trigger subscription.
@@ -1400,35 +1420,6 @@ impl From<PluginError> for TriggerOperationError {
 }
 
 pub type TriggerEffectResult = Result<TriggerCommandOutcome, TriggerOperationError>;
-
-/// Store implementors use this encoder to persist a mutation result with its
-/// owner namespace in private receipt JSON. Normal [`TriggerEffectResult`]
-/// decoding ignores the field; retention uses it for receipts without records.
-pub fn encode_trigger_effect_result_receipt(
-    owner_scope: &TriggerOwnerScope,
-    result: &TriggerEffectResult,
-) -> Result<String, PluginError> {
-    let encoding_error = |error| {
-        PluginError::Session(format!(
-            "failed to encode trigger mutation receipt: {error}"
-        ))
-    };
-    let mut value = serde_json::to_value(result).map_err(encoding_error)?;
-    let variant = match &mut value {
-        serde_json::Value::Object(result) => result.values_mut().next(),
-        _ => None,
-    };
-    let Some(serde_json::Value::Object(payload)) = variant else {
-        return Err(PluginError::Session(
-            "trigger mutation receipt encoded without a result payload".to_string(),
-        ));
-    };
-    payload.insert(
-        "_owner_scope_namespace".to_string(),
-        serde_json::Value::String(owner_scope.namespace()),
-    );
-    serde_json::to_string(&value).map_err(encoding_error)
-}
 
 pub fn next_trigger_revision(
     record: &TriggerSubscriptionRecord,

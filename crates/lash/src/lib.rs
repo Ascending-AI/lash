@@ -86,6 +86,10 @@ pub use crate::turn::{
     QueuedTurnBuilder, SelectedQueuedTurnBuilder, TurnActivityFanout, TurnBuilder, TurnOutput,
     TurnReport, TurnStream, message_role, message_text,
 };
+/// Re-exported so implementors of `#[async_trait]` facade traits (for example
+/// [`tools::StaticToolExecute`]) apply the macro without carrying their own
+/// `async-trait` dependency to keep version-aligned.
+pub use lash_core::async_trait;
 pub use lash_core::facade_support::{
     SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainOutcome, TurnCancelAffectedInput,
     TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
@@ -280,10 +284,14 @@ pub mod tools {
         RecordedGrantInstallError, Resolution as DeferredToolResolution,
         SharedDeferredToolResolver, ToolGrant as DeferredToolGrant, link_with_deferred_resolution,
     };
-    /// Author a fixed-tool provider without hand-rolling `tool_manifests` /
-    /// `resolve_contract`: supply the [`ToolDefinition`]s once and an
-    /// [`StaticToolExecute`] for behavior.
-    pub use lash_tool_support::{StaticToolExecute, StaticToolProvider};
+    /// The whole tool-authoring support surface: [`StaticToolProvider`] /
+    /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers
+    /// (`invalid_tool_args`, `object_schema`, `parse_optional_usize_arg`,
+    /// `ToolBinding`, `ToolDefinitionBindingExt`, `TYPESCRIPT_TOOL_BINDING_KEY`,
+    /// `LASHLANG_BINDINGS_ENABLED`) tools are built from. The glob keeps the
+    /// facade complete as the crate grows; where it overlaps the explicit
+    /// `rlm` re-exports above, those name the same items.
+    pub use lash_tool_support::*;
 }
 
 /// Direct protocol transport types.
@@ -557,6 +565,13 @@ pub mod attachments {
     pub use lash_sansio::{InvalidAttachmentId, InvalidMediaType};
 }
 
+/// Secret-handling values for host-owned configuration structs.
+pub mod secrets {
+    /// A string wrapper whose `Debug`/`Display` render `[redacted]`, so a
+    /// provider key held in a host config struct cannot leak through logs.
+    pub use lash_sansio::Redacted;
+}
+
 /// Wire-format DTOs for driving lash across a process boundary, sub-namespaced
 /// by protocol domain. Only the cross-cutting envelope
 /// ([`Envelope`](remote::Envelope),
@@ -610,22 +625,25 @@ pub mod remote {
     pub mod processes {
         pub use lash_remote_protocol::processes::{
             RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter,
-            RemoteLeaseOwnerIdentity, RemoteObservedProcess, RemoteObservedProcessEvent,
-            RemoteOnParentEnd, RemoteParentScope, RemotePersistProcessEnvReceipt,
-            RemotePersistProcessEnvRequest, RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput,
-            RemoteProcessAwaitRequest, RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
+            RemoteDeclaredProcessIdentity, RemoteLeaseOwnerIdentity, RemoteObservedProcess,
+            RemoteObservedProcessEvent, RemoteObservedProcessFailure, RemoteObservedWorkItemState,
+            RemoteObserverInheritance, RemoteOnParentEnd, RemoteParentScope,
+            RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
+            RemoteProcessAwaitOutcome, RemoteProcessAwaitOutput, RemoteProcessAwaitRequest,
+            RemoteProcessCancelReceipt, RemoteProcessCancelRequest,
             RemoteProcessDefinitionIdentity, RemoteProcessEvent, RemoteProcessEventSemantics,
             RemoteProcessEventSemanticsSpec, RemoteProcessEventType, RemoteProcessEventsRequest,
             RemoteProcessEventsResponse, RemoteProcessExecutionEnvRef,
             RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessExternalRef,
-            RemoteProcessHandleView, RemoteProcessInput, RemoteProcessLifecyclePolicy,
-            RemoteProcessListFilter, RemoteProcessListResponse, RemoteProcessModelLimits,
-            RemoteProcessModelSpec, RemoteProcessOriginator, RemoteProcessPluginOptions,
-            RemoteProcessProvenance, RemoteProcessRef, RemoteProcessSignalReceipt,
-            RemoteProcessSignalRequest, RemoteProcessStartReceipt, RemoteProcessStartRequest,
-            RemoteProcessStarted, RemoteProcessStatus, RemoteProcessStatusFilter,
-            RemoteProcessTerminalSemantics, RemoteProcessTerminalSpec,
-            RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
+            RemoteProcessHandleView, RemoteProcessIdentity, RemoteProcessInput,
+            RemoteProcessLifecyclePolicy, RemoteProcessListFilter, RemoteProcessListResponse,
+            RemoteProcessModelLimits, RemoteProcessModelSpec, RemoteProcessObserverBy,
+            RemoteProcessOriginator, RemoteProcessOriginatorFilter, RemoteProcessPluginOptions,
+            RemoteProcessProvenance, RemoteProcessRecord, RemoteProcessRef,
+            RemoteProcessSignalReceipt, RemoteProcessSignalRequest, RemoteProcessSignature,
+            RemoteProcessStartReceipt, RemoteProcessStartRequest, RemoteProcessStarted,
+            RemoteProcessStatus, RemoteProcessStatusFilter, RemoteProcessTerminalSemantics,
+            RemoteProcessTerminalSpec, RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
             RemoteProcessToolCancellation, RemoteProcessToolFailure,
             RemoteProcessToolFailureSource, RemoteProcessToolRetryStatus,
             RemoteProcessValueSelector, RemoteProcessWaitKind, RemoteProcessWaitState,
@@ -891,17 +909,27 @@ pub mod tracing {
         facade_support::TraceRecord, facade_support::TraceRuntimeScope,
         facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
     };
-    #[cfg(feature = "rlm")]
-    pub use lash_lashlang_runtime::{
-        TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
-        TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
-        TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
-        TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
-        TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
-    };
     pub use lash_trace::{
         StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,
         TraceToolCallOutput,
+    };
+    /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
+    /// can name — match on, take in a signature, or build in a test — what a
+    /// `TurnCompleted` or tool-call variant carries. The `LanguageExecution`
+    /// variant exists in every build, so its payload types are unconditional
+    /// `lash-trace` re-exports rather than `rlm`-gated.
+    pub use lash_trace::{
+        TextProjectionMetadata, TraceAgentFrameSwitch, TraceAttemptUsageDisposition,
+        TraceDurableTimerStatus, TraceDurableWaitResolution, TraceExecToolCall,
+        TraceExecutionEvidence, TraceJournaledEffectStatus, TraceLanguageChildExecution,
+        TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
+        TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
+        TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
+        TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
+        TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
+        TraceRetryAttempt, TraceRetryAttemptOutcome, TraceRlmStepOutcome, TraceToolCallStatus,
+        TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
+        TraceTurnOutcome,
     };
 }
 
@@ -995,7 +1023,9 @@ pub mod provider {
     /// stable contract a capability catalog can branch on.
     pub use lash_core::facade_support::ModelEffortValidationCategory;
     pub use lash_core::llm::transport::TransportRetryVerdict;
-    pub use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmOutputSpec, LlmRole};
+    pub use lash_core::llm::types::{
+        LlmContentBlock, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRole, LlmToolChoice,
+    };
     pub use lash_core::provider::ModelEffortValidationError;
     /// Provider completion, caching, failure, retry, and rate-limiting contracts.
     pub use lash_core::provider::{

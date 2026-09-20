@@ -9,6 +9,7 @@ use lash_core::runtime::*;
 use lash_core::store::*;
 mod macros;
 use lash_core::testing::conformance_support::default_queued_drain_policy;
+#[cfg(feature = "lashlang")]
 pub mod fused_artifact_store;
 #[cfg(test)]
 mod in_memory;

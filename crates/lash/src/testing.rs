@@ -37,7 +37,13 @@ pub use lash_core::testing::behavior_transcript;
 pub use lash_core::testing::checkpoint_observer;
 
 pub mod conformance {
-    //! Runtime rebuild certification. Store laws live in `lash-internal-conformance`.
+    //! Backend certification: the durable-store laws (re-exported from
+    //! `lash-internal-conformance`, including the `Reopenable*` handle pairs a
+    //! host implements) and, under `rlm`, runtime rebuild certification.
+    /// Gated on the `testing` feature rather than `cfg(test)`: the dependency
+    /// is optional and only resolved for embedders who enable the feature.
+    #[cfg(feature = "testing")]
+    pub use lash_conformance::*;
 
     #[cfg(feature = "rlm")]
     mod rlm {

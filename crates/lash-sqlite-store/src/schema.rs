@@ -1085,9 +1085,12 @@ CREATE TABLE IF NOT EXISTS trigger_deliveries (
 
 CREATE TABLE IF NOT EXISTS trigger_mutation_receipts (
     operation_id    TEXT PRIMARY KEY,
+    owner_kind      TEXT NOT NULL,
+    owner_id        TEXT NOT NULL,
     request_fingerprint    TEXT NOT NULL,
     result_json     TEXT NOT NULL,
-    created_at_ms   INTEGER NOT NULL
+    created_at_ms   INTEGER NOT NULL,
+    CONSTRAINT ck_trigger_receipts_owner_kind CHECK (owner_kind IN ('session', 'host', 'platform'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_process
@@ -1110,10 +1113,14 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // `deleted_at_ms` column paired to it by CHECK, so the three legal states are
 // the only representable ones and the deletion time stops living solely inside
 // `record_json`. Existing trigger stores are rejected rather than migrated.
-// Version 10 (FIG-3376) moves the `SessionCreateRequest` carried in trigger
+// Version 10 (FIG-1956) gives the mutation-receipt table typed NOT NULL
+// `owner_kind`/`owner_id` columns with a named owner-kind CHECK, deleting the
+// `_owner_scope_namespace` JSON encoding entirely. Existing trigger stores
+// are rejected rather than migrated.
+// Version 11 (FIG-3376) moves the `SessionCreateRequest` carried in trigger
 // targets to the spawn-time plugin-init cutover and drops `usage_source`;
 // existing trigger stores are rejected rather than migrated.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 10;
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 11;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
@@ -1843,6 +1850,14 @@ mod check_constraint_tests {
                  'source', 'key', 'enabled', 7, 0, 0, '{}'
              )",
             "ck_trigger_subscriptions_lifecycle_deleted_at",
+        );
+        assert_check_rejects(
+            &triggers,
+            "INSERT INTO trigger_mutation_receipts (
+                 operation_id, owner_kind, owner_id,
+                 request_fingerprint, result_json, created_at_ms
+             ) VALUES ('bad-owner-kind', 'workflow', 'owner', 'fingerprint', '{}', 0)",
+            "ck_trigger_receipts_owner_kind",
         );
 
         let effects = Connection::open_in_memory().expect("open effect constraint fixture");
