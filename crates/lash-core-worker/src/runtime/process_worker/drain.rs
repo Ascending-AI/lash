@@ -63,44 +63,14 @@ impl DurableProcessWorker {
                     continue;
                 }
                 let owner = first_started.owner.clone();
+                // The completion already speaks the recovery outcome dialect:
+                // `Ok` terminalized the row, `Err` is the deferral to report.
                 match self.drain_one_owner_bound(&record.id, owner).await {
-                    RecoveryCompletionDisposition::Committed => abandoned.push(record.id),
-                    RecoveryCompletionDisposition::Busy => deferred.push(ProcessDrainDeferred {
+                    Ok(()) => abandoned.push(record.id),
+                    Err(disposition) => deferred.push(ProcessDrainDeferred {
                         process_id: record.id,
-                        disposition: ProcessRecoveryAttemptOutcome::Busy,
+                        disposition,
                     }),
-                    RecoveryCompletionDisposition::Absent => deferred.push(ProcessDrainDeferred {
-                        process_id: record.id,
-                        disposition: ProcessRecoveryAttemptOutcome::Absent,
-                    }),
-                    RecoveryCompletionDisposition::AlreadyApplied(terminal_status) => {
-                        deferred.push(ProcessDrainDeferred {
-                            process_id: record.id,
-                            disposition: ProcessRecoveryAttemptOutcome::AlreadyApplied {
-                                terminal_status,
-                            },
-                        });
-                    }
-                    RecoveryCompletionDisposition::SettledByPeer(terminal_status) => {
-                        deferred.push(ProcessDrainDeferred {
-                            process_id: record.id,
-                            disposition: ProcessRecoveryAttemptOutcome::SettledByPeer {
-                                terminal_status,
-                            },
-                        });
-                    }
-                    RecoveryCompletionDisposition::LeaseLost(operation) => {
-                        deferred.push(ProcessDrainDeferred {
-                            process_id: record.id,
-                            disposition: ProcessRecoveryAttemptOutcome::LeaseLost { operation },
-                        });
-                    }
-                    RecoveryCompletionDisposition::BackendError(error) => {
-                        deferred.push(ProcessDrainDeferred {
-                            process_id: record.id,
-                            disposition: error.into_public(),
-                        });
-                    }
                 }
             }
             let Some(next) = next else {

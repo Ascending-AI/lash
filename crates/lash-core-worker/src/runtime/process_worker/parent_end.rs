@@ -224,10 +224,9 @@ impl DurableProcessWorker {
         let completion = self.complete_and_release(lease, process_id, *output).await;
         let terminal_written = matches!(
             completion,
-            RecoveryCompletionDisposition::Committed
-                | RecoveryCompletionDisposition::AlreadyApplied(_)
+            Ok(()) | Err(ProcessRecoveryAttemptOutcome::AlreadyApplied { .. })
         );
-        let outcome = completion.into_outcome();
+        let outcome = ProcessRecoveryOutcome::from_completion(completion);
         // The ledger row rode the terminal write. Sweeping it now is an
         // optimisation, not the guarantee: a failure here leaves the row
         // pending for the next pass.

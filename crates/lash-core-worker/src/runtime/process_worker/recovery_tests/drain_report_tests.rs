@@ -184,6 +184,63 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
     assert!(retry.deferred.is_empty());
 }
 
+/// Explicit decision: when the drain claims a row that has already vanished,
+/// its last act is releasing that claim — and if the release fails, the report
+/// names the release fault, not `Absent`. The clean absent answer would leave
+/// a failed release with no trace at all.
+#[tokio::test]
+async fn drain_reports_release_failure_over_absent() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let owner = local_owner("drain-release-failure", "host-a", "start-a");
+    let process_id = "owner-bound-release-failure";
+    registry
+        .register_process(registration_with_disposition(
+            process_id,
+            RecoveryContract::OwnerBound,
+        ))
+        .await
+        .expect("register owner-bound row");
+    registry
+        .record_first_started(
+            &ProcessId::from(process_id),
+            ProcessStarted {
+                owner: owner.clone(),
+                fencing_token: 0,
+                attempt: 1,
+                started_at_ms: 1,
+            },
+        )
+        .await
+        .expect("record first start");
+    registry.set_process_read_absent(true).await;
+    registry
+        .set_process_lease_release_error(Some(PluginError::Session(
+            "injected release failure".to_string(),
+        )))
+        .await;
+
+    let worker = native_worker(registry.clone(), owner);
+    let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
+    let report = report.expect("owner drain");
+    assert!(report.abandoned.is_empty());
+    assert_eq!(
+        report.deferred,
+        vec![ProcessDrainDeferred {
+            process_id: ProcessId::from(process_id.to_string()),
+            disposition: ProcessRecoveryAttemptOutcome::BackendError {
+                operation: ProcessRecoveryOperation::ReleaseLease,
+                error: "plugin session error: injected release failure".to_string(),
+            },
+        }]
+    );
+    assert_recovery_backend_error_event(
+        &capture,
+        &ProcessId::from(process_id),
+        "release_lease",
+        "plugin session error: injected release failure",
+    );
+}
+
 #[tokio::test]
 async fn drain_distinguishes_busy_and_absent_rows() {
     let registry = Arc::new(TestLocalProcessRegistry::default());
