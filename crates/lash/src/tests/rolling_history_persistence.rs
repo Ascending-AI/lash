@@ -372,20 +372,20 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
 
 #[tokio::test]
 async fn repeated_admin_compaction_with_parent_turn_distinguishes_changed_snapshot() -> Result<()> {
-    assert_repeated_admin_compactions_with_changed_snapshot(
+    Box::pin(assert_repeated_admin_compactions_with_changed_snapshot(
         RepeatedAdminCompactionScope::ParentTurn,
         &["first summary", "second summary"],
-    )
+    ))
     .await
 }
 
 #[tokio::test]
 async fn repeated_admin_compaction_with_runtime_scope_distinguishes_changed_snapshot() -> Result<()>
 {
-    assert_repeated_admin_compactions_with_changed_snapshot(
+    Box::pin(assert_repeated_admin_compactions_with_changed_snapshot(
         RepeatedAdminCompactionScope::RuntimeOperation,
         &["first summary", "second summary", "third summary"],
-    )
+    ))
     .await
 }
 

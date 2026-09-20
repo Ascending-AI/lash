@@ -223,7 +223,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
                 lash_core::SessionObservationEventPayload::AgentFrameSwitched { .. },
                 lash_core::SessionObservationEventPayload::Committed { read_view }
             ) if read_view.messages().iter().any(|message| {
-                message.parts[0].content.contains("old durable request summarized")
+                message.parts[0].content().contains("old durable request summarized")
             })
         )),
         "expected AgentFrameSwitched immediately followed by Committed carrying the summary, got {events:?}"
