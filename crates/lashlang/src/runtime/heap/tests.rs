@@ -60,10 +60,68 @@ fn sparse_object_bookkeeping_stays_bounded_by_live_objects() {
         heap.collect(std::iter::empty());
     }
 
-    assert_eq!(heap.slots.len(), 1, "vacant storage slot should be reused");
-    assert!(heap.id_to_slot.is_empty(), "no dead ID bookkeeping remains");
+    assert_eq!(
+        heap.entries.len(),
+        0,
+        "swept objects leave no storage behind"
+    );
     assert!(heap.materialized.is_empty());
     assert!(heap.boundary_refs.is_empty());
+}
+
+/// A heap that swept garbage and kept allocating is byte-identical to one that
+/// only ever held the survivors: same id-ordered objects, same live bytes. The
+/// ids of swept objects are gaps, not reusable slots.
+#[test]
+fn allocation_across_a_sweep_is_byte_identical_to_allocation_without_one() {
+    let mut swept = Heap::default();
+    let garbage = swept
+        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .expect("allocate garbage");
+    let kept = swept
+        .allocate(HeapObject::List(vec![Value::String("kept".into())]))
+        .expect("allocate kept");
+    swept.collect([Value::Number(0.0), kept.clone()].iter());
+    assert!(matches!(
+        swept.get(match garbage {
+            Value::Ref(id) => id,
+            _ => unreachable!(),
+        }),
+        Err(RuntimeError::DanglingHeapReference { .. })
+    ));
+    let after = swept
+        .allocate(HeapObject::Tuple(vec![Value::Bool(true)]))
+        .expect("allocate across the sweep boundary");
+
+    let mut clean = Heap::default();
+    let skipped = clean
+        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .expect("allocate the same first id");
+    let Value::Ref(skipped_id) = skipped else {
+        unreachable!()
+    };
+    let entry = clean.entries.remove(&skipped_id).expect("remove it");
+    clean.live_logical_bytes -= entry.logical_bytes;
+    let clean_kept = clean
+        .allocate(HeapObject::List(vec![Value::String("kept".into())]))
+        .expect("allocate kept");
+    let clean_after = clean
+        .allocate(HeapObject::Tuple(vec![Value::Bool(true)]))
+        .expect("allocate after");
+
+    assert_eq!(kept, clean_kept);
+    assert_eq!(after, clean_after);
+    assert!(
+        swept
+            .objects_in_id_order()
+            .map(|(id, object)| (id, object.clone()))
+            .eq(clean
+                .objects_in_id_order()
+                .map(|(id, object)| (id, object.clone()))),
+        "id-order iteration must be byte-identical across a GC boundary"
+    );
+    assert_eq!(swept.live_logical_bytes(), clean.live_logical_bytes());
+    assert_eq!(swept, clean);
 }
 
 #[test]

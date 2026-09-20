@@ -1208,10 +1208,10 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     };
     heap.set_regexp_last_index(regexp_id, 7)
         .expect("set lastIndex");
-    let regexp_slot = heap.id_to_slot[&regexp_id];
-    let HeapObject::RegExp(regexp_object) = &mut heap.slots[regexp_slot]
-        .as_mut()
-        .expect("RegExp slot")
+    let HeapObject::RegExp(regexp_object) = &mut heap
+        .entries
+        .get_mut(&regexp_id)
+        .expect("RegExp entry")
         .object
     else {
         unreachable!()
@@ -1293,10 +1293,10 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     let Value::Ref(restored_regexp) = runtime_globals["regexp"] else {
         unreachable!()
     };
-    let regexp_slot = heap.id_to_slot[&restored_regexp];
-    let HeapObject::RegExp(regexp) = &heap.slots[regexp_slot]
-        .as_ref()
-        .expect("restored RegExp slot")
+    let HeapObject::RegExp(regexp) = &heap
+        .entries
+        .get(&restored_regexp)
+        .expect("restored RegExp entry")
         .object
     else {
         unreachable!()
@@ -1309,10 +1309,10 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     let Value::Ref(restored_match) = runtime_globals["regexp_match"] else {
         unreachable!()
     };
-    let match_slot = heap.id_to_slot[&restored_match];
-    let HeapObject::RegExpMatch(regexp_match) = &heap.slots[match_slot]
-        .as_ref()
-        .expect("restored RegExp match slot")
+    let HeapObject::RegExpMatch(regexp_match) = &heap
+        .entries
+        .get(&restored_match)
+        .expect("restored RegExp match entry")
         .object
     else {
         unreachable!()
