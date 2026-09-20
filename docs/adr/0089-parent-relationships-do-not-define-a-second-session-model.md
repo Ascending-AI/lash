@@ -66,5 +66,9 @@ input, but canonical admission and binding are shared by every facade session.
   lifetime; moving foreground work to another session requires another handle.
 - Tests and examples must exercise related sessions through the same admission,
   control, resume, and failure contracts as root sessions.
+- The facade child-administration surface (`SessionAdmin::children`,
+  `ChildSessionAdmin`) is removed (FIG-3373): a host-run related session is an
+  ordinary session opened with `SessionBuilder::parent`, its spend records on
+  its own ledger, and rolling related sessions together is host policy.
 - Process reconstruction remains governed by ADR 0011 only where no
   host-addressable facade session is being created.
