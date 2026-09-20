@@ -46,7 +46,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-lash-conformance.workspace = true
+lash-conformance = { workspace = true, features = ["lashlang"] }
 fastrand = { workspace = true }
 lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }

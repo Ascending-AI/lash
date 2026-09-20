@@ -15,9 +15,13 @@ package(default_visibility = ["//visibility:public"])
 lash_rust_library(
     name = "lash-conformance",
     build_script = None,
-    crate_features = [],
+    crate_features = [
+        "lashlang",
+    ],
     crate_name = "lash_conformance",
-    declared_features = [],
+    declared_features = [
+        "lashlang",
+    ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-conformance",
@@ -34,10 +38,14 @@ rust_doc(
 lash_rust_unit_test(
     name = "lash-conformance__unit_test",
     build_script = None,
-    crate_features = [],
+    crate_features = [
+        "lashlang",
+    ],
     crate_name = "lash_conformance",
     crate_root = "src/lib.rs",
-    declared_features = [],
+    declared_features = [
+        "lashlang",
+    ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-conformance",
@@ -69,7 +77,9 @@ lash_rust_feature_library(
     build_script = None,
     crate_features = [],
     crate_name = "lash_conformance",
-    declared_features = [],
+    declared_features = [
+        "lashlang",
+    ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-conformance",
@@ -78,6 +88,28 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_5f940d7c", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_955befbe", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_4928b98d", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-memory": "//crates/lash-core-memory:lash-core-memory__fv_faedc8f6", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_e1660697", "//crates/lashlang": "//crates/lashlang:lashlang__fv_32d6426d"},
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_5f940d7c", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_955befbe", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_4928b98d", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-memory": "//crates/lash-core-memory:lash-core-memory__fv_faedc8f6", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-conformance__fv_d227a9d5",
+    build_script = None,
+    crate_features = [
+        "lashlang",
+    ],
+    crate_name = "lash_conformance",
+    declared_features = [
+        "lashlang",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-conformance",
+    package_name = "lash-internal-conformance",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_5f940d7c", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_955befbe", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_4928b98d", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-memory": "//crates/lash-core-memory:lash-core-memory__fv_faedc8f6", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003", "//crates/lashlang": "//crates/lashlang:lashlang__fv_32d6426d"},
     version = "0.0.0-dev",
 )
