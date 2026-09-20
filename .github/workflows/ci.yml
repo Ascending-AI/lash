@@ -244,9 +244,9 @@ jobs:
       - name: Check example facade imports
         run: python3 scripts/check_facade_only_examples.py
 
-  # The API seal lane alone: the workspace compile proof moved into the
-  # Bazel partition, which builds `//:workspace_compile` alongside
-  # `//:workspace_tests`. Untrusted (fork/dependabot) pull requests lose no
+  # The API seal lane alone: the workspace compile proof lives in the Lint
+  # job's `//:workspace_clippy`, which type-checks the full all-targets
+  # workspace shape. Untrusted (fork/dependabot) pull requests lose no
   # coverage: the full Cargo workspace build inside `workspace-tests` already
   # compiles every target. The seal lane runs when the facade crate or the
   # root manifests changed; the release dispatch always runs it.
@@ -721,14 +721,17 @@ jobs:
         shell: bash
         run: |
           # shellcheck disable=SC2086
-          # `bazel test` also builds the non-test targets on its command line,
-          # so `//:workspace_compile` restores the workspace compile proof the
-          # deleted check lane carried.
+          # The all-targets compile proof rides the Lint job instead:
+          # `//:workspace_clippy` type-checks the same 189-target workspace
+          # shape `cargo check --workspace --all-targets` used to, so the
+          # workspace compile aggregate does not ride this command -- it
+          # would pay the workspace compile a second time on this job's
+          # critical path. It remains available for local runs.
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
             --cache_test_results=yes --test_output=errors \
-            //:workspace_tests //:workspace_compile
+            //:workspace_tests
 
       - name: Remove client credentials
         if: always()

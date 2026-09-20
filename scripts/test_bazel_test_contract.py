@@ -819,14 +819,18 @@ class BazelTestContractTests(unittest.TestCase):
             e2e["run"],
         )
 
-        # The workspace compile proof moved into the Bazel test partition:
-        # `bazel test` builds the non-test targets on its command line, so
-        # `//:workspace_compile` rides the same invocation. Remote execution
-        # needs the action result, not hundreds of MiB of top-level binaries.
+        # The workspace compile proof rides the Lint job's
+        # `//:workspace_clippy` (asserted above): the clippy action
+        # type-checks the same all-targets shape `cargo check --workspace
+        # --all-targets` used to, so the partition does not build
+        # `//:workspace_compile` a second time on its own critical path.
+        # Remote execution needs the action result, not hundreds of MiB of
+        # top-level binaries.
         bazel_test = job_step(
             jobs["bazel-tests"], "Test deterministic workspace suite with shared cache"
         )
-        self.assertIn("//:workspace_tests //:workspace_compile", bazel_test["run"])
+        self.assertIn("//:workspace_tests", bazel_test["run"])
+        self.assertNotIn("//:workspace_compile", bazel_test["run"])
         self.assertNotIn("workspace_doctests", bazel_test["run"])
         self.assertIn("--remote_download_outputs=minimal", bazel_test["run"])
 
