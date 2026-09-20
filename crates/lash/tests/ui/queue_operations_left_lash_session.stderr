@@ -1,3 +1,20 @@
+error[E0425]: cannot find type `ChildSessionAdmin` in module `lash::admin`
+  --> tests/ui/queue_operations_left_lash_session.rs:32:45
+   |
+32 | fn child_admin_type_is_gone(_: lash::admin::ChildSessionAdmin) {}
+   |                                             ^^^^^^^^^^^^^^^^^
+   |
+  ::: src/admin.rs
+   |
+   | pub struct SessionAdmin {
+   | ----------------------- similarly named struct `SessionAdmin` defined here
+   |
+help: a struct with a similar name exists
+   |
+32 - fn child_admin_type_is_gone(_: lash::admin::ChildSessionAdmin) {}
+32 + fn child_admin_type_is_gone(_: lash::admin::SessionAdmin) {}
+   |
+
 error[E0599]: no method named `pending_turn_inputs` found for struct `LashSession` in the current scope
  --> tests/ui/queue_operations_left_lash_session.rs:7:21
   |
@@ -29,3 +46,9 @@ help: there is a method `cancel_queued_work_batch` with a similar name
 20 -         .await_queued_work_batch(&lash::BatchId::from("qwb:batch"))
 20 +         .cancel_queued_work_batch(&lash::BatchId::from("qwb:batch"))
    |
+
+error[E0599]: no method named `children` found for struct `SessionAdmin` in the current scope
+  --> tests/ui/queue_operations_left_lash_session.rs:29:29
+   |
+29 |     let _ = session.admin().children();
+   |                             ^^^^^^^^ method not found in `SessionAdmin`

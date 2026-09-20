@@ -108,11 +108,13 @@ pub(crate) fn approx_token_count(text: &str) -> usize {
 }
 
 fn strip_attachment(part: &mut Part, placeholder: &str) -> bool {
-    if !matches!(part.kind, PartKind::Attachment) || part.attachment.is_none() {
+    if !matches!(part.kind(), PartKind::Attachment) || part.attachment().is_none() {
         return false;
     }
-    part.attachment = None;
-    part.content = placeholder.to_string();
+    if let Some(slot) = part.attachment_mut() {
+        *slot = None;
+    }
+    *part.content_mut() = placeholder.to_string();
     true
 }
 
@@ -174,8 +176,8 @@ pub(crate) fn find_compaction_cut_point(messages: &[Message], prefix_len: usize)
     let mut accumulated = 0usize;
     for idx in (start..messages.len()).rev() {
         for part in messages[idx].parts.iter() {
-            accumulated += approx_token_count(&part.content);
-            if part.attachment.is_some() {
+            accumulated += approx_token_count(part.content());
+            if part.attachment().is_some() {
                 accumulated += 1200; // approximate binary attachment token cost
             }
         }
@@ -222,9 +224,9 @@ fn extract_previous_summary(messages: &[Message]) -> Option<String> {
             return None;
         }
         m.parts.first().map(|p| {
-            p.content
+            p.content()
                 .strip_prefix(COMPACTION_SUMMARY_TITLE)
-                .unwrap_or(&p.content)
+                .unwrap_or_else(|| p.content())
                 .trim()
                 .to_string()
         })
@@ -524,8 +526,6 @@ async fn summarize_compaction_prefix(
     )
     .with_context_overlay(SessionContextOverlay {
         include_base_tools: false,
-        tool_providers: Vec::new(),
-        prompt_contributions: Vec::new(),
     })
     .with_session_id(compaction_session_id);
     let handle = session_lifecycle

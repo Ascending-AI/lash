@@ -2,15 +2,16 @@
 //! scheduler (`lash_core_worker::runtime::process_worker`) and the queued-work
 //! scheduler (`runtime::native_substrate::queued`).
 //!
-//! One protocol, one implementation: a `pending` queue, a per-key `scheduled`
-//! set, at most one retained `rerun` per key, `active` execution accounting,
-//! and a `dispatcher_running` latch that admits exactly one drain task. Hosts
-//! parameterise the key, the work item, a side-scoped `extra` state block, and
-//! the underflow report; they keep their own dispatch loops because the loops
-//! carry different duties (worklist paging versus exit-on-idle).
+//! One protocol, one implementation: one entry per key records whether its
+//! demand is queued (with at most one coalesced rerun already waiting behind
+//! it) or running (retaining at most one rerun demand), and a FIFO queue of
+//! the queued keys orders pops. A `dispatcher_running` latch admits exactly
+//! one drain task. Hosts parameterise the key, the work item, and a
+//! side-scoped `extra` state block; they keep their own dispatch loops because
+//! the loops carry different duties (worklist paging versus exit-on-idle).
 
 use lash_sansio::sync::MutexExt;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use lash_core_ids::worker_capacity::{WorkerCapacityMetrics, WorkerSlotKind};
@@ -25,16 +26,43 @@ pub trait CoalescingExtra: Send {
 
 impl CoalescingExtra for () {}
 
-/// The protocol state shared by both schedulers. `pending` + `scheduled` +
-/// `rerun` coalesce repeated admissions per key; `active` counts in-flight
-/// executions; `dispatcher_running` is the single-dispatcher latch, mutated
-/// only through [`claim_dispatcher`](Self::claim_dispatcher) and
+/// One key's schedule: work waiting for an attempt, or an in-flight attempt.
+/// A retained rerun only ever lives inside one of these variants, so a rerun
+/// demand cannot exist for a key with nothing queued or running.
+enum CoalescingEntry<W> {
+    /// `staged` is the demand the next pop hands to a task. `rerun` retains a
+    /// demand admitted while this key was already queued but not yet running;
+    /// a host either folds it into the popped demand (`take_rerun`) or lets it
+    /// carry into the running attempt and re-queue on completion.
+    Queued { staged: W, rerun: Option<W> },
+    /// The attempt is in flight; `rerun` retains at most one coalesced demand.
+    Running { rerun: Option<W> },
+}
+
+impl<W> CoalescingEntry<W> {
+    fn rerun_slot(&mut self) -> &mut Option<W> {
+        match self {
+            Self::Queued { rerun, .. } | Self::Running { rerun } => rerun,
+        }
+    }
+
+    fn depth(&self) -> usize {
+        match self {
+            Self::Queued { rerun, .. } => 1 + usize::from(rerun.is_some()),
+            Self::Running { rerun } => usize::from(rerun.is_some()),
+        }
+    }
+}
+
+/// The protocol state shared by both schedulers. `entries` is the single
+/// record of which keys are queued or running and what each retains;
+/// `queue` orders the queued keys first-in-first-out; `dispatcher_running` is
+/// the single-dispatcher latch, mutated only through
+/// [`claim_dispatcher`](Self::claim_dispatcher) and
 /// [`release_dispatcher`](Self::release_dispatcher).
 pub struct CoalescingSchedulerState<K, W, E = ()> {
-    pub pending: VecDeque<W>,
-    pub scheduled: BTreeSet<K>,
-    pub rerun: BTreeMap<K, W>,
-    pub active: usize,
+    entries: BTreeMap<K, CoalescingEntry<W>>,
+    queue: VecDeque<K>,
     dispatcher_running: bool,
     pub extra: E,
 }
@@ -42,10 +70,8 @@ pub struct CoalescingSchedulerState<K, W, E = ()> {
 impl<K: Ord, W, E: Default> Default for CoalescingSchedulerState<K, W, E> {
     fn default() -> Self {
         Self {
-            pending: VecDeque::new(),
-            scheduled: BTreeSet::new(),
-            rerun: BTreeMap::new(),
-            active: 0,
+            entries: BTreeMap::new(),
+            queue: VecDeque::new(),
             dispatcher_running: false,
             extra: E::default(),
         }
@@ -53,27 +79,73 @@ impl<K: Ord, W, E: Default> Default for CoalescingSchedulerState<K, W, E> {
 }
 
 impl<K: Ord + Clone, W, E: CoalescingExtra> CoalescingSchedulerState<K, W, E> {
-    /// Queue `work` under `key`, or coalesce it onto the in-flight attempt's
-    /// retained rerun. Returns true when the key was newly scheduled.
+    /// Queue `work` under `key`, or coalesce it onto the key's retained rerun
+    /// when the key is already scheduled. Returns true when the key was newly
+    /// scheduled.
     pub fn admit(&mut self, key: K, work: W, merge: impl FnOnce(&mut W, W)) -> bool {
-        if self.scheduled.insert(key.clone()) {
-            self.pending.push_back(work);
-            return true;
-        }
-        match self.rerun.entry(key) {
-            std::collections::btree_map::Entry::Occupied(mut slot) => merge(slot.get_mut(), work),
+        match self.entries.entry(key.clone()) {
             std::collections::btree_map::Entry::Vacant(slot) => {
-                slot.insert(work);
+                slot.insert(CoalescingEntry::Queued {
+                    staged: work,
+                    rerun: None,
+                });
+                self.queue.push_back(key);
+                true
+            }
+            std::collections::btree_map::Entry::Occupied(mut slot) => {
+                let rerun = slot.get_mut().rerun_slot();
+                match rerun {
+                    Some(retained) => merge(retained, work),
+                    None => *rerun = Some(work),
+                }
+                false
             }
         }
-        false
     }
 
-    /// Pop the next pending item and count it active.
+    /// Pop the next queued key and mark its attempt running.
     pub fn pop_next(&mut self) -> Option<W> {
-        let work = self.pending.pop_front()?;
-        self.active += 1;
-        Some(work)
+        loop {
+            let key = self.queue.pop_front()?;
+            match self.entries.remove(&key) {
+                Some(CoalescingEntry::Queued { staged, rerun }) => {
+                    self.entries.insert(key, CoalescingEntry::Running { rerun });
+                    return Some(staged);
+                }
+                Some(entry @ CoalescingEntry::Running { .. }) => {
+                    self.entries.insert(key, entry);
+                }
+                None => {}
+            }
+        }
+    }
+
+    /// Drain the key's retained rerun demand, if any.
+    pub fn take_rerun(&mut self, key: &K) -> Option<W> {
+        self.entries
+            .get_mut(key)
+            .and_then(|entry| entry.rerun_slot().take())
+    }
+
+    /// Record one finished execution for `key`: a retained rerun re-enters the
+    /// queue in FIFO order with the key still scheduled; otherwise the key
+    /// leaves the schedule. A completion for a key with no running attempt is
+    /// unrepresentable — this runs in a detached task's Drop, so it degrades
+    /// to a no-op rather than panicking.
+    pub fn complete(&mut self, key: &K) {
+        if !matches!(self.entries.get(key), Some(CoalescingEntry::Running { .. })) {
+            return;
+        }
+        if let Some(CoalescingEntry::Running { rerun: Some(work) }) = self.entries.remove(key) {
+            self.entries.insert(
+                key.clone(),
+                CoalescingEntry::Queued {
+                    staged: work,
+                    rerun: None,
+                },
+            );
+            self.queue.push_back(key.clone());
+        }
     }
 
     /// Claim the dispatcher latch: true exactly when this call starts the
@@ -100,9 +172,27 @@ impl<K: Ord + Clone, W, E: CoalescingExtra> CoalescingSchedulerState<K, W, E> {
         self.extra.on_dispatcher_exit();
     }
 
-    /// No queued work and nothing executing.
+    /// Any key with a queued demand.
+    pub fn has_queued(&self) -> bool {
+        !self.queue.is_empty()
+    }
+
+    /// How many attempts are in flight — derived, not tracked.
+    pub fn running_count(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|entry| matches!(entry, CoalescingEntry::Running { .. }))
+            .count()
+    }
+
+    /// Queued demands plus retained reruns: the intake-depth accounting.
+    pub fn intake_depth(&self) -> usize {
+        self.entries.values().map(CoalescingEntry::depth).sum()
+    }
+
+    /// No queued and no running entries: the dispatcher exit condition.
     pub fn queue_idle(&self) -> bool {
-        self.pending.is_empty() && self.active == 0
+        self.entries.is_empty()
     }
 }
 
@@ -119,22 +209,12 @@ pub trait CoalescingSchedulerHandle: Send + Sync + 'static {
     fn metrics(&self) -> &WorkerCapacityMetrics;
 
     /// Record one finished execution: release the key for a retained rerun,
-    /// else unschedule it. An underflowing completion is an accounting bug —
-    /// report it and clamp, never panic (this runs in a detached task's Drop).
-    fn complete(&self, key: &Self::Key, on_underflow: impl FnOnce(&Self::Key)) {
+    /// else unschedule it.
+    fn complete(&self, key: &Self::Key) {
         let mut state = self.state().lock_recover();
-        if state.active == 0 {
-            on_underflow(key);
-        } else {
-            state.active -= 1;
-        }
-        if let Some(work) = state.rerun.remove(key) {
-            state.pending.push_back(work);
-        } else {
-            state.scheduled.remove(key);
-        }
+        state.complete(key);
         self.metrics()
-            .intake_depth(self.slot_kind(), state.pending.len() + state.rerun.len());
+            .intake_depth(self.slot_kind(), state.intake_depth());
         drop(state);
         self.changed().notify_one();
     }
@@ -176,5 +256,98 @@ impl<S: CoalescingSchedulerHandle> Drop for CoalescingDispatcherGuard<S> {
             return;
         }
         self.scheduler.park_dispatcher();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type State = CoalescingSchedulerState<u32, String>;
+
+    fn merge(retained: &mut String, incoming: String) {
+        retained.push_str(&incoming);
+    }
+
+    #[test]
+    fn pops_are_first_in_first_out() {
+        let mut state = State::default();
+        assert!(state.admit(1, "a".to_string(), merge));
+        assert!(state.admit(2, "b".to_string(), merge));
+        assert!(state.admit(3, "c".to_string(), merge));
+
+        assert_eq!(state.pop_next().as_deref(), Some("a"));
+        assert_eq!(state.pop_next().as_deref(), Some("b"));
+        assert_eq!(state.pop_next().as_deref(), Some("c"));
+        assert_eq!(state.pop_next(), None);
+    }
+
+    #[test]
+    fn an_admit_between_pop_and_completion_is_retained_then_requeued_in_order() {
+        let mut state = State::default();
+        assert!(state.admit(1, "first".to_string(), merge));
+        assert!(state.admit(2, "other".to_string(), merge));
+        assert_eq!(state.pop_next().as_deref(), Some("first"));
+
+        // Key 1 is running: a fresh demand is retained on its entry, not lost
+        // and not re-queued ahead of the still-queued key 2.
+        assert!(!state.admit(1, "again".to_string(), merge));
+        assert_eq!(state.running_count(), 1);
+        assert_eq!(state.intake_depth(), 2);
+        assert!(!state.queue_idle());
+
+        state.complete(&1);
+        assert_eq!(state.pop_next().as_deref(), Some("other"));
+        assert_eq!(state.pop_next().as_deref(), Some("again"));
+        assert_eq!(state.pop_next(), None);
+    }
+
+    #[test]
+    fn an_admit_while_queued_is_retained_not_folded_into_the_staged_demand() {
+        let mut state = State::default();
+        assert!(state.admit(1, "staged".to_string(), merge));
+        assert!(!state.admit(1, "retained".to_string(), merge));
+
+        // The staged demand pops unchanged; the retained rerun stays attached
+        // to the now-running attempt for the host to fold or re-queue.
+        assert_eq!(state.pop_next().as_deref(), Some("staged"));
+        assert_eq!(state.take_rerun(&1).as_deref(), Some("retained"));
+
+        state.complete(&1);
+        assert!(state.queue_idle());
+    }
+
+    #[test]
+    fn completing_an_unknown_key_is_a_noop() {
+        let mut state = State::default();
+        state.complete(&7);
+        assert!(state.queue_idle());
+
+        assert!(state.admit(1, "a".to_string(), merge));
+        state.complete(&7);
+        assert_eq!(state.pop_next().as_deref(), Some("a"));
+
+        // A completion for a queued-but-never-run key leaves its demand alone.
+        assert!(state.admit(2, "b".to_string(), merge));
+        state.complete(&2);
+        assert_eq!(state.pop_next().as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn queue_idle_is_no_queued_and_no_running_entries() {
+        let mut state = State::default();
+        assert!(state.queue_idle());
+
+        state.admit(1, "a".to_string(), merge);
+        assert!(!state.queue_idle(), "a queued entry keeps it busy");
+
+        state.pop_next();
+        assert!(!state.queue_idle(), "a running entry keeps it busy");
+
+        state.complete(&1);
+        assert!(
+            state.queue_idle(),
+            "no queued and no running entries is idle"
+        );
     }
 }

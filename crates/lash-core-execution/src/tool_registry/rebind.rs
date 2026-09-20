@@ -66,8 +66,17 @@ pub(super) enum ReconcileMode {
 
 pub(super) struct ReconciledTools {
     pub(super) surface: ToolSurface,
-    pub(super) orphaned: Vec<ToolId>,
+    /// How each unresolved persisted id was classified. Reconcile decides the
+    /// dispositions; this only records which of the three they were.
+    pub(super) unresolved: UnresolvedPersistedTools,
     pub(super) changed: bool,
+}
+
+#[derive(Default)]
+pub(super) struct UnresolvedPersistedTools {
+    pub(super) lost_members: Vec<ToolId>,
+    pub(super) parked_opt_outs: Vec<ToolId>,
+    pub(super) superseded_identities: Vec<SupersededToolIdentity>,
 }
 
 /// Reconcile live sources with persisted per-id state at the one registry seam.
@@ -87,7 +96,7 @@ pub(super) fn reconcile_tool_state_entries(
         ReconcileMode::LiveSurface => advertised_tool_entries(sources, preferred_source_key)?,
         ReconcileMode::SnapshotSurface => ToolSurface::default(),
     };
-    let mut orphaned = Vec::new();
+    let mut unresolved = UnresolvedPersistedTools::default();
 
     for (id, stored) in entries {
         if let Some(live) = surface.get_mut(id) {
@@ -133,11 +142,25 @@ pub(super) fn reconcile_tool_state_entries(
                 // The old authority grant is not transferred and its orphan is
                 // superseded, while the new id remains a default member.
                 if mode == ReconcileMode::LiveSurface
-                    && surface.get_by_name(&stored.manifest.name).is_some()
+                    && let Some((live_id, _)) = surface.get_by_name(&stored.manifest.name)
                 {
+                    unresolved
+                        .superseded_identities
+                        .push(SupersededToolIdentity {
+                            retired_id: id.clone(),
+                            live_id: live_id.clone(),
+                            name: stored.manifest.name.clone(),
+                        });
                     continue;
                 }
-                orphaned.push(id.clone());
+                // Nothing resolves the id and nothing owns its name. A
+                // persisted member is a lost capability; an entry the host had
+                // already opted out of is not.
+                if stored.member {
+                    unresolved.lost_members.push(id.clone());
+                } else {
+                    unresolved.parked_opt_outs.push(id.clone());
+                }
                 let orphan = ToolRegistryEntry::orphaned(
                     stored.manifest.clone(),
                     stored.registration_kind,
@@ -151,7 +174,7 @@ pub(super) fn reconcile_tool_state_entries(
     let changed = export_tool_state_entries(&surface) != *entries;
     Ok(ReconciledTools {
         surface,
-        orphaned,
+        unresolved,
         changed,
     })
 }

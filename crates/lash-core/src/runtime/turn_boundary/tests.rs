@@ -458,13 +458,13 @@ fn agent_frame_switch_seeds_the_new_frame_without_a_tool_call_event() {
         .read_model(Some(&expected_frame_node_id))
         .unwrap();
     assert_eq!(current_read.messages.len(), 1);
-    assert_eq!(current_read.messages[0].parts[0].content, "seed message");
+    assert_eq!(current_read.messages[0].parts[0].content(), "seed message");
     let previous_read = state
         .session_graph
         .read_model(previous_frame_node_id.as_ref())
         .unwrap();
     assert_eq!(previous_read.messages.len(), 1);
-    assert_eq!(previous_read.messages[0].parts[0].content, "old frame");
+    assert_eq!(previous_read.messages[0].parts[0].content(), "old frame");
 }
 #[test]
 fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
@@ -538,7 +538,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         .unwrap();
     assert_eq!(current_read.messages.len(), 1);
     assert_eq!(
-        current_read.messages[0].parts[0].content,
+        current_read.messages[0].parts[0].content(),
         "Compaction summary:\nold work"
     );
     assert!(matches!(
@@ -552,7 +552,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         .unwrap();
     assert_eq!(previous_read.messages.len(), 1);
     assert_eq!(
-        previous_read.messages[0].parts[0].content,
+        previous_read.messages[0].parts[0].content(),
         "old durable frame"
     );
 
@@ -824,7 +824,7 @@ async fn final_commit_opens_one_frame_for_two_agreeing_switch_authors() {
         .expect("read the frame this commit opened");
     assert_eq!(current_read.messages.len(), 1);
     assert_eq!(
-        current_read.messages[0].parts[0].content,
+        current_read.messages[0].parts[0].content(),
         "compaction summary"
     );
 }

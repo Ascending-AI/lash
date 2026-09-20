@@ -1186,3 +1186,65 @@ fn one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would() {
         );
     }
 }
+
+#[test]
+fn every_execution_fact_contract_resolves_to_its_registry_fact_spec_row() {
+    // Exhaustiveness is proven against the imported registries, not a hand-
+    // maintained count: adding a contract to a spec table without a fact-spec
+    // row fails here, and a row naming a contract outside its family's table
+    // fails to compile at `contract_spec` resolution.
+    for contracts in [
+        STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
+        RLM_PROTOCOL_SCENARIO_CONTRACTS,
+        AGENT_SCENARIO_CONTRACTS,
+    ] {
+        for contract in contracts {
+            if contract.semantic_oracle == NO_EXECUTION_FACT_CONTRACT.semantic_oracle {
+                assert!(
+                    contract_fact_row(contract.semantic_oracle).is_none(),
+                    "{} is the named generated-boundary bypass and must not carry a fact-spec row",
+                    contract.semantic_oracle
+                );
+                continue;
+            }
+            let (row, _) = contract_fact_row(contract.semantic_oracle).unwrap_or_else(|| {
+                panic!(
+                    "{} registry contract `{}` has no fact-spec row",
+                    contract.suite, contract.semantic_oracle
+                )
+            });
+            // The registries are `pub const` slices, so identity is proven by
+            // the spec's fields, not by pointer equality.
+            assert_eq!(
+                row.spec.suite, contract.suite,
+                "{} resolved to a fact-spec row bound to another suite's spec",
+                contract.semantic_oracle
+            );
+            assert_eq!(
+                row.spec.test_name, contract.test_name,
+                "{} resolved to a fact-spec row bound to another registry spec",
+                contract.semantic_oracle
+            );
+        }
+    }
+}
+
+#[test]
+fn fact_spec_rows_publish_each_contract_under_its_registry_oracle_name() {
+    // A row can never attribute its facts to a contract name other than the
+    // one its bound spec carries: the dispatcher key, the execution-payload
+    // contract field, and the memo key are all `row.spec.semantic_oracle`.
+    let mut seen = BTreeSet::new();
+    for row in all_contract_fact_specs() {
+        assert!(
+            seen.insert(row.spec.semantic_oracle),
+            "duplicate fact-spec row for {}",
+            row.spec.semantic_oracle
+        );
+        assert!(
+            !row.fact.is_empty() && !row.assertion.is_empty(),
+            "{} must publish a named fact and assertion",
+            row.spec.semantic_oracle
+        );
+    }
+}

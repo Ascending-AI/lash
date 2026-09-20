@@ -1543,7 +1543,7 @@ pub fn message_text(message: &Message) -> String {
     message
         .parts
         .iter()
-        .map(|part| part.content.as_str())
+        .map(|part| part.content())
         .collect::<Vec<_>>()
         .join("\n")
 }

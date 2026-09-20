@@ -240,13 +240,16 @@ impl VmHeapContinuation {
     }
 
     #[cfg(test)]
-    pub(crate) fn storage_slot_count(&self) -> usize {
-        self.heap.slots.len()
+    pub(crate) fn live_object_count(&self) -> usize {
+        self.heap.objects_in_id_order().count()
     }
 
+    /// Objects allocated and swept since the VM started: the heap stores only
+    /// the live entries, so what a collection removed is the gap between the
+    /// allocation counter and what remains.
     #[cfg(test)]
-    pub(crate) fn vacant_slot_count(&self) -> usize {
-        self.heap.slots.iter().filter(|slot| slot.is_none()).count()
+    pub(crate) fn swept_object_count(&self) -> u64 {
+        self.heap.allocations() - self.heap.objects_in_id_order().count() as u64
     }
 
     pub fn materialize(&self, value: &Value) -> Result<Value, ContinuationError> {

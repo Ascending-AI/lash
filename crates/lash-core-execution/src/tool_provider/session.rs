@@ -1,11 +1,8 @@
 use crate::ModelGenerationClamp;
 use crate::SessionId;
-use crate::TurnId;
 use std::sync::Arc;
 
-use crate::plugin::{
-    PluginError, SessionHandle, SessionLifecycleService, SessionSnapshot, SessionStateService,
-};
+use crate::plugin::{PluginError, SessionSnapshot, SessionStateService};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolSessionModel {
@@ -24,14 +21,12 @@ pub struct ToolSessionModel {
 }
 
 #[derive(Clone)]
-pub struct ToolSessionAdmin<'run> {
+pub struct ToolSessionAdmin {
     pub(super) session_id: SessionId,
     pub(super) sessions: Arc<dyn SessionStateService>,
-    pub(super) session_lifecycle: Arc<dyn SessionLifecycleService>,
-    pub(super) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
 }
 
-impl<'run> ToolSessionAdmin<'run> {
+impl ToolSessionAdmin {
     /// Read the current session's effective model and generation policy.
     ///
     /// # Integrator class
@@ -75,63 +70,6 @@ impl<'run> ToolSessionAdmin<'run> {
         self.sessions
             .snapshot_session(&SessionId::from(session_id.as_ref()))
             .await
-    }
-
-    /// Create a managed session through the runtime lifecycle service.
-    ///
-    /// # Integrator class
-    ///
-    /// Orchestrating tool implementors use this capability to create sessions
-    /// without acquiring the runtime's concrete lifecycle implementation.
-    pub async fn create_session(
-        &self,
-        request: crate::SessionCreateRequest,
-    ) -> Result<SessionHandle, PluginError> {
-        self.session_lifecycle.create_session(request).await
-    }
-
-    /// Close a named managed session through the runtime lifecycle service.
-    ///
-    /// # Integrator class
-    ///
-    /// Orchestrating tool implementors use this capability to finish sessions
-    /// they own through the supported lifecycle boundary.
-    pub async fn close_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
-        self.session_lifecycle.close_session(session_id).await
-    }
-
-    /// Run one turn on a managed session, scoping its durable effects to
-    /// `turn_id`.
-    ///
-    /// `turn_id` must be unique across every managed turn running in this
-    /// process (a process id or another already-unique handle); a duplicate is
-    /// rejected with `` turn `<id>` is already running on session `<other>` ``.
-    /// A session runs at most one turn at a time, and both registrations are
-    /// released even when this future is dropped mid-turn.
-    pub async fn start_turn(
-        &self,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-        input: crate::TurnInput,
-    ) -> Result<crate::AssembledTurn, PluginError> {
-        let scope = self.sessions.turn_scope(session_id, turn_id).await?;
-        let scoped_effect_controller = self
-            .effect_controller
-            .scoped_for(scope)
-            .map_err(|err| PluginError::Session(err.to_string()))?;
-        let request =
-            crate::SessionTurnRequest::new(session_id, turn_id, input, scoped_effect_controller)?;
-        self.session_lifecycle.start_turn(request).await
-    }
-
-    /// Captures the spawn-time [`crate::SessionPluginInit`] payload a
-    /// `ParentFork` creation request must carry for a peer of the given
-    /// session.
-    pub async fn session_plugin_init(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<crate::SessionPluginInit, PluginError> {
-        self.sessions.session_plugin_init(session_id).await
     }
 
     /// Read the current session's serialized tool catalog.

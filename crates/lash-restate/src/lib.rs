@@ -83,6 +83,7 @@
 //! self-terminates. Draining and purging those invocations before the cutover is
 //! the only remedy.
 
+mod bindings;
 mod controller;
 mod durable_wait;
 mod effect_group;
@@ -95,6 +96,10 @@ mod turn;
 
 pub use restate_sdk;
 
+pub use bindings::{
+    RestateBindingCheckError, RestateEndpointDiscoveryError, assert_services_bound,
+    bound_service_names,
+};
 pub use controller::{
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
 };

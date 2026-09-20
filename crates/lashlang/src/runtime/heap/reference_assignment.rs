@@ -116,10 +116,6 @@ impl Heap {
         Ok(())
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the slot was resolved and its old object cloned a few lines above"
-    )]
     pub(crate) fn delete_javascript_member(
         &mut self,
         receiver: &Value,
@@ -134,15 +130,9 @@ impl Heap {
             };
         };
         let key = coerce_string(key)?;
-        let slot =
-            self.id_to_slot
-                .get(target_id)
-                .copied()
-                .ok_or(RuntimeError::DanglingHeapReference {
-                    id: target_id.get(),
-                })?;
-        let old_object = self.slots[slot]
-            .as_ref()
+        let old_object = self
+            .entries
+            .get(target_id)
             .ok_or(RuntimeError::DanglingHeapReference {
                 id: target_id.get(),
             })?
@@ -183,7 +173,7 @@ impl Heap {
         let new_bytes = new_object.logical_bytes();
         let old_children = old_object.child_refs();
         let new_children = new_object.child_refs();
-        let entry = self.slots[slot].as_mut().expect("heap slot exists");
+        let entry = self.entry_mut(*target_id)?;
         entry.object = new_object;
         entry.logical_bytes = new_bytes;
         self.live_logical_bytes = self
@@ -365,13 +355,9 @@ impl Heap {
             return Ok(());
         }
 
-        let slot = self.id_to_slot.get(&target_id).copied().ok_or(
-            RuntimeError::DanglingHeapReference {
-                id: target_id.get(),
-            },
-        )?;
-        let old_object = self.slots[slot]
-            .as_ref()
+        let old_object = self
+            .entries
+            .get(&target_id)
             .ok_or(RuntimeError::DanglingHeapReference {
                 id: target_id.get(),
             })?
@@ -487,16 +473,7 @@ impl Heap {
         }
         let old_children = old_object.child_refs();
         let new_children = new_object.child_refs();
-        let slot = self.id_to_slot.get(&target_id).copied().ok_or(
-            RuntimeError::DanglingHeapReference {
-                id: target_id.get(),
-            },
-        )?;
-        let entry = self.slots[slot]
-            .as_mut()
-            .ok_or(RuntimeError::DanglingHeapReference {
-                id: target_id.get(),
-            })?;
+        let entry = self.entry_mut(target_id)?;
         entry.object = new_object;
         entry.logical_bytes = new_bytes;
         self.live_logical_bytes = next_live;

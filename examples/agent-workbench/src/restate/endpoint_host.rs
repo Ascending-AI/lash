@@ -9,8 +9,8 @@ pub(crate) fn spawn_restate_endpoint(
     process_deployment: lash_restate::RestateProcessDeployment,
     process_worker: lash::durability::DurableProcessWorker,
 ) {
-    let endpoint = endpoint(state, process_deployment, process_worker);
     tokio::spawn(async move {
+        let endpoint = endpoint(state, process_deployment, process_worker).await;
         restate_sdk::http_server::HttpServer::new(endpoint)
             .listen_and_serve(addr)
             .await;
@@ -31,8 +31,8 @@ pub(crate) fn spawn_owned_restate_endpoint(
     process_worker: lash::durability::DurableProcessWorker,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
-    let endpoint = endpoint(state, process_deployment, process_worker);
     tokio::spawn(async move {
+        let endpoint = endpoint(state, process_deployment, process_worker).await;
         restate_sdk::http_server::HttpServer::new(endpoint)
             .serve_with_cancel(listener, async move {
                 while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
@@ -41,12 +41,12 @@ pub(crate) fn spawn_owned_restate_endpoint(
     })
 }
 
-fn endpoint(
+async fn endpoint(
     state: AppState,
     process_deployment: lash_restate::RestateProcessDeployment,
     process_worker: lash::durability::DurableProcessWorker,
 ) -> Endpoint {
-    Endpoint::builder()
+    let endpoint = Endpoint::builder()
         .bind(WorkbenchTurnWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchQueuedTurnWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchButtonTriggerWorkflowImpl::new(state.clone()).serve())
@@ -58,5 +58,43 @@ fn endpoint(
         .bind(LashDurableWaitWorkflowImpl.serve())
         .bind(LashDurableWaitIndexImpl.serve())
         .bind(LashProcessAttachImpl.serve())
-        .build()
+        .build();
+    // Wiring-time check: the deployment knows the lash service surface it
+    // requires, and the built endpoint reports what it bound. A missing bind
+    // fails startup here rather than the first call that would 404.
+    if let Err(error) = process_deployment.assert_endpoint_bound(&endpoint).await {
+        panic!("workbench Restate endpoint must bind the lash process service surface: {error}");
+    }
+    endpoint
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Red-proof for the wiring-time check: an endpoint that forgot
+    /// `LashProcessAttach` (and the process workflow itself) must fail
+    /// binding validation, naming the missing services.
+    #[tokio::test]
+    async fn endpoint_missing_lash_bindings_fails_validation() {
+        let endpoint = Endpoint::builder()
+            .bind(LashDurableWaitWorkflowImpl.serve())
+            .bind(LashDurableWaitIndexImpl.serve())
+            .build();
+        let error = lash_restate::assert_services_bound(
+            &endpoint,
+            lash_restate::RestateProcessDeployment::required_service_names().as_slice(),
+        )
+        .await
+        .expect_err("an endpoint missing lash process services must not validate");
+        let lash_restate::RestateBindingCheckError::UnboundServices(missing) = error else {
+            panic!("a bound endpoint's discovery answer yields UnboundServices, not {error}");
+        };
+        assert_eq!(
+            missing,
+            ["LashProcessAttach", "LashProcessWorkflow"]
+                .map(str::to_string)
+                .to_vec(),
+        );
+    }
 }

@@ -257,6 +257,7 @@ impl LashRuntime {
             ));
         }
         let mut session = Session::new(services.clone(), &state.session_id).await?;
+        let mut tool_restore_report = None;
         if let Some(tool_state) = state.tool_state_snapshot().cloned() {
             // Cold rebuild reconciles the persisted catalog over live tools,
             // adopting its generation when the surface is unchanged.
@@ -267,19 +268,22 @@ impl LashRuntime {
             // is not generation-fenced against the fresh registry, so any
             // persisted generation rebuilds. A changed live surface bumps once
             // to make the next commit capture it.
-            let report = session
-                .plugins()
-                .tool_registry()
-                .restore_state(tool_state)
-                .map_err(|err| SessionError::Protocol(err.to_string()))?;
-            if !report.orphaned.is_empty() {
-                tracing::warn!(
-                    session_id = %state.session_id,
-                    orphaned = ?report.orphaned,
-                    "session restored with orphaned tools: no registered source \
-                     resolves them; they remain non-members until their source returns"
-                );
-            }
+            //
+            // Refusing here is what the Require contract promises: the
+            // protocol restore, the `SessionRestored` event and every durable
+            // write below have not run, and the admitted load already released
+            // its Session Execution Lease.
+            let registry = session.plugins().tool_registry();
+            tool_restore_report = Some(crate::runtime::tool_restore::install_persisted_tool_state(
+                registry.as_ref(),
+                tool_state,
+                crate::runtime::tool_restore::ToolRestoreContext::for_open(
+                    &state.session_id,
+                    host.core.control.tool_source_policy,
+                    &host.core.tracing,
+                    host.core.clock.as_ref(),
+                ),
+            )?);
         }
         session.refresh_tool_catalog().await?;
         let protocol_session = Arc::clone(session.plugins().protocol_session());
@@ -323,6 +327,7 @@ impl LashRuntime {
             turn_phase_probe: None,
             resident_session: ResidentSessionContinuity::fresh(),
             materialized_protocol_config_dirty: false,
+            tool_restore_report,
         })
     }
 

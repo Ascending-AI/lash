@@ -1566,6 +1566,48 @@ pub(super) async fn durable_wait_workflow_rejects_a_key_for_a_different_workflow
 }
 
 #[tokio::test]
+pub(super) async fn durable_wait_workflow_rejects_an_inconsistent_key_preimage_before_promise_use()
+{
+    let endpoint = Endpoint::builder()
+        .bind(LashDurableWaitWorkflowImpl.serve())
+        .build();
+    let scope = durable_turn_scope("fig2065-forged-session", "fig2065-forged-turn");
+    let mut key = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
+        .expect("derive FIG-2065 turn-control key");
+    key.wait = AwaitEventWaitIdentity::tool_completion("fig2065-forged-tool-completion");
+    let address = RestateDurableWaitAddress::for_key(&key);
+    assert_eq!(
+        address.classification,
+        RestateDurableWaitClassification::DurableWait,
+        "the forged wait must read as a durable wait so only the preimage guard can catch it"
+    );
+
+    let output = invoke_endpoint(
+        &endpoint,
+        "LashDurableWaitWorkflow",
+        "resolve",
+        &address.workflow_key,
+        &RestateDurableWaitResolveRequest {
+            key: key.clone(),
+            resolution: Resolution::Cancelled,
+        },
+    )
+    .await
+    .expect("invoke FIG-2065 forged-key resolve");
+    let error = restate_output_failure_message(&output)
+        .or_else(|| restate_error_message(&output))
+        .expect("a classification-mismatched preimage must fail the workflow invocation");
+    assert!(
+        error.contains("inconsistent durable-wait key preimage"),
+        "terminal error must name the key-preimage inconsistency, got: {error}"
+    );
+    assert!(
+        restate_completed_promise(&output, DURABLE_WAIT_PROMISE_KEY).is_none(),
+        "terminal rejection must precede any promise interaction"
+    );
+}
+
+#[tokio::test]
 pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_before_state_write() {
     let endpoint = Endpoint::builder()
         .bind(LashDurableWaitIndexImpl.serve())

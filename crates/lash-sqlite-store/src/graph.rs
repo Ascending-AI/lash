@@ -11,8 +11,39 @@
 //! up front, replacing the prior store `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK`
 //! ceremony.
 
+use super::attachments::artifact_namespace_kind;
 use super::*;
 use lash_sansio::SessionId;
+
+/// One GC root class. The variant *is* the label choice: a pointer-table row
+/// derives its [`PersistedArtifactKind`] from its own namespace key, the sole
+/// owner of the payload-family fact, so a new root class must pick a variant
+/// rather than silently inherit a sibling's label (FIG-1949). Child refs a
+/// traversal discovers are not roots and keep flowing as
+/// [`RetainedArtifactRef`].
+enum GcRoot {
+    /// A live session checkpoint root; the only root class whose stored ref
+    /// graph the sweep traverses.
+    CheckpointManifest(BlobRef),
+    /// A pointer-table `artifact_refs` row; a leaf whose label its namespace
+    /// owns.
+    ArtifactRef {
+        blob_ref: BlobRef,
+        kind: PersistedArtifactKind,
+    },
+}
+
+impl GcRoot {
+    fn into_retained(self) -> RetainedArtifactRef {
+        match self {
+            Self::CheckpointManifest(blob_ref) => RetainedArtifactRef {
+                blob_ref,
+                kind: PersistedArtifactKind::CheckpointManifest,
+            },
+            Self::ArtifactRef { blob_ref, kind } => RetainedArtifactRef { blob_ref, kind },
+        }
+    }
+}
 
 impl Store {
     pub(crate) fn load_session_graph_from_conn(
@@ -186,7 +217,7 @@ impl Store {
     /// manifest blob (and, transitively, the tool/plugin/execution snapshot
     /// blobs it references) is reachable and must be kept. Synchronous: runs
     /// inside the GC `conn.write` closure on the connection thread.
-    fn live_checkpoint_roots(conn: &Connection) -> Result<Vec<RetainedArtifactRef>, StoreError> {
+    fn live_checkpoint_roots(conn: &Connection) -> Result<Vec<GcRoot>, StoreError> {
         let mut roots = Vec::new();
         let mut stmt = conn
             .prepare(
@@ -199,9 +230,36 @@ impl Store {
             .query_map([], |row| row.get::<_, String>(0))
             .map_err(sqlite_error)?;
         for row in rows {
-            roots.push(RetainedArtifactRef {
-                blob_ref: BlobRef(row.map_err(sqlite_error)?),
-                kind: PersistedArtifactKind::CheckpointManifest,
+            roots.push(GcRoot::CheckpointManifest(BlobRef(
+                row.map_err(sqlite_error)?,
+            )));
+        }
+        Ok(roots)
+    }
+
+    /// Collect the pointer-table roots that must survive GC.
+    ///
+    /// Each row's label is derived from its own namespace key — the sole owner
+    /// of the payload-family fact — via [`artifact_namespace_kind`], so a
+    /// pointer row can never inherit the module label (FIG-1949).
+    /// Synchronous: runs inside the GC `conn.write` closure.
+    fn artifact_ref_roots(conn: &Connection) -> Result<Vec<GcRoot>, StoreError> {
+        let mut roots = Vec::new();
+        let mut stmt = conn
+            .prepare(
+                "SELECT namespace, blob_ref FROM artifact_refs ORDER BY namespace, artifact_ref",
+            )
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(sqlite_error)?;
+        for row in rows {
+            let (namespace, blob_ref) = row.map_err(sqlite_error)?;
+            roots.push(GcRoot::ArtifactRef {
+                blob_ref: BlobRef(blob_ref),
+                kind: artifact_namespace_kind(&namespace)?,
             });
         }
         Ok(roots)
@@ -212,23 +270,11 @@ impl Store {
     /// holds the write lock for its duration.
     pub(crate) fn gc_unreachable_in_tx(tx: &Transaction<'_>) -> Result<GcReport, StoreError> {
         let mut roots = Self::live_checkpoint_roots(tx)?;
-        {
-            let mut stmt = tx
-                .prepare("SELECT blob_ref FROM artifact_refs ORDER BY namespace, artifact_ref")
-                .map_err(sqlite_error)?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))
-                .map_err(sqlite_error)?;
-            for row in rows {
-                roots.push(RetainedArtifactRef {
-                    blob_ref: BlobRef(row.map_err(sqlite_error)?),
-                    kind: PersistedArtifactKind::LashlangModule,
-                });
-            }
-        }
+        roots.extend(Self::artifact_ref_roots(tx)?);
         let root_count = roots.len();
         let mut retained = std::collections::BTreeMap::<String, PersistedArtifactKind>::new();
-        let mut stack = roots;
+        let mut stack: Vec<RetainedArtifactRef> =
+            roots.into_iter().map(GcRoot::into_retained).collect();
         while let Some(current) = stack.pop() {
             if retained
                 .insert(current.blob_ref.0.clone(), current.kind)
@@ -309,6 +355,66 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::attachments::{MODULE_ARTIFACT_NAMESPACE, PROCESS_ENV_NAMESPACE};
+
+    /// A pointer-table row's retained label comes from its own namespace key:
+    /// a non-manifest namespace cannot inherit the module label (FIG-1949).
+    #[tokio::test]
+    async fn pointer_table_roots_derive_labels_from_their_namespace() {
+        let store = Store::memory().await.expect("open store");
+        store
+            .conn
+            .call(|conn| {
+                for (namespace, artifact_ref, blob_ref) in [
+                    (MODULE_ARTIFACT_NAMESPACE, "mod-a", "blob-mod"),
+                    (PROCESS_ENV_NAMESPACE, "env-a", "blob-env"),
+                ] {
+                    conn.execute(
+                        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
+                         VALUES (?1, ?2, ?3)",
+                        params![namespace, artifact_ref, blob_ref],
+                    )?;
+                }
+                let roots = Store::artifact_ref_roots(conn).map_err(sqlite_conversion_error)?;
+                let kinds: std::collections::BTreeMap<String, PersistedArtifactKind> = roots
+                    .into_iter()
+                    .map(|root| match root {
+                        GcRoot::ArtifactRef { blob_ref, kind } => (blob_ref.0, kind),
+                        GcRoot::CheckpointManifest(_) => {
+                            unreachable!("pointer collection yields no manifest root")
+                        }
+                    })
+                    .collect();
+                assert_eq!(kinds["blob-mod"], PersistedArtifactKind::LashlangModule);
+                assert_eq!(
+                    kinds["blob-env"],
+                    PersistedArtifactKind::ProcessExecutionEnv
+                );
+                Ok(())
+            })
+            .await
+            .expect("namespace-derived pointer labels");
+    }
+
+    /// A namespace nobody mapped fails the sweep rather than being labelled
+    /// with a sibling namespace's kind.
+    #[tokio::test]
+    async fn pointer_table_root_with_unknown_namespace_fails_closed() {
+        let store = Store::memory().await.expect("open store");
+        store
+            .conn
+            .call(|conn| {
+                conn.execute(
+                    "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
+                     VALUES ('foreign_namespace', 'ref-a', 'blob-a')",
+                    [],
+                )?;
+                assert!(Store::artifact_ref_roots(conn).is_err());
+                Ok(())
+            })
+            .await
+            .expect("unknown namespace fails closed");
+    }
 
     #[tokio::test]
     async fn healthy_non_empty_whole_graph_validates_without_resident_leaf() {

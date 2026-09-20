@@ -71,7 +71,7 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
                 .all(|message| message
                     .parts
                     .iter()
-                    .all(|part| part.content != ROLLED_BACK_MARKER)),
+                    .all(|part| part.content() != ROLLED_BACK_MARKER)),
             "the stale append must be absent from the reconciled RLM history projection"
         );
         session.runtime.publish_from(&runtime);
@@ -785,7 +785,7 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
         .filter(|message| message.role == lash_core::MessageRole::Assistant)
         .collect::<Vec<_>>();
     assert_eq!(assistant_messages.len(), 1);
-    assert_eq!(assistant_messages[0].parts[0].content, "done in prose");
+    assert_eq!(assistant_messages[0].parts[0].content(), "done in prose");
     Ok(())
 }
 

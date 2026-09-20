@@ -32,7 +32,7 @@ lash = { workspace = true, features = ["rlm"] }
 lash-http-transport = { workspace = true }
 lashlang = { workspace = true }
 lash-plugin-mcp = { workspace = true, features = ["lashlang"] }
-lash-plugin-process-controls = { workspace = true, features = ["lashlang"] }
+lash-plugin-process-controls = { workspace = true }
 lash-plugin-rolling-history = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-provider-openai = { workspace = true }

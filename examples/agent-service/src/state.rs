@@ -130,7 +130,41 @@ impl AppStateData {
             .plugin::<DemoPlugin>(DemoPluginConfig {
                 db: Arc::clone(&self.db),
             });
-        Ok(builder.open().await?)
+        let session = builder.open().await?;
+        self.record_tool_loss_notice(chat_id, &session).await?;
+        Ok(session)
+    }
+
+    /// Tell this chat's user when the reopened session lost a tool.
+    ///
+    /// An open is the one moment the service learns that a persisted tool has
+    /// no live source (FIG-3367). The report is a typed value, so the notice
+    /// names the exact tool ids and goes into the transcript the user reads
+    /// rather than into the service log. Only lost members are rendered: a
+    /// parked opt-out is a tool the user already turned off, and a superseded
+    /// identity is the same capability under a new id.
+    async fn record_tool_loss_notice(&self, chat_id: &str, session: &LashSession) -> AppResult<()> {
+        let Some(report) = session.tool_restore_report().await else {
+            return Ok(());
+        };
+        if !report.has_lost_members() {
+            return Ok(());
+        }
+        let notice = tool_loss_notice_text(&report);
+        let chat_id = chat_id.to_string();
+        self.with_db(move |db| {
+            // One notice per distinct loss: every request opens the chat, and
+            // a transcript that repeats the same warning per poll is noise.
+            let already_told = db
+                .list_messages(&chat_id)?
+                .iter()
+                .any(|message| message.body.text() == notice);
+            if !already_told {
+                db.insert_message(&chat_id, "system", &notice)?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     pub(crate) async fn with_db<T, F>(&self, f: F) -> AppResult<T>
@@ -170,6 +204,20 @@ impl AppStateData {
         }
         Ok(())
     }
+}
+
+/// The user-facing sentence for a tool-restore report that lost members.
+pub(crate) fn tool_loss_notice_text(report: &lash::tools::ToolRestoreReport) -> String {
+    let lost = report
+        .lost_members
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "Some tools this chat had are unavailable: {lost}. The chat still works; \
+         those tools return when their source does."
+    )
 }
 
 #[derive(Debug)]
@@ -298,6 +346,37 @@ pub(crate) mod test_support {
         data_dir: &std::path::Path,
         provider: lash::provider::ProviderHandle,
     ) -> LashCore {
+        test_core_with_facets(
+            data_dir,
+            provider,
+            None,
+            lash::tools::ToolSourcePolicy::Tolerate,
+        )
+        .await
+    }
+
+    /// A core that refuses to serve a chat whose persisted tools have no
+    /// source here — the unattended-deployment posture (FIG-3367).
+    pub(crate) async fn test_core_requiring_tool_sources(data_dir: &std::path::Path) -> LashCore {
+        let provider = lash::testing::TestProvider::builder()
+            .kind("agent-service-test-support")
+            .build()
+            .into_handle();
+        test_core_with_facets(
+            data_dir,
+            provider,
+            None,
+            lash::tools::ToolSourcePolicy::Require,
+        )
+        .await
+    }
+
+    pub(crate) async fn test_core_with_facets(
+        data_dir: &std::path::Path,
+        provider: lash::provider::ProviderHandle,
+        tools: Option<Arc<dyn lash::tools::ToolProvider>>,
+        tool_source_policy: lash::tools::ToolSourcePolicy,
+    ) -> LashCore {
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
@@ -311,9 +390,14 @@ pub(crate) mod test_support {
                     .expect("artifact store"),
             ),
         );
-        LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        let mut builder = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .with_native_queued_work()
-            .provider(provider)
+            .tool_source_policy(tool_source_policy)
+            .provider(provider);
+        if let Some(tools) = tools {
+            builder = builder.tools(tools);
+        }
+        builder
             .model(mock_model_spec())
             .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
                 data_dir.join("lash-sessions"),
@@ -342,6 +426,25 @@ pub(crate) mod test_support {
                 "test",
             ))
             .expect("core")
+    }
+
+    /// A core with an extra host tool source, for seeding a chat whose
+    /// checkpoint records a tool a later core will not carry.
+    pub(crate) async fn test_core_with_tools(
+        data_dir: &std::path::Path,
+        tools: Arc<dyn lash::tools::ToolProvider>,
+    ) -> LashCore {
+        let provider = lash::testing::TestProvider::builder()
+            .kind("agent-service-test-support")
+            .build()
+            .into_handle();
+        test_core_with_facets(
+            data_dir,
+            provider,
+            Some(tools),
+            lash::tools::ToolSourcePolicy::Tolerate,
+        )
+        .await
     }
 
     pub(crate) fn test_state(core: &LashCore, db: AppDb) -> AppStateData {
@@ -376,7 +479,10 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod session_language_tests {
-    use super::test_support::{mock_model_spec, test_core, test_core_with_provider, test_state};
+    use super::test_support::{
+        mock_model_spec, test_core, test_core_requiring_tool_sources, test_core_with_provider,
+        test_core_with_tools, test_state,
+    };
     use super::*;
 
     fn system_text(request: &lash::provider::LlmRequest) -> String {
@@ -478,6 +584,162 @@ mod session_language_tests {
                 "a per-turn dialect key must not re-word the board prompt: {prompt}"
             );
         }
+    }
+
+    /// A reopen that lost a tool tells this chat's user, by tool id, once
+    /// (FIG-3367).
+    ///
+    /// The seed core carries a host tool source; the serving core does not, so
+    /// the reopen's restore report has a lost member. Dropping the report — or
+    /// rendering it only as a log line — leaves the transcript without the
+    /// notice and fails this test.
+    #[tokio::test]
+    async fn a_reopen_that_lost_a_tool_tells_the_user_once() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path();
+        let db_path = data_dir.join("app-tool-loss.db");
+        let chat_id = {
+            let mut db = AppDb::open(&db_path).expect("app db");
+            db.create_chat("tool loss", "mock-model", None)
+                .expect("create chat")
+                .id
+        };
+
+        // Seed: a core that carries the source persists the tool in the
+        // session's checkpoint.
+        let seeding_core = test_core_with_tools(data_dir, Arc::new(SeedTools)).await;
+        let seeded = seeding_core
+            .session(chat_id.clone())
+            .session_spec(lash::SessionSpec::inherit().model(mock_model_spec()))
+            .open()
+            .await
+            .expect("seed open");
+        seeded
+            .admin()
+            .state()
+            .append_messages(vec![lash::plugins::PluginMessage::text(
+                lash::messages::MessageRole::Assistant,
+                "seeded while the tool source was present",
+            )])
+            .await
+            .expect("append a committed message while the tool source is present");
+        seeded.close().await.expect("close the seeded session");
+
+        // Serve: the service's own core has no such source.
+        let core = test_core(data_dir).await;
+        let service = test_state(&core, AppDb::open(&db_path).expect("app db"));
+        let session = service
+            .open_session(&chat_id, mock_model_spec())
+            .await
+            .expect("the chat still opens");
+        session.close().await.expect("close");
+
+        async fn system_notices(service: &AppStateData, chat_id: &str) -> Vec<String> {
+            let chat_id = chat_id.to_string();
+            service
+                .with_db(move |db| db.list_messages(&chat_id))
+                .await
+                .expect("list messages")
+                .into_iter()
+                .filter(|message| message.role() == "system")
+                .map(|message| message.text().to_string())
+                .collect()
+        }
+
+        let told = system_notices(&service, &chat_id).await;
+        assert_eq!(told.len(), 1, "the user is told exactly once, got {told:?}");
+        assert!(
+            told[0].contains("tool:agent_service_seed_lookup"),
+            "the notice names the lost tool id: {}",
+            told[0]
+        );
+
+        // A second open of the same chat does not repeat the notice.
+        let again = service
+            .open_session(&chat_id, mock_model_spec())
+            .await
+            .expect("second open");
+        again.close().await.expect("close");
+        assert_eq!(
+            system_notices(&service, &chat_id).await.len(),
+            1,
+            "one notice per distinct loss, not one per request"
+        );
+    }
+
+    struct SeedTools;
+
+    fn seed_tool_definition() -> lash::tools::ToolDefinition {
+        lash::tools::ToolDefinition::raw(
+            "tool:agent_service_seed_lookup",
+            "agent_service_seed_lookup",
+            "a host tool only the seeding core carries",
+            lash::tools::ToolDefinition::default_input_schema(),
+            serde_json::json!({ "type": "object", "additionalProperties": true }),
+        )
+    }
+
+    #[async_trait::async_trait]
+    impl lash::tools::ToolProvider for SeedTools {
+        fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
+            vec![seed_tool_definition().manifest()]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<lash::tools::ToolContract>> {
+            (name == "agent_service_seed_lookup")
+                .then(|| Arc::new(seed_tool_definition().contract()))
+        }
+
+        async fn execute(
+            &self,
+            _call: lash::tools::ToolCall<'_>,
+        ) -> lash::tools::ToolAttemptOutcome {
+            lash::tools::ToolOutcome::ok(serde_json::json!({ "ok": true })).into()
+        }
+    }
+
+    /// The remote host under Require: a chat whose persisted tool has no
+    /// source here is refused rather than served degraded (FIG-3367).
+    #[tokio::test]
+    async fn a_require_core_refuses_to_serve_a_chat_that_lost_a_tool() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path();
+        let db_path = data_dir.join("app-require.db");
+        let chat_id = {
+            let mut db = AppDb::open(&db_path).expect("app db");
+            db.create_chat("require", "mock-model", None)
+                .expect("create chat")
+                .id
+        };
+
+        let seeding_core = test_core_with_tools(data_dir, Arc::new(SeedTools)).await;
+        let seeded = seeding_core
+            .session(chat_id.clone())
+            .session_spec(lash::SessionSpec::inherit().model(mock_model_spec()))
+            .open()
+            .await
+            .expect("seed open");
+        seeded
+            .admin()
+            .state()
+            .append_messages(vec![lash::plugins::PluginMessage::text(
+                lash::messages::MessageRole::Assistant,
+                "seeded while the tool source was present",
+            )])
+            .await
+            .expect("append a committed message while the tool source is present");
+        seeded.close().await.expect("close the seeded session");
+
+        let core = test_core_requiring_tool_sources(data_dir).await;
+        let service = test_state(&core, AppDb::open(&db_path).expect("app db"));
+        let refusal = match service.open_session(&chat_id, mock_model_spec()).await {
+            Ok(_) => panic!("a Require core must refuse a chat that lost a tool"),
+            Err(error) => error.message,
+        };
+        assert!(
+            refusal.contains("tool:agent_service_seed_lookup"),
+            "the refusal names the missing tool: {refusal}"
+        );
     }
 
     // `a_recorded_chat_refuses_to_reopen_under_another_dialect` is deleted:

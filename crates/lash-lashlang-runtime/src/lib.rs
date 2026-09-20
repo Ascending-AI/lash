@@ -30,10 +30,10 @@ pub use lashlang::{
 };
 
 pub const LASHLANG_ENGINE_KIND: &str = "lashlang";
-/// The one manifest key a tool binding lives under. A `lashlang.tool` twin
-/// used to be written beside it for the retired surface dialect (FIG-3021);
-/// readers now share this key, so a manifest has exactly one binding truth.
-pub const TYPESCRIPT_TOOL_BINDING_KEY: &str = "typescript.tool";
+/// The dialect-agnostic tool binding type, its manifest key, and the one
+/// host-facing setter are defined in `lash-core` beside [`lash_core::ToolManifest`]
+/// and re-exported here so existing runtime-crate paths keep resolving.
+pub use lash_core::{TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
 pub const LASHLANG_SURFACE_EXTENSION_ID: &str = "lashlang.surface";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -76,42 +76,29 @@ pub fn lashlang_surface_extension(
     lash_core::plugin::PluginExtensionContribution::new(LASHLANG_SURFACE_EXTENSION_ID, contribution)
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ToolBinding {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub module_path: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub operation: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub authority_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub aliases: Vec<String>,
+/// Lashlang/TypeScript resolution over the dialect-agnostic [`ToolBinding`]
+/// relocated to `lash-core`: validate the authored module path and operation
+/// and produce the executable [`ResolvedToolBinding`] the dialects dispatch on.
+pub trait ToolBindingResolutionExt {
+    fn executable_for(&self, tool_name: &str) -> Result<ResolvedToolBinding, ToolBindingError>;
+
+    fn required_for_remote(
+        manifest: &lash_core::ToolManifest,
+    ) -> Result<ResolvedToolBinding, ToolBindingError>
+    where
+        Self: Sized,
+    {
+        required_tool_typescript_executable(manifest)
+    }
+
+    fn required_executable_for_remote(
+        &self,
+        tool_name: &str,
+    ) -> Result<ResolvedToolBinding, ToolBindingError>;
 }
 
-impl ToolBinding {
-    pub fn new(
-        module_path: impl IntoIterator<Item = impl Into<String>>,
-        operation: impl Into<String>,
-    ) -> Self {
-        Self {
-            module_path: module_path.into_iter().map(Into::into).collect(),
-            operation: Some(operation.into()),
-            authority_type: None,
-            aliases: Vec::new(),
-        }
-    }
-
-    pub fn with_authority_type(mut self, authority_type: impl Into<String>) -> Self {
-        self.authority_type = Some(authority_type.into());
-        self
-    }
-
-    pub fn with_aliases(mut self, aliases: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.aliases = aliases.into_iter().map(Into::into).collect();
-        self
-    }
-
-    pub fn executable_for(&self, tool_name: &str) -> Result<ResolvedToolBinding, ToolBindingError> {
+impl ToolBindingResolutionExt for ToolBinding {
+    fn executable_for(&self, tool_name: &str) -> Result<ResolvedToolBinding, ToolBindingError> {
         if self.module_path.is_empty() {
             return Err(ToolBindingError::MissingModulePath {
                 tool: tool_name.to_string(),
@@ -141,13 +128,7 @@ impl ToolBinding {
         })
     }
 
-    pub fn required_for_remote(
-        manifest: &lash_core::ToolManifest,
-    ) -> Result<ResolvedToolBinding, ToolBindingError> {
-        required_tool_typescript_executable(manifest)
-    }
-
-    pub fn required_executable_for_remote(
+    fn required_executable_for_remote(
         &self,
         tool_name: &str,
     ) -> Result<ResolvedToolBinding, ToolBindingError> {
@@ -251,24 +232,6 @@ impl ToolManifestBindingExt for lash_core::ToolManifest {
                 binding_key: TYPESCRIPT_TOOL_BINDING_KEY,
                 source,
             })
-    }
-}
-
-pub trait ToolDefinitionBindingExt {
-    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self;
-}
-
-impl ToolDefinitionBindingExt for lash_core::ToolDefinition {
-    #[expect(
-        clippy::expect_used,
-        reason = "ToolBinding is a module-owned struct of strings and maps, so serialization into the manifest's JSON bindings map can only fail if the type is widened, which the site's message asserts"
-    )]
-    fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
-        self.manifest.bindings.insert(
-            TYPESCRIPT_TOOL_BINDING_KEY.to_string(),
-            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON"),
-        );
-        self
     }
 }
 

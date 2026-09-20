@@ -21,4 +21,14 @@ async fn queued_work_wait_is_gone(durable: lash::DurableSession) {
         .await;
 }
 
+// FIG-3373, ADR 0089: the child-administration facade is gone as well — a
+// host-run related session is an ordinary session opened with
+// `core.session(id).parent(parent)`, so `SessionAdmin::children` and
+// `ChildSessionAdmin` must stay removed.
+async fn child_admin_is_gone(session: lash::LashSession) {
+    let _ = session.admin().children();
+}
+
+fn child_admin_type_is_gone(_: lash::admin::ChildSessionAdmin) {}
+
 fn main() {}

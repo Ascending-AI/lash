@@ -263,6 +263,13 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
+    /// Choose what an open does when a persisted tool id no registered source
+    /// resolves. See [`crate::ToolSourcePolicy`]; the default is `Tolerate`.
+    pub fn with_tool_source_policy(mut self, policy: crate::ToolSourcePolicy) -> Self {
+        self.env.core.control.tool_source_policy = policy;
+        self
+    }
+
     pub fn with_termination(mut self, termination: TerminationPolicy) -> Self {
         self.env.core.control.termination = termination;
         self

@@ -152,6 +152,16 @@ const HOST_CONFIG_OVERLAYS: &[HostConfigOverlay] = &[
         },
     ),
     overlay(
+        "tool_source_policy",
+        |b, _| b.tool_source_policy.is_some(),
+        |b, mut core| {
+            if let Some(policy) = b.tool_source_policy.take() {
+                core.control.tool_source_policy = policy;
+            }
+            core
+        },
+    ),
+    overlay(
         "abort_drain_grace",
         |b, _| b.abort_drain_grace.is_some(),
         |b, mut core| {
@@ -344,6 +354,9 @@ mod tests {
                     builder.trace_context = Some(lash_trace::TraceContext::default())
                 }
                 "termination" => builder.termination = Some(TerminationPolicy::default()),
+                "tool_source_policy" => {
+                    builder.tool_source_policy = Some(lash_core::ToolSourcePolicy::Require)
+                }
                 "abort_drain_grace" => builder.abort_drain_grace = Some(std::time::Duration::ZERO),
                 "lease_timings" => {
                     builder.lease_timings = Some(facade_support::LeaseTimings::default())

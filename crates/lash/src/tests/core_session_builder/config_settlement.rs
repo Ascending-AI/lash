@@ -92,3 +92,72 @@ async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<
     );
     Ok(())
 }
+
+/// FIG-1896 seed-then-write: a host-supplied open value wins at open AND is
+/// durable immediately after open — a crash/reload right after open yields
+/// the host value, not the pre-open head. The seed write settles before the
+/// session handle is observable, so the durable head is true again by the
+/// time `open()` returns.
+#[tokio::test]
+async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
+    let mut policy = core.policy.clone();
+    policy.session_id = Some(lash_core::SessionId::from("seeded-reopen"));
+    let store = lash_core::SessionStoreFactory::create_store(
+        &factory,
+        &lash_core::SessionStoreCreateRequest {
+            session_id: lash_core::SessionId::from("seeded-reopen"),
+            relation: lash_core::SessionRelation::Root,
+            policy,
+            pending_observer_intents: Vec::new(),
+        },
+    )
+    .await?;
+
+    // Establish a durable head carrying the original model.
+    let session = core
+        .session("seeded-reopen")
+        .store(Arc::clone(&store))
+        .open()
+        .await?;
+    session
+        .turn(TurnInput::text("establish head"))
+        .run()
+        .await?;
+    drop(session);
+
+    // Reopen with an explicit host model: the seed wins at open...
+    let host_model = model_spec("host-seeded-model", None, 64_000);
+    let reopened = core
+        .session("seeded-reopen")
+        .store(Arc::clone(&store))
+        .session_spec(crate::SessionSpec::new().model(host_model.clone()))
+        .open()
+        .await?;
+    assert_eq!(reopened.policy_snapshot().model, host_model);
+
+    // ...and the head already carries it before any turn runs.
+    let head = store
+        .load_session_head_meta()
+        .await?
+        .expect("a durable head exists after reopen");
+    assert_eq!(
+        head.config.model, host_model,
+        "the host seed is guard-written before open returns"
+    );
+    drop(reopened);
+
+    // A subsequent incidental reopen inherits it from the head, proving the
+    // value is durable rather than resident-only.
+    let reloaded = core.session("seeded-reopen").store(store).open().await?;
+    assert_eq!(
+        reloaded.policy_snapshot().model,
+        host_model,
+        "a crash/reload after the seeded open yields the host value"
+    );
+    Ok(())
+}

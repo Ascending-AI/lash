@@ -80,7 +80,8 @@ use crate::state::{AgentServiceDurability, AppStateData, anyhow_like};
 use lash::durability::DurableProcessWorker;
 #[cfg(feature = "restate")]
 use lash_restate::{
-    LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessWorkflow, RestateProcessDeployment,
+    LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessAttach, LashProcessAttachImpl,
+    LashProcessWorkflow, RestateEffectGroupServices, RestateProcessDeployment,
     RestateTurnDeployment,
 };
 
@@ -484,7 +485,17 @@ async fn async_main() -> anyhow_like::Result<()> {
                 .bind(effect_groups.dispatch)
                 .bind(effect_groups.wait.workflow.serve())
                 .bind(effect_groups.wait.index.serve())
+                .bind(LashProcessAttachImpl.serve())
                 .build();
+            // Wiring-time check: the deployments know the lash service surface
+            // they require, and the built endpoint reports what it bound. A
+            // missing bind fails startup here rather than the first call that
+            // would 404.
+            let mut required_services = RestateProcessDeployment::required_service_names();
+            required_services.extend(RestateEffectGroupServices::required_service_names());
+            lash_restate::assert_services_bound(&endpoint, &required_services)
+                .await
+                .map_err(|err| format!("agent-service Restate endpoint binding check: {err}"))?;
             let _ = process_deployment
                 .process_work()
                 .admit_pending_processes("agent_service_startup")

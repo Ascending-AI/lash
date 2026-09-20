@@ -332,29 +332,17 @@ commands = [
 [[lane]]
 name = "tool-lashlang-proxies"
 features = [
-  "lash-internal-protocol-standard/lashlang:on",
   "lash-internal-plugin-mcp/lashlang:on",
   "lash-internal-plugin-mcp/lashlang:off",
-  "lash-internal-plugin-process-controls/lashlang:on",
-  "lash-internal-plugin-process-controls/lashlang:off",
-  "lash-internal-llm-tools/lashlang:on",
-  "lash-internal-tool-support/lashlang:on",
-  "lash-internal-tool-support/lashlang:off",
 ]
 commands = [
-  ["cargo", "check", "-p", "lash-internal-protocol-standard", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
   ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
   ["cargo", "test", "-p", "lash-internal-plugin-mcp", "--no-default-features", "--locked"],
   ["cargo", "test", "-p", "lash-internal-plugin-mcp", "--features", "lashlang", "--locked"],
   ["cargo", "check", "-p", "lash-internal-plugin-process-controls", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-plugin-process-controls", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
   ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--features", "lashlang", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--features", "lash-tool-support/lashlang", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-llm-tools", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
   ["cargo", "check", "-p", "lash-internal-tool-support", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-tool-support", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
 ]
 
 [[lane]]
@@ -396,11 +384,6 @@ command = ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-feat
 feature = "lash-internal-core-store/otel-trace"
 dependency = "lash-trace/otel"
 command = ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-features", "--features", "lash-trace/otel", "--locked"]
-
-[[proxy_witness]]
-feature = "lash-internal-plugin-process-controls/lashlang"
-dependency = "lash-tool-support/lashlang"
-command = ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--features", "lash-tool-support/lashlang", "--locked"]
 
 [[lane]]
 name = "perf-dhat-heap"

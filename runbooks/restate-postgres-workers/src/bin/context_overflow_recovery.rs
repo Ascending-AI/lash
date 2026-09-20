@@ -144,7 +144,7 @@ async fn overflow_and_recovery(
             && message
                 .parts
                 .iter()
-                .any(|part| part.content.starts_with(OVERFLOW_RECOVERY_MARKER_TITLE))
+                .any(|part| part.content().starts_with(OVERFLOW_RECOVERY_MARKER_TITLE))
     });
     if overflow.result.is_context_overflow() && !plugin_recovery_pending {
         bail!("the plugin silently swallowed the overflow trigger");
@@ -201,7 +201,7 @@ async fn overflow_and_recovery(
         // completed record, and the original history stays inspectable.
         "plugin_recovery_completed": overflow_history_after_turn.iter().any(|message| {
             message.parts.iter().any(|part| {
-                part.content
+                part.content()
                     .starts_with(OVERFLOW_RECOVERY_COMPLETED_TITLE)
             })
         }),
@@ -209,7 +209,7 @@ async fn overflow_and_recovery(
             .iter()
             .filter_map(|message| {
                 message.parts.iter().find_map(|part| {
-                    part.content
+                    part.content()
                         .strip_prefix("Compaction summary:")
                         .map(|rest| rest.trim().len())
                 })

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{Span, WorkflowNodeId};
-use crate::ast::{Expr, TypeExpr};
+use crate::ast::{AstPath, TypeExpr};
 use crate::linker::WorkflowLinkAnalysis;
 
 /// Version of the optional, derived workflow type-facet contract.
@@ -45,11 +45,11 @@ pub struct WorkflowTypeDiagnostic {
 /// `lashlang` while the projector that calls it lives in `lash-typescript`.
 pub fn projected_node_type_facets(
     analysis: Option<&WorkflowLinkAnalysis>,
-    expression: &Expr,
+    path: &AstPath,
     available_variables: &[String],
     id: &WorkflowNodeId,
 ) -> Option<WorkflowNodeTypeFacets> {
-    let facts = analysis?.facts_for(expression)?;
+    let facts = analysis?.facts_for(path)?;
     Some(WorkflowNodeTypeFacets {
         available_variables: available_variables
             .iter()

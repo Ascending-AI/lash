@@ -20,6 +20,9 @@ workspace = true
 [dependencies]
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
+bytes = { workspace = true }
+http = "1"
+http-body-util = "0.1"
 lash-core = { workspace = true }
 lash-core-worker = { workspace = true }
 lash-trace = { workspace = true }
@@ -35,9 +38,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 lash-conformance.workspace = true
-bytes = { workspace = true }
 chrono = { workspace = true }
-http = "1"
 http-body = "1"
 http-body-util = { version = "0.1", features = ["channel"] }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
@@ -48,7 +49,7 @@ lash-typescript = { workspace = true }
 lash-llm-tools = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true }
-lash-protocol-standard = { workspace = true, features = ["lashlang"] }
+lash-protocol-standard = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }

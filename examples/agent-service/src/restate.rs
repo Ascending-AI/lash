@@ -417,7 +417,9 @@ mod restate_tests {
         ResolveOutcome,
     };
     use lash_restate::{
-        LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessWorkflow, RestateEffectHost,
+        LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessAttach, LashProcessAttachImpl,
+        LashProcessWorkflow, RestateEffectGroupServices, RestateEffectHost,
+        RestateProcessDeployment,
     };
 
     const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
@@ -525,7 +527,13 @@ mod restate_tests {
             .bind(effect_groups.dispatch)
             .bind(effect_groups.wait.workflow.serve())
             .bind(effect_groups.wait.index.serve())
+            .bind(LashProcessAttachImpl.serve())
             .build();
+        let mut required_services = RestateProcessDeployment::required_service_names();
+        required_services.extend(RestateEffectGroupServices::required_service_names());
+        lash_restate::assert_services_bound(&endpoint, &required_services)
+            .await
+            .expect("agent-service Restate endpoint must bind the lash service surface");
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
             restate_sdk::http_server::HttpServer::new(endpoint)

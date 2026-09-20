@@ -1,222 +1,157 @@
 use super::*;
 
+/// The Agent family's fact-spec rows. `spec` is resolved from the imported
+/// contract table at compile time; the source scenario the metadata table used
+/// to copy is now just `spec.test_name`.
+pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
+    ContractFactSpec {
+        spec: contract_spec(
+            AGENT_SCENARIO_CONTRACTS,
+            "agent.foreground_tool_call_round_trip",
+        ),
+        fact: "agent_foreground_tool_call_round_trip_execution",
+        assertion: "Agent facade executes app_lookup and returns its concrete tool value as the final value",
+        check: check_agent_foreground_tool_call_round_trip,
+        extras_before: &[],
+        extras_after: &[ExtraFact::ToolReentry {
+            fact: "agent_foreground_tool_call_round_trip",
+            require_provider_event_release: false,
+        }],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            AGENT_SCENARIO_CONTRACTS,
+            "agent.started_process_tool_call_graph",
+        ),
+        fact: "agent_started_process_tool_call_graph_execution",
+        assertion: "Agent facade starts a Lashlang process that executes app_lookup and records a completed labeled process graph",
+        check: check_agent_started_process_tool_call_graph,
+        extras_before: &[],
+        extras_after: &[
+            ExtraFact::ProcessWake("agent_started_process_graph"),
+            ExtraFact::ToolReentry {
+                fact: "agent_started_process_tool_call",
+                require_provider_event_release: false,
+            },
+        ],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            AGENT_SCENARIO_CONTRACTS,
+            "agent.durable_input_suspension_resolution",
+        ),
+        fact: "agent_durable_input_suspension_resolution_execution",
+        assertion: "Agent facade suspends a durable input process before external resolution and resumes to a concrete final value",
+        check: check_agent_durable_input_suspension_resolution,
+        extras_before: &[],
+        extras_after: &[
+            ExtraFact::DurableReplay("agent_durable_input_first_and_replay"),
+            ExtraFact::ProcessWake("agent_durable_input_process_wake"),
+            ExtraFact::ObserverReconnect("agent_durable_input_observer_reconnect"),
+        ],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            AGENT_SCENARIO_CONTRACTS,
+            "agent.started_process_subagent_spawn",
+        ),
+        fact: "agent_started_process_subagent_spawn_execution",
+        assertion: "Agent facade starts a Lashlang process that spawns a default subagent, preserves the labeled child-session graph, and returns the typed child value",
+        check: check_agent_started_process_subagent_spawn,
+        extras_before: &[],
+        extras_after: &[ExtraFact::ProcessWake(
+            "agent_started_process_subagent_spawn",
+        )],
+    },
+    ContractFactSpec {
+        spec: contract_spec(AGENT_SCENARIO_CONTRACTS, "agent.session_turn_process_child"),
+        fact: "agent_session_turn_process_child_execution",
+        assertion: "Agent facade starts and awaits a child process to produce a concrete final value",
+        check: check_agent_session_turn_process_child,
+        extras_before: &[],
+        extras_after: &[
+            ExtraFact::ProcessWake("agent_session_turn_process_child_wake"),
+            ExtraFact::Custom(agent_session_turn_child_provider_fact),
+        ],
+    },
+    ContractFactSpec {
+        spec: contract_spec(AGENT_SCENARIO_CONTRACTS, "agent.nested_process_start_await"),
+        fact: "agent_nested_process_start_await_execution",
+        assertion: "Agent facade starts a parent Lashlang process that starts and awaits a child process with connected graph evidence",
+        check: check_agent_nested_process_start_await,
+        extras_before: &[],
+        extras_after: &[ExtraFact::ProcessWake("agent_nested_process_start_await")],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            AGENT_SCENARIO_CONTRACTS,
+            "agent.failed_child_preserves_failure_graph",
+        ),
+        fact: "agent_failed_child_preserves_failure_graph_execution",
+        assertion: "Agent facade preserves a failed subagent task graph, terminal process state, and task.fail reason without provider exhaustion or false final value",
+        check: check_agent_failed_child_preserves_failure_graph,
+        extras_before: &[],
+        extras_after: &[
+            ExtraFact::WorkerStale("agent_failed_child_worker_graph"),
+            ExtraFact::BackendRetry("agent_failed_child_backend_graph"),
+        ],
+    },
+    ContractFactSpec {
+        spec: contract_spec(AGENT_SCENARIO_CONTRACTS, "agent.parallel_spawn_and_join"),
+        fact: "agent_parallel_spawn_and_join_execution",
+        assertion: "Agent facade starts two child processes and joins their concrete final values in order",
+        check: check_agent_parallel_spawn_and_join,
+        extras_before: &[],
+        extras_after: &[
+            ExtraFact::ProcessWake("agent_parallel_spawn_process_wakes"),
+            ExtraFact::WorkerStale("agent_parallel_spawn_join_worker_order"),
+        ],
+    },
+    ContractFactSpec {
+        spec: contract_spec(
+            AGENT_SCENARIO_CONTRACTS,
+            "agent.tuple_values_finish_as_json_arrays",
+        ),
+        fact: "agent_tuple_values_finish_json_arrays_execution",
+        assertion: "Agent facade preserves Lashlang tuple projections as JSON arrays in final-value and runtime outcome evidence",
+        check: check_agent_tuple_values_finish_as_json_arrays,
+        extras_before: &[],
+        extras_after: &[],
+    },
+];
+
 pub(super) fn agent_contract_execution_fact(
     events: &[DeliveredBoundary],
-    contract: &'static str,
+    row: &'static ContractFactSpec,
     memo: &ScenarioFactMemo,
 ) -> Result<ScenarioContractGeneratedFact, String> {
+    let contract = row.spec.semantic_oracle;
     let proof_event = contract_execution_event(events, contract)?;
     // Which event proves the contract depends on the candidate's event list, so
     // the lookup always runs; what the fact says about that event does not, so
     // it is derived once per proof event for the life of the memo.
     let boundary_id = proof_event.boundary_id.clone();
     memo.fact_from_proof_event(contract, &boundary_id, || {
-        agent_contract_execution_fact_from_proof_event(proof_event, contract)
+        agent_contract_execution_fact_from_proof_event(proof_event, row)
     })
 }
 
 fn agent_contract_execution_fact_from_proof_event(
     proof_event: &DeliveredBoundary,
-    contract: &'static str,
+    row: &'static ContractFactSpec,
 ) -> Result<ScenarioContractGeneratedFact, String> {
-    let (scenario, fact, assertion) = agent_contract_metadata(contract)?;
-    let execution = contract_execution_payload_matches_observed(proof_event, contract, scenario)?;
+    let contract = row.spec.semantic_oracle;
+    let execution =
+        contract_execution_payload_matches_observed(proof_event, contract, row.spec.test_name)?;
     let result = execution
         .get("result")
         .ok_or_else(|| format!("{contract} execution missing result"))?;
-    require_agent_bool(result, "/done", true, contract)?;
-    require_agent_str(result, "/execution_api", "lash::LashCore facade", contract)?;
-    let observed = match contract {
-        "agent.foreground_tool_call_round_trip" => {
-            require_agent_final_value(result, &json!({ "ok": true }), contract)?;
-            require_agent_u64(result, "/tool_completed_count", 1, contract)?;
-            require_agent_tool_output(result, "app_lookup", &json!({ "ok": true }), contract)?;
-            json!({
-                "final_value": { "ok": true },
-                "tool_completed_count": 1,
-                "tool_name": "app_lookup",
-            })
-        }
-        "agent.started_process_tool_call_graph" => {
-            require_agent_final_value(result, &json!({ "ok": true }), contract)?;
-            require_agent_lifted_process_entries(result, 1, contract)?;
-            require_agent_completed_labeled_resource(
-                result,
-                "Lookup app state in process",
-                contract,
-            )?;
-            json!({
-                "final_value": { "ok": true },
-                "completed_lifted_processes": 1,
-                "labeled_resource": "Lookup app state in process",
-            })
-        }
-        "agent.durable_input_suspension_resolution" => {
-            require_agent_final_value(result, &json!("approved"), contract)?;
-            require_agent_bool(
-                result,
-                "/durable_input/suspended_before_resolution",
-                true,
-                contract,
-            )?;
-            require_agent_bool(result, "/durable_input/resolve_accepted", true, contract)?;
-            require_agent_u64(
-                result,
-                "/durable_input/completed_event_count_before_resolution",
-                0,
-                contract,
-            )?;
-            require_agent_u64(result, "/durable_input/atomic_attempt_count", 1, contract)?;
-            require_agent_bool(
-                result,
-                "/durable_input/await_tool_call_id_present",
-                true,
-                contract,
-            )?;
-            require_agent_lifted_process_entries(result, 1, contract)?;
-            require_agent_process_event(
-                result,
-                "process.yield",
-                "/payload/type",
-                "work.input_request.opened",
-                contract,
-            )?;
-            require_agent_no_process_event(result, "process.waiting", contract)?;
-            json!({
-                "final_value": "approved",
-                "await_tool_call_id_present": true,
-                "suspended_before_resolution": true,
-                "completed_lifted_processes": 1,
-                "process_event": "work.input_request.opened",
-            })
-        }
-        "agent.started_process_subagent_spawn" => {
-            require_agent_final_value(result, &json!({ "len": 2 }), contract)?;
-            require_agent_lifted_process_entries(result, 1, contract)?;
-            require_agent_completed_process_entry(result, "spawn", contract)?;
-            require_agent_completed_labeled_resource(
-                result,
-                "Spawn subagent with web search",
-                contract,
-            )?;
-            require_agent_min_u64(
-                result,
-                "/graph_facts/child_session_exec_completed_count",
-                1,
-                contract,
-            )?;
-            json!({
-                "final_value": { "len": 2 },
-                "completed_lifted_processes": 1,
-                "completed_process": "spawn",
-                "labeled_resource": "Spawn subagent with web search",
-                "child_session_exec_completed_count": result.pointer("/graph_facts/child_session_exec_completed_count").cloned().unwrap_or(Value::Null),
-            })
-        }
-        "agent.session_turn_process_child" => {
-            require_agent_final_value(result, &json!({ "child": "done" }), contract)?;
-            json!({
-                "final_value": { "child": "done" },
-                "process_child_awaited": true,
-            })
-        }
-        "agent.nested_process_start_await" => {
-            require_agent_final_value(result, &json!({ "parent": "done" }), contract)?;
-            require_agent_lifted_process_entries(result, 2, contract)?;
-            require_agent_completed_labeled_node(result, "Start nested child process", contract)?;
-            require_agent_min_u64(result, "/process_facts/process_count", 2, contract)?;
-            require_agent_min_u64(
-                result,
-                "/process_facts/completed_lashlang_process_count",
-                2,
-                contract,
-            )?;
-            json!({
-                "final_value": { "parent": "done" },
-                "completed_lifted_processes": 2,
-                "labeled_node": "Start nested child process",
-            })
-        }
-        "agent.failed_child_preserves_failure_graph" => {
-            require_agent_no_final_value(result, contract)?;
-            require_agent_bool(result, "/process_facts/all_terminal", true, contract)?;
-            require_agent_failed_labeled_resource(result, "Spawn failing subagent", contract)?;
-            require_agent_min_u64(
-                result,
-                "/graph_facts/child_session_exec_completed_count",
-                1,
-                contract,
-            )?;
-            require_agent_bool(result, "/failure/turn_success", false, contract)?;
-            require_agent_bool(result, "/failure/final_value_present", false, contract)?;
-            require_agent_u64(result, "/failure/final_value_event_count", 0, contract)?;
-            require_agent_min_u64(result, "/failure/failed_code_block_count", 1, contract)?;
-            require_agent_bool(
-                result,
-                "/failure/provider_exhaustion_observed",
-                false,
-                contract,
-            )?;
-            require_agent_bool(
-                result,
-                "/failure/child_task_fail_reason_observed",
-                true,
-                contract,
-            )?;
-            json!({
-                "final_value_present": false,
-                "failed_labeled_resource": "Spawn failing subagent",
-                "child_task_fail_reason": "child boom",
-                "child_session_exec_completed_count": result.pointer("/graph_facts/child_session_exec_completed_count").cloned().unwrap_or(Value::Null),
-                "all_processes_terminal": true,
-            })
-        }
-        "agent.parallel_spawn_and_join" => {
-            let expected = json!({ "joined": ["left", "right"] });
-            require_agent_final_value(result, &expected, contract)?;
-            json!({
-                "final_value": expected,
-                "joined": ["left", "right"],
-            })
-        }
-        "agent.tuple_values_finish_as_json_arrays" => {
-            let expected = json!({
-                "first": "left",
-                "tail": ["right"],
-                "seen": ["left", "right"],
-                "tuple": ["left", "right"],
-                "nested": { "pair": ["left", "right"] }
-            });
-            require_agent_final_value(result, &expected, contract)?;
-            let final_value = result
-                .get("final_value")
-                .ok_or_else(|| format!("{contract} missing concrete final value"))?;
-            if !(json_array_equals(final_value.pointer("/tuple"), &["left", "right"])
-                && json_array_equals(final_value.pointer("/tail"), &["right"])
-                && json_array_equals(final_value.pointer("/seen"), &["left", "right"])
-                && json_array_equals(final_value.pointer("/nested/pair"), &["left", "right"]))
-            {
-                return Err(format!(
-                    "{contract} did not preserve tuple/tail/seen/nested tuple values as JSON arrays"
-                ));
-            }
-            json!({
-                "final_value": expected,
-                "tuple": final_value.pointer("/tuple").cloned().unwrap_or(Value::Null),
-                "tail": final_value.pointer("/tail").cloned().unwrap_or(Value::Null),
-                "seen": final_value.pointer("/seen").cloned().unwrap_or(Value::Null),
-                "nested_pair": final_value.pointer("/nested/pair").cloned().unwrap_or(Value::Null),
-            })
-        }
-        other => {
-            return Err(format!(
-                "Agent contract execution fact has no checker for `{other}`"
-            ));
-        }
-    };
+    require_bool(result, "/done", true, contract)?;
+    require_str(result, "/execution_api", "lash::LashCore facade", contract)?;
+    let observed = (row.check)(result, contract)?;
     generated_fact(
-        fact,
-        assertion,
+        row.fact,
+        row.assertion,
         vec![proof_event],
         json!({
             "contract_execution_boundary": proof_event.boundary_id,
@@ -227,85 +162,213 @@ fn agent_contract_execution_fact_from_proof_event(
     )
 }
 
-pub(super) fn agent_contract_metadata(
-    contract: &str,
-) -> Result<(&'static str, &'static str, &'static str), String> {
-    match contract {
-        "agent.foreground_tool_call_round_trip" => Ok((
-            "agent_scenario_foreground_labeled_tool_call",
-            "agent_foreground_tool_call_round_trip_execution",
-            "Agent facade executes app_lookup and returns its concrete tool value as the final value",
-        )),
-        "agent.started_process_tool_call_graph" => Ok((
-            "agent_scenario_started_process_labeled_tool_call",
-            "agent_started_process_tool_call_graph_execution",
-            "Agent facade starts a Lashlang process that executes app_lookup and records a completed labeled process graph",
-        )),
-        "agent.durable_input_suspension_resolution" => Ok((
-            "agent_scenario_process_durable_input_request_tool",
-            "agent_durable_input_suspension_resolution_execution",
-            "Agent facade suspends a durable input process before external resolution and resumes to a concrete final value",
-        )),
-        "agent.started_process_subagent_spawn" => Ok((
-            "agent_scenario_started_process_labeled_subagent_spawn",
-            "agent_started_process_subagent_spawn_execution",
-            "Agent facade starts a Lashlang process that spawns a default subagent, preserves the labeled child-session graph, and returns the typed child value",
-        )),
-        "agent.session_turn_process_child" => Ok((
-            "agent_scenario_session_turn_process_child",
-            "agent_session_turn_process_child_execution",
-            "Agent facade starts and awaits a child process to produce a concrete final value",
-        )),
-        "agent.nested_process_start_await" => Ok((
-            "agent_scenario_nested_process_start_await",
-            "agent_nested_process_start_await_execution",
-            "Agent facade starts a parent Lashlang process that starts and awaits a child process with connected graph evidence",
-        )),
-        "agent.failed_child_preserves_failure_graph" => Ok((
-            "agent_scenario_failed_child_preserves_failure_graph",
-            "agent_failed_child_preserves_failure_graph_execution",
-            "Agent facade preserves a failed subagent task graph, terminal process state, and task.fail reason without provider exhaustion or false final value",
-        )),
-        "agent.parallel_spawn_and_join" => Ok((
-            "agent_scenario_parallel_spawn_and_join",
-            "agent_parallel_spawn_and_join_execution",
-            "Agent facade starts two child processes and joins their concrete final values in order",
-        )),
-        "agent.tuple_values_finish_as_json_arrays" => Ok((
-            "agent_scenario_tuple_values_finish_as_json_arrays",
-            "agent_tuple_values_finish_json_arrays_execution",
-            "Agent facade preserves Lashlang tuple projections as JSON arrays in final-value and runtime outcome evidence",
-        )),
-        other => Err(format!(
-            "no Agent contract metadata registered for `{other}`"
-        )),
-    }
+fn check_agent_foreground_tool_call_round_trip(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_agent_final_value(result, &json!({ "ok": true }), contract)?;
+    require_u64(result, "/tool_completed_count", 1, contract)?;
+    require_agent_tool_output(result, "app_lookup", &json!({ "ok": true }), contract)?;
+    Ok(json!({
+        "final_value": { "ok": true },
+        "tool_completed_count": 1,
+        "tool_name": "app_lookup",
+    }))
 }
 
-pub(super) fn require_agent_bool(
+fn check_agent_started_process_tool_call_graph(
     result: &Value,
-    pointer: &str,
-    expected: bool,
-    contract: &str,
-) -> Result<(), String> {
-    if result.pointer(pointer).and_then(Value::as_bool) == Some(expected) {
-        Ok(())
-    } else {
-        Err(format!("{contract} expected {pointer}={expected}"))
-    }
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_agent_final_value(result, &json!({ "ok": true }), contract)?;
+    require_agent_lifted_process_entries(result, 1, contract)?;
+    require_agent_completed_labeled_resource(result, "Lookup app state in process", contract)?;
+    Ok(json!({
+        "final_value": { "ok": true },
+        "completed_lifted_processes": 1,
+        "labeled_resource": "Lookup app state in process",
+    }))
 }
 
-pub(super) fn require_agent_u64(
+fn check_agent_durable_input_suspension_resolution(
     result: &Value,
-    pointer: &str,
-    expected: u64,
-    contract: &str,
-) -> Result<(), String> {
-    if result.pointer(pointer).and_then(Value::as_u64) == Some(expected) {
-        Ok(())
-    } else {
-        Err(format!("{contract} expected {pointer}={expected}"))
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_agent_final_value(result, &json!("approved"), contract)?;
+    require_bool(
+        result,
+        "/durable_input/suspended_before_resolution",
+        true,
+        contract,
+    )?;
+    require_bool(result, "/durable_input/resolve_accepted", true, contract)?;
+    require_u64(
+        result,
+        "/durable_input/completed_event_count_before_resolution",
+        0,
+        contract,
+    )?;
+    require_u64(result, "/durable_input/atomic_attempt_count", 1, contract)?;
+    require_bool(
+        result,
+        "/durable_input/await_tool_call_id_present",
+        true,
+        contract,
+    )?;
+    require_agent_lifted_process_entries(result, 1, contract)?;
+    require_agent_process_event(
+        result,
+        "process.yield",
+        "/payload/type",
+        "work.input_request.opened",
+        contract,
+    )?;
+    require_agent_no_process_event(result, "process.waiting", contract)?;
+    Ok(json!({
+        "final_value": "approved",
+        "await_tool_call_id_present": true,
+        "suspended_before_resolution": true,
+        "completed_lifted_processes": 1,
+        "process_event": "work.input_request.opened",
+    }))
+}
+
+fn check_agent_started_process_subagent_spawn(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_agent_final_value(result, &json!({ "len": 2 }), contract)?;
+    require_agent_lifted_process_entries(result, 1, contract)?;
+    require_agent_completed_process_entry(result, "spawn", contract)?;
+    require_agent_completed_labeled_resource(result, "Spawn subagent with web search", contract)?;
+    require_agent_min_u64(
+        result,
+        "/graph_facts/child_session_exec_completed_count",
+        1,
+        contract,
+    )?;
+    Ok(json!({
+        "final_value": { "len": 2 },
+        "completed_lifted_processes": 1,
+        "completed_process": "spawn",
+        "labeled_resource": "Spawn subagent with web search",
+        "child_session_exec_completed_count": result.pointer("/graph_facts/child_session_exec_completed_count").cloned().unwrap_or(Value::Null),
+    }))
+}
+
+fn check_agent_session_turn_process_child(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_agent_final_value(result, &json!({ "child": "done" }), contract)?;
+    Ok(json!({
+        "final_value": { "child": "done" },
+        "process_child_awaited": true,
+    }))
+}
+
+fn check_agent_nested_process_start_await(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_agent_final_value(result, &json!({ "parent": "done" }), contract)?;
+    require_agent_lifted_process_entries(result, 2, contract)?;
+    require_agent_completed_labeled_node(result, "Start nested child process", contract)?;
+    require_agent_min_u64(result, "/process_facts/process_count", 2, contract)?;
+    require_agent_min_u64(
+        result,
+        "/process_facts/completed_lashlang_process_count",
+        2,
+        contract,
+    )?;
+    Ok(json!({
+        "final_value": { "parent": "done" },
+        "completed_lifted_processes": 2,
+        "labeled_node": "Start nested child process",
+    }))
+}
+
+fn check_agent_failed_child_preserves_failure_graph(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    require_agent_no_final_value(result, contract)?;
+    require_bool(result, "/process_facts/all_terminal", true, contract)?;
+    require_agent_failed_labeled_resource(result, "Spawn failing subagent", contract)?;
+    require_agent_min_u64(
+        result,
+        "/graph_facts/child_session_exec_completed_count",
+        1,
+        contract,
+    )?;
+    require_bool(result, "/failure/turn_success", false, contract)?;
+    require_bool(result, "/failure/final_value_present", false, contract)?;
+    require_u64(result, "/failure/final_value_event_count", 0, contract)?;
+    require_agent_min_u64(result, "/failure/failed_code_block_count", 1, contract)?;
+    require_bool(
+        result,
+        "/failure/provider_exhaustion_observed",
+        false,
+        contract,
+    )?;
+    require_bool(
+        result,
+        "/failure/child_task_fail_reason_observed",
+        true,
+        contract,
+    )?;
+    Ok(json!({
+        "final_value_present": false,
+        "failed_labeled_resource": "Spawn failing subagent",
+        "child_task_fail_reason": "child boom",
+        "child_session_exec_completed_count": result.pointer("/graph_facts/child_session_exec_completed_count").cloned().unwrap_or(Value::Null),
+        "all_processes_terminal": true,
+    }))
+}
+
+fn check_agent_parallel_spawn_and_join(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    let expected = json!({ "joined": ["left", "right"] });
+    require_agent_final_value(result, &expected, contract)?;
+    Ok(json!({
+        "final_value": expected,
+        "joined": ["left", "right"],
+    }))
+}
+
+fn check_agent_tuple_values_finish_as_json_arrays(
+    result: &Value,
+    contract: &'static str,
+) -> Result<Value, String> {
+    let expected = json!({
+        "first": "left",
+        "tail": ["right"],
+        "seen": ["left", "right"],
+        "tuple": ["left", "right"],
+        "nested": { "pair": ["left", "right"] }
+    });
+    require_agent_final_value(result, &expected, contract)?;
+    let final_value = result
+        .get("final_value")
+        .ok_or_else(|| format!("{contract} missing concrete final value"))?;
+    if !(json_array_equals(final_value.pointer("/tuple"), &["left", "right"])
+        && json_array_equals(final_value.pointer("/tail"), &["right"])
+        && json_array_equals(final_value.pointer("/seen"), &["left", "right"])
+        && json_array_equals(final_value.pointer("/nested/pair"), &["left", "right"]))
+    {
+        return Err(format!(
+            "{contract} did not preserve tuple/tail/seen/nested tuple values as JSON arrays"
+        ));
     }
+    Ok(json!({
+        "final_value": expected,
+        "tuple": final_value.pointer("/tuple").cloned().unwrap_or(Value::Null),
+        "tail": final_value.pointer("/tail").cloned().unwrap_or(Value::Null),
+        "seen": final_value.pointer("/seen").cloned().unwrap_or(Value::Null),
+        "nested_pair": final_value.pointer("/nested/pair").cloned().unwrap_or(Value::Null),
+    }))
 }
 
 pub(super) fn require_agent_min_u64(
@@ -322,19 +385,6 @@ pub(super) fn require_agent_min_u64(
         Ok(())
     } else {
         Err(format!("{contract} expected {pointer}>={minimum}"))
-    }
-}
-
-pub(super) fn require_agent_str(
-    result: &Value,
-    pointer: &str,
-    expected: &str,
-    contract: &str,
-) -> Result<(), String> {
-    if result.pointer(pointer).and_then(Value::as_str) == Some(expected) {
-        Ok(())
-    } else {
-        Err(format!("{contract} expected {pointer}=`{expected}`"))
     }
 }
 

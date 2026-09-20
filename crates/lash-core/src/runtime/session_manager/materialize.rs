@@ -12,7 +12,16 @@ pub(in crate::runtime::session_manager) async fn materialize_session_create_plan
     current: &CurrentSessionCapability,
     plan: &SessionCreatePlan,
 ) -> Result<MaterializedSession, crate::PluginError> {
-    let plugins = build_session_plugins(current, plan)?;
+    let (plugins, plugin_init) = build_session_plugins(current, plan)?;
+    let mut initial_state = plan.initial_runtime_state.clone();
+    if let Some(init) = plugin_init {
+        // The captured tool state seeds the child's session state so the
+        // shared open path installs it through `install_persisted_tool_state`:
+        // the lost-member report, its trace evidence, and the `Require`
+        // refusal at creation apply to a forked child exactly as they do to a
+        // reopening session (FIG-3367).
+        initial_state.set_tool_state_snapshot(Some(init.tool_state.clone()));
+    }
     let store_binding = bind_session_store(current, plan).await?;
     // Session creation routes through the same assembler as live open and
     // worker-rebuild paths. A freshly created session has a single path, so it
@@ -24,7 +33,7 @@ pub(in crate::runtime::session_manager) async fn materialize_session_create_plan
         crate::runtime::lifecycle::RuntimePersistenceBindings::new(Some(store_binding.clone())),
         current.host.work.clone(),
         crate::runtime::lifecycle::RuntimeSessionAssembly::new(
-            plan.initial_runtime_state.clone(),
+            initial_state,
             plan.relation.clone(),
             current.runtime_lease_owner.clone(),
         ),
@@ -38,8 +47,8 @@ pub(in crate::runtime::session_manager) async fn materialize_session_create_plan
     )?;
     if let Some(session) = runtime.session.as_mut() {
         session.set_context_overlay(
-            plan.context_overlay.tool_providers.clone(),
-            plan.context_overlay.prompt_contributions.clone(),
+            Vec::new(),
+            Vec::new(),
             plan.context_overlay.include_base_tools,
         )?;
     }
@@ -50,18 +59,25 @@ pub(in crate::runtime::session_manager) async fn materialize_session_create_plan
     })
 }
 
-fn build_session_plugins(
+fn build_session_plugins<'a>(
     current: &CurrentSessionCapability,
-    plan: &SessionCreatePlan,
-) -> Result<Arc<crate::PluginSession>, crate::PluginError> {
+    plan: &'a SessionCreatePlan,
+) -> Result<
+    (
+        Arc<crate::PluginSession>,
+        Option<&'a crate::SessionPluginInit>,
+    ),
+    crate::PluginError,
+> {
     match plan.plugin_source {
-        crate::SessionPluginSource::CurrentHostFresh => {
+        crate::SessionPluginSource::CurrentHostFresh => Ok((
             current.plugins.host().build_session_with_parent(
                 &plan.session_id,
                 plan.parent_session_id.clone(),
                 plan.plugin_config.clone(),
-            )
-        }
+            )?,
+            None,
+        )),
         // The fork initializes from the spawn-time capture alone. There is
         // deliberately no read of the running session that created this
         // request — on a process worker that session is a synthetic runtime
@@ -72,12 +88,13 @@ fn build_session_plugins(
                     session_id: plan.session_id.clone(),
                 },
             )?;
-            current.plugins.host().build_session_from_init(
+            let session = current.plugins.host().build_session_from_init(
                 &plan.session_id,
                 plan.parent_session_id.clone(),
                 init,
                 plan.plugin_config.clone(),
-            )
+            )?;
+            Ok((session, Some(init)))
         }
     }
 }

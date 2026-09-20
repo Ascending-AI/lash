@@ -46,7 +46,7 @@ lash-http-transport = { workspace = true, optional = true }
 lash-protocol-rlm = { workspace = true, optional = true }
 lash-protocol-standard = { workspace = true }
 lash-plugin-tool-output-budget = { workspace = true }
-lash-plugin-process-controls = { workspace = true, optional = true, features = ["lashlang"] }
+lash-plugin-process-controls = { workspace = true, optional = true }
 lash-rlm-types = { workspace = true, optional = true }
 lash-trace = { workspace = true }
 uuid = { workspace = true }
@@ -66,7 +66,6 @@ rlm = [
     "dep:lash-protocol-rlm",
     "dep:lash-rlm-types",
     "dep:lashlang",
-    "lash-protocol-standard/lashlang",
 ]
 
 # Host-wired extension features (ADR 0079 section 1). Each gates one

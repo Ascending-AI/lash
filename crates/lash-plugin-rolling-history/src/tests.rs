@@ -324,9 +324,9 @@ async fn rolling_turn_transform_strips_old_image_attachments() {
         .messages;
 
     let image_part = built[0].parts.first().expect("image part");
-    assert!(matches!(image_part.kind, PartKind::Attachment));
-    assert!(image_part.attachment.is_none());
-    assert_eq!(image_part.content, PRUNED_ATTACHMENT_PLACEHOLDER);
+    assert!(matches!(image_part.kind(), PartKind::Attachment));
+    assert!(image_part.attachment().is_none());
+    assert_eq!(image_part.content(), PRUNED_ATTACHMENT_PLACEHOLDER);
 }
 
 #[tokio::test]
@@ -370,13 +370,13 @@ async fn rolling_turn_transform_projects_tail_without_summary() {
         message
             .parts
             .iter()
-            .any(|part| part.content.contains("latest request"))
+            .any(|part| part.content().contains("latest request"))
     }));
     assert!(!built.iter().any(|message| {
         message
             .parts
             .iter()
-            .any(|part| part.content.contains("old work"))
+            .any(|part| part.content().contains("old work"))
     }));
 
     let created = manager.created_snapshot();
@@ -1182,7 +1182,7 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
 
     let contents: Vec<&str> = built
         .iter()
-        .flat_map(|message| message.parts.iter().map(|part| part.content.as_str()))
+        .flat_map(|message| message.parts.iter().map(|part| part.content()))
         .collect();
     assert!(
         contents
@@ -1389,7 +1389,7 @@ async fn recovery_failure_is_bounded_and_explicit() {
         let contents: Vec<&str> = built
             .messages
             .iter()
-            .flat_map(|message| message.parts.iter().map(|part| part.content.as_str()))
+            .flat_map(|message| message.parts.iter().map(|part| part.content()))
             .collect();
         assert!(
             !contents
@@ -1497,7 +1497,7 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
         let contents: Vec<&str> = built
             .messages
             .iter()
-            .flat_map(|message| message.parts.iter().map(|part| part.content.as_str()))
+            .flat_map(|message| message.parts.iter().map(|part| part.content()))
             .collect();
         assert!(
             !contents

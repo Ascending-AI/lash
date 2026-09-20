@@ -50,10 +50,9 @@ impl DurableProcessWorker {
             }
         }
         state.extra.page_installed(page.continuation);
-        self.execution_scheduler.metrics.intake_depth(
-            WorkerSlotKind::Process,
-            state.pending.len() + state.rerun.len(),
-        );
+        self.execution_scheduler
+            .metrics
+            .intake_depth(WorkerSlotKind::Process, state.intake_depth());
         report
     }
 
@@ -65,10 +64,10 @@ impl DurableProcessWorker {
             .slots
             .available_slots(WorkerSlotKind::Process);
         let mut state = self.execution_scheduler.state.lock_recover();
-        if !state.pending.is_empty() {
+        if state.has_queued() {
             return None;
         }
-        if available == 0 && state.active != 0 {
+        if available == 0 && state.running_count() != 0 {
             return None;
         }
         let limit = std::num::NonZeroUsize::new(available)
@@ -110,13 +109,7 @@ impl DurableProcessWorker {
     }
 
     pub(super) async fn next_process_execution(&self) -> Option<(ProcessRecord, WorkerSlotPermit)> {
-        if self
-            .execution_scheduler
-            .state
-            .lock_recover()
-            .pending
-            .is_empty()
-        {
+        if !self.execution_scheduler.state.lock_recover().has_queued() {
             return None;
         }
         let reserve = self
@@ -138,10 +131,9 @@ impl DurableProcessWorker {
             drop(permit);
             return None;
         };
-        self.execution_scheduler.metrics.intake_depth(
-            WorkerSlotKind::Process,
-            state.pending.len() + state.rerun.len(),
-        );
+        self.execution_scheduler
+            .metrics
+            .intake_depth(WorkerSlotKind::Process, state.intake_depth());
         Some((record, permit))
     }
 }

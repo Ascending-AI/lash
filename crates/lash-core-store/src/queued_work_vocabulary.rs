@@ -4,9 +4,7 @@
 //! session-command family that rides in them. The runtime's queue driver
 //! stays in `lash-core`; only the data it persists lives here.
 
-use crate::{
-    PluginMessage, ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause, TurnInput,
-};
+use crate::{ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause, TurnInput};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -493,8 +491,6 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
 
     /// Materializes checkpoint input from a claim for runtime and conformance-suite implementors.
     pub fn materialize_queued_checkpoint_work(&self) -> QueuedCheckpointWork {
-        let messages = Vec::new();
-        let transient_messages = Vec::new();
         let mut turn_causes = Vec::new();
         for batch in &self.batches {
             for item in &batch.items {
@@ -507,38 +503,7 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
                 }
             }
         }
-        QueuedCheckpointWork {
-            messages,
-            transient_messages,
-            turn_causes,
-        }
-    }
-
-    /// Materializes checkpoint input through the attachment-aware seam used by runtime and
-    /// conformance-suite implementors.
-    pub async fn materialize_queued_checkpoint_work_with_attachments(
-        &self,
-        _attachment_store: &crate::SessionAttachmentStore,
-    ) -> Result<QueuedCheckpointWork, String> {
-        let messages = Vec::new();
-        let transient_messages = Vec::new();
-        let mut turn_causes = Vec::new();
-        for batch in &self.batches {
-            for item in &batch.items {
-                match &item.payload {
-                    QueuedWorkPayload::ProcessWake { wake } => {
-                        turn_causes.push(crate::process_wake_turn_cause(wake));
-                    }
-                    QueuedWorkPayload::AgentFrameTask { .. } => {}
-                    QueuedWorkPayload::SessionCommand { .. } => {}
-                }
-            }
-        }
-        Ok(QueuedCheckpointWork {
-            messages,
-            transient_messages,
-            turn_causes,
-        })
+        QueuedCheckpointWork { turn_causes }
     }
 
     /// Extracts the sole exclusive session command for queued-work driver implementors.
@@ -600,7 +565,6 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
         input.protocol_turn_options = selected_turn_options;
         QueuedTurnWork {
             input,
-            messages: checkpoint.messages,
             turn_causes: checkpoint.turn_causes,
         }
     }
@@ -664,8 +628,6 @@ impl TryFrom<QueuedWorkDraftWire> for QueuedWorkBatchDraft {
 
 #[derive(Clone, Debug, Default)]
 pub struct QueuedCheckpointWork {
-    pub messages: Vec<PluginMessage>,
-    pub transient_messages: Vec<PluginMessage>,
     pub turn_causes: Vec<TurnCause>,
 }
 /// One command or a nonempty sequence of turn work, in the existing item order.
@@ -769,7 +731,6 @@ struct QueuedWorkDraftWire {
 #[derive(Clone, Debug)]
 pub struct QueuedTurnWork {
     pub input: TurnInput,
-    pub messages: Vec<PluginMessage>,
     pub turn_causes: Vec<TurnCause>,
 }
 pub fn process_wake_source_key(process_id: &ProcessId, sequence: u64) -> String {

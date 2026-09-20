@@ -121,6 +121,7 @@ pub struct FrameSwitchCommitObservation {
 }
 
 mod agent_contracts;
+mod contract_facts;
 mod frame_switch;
 mod live_provider;
 mod mini_scenarios;
@@ -134,6 +135,7 @@ mod standard_contracts;
 mod tests;
 
 use agent_contracts::*;
+use contract_facts::*;
 use frame_switch::*;
 pub use frame_switch::{
     frame_switch_follow_on_precedes_pending, frame_switch_outbox_is_atomic, frame_switch_seeds,

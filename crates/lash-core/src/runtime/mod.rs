@@ -98,6 +98,8 @@ pub mod state;
 pub(crate) mod state;
 #[cfg(test)]
 pub(crate) mod tests;
+mod tool_restore;
+pub use tool_restore::ToolRestoreSite;
 mod turn_boundary;
 mod turn_commit_draft;
 #[cfg(feature = "testing")]
@@ -529,6 +531,12 @@ pub struct LashRuntime {
     /// Materialization resolved protocol facts that must be durable before queued work may
     /// reconstruct this session in another runtime.
     pub materialized_protocol_config_dirty: bool,
+    /// The report from the most recent persisted-tool-state install on this
+    /// runtime — the open that built it, or the latest host restore, persisted
+    /// state install or resident re-sync. This is how the report reaches a
+    /// host on the paths that have no return value to give it (FIG-3367); the
+    /// facade reads it as `LashSession::tool_restore_report()`.
+    pub tool_restore_report: Option<crate::ToolRestoreReport>,
     /// Attempts whose usage never arrived after an abort or failure, not yet
     /// reconciled (FIG-2765). Runtime-resident: persisted holes live in the
     /// ledger's unreported rows; this is the attribution a later

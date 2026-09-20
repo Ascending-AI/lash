@@ -48,6 +48,18 @@ existing frames retain the model they opened with. This supersedes the
 requirements above to reconcile or update a current frame assignment together
 with policy. It does not restore a turn-level overlay.
 
+## Seed-then-write amendment (FIG-1896)
+
+The open-time host precedence this ADR establishes is an *initialization*
+rule, not a standing runtime authority over the durable head. On a reopen the
+host-supplied values act as a seed: they are reconciled into the resident
+policy once, and any difference from the persisted head is then guard-written
+to the durable head before the session is observable as open
+(`LashRuntime::settle_reopen_seeded_config`, FIG-1875's settlement path). From
+that point on the head is true again and every later adoption through
+`adopt_durable_head` is unconditional head-wins — there is no facade-reopen
+carve-out and no resident copy that runs ahead of the durable record.
+
 ## Bypass surfaces
 
 FIG-1875 made session configuration a durable fact that changes only through a

@@ -78,7 +78,10 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     let state = runtime.export_state();
     let read_view = state.read_view().expect("runtime frame scope resolves");
     assert_eq!(read_view.messages().len(), 1);
-    assert_eq!(read_view.messages()[0].parts[0].content, "stored question");
+    assert_eq!(
+        read_view.messages()[0].parts[0].content(),
+        "stored question"
+    );
     assert_eq!(state.turn_index, 3);
     assert_eq!(state.token_usage.input_tokens, 20);
     assert_eq!(state.policy.model.id, "gpt-5.4-mini");

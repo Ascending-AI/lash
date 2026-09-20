@@ -43,17 +43,18 @@ pub(super) struct Linker<'module> {
     /// is lowered so a function may call one declared later, and itself.
     pub(super) function_signatures: BTreeMap<String, FunctionSignature>,
     pub(super) type_defs: BTreeMap<String, TypeExpr>,
-    pub(super) expression_spans: BTreeMap<usize, Span>,
+    /// Expected types recorded per node during the canonical walk, keyed by
+    /// the node's [`AstPath`] in `program`.
     pub(super) expected_type_facts: Option<RefCell<ExpectedTypeFacts>>,
     /// Completion facts produced by the canonical expression walk.
-    pub(super) completion_facts: RefCell<BTreeMap<usize, Completion>>,
+    pub(super) completion_facts: RefCell<BTreeMap<AstPath, Completion>>,
     pub(super) collect_completion: Cell<bool>,
     /// Optional best-effort editor projection populated by the same walk.
     pub(super) workflow_analysis: Option<RefCell<WorkflowLinkAnalysis>>,
     pub(super) recover_workflow_errors: Cell<bool>,
-    /// The source expression whose facts the workflow projector will read for
-    /// a recovered error in the current top-level workflow node.
-    pub(super) workflow_diagnostic_owner: Cell<Option<usize>>,
+    /// The [`AstPath`] whose facts the workflow projector will read for a
+    /// recovered error in the current top-level workflow node.
+    pub(super) workflow_diagnostic_owner: RefCell<Option<AstPath>>,
     /// Process declarations lifted from `Expr::ProcessLiteral` during the
     /// lowering walk, in lift order, with the span to record for each.
     /// While one literal lifts, `collect_signals` is on and every wait site
@@ -72,9 +73,6 @@ pub(super) struct Linker<'module> {
     /// nested definition has to reach the child's own start site — one level
     /// deeper than any start argument the enclosing start can carry.
     pub(super) lifted_process_aliases: RefCell<BTreeMap<String, (String, TypeExpr)>>,
-    /// The [`AstPath`] of every expression in the program, keyed by node
-    /// pointer — `main`-rooted and declaration-body-rooted alike.
-    pub(super) expression_paths: BTreeMap<usize, AstPath>,
 }
 
 impl<'module> Linker<'module> {
@@ -82,26 +80,29 @@ impl<'module> Linker<'module> {
         program: &'module Program,
         surface: &'module LashlangHostEnvironment,
     ) -> Self {
-        let (expression_paths, expression_spans) = program_node_maps(program);
         Self {
             program,
             surface,
             process_types: BTreeMap::new(),
             function_signatures: BTreeMap::new(),
             type_defs: BTreeMap::new(),
-            expression_spans,
             expected_type_facts: None,
             completion_facts: RefCell::new(BTreeMap::new()),
             collect_completion: Cell::new(false),
             workflow_analysis: None,
             recover_workflow_errors: Cell::new(false),
-            workflow_diagnostic_owner: Cell::new(None),
+            workflow_diagnostic_owner: RefCell::new(None),
             collect_signals: Cell::new(false),
             inferred_signals: RefCell::new(BTreeMap::new()),
             lifted_declarations: RefCell::new(Vec::new()),
             lifted_process_aliases: RefCell::new(BTreeMap::new()),
-            expression_paths,
         }
+    }
+
+    /// The source span recorded for the node at `path`, if the program
+    /// carries one.
+    pub(super) fn expression_span(&self, path: &AstPath) -> Option<Span> {
+        self.program.spans.get(path).copied()
     }
 
     /// The RLM language's spelling of the process-only signal receiver, for
@@ -137,14 +138,20 @@ impl<'module> Linker<'module> {
             .enumerate()
             .map(|(index, declaration)| {
                 let span = declaration_span(self.program, index);
-                self.lower_declaration(declaration, span)
+                self.lower_declaration(
+                    declaration,
+                    &AstPath::declaration(index as u32, Vec::new()),
+                    span,
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut scope = Scope::new(false, None);
         for name in &self.surface.globals {
             scope.bind(name, any_binding());
         }
-        let main = self.lower_expr(&self.program.main, &mut scope)?.0;
+        let main = self
+            .lower_expr(&self.program.main, &AstPath::main(Vec::new()), &mut scope)?
+            .0;
         let mut declarations = declarations;
         let mut spans = self.program.spans.clone();
         for (declaration, span) in self.lifted_declarations.borrow_mut().drain(..) {
@@ -244,7 +251,11 @@ impl<'module> Linker<'module> {
                 continue;
             };
             let span = declaration_span(self.program, index);
-            let output = self.infer_process_output(process, span)?;
+            let output = self.infer_process_output(
+                process,
+                &AstPath::declaration(index as u32, Vec::new()),
+                span,
+            )?;
             if let Some(expected) = &process.return_ty
                 && !self.is_type_assignable(&output, expected)
             {
@@ -863,6 +874,7 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_declaration(
         &self,
         declaration: &Declaration,
+        path: &AstPath,
         span: Option<Span>,
     ) -> Result<Declaration, LinkError> {
         Ok(match declaration {
@@ -898,7 +910,7 @@ impl<'module> Linker<'module> {
                 }
                 scope.bind("input", Binding::Value(process_input_type(process)));
                 scope.bind("inputs", Binding::Value(process_input_record_type(process)));
-                let body = self.lower_expr(&process.body, &mut scope)?.0;
+                let body = self.lower_expr(&process.body, path, &mut scope)?.0;
                 let return_ty = self
                     .process_types
                     .get(process.name.as_str())
@@ -922,7 +934,7 @@ impl<'module> Linker<'module> {
                 })
             }
             Declaration::Function(function) => {
-                Declaration::Function(self.lower_function_decl(function, span)?)
+                Declaration::Function(self.lower_function_decl(function, path, span)?)
             }
         })
     }
@@ -937,9 +949,10 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_function_decl(
         &self,
         function: &crate::ast::FunctionDecl,
+        path: &AstPath,
         span: Option<Span>,
     ) -> Result<crate::ast::FunctionDecl, LinkError> {
-        self.reject_effects_in_function(function, &function.body, span)?;
+        self.reject_effects_in_function(function, &function.body, path, span)?;
         let mut scope = Scope::new(false, span);
         scope.expected_return = Some(function.return_ty.clone());
         let mut seen = BTreeSet::new();
@@ -960,7 +973,7 @@ impl<'module> Linker<'module> {
         // not variables at all still resolve, though -- a declared process name
         // lowers to a process reference -- which is why the ban is re-applied
         // to the lowered body below.
-        let (body, binding) = self.lower_expr(&function.body, &mut scope)?;
+        let (body, binding) = self.lower_expr(&function.body, path, &mut scope)?;
         // Lowering is a resolver, not just a rewriter: it turns a bare
         // identifier into whatever the name denotes, so it can *introduce* a
         // forbidden node that the parsed body never contained. Walking the
@@ -969,7 +982,7 @@ impl<'module> Linker<'module> {
         // a property of the lowered program -- the thing that actually runs --
         // while the parsed walk above still owns the precise span for effects
         // a reader wrote themselves.
-        self.reject_effects_in_function(function, &body, span)?;
+        self.reject_effects_in_function(function, &body, path, span)?;
         let output = binding_type(&binding);
         if !self.is_type_assignable(&output, &function.return_ty) {
             return Err(LinkError::IncompatibleFunctionReturn {
@@ -1005,22 +1018,23 @@ impl<'module> Linker<'module> {
         &self,
         function: &crate::ast::FunctionDecl,
         body: &Expr,
+        body_path: &AstPath,
         span: Option<Span>,
     ) -> Result<(), LinkError> {
-        let mut pending = vec![body];
-        while let Some(expr) = pending.pop() {
+        let mut pending = vec![(body, body_path.clone())];
+        while let Some((expr, path)) = pending.pop() {
             if let Some(construct) = forbidden_function_construct(expr) {
                 return Err(LinkError::ForbiddenInFunction {
                     function: function.name.to_string(),
                     construct,
-                    span: self
-                        .expression_spans
-                        .get(&(expr as *const Expr as usize))
-                        .copied()
-                        .or(span),
+                    span: self.expression_span(&path).or(span),
                 });
             }
-            pending.extend(expr.children());
+            pending.extend(
+                expr.children()
+                    .enumerate()
+                    .map(|(index, child)| (child, path.child(index as u32))),
+            );
         }
         Ok(())
     }

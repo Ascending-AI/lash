@@ -4,6 +4,12 @@ use crate::*;
 /// `schema.sql` artifact so a host can vendor the exact bytes lash executes.
 pub(crate) const SCHEMA_DDL: &str = include_str!("../../schema.sql");
 
+/// The DDL that drops every object `SCHEMA_DDL` provisions, committed verbatim
+/// as the crate's `teardown.sql` artifact so a host can vendor the exact bytes.
+/// The artifact consistency test regenerates it from the object list the
+/// schema DDL declares, so the two files can never drift apart.
+pub(crate) const TEARDOWN_DDL: &str = include_str!("../../teardown.sql");
+
 /// Advisory-lock key lash takes for the duration of a schema-provisioning or
 /// schema-verifying transaction. See
 /// [`crate::PostgresStorage::schema_advisory_lock_key`].

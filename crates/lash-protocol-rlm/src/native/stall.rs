@@ -29,10 +29,10 @@ const NATIVE_PART_SEPARATOR: char = '\u{1f}';
 pub(super) fn native_reply_fingerprint(parts: &[Part]) -> String {
     let mut reply = String::new();
     for part in parts {
-        if matches!(part.kind, PartKind::Reasoning) {
+        if matches!(part.kind(), PartKind::Reasoning) {
             continue;
         }
-        reply.push_str(&part.content);
+        reply.push_str(part.content());
         reply.push(NATIVE_PART_SEPARATOR);
     }
     reply_fingerprint(&reply)

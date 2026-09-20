@@ -418,8 +418,10 @@ pub mod facade_support {
     pub use crate::tool_provider::ToolTriggerClient;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
     pub use crate::tool_registry::ReconfigureError;
+    pub use crate::tool_registry::SupersededToolIdentity;
     pub use crate::tool_registry::ToolRestoreReport;
     pub use crate::tool_registry::ToolSourceHandle;
+    pub use crate::tool_registry::ToolSourcePolicy;
     pub use crate::tool_registry::ToolStateEntry;
     pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
     pub use crate::triggers::InMemoryTriggerStore;
@@ -588,13 +590,14 @@ pub use lash_sansio::{
     PromptBuiltin, PromptContribution, PromptContributionBody, PromptContributionGate, PromptLayer,
     PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
     PruneState, SchemaContract, SchemaProjectionOverride, SchemaProjectionPolicy,
-    SessionAppendNode, TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolActivation,
-    ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-    ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolContract,
-    ToolControl, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource,
-    ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-    ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus,
-    ToolValue, TurnCause, TurnId, TurnOutputSource,
+    SessionAppendNode, TYPESCRIPT_TOOL_BINDING_KEY, TextProjectionMetadata, TokenUsage,
+    TokenUsageOverflow, ToolActivation, ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome,
+    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
+    ToolCatalogEntry, ToolContract, ToolControl, ToolDefinition, ToolDefinitionBindingExt,
+    ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource, ToolId,
+    ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
+    ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus, ToolValue, TurnCause,
+    TurnId, TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -606,7 +609,9 @@ pub use tool_provider::{
     ToolAttachmentClient, ToolDirectCompletionClient, ToolDispatchClient, ToolProcessEventClient,
     ToolSessionAdmin, ToolSessionModel,
 };
-pub use tool_registry::{ToolRegistry, ToolState};
+pub use tool_registry::{
+    SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy, ToolState,
+};
 pub use tool_result::{
     CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,
     ToolOutcome,

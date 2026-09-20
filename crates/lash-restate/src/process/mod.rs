@@ -861,6 +861,39 @@ impl RestateProcessDeployment {
         self.wiring.clone()
     }
 
+    /// Every service name this deployment's wiring addresses on the endpoint.
+    ///
+    /// `LashProcessWorkflow` is the segment runner the ingress side submits to
+    /// and awaits; `LashProcessAttach` holds process-terminal waits armed for
+    /// parked callers; the durable-wait pair carries the waits and
+    /// cancellation gates the workflow's handlers register. An endpoint
+    /// missing any of them compiles and deploys clean, then fails the first
+    /// call that needs it — assert the set at wiring time with
+    /// [`crate::assert_services_bound`] or
+    /// [`assert_endpoint_bound`](Self::assert_endpoint_bound).
+    pub fn required_service_names() -> Vec<&'static str> {
+        vec![
+            "LashProcessWorkflow",
+            "LashProcessAttach",
+            "LashDurableWaitWorkflow",
+            "LashDurableWaitIndex",
+        ]
+    }
+
+    /// Fail at wiring time when `endpoint` does not bind every service in
+    /// [`required_service_names`](Self::required_service_names).
+    ///
+    /// The check asks the built endpoint for its own discovery document, so a
+    /// [`crate::RestateBindingCheckError::Discovery`] means the endpoint would
+    /// not
+    /// report its surface — not that anything is unbound.
+    pub async fn assert_endpoint_bound(
+        &self,
+        endpoint: &restate_sdk::endpoint::Endpoint,
+    ) -> Result<(), crate::RestateBindingCheckError> {
+        crate::assert_services_bound(endpoint, Self::required_service_names().as_slice()).await
+    }
+
     #[cfg(test)]
     pub(crate) fn test_registry(&self) -> Arc<dyn ProcessRegistry> {
         Arc::clone(&self.registry)

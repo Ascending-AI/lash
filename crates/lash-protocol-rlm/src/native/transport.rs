@@ -150,9 +150,9 @@ pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output
     let mut results = Vec::new();
     let mut ids = std::collections::HashSet::new();
     for part in parts {
-        match part.kind {
+        match part.kind() {
             PartKind::ToolCall => {
-                let Some(call_id) = part.tool_call_id.as_ref() else {
+                let Some(call_id) = part.tool_call_id() else {
                     continue;
                 };
                 // Duplicate ids are rejected by normalization. Preserve every original
@@ -162,25 +162,25 @@ pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output
                     continue;
                 }
                 assistant.push(LlmContentBlock::ToolCall {
-                    call_id: call_id.clone(),
-                    tool_name: part.tool_name.clone().unwrap_or_default(),
-                    input_json: part.content.clone(),
-                    replay: part.tool_replay.clone(),
+                    call_id: call_id.to_string(),
+                    tool_name: part.tool_name().unwrap_or_default().to_string(),
+                    input_json: part.content().to_string(),
+                    replay: part.tool_replay().cloned(),
                 });
                 results.push(LlmContentBlock::ToolResult {
-                    call_id: call_id.clone(),
-                    tool_name: part.tool_name.clone(),
+                    call_id: call_id.to_string(),
+                    tool_name: part.tool_name().map(str::to_string),
                     content: output.to_string(),
                 });
             }
             PartKind::Reasoning => assistant.push(LlmContentBlock::Reasoning {
-                text: part.content.clone(),
-                replay: part.reasoning_meta.clone(),
+                text: part.content().to_string(),
+                replay: part.reasoning_meta().cloned(),
             }),
             PartKind::Prose | PartKind::Text => assistant.push(LlmContentBlock::Text {
-                text: part.content.clone().into(),
+                text: part.content().to_string().into(),
                 cache_breakpoint: false,
-                response_meta: part.response_meta.clone(),
+                response_meta: part.response_meta().cloned(),
             }),
             _ => {}
         }

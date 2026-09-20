@@ -15,9 +15,9 @@ use lash::sync::MutexExt;
 use lash::tools::{
     CataloguePreviewOptions, DeferredToolGrant, DeferredToolResolution, DeferredToolResolver,
     RecordedGrantInstallError, SharedDeferredToolResolver, StaticToolExecute, StaticToolProvider,
-    ToolAttemptOutcome, ToolBinding, ToolCall, ToolContract, ToolDefinition,
-    ToolDefinitionBindingExt, ToolId, ToolManifest, ToolManifestBindingExt, ToolOutcome,
-    ToolProvider,
+    ToolAttemptOutcome, ToolBinding, ToolBindingResolutionExt, ToolCall, ToolContract,
+    ToolDefinition, ToolDefinitionBindingExt, ToolId, ToolManifest, ToolManifestBindingExt,
+    ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};

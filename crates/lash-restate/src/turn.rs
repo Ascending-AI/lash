@@ -130,6 +130,25 @@ impl RestateTurnDeployment {
         Self { effect_host }
     }
 
+    /// Every service name this deployment's wiring addresses on the endpoint.
+    ///
+    /// The durable-wait pair carries turn terminal promises, await-event
+    /// waits, and cancellation gates. Assert the set at wiring time with
+    /// [`crate::assert_services_bound`] or
+    /// [`assert_endpoint_bound`](Self::assert_endpoint_bound).
+    pub fn required_service_names() -> Vec<&'static str> {
+        vec!["LashDurableWaitWorkflow", "LashDurableWaitIndex"]
+    }
+
+    /// Fail at wiring time when `endpoint` does not bind every service in
+    /// [`required_service_names`](Self::required_service_names).
+    pub async fn assert_endpoint_bound(
+        &self,
+        endpoint: &restate_sdk::endpoint::Endpoint,
+    ) -> Result<(), crate::RestateBindingCheckError> {
+        crate::assert_services_bound(endpoint, Self::required_service_names().as_slice()).await
+    }
+
     pub fn effect_host(&self) -> Arc<RestateEffectHost> {
         Arc::clone(&self.effect_host)
     }

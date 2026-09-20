@@ -122,7 +122,7 @@ pub(crate) fn restate_unknown_or_revoked() -> RuntimeError {
         "await-event key is invalid or revoked",
     )
 }
-const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
+pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// Current wire version of a deadline carried by a durable-wait request.
 ///
 /// Version 1 was the unversioned `timeout_ms` field. Version 2 carries the

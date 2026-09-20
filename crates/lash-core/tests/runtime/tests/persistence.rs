@@ -295,7 +295,7 @@ async fn standard_runtime_assembles_stream_only_text_response() {
     assert_eq!(
         assistant_messages
             .iter()
-            .map(|message| message.parts[0].content.as_str())
+            .map(|message| message.parts[0].content())
             .collect::<Vec<_>>(),
         vec!["What time is it?"],
         "the assistant reply a turn finishes with must be committed exactly once"
@@ -364,7 +364,7 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
         .filter(|message| message.role == MessageRole::Assistant)
         .collect::<Vec<_>>();
     assert_eq!(assistant_messages.len(), 1);
-    assert_eq!(assistant_messages[0].parts[0].content, expected);
+    assert_eq!(assistant_messages[0].parts[0].content(), expected);
 
     let streamed_text: String = sink
         .snapshot()

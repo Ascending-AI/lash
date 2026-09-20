@@ -72,78 +72,29 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
     Ok(())
 }
 
-/// FIG-1558: child/fork creation inherits the recorded pin, and a create
-/// request naming a different provider is refused rather than overwriting it.
+/// FIG-1558: a related session opened with `.parent(..)` is admitted through
+/// the same boundary as any other open, so its store request carries the
+/// core's recorded provider pin. A conflicting pin on reopen is refused by
+/// `conflicting_provider_at_open_is_refused_before_any_turn` above.
 #[tokio::test]
-async fn child_create_inherits_the_recorded_provider_pin_and_refuses_a_conflict() -> Result<()> {
+async fn related_session_open_records_the_provider_pin() -> Result<()> {
     let factory = Arc::new(RecordingStoreFactory::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(factory.clone())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("provider-pin-root").open().await?;
+    let _session = core.session("provider-pin-root").open().await?;
 
-    let plugin_init = session
-        .admin()
-        .state()
-        .session_state_service()
-        .await?
-        .session_plugin_init(&session.session_id())
-        .await?;
-    let child_request =
-        |session_id: &str, policy: Option<lash_core::SessionPolicy>| SessionCreateRequest {
-            session_id: Some(SessionId::from(session_id)),
-            relation: lash_core::SessionRelation::Child {
-                parent_session_id: SessionId::from("provider-pin-root"),
-                caused_by: None,
-            },
-            start: lash_core::SessionStartPoint::Empty,
-            policy,
-            plugin_source: lash_core::SessionPluginSource::ParentFork,
-            plugin_init: Some(plugin_init.clone()),
-            initial_nodes: Vec::new(),
-            observed_processes: Vec::new(),
-            tool_access: lash_core::SessionToolAccess::default(),
-            subagent: None,
-            context_overlay: lash_core::SessionContextOverlay::default(),
-            plugin_options: lash_core::PluginOptions::default(),
-        };
-
-    session
-        .admin()
-        .children()
-        .create_session(child_request("provider-pin-child", None))
+    core.session("provider-pin-child")
+        .parent("provider-pin-root")
+        .open()
         .await?;
     assert_eq!(
         factory.provider_ids(),
         vec!["embed-test".to_string(), "embed-test".to_string()],
-        "a child created without a policy carries the parent's recorded pin"
-    );
-
-    let mut conflicting = session.policy_snapshot();
-    conflicting.provider_id = "other-embed-test".to_string();
-    let error = session
-        .admin()
-        .children()
-        .create_session(child_request(
-            "provider-pin-child-conflict",
-            Some(conflicting),
-        ))
-        .await
-        .expect_err("a create request naming a different provider must be refused");
-    let message = error.to_string();
-    assert!(
-        message.contains("embed-test") && message.contains("other-embed-test"),
-        "the refusal names both the recorded pin and the requested provider: {message}"
-    );
-    assert_eq!(
-        factory.session_ids(),
-        vec![
-            SessionId::from("provider-pin-root"),
-            SessionId::from("provider-pin-child"),
-        ],
-        "the refused create never reached the store"
+        "a related session opened through the ordinary path carries the \
+         recorded provider pin"
     );
     Ok(())
 }

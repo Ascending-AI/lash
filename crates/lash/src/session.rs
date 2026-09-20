@@ -43,6 +43,8 @@ pub struct SessionBuilder {
     /// `SessionCreateRequest` carries) so every plugin gets open-time options
     /// through one hook.
     pub(crate) plugin_options: PluginOptions,
+    /// Per-open override of the core's tool-source policy (FIG-3367).
+    pub(crate) tool_source_policy: Option<lash_core::ToolSourcePolicy>,
 }
 
 struct ResolvedSessionStore {
@@ -94,6 +96,11 @@ impl SessionBuilder {
     }
 
     /// Configures the parent and returns the updated builder.
+    ///
+    /// This is the only facade path to a related session (ADR 0089): the
+    /// session that opens is an ordinary session with its own Session Binding
+    /// and its own usage ledger — rolling related sessions together is host
+    /// policy, not a facade service.
     pub fn parent(mut self, parent_session_id: impl Into<SessionId>) -> Self {
         self.parent_session_id = Some(parent_session_id.into());
         self
@@ -107,6 +114,19 @@ impl SessionBuilder {
     /// session can create more sessions.
     pub fn store(mut self, store: Arc<dyn RuntimePersistence>) -> Self {
         self.store = Some(store);
+        self
+    }
+
+    /// Override the core's tool-source policy for this open.
+    ///
+    /// The core's choice is the deployment default; this states it for one
+    /// session — an unattended reopen that must not run without its tools sets
+    /// [`Require`](lash_core::ToolSourcePolicy::Require) even on a core that
+    /// tolerates loss elsewhere. The refusal is
+    /// [`SessionError::ToolSourcesUnavailable`](lash_core::SessionError::ToolSourcesUnavailable),
+    /// which carries the report.
+    pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {
+        self.tool_source_policy = Some(policy);
         self
     }
 
@@ -317,6 +337,12 @@ impl SessionBuilder {
         let policy = state.effective_policy().clone();
         let session_id = state.session_id.clone();
         let mut env = self.core.env.clone();
+        if let Some(policy) = self.tool_source_policy {
+            // Per-open override of the deployment default. It rides the env's
+            // host config so every construction this open performs below the
+            // facade sees the same choice.
+            env.core.control.tool_source_policy = policy;
+        }
         if let Some(provider) = self.provider.clone().or_else(|| self.core.provider.clone()) {
             env.core.providers.provider_resolver = Arc::new(
                 lash_core::facade_support::SingleProviderResolver::new(provider),
@@ -629,6 +655,32 @@ impl LashSession {
             .ok_or(EmbedError::SessionCatalogUnavailable {
                 operation: "session_administration",
             })
+    }
+
+    /// What this session's open (or its latest internal reload) found when it
+    /// installed the persisted Tool Catalog.
+    ///
+    /// `None` means no persisted tool state was installed — a first open of a
+    /// fresh session. A present report says which persisted tools no registered
+    /// source resolves, in three classes:
+    ///
+    /// * `lost_members` — capability loss. Surface these to your user: the
+    ///   session opened, but a tool the host had curated in is not callable
+    ///   until its source returns. Under
+    ///   [`ToolSourcePolicy::Require`](lash_core::ToolSourcePolicy::Require)
+    ///   this list is what refuses the open instead.
+    /// * `parked_opt_outs` — unresolved tools the host had already opted out
+    ///   of. Nothing usable is missing.
+    /// * `superseded_identities` — a live tool now owns the old tool's
+    ///   model-facing name. The capability is present under a new id.
+    ///
+    /// The report is replaced by every later host restore, persisted-state
+    /// install and resident re-sync on this session, so a host that renders it
+    /// after a long-lived session's re-sync sees the current answer.
+    pub async fn tool_restore_report(&self) -> Option<crate::tools::ToolRestoreReport> {
+        let writer = self.runtime.writer();
+        let runtime = writer.lock().await;
+        runtime.tool_restore_report().cloned()
     }
 
     /// Durably close this session, then release its in-memory runtime.

@@ -394,6 +394,9 @@ impl LashRuntime {
         };
         let mut durable_state = self.state.clone();
         let mut durable_head_revision = durable_state.head_revision;
+        let tracing = self.host.core.tracing.clone();
+        let clock = Arc::clone(&self.host.core.clock);
+        let mut reloaded_tool_restore = None;
         let reload_result: Result<(), (ResidentReloadStage, RuntimeError)> = async {
             if let Some(store) = store.as_ref() {
                 crate::store::refresh_persisted_session_state(store.as_ref(), &mut durable_state)
@@ -424,19 +427,34 @@ impl LashRuntime {
             })?;
             session.invalidate_runtime_caches();
             if let Some(tool_state) = durable_state.tool_state_snapshot().cloned() {
-                session
-                    .plugins()
-                    .tool_registry()
-                    .restore_state(tool_state)
-                    .map_err(|err| {
-                        (
-                            ResidentReloadStage::ToolStateRestore,
-                            RuntimeError::new(
-                                RuntimeErrorCode::ResidentSessionReloadFailed,
-                                err.to_string(),
-                            ),
-                        )
-                    })?;
+                // The re-sync has no return value to hand the host, so the
+                // installer's delivery is the contract: trace evidence plus the
+                // typed report the runtime retains for
+                // `LashSession::tool_restore_report()` (FIG-3367).
+                let registry = session.plugins().tool_registry();
+                let report = crate::runtime::tool_restore::install_persisted_tool_state(
+                    registry.as_ref(),
+                    tool_state,
+                    // A live runtime mid-turn: a source that went away
+                    // degrades the session, it does not fail the reload
+                    // (FIG-3367).
+                    crate::runtime::tool_restore::ToolRestoreContext::for_live_install(
+                        &durable_state.session_id,
+                        crate::runtime::ToolRestoreSite::ResidentReload,
+                        &tracing,
+                        clock.as_ref(),
+                    ),
+                )
+                .map_err(|err| {
+                    (
+                        ResidentReloadStage::ToolStateRestore,
+                        RuntimeError::new(
+                            RuntimeErrorCode::ResidentSessionReloadFailed,
+                            err.to_string(),
+                        ),
+                    )
+                })?;
+                reloaded_tool_restore = Some(report);
             }
             session.refresh_tool_catalog().await.map_err(|err| {
                 (
@@ -528,6 +546,9 @@ impl LashRuntime {
         }
         .await;
 
+        if reloaded_tool_restore.is_some() {
+            self.tool_restore_report = reloaded_tool_restore;
+        }
         match reload_result {
             Ok(()) => {
                 self.trace_resident_session_reload_decision(ResidentSessionReloadDecision {

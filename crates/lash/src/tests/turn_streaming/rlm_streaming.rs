@@ -252,14 +252,14 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
                 && message
                     .parts
                     .iter()
-                    .any(|part| part.tool_call_id.as_deref() == Some("lookup-1"))
+                    .any(|part| part.tool_call_id() == Some("lookup-1"))
         })
         .expect("stored interleaved assistant message");
     assert_eq!(
         stored_assistant
             .parts
             .iter()
-            .map(|part| part.kind)
+            .map(|part| part.kind())
             .collect::<Vec<_>>(),
         [
             lash_core::PartKind::Prose,
@@ -574,7 +574,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
                 .iter()
                 .any(|message| {
                     message.parts.iter().any(|part| {
-                        part.reasoning_meta.as_ref().is_some_and(|meta| {
+                        part.reasoning_meta().as_ref().is_some_and(|meta| {
                             meta.signature.as_deref() == Some("signature-after-abort")
                                 && meta.encrypted_content.as_deref()
                                     == Some("encrypted-after-abort")
@@ -964,7 +964,7 @@ finish("done");"#,
         read_view.messages().iter().all(|message| message
             .parts
             .iter()
-            .all(|part| part.tool_call_id.as_ref() != tool_call_ids.first())),
+            .all(|part| part.tool_call_id() != tool_call_ids.first().map(String::as_str))),
         "live RLM tool calls should not be persisted as message history"
     );
     assert_eq!(

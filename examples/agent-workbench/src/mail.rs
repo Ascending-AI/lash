@@ -515,6 +515,7 @@ impl ToolProvider for MockMailProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash::tools::ToolBindingResolutionExt;
 
     #[test]
     fn slugify_normalizes_names() {

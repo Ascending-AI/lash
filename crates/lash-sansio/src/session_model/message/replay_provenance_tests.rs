@@ -13,7 +13,7 @@ fn reasoning_part_roundtrips_when_snapshot_predates_field() {
         }]
     }]"#;
     let msgs: Vec<Message> = serde_json::from_str(legacy).expect("legacy snapshot");
-    assert!(msgs[0].parts[0].reasoning_meta.is_none());
+    assert!(msgs[0].parts[0].reasoning_meta().is_none());
 }
 
 fn replay_request_from_reopened_message(

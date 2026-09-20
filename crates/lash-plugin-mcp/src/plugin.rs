@@ -472,50 +472,27 @@ mod tests {
         let expected_name = crate::mcp_tool_name("docs", "search-docs");
         assert_eq!(defs[0].name(), expected_name);
         assert_eq!(defs[0].manifest.id.as_str(), "mcp:4:docs/11:search-docs");
-        #[cfg(feature = "lashlang")]
-        {
-            let binding =
-                lash_lashlang_runtime::ToolManifestBindingExt::tool_binding(&defs[0].manifest)
-                    .expect("valid lashlang binding")
-                    .expect("mcp tool has lashlang binding");
-            assert_eq!(binding.module_path, vec!["docs".to_string()]);
-            assert_eq!(
-                binding.operation.as_deref(),
-                expected_name
-                    .rsplit_once("__")
-                    .map(|(_, operation)| operation)
-            );
-            assert!(binding.aliases.is_empty());
-        }
-        // Whether the binding lands in the manifest is governed by
-        // `lash-tool-support/lashlang`, not by this crate's own feature: our
-        // `lashlang` implies it, but `lash-llm-tools`,
-        // `lash-plugin-process-controls` and `lash-protocol-standard` each
-        // enable it independently, so a workspace build can carry the binding
-        // while this crate is built without the feature. An empty map is
-        // therefore a legitimate configuration, not a failure. What this crate
-        // owes is that when a binding IS recorded it is the right one, so
-        // assert the content rather than the presence or absence.
-        if let Some(recorded) = defs[0]
+        // The binding is always written: the manifest key is lash's internal
+        // projection, so assert its content unconditionally.
+        let recorded = defs[0]
             .manifest
             .bindings
             .get(lash_tool_support::TYPESCRIPT_TOOL_BINDING_KEY)
-        {
-            assert_eq!(
-                recorded.get("module_path"),
-                Some(&serde_json::json!(["docs"])),
-                "{recorded:?}"
-            );
-            assert_eq!(
-                recorded.get("operation"),
-                expected_name
-                    .rsplit_once("__")
-                    .map(|(_, operation)| serde_json::json!(operation))
-                    .as_ref(),
-                "{recorded:?}"
-            );
-            assert!(recorded.get("aliases").is_none(), "{recorded:?}");
-        }
+            .expect("mcp tool carries its tool binding");
+        assert_eq!(
+            recorded.get("module_path"),
+            Some(&serde_json::json!(["docs"])),
+            "{recorded:?}"
+        );
+        assert_eq!(
+            recorded.get("operation"),
+            expected_name
+                .rsplit_once("__")
+                .map(|(_, operation)| serde_json::json!(operation))
+                .as_ref(),
+            "{recorded:?}"
+        );
+        assert!(recorded.get("aliases").is_none(), "{recorded:?}");
         assert_eq!(
             defs[0]
                 .contract

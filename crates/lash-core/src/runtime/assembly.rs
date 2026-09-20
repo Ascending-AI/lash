@@ -960,11 +960,11 @@ pub(super) fn recovered_assistant_output_from_state(
                 .iter()
                 .filter(|part| {
                     matches!(
-                        part.kind,
+                        part.kind(),
                         PartKind::Text | PartKind::Prose | PartKind::Attachment
                     )
                 })
-                .map(|part| part.content.as_str())
+                .map(|part| part.content())
                 .collect::<String>()
         })
         .unwrap_or_default())

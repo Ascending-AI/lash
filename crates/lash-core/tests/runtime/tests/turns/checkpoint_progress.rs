@@ -476,7 +476,7 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
                 message
                     .parts
                     .iter()
-                    .any(|part| part.content.contains("plugin preface"))
+                    .any(|part| part.content().contains("plugin preface"))
             })
     );
 }
@@ -524,7 +524,7 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
         .find(|message| message.role == MessageRole::User)
         .expect("user message");
     assert_eq!(
-        user_message.parts.first().map(|part| part.content.as_str()),
+        user_message.parts.first().map(|part| part.content()),
         Some("/yolopush\n\n<skill>\nbody\n</skill>")
     );
     // The committed turn input carries typed provenance so a host that rendered
@@ -795,7 +795,7 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
                     && message
                         .parts
                         .iter()
-                        .any(|part| part.content.contains("Second answer."))
+                        .any(|part| part.content().contains("Second answer."))
             })
     );
     let admitted = active_conversation_messages(&turn.state)
@@ -805,7 +805,7 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
                 && message
                     .parts
                     .iter()
-                    .any(|part| part.content == "one more thing")
+                    .any(|part| part.content() == "one more thing")
         })
         .collect::<Vec<_>>();
     assert_eq!(admitted.len(), 1);
@@ -994,7 +994,7 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
                     && message
                         .parts
                         .iter()
-                        .any(|part| part.content == "checkpoint injected")
+                        .any(|part| part.content() == "checkpoint injected")
             })
     );
 }
@@ -1115,10 +1115,12 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
     assert!(
         active_conversation_messages(&turn.state)
             .iter()
-            .all(|message| message
-                .parts
-                .iter()
-                .all(|part| part.content != "must remain pending")),
+            .all(|message| {
+                message
+                    .parts
+                    .iter()
+                    .all(|part| part.content() != "must remain pending")
+            }),
         "a rejected checkpoint input must not enter canonical history"
     );
 }
@@ -1274,10 +1276,12 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
     assert!(
         active_conversation_messages(&turn.state)
             .iter()
-            .all(|message| message
-                .parts
-                .iter()
-                .all(|part| part.content != "must remain pending after attachment failure")),
+            .all(|message| {
+                message
+                    .parts
+                    .iter()
+                    .all(|part| part.content() != "must remain pending after attachment failure")
+            }),
         "an attachment-failed checkpoint input must not enter canonical history"
     );
 }
@@ -1365,7 +1369,10 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
         .iter()
         .filter(|message| {
             message.role == lash_core::MessageRole::User
-                && message.parts.iter().any(|part| part.content == "follow up")
+                && message
+                    .parts
+                    .iter()
+                    .any(|part| part.content() == "follow up")
         })
         .count();
     assert_eq!(
@@ -1376,7 +1383,10 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
         .iter()
         .find(|message| {
             message.role == lash_core::MessageRole::User
-                && message.parts.iter().any(|part| part.content == "follow up")
+                && message
+                    .parts
+                    .iter()
+                    .any(|part| part.content() == "follow up")
         })
         .expect("committed injected input");
     // The injected input keeps the normal user-message representation — no
@@ -1403,7 +1413,7 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
         .iter()
         .find(|message| {
             message.role == lash_core::MessageRole::User
-                && message.parts.iter().any(|part| part.content == "hello")
+                && message.parts.iter().any(|part| part.content() == "hello")
         })
         .expect("committed opening input");
     // The opening input entered the same way (ADR 0069): its own acceptance,
@@ -1824,35 +1834,6 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
     );
 }
 
-#[tokio::test]
-pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_state() {
-    let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
-    let full_loads_before = store.load_session_count();
-    let head_reads_before = store.load_session_head_meta_count();
-
-    let receipt = runtime
-        .submit_session_command(
-            lash_core::facade_support::SessionCommand::RefreshToolCatalog {
-                reason: "deferred queued lane".to_string(),
-            },
-            "deferred-queued-command",
-        )
-        .await
-        .expect("NoQueuedWork leaves the durable command pending");
-
-    assert_eq!(store.load_session_count(), full_loads_before);
-    assert_eq!(store.load_session_head_meta_count(), head_reads_before);
-    let pending = lash_core::store::QueuedWorkStore::list_queued_work(
-        store.as_ref(),
-        &SessionId::from("root"),
-    )
-    .await
-    .expect("inspect deferred durable command");
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].batch_id, receipt.batch_id);
-}
-
 // Boundary: these process-wake and active-checkpoint steering tests stay in
 // `turns.rs` because they verify the full `LashRuntime` scheduler, provider
 // prompt contents, cancellation path, and selected queued-work APIs. Runtime
@@ -2255,7 +2236,7 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
                     && message
                         .parts
                         .iter()
-                        .any(|part| part.content.contains(answer)))
+                        .any(|part| part.content().contains(answer)))
                 .count(),
             1,
             "`{answer}` must be rendered exactly once"

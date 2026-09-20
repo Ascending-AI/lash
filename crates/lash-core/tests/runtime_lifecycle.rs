@@ -65,6 +65,7 @@ mod runtime {
         mod child_sessions;
         mod persistence;
         mod plugin_lifecycle;
+        mod tool_restore_report;
         mod tool_surface_lifecycle;
     }
 }

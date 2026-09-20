@@ -1803,8 +1803,8 @@ fn assert_graph_payloads(nodes: &[lash_core::SessionNodeRecord]) {
         } => {
             assert_eq!(message.role, MessageRole::User);
             assert_eq!(message.parts.len(), 1);
-            assert_eq!(message.parts[0].kind, PartKind::Text);
-            assert_eq!(message.parts[0].content, "durable read user message");
+            assert_eq!(message.parts[0].kind(), PartKind::Text);
+            assert_eq!(message.parts[0].content(), "durable read user message");
             assert!(matches!(
                 message.origin.as_ref(),
                 Some(MessageOrigin::Plugin { plugin_id, transient: false })

@@ -7,18 +7,64 @@
 #[test]
 fn part_field_additions_trip_this_exhaustive_destructure() {
     let part = super::Part::text("m0.p0".into(), "x".into(), None);
-    let super::Part {
-        id: _,
-        kind: _,
-        content: _,
-        attachment: _,
-        tool_call_id: _,
-        tool_name: _,
-        tool_replay: _,
-        prune_state: _,
-        reasoning_meta: _,
-        response_meta: _,
-    } = part;
+    match part {
+        super::Part::Text {
+            id: _,
+            content: _,
+            response_meta: _,
+            prune_state: _,
+        } => {}
+        super::Part::Attachment {
+            id: _,
+            content: _,
+            attachment: _,
+            tool_call_id: _,
+            tool_name: _,
+            prune_state: _,
+        } => {}
+        super::Part::Code {
+            id: _,
+            content: _,
+            prune_state: _,
+        }
+        | super::Part::Output {
+            id: _,
+            content: _,
+            prune_state: _,
+        }
+        | super::Part::Error {
+            id: _,
+            content: _,
+            prune_state: _,
+        } => {}
+        super::Part::Prose {
+            id: _,
+            content: _,
+            response_meta: _,
+            prune_state: _,
+        } => {}
+        super::Part::ToolCall {
+            id: _,
+            content: _,
+            tool_call_id: _,
+            tool_name: _,
+            tool_replay: _,
+            prune_state: _,
+        } => {}
+        super::Part::ToolResult {
+            id: _,
+            content: _,
+            tool_call_id: _,
+            tool_name: _,
+            prune_state: _,
+        } => {}
+        super::Part::Reasoning {
+            id: _,
+            content: _,
+            reasoning_meta: _,
+            prune_state: _,
+        } => {}
+    }
 }
 
 use super::*;
@@ -168,9 +214,9 @@ fn replay_carrying_constructors_preserve_provider_metadata() {
         Some(reasoning_meta.clone()),
     );
 
-    assert_eq!(tool_call.tool_replay, Some(tool_replay));
-    assert_eq!(prose.response_meta, Some(response_meta));
-    assert_eq!(reasoning.reasoning_meta, Some(reasoning_meta));
+    assert_eq!(tool_call.tool_replay(), Some(&tool_replay));
+    assert_eq!(prose.response_meta(), Some(&response_meta));
+    assert_eq!(reasoning.reasoning_meta(), Some(&reasoning_meta));
 }
 
 #[test]
@@ -518,9 +564,12 @@ fn reasoning_parts_survive_snapshot_but_never_reach_the_model() {
     let deserialized: Vec<Message> =
         serde_json::from_str(&serialized).expect("deserialize messages");
     assert_eq!(deserialized[0].parts.len(), 2);
-    assert!(matches!(deserialized[0].parts[0].kind, PartKind::Reasoning));
+    assert!(matches!(
+        deserialized[0].parts[0].kind(),
+        PartKind::Reasoning
+    ));
     assert_eq!(
-        deserialized[0].parts[0].content,
+        deserialized[0].parts[0].content(),
         "Thinking about how to answer."
     );
 
@@ -605,8 +654,8 @@ fn reasoning_part_roundtrips_through_snapshot_serde() {
     let deserialized: Vec<Message> = serde_json::from_str(&serialized).expect("deserialize");
     assert_eq!(deserialized[0].parts.len(), 1);
     let part = &deserialized[0].parts[0];
-    assert!(matches!(part.kind, PartKind::Reasoning));
-    let meta = part.reasoning_meta.as_ref().expect("meta survives");
+    assert!(matches!(part.kind(), PartKind::Reasoning));
+    let meta = part.reasoning_meta().expect("meta survives");
     assert_eq!(meta.item_id.as_deref(), Some("rs_xyz"));
     assert_eq!(meta.summary, vec!["Thinking.".to_string()]);
     assert_eq!(meta.encrypted_content.as_deref(), Some("CIPHER=="));
@@ -859,4 +908,116 @@ fn reasoning_parts_are_zero_for_prune_accounting() {
     // so they must not count against the prompt budget.
     let part = reasoning_part_fixture(Some("X=="));
     assert_eq!(part.prompt_char_count(), 0);
+}
+
+// ─── Part enum serde (FIG-3305) ─────────────────────────────────────
+//
+// `Part` is now an internally-tagged enum whose variants own only their
+// kind's fields. The durable JSON is unchanged — the same flat shape
+// every stored message already uses — and the compatibility reader
+// rejects pairings the constructors cannot produce.
+
+#[test]
+fn part_serializes_to_the_flat_wire_shape() {
+    let part = Part::tool_call(
+        "m0.p0".to_string(),
+        "{}".to_string(),
+        "call-1".to_string(),
+        "lookup".to_string(),
+        None,
+    );
+    assert_eq!(
+        serde_json::to_value(&part).expect("serialize"),
+        serde_json::json!({
+            "kind": "ToolCall",
+            "id": "m0.p0",
+            "content": "{}",
+            "tool_call_id": "call-1",
+            "tool_name": "lookup",
+            "prune_state": "Intact",
+        })
+    );
+}
+
+#[test]
+fn every_kind_round_trips_through_the_flat_form() {
+    let parts = vec![
+        Part::text("m.p0".into(), "x".into(), None),
+        Part::attachment_part(
+            "m.p1".into(),
+            String::new(),
+            Some(PartAttachment {
+                source: AttachmentSource::stored(test_attachment_ref(3)),
+            }),
+        ),
+        Part::tool_result_attachment(
+            "m.p2".into(),
+            String::new(),
+            PartAttachment {
+                source: AttachmentSource::stored(test_attachment_ref(4)),
+            },
+            "call-1".into(),
+            "snap".into(),
+        ),
+        Part::code("m.p3".into(), "x = 1".into()),
+        Part::output("m.p4".into(), "ok".into()),
+        Part::error("m.p5".into(), "boom".into()),
+        Part::prose("m.p6".into(), "doc".into(), None),
+        Part::tool_call(
+            "m.p7".into(),
+            "{}".into(),
+            "call-2".into(),
+            "lookup".into(),
+            Some(ProviderReplayMeta {
+                item_id: Some("fc_1".into()),
+                opaque: None,
+                origin: None,
+            }),
+        ),
+        Part::tool_result(
+            "m.p8".into(),
+            "done".into(),
+            "call-2".into(),
+            "lookup".into(),
+        ),
+        Part::reasoning(
+            "m.p9".into(),
+            "thinking".into(),
+            Some(ProviderReasoningReplay {
+                item_id: Some("rs_1".into()),
+                summary: vec![],
+                encrypted_content: None,
+                signature: None,
+                redacted: false,
+                origin: None,
+            }),
+        ),
+    ];
+    let serialized = serde_json::to_string(&parts).expect("serialize");
+    let decoded: Vec<Part> = serde_json::from_str(&serialized).expect("deserialize");
+    assert_eq!(decoded, parts);
+}
+
+#[test]
+fn legacy_flat_json_pairs_rejected_when_the_kind_cannot_carry_the_field() {
+    // A Text part with a tool_call_id was representable in the old flat
+    // struct; the enum reader refuses it with a typed error.
+    let bad = r#"{"id":"m.p0","kind":"Text","content":"x","tool_call_id":"call-1","prune_state":"Intact"}"#;
+    let err = serde_json::from_str::<Part>(bad).expect_err("invalid pairing must fail");
+    assert!(
+        err.to_string().contains("tool_call_id"),
+        "typed error names the offending field: {err}"
+    );
+
+    // A tool result missing its call pair is likewise unrepresentable.
+    let missing = r#"{"id":"m.p0","kind":"ToolResult","content":"x","prune_state":"Intact"}"#;
+    let err = serde_json::from_str::<Part>(missing).expect_err("missing call pair must fail");
+    assert!(
+        err.to_string().contains("tool_call_id"),
+        "typed error names the missing field: {err}"
+    );
+
+    // A lone half of the attachment call pair is rejected too.
+    let lone = r#"{"id":"m.p0","kind":"Attachment","content":"","tool_call_id":"call-1","prune_state":"Intact"}"#;
+    serde_json::from_str::<Part>(lone).expect_err("lone tool_call_id must fail");
 }

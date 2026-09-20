@@ -97,7 +97,7 @@ impl lash_core::facade_support::ContextCompactor for FixedCompactor {
             ctx.state
                 .messages()
                 .iter()
-                .any(|message| message.parts[0].content.contains("old durable request"))
+                .any(|message| message.parts[0].content().contains("old durable request"))
         );
         Ok(Some(lash_core::facade_support::ContextCompaction::new(
             vec![lash_core::SessionAppendNode::message(
@@ -181,9 +181,9 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
                 .nearest_frame_node_id(Some(&node.node_id))
                 .map(lash_core::NodeId::as_str)
                 == previous_frame_node_id.as_deref()
-                && node
-                    .message()
-                    .is_some_and(|message| message.parts[0].content.contains("old durable request"))
+                && node.message().is_some_and(|message| {
+                    message.parts[0].content().contains("old durable request")
+                })
         }),
         "initial frame should contain the original request"
     );
@@ -201,7 +201,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     let read_view = session.read_view();
     assert_eq!(read_view.messages().len(), 1);
     assert_eq!(
-        read_view.messages()[0].parts[0].content,
+        read_view.messages()[0].parts[0].content(),
         "Compaction summary:\nold durable request summarized"
     );
     assert!(matches!(
@@ -250,9 +250,9 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
                 .nearest_frame_node_id(Some(&node.node_id))
                 .map(lash_core::NodeId::as_str)
                 == previous_frame_node_id.as_deref()
-                && node
-                    .message()
-                    .is_some_and(|message| message.parts[0].content.contains("old durable request"))
+                && node.message().is_some_and(|message| {
+                    message.parts[0].content().contains("old durable request")
+                })
         }),
         "previous frame content should remain durable after compaction"
     );
@@ -265,7 +265,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
                 == after.current_frame_node_id.as_deref()
                 && node.message().is_some_and(|message| {
                     message.parts[0]
-                        .content
+                        .content()
                         .contains("old durable request summarized")
                 })
         }),
@@ -998,45 +998,49 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
     Ok(())
 }
 
+/// FIG-3373 / ADR 0089: a host-run related session is an ordinary session.
+/// `core.session(child).parent(parent)` admits it under its own Session
+/// Binding, records the Child relation, carries the provider pin, and runs a
+/// turn — there is no second session model behind a child-admin facade.
 #[tokio::test]
-async fn session_control_manages_child_session_lifecycle() -> Result<()> {
-    let core = standard_core();
-    let session = core.session("parent-control").open().await?;
-    let children = session.admin().children();
-    let plugin_init = session
-        .admin()
-        .state()
-        .session_state_service()
-        .await?
-        .session_plugin_init(&session.session_id())
-        .await?;
-    let child = children
-        .create_session(SessionCreateRequest {
-            session_id: Some(SessionId::from("child-control")),
-            relation: lash_core::SessionRelation::Child {
-                parent_session_id: SessionId::from("parent-control"),
-                caused_by: None,
-            },
-            start: lash_core::SessionStartPoint::Empty,
-            policy: None,
-            plugin_source: lash_core::SessionPluginSource::ParentFork,
-            plugin_init: Some(plugin_init),
-            initial_nodes: Vec::new(),
-            observed_processes: Vec::new(),
-            tool_access: lash_core::SessionToolAccess::default(),
-            subagent: None,
-            context_overlay: lash_core::SessionContextOverlay::default(),
-            plugin_options: lash_core::PluginOptions::default(),
-        })
+
+async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&store_factory) as Arc<dyn SessionStoreFactory>)
+        .build(crate::testing::runtime_lease_owner())?;
+    let _parent = core.session("parent-control").open().await?;
+
+    let child = core
+        .session("child-control")
+        .parent("parent-control")
+        .open()
         .await?;
 
-    assert_eq!(child.session_id, "child-control");
-    children.close_session(&child.session_id).await?;
+    assert_eq!(child.parent_session_id(), Some("parent-control"));
+    assert_eq!(child.policy_snapshot().recorded_provider_id(), "embed-test");
+    child.turn(TurnInput::text("child turn")).run().await?;
+    assert!(
+        store_factory
+            .open_existing_store_by_id(&SessionId::from("child-control"))
+            .await
+            .expect("read session catalog")
+            .is_some(),
+        "the related session was admitted under its own store binding"
+    );
     Ok(())
 }
 
+/// FIG-3373: process-observer intents are persisted facts settled at open.
+/// A host that creates the related session's store carrying
+/// `pending_observer_intents` gets the same observer publication the deleted
+/// `children().create_session` facade performed — `SessionBuilder::open`
+/// reconciles them through `SessionObserverIntentSource::PersistedIfPresent`
+/// before returning the handle.
 #[tokio::test]
-async fn managed_create_publishes_host_observers_before_returning() -> Result<()> {
+async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> {
     let sqlite_dir = tempfile::tempdir().expect("create managed-create SQLite directory");
     let cases: Vec<(&str, Option<Arc<dyn lash_core::SessionStoreFactory>>)> = vec![
         (
@@ -1054,6 +1058,7 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
     ];
 
     for (case, store_factory) in cases {
+        let store_factory = store_factory.expect("every case selects a store");
         let parent_session_id = SessionId::from(format!("managed-observer-parent-{case}"));
         let child_session_id = SessionId::from(format!("managed-observer-child-{case}"));
         let create_process_id = ProcessId::from(format!("managed-create-process-{case}"));
@@ -1067,12 +1072,12 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
                 .model(mock_model_spec())
                 .process_work(wiring);
         builder = builder
-            .store_factory(store_factory.clone().expect("every case selects a store"))
+            .store_factory(Arc::clone(&store_factory))
             .with_native_queued_work();
         let core = builder.build(crate::testing::runtime_lease_owner())?;
-        let session = core.session(&parent_session_id).open().await?;
+        let _parent = core.session(&parent_session_id).open().await?;
 
-        let registered_process = registry
+        registry
             .register_process(lash_core::ProcessRegistration::new(
                 &create_process_id,
                 lash_core::ProcessInput::External {
@@ -1087,35 +1092,37 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
             ))
             .await?;
 
-        let mut request = SessionCreateRequest::root(
-            lash_core::SessionStartPoint::Empty,
-            lash_core::PluginOptions::default(),
-        )
-        .with_session_id(&child_session_id)
-        .with_observed_processes([&create_process_id]);
-        request.relation = lash_core::SessionRelation::Fork {
-            source_session_id: SessionId::from(format!("managed-observer-source-{case}")),
-            source_node_id: format!("managed-observer-source-node-{case}").into(),
-            observer_inheritance: lash_core::ObserverInheritance::All,
-        };
-
-        let child = session.admin().children().create_session(request).await?;
-
-        assert_eq!(child.session_id, child_session_id);
-        assert_eq!(
-            child.observed_processes,
-            vec![lash_core::test_support::SessionObservedProcessReceipt {
-                process_id: create_process_id.clone(),
-                outcome: lash_core::test_support::SessionObservedProcessOutcome::Observed {
-                    incarnation: registered_process.incarnation,
+        let child_store = store_factory
+            .create_store(&lash_core::SessionStoreCreateRequest {
+                pending_observer_intents: vec![
+                    lash_core::facade_support::SessionObserverIntent::host_requested(
+                        create_process_id.clone(),
+                    ),
+                ],
+                session_id: child_session_id.clone(),
+                relation: lash_core::SessionRelation::Child {
+                    parent_session_id: parent_session_id.clone(),
+                    caused_by: None,
                 },
-                attribution:
-                    lash_core::test_support::SessionObserverIntentAttribution::HostRequested,
-            }]
-        );
+                policy: lash_core::SessionPolicy {
+                    provider_id: mock_provider().kind().to_string(),
+                    model: mock_model_spec(),
+                    ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                },
+            })
+            .await?;
+
+        let child = core
+            .session(&child_session_id)
+            .store(child_store)
+            .parent(&parent_session_id)
+            .open()
+            .await?;
+
+        assert_eq!(child.session_id(), child_session_id);
         assert!(
             registry
-                .is_observer(&child.session_id, &create_process_id)
+                .is_observer(&child_session_id, &create_process_id)
                 .await?,
             "the returned live session must have its create observer edge"
         );
@@ -1128,27 +1135,25 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
                         "operation_id": format!("session-create:{child_session_id}")
                     })
         }));
-        if let Some(store_factory) = store_factory {
-            let child_store = store_factory
-                .open_existing_store(&lash_core::SessionStoreCreateRequest {
-                    pending_observer_intents: Vec::new(),
-                    session_id: child_session_id,
-                    relation: lash_core::SessionRelation::Root,
-                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-                })
-                .await
-                .expect("open managed child store")
-                .expect("managed child store exists");
-            let child_meta = child_store
-                .load_session_meta()
-                .await?
-                .expect("managed child metadata exists");
-            assert!(matches!(
-                child_meta.relation,
-                lash_core::SessionRelation::Fork { .. }
-            ));
-            assert!(child_meta.pending_observer_intents.is_empty());
-        }
+        let child_store = store_factory
+            .open_existing_store(&lash_core::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: child_session_id.clone(),
+                relation: lash_core::SessionRelation::Root,
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("open managed child store")
+            .expect("managed child store exists");
+        let child_meta = child_store
+            .load_session_meta()
+            .await?
+            .expect("managed child metadata exists");
+        assert!(matches!(
+            child_meta.relation,
+            lash_core::SessionRelation::Child { .. }
+        ));
+        assert!(child_meta.pending_observer_intents.is_empty());
     }
     Ok(())
 }

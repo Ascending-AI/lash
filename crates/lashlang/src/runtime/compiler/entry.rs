@@ -1,7 +1,7 @@
 use super::*;
 
 /// What an awaited-comprehension loop appends per accepted element.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum ListComprehensionElement<'a> {
     /// The ordinary comprehension: evaluate the element and append its value.
     Value(&'a Expr),
@@ -11,6 +11,9 @@ pub(super) enum ListComprehensionElement<'a> {
     DeferredCall {
         receiver: &'a Expr,
         args: &'a [Expr],
+        /// The [`AstPath`] of the receiver-call node `receiver`/`args` belong
+        /// to, so deferred compilation still resolves their source spans.
+        call_path: AstPath,
     },
 }
 
@@ -160,6 +163,7 @@ impl Compiler {
             let pending = self.pending_functions[next]
                 .take()
                 .expect("pending function is compiled once");
+            let body_path = pending.body_path;
             let definition = pending.definition;
             debug_assert_eq!(next, self.functions.len());
 
@@ -191,7 +195,7 @@ impl Compiler {
                 .map(|name| self.push_slot(name))
                 .collect::<Vec<_>>();
             let entry_ip = self.code.len();
-            self.compile_expr(&definition.body);
+            self.compile_expr(&definition.body, &body_path);
             self.code.push(Instruction::Return);
             let end_ip = self.code.len();
             let slot_names = self.slots.borrow().names.clone().into_boxed_slice();
@@ -212,22 +216,6 @@ impl Compiler {
             self.loop_contexts = root_loops;
             self.handler_scopes = root_handler_scopes;
             next += 1;
-        }
-    }
-
-    pub(super) fn copy_expression_metadata(&mut self, original: &Expr, cloned: &Expr) {
-        let original_key = original as *const Expr as usize;
-        let cloned_key = cloned as *const Expr as usize;
-        if let Some(span) = self.expression_source_spans.get(&original_key).copied() {
-            self.expression_source_spans.insert(cloned_key, span);
-        }
-        if let Some(tracking) = &mut self.lashlang_execution
-            && let Some(path) = tracking.paths.get(&original_key).cloned()
-        {
-            tracking.paths.insert(cloned_key, path);
-        }
-        for (original_child, cloned_child) in original.children().zip(cloned.children()) {
-            self.copy_expression_metadata(original_child, cloned_child);
         }
     }
 
@@ -406,7 +394,7 @@ impl Compiler {
     /// either direction, because a call site names a chunk function index
     /// rather than a value that had to exist first.
     fn register_declared_functions(&mut self, program: &Program) {
-        for declaration in &program.declarations {
+        for (declaration_index, declaration) in program.declarations.iter().enumerate() {
             let Declaration::Function(function) = declaration else {
                 continue;
             };
@@ -424,9 +412,13 @@ impl Compiler {
                 captures: Vec::new(),
                 body: Box::new(function.body.clone()),
             };
-            self.copy_expression_metadata(&function.body, &definition.body);
+            // The clone shares its original's [`AstPath`]: node identity is
+            // structural, so the deferred body's facts resolve without any
+            // copying.
+            let body_path = AstPath::declaration(declaration_index as u32, Vec::new());
             self.pending_functions.push(Some(PendingFunction {
                 definition,
+                body_path,
                 parameter_model: ClosureParameterModel::Exact,
             }));
             self.declared_functions
@@ -436,95 +428,108 @@ impl Compiler {
 
     fn compile_program_block(&mut self, program: &Program) {
         self.register_declared_functions(program);
+        let main_path = AstPath::main(Vec::new());
         let last_statement = match &program.main {
             Expr::Block(expressions) => {
-                self.compile_block_value_with_spans(expressions);
-                expressions.last()
+                self.compile_block_value_with_spans(expressions, &main_path);
+                expressions
+                    .len()
+                    .checked_sub(1)
+                    .map(|index| main_path.child(index as u32))
             }
             expression => {
-                self.compile_expr(expression);
-                Some(expression)
+                self.compile_expr(expression, &main_path);
+                Some(main_path.clone())
             }
         };
         if !is_terminal_expr(&program.main) {
             let pop = self.code.len();
             self.code.push(Instruction::Pop);
-            if let Some(span) =
-                last_statement.and_then(|expression| self.expression_source_span(expression))
-            {
+            if let Some(span) = last_statement.and_then(|path| self.expression_source_span(&path)) {
                 self.mark_instruction_spans(pop, self.code.len(), span);
             }
         }
     }
 
-    pub(super) fn compile_block_value(&mut self, expressions: &[Expr]) {
-        let Some((last, prefix)) = expressions.split_last() else {
+    pub(super) fn compile_block_value(&mut self, expressions: &[Expr], path: &AstPath) {
+        let Some((last_index, last)) = expressions.iter().enumerate().next_back() else {
             self.code.push(Instruction::PushNull);
             return;
         };
-        for expression in prefix {
-            self.compile_expr_discarding_value(expression);
+        for (index, expression) in expressions.iter().enumerate().take(last_index) {
+            self.compile_expr_discarding_value(expression, &path.child(index as u32));
         }
-        self.compile_expr(last);
+        self.compile_expr(last, &path.child(last_index as u32));
     }
 
-    fn compile_block_value_with_spans(&mut self, expressions: &[Expr]) {
-        let Some((last, prefix)) = expressions.split_last() else {
+    fn compile_block_value_with_spans(&mut self, expressions: &[Expr], path: &AstPath) {
+        let Some((last_index, last)) = expressions.iter().enumerate().next_back() else {
             self.code.push(Instruction::PushNull);
             return;
         };
-        for expression in prefix {
-            let span = self.expression_source_span(expression);
-            self.compile_expr_discarding_value_with_span(expression, span);
+        for (index, expression) in expressions.iter().enumerate().take(last_index) {
+            let expression_path = path.child(index as u32);
+            let span = self.expression_source_span(&expression_path);
+            self.compile_expr_discarding_value_with_span(expression, &expression_path, span);
         }
-        let span = self.expression_source_span(last);
-        self.compile_expr_with_span(last, span);
+        let last_path = path.child(last_index as u32);
+        let span = self.expression_source_span(&last_path);
+        self.compile_expr_with_span(last, &last_path, span);
     }
 
-    fn compile_expr_with_span(&mut self, expression: &Expr, span: Option<Span>) {
+    fn compile_expr_with_span(&mut self, expression: &Expr, path: &AstPath, span: Option<Span>) {
         let start = self.code.len();
-        self.compile_expr(expression);
+        self.compile_expr(expression, path);
         if let Some(span) = span {
             self.mark_instruction_spans(start, self.code.len(), span);
         }
     }
 
-    fn compile_expr_discarding_value_with_span(&mut self, expression: &Expr, span: Option<Span>) {
+    fn compile_expr_discarding_value_with_span(
+        &mut self,
+        expression: &Expr,
+        path: &AstPath,
+        span: Option<Span>,
+    ) {
         let start = self.code.len();
-        self.compile_expr_discarding_value(expression);
+        self.compile_expr_discarding_value(expression, path);
         if let Some(span) = span {
             self.mark_instruction_spans(start, self.code.len(), span);
         }
     }
 
-    fn compile_expr_discarding_value(&mut self, expression: &Expr) {
+    fn compile_expr_discarding_value(&mut self, expression: &Expr, path: &AstPath) {
         match expression {
             Expr::LabelAnnotated { label, expr } => {
-                if self.try_compile_label_as_effect_step(expr, label, false) {
+                if self.try_compile_label_as_effect_step(expr, label, false, &path.child(0)) {
                     return;
                 }
                 if !label_attaches_to_concrete_node(expr) {
-                    self.emit_lashlang_execution_step(expression, label);
+                    self.emit_lashlang_execution_step(&path.child(0), label);
                 }
-                self.compile_expr_discarding_value(expr);
+                self.compile_expr_discarding_value(expr, &path.child(0));
             }
             Expr::Block(expressions) => {
-                for expression in expressions {
-                    self.compile_expr_discarding_value(expression);
+                for (index, expression) in expressions.iter().enumerate() {
+                    self.compile_expr_discarding_value(expression, &path.child(index as u32));
                 }
             }
-            Expr::Assign { target, expr } => self.compile_assignment_expr(target, expr, false),
+            Expr::Assign { target, expr } => {
+                self.compile_assignment_expr(target, expr, false, path)
+            }
             Expr::For {
                 binding,
                 iterable,
                 body,
-            } => self.compile_for_expr(binding, iterable, body, false),
-            Expr::While { condition, body } => self.compile_while_expr(condition, body, false),
+            } => self.compile_for_expr(binding, iterable, body, false, path),
+            Expr::While { condition, body } => {
+                self.compile_while_expr(condition, body, false, path)
+            }
             Expr::Finish(_) | Expr::Fail(_) | Expr::Return(_) | Expr::Break | Expr::Continue => {
-                self.compile_expr(expression);
+                self.compile_expr(expression, path);
             }
             expression => {
-                self.compile_expr(expression);
+                self.compile_expr(expression, path);
                 self.code.push(Instruction::Pop);
             }
         }
@@ -541,8 +546,8 @@ impl Compiler {
         }
     }
 
-    pub(super) fn mark_instruction_source_span(&mut self, instruction: usize, expr: &Expr) {
-        let Some(span) = self.expression_source_span(expr) else {
+    pub(super) fn mark_instruction_source_span(&mut self, instruction: usize, path: &AstPath) {
+        let Some(span) = self.expression_source_span(path) else {
             return;
         };
         if self.spans.len() <= instruction {
@@ -551,8 +556,8 @@ impl Compiler {
         self.spans[instruction] = Some(span);
     }
 
-    pub(super) fn expression_source_span(&self, expr: &Expr) -> Option<Span> {
-        self.expression_source_spans.get(&expr_key(expr)).copied()
+    pub(super) fn expression_source_span(&self, path: &AstPath) -> Option<Span> {
+        self.expression_source_spans.get(path).copied()
     }
 
     pub(super) fn mark_lashlang_execution_site(
@@ -572,17 +577,18 @@ impl Compiler {
     pub(super) fn lashlang_execution_site_for_expr(
         &self,
         expression: &Expr,
+        path: &AstPath,
     ) -> Option<LashlangExecutionSite> {
-        self.lashlang_execution_site_for_descriptor(expression, expression)
+        self.lashlang_execution_site_for_descriptor(path, expression)
     }
 
     pub(super) fn lashlang_execution_site_for_descriptor(
         &self,
-        expression: &Expr,
+        path: &AstPath,
         descriptor_expression: &Expr,
     ) -> Option<LashlangExecutionSite> {
         let tracking = self.lashlang_execution.as_ref()?;
-        let path = tracking.paths.get(&expr_key(expression))?;
+        let path = tracking.paths.get(path)?;
         let (kind, label) = execution_site_descriptor(descriptor_expression)?;
         Some(if kind == BRANCH_EXECUTION_SITE_KIND {
             tracking.context.builder().branch_site(path)
@@ -593,11 +599,11 @@ impl Compiler {
 
     pub(super) fn labeled_step_execution_site(
         &self,
-        expression: &Expr,
+        path: &AstPath,
         label: &str,
     ) -> Option<LashlangExecutionSite> {
         let tracking = self.lashlang_execution.as_ref()?;
-        let path = tracking.paths.get(&expr_key(expression))?;
+        let path = tracking.paths.get(path)?;
         Some(
             tracking
                 .context
@@ -606,27 +612,23 @@ impl Compiler {
         )
     }
 
-    pub(super) fn emit_lashlang_execution_step(
-        &mut self,
-        expression: &Expr,
-        label: &LabelMetadata,
-    ) {
+    pub(super) fn emit_lashlang_execution_step(&mut self, path: &AstPath, label: &LabelMetadata) {
         let instruction = self.code.len();
         self.code.push(Instruction::ObserveStep);
-        if let Some(site) = self.labeled_step_execution_site(expression, label.title.as_str()) {
+        if let Some(site) = self.labeled_step_execution_site(path, label.title.as_str()) {
             self.mark_lashlang_execution_site(instruction, site);
         }
     }
 
-    fn compile_block_discarding_values(&mut self, block: &Expr) {
+    fn compile_block_discarding_values(&mut self, block: &Expr, path: &AstPath) {
         match block {
             Expr::Block(expressions) => {
-                for expression in expressions {
-                    self.compile_expr_discarding_value(expression);
+                for (index, expression) in expressions.iter().enumerate() {
+                    self.compile_expr_discarding_value(expression, &path.child(index as u32));
                 }
             }
             expression => {
-                self.compile_expr_discarding_value(expression);
+                self.compile_expr_discarding_value(expression, path);
             }
         }
     }
@@ -637,12 +639,25 @@ impl Compiler {
         }
     }
 
+    /// `expr` is the `Assign`'s value child: it sits after the target's
+    /// dynamic index steps in `children()` order, so its path is
+    /// `path.child(value_index)`.
+    pub(super) fn assign_value_index(target: &AssignTarget) -> usize {
+        target
+            .steps
+            .iter()
+            .filter(|step| matches!(step, AssignPathStep::Index(_)))
+            .count()
+    }
+
     pub(super) fn compile_assignment_expr(
         &mut self,
         target: &AssignTarget,
         expr: &Expr,
         leave_value: bool,
+        path: &AstPath,
     ) {
+        let value_path = || path.child(Self::assign_value_index(target) as u32);
         if target.is_simple() {
             let name = &target.root;
             let slot = self.push_slot(name);
@@ -660,7 +675,7 @@ impl Compiler {
                     // The optimized single-item concat is an insertion like any
                     // other: the entering item is isolated before it joins the
                     // accumulator.
-                    self.compile_expr(&items[0]);
+                    self.compile_expr(&items[0], &value_path().child(1).child(0));
                     self.code.push(Instruction::AppendAssign(slot));
                     self.set_const_slot(slot, None);
                     self.push_null_if(leave_value);
@@ -682,7 +697,7 @@ impl Compiler {
                 // A general concat copies the right operand's members into the
                 // accumulator. The copy happens per member at the insertion
                 // itself, so the operand does not need isolating as a whole.
-                self.compile_expr(right);
+                self.compile_expr(right, &value_path().child(1));
                 self.code.push(Instruction::AddAssign(slot));
                 self.set_const_slot(slot, None);
                 self.push_null_if(leave_value);
@@ -696,14 +711,14 @@ impl Compiler {
                 && let [Expr::Variable(first_arg), item] = args.as_slice()
                 && first_arg == name
             {
-                self.compile_expr(item);
+                self.compile_expr(item, &value_path().child(1));
                 self.code
                     .push(Instruction::Intrinsic(IntrinsicOp::PushAssign(slot)));
                 self.set_const_slot(slot, None);
                 self.push_null_if(leave_value);
                 return;
             }
-            self.compile_expr(expr);
+            self.compile_expr(expr, &value_path());
             self.code.push(Instruction::StoreName(slot));
             self.set_const_slot(slot, None);
             self.push_null_if(leave_value);
@@ -731,7 +746,7 @@ impl Compiler {
                 self.code
                     .push(Instruction::AddAssignIndexSlotNumber { slot, index, right });
             } else {
-                self.compile_expr(index);
+                self.compile_expr(index, &path.child(0));
                 self.code
                     .push(Instruction::AddAssignIndexNumber { slot, right });
             }
@@ -739,12 +754,14 @@ impl Compiler {
             self.push_null_if(leave_value);
             return;
         }
+        let mut index_child = 0usize;
         for step in &target.steps {
             if let AssignPathStep::Index(index) = step {
-                self.compile_expr(index);
+                self.compile_expr(index, &path.child(index_child as u32));
+                index_child += 1;
             }
         }
-        self.compile_expr(expr);
+        self.compile_expr(expr, &value_path());
         let path = self.push_assign_path(&target.steps);
         self.code.push(Instruction::HeapPathAssign { slot, path });
         self.set_const_slot(slot, None);
@@ -757,13 +774,14 @@ impl Compiler {
         iterable: &Expr,
         body: &Expr,
         leave_value: bool,
+        path: &AstPath,
     ) {
         let binding = self.push_slot(binding);
         if let Expr::BuiltinCall { name, args } = iterable
             && name.as_str() == "range"
         {
-            for arg in args {
-                self.compile_expr(arg);
+            for (index, arg) in args.iter().enumerate() {
+                self.compile_expr(arg, &path.child(0).child(index as u32));
             }
             self.clear_const_slots();
             self.set_const_slot(binding, None);
@@ -771,16 +789,16 @@ impl Compiler {
                 binding,
                 argc: args.len(),
             });
-            self.compile_for_loop_body(body);
+            self.compile_for_loop_body(body, &path.child(1));
             self.push_null_if(leave_value);
             return;
         }
 
-        self.compile_expr(iterable);
+        self.compile_expr(iterable, &path.child(0));
         self.clear_const_slots();
         self.set_const_slot(binding, None);
         self.code.push(Instruction::BeginIter(binding));
-        self.compile_for_loop_body(body);
+        self.compile_for_loop_body(body, &path.child(1));
         self.push_null_if(leave_value);
     }
 
@@ -788,7 +806,7 @@ impl Compiler {
         clippy::expect_used,
         reason = "the loop context pushed a few lines above is popped exactly once at the end of the body"
     )]
-    fn compile_for_loop_body(&mut self, body: &Expr) {
+    fn compile_for_loop_body(&mut self, body: &Expr, body_path: &AstPath) {
         let loop_start = self.code.len();
         let iter_next = self.code.len();
         self.code.push(Instruction::IterNext {
@@ -799,7 +817,7 @@ impl Compiler {
             break_jumps: SmallVec::new(),
             handler_scope_depth: self.handler_scopes.len(),
         });
-        self.compile_block_discarding_values(body);
+        self.compile_block_discarding_values(body, body_path);
         let loop_context = self
             .loop_contexts
             .pop()
@@ -814,23 +832,35 @@ impl Compiler {
         self.clear_const_slots();
     }
 
+    /// `path` is the comprehension node's path. In `children()` order the
+    /// clause expressions come first (`For` contributes its iterable, `If`
+    /// its condition) and the element is last.
     pub(super) fn compile_list_comprehension(
         &mut self,
         element: ListComprehensionElement<'_>,
         clauses: &[ListComprehensionClause],
+        path: &AstPath,
     ) {
+        let element_path = path.child(clauses.len() as u32);
         self.compile_list_comprehension_with(
-            &mut |compiler| match element {
-                ListComprehensionElement::Value(element) => compiler.compile_expr(element),
-                ListComprehensionElement::DeferredCall { receiver, args } => {
-                    compiler.compile_expr(receiver);
-                    for arg in args {
-                        compiler.compile_expr(arg);
+            &mut |compiler| match &element {
+                ListComprehensionElement::Value(element) => {
+                    compiler.compile_expr(element, &element_path)
+                }
+                ListComprehensionElement::DeferredCall {
+                    receiver,
+                    args,
+                    call_path,
+                } => {
+                    compiler.compile_expr(receiver, &call_path.child(0));
+                    for (index, arg) in args.iter().enumerate() {
+                        compiler.compile_expr(arg, &call_path.child(index as u32 + 1));
                     }
                     compiler.code.push(Instruction::BuildTuple(args.len() + 1));
                 }
             },
             clauses,
+            path,
         );
     }
 
@@ -838,9 +868,10 @@ impl Compiler {
         &mut self,
         element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
+        path: &AstPath,
     ) {
         self.code.push(Instruction::BuildList(0));
-        self.compile_list_comprehension_clause(element, clauses, 0);
+        self.compile_list_comprehension_clause(element, clauses, 0, path);
         self.clear_const_slots();
     }
 
@@ -849,6 +880,7 @@ impl Compiler {
         element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         index: usize,
+        path: &AstPath,
     ) {
         let Some(clause) = clauses.get(index) else {
             element(self);
@@ -856,20 +888,34 @@ impl Compiler {
             return;
         };
 
+        let clause_path = path.child(index as u32);
         match clause {
             ListComprehensionClause::For { binding, iterable } => {
-                self.compile_list_comprehension_for(binding, iterable, element, clauses, index + 1);
+                self.compile_list_comprehension_for(
+                    binding,
+                    iterable,
+                    element,
+                    clauses,
+                    index + 1,
+                    path,
+                    &clause_path,
+                );
             }
             ListComprehensionClause::If { condition } => {
-                let jump_to_next_iteration = self.compile_condition_jump_if_false(condition);
+                let jump_to_next_iteration =
+                    self.compile_condition_jump_if_false(condition, &clause_path);
                 self.clear_const_slots();
-                self.compile_list_comprehension_clause(element, clauses, index + 1);
+                self.compile_list_comprehension_clause(element, clauses, index + 1, path);
                 self.patch_jump(jump_to_next_iteration, self.code.len());
                 self.clear_const_slots();
             }
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "comprehension compilation carries its loop state through the recursion"
+    )]
     fn compile_list_comprehension_for(
         &mut self,
         binding: &str,
@@ -877,13 +923,15 @@ impl Compiler {
         element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         next_clause: usize,
+        path: &AstPath,
+        iterable_path: &AstPath,
     ) {
         let binding = self.push_slot(binding);
         if let Expr::BuiltinCall { name, args } = iterable
             && name.as_str() == "range"
         {
-            for arg in args {
-                self.compile_expr(arg);
+            for (index, arg) in args.iter().enumerate() {
+                self.compile_expr(arg, &iterable_path.child(index as u32));
             }
             self.clear_const_slots();
             self.set_const_slot(binding, None);
@@ -891,15 +939,15 @@ impl Compiler {
                 binding,
                 argc: args.len(),
             });
-            self.compile_list_comprehension_for_body(element, clauses, next_clause);
+            self.compile_list_comprehension_for_body(element, clauses, next_clause, path);
             return;
         }
 
-        self.compile_expr(iterable);
+        self.compile_expr(iterable, iterable_path);
         self.clear_const_slots();
         self.set_const_slot(binding, None);
         self.code.push(Instruction::BeginIter(binding));
-        self.compile_list_comprehension_for_body(element, clauses, next_clause);
+        self.compile_list_comprehension_for_body(element, clauses, next_clause, path);
     }
 
     fn compile_list_comprehension_for_body(
@@ -907,13 +955,14 @@ impl Compiler {
         element: &mut dyn FnMut(&mut Self),
         clauses: &[ListComprehensionClause],
         next_clause: usize,
+        path: &AstPath,
     ) {
         let loop_start = self.code.len();
         let iter_next = self.code.len();
         self.code.push(Instruction::IterNext {
             jump_to: usize::MAX,
         });
-        self.compile_list_comprehension_clause(element, clauses, next_clause);
+        self.compile_list_comprehension_clause(element, clauses, next_clause, path);
         self.code.push(Instruction::Jump(loop_start));
         let loop_end = self.code.len();
         self.code.push(Instruction::EndIter);
@@ -925,17 +974,23 @@ impl Compiler {
         clippy::expect_used,
         reason = "the loop context pushed a few lines above is popped exactly once at the end of the body"
     )]
-    pub(super) fn compile_while_expr(&mut self, condition: &Expr, body: &Expr, leave_value: bool) {
+    pub(super) fn compile_while_expr(
+        &mut self,
+        condition: &Expr,
+        body: &Expr,
+        leave_value: bool,
+        path: &AstPath,
+    ) {
         self.clear_const_slots();
         let loop_start = self.code.len();
-        let jump_to_end = self.compile_condition_jump_if_false(condition);
+        let jump_to_end = self.compile_condition_jump_if_false(condition, &path.child(0));
         self.clear_const_slots();
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,
             break_jumps: SmallVec::new(),
             handler_scope_depth: self.handler_scopes.len(),
         });
-        self.compile_block_discarding_values(body);
+        self.compile_block_discarding_values(body, &path.child(1));
         let loop_context = self
             .loop_contexts
             .pop()

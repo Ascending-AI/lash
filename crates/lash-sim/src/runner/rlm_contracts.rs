@@ -937,6 +937,6 @@ fn rlm_contract_system_messages(machine: &lash_core::TurnMachine) -> Vec<String>
         .messages()
         .iter()
         .filter(|message| message.role == lash_core::MessageRole::System)
-        .flat_map(|message| message.parts.iter().map(|part| part.content.clone()))
+        .flat_map(|message| message.parts.iter().map(|part| part.content().to_string()))
         .collect()
 }

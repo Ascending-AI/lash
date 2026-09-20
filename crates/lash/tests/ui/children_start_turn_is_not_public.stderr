@@ -1,5 +1,0 @@
-error[E0599]: no method named `start_turn` found for struct `ChildSessionAdmin` in the current scope
- --> tests/ui/children_start_turn_is_not_public.rs:2:40
-  |
-2 |     let _ = session.admin().children().start_turn(request).await;
-  |                                        ^^^^^^^^^^ method not found in `ChildSessionAdmin`

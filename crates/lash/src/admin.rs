@@ -1,9 +1,9 @@
 use crate::support::{
     Arc, CancellationToken, EmbedError, InputItem, LashCore, LashRuntime, PluginMessage,
     PromptContribution, PromptSlot, PromptTemplate, Result, RuntimeHandle, RuntimeSessionState,
-    ScopedEffectController, SessionCreateRequest, SessionError, SessionHandle,
-    SessionProcessEventKind, SessionStateService, SessionToolAccess, ToolManifest, ToolProvider,
-    ToolRestoreReport, ToolSourceHandle, ToolState, TurnInput,
+    ScopedEffectController, SessionError, SessionProcessEventKind, SessionStateService,
+    SessionToolAccess, ToolManifest, ToolProvider, ToolRestoreReport, ToolSourceHandle, ToolState,
+    TurnInput,
 };
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
 use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
@@ -167,13 +167,6 @@ impl SessionAdmin {
     /// Returns the current administration state.
     pub fn state(&self) -> SessionStateAdmin {
         SessionStateAdmin {
-            control: self.clone(),
-        }
-    }
-
-    /// Returns the child-session administration facade.
-    pub fn children(&self) -> ChildSessionAdmin {
-        ChildSessionAdmin {
             control: self.clone(),
         }
     }
@@ -873,23 +866,6 @@ impl SessionAdmin {
             .map_err(|err| EmbedError::Session(SessionError::Protocol(err.to_string())))?;
         self.refresh_tool_catalog().await?;
         Ok(self.tool_state().await?.generation())
-    }
-
-    async fn create_child_session(&self, request: SessionCreateRequest) -> Result<SessionHandle> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        let lifecycle = runtime.session_lifecycle_service()?;
-        lifecycle.create_session(request).await.map_err(Into::into)
-    }
-
-    async fn close_child_session(&self, session_id: &SessionId) -> Result<()> {
-        let writer = self.runtime.writer();
-        let runtime = writer.lock().await;
-        let lifecycle = runtime.session_lifecycle_service()?;
-        lifecycle
-            .close_session(session_id)
-            .await
-            .map_err(Into::into)
     }
 
     async fn inject_turn_input(
@@ -1595,24 +1571,6 @@ fn decode_plugin_output<Op: lash_core::facade_support::PluginOperation>(
             Op::NAME
         )))
     })
-}
-
-#[derive(Clone)]
-/// Facade handle for child session administration.
-pub struct ChildSessionAdmin {
-    control: SessionAdmin,
-}
-
-impl ChildSessionAdmin {
-    /// Creates a child session from the supplied request.
-    pub async fn create_session(&self, request: SessionCreateRequest) -> Result<SessionHandle> {
-        self.control.create_child_session(request).await
-    }
-
-    /// Closes the identified child session.
-    pub async fn close_session(&self, session_id: &SessionId) -> Result<()> {
-        self.control.close_child_session(session_id).await
-    }
 }
 
 #[derive(Clone)]

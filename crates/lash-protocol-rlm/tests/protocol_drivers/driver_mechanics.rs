@@ -215,7 +215,7 @@ fn provider_stop_evidence_does_not_reconstruct_an_unclosed_cell() {
         message
             .parts
             .iter()
-            .any(|part| part.content.contains("inside multiline source text"))
+            .any(|part| part.content().contains("inside multiline source text"))
     }));
 }
 
@@ -446,10 +446,10 @@ fn output_limit_unclosed_cell_retries_with_shorten_block_diagnostic() {
                 // the remedy. The retired surface's wording ("output limit
                 // truncated", "do less per block") went with it (ADR 0096);
                 // the three facts asserted are the same ones.
-                part.content.contains("truncated")
-                    && part.content.contains("</typescript>")
-                    && part.content.contains("4096")
-                    && part.content.contains("shorter block")
+                part.content().contains("truncated")
+                    && part.content().contains("</typescript>")
+                    && part.content().contains("4096")
+                    && part.content().contains("shorter block")
             }))
     );
     assert!(assistant_visible_texts(&machine).is_empty());
@@ -499,7 +499,7 @@ fn multiple_cells_execute_only_the_first_without_emitting_raw_markup() {
             && message
                 .parts
                 .iter()
-                .any(|part| part.content.contains("<typescript>"))
+                .any(|part| part.content().contains("<typescript>"))
     }));
 }
 
@@ -542,10 +542,10 @@ fn output_limit_prose_retries_with_the_request_cap() {
             .messages()
             .iter()
             .any(|message| message.parts.iter().any(|part| part
-                .content
+                .content()
                 .contains("answer was cut off")
-                && part.content.contains("2048")
-                && part.content.contains("shorter answer")))
+                && part.content().contains("2048")
+                && part.content().contains("shorter answer")))
     );
 }
 
@@ -598,14 +598,14 @@ fn output_limit_retry_emits_the_guarded_projection_with_no_empty_parts() {
                 && message
                     .parts
                     .iter()
-                    .any(|part| part.content.contains("the truncated answer"))
+                    .any(|part| part.content().contains("the truncated answer"))
         })
         .expect("the retry retains the assistant's visible reply");
     assert!(
         assistant
             .parts
             .iter()
-            .all(|part| !part.content.contains("internal commentary")),
+            .all(|part| !part.content().contains("internal commentary")),
         "the retained message carries the normalized projection, not the raw one"
     );
     assert!(
@@ -1358,7 +1358,7 @@ impl StalledTurn {
             message
                 .parts
                 .iter()
-                .find(|part| part.content.contains("no-progress budget is exhausted"))
+                .find(|part| part.content().contains("no-progress budget is exhausted"))
         })
     }
 }
@@ -1889,11 +1889,11 @@ fn a_malformed_fence_is_answered_by_naming_the_rule() {
         );
         let told = machine.messages().iter().any(|message| {
             message.parts.iter().any(|part| {
-                part.content.contains("grammar could not read")
-                    && part.content.contains("stand alone on its own line")
-                    && part.content.contains("stand alone on a later line")
-                    && part.content.contains(open)
-                    && part.content.contains(close)
+                part.content().contains("grammar could not read")
+                    && part.content().contains("stand alone on its own line")
+                    && part.content().contains("stand alone on a later line")
+                    && part.content().contains(open)
+                    && part.content().contains(close)
             })
         });
         assert!(

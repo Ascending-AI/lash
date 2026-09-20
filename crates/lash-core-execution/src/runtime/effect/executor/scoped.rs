@@ -30,18 +30,3 @@ impl<'run> ScopedEffectController<'run> {
         }
     }
 }
-
-impl<'run> RuntimeEffectControllerHandle<'run> {
-    pub(crate) fn scoped_for(
-        &self,
-        scope: ExecutionScope,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        match self {
-            Self::Borrowed(scoped) => scoped.rescope(scope),
-            #[cfg(any(test, feature = "testing"))]
-            Self::Shared { controller, .. } => {
-                ScopedEffectController::shared(Arc::clone(controller), scope)
-            }
-        }
-    }
-}

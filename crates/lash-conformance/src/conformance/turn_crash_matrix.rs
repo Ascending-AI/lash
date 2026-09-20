@@ -2317,7 +2317,7 @@ async fn run_crash_matrix_case<F, I>(
             .messages
             .iter()
             .flat_map(|message| message.parts.iter())
-            .filter(|part| part.content == content)
+            .filter(|part| part.content() == content)
             .count()
     };
     // FIG-3157: queued work claimed at the terminal checkpoint no longer

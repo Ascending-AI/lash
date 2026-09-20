@@ -29,6 +29,7 @@ impl ExecutionHost for ToolCallRecordingHost {
                     .push((alias, call.operation));
                 Ok(AbilityResult::Value(Value::String("tool-ok".into())))
             }
+            AbilityOp::Print(_) => Ok(AbilityResult::Value(Value::Null)),
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
             other => Err(ExecutionHostError::new(format!(
                 "unexpected ability {other:?}"
@@ -139,6 +140,52 @@ fn module_paths_no_cell_can_write_are_refused_rather_than_advertised() {
             "{call_path}: {error:?}"
         );
     }
+}
+
+/// A registered module root outranks the lowerer's `console`/`crypto` special
+/// cases: catalogs built without the RLM contributor used to lose a `console`
+/// or `crypto` binding silently — `console.log` lowered to the observation
+/// `Print` and `crypto.randomUUID` refused outright (FIG-1483).
+#[test]
+fn console_and_crypto_module_roots_dispatch_their_bindings() {
+    assert_eq!(
+        dispatch("console.log", &["console"], "log"),
+        vec![("console".to_string(), "log".to_string())]
+    );
+    assert_eq!(
+        dispatch("crypto.randomUUID", &["crypto"], "randomUUID"),
+        vec![("crypto".to_string(), "randomUUID".to_string())]
+    );
+}
+
+/// Without a `console` module the observation shim still owns the name.
+#[test]
+fn console_log_without_a_module_root_still_observes() {
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation_contract(
+            vec!["web".to_string()],
+            "ToolModule",
+            "fetch",
+            "tool:test/web".to_string(),
+            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+        )
+        .expect("operation binding");
+    let environment =
+        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+    let linked = lash_typescript::link("console.log(1); finish(0);", &environment)
+        .expect("unregistered console.log still lowers to the observation");
+    let host = ToolCallRecordingHost {
+        dispatched: std::sync::Mutex::new(Vec::new()),
+    };
+    let outcome = futures::executor::block_on(lashlang::execute(
+        &lash_typescript::compile_linked(&linked),
+        &mut State::new(),
+        &host,
+    ))
+    .expect("console.log observes");
+    assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(0.0)));
+    assert!(host.dispatched.lock().expect("dispatched lock").is_empty());
 }
 
 /// A single-segment name has no receiver, so registration refuses it.

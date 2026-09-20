@@ -276,7 +276,7 @@ fn committed_transcript_contains(session: &lash::LashSession, needle: &str) -> b
         message
             .parts
             .iter()
-            .any(|part| part.content.contains(needle))
+            .any(|part| part.content().contains(needle))
     })
 }
 
@@ -582,7 +582,7 @@ pub(super) async fn prove_final_value_semantic_channel()
         .messages()
         .iter()
         .flat_map(|message| message.parts.iter())
-        .map(|part| part.content.as_str())
+        .map(|part| part.content())
         .collect::<Vec<_>>()
         .join("\n");
     let transcript_contains_final_value =

@@ -168,6 +168,34 @@ fn snapshot_agent_frame_can_target_queued_work_from_the_facade() {
     assert_eq!(frame_id.as_str(), "frame-node/v2/host-path");
 }
 
+/// A host binds a tool through the facade with no `rlm` feature and no
+/// dialect named; the manifest carries the binding under lash's internal
+/// projection key with exactly the authored payload.
+#[test]
+fn facade_tool_binding_is_dialect_agnostic() {
+    use lash::tools::{
+        TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinition, ToolDefinitionBindingExt,
+    };
+
+    let binding = ToolBinding::new(["tools"], "lookup")
+        .with_authority_type("LookupTool")
+        .with_aliases(["lookup_alias"]);
+    let definition = ToolDefinition::raw(
+        "tool:lookup",
+        "lookup",
+        "Look up app state.",
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    )
+    .with_tool_binding(binding.clone());
+
+    let manifest = definition.manifest();
+    assert_eq!(
+        manifest.bindings.get(TYPESCRIPT_TOOL_BINDING_KEY),
+        Some(&serde_json::to_value(&binding).expect("binding serializes")),
+    );
+}
+
 #[test]
 fn remaining_host_ui_types_are_constructible_from_the_facade() {
     let node = SessionNodeRecord {

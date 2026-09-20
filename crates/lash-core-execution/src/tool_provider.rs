@@ -819,12 +819,14 @@ impl<'run> ToolContext<'run> {
 
     /// Exposes sessions to protocol and process-engine implementors while preparing or executing an
     /// authorized tool call.
-    pub fn sessions(&self) -> ToolSessionAdmin<'run> {
+    ///
+    /// The returned admin reads session state; a tool that needs a related
+    /// session to run a turn starts a `ProcessInput::SessionTurn` process
+    /// instead, as `lash-subagents` does.
+    pub fn sessions(&self) -> ToolSessionAdmin {
         ToolSessionAdmin {
             session_id: self.session_id.clone(),
             sessions: Arc::clone(&self.sessions),
-            session_lifecycle: Arc::clone(&self.session_lifecycle),
-            effect_controller: self.effect_controller.clone(),
         }
     }
 

@@ -4,11 +4,11 @@ use crate::support::{
     Arc, BTreeMap, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory,
     ProcessExecutionEnvStore, ProcessRegistry, PromptContribution, PromptLayerSink, PromptSlot,
     PromptTemplate, ProviderHandle, Result, RunActivityCollector, RuntimeHostConfig,
-    RuntimeSessionState, ScopedEffectController, SelectedQueuedWorkDrainRefusalCause,
-    SessionCreateRequest, SessionError, SessionObservationSubscription, SessionProcessEventKind,
-    SessionResume, SessionSpec, SessionStoreFactory, StaticPluginFactory, StdMutex,
-    TestLocalProcessRegistry, ToolProvider, TurnActivity, TurnActivityId, TurnActivitySink,
-    TurnEvent, TurnInput, TurnOutcome, TurnReport, async_trait, message_text,
+    RuntimeSessionState, ScopedEffectController, SelectedQueuedWorkDrainRefusalCause, SessionError,
+    SessionObservationSubscription, SessionProcessEventKind, SessionResume, SessionSpec,
+    SessionStoreFactory, StaticPluginFactory, StdMutex, TestLocalProcessRegistry, ToolProvider,
+    TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport,
+    async_trait, message_text,
 };
 use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
@@ -25,9 +25,9 @@ use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, ResponseTextMeta,
 };
-use lash_core::{LlmOutputPart, SessionExecutionLeaseObservation, StoreError};
-#[cfg(feature = "rlm")]
-use lash_lashlang_runtime::ToolDefinitionBindingExt;
+use lash_core::{
+    LlmOutputPart, SessionExecutionLeaseObservation, StoreError, ToolDefinitionBindingExt,
+};
 use tokio::sync::{Mutex as TokioMutex, oneshot};
 
 static TEST_SESSION_LEASE_TOKEN: AtomicUsize = AtomicUsize::new(1);
@@ -1704,20 +1704,11 @@ fn long_text_tool_definition() -> lash_core::ToolDefinition {
     )
 }
 
-#[cfg(feature = "rlm")]
 fn test_tool_definition_with_tool_binding(
     definition: lash_core::ToolDefinition,
     name: impl Into<String>,
 ) -> lash_core::ToolDefinition {
-    definition.with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], name))
-}
-
-#[cfg(not(feature = "rlm"))]
-fn test_tool_definition_with_tool_binding(
-    definition: lash_core::ToolDefinition,
-    _name: impl Into<String>,
-) -> lash_core::ToolDefinition {
-    definition
+    definition.with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
 
 struct SurfacePluginFactory;
@@ -2207,6 +2198,7 @@ mod rolling_history_persistence;
 #[cfg(feature = "rlm")]
 mod stack_budget;
 mod tool_intent_ingress;
+mod tool_restore_report;
 mod turn_streaming;
 mod usage_durability;
 

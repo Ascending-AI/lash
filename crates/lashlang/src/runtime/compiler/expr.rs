@@ -1,12 +1,21 @@
 use super::*;
 
 impl Compiler {
-    fn emit_function(&mut self, function: &FunctionExpr, parameter_model: ClosureParameterModel) {
+    fn emit_function(
+        &mut self,
+        function: &FunctionExpr,
+        parameter_model: ClosureParameterModel,
+        path: &AstPath,
+    ) {
         let function_index = self.pending_functions.len();
         let cloned = function.clone();
-        self.copy_expression_metadata(&function.body, &cloned.body);
+        // The body is cloned for deferred compilation; its nodes keep the
+        // originals' [`AstPath`]s, so spans and sites resolve against the
+        // shared tables with nothing copied over.
+        let body_path = path.child(0);
         self.pending_functions.push(Some(PendingFunction {
             definition: cloned,
+            body_path,
             parameter_model,
         }));
         for capture in &function.captures {
@@ -39,7 +48,7 @@ impl Compiler {
         clippy::expect_used,
         reason = "the linker records every declared function before lowering calls to it, per the message"
     )]
-    fn compile_declared_call(&mut self, function: &str, args: &[Expr]) {
+    fn compile_declared_call(&mut self, function: &str, args: &[Expr], path: &AstPath) {
         let index = self
             .declared_functions
             .get(function)
@@ -49,8 +58,8 @@ impl Compiler {
             function: index,
             captures: 0,
         });
-        for arg in args {
-            self.compile_expr(arg);
+        for (index, arg) in args.iter().enumerate() {
+            self.compile_expr(arg, &path.child(index as u32));
         }
         self.code.push(Instruction::Call { argc: args.len() });
     }
@@ -59,24 +68,24 @@ impl Compiler {
         clippy::expect_used,
         reason = "the tool call instruction was emitted by this function two lines above"
     )]
-    fn emit_builtin_call(&mut self, name: &str, args: &[Expr]) {
+    fn emit_builtin_call(&mut self, name: &str, args: &[Expr], path: &AstPath) {
         // Source spells a declared call and a builtin call the same way, and
         // the linker normally resolves which one it is. The unlinked compile
         // entry has no linker, so the same resolution happens here: without it
         // a program compiled that way would defer a name it can see to a
         // runtime "unknown builtin".
         if self.declared_functions.contains_key(name) {
-            self.compile_declared_call(name, args);
+            self.compile_declared_call(name, args, path);
             return;
         }
         if let ("__typescript_call_dynamic", [function, arguments]) = (name, args) {
-            self.compile_expr(function);
-            self.compile_expr(arguments);
+            self.compile_expr(function, &path.child(0));
+            self.compile_expr(arguments, &path.child(1));
             self.code.push(Instruction::CallDynamic);
             return;
         }
         if let ("__typescript_pending_tool", [call @ Expr::ReceiverCall { .. }]) = (name, args) {
-            self.compile_awaitable_effect_expr(call, None);
+            self.compile_awaitable_effect_expr(call, None, &path.child(0));
             let instruction = self.code.last_mut().expect("tool call instruction");
             let Instruction::ResourceCall { operation, argc } = *instruction else {
                 unreachable!()
@@ -85,18 +94,18 @@ impl Compiler {
             return;
         }
         if let ("__typescript_await_array", [items, Expr::Bool(settle)]) = (name, args) {
-            self.compile_expr(items);
+            self.compile_expr(items, &path.child(0));
             self.code.push(Instruction::AwaitArray { settle: *settle });
             return;
         }
         if let ("__typescript_await_pending", [value]) = (name, args) {
-            self.compile_expr(value);
+            self.compile_expr(value, &path.child(0));
             self.code.push(Instruction::AwaitPending);
             return;
         }
         if let ("__typescript_async_map", [items, function]) = (name, args) {
-            self.compile_expr(items);
-            self.compile_expr(function);
+            self.compile_expr(items, &path.child(0));
+            self.compile_expr(function, &path.child(1));
             self.code.push(Instruction::AsyncMap);
             return;
         }
@@ -125,6 +134,7 @@ impl Compiler {
                     required_count: *required_count as usize,
                     accepts_rest: *accepts_rest,
                 },
+                &path.child(0),
             );
             return;
         }
@@ -156,8 +166,8 @@ impl Compiler {
                 ));
                 return;
             }
-            for arg in value_args {
-                self.compile_expr(arg);
+            for (index, arg) in value_args.iter().enumerate() {
+                self.compile_expr(arg, &path.child(index as u32 + 1));
             }
             let template = self.push_format_template(template, value_args.len());
             self.code
@@ -169,19 +179,19 @@ impl Compiler {
 
         match (name, args.len()) {
             ("len", 1) => {
-                self.compile_expr(&args[0]);
+                self.compile_expr(&args[0], &path.child(0));
                 self.code.push(Instruction::Intrinsic(IntrinsicOp::Len));
             }
             ("join", 2) => {
-                self.compile_expr(&args[0]);
-                self.compile_expr(&args[1]);
+                self.compile_expr(&args[0], &path.child(0));
+                self.compile_expr(&args[1], &path.child(1));
                 self.code.push(Instruction::Intrinsic(IntrinsicOp::Join));
             }
             ("validate", 2) => {
                 if let Some(schema_wrapper) = self.fold_compile_time_expr(&args[1])
                     && let Some(schema) = unwrap_type_value(&schema_wrapper).cloned()
                 {
-                    self.compile_expr(&args[0]);
+                    self.compile_expr(&args[0], &path.child(0));
                     let schema = self.push_compiled_schema(&schema);
                     self.code
                         .push(Instruction::Intrinsic(IntrinsicOp::ValidateCompiled(
@@ -190,26 +200,26 @@ impl Compiler {
                     return;
                 }
 
-                self.compile_expr(&args[0]);
-                self.compile_expr(&args[1]);
+                self.compile_expr(&args[0], &path.child(0));
+                self.compile_expr(&args[1], &path.child(1));
                 self.code
                     .push(Instruction::Intrinsic(IntrinsicOp::Validate));
             }
             ("push", 2) => {
-                self.compile_expr(&args[0]);
-                self.compile_expr(&args[1]);
+                self.compile_expr(&args[0], &path.child(0));
+                self.compile_expr(&args[1], &path.child(1));
                 self.code.push(Instruction::Intrinsic(IntrinsicOp::Push));
             }
             ("range", 1..=3) => {
-                for arg in args {
-                    self.compile_expr(arg);
+                for (index, arg) in args.iter().enumerate() {
+                    self.compile_expr(arg, &path.child(index as u32));
                 }
                 self.code
                     .push(Instruction::Intrinsic(IntrinsicOp::Range(args.len())));
             }
             _ => {
-                for arg in args {
-                    self.compile_expr(arg);
+                for (index, arg) in args.iter().enumerate() {
+                    self.compile_expr(arg, &path.child(index as u32));
                 }
                 let builtin = self.resolve_intrinsic(name, args.len());
                 self.code.push(Instruction::Intrinsic(builtin));
@@ -221,25 +231,28 @@ impl Compiler {
         clippy::expect_used,
         reason = "validate_ast rejects break or continue outside loops, per the messages, so a loop context exists here"
     )]
-    pub(super) fn compile_expr(&mut self, expr: &Expr) {
+    /// `path` is `expr`'s [`AstPath`]: the structural address the linker's
+    /// side tables and the program's span map are keyed by, so it follows the
+    /// node rather than its address.
+    pub(super) fn compile_expr(&mut self, expr: &Expr, path: &AstPath) {
         match expr {
             Expr::LabelAnnotated { label, expr } => {
-                if self.try_compile_label_as_effect_step(expr, label, true) {
+                if self.try_compile_label_as_effect_step(expr, label, true, &path.child(0)) {
                     return;
                 }
                 if !label_attaches_to_concrete_node(expr) {
-                    self.emit_lashlang_execution_step(expr, label);
+                    self.emit_lashlang_execution_step(&path.child(0), label);
                 }
-                self.compile_expr(expr);
+                self.compile_expr(expr, &path.child(0));
             }
-            Expr::Block(expressions) => self.compile_block_value(expressions),
-            Expr::Assign { target, expr } => self.compile_assignment_expr(target, expr, true),
+            Expr::Block(expressions) => self.compile_block_value(expressions, path),
+            Expr::Assign { target, expr } => self.compile_assignment_expr(target, expr, true, path),
             Expr::For {
                 binding,
                 iterable,
                 body,
-            } => self.compile_for_expr(binding, iterable, body, true),
-            Expr::While { condition, body } => self.compile_while_expr(condition, body, true),
+            } => self.compile_for_expr(binding, iterable, body, true, path),
+            Expr::While { condition, body } => self.compile_while_expr(condition, body, true, path),
             Expr::Break => {
                 let scope_depth = self
                     .loop_contexts
@@ -294,14 +307,14 @@ impl Compiler {
                 }
             }
             Expr::Tuple(items) => {
-                for item in items {
-                    self.compile_expr(item);
+                for (index, item) in items.iter().enumerate() {
+                    self.compile_expr(item, &path.child(index as u32));
                 }
                 self.code.push(Instruction::BuildTuple(items.len()));
             }
             Expr::List(items) => {
-                for item in items {
-                    self.compile_expr(item);
+                for (index, item) in items.iter().enumerate() {
+                    self.compile_expr(item, &path.child(index as u32));
                 }
                 self.code.push(Instruction::BuildHeapList(items.len()));
             }
@@ -309,18 +322,19 @@ impl Compiler {
                 self.compile_list_comprehension(
                     super::entry::ListComprehensionElement::Value(element),
                     clauses,
+                    path,
                 );
             }
             Expr::Record(entries) => {
-                for (_, value) in entries {
-                    self.compile_expr(value);
+                for (index, (_, value)) in entries.iter().enumerate() {
+                    self.compile_expr(value, &path.child(index as u32));
                 }
                 let keys = self.push_key_list(entries.iter().map(|(key, _)| key.as_str()));
                 self.code.push(Instruction::BuildHeapRecord(keys));
             }
             Expr::ProcessRef { process } => self.compile_process_ref_expr(process),
             Expr::HostDescriptorConstructor { type_name, input } => {
-                self.compile_expr(input);
+                self.compile_expr(input, &path.child(0));
                 let type_name = self.push_name(type_name);
                 self.code.push(Instruction::WrapHostDescriptor(type_name));
             }
@@ -331,21 +345,21 @@ impl Compiler {
                 )));
             }
             Expr::ReceiverCall { .. } | Expr::Await(_) => {
-                self.compile_awaitable_effect_expr(expr, None);
+                self.compile_awaitable_effect_expr(expr, None, path);
             }
             Expr::SleepFor(duration) => {
-                self.compile_expr(duration);
+                self.compile_expr(duration, &path.child(0));
                 let instruction = self.code.len();
                 self.code.push(Instruction::SleepFor);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
             Expr::SleepUntil(deadline) => {
-                self.compile_expr(deadline);
+                self.compile_expr(deadline, &path.child(0));
                 let instruction = self.code.len();
                 self.code.push(Instruction::SleepUntil);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
@@ -353,12 +367,12 @@ impl Compiler {
                 let name = self.push_name(name);
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessWaitSignal { name });
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
             Expr::ResultUnwrap(inner) => {
-                if self.compile_awaitable_effect_expr(expr, None) {
+                if self.compile_awaitable_effect_expr(expr, None, path) {
                     return;
                 }
                 if let Expr::Field { target, field } = inner.as_ref()
@@ -368,12 +382,12 @@ impl Compiler {
                     let field = self.push_name(field);
                     self.code.push(Instruction::LoadFieldUnwrap { slot, field });
                 } else {
-                    self.compile_expr(inner);
+                    self.compile_expr(inner, &path.child(0));
                     self.code.push(Instruction::ResultUnwrap);
                 }
             }
             Expr::BuiltinCall { name, args } => {
-                self.emit_builtin_call(name, args);
+                self.emit_builtin_call(name, args, path);
             }
             Expr::Function(function) => {
                 self.emit_function(
@@ -382,6 +396,7 @@ impl Compiler {
                         required_count: function.params.len(),
                         accepts_rest: false,
                     },
+                    path,
                 );
             }
             // A literal lowers away in the linker, so compilation never sees
@@ -390,29 +405,31 @@ impl Compiler {
                 "process literal survived the link; the expected-type hook must lift it"
             ),
             Expr::Call { function, args } => {
-                self.compile_expr(function);
-                for arg in args {
-                    self.compile_expr(arg);
+                self.compile_expr(function, &path.child(0));
+                for (index, arg) in args.iter().enumerate() {
+                    self.compile_expr(arg, &path.child(index as u32 + 1));
                 }
                 let instruction = self.code.len();
                 self.code.push(Instruction::Call { argc: args.len() });
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
-            Expr::FunctionCall { function, args } => self.compile_declared_call(function, args),
+            Expr::FunctionCall { function, args } => {
+                self.compile_declared_call(function, args, path)
+            }
             Expr::Map { items, function } => {
-                self.compile_expr(items);
-                self.compile_expr(function);
+                self.compile_expr(items, &path.child(0));
+                self.compile_expr(function, &path.child(1));
                 self.code.push(Instruction::Map);
             }
-            Expr::Try(scope) => self.compile_try_expr(scope),
+            Expr::Try(scope) => self.compile_try_expr(scope, path),
             Expr::Throw(value) => {
-                self.compile_expr(value);
+                self.compile_expr(value, &path.child(0));
                 self.code.push(Instruction::Throw);
             }
             Expr::Return(value) => {
-                self.compile_expr(value);
+                self.compile_expr(value, &path.child(0));
                 self.emit_return_scope_exit();
                 self.code.push(Instruction::Return);
                 self.record_handler_chain_breakpoint();
@@ -425,17 +442,17 @@ impl Compiler {
                     self.code.push(Instruction::LoadField { slot, field });
                     return;
                 }
-                self.compile_expr(target);
+                self.compile_expr(target, &path.child(0));
                 let field = self.push_name(field);
                 self.code.push(Instruction::Field(field));
             }
             Expr::Index { target, index } => {
-                self.compile_expr(target);
-                self.compile_expr(index);
+                self.compile_expr(target, &path.child(0));
+                self.compile_expr(index, &path.child(1));
                 self.code.push(Instruction::Index);
             }
             Expr::Unary { op, expr } => {
-                self.compile_expr(expr);
+                self.compile_expr(expr, &path.child(0));
                 self.code.push(Instruction::Unary(*op));
             }
             Expr::If {
@@ -443,53 +460,53 @@ impl Compiler {
                 then_block,
                 else_block,
             } => {
-                let jump_to_else = self.compile_condition_jump_if_false(condition);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
+                let jump_to_else = self.compile_condition_jump_if_false(condition, &path.child(0));
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(jump_to_else, site);
                 }
                 let const_slots_before_branches = self.const_slots.clone();
-                self.compile_expr(then_block);
+                self.compile_expr(then_block, &path.child(1));
                 let jump_to_end = self.emit_jump();
                 self.patch_jump(jump_to_else, self.code.len());
                 self.const_slots = const_slots_before_branches;
-                self.compile_expr(else_block);
+                self.compile_expr(else_block, &path.child(2));
                 self.patch_jump(jump_to_end, self.code.len());
                 self.clear_const_slots();
             }
             Expr::Print(expr) => {
-                self.compile_expr(expr);
+                self.compile_expr(expr, &path.child(0));
                 self.code.push(Instruction::Print);
             }
             Expr::Yield(value) => {
-                self.compile_expr(value);
+                self.compile_expr(value, &path.child(0));
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessYield);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
             Expr::Finish(value) => {
-                self.compile_expr(value);
+                self.compile_expr(value, &path.child(0));
                 let instruction = self.code.len();
                 self.code.push(Instruction::Finish);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
             Expr::Fail(value) => {
-                self.compile_expr(value);
+                self.compile_expr(value, &path.child(0));
                 let instruction = self.code.len();
                 self.code.push(Instruction::ProcessFail);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr) {
+                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
             Expr::TypeLiteral(ty) => self.compile_type_literal(ty),
             Expr::Binary { left, op, right } => match op {
                 BinaryOp::And => {
-                    self.compile_expr(left);
+                    self.compile_expr(left, &path.child(0));
                     let jump_to_false = self.emit_jump_if_false();
-                    self.compile_expr(right);
+                    self.compile_expr(right, &path.child(1));
                     self.code.push(Instruction::ToBool);
                     let jump_to_end = self.emit_jump();
                     self.patch_jump(jump_to_false, self.code.len());
@@ -497,9 +514,9 @@ impl Compiler {
                     self.patch_jump(jump_to_end, self.code.len());
                 }
                 BinaryOp::Or => {
-                    self.compile_expr(left);
+                    self.compile_expr(left, &path.child(0));
                     let jump_to_true = self.emit_jump_if_true();
-                    self.compile_expr(right);
+                    self.compile_expr(right, &path.child(1));
                     self.code.push(Instruction::ToBool);
                     let jump_to_end = self.emit_jump();
                     self.patch_jump(jump_to_true, self.code.len());
@@ -556,22 +573,22 @@ impl Compiler {
                         });
                         return;
                     }
-                    self.compile_expr(left);
-                    self.compile_expr(right);
+                    self.compile_expr(left, &path.child(0));
+                    self.compile_expr(right, &path.child(1));
                     self.code.push(Instruction::Binary(*op));
                 }
             },
             Expr::JavaScriptUnary { op, expr } => {
-                self.compile_expr(expr);
+                self.compile_expr(expr, &path.child(0));
                 self.code.push(Instruction::JavaScriptUnary(*op));
             }
             Expr::JavaScriptBinary { left, op, right } => {
-                self.compile_expr(left);
-                self.compile_expr(right);
+                self.compile_expr(left, &path.child(0));
+                self.compile_expr(right, &path.child(1));
                 self.code.push(Instruction::JavaScriptBinary(*op));
             }
             Expr::JavaScriptLogical { left, op, right } => {
-                self.compile_expr(left);
+                self.compile_expr(left, &path.child(0));
                 self.code.push(Instruction::Duplicate);
                 match op {
                     JavaScriptLogicalOp::And | JavaScriptLogicalOp::Or => {
@@ -588,7 +605,7 @@ impl Compiler {
                     JavaScriptLogicalOp::Or => self.emit_jump_if_true(),
                 };
                 self.code.push(Instruction::Pop);
-                self.compile_expr(right);
+                self.compile_expr(right, &path.child(1));
                 self.patch_jump(jump, self.code.len());
                 self.clear_const_slots();
             }
@@ -647,9 +664,11 @@ impl Compiler {
         clippy::expect_used,
         reason = "each handler scope pushed in this same compile is popped exactly once, and the cleanup ip was just emitted where the message says"
     )]
-    fn compile_try_expr(&mut self, scope: &crate::ast::TryExpr) {
+    /// Children in `children()` order: body is 0, catch body is 1, finally is
+    /// 2.
+    fn compile_try_expr(&mut self, scope: &crate::ast::TryExpr, path: &AstPath) {
         if scope.catch.is_none() && scope.finally.is_none() {
-            self.compile_expr(&scope.body);
+            self.compile_expr(&scope.body, &path.child(0));
             return;
         }
 
@@ -668,7 +687,7 @@ impl Compiler {
             finally_sites,
         });
         self.record_handler_chain_breakpoint();
-        self.compile_expr(&scope.body);
+        self.compile_expr(&scope.body, &path.child(0));
         // The scope is still installed while `PopHandler` is the next
         // instruction to run, so the breakpoint that drops it is recorded
         // after that instruction is emitted, not before.
@@ -707,7 +726,7 @@ impl Compiler {
                 });
                 self.record_handler_chain_breakpoint();
             }
-            self.compile_expr(&catch.body);
+            self.compile_expr(&catch.body, &path.child(1));
             if scope.finally.is_some() {
                 self.code.push(Instruction::PopHandler);
                 self.handler_scopes
@@ -725,7 +744,7 @@ impl Compiler {
         let finally_ip = self.code.len();
         if let Some(finally) = &scope.finally {
             self.handler_scopes.push(HandlerScope::FinallyBody);
-            self.compile_expr(finally);
+            self.compile_expr(finally, &path.child(2));
             self.handler_scopes
                 .pop()
                 .expect("the finally body's scope is popped once");
