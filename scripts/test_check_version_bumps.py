@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -100,6 +101,97 @@ pub enum ToolRetryStatus {
     Never,
     Exhausted { attempts: u32 },
 }
+"""
+
+ABILITY_CONFIG = """
+[[surface]]
+constant = "LASHLANG_VM_ABI_VERSION"
+constant_path = "src/artifact.rs"
+version_regex = '\\bLASHLANG_VM_ABI_VERSION\\b\\s*:\\s*&str\\s*=\\s*"lashlang-vm-abi-v([0-9]+)"'
+description = "fixture VM-to-host ability contract"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["src/host.rs"]
+symbols = [
+  "AbilityOp",
+  "AbilityResult",
+  "ResourceOperationBatch",
+  "ResourceOperationBatchResult",
+]
+"""
+
+ABILITY_SHAPES = """
+#[derive(Clone, Debug)]
+pub enum AbilityOp {
+    ResourceOperation(Box<ResourceOperation>),
+    ResourceOperationBatch(ResourceOperationBatch),
+    Await(Value),
+}
+
+#[derive(Clone, Debug)]
+pub enum AbilityResult {
+    Value(Value),
+    ResourceOperationBatch(ResourceOperationBatchResult),
+    Unit,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResourceOperationBatch {
+    pub operations: Vec<ResourceOperation>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResourceOperationBatchResult {
+    pub results: Vec<ResourceOperationResult>,
+    pub settlement_order: Vec<usize>,
+}
+"""
+
+# One `pub(crate) const XS: &[T] = &[T { .. }, ..];` table, which is the shape
+# the builtin registry has and the shape an item walk that stops at the first
+# balanced brace truncates after its first entry.
+REGISTRY_CONFIG = """
+[[surface]]
+constant = "LASHLANG_SEMANTIC_HASH_VERSION"
+constant_path = "src/identity.rs"
+version_regex = '\\bLASHLANG_SEMANTIC_HASH_VERSION\\b\\s*:\\s*&str\\s*=\\s*"lashlang-semantic-v([0-9]+)"'
+description = "fixture builtin vocabulary behind a generic builtin-call encoding"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["src/builtins.rs"]
+symbols = ["SOURCE_BUILTINS", "TYPESCRIPT_BUILTINS"]
+"""
+
+REGISTRY_SOURCE = """
+pub(crate) const SOURCE_BUILTINS: &[Builtin] = &[
+    Builtin {
+        name: "len",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
+        name: "join",
+        arity: Arity::Exact(2),
+    },
+];
+
+pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
+    Builtin {
+        name: "__typescript_split",
+        arity: Arity::Exact(2),
+    },
+    Builtin {
+        name: "__typescript_stdlib",
+        arity: Arity::AtLeast(1),
+    },
+];
+"""
+
+# A fixed-size array type puts a semicolon inside brackets, at the top level of
+# the item's own declaration.
+ARRAY_LENGTH_ITEM = """
+pub(crate) const LANES: [Lane; 2] = [Lane::First, Lane::Second];
 """
 
 UNRELATED_SURFACE_ENTRY = """
@@ -424,6 +516,175 @@ class VersionBumpFixtureTest(unittest.TestCase):
                 )
                 self.assertEqual(result.failures[0].base_version, 10)
                 self.assertEqual(result.failures[0].head_version, 10)
+
+    def test_the_vm_abi_surface_covers_every_ability_leaf_host_rs_declares(
+        self,
+    ) -> None:
+        """No type an ability op reaches may be guarded by nothing.
+
+        The abilities are an in-process contract, so the reachable leaves are
+        found by walking the guarded item text rather than by trusting a list
+        someone kept up to date. `ExecutionHostError` is deliberately absent
+        from the ABI guard -- it is durable and already fenced by the
+        continuation surface -- so the contract is that the union covers the
+        closure, not that one guard does.
+        """
+        surfaces = MODULE.load_config(REAL_CONFIG)
+        host_path = "crates/lashlang/src/runtime/host.rs"
+        abi = next(
+            surface
+            for surface in surfaces
+            if surface.constant == "LASHLANG_VM_ABI_VERSION"
+        )
+        abi_guard = next(guard for guard in abi.guards if guard.paths == (host_path,))
+        continuation = next(
+            surface
+            for surface in surfaces
+            if surface.constant == "VM_CONTINUATION_FORMAT_VERSION"
+        )
+        continuation_guard = next(
+            guard for guard in continuation.guards if guard.paths == (host_path,)
+        )
+        self.assertEqual(abi_guard.kind, "rust_items")
+
+        source = (Path(MODULE.ROOT) / host_path).read_text(encoding="utf-8")
+        declared = {
+            match.group(1) for match in MODULE.RUST_SERDE_SHAPE.finditer(source)
+        }
+        items = MODULE.named_rust_items(source, declared)
+        reachable = {"AbilityOp", "AbilityResult"}
+        pending = list(reachable)
+        while pending:
+            body = items[pending.pop()]
+            for name in declared - reachable:
+                if re.search(rf"\b{re.escape(name)}\b", body):
+                    reachable.add(name)
+                    pending.append(name)
+
+        self.assertIn("ExecutionHostError", reachable)
+        self.assertIn("ExecutionHostError", continuation_guard.symbols)
+        self.assertLessEqual(
+            reachable, set(abi_guard.symbols) | set(continuation_guard.symbols)
+        )
+        self.assertLessEqual(set(abi_guard.symbols), declared)
+
+    def test_each_ability_change_demands_a_vm_abi_bump(self) -> None:
+        mutations = {
+            "new ability": ("    Await(Value),", "    Await(Value),\n    Print(Value),"),
+            "boxed receiver": (
+                "ResourceOperation(Box<ResourceOperation>)",
+                "ResourceOperation(ResourceOperation)",
+            ),
+            "retired result arm": ("    Unit,\n", ""),
+            "batch result field": (
+                "    pub settlement_order: Vec<usize>,\n",
+                "",
+            ),
+        }
+        for name, (before, after) in mutations.items():
+            with self.subTest(name=name):
+                fixture = FixtureRepository(ABILITY_CONFIG)
+                self.addCleanup(fixture.close)
+                fixture.write_file(
+                    "src/artifact.rs",
+                    'pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v8";\n',
+                )
+                fixture.write_file("src/host.rs", ABILITY_SHAPES)
+                base = fixture.commit("base")
+                fixture.write_file("src/host.rs", ABILITY_SHAPES.replace(before, after))
+                head = fixture.commit(f"change {name} without bump")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(len(result.failures), 1)
+                self.assertEqual(
+                    result.failures[0].surface.constant, "LASHLANG_VM_ABI_VERSION"
+                )
+                self.assertEqual(result.failures[0].base_version, 8)
+                self.assertEqual(result.failures[0].head_version, 8)
+
+    def test_the_semantic_hash_surface_covers_the_whole_builtin_registry(self) -> None:
+        """Every registered intrinsic is inside the guarded text, not just the first.
+
+        A table is exactly the shape an item walk can truncate after one entry,
+        and a guard that covers a table's head while appearing to cover the
+        table is worse than no guard: appending to it changes nothing the check
+        can see.
+        """
+        semantic = next(
+            surface
+            for surface in MODULE.load_config(REAL_CONFIG)
+            if surface.constant == "LASHLANG_SEMANTIC_HASH_VERSION"
+        )
+        registry_path = "crates/lashlang/src/builtins.rs"
+        guard = next(
+            guard for guard in semantic.guards if guard.paths == (registry_path,)
+        )
+        self.assertEqual(guard.kind, "rust_items")
+        self.assertIn("TYPESCRIPT_BUILTINS", guard.symbols)
+
+        source = (Path(MODULE.ROOT) / registry_path).read_text(encoding="utf-8")
+        guarded = MODULE.named_rust_items(source, guard.symbols)
+        intrinsics = re.findall(r'name: "(__typescript_\w+)"', source)
+
+        self.assertGreater(len(intrinsics), 1)
+        for name in intrinsics:
+            self.assertIn(f'"{name}"', guarded["TYPESCRIPT_BUILTINS"])
+
+    def test_a_registry_entry_change_demands_a_semantic_hash_bump(self) -> None:
+        mutations = {
+            "appended dialect intrinsic": (
+                '    Builtin {\n        name: "__typescript_stdlib",\n'
+                "        arity: Arity::AtLeast(1),\n    },\n",
+                '    Builtin {\n        name: "__typescript_stdlib",\n'
+                "        arity: Arity::AtLeast(1),\n    },\n"
+                '    Builtin {\n        name: "__typescript_btoa",\n'
+                "        arity: Arity::Exact(1),\n    },\n",
+            ),
+            "retired source builtin": (
+                '    Builtin {\n        name: "join",\n'
+                "        arity: Arity::Exact(2),\n    },\n",
+                "",
+            ),
+            "widened arity": ("Arity::Exact(2),\n    },\n];", "Arity::AtLeast(2),\n    },\n];"),
+        }
+        for name, (before, after) in mutations.items():
+            with self.subTest(name=name):
+                fixture = FixtureRepository(REGISTRY_CONFIG)
+                self.addCleanup(fixture.close)
+                fixture.write_file(
+                    "src/identity.rs",
+                    "pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "
+                    '"lashlang-semantic-v15";\n',
+                )
+                fixture.write_file("src/builtins.rs", REGISTRY_SOURCE)
+                base = fixture.commit("base")
+                mutated = REGISTRY_SOURCE.replace(before, after)
+                self.assertNotEqual(mutated, REGISTRY_SOURCE)
+                fixture.write_file("src/builtins.rs", mutated)
+                head = fixture.commit(f"change {name} without bump")
+
+                result = self.check(fixture, base, head)
+
+                self.assertEqual(result.errors, ())
+                self.assertEqual(len(result.failures), 1)
+                self.assertEqual(
+                    result.failures[0].surface.constant,
+                    "LASHLANG_SEMANTIC_HASH_VERSION",
+                )
+                self.assertEqual(result.failures[0].base_version, 15)
+                self.assertEqual(result.failures[0].head_version, 15)
+
+    def test_a_guarded_item_keeps_its_delimiters_apart(self) -> None:
+        """A `;` inside brackets is an array length, not the item's terminator."""
+        source = ARRAY_LENGTH_ITEM
+        extracted = MODULE.named_rust_items(source, ["LANES"])["LANES"]
+
+        self.assertEqual(
+            extracted,
+            "pub(crate)constLANES:[Lane;2]=[Lane::First,Lane::Second];",
+        )
 
     def test_wire_variant_with_bump_passes(self) -> None:
         fixture = self.fixture()

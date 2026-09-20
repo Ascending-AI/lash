@@ -920,6 +920,52 @@ kind = "rust_items"
 paths = ["crates/lashlang/src/runtime/value.rs"]
 symbols = ["ImageValue", "ResourceHandle"]
 
+# The ability boundary is the VM's other contract, and it is not a durable one.
+# An `AbilityOp` is minted by the VM at dispatch, handed to a host bridge, and
+# dropped inside one `perform`; it reaches no bytecode, no continuation and no
+# snapshot. What moves when its vocabulary moves is which host bridge can serve
+# a program this VM compiled -- which is what `LASHLANG_VM_ABI_VERSION` names
+# ("the Lashlang VM ABI this build implements", `lash::formats`, probe
+# `NotPersisted`), and what `CompiledProcessCacheKey` compares before it reuses
+# a compiled process (crates/lashlang/src/runtime/cache.rs).
+#
+# It is therefore the only honest owner of the three candidates. A bump of
+# BYTECODE_FORMAT_VERSION or VM_CONTINUATION_FORMAT_VERSION would publish a
+# false incompatibility: both fail closed on stored bytes an ability change
+# cannot have touched, so a deployment would refuse parked segments it could
+# still have read. Bytecode is not sufficient either -- #1529 deleted the
+# `Cancel`, `StartProcess` and `SignalRun` abilities and bumped only the
+# bytecode, which happened to move for its own reasons; `ResourceOperation`
+# becoming `Box<ResourceOperation>` in the same change moved no constant at all.
+#
+# Stated boundary rather than claimed coverage: `Value` and `ExecutionHostError`
+# ride inside these ops and are guarded under the snapshot and continuation
+# surfaces, where a change to either already fails closed. They are not repeated
+# here, so one change still owes one bump; what this surface adds is the ability
+# vocabulary itself, which no other guard sees. `rust_items` does not follow
+# type references, so the leaves host.rs declares are named one by one.
+[[surface]]
+constant = "LASHLANG_VM_ABI_VERSION"
+constant_path = "crates/lashlang/src/artifact.rs"
+version_regex = '\bLASHLANG_VM_ABI_VERSION\b\s*:\s*&str\s*=\s*"lashlang-vm-abi-v([0-9]+)"'
+description = "in-process VM-to-host ability contract: the ops a compiled program performs and the results a host returns"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/host.rs"]
+symbols = [
+  "AbilityOp",
+  "AbilityResult",
+  "ResourceOperation",
+  "ResourceOperationBatch",
+  "ResourceOperationBatchResult",
+  "ResourceOperationResult",
+  "ProcessEvent",
+  "ProcessEventKind",
+  "Sleep",
+  "SleepKind",
+]
+
 [[surface]]
 constant = "LASHLANG_SEGMENT_STATE_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/process.rs"
@@ -990,11 +1036,36 @@ symbols = [
   "write_expr",
 ]
 
+# The writers above spell a builtin call generically -- `write_expr` emits the
+# atom `builtin-call`, the name, and the arguments -- so the vocabulary those
+# names are resolved against is invisible to them. That vocabulary is this
+# table: the linker admits a call by it, the compiler picks the intrinsic by it,
+# and the runtime renders arity diagnostics from it. Adding, removing, renaming
+# or re-arity-ing an entry therefore changes what a module ref MEANS without
+# changing a byte any other guard on this surface projects, and the semantic
+# hash is the fence that catches it: it is the first atom of every module-ref
+# hash input (crates/lashlang/src/artifact_dialect.rs), so moving it re-mints
+# every published ref and an artifact minted under the old vocabulary stops
+# matching. That is the fail-closed behaviour a vocabulary change needs, and it
+# is why `__typescript_*` intrinsics -- which source can never spell, so no
+# front-end diagnostic covers them -- belong here rather than nowhere.
+#
+# Stated boundary rather than claimed coverage: this projects the table, so a
+# name/arity edit fails closed. Changing what an already-listed builtin DOES,
+# with its name and arity untouched, is a behaviour change no textual guard over
+# a registry can see; that reading stays with the author.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/builtins.rs"]
+symbols = ["SOURCE_BUILTINS", "TYPESCRIPT_BUILTINS", "Builtin", "Arity"]
+
 # Sweep exclusions: APP_VERSION and LASHLANG_COMPILER_VERSION mirror package
 # versions; MCP_PROTOCOL_VERSION, ANTHROPIC_VERSION, and CODE_ASSIST_API_VERSION
 # pin upstream protocols; GENERATOR_VERSION versions a generated test artifact;
-# LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, and
-# SOURCE_CACHE_VERSION identify hashes/caches rather than serialized shapes.
+# SOURCE_CACHE_VERSION identifies a process-local cache rather than a serialized
+# shape. LASHLANG_SEMANTIC_HASH_VERSION and LASHLANG_VM_ABI_VERSION are not
+# exclusions: they are identity strings rather than counters, and both are
+# registered surfaces above under an explicit `version_regex`.
 # TOOL_INTENT_PROTOCOL_V3 is a permanently named v3 discriminator, not a mutable
 # current-version constant: each protocol version keeps its own named constant
 # and the predecessors are refused by number, never rewritten in place.

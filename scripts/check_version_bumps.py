@@ -948,9 +948,21 @@ def _char_literal_end(text: str, index: int) -> int | None:
 
 
 def rust_item_end(text: str, start: int) -> int:
-    """Return the end of one Rust item, ignoring delimiters inside literals."""
+    """Return the end of one Rust item, ignoring delimiters inside literals.
+
+    All three delimiter kinds are tracked, not braces alone, because an item's
+    terminator is only its terminator at the top level of the item. A brace
+    inside a bracket is a struct literal in an initializer -- the registry
+    constant ``const XS: &[Builtin] = &[Builtin { .. }, ..];`` is the shape that
+    matters here -- and a semicolon inside a bracket is an array length. Reading
+    either as the end truncates the item after its first element, which reads as
+    a guard over a table while covering only its head: appending to the table
+    then changes nothing the guard can see.
+    """
     index = start
     brace_depth = 0
+    bracket_depth = 0
+    paren_depth = 0
     saw_brace = False
     block_comment_depth = 0
     state = "normal"
@@ -1017,7 +1029,8 @@ def rust_item_end(text: str, start: int) -> int:
         elif char_end := _char_literal_end(text, index):
             index = char_end
         elif char == "{":
-            saw_brace = True
+            if brace_depth == 0 and bracket_depth == 0 and paren_depth == 0:
+                saw_brace = True
             brace_depth += 1
             index += 1
         elif char == "}":
@@ -1025,7 +1038,19 @@ def rust_item_end(text: str, start: int) -> int:
             index += 1
             if saw_brace and brace_depth == 0:
                 return index
-        elif char == ";" and not saw_brace:
+        elif char == "[":
+            bracket_depth += 1
+            index += 1
+        elif char == "]":
+            bracket_depth -= 1
+            index += 1
+        elif char == "(":
+            paren_depth += 1
+            index += 1
+        elif char == ")":
+            paren_depth -= 1
+            index += 1
+        elif char == ";" and not brace_depth and not bracket_depth and not paren_depth:
             return index + 1
         else:
             index += 1
