@@ -292,7 +292,7 @@ IDENTIFIER_RENAME_BASELINES = {
     #     APPEND_REQUEST_IDENTITY_ENCODING_VERSION stays 4 and
     #     SESSION_NODE_BODY_SCHEMA_VERSION stays 16.
     'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:fbf343e99da3d0f156255adf90c62cf4e9fc594ed436f40f3ac60796e11ec139',
-    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:268e672e8c8ef1a603d3a8c2fd392f66411b6c8a9d769ceb7b9fd5873e9e0d97',
+    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:0e9a3121837a78627f21f536aa9e963f0ab3df9237f76eb2e7e8d3a64f2d352e',
 
     # FIG-2784 pass 1 (#1502): `push_causal_ref` in commit_identity.rs gained a
     # two-line doc comment and `#[expect(clippy::expect_used, ...)]` under the
