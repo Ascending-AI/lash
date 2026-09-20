@@ -220,7 +220,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             &mut self.slots
         };
         let deleted = if let Some(slot) = slot {
-            slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+            slots.ensure_assignable(
+                slot,
+                &self.chunk.slot_names,
+                Some(&self.projected_bindings),
+            )?;
             slots.values[slot].take().is_some()
         } else {
             slots.extras.remove(name.as_str()).is_some()
@@ -288,7 +292,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             &mut self.slots
         };
         if let Some(slot) = slot {
-            slots.ensure_assignable(slot, &self.chunk.slot_names)?;
+            slots.ensure_assignable(
+                slot,
+                &self.chunk.slot_names,
+                Some(&self.projected_bindings),
+            )?;
             slots.values[slot] = Some(value.clone());
         } else {
             slots.extras.insert(name.to_string(), value.clone());

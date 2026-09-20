@@ -560,6 +560,50 @@ fn continuation_carries_a_projected_binding_slot_by_identity() {
     );
 }
 
+/// FIG-1839: a slot's read-only-ness is derived from the host's projected
+/// bindings rather than a flag parked beside the values — so a projected
+/// binding that crosses the boundary by identity and is re-supplied on
+/// resume still refuses assignment.
+#[tokio::test(flavor = "current_thread")]
+async fn resumed_projected_slot_still_refuses_assignment() {
+    // `input = []` / `finish input`
+    let program = compile_program_for_tests(builders::program(vec![
+        builders::assign("input", builders::list(Vec::new())),
+        builders::finish(builders::var("input")),
+    ]));
+    let mut projected = ProjectedBindings::new();
+    projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
+    let slots = SlotState::from_globals(
+        Record::new(),
+        &program.chunk.slot_names,
+        &projected,
+        Vec::new(),
+    );
+    let host = Host;
+    let mut vm = Vm::new(
+        &program.chunk,
+        slots,
+        &host,
+        None,
+        ExecutionMode::Foreground,
+    );
+
+    let continuation = vm.suspend().expect("a projected slot must be capturable");
+    let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
+    let restored = serde_json::from_slice(&bytes).expect("continuation should deserialize");
+    let env = ExecutionEnvironment::new(&host).with_projected_bindings(projected);
+    let mut vm = Vm::resume_from(restored, &program, &env).expect("continuation should resume");
+
+    let error = vm
+        .run_for_mode()
+        .await
+        .expect_err("assigning a restored projected slot must refuse");
+    assert!(
+        error.to_string().contains("read-only projected binding"),
+        "the refusal must name the read-only projected binding: {error}"
+    );
+}
+
 #[derive(Default)]
 struct SegmentRecordingHost {
     effects: Mutex<Vec<Value>>,

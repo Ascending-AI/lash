@@ -73,7 +73,6 @@ use super::{
 #[derive(Clone)]
 pub(crate) struct SlotState {
     values: Vec<Option<Value>>,
-    projected: Vec<bool>,
     extras: Record,
     /// Whether `extras` has been imported into the heap. Written once, when
     /// the VM is built or restored, and read by `heapify_vm_state` — it lives
@@ -96,20 +95,16 @@ impl SlotState {
         if values.capacity() < slot_names.len() {
             values.reserve(slot_names.len() - values.capacity());
         }
-        let mut projected = Vec::with_capacity(slot_names.len());
         for name in slot_names {
             if let Some(value) = projected_bindings.get_symbol(name.symbol) {
                 globals.remove_symbol(name.symbol);
                 values.push(Some(Value::Projected(value)));
-                projected.push(true);
             } else {
                 values.push(globals.remove_symbol(name.symbol));
-                projected.push(false);
             }
         }
         Self {
             values,
-            projected,
             extras: globals,
             extras_heapified: false,
         }
@@ -128,8 +123,9 @@ impl SlotState {
         slot: usize,
         value: Value,
         slot_names: &[Name],
+        projected_bindings: Option<&ProjectedBindings>,
     ) -> Result<(), RuntimeError> {
-        self.ensure_assignable(slot, slot_names)?;
+        self.ensure_assignable(slot, slot_names, projected_bindings)?;
         self.values[slot] = Some(materialize_value(value)?);
         Ok(())
     }
@@ -139,8 +135,19 @@ impl SlotState {
         Ok(())
     }
 
-    fn ensure_assignable(&self, slot: usize, slot_names: &[Name]) -> Result<(), RuntimeError> {
-        if self.projected.get(slot).copied().unwrap_or(false) {
+    /// `projected_bindings` is the host's declaration, passed only when `self`
+    /// is the root slot state — a function frame's locals are never projected
+    /// bindings, and their names may collide with one.
+    fn ensure_assignable(
+        &self,
+        slot: usize,
+        slot_names: &[Name],
+        projected_bindings: Option<&ProjectedBindings>,
+    ) -> Result<(), RuntimeError> {
+        let is_binding = projected_bindings
+            .zip(slot_names.get(slot))
+            .is_some_and(|(bindings, name)| bindings.get_symbol(name.symbol).is_some());
+        if is_binding {
             return Err(RuntimeError::ReadOnlyProjectedBinding {
                 name: slot_names[slot].text.to_string(),
             });
@@ -160,17 +167,21 @@ impl SlotState {
 
     /// `reclaim` receives the drained values buffer for recycling —
     /// `ExecutionScratch::slot_values` when the caller reuses scratch.
+    ///
+    /// `projected_bindings` is the host's declaration — a slot whose name is
+    /// a projected binding is read-only and leaves no global behind, while a
+    /// slot that merely holds a projected *value* materializes into globals
+    /// like any other binding (FIG-2865 lets the two coexist).
     pub(crate) fn into_globals(
         self,
         slot_names: &[Name],
+        projected_bindings: &ProjectedBindings,
         reclaim: Option<&mut Vec<Option<Value>>>,
     ) -> Result<Record, RuntimeError> {
         let mut extras = self.extras;
         let mut values = self.values;
-        for ((name, value), projected) in
-            slot_names.iter().zip(values.iter_mut()).zip(self.projected)
-        {
-            if projected {
+        for (name, value) in slot_names.iter().zip(values.iter_mut()) {
+            if projected_bindings.get_symbol(name.symbol).is_some() {
                 extras.remove_symbol(name.symbol);
                 continue;
             }
@@ -206,12 +217,17 @@ pub struct Vm<'a, H> {
     iter_stack: Vec<IterState>,
     active_function: Option<usize>,
     frames: Vec<CallFrame>,
-    /// The most recently released frame's slot vectors, kept for the next
-    /// call. A callback-driven loop (`Array.map`, `Map`/`Set.forEach`, async
-    /// map) otherwise allocates a fresh values/projected pair per visited
-    /// element. One slot is all such a loop needs: every element returns
-    /// before the next one is called.
+    /// The most recently released frame's slot state, kept for the next call.
+    /// A callback-driven loop (`Array.map`, `Map`/`Set.forEach`, async map)
+    /// otherwise allocates a fresh values vector per visited element. One slot
+    /// is all such a loop needs: every element returns before the next one is
+    /// called.
     slot_scratch: Option<SlotState>,
+    /// The host's projected-binding declaration, captured once at build or
+    /// resume — the same map `SlotState::from_globals` and
+    /// `refresh_projected` seed from. A root slot whose name is in it is
+    /// read-only; nothing per-slot duplicates that.
+    projected_bindings: ProjectedBindings,
     handlers: Vec<ExceptionHandler>,
     finally_stack: Vec<FinallyState>,
     lashlang_execution_occurrences: FxHashMap<String, u64>,
@@ -310,6 +326,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     name,
                     value.clone(),
                     slot_names_for(self.chunk, self.active_function),
+                    self.active_function
+                        .is_none()
+                        .then_some(&self.projected_bindings),
                 )?;
                 self.record_assignment(name);
                 self.last_value = Some(value);
@@ -844,6 +863,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     self.slots.ensure_assignable(
                         binding,
                         slot_names_for(self.chunk, self.active_function),
+                        self.active_projected_bindings(),
                     )?;
                 }
                 self.iter_stack.push(IterState {
@@ -1009,8 +1029,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let index_start = self.stack_drain_start(path.dynamic_index_count)?;
                 let indexes = &self.stack[index_start..];
                 let root_name = &slot_names_for(self.chunk, self.active_function)[slot];
-                self.slots
-                    .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
+                self.slots.ensure_assignable(
+                    slot,
+                    slot_names_for(self.chunk, self.active_function),
+                    self.active_projected_bindings(),
+                )?;
                 let root =
                     self.slots
                         .get_mut(slot)
@@ -1173,6 +1196,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     self.slots.ensure_assignable(
                         binding,
                         slot_names_for(self.chunk, self.active_function),
+                        self.active_projected_bindings(),
                     )?;
                 }
                 self.iter_stack.push(IterState {
@@ -1190,6 +1214,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     self.slots.ensure_assignable(
                         binding,
                         slot_names_for(self.chunk, self.active_function),
+                        self.active_projected_bindings(),
                     )?;
                 }
                 self.iter_stack.push(IterState {
@@ -1326,8 +1351,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             IntrinsicOp::PushAssign(slot) => {
                 let mut item = Some(materialize_projected_async(self.pop_stack()?).await?);
                 let slot_name = &slot_names_for(self.chunk, self.active_function)[slot];
-                self.slots
-                    .ensure_assignable(slot, slot_names_for(self.chunk, self.active_function))?;
+                self.slots.ensure_assignable(
+                    slot,
+                    slot_names_for(self.chunk, self.active_function),
+                    self.active_projected_bindings(),
+                )?;
                 if let Some(Value::Ref(id)) = self.slots.get(slot) {
                     let target = Value::Ref(*id);
                     let value = self
@@ -1368,6 +1396,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                             slot,
                             value.clone(),
                             slot_names_for(self.chunk, self.active_function),
+                            self.active_function
+                                .is_none()
+                                .then_some(&self.projected_bindings),
                         )?;
                         self.record_assignment(slot);
                         self.last_value = Some(value);
@@ -1523,6 +1554,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         }
     }
 
+    /// The host's projected-binding declaration when `self.slots` is the root
+    /// scope's — inside a function the active slot state holds the frame's
+    /// locals, which are never projected bindings and may collide with one's
+    /// name.
+    fn active_projected_bindings(&self) -> Option<&ProjectedBindings> {
+        self.active_function
+            .is_none()
+            .then_some(&self.projected_bindings)
+    }
+
     fn record_assignment(&mut self, slot: usize) {
         if self.active_function.is_some() {
             return;
@@ -1536,12 +1577,16 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     /// Materializes host-visible globals, omitting any entire binding that
     /// contains a function value at any depth.
     pub fn into_globals(mut self) -> Result<Record, RuntimeError> {
-        let runtime_globals = self.slots.into_globals(&self.chunk.slot_names, None)?;
+        let runtime_globals =
+            self.slots
+                .into_globals(&self.chunk.slot_names, &self.projected_bindings, None)?;
         super::state::host_view(&runtime_globals, &mut self.heap)
     }
 
     pub(crate) fn into_state_parts(self) -> Result<(Record, Heap), RuntimeError> {
-        let globals = self.slots.into_globals(&self.chunk.slot_names, None)?;
+        let globals =
+            self.slots
+                .into_globals(&self.chunk.slot_names, &self.projected_bindings, None)?;
         Ok((globals, self.heap))
     }
 
@@ -1554,9 +1599,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         scratch.stack = std::mem::take(&mut self.stack);
         scratch.iter_stack = std::mem::take(&mut self.iter_stack);
         scratch.assigned_globals = std::mem::take(&mut self.assigned_globals);
-        let globals = self
-            .slots
-            .into_globals(&self.chunk.slot_names, Some(&mut scratch.slot_values))?;
+        let globals = self.slots.into_globals(
+            &self.chunk.slot_names,
+            &self.projected_bindings,
+            Some(&mut scratch.slot_values),
+        )?;
         Ok((globals, self.heap))
     }
 }

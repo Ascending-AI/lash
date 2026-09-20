@@ -996,6 +996,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_function: None,
             frames: Vec::new(),
             slot_scratch: None,
+            projected_bindings: host.projected_bindings(),
             handlers: Vec::new(),
             finally_stack: Vec::new(),
             lashlang_execution_occurrences: FxHashMap::default(),
@@ -1325,50 +1326,45 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         let frames = continuation
             .frame_stack
             .into_iter()
-            .map(|frame| {
-                let projected = vec![false; frame.slots.len()];
-                CallFrame {
-                    return_ip: frame.return_instruction_pointer,
-                    function: frame.function.map(|index| index as usize),
-                    operand_stack_base: frame.operand_stack_base,
-                    slots: SlotState {
-                        values: frame.slots,
-                        projected,
-                        extras: frame.globals,
-                        extras_heapified: false,
-                    },
-                    iter_stack: frame
-                        .iterator_stack
-                        .into_iter()
-                        .map(iterator_from_continuation)
-                        .collect(),
-                    return_target: match frame.return_target {
-                        VmFrameReturnContinuation::Direct => ReturnTarget::Direct,
-                        VmFrameReturnContinuation::Callback {
-                            function,
-                            calls,
-                            next_index,
-                            results,
-                            completion,
-                            allow_effects,
-                            live_url_search_params,
-                        } => ReturnTarget::Callback(CallbackDriver {
-                            function,
-                            calls,
-                            next_index,
-                            results,
-                            completion: match completion {
-                                VmCallbackCompletion::Collect => CallbackCompletion::Collect,
-                                VmCallbackCompletion::Discard => CallbackCompletion::Discard,
-                            },
-                            allow_effects,
-                            live_url_search_params,
-                        }),
-                    },
-                }
+            .map(|frame| CallFrame {
+                return_ip: frame.return_instruction_pointer,
+                function: frame.function.map(|index| index as usize),
+                operand_stack_base: frame.operand_stack_base,
+                slots: SlotState {
+                    values: frame.slots,
+                    extras: frame.globals,
+                    extras_heapified: false,
+                },
+                iter_stack: frame
+                    .iterator_stack
+                    .into_iter()
+                    .map(iterator_from_continuation)
+                    .collect(),
+                return_target: match frame.return_target {
+                    VmFrameReturnContinuation::Direct => ReturnTarget::Direct,
+                    VmFrameReturnContinuation::Callback {
+                        function,
+                        calls,
+                        next_index,
+                        results,
+                        completion,
+                        allow_effects,
+                        live_url_search_params,
+                    } => ReturnTarget::Callback(CallbackDriver {
+                        function,
+                        calls,
+                        next_index,
+                        results,
+                        completion: match completion {
+                            VmCallbackCompletion::Collect => CallbackCompletion::Collect,
+                            VmCallbackCompletion::Discard => CallbackCompletion::Discard,
+                        },
+                        allow_effects,
+                        live_url_search_params,
+                    }),
+                },
             })
             .collect();
-        let projected = vec![false; continuation.slots.len()];
         let mut vm = Self {
             chunk: &program.chunk,
             ip: continuation.instruction_pointer,
@@ -1376,7 +1372,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             last_value: continuation.last_value,
             slots: SlotState {
                 values: continuation.slots,
-                projected,
                 extras: continuation.globals,
                 extras_heapified: false,
             },
@@ -1386,6 +1381,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             active_function,
             frames,
             slot_scratch: None,
+            projected_bindings: host.projected_bindings(),
             handlers,
             finally_stack,
             lashlang_execution_occurrences: continuation.occurrence_counters.into_iter().collect(),
