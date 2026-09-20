@@ -735,13 +735,16 @@ impl DurableProcessWorker {
                 Ok(page) => page,
                 Err(error) => {
                     let mut state = self.execution_scheduler.state.lock_recover();
-                    state.extra.worklist_scan = if state.extra.rescan_requested {
+                    // Consume the pending rescan: the Ready restart below *is*
+                    // that rescan, so leaving the flag set would send the
+                    // restarted dispatcher around one redundant full scan.
+                    let rescan_requested = std::mem::take(&mut state.extra.rescan_requested);
+                    state.extra.worklist_scan = if rescan_requested {
                         ProcessWorklistScan::Ready(None)
                     } else {
                         ProcessWorklistScan::Idle
                     };
-                    let restart_dispatcher =
-                        should_start_dispatcher && state.extra.rescan_requested;
+                    let restart_dispatcher = should_start_dispatcher && rescan_requested;
                     if should_start_dispatcher && !restart_dispatcher {
                         state.dispatcher_running = false;
                     }
