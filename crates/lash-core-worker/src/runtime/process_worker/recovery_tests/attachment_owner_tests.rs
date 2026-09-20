@@ -43,6 +43,15 @@ impl SessionStoreFactory for ParentBoundSessionStoreFactory {
         Ok(self.store.clone())
     }
 
+    // The fixture binds exactly one store, so a by-id lookup hands back that
+    // store for the id it was bound to.
+    async fn open_existing_store_by_id(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+        Ok(Some(self.store.clone()))
+    }
+
     // The single bound store is never deleted by this fixture, so there is no
     // tombstone to report.
     async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {

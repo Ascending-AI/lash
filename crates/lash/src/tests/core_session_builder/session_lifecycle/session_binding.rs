@@ -226,11 +226,23 @@ async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> 
         .await
         .expect_err("first retirement fails after the tombstone commits");
     assert!(matches!(first, EmbedError::SessionDeleteProcess { .. }));
-    assert!(core.session_was_deleted("delete-retry").await?);
+    assert!(
+        core.session("delete-retry")
+            .durable()
+            .await?
+            .was_deleted()
+            .await?
+    );
 
     let report = LashCore::delete_session(administration.delete_context("delete-retry")?).await?;
     assert_eq!(report.session_id, "delete-retry");
-    assert!(core.session_was_deleted("delete-retry").await?);
+    assert!(
+        core.session("delete-retry")
+            .durable()
+            .await?
+            .was_deleted()
+            .await?
+    );
     Ok(())
 }
 

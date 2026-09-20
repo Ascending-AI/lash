@@ -86,6 +86,15 @@ fn hello_lash_core(provider: ProviderHandle, model: ModelSpec) -> lash::Result<L
 }
 ```
 
+A session id reaches Lash through three terminal verbs. `core.session(id).open()`
+builds the live runtime and runs turns; `core.session(id).durable()` builds
+nothing and hands back the session's durable queue and settled reads — enqueue,
+list, cancel, reconcile — straight from its store, safely alongside a writer in
+another process; `core.session(id).create()` is the one verb that creates,
+writing the session's catalog entry and handing back the same durable handle.
+Poll a queue with `durable()`, never with `open()`. An open session exposes the
+same handle as `session.durable()`.
+
 Full walkthrough in the [quickstart](https://lash.run/quickstart.html); the complete facade API — session specs, plugin stacks, turn streaming, persistence, subagents, MCP, durable workflows — is in the [embedding guide](https://lash.run/embedding.html). To wrap Lash behind a service boundary (HTTP, queues, workflow handlers), use the canonical DTOs from `lash::remote` — see [remote protocol](https://lash.run/remote-protocol.html).
 
 ## Examples

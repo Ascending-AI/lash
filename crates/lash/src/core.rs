@@ -4,9 +4,9 @@ use crate::support::{
     ParkedSession, PluginFactory, PluginHost, PluginOptions, PluginSpec, PluginStack,
     ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, PromptLayer, PromptLayerSink,
     ProviderHandle, QueuedWorkSubstrate, Result, RuntimeEnvironment, RuntimeHandle,
-    RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy, SessionRelation,
-    SessionSpec, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget,
-    StaticPluginFactory, TerminationPolicy, ToolProvider, WorkerSlotSupplier,
+    RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy, SessionSpec,
+    SessionStoreFactory, SessionSummary, StaticPluginFactory, TerminationPolicy, ToolProvider,
+    WorkerSlotSupplier,
 };
 use lash_core::facade_support;
 use lash_core::runtime::{
@@ -204,80 +204,6 @@ impl LashCore {
         }
     }
 
-    /// Report whether `session_id` has durable live session metadata.
-    ///
-    /// This is a cheap existence read: it does not create, hydrate, or open the
-    /// session. A permanently deleted session returns `false`; callers that try
-    /// to recreate the id still receive the store's typed deletion error.
-    pub async fn session_exists(&self, session_id: impl AsRef<str>) -> Result<bool> {
-        let session_id = SessionId::from(session_id.as_ref());
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable {
-                operation: "session_exists",
-            });
-        };
-        let request = lash_core::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: lash_core::SessionRelation::Root,
-            policy: self.policy.clone(),
-        };
-        let Some(store) = store_factory
-            .open_existing_store(&request)
-            .await
-            .map_err(|message| EmbedError::StoreFactory {
-                session_id: session_id.clone(),
-                message,
-            })?
-        else {
-            return Ok(false);
-        };
-        Ok(store.load_session_meta().await?.is_some())
-    }
-
-    /// Read the canonical settled view of a durable session without opening a
-    /// live runtime, acquiring its execution lease, or exposing mutations.
-    ///
-    /// This is the inspection path for exporters, debuggers, and administrative
-    /// tooling that must coexist with a live writer. `Ok(None)` means the store
-    /// has no readable committed state for `session_id`; unsupported backends
-    /// return [`StoreError::UnsupportedStoreOperation`](lash_core::StoreError::UnsupportedStoreOperation).
-    pub async fn read_session(
-        &self,
-        session_id: impl AsRef<str>,
-    ) -> Result<Option<crate::persistence::SessionReadView>> {
-        let session_id = SessionId::from(session_id.as_ref());
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable {
-                operation: "read_session",
-            });
-        };
-        store_factory
-            .read_session(&session_id)
-            .await
-            .map_err(EmbedError::Store)
-    }
-
-    /// Report whether the durable single-use tombstone for `session_id` exists.
-    /// A `false` result means only "no tombstone"; it is not evidence that the session is live.
-    /// Tombstones are monotonic: once this returns `true`, the session id cannot become live again.
-    /// Compose this read with [`Self::session_exists`] when deciding live/retired/unknown disposition.
-    pub async fn session_was_deleted(&self, session_id: impl AsRef<str>) -> Result<bool> {
-        let session_id = SessionId::from(session_id.as_ref());
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable {
-                operation: "session_was_deleted",
-            });
-        };
-        store_factory
-            .session_was_deleted(&session_id)
-            .await
-            .map_err(|message| EmbedError::StoreFactory {
-                session_id: session_id.clone(),
-                message,
-            })
-    }
-
     /// Select the lifecycle owner used by administrative session operations.
     ///
     /// The returned handle keeps the catalog, effect host, process services,
@@ -402,68 +328,6 @@ impl LashCore {
             self.effect_host(),
             Arc::clone(catalog),
         ))
-    }
-
-    /// Persist host input without opening a competing session writer.
-    ///
-    /// This is the downstream-host ingress seam for input submitted while a
-    /// durable turn may already own the session execution lease. Active-turn
-    /// input is claimed by that exact turn at a checkpoint; next-turn input is
-    /// handed to the configured queued-work driver after it is durably stored.
-    /// Success acknowledges durable acceptance only; queue dispatch is a
-    /// separate best-effort wake and is reconciled from the pending row.
-    pub async fn enqueue_turn_input(
-        &self,
-        session_id: impl Into<SessionId>,
-        input: lash_core::TurnInput,
-        ingress: lash_core::TurnInputIngress,
-        id: Option<String>,
-    ) -> Result<facade_support::TurnInputAcceptanceReceipt> {
-        facade_support::ensure_durable_effect_input(&input).map_err(EmbedError::Runtime)?;
-        let session_id = session_id.into();
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable {
-                operation: "enqueue_turn_input",
-            });
-        };
-        let mut policy = self.policy.clone();
-        policy.session_id = Some(session_id.clone());
-        let store = store_factory
-            .create_store(&SessionStoreCreateRequest {
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: SessionRelation::default(),
-                policy,
-            })
-            .await
-            .map_err(EmbedError::Store)?;
-        let is_next_turn = matches!(ingress, lash_core::TurnInputIngress::NextTurn);
-        let mut draft = lash_core::PendingTurnInputDraft::new(session_id, ingress, input);
-        draft.source_key = id.map(|id| format!("host:{id}"));
-        store
-            .read_session_state_version()
-            .await
-            .map_err(EmbedError::Store)?;
-        let enqueued = store
-            .enqueue_pending_turn_input(draft)
-            .await
-            .map_err(|err| {
-                EmbedError::Runtime(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::StoreCommitFailed,
-                    err.to_string(),
-                ))
-            })?;
-        if is_next_turn {
-            self.substrate_slot
-                .ports()
-                .await
-                .queued
-                .notify_session_work(
-                    SessionWorkTarget::Session(enqueued.session_id.clone()),
-                    "queued_turn_input",
-                );
-        }
-        Ok(facade_support::TurnInputAcceptanceReceipt::from(&enqueued))
     }
 
     /// Retain the current continuation checkpoint for a turn-boundary node.

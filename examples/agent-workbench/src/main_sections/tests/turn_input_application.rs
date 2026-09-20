@@ -5,6 +5,7 @@ pub(crate) async fn assert_typed_turn_input_application(
     rx: &mut mpsc::Receiver<ObservationStreamItem>,
 ) {
     let admission = session
+        .durable()
         .enqueue(lash::TurnInput::text("queued workbench input"))
         .id("workbench-queued-input")
         .send()
@@ -52,6 +53,7 @@ pub(crate) async fn assert_typed_turn_input_application(
         Some("workbench-queued-turn")
     );
     let durable = session
+        .durable()
         .remote_turn_input_applications()
         .await
         .expect("durable workbench applications");
@@ -65,6 +67,7 @@ pub(crate) async fn assert_typed_turn_input_application(
     assert_eq!(settled.turn_id.as_str(), "workbench-queued-turn");
     assert!(
         session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("pending input snapshot")

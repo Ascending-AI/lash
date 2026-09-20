@@ -1726,6 +1726,7 @@ pub(super) async fn durable_queued_continue_as_survives_post_commit_graph_append
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
+        .durable()
         .enqueue(TurnInput::text("switch frames from queued work"))
         .id("queued-continue-as")
         .send()
@@ -1859,6 +1860,7 @@ finish({ established: established.total });"#,
         ))
         .await?;
     session
+        .durable()
         .enqueue(TurnInput::text("switch frames with a durable seed"))
         .id("queued-continue-as-seed")
         .send()
@@ -1871,6 +1873,7 @@ finish({ established: established.total });"#,
         .expect("first provider call should start")
         .expect("first provider call signal should arrive");
     session
+        .durable()
         .enqueue(TurnInput::text("keep this pending across the frame switch"))
         .id("queued-after-continue-as")
         .send()

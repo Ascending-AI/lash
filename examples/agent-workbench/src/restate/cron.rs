@@ -151,15 +151,20 @@ pub(super) async fn cron_session_disposition(
     core: &lash::LashCore,
     session_id: &SessionId,
 ) -> Result<CronSessionDisposition, HandlerError> {
-    if core
-        .session_was_deleted(session_id)
+    let durable = core
+        .session(session_id.clone())
+        .durable()
+        .await
+        .map_err(classified_embed_handler_error)?;
+    if durable
+        .was_deleted()
         .await
         .map_err(classified_embed_handler_error)?
     {
         return Ok(CronSessionDisposition::Retired);
     }
-    if core
-        .session_exists(session_id)
+    if durable
+        .exists()
         .await
         .map_err(classified_embed_handler_error)?
     {

@@ -349,6 +349,19 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
             .map(|store| self.wrap(store)))
     }
 
+    // A decorator forwards the by-id seam to the catalog it wraps, keeping the
+    // observation wrapper on the store it hands back.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        Ok(self
+            .inner
+            .open_existing_store_by_id(session_id)
+            .await?
+            .map(|store| self.wrap(store)))
+    }
+
     async fn read_session(
         &self,
         session_id: &SessionId,

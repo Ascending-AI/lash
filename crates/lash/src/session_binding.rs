@@ -72,6 +72,12 @@ impl BoundSession {
         self.process.as_ref()
     }
 
+    /// The owner-issued queued-work port. The binding-derived Durable Session
+    /// wakes this port, never a core-level override.
+    pub(crate) fn queued(&self) -> Arc<dyn QueuedWorkSubstrate> {
+        Arc::clone(&self.queued)
+    }
+
     pub(crate) fn catalog(&self) -> Option<Arc<dyn SessionStoreFactory>> {
         self.catalog.clone()
     }

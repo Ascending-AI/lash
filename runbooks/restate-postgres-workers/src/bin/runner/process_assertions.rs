@@ -165,7 +165,7 @@ pub(super) async fn wait_for_queued_work(
     let session = core.session(DEFAULT_SESSION_ID).open().await?;
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
-        let queued = session.queued_work().await?;
+        let queued = session.durable().queued_work().await?;
         if !queued.is_empty() {
             return Ok(());
         }
@@ -897,7 +897,7 @@ pub(super) async fn assert_reopened_session_agrees(
         DEFAULT_SESSION_ID,
         read.session_id
     );
-    let queued = session.queued_work().await?;
+    let queued = session.durable().queued_work().await?;
     anyhow::ensure!(
         queued.is_empty(),
         "reopened session had queued work: {queued:?}"

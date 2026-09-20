@@ -10,7 +10,8 @@ section 5 — how an accepted input is settled by the turn that drove it.
 
 Lash has two ways to start a turn, and they disagree about what durably exists.
 
-`LashSession::enqueue(input).send()` writes a Pending Turn Input row and returns
+`DurableSession::enqueue(input).send()` (reached as `session.durable()` or
+`core.session(id).durable()`; ADR 0097) writes a Pending Turn Input row and returns
 a `TurnInputAcceptanceReceipt`. The input is durable admission evidence before
 anything executes ([ADR 0010](0010-pending-turn-input-is-admission-evidence.md)),
 so any drain holding the session-execution lease can claim it and drive it, and

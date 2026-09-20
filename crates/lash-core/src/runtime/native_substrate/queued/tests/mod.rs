@@ -436,6 +436,15 @@ impl crate::SessionStoreFactory for CreateOnlyFactory {
         self.inner.create_store(request).await
     }
 
+    // Create-only by construction: this fixture exposes no non-creating
+    // lookup, and says so instead of inheriting "no such session".
+    async fn open_existing_store_by_id(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
+        Err("create-only factory offers no by-id session lookup".to_string())
+    }
+
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         crate::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
     }

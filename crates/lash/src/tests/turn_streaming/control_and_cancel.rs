@@ -361,13 +361,14 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
     entered.await;
     let baseline_builds = builds.load(Ordering::SeqCst);
 
-    core.enqueue_turn_input(
-        "queued-work-live-lease",
-        TurnInput::text("queued while foreground owns the lease"),
-        lash_core::TurnInputIngress::NextTurn,
-        Some("queued-during-live-turn".to_string()),
-    )
-    .await?;
+    core.session("queued-work-live-lease")
+        .durable()
+        .await?
+        .enqueue(TurnInput::text("queued while foreground owns the lease"))
+        .ingress(lash_core::TurnInputIngress::NextTurn)
+        .id("queued-during-live-turn")
+        .send()
+        .await?;
     wait_for_stable_build_count(&builds).await;
 
     let hydrations = builds
@@ -434,13 +435,15 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_c
         .build(crate::testing::runtime_lease_owner())?;
     let baseline_builds = builds.load(Ordering::SeqCst);
 
-    core.enqueue_turn_input(
-        "create-only-factory-idles",
-        TurnInput::text("queued through create-only factory"),
-        lash_core::TurnInputIngress::NextTurn,
-        Some("create-only-idle".to_string()),
-    )
-    .await?;
+    crate::tests::create_catalog_session(&core, "create-only-factory-idles").await?;
+    core.session("create-only-factory-idles")
+        .durable()
+        .await?
+        .enqueue(TurnInput::text("queued through create-only factory"))
+        .ingress(lash_core::TurnInputIngress::NextTurn)
+        .id("create-only-idle")
+        .send()
+        .await?;
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         while provider_calls.load(Ordering::SeqCst) != 1 {
             tokio::task::yield_now().await;
@@ -486,13 +489,16 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_c
         "one conservative notification must use one bounded hydration ladder, got {first_hydrations}"
     );
 
-    core.enqueue_turn_input(
-        "create-only-factory-idles",
-        TurnInput::text("queued after the create-only factory idled"),
-        lash_core::TurnInputIngress::NextTurn,
-        Some("create-only-rearm".to_string()),
-    )
-    .await?;
+    core.session("create-only-factory-idles")
+        .durable()
+        .await?
+        .enqueue(TurnInput::text(
+            "queued after the create-only factory idled",
+        ))
+        .ingress(lash_core::TurnInputIngress::NextTurn)
+        .id("create-only-rearm")
+        .send()
+        .await?;
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         while provider_calls.load(Ordering::SeqCst) != 2 {
             tokio::task::yield_now().await;
@@ -559,24 +565,27 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
     assert_eq!(builds.load(Ordering::SeqCst), 1, "build-time validation");
 
     let entered = first_entered.notified();
-    core.enqueue_turn_input(
-        "queued-work-hydration-burst",
-        TurnInput::text("queued input 0"),
-        lash_core::TurnInputIngress::NextTurn,
-        Some("queued-input-0".to_string()),
-    )
-    .await?;
+    crate::tests::create_catalog_session(&core, "queued-work-hydration-burst").await?;
+    core.session("queued-work-hydration-burst")
+        .durable()
+        .await?
+        .enqueue(TurnInput::text("queued input 0"))
+        .ingress(lash_core::TurnInputIngress::NextTurn)
+        .id("queued-input-0")
+        .send()
+        .await?;
     tokio::time::timeout(std::time::Duration::from_secs(1), entered)
         .await
         .expect("the first queued turn reaches the provider");
     for index in 1..INPUTS {
-        core.enqueue_turn_input(
-            "queued-work-hydration-burst",
-            TurnInput::text(format!("queued input {index}")),
-            lash_core::TurnInputIngress::NextTurn,
-            Some(format!("queued-input-{index}")),
-        )
-        .await?;
+        core.session("queued-work-hydration-burst")
+            .durable()
+            .await?
+            .enqueue(TurnInput::text(format!("queued input {index}")))
+            .ingress(lash_core::TurnInputIngress::NextTurn)
+            .id(format!("queued-input-{index}"))
+            .send()
+            .await?;
     }
 
     assert_eq!(
@@ -772,6 +781,7 @@ pub(super) async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<
         .expect("core");
     let session = core.session("cancel-queued-drain").open().await?;
     session
+        .durable()
         .enqueue(TurnInput::text("hang queued"))
         .send()
         .await?;
@@ -825,6 +835,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     started_rx.await.expect("turn reached the provider");
 
     let undelivered = session
+        .durable()
         .enqueue(TurnInput::text("undelivered active-turn input"))
         .id(format!("{session_id}:undelivered"))
         .ingress(lash_core::TurnInputIngress::active_turn(
@@ -873,7 +884,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     let store = store_factory
         .raw_store_for_testing(session_id)
         .expect("opened session retains its in-memory store");
-    let pending = session.pending_turn_inputs().await?;
+    let pending = session.durable().pending_turn_inputs().await?;
     match disposition {
         lash_core::facade_support::TurnCancelDisposition::Drop => {
             let raw_pending = store.raw_pending_turn_inputs_for_testing();
@@ -995,6 +1006,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         .expect("primary turn should reach provider")
         .expect("provider started signal");
     let active = session
+        .durable()
         .enqueue(TurnInput::text("deferred active steer"))
         .id("active-steer")
         .ingress(lash_core::TurnInputIngress::active_turn(
@@ -1004,11 +1016,15 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         .send()
         .await?;
     let queued = session
+        .durable()
         .enqueue(TurnInput::text("cancelled next turn"))
         .id("cancelled-next")
         .send()
         .await?;
-    let cancelled = session.cancel_pending_turn_input(&queued.input_id).await?;
+    let cancelled = session
+        .durable()
+        .cancel_pending_turn_input(&queued.input_id)
+        .await?;
     let crate::PendingTurnInputCancelOutcome::Cancelled(cancelled) = cancelled else {
         panic!("queued input should be cancellable before it is claimed: {cancelled:?}");
     };
@@ -1021,7 +1037,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
 
-    let pending = session.pending_turn_inputs().await?;
+    let pending = session.durable().pending_turn_inputs().await?;
     assert_eq!(
         pending.len(),
         1,
@@ -1046,7 +1062,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         drained.assistant_message(),
         Some("echo: deferred active steer")
     );
-    assert!(session.pending_turn_inputs().await?.is_empty());
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
     let requests = requests.lock_recover().clone();
     assert_eq!(
         requests
@@ -1143,6 +1159,7 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         .expect("first provider call should start")
         .expect("first provider signal");
     let active = session
+        .durable()
         .enqueue(TurnInput::text("accepted active steer"))
         .id("accepted-active-steer")
         .ingress(lash_core::TurnInputIngress::active_turn(
@@ -1166,7 +1183,7 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
     assert!(
-        session.pending_turn_inputs().await?.is_empty(),
+        session.durable().pending_turn_inputs().await?.is_empty(),
         "accepted active steer `{}` must be completed, not deferred after interrupt",
         active.input_id
     );
@@ -1261,6 +1278,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
 
         first_started_rx.await.expect("first provider call started");
         session
+            .durable()
             .enqueue(TurnInput::text("mid-turn injection marker"))
             .id("rlm-mid-turn-injection")
             .ingress(lash_core::TurnInputIngress::active_turn(
@@ -1310,68 +1328,9 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
             1,
             "later assembled history must contain the committed input exactly once"
         );
-        assert!(session.pending_turn_inputs().await?.is_empty());
+        assert!(session.durable().pending_turn_inputs().await?.is_empty());
         Ok(())
     })
-}
-
-#[tokio::test]
-pub(super) async fn await_queued_work_batch_resolves_when_drained() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())
-        .expect("core");
-    let session = core.session("await-queued").open().await?;
-    let receipt = session
-        .admin()
-        .commands()
-        .refresh_tool_catalog("await queued work test", "await-queued-refresh")
-        .await?;
-
-    let waiter_session = session.clone();
-    let waiter_batch = receipt.batch_id.clone();
-    let waiter =
-        tokio::spawn(async move { waiter_session.await_queued_work_batch(&waiter_batch).await });
-
-    // Nothing has drained the batch yet, so the waiter must still be pending.
-    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-    assert!(!waiter.is_finished(), "waiter resolved before any drain");
-
-    assert!(
-        session.queued_turn().run().await?.ran().is_none(),
-        "a session-command-only drain should not produce a model turn"
-    );
-
-    tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
-        .await
-        .expect("waiter should resolve after the drain")
-        .expect("waiter task")?;
-    Ok(())
-}
-
-#[tokio::test]
-pub(super) async fn await_queued_work_batch_resolves_immediately_for_unknown_batch() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .build(crate::testing::runtime_lease_owner())
-        .expect("core");
-    let session = core.session("await-unknown").open().await?;
-    tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        session.await_queued_work_batch(&lash_core::BatchId::from("qwb:never-existed")),
-    )
-    .await
-    .expect("unknown batch must resolve immediately")?;
-    Ok(())
 }
 
 #[tokio::test]

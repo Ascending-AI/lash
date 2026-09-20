@@ -92,6 +92,16 @@ pub enum EmbedError {
     )]
     /// Returned before execution when a facade session has no store source.
     MissingSessionStore,
+    #[error(
+        "session `{session_id}` has no durable session store; a Durable Session never creates one, so create the session first with core.session(id).open()"
+    )]
+    /// A Durable Session operation named a session the catalog has never
+    /// created. Acquisition is deliberately non-creating, so this replaces the
+    /// silent metadata materialisation an unknown-id enqueue once performed.
+    UnknownSession {
+        /// Session identifier with no durable store.
+        session_id: SessionId,
+    },
     #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
     /// A loaded store belongs to a different session than requested.
     StoreSessionMismatch {
@@ -233,6 +243,7 @@ impl EmbedError {
                     | SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow { .. },
             }
             | Self::MissingProtocolPlugin
+            | Self::UnknownSession { .. }
             | Self::MissingModelSpec
             | Self::MissingTurnBudget
             | Self::MissingEffectHost
@@ -316,6 +327,7 @@ impl EmbedError {
             | Self::QueuedWorkExecutionConcurrency(_)
             | Self::MissingSessionStore
             | Self::SessionCatalogUnavailable { .. }
+            | Self::UnknownSession { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
             Self::Store(err) => store_error_is_terminal(err),
             Self::Runtime(err) => err.is_terminal(),

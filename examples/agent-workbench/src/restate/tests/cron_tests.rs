@@ -1016,6 +1016,28 @@ impl lash::persistence::AttachmentRootSet for ContendedSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
+    // A decorator forwards the non-creating by-id seam, keeping the
+    // contention wrapper on the store it hands back.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
+        Ok(
+            lash::persistence::SessionStoreFactory::open_existing_store_by_id(
+                &self.inner,
+                session_id,
+            )
+            .await?
+            .map(|inner| {
+                Arc::new(ContendedRuntimePersistence {
+                    inner,
+                    contend: Arc::clone(&self.contend),
+                    contended_attempts: Arc::clone(&self.contended_attempts),
+                }) as Arc<dyn lash::persistence::RuntimePersistence>
+            }),
+        )
+    }
+
     async fn create_store(
         &self,
         request: &lash::persistence::SessionStoreCreateRequest,
@@ -1109,6 +1131,20 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
             return Ok(None);
         }
         lash::persistence::SessionStoreFactory::open_existing_store(&self.inner, request).await
+    }
+
+    // A Durable Session acquires by id; the fixture's meta loss must be
+    // visible through that seam too, not hidden behind an unimplemented
+    // default that reports the session as absent.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
+        if self.absent_session_ids.lock_recover().contains(session_id) {
+            return Ok(None);
+        }
+        lash::persistence::SessionStoreFactory::open_existing_store_by_id(&self.inner, session_id)
+            .await
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
@@ -1444,7 +1480,11 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
     assert!(
         state
             .core
-            .session_exists(session_id)
+            .session(session_id)
+            .durable()
+            .await
+            .expect("durable handle for the cron session")
+            .exists()
             .await
             .expect("read materialized session metadata")
     );
@@ -1452,14 +1492,22 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
     assert!(
         !state
             .core
-            .session_was_deleted(session_id)
+            .session(session_id)
+            .durable()
+            .await
+            .expect("durable handle for the cron session")
+            .was_deleted()
             .await
             .expect("read absent-session tombstone")
     );
     assert!(
         !state
             .core
-            .session_exists(session_id)
+            .session(session_id)
+            .durable()
+            .await
+            .expect("durable handle for the cron session")
+            .exists()
             .await
             .expect("read absent-session metadata")
     );

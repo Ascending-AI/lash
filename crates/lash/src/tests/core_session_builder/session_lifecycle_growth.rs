@@ -53,6 +53,15 @@ struct GrowthFactory {
 
 #[async_trait]
 impl SessionStoreFactory for GrowthFactory {
+    // A decorator forwards the non-creating by-id seam to the catalog it
+    // wraps.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+        lash_core::SessionStoreFactory::open_existing_store_by_id(&self.inner, session_id).await
+    }
+
     async fn session_was_deleted(
         &self,
         session_id: &SessionId,

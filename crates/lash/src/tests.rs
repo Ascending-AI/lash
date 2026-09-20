@@ -34,6 +34,17 @@ use tokio::sync::{Mutex as TokioMutex, oneshot};
 
 static TEST_SESSION_LEASE_TOKEN: AtomicUsize = AtomicUsize::new(1);
 
+/// Create a session's durable metadata without building a runtime.
+///
+/// A Durable Session never creates (ADR 0097), so a test that enqueues to a
+/// session it has not opened creates it first through the facade's third
+/// terminal verb — the same move an in-repo host that relied on
+/// enqueue-materialisation now makes.
+pub(crate) async fn create_catalog_session(core: &LashCore, session_id: &str) -> Result<()> {
+    core.session(session_id).create().await?;
+    Ok(())
+}
+
 fn now_epoch_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -772,6 +783,17 @@ impl lash_core::AttachmentRootSet for ReusableStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for ReusableStoreFactory {
+    // One reusable store backs every id this fixture serves, so a by-id
+    // lookup hands back that store.
+    async fn open_existing_store_by_id(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+        Ok(Some(
+            Arc::clone(&self.store) as Arc<dyn lash_core::RuntimePersistence>
+        ))
+    }
+
     async fn pending_turn_cancel_closure_pins(
         &self,
         _session_id: &SessionId,
@@ -1127,6 +1149,16 @@ impl lash_core::AttachmentRootSet for RecordingStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for RecordingStoreFactory {
+    // This fixture records requests and mints a fresh store per call; it keeps
+    // no catalog to look an id up in, and says so rather than reporting every
+    // session absent.
+    async fn open_existing_store_by_id(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+        Err("recording factory keeps no session catalog to resolve a store by id".to_string())
+    }
+
     async fn pending_turn_cancel_closure_pins(
         &self,
         _session_id: &SessionId,
@@ -1202,6 +1234,20 @@ impl lash_core::AttachmentRootSet for DeletingStoreFactory {
 
 #[async_trait::async_trait]
 impl lash_core::SessionStoreFactory for DeletingStoreFactory {
+    // The kept map is this fixture's catalog; a deleted id is simply absent
+    // from it.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+        Ok(self
+            .stores
+            .lock_recover()
+            .get(session_id)
+            .cloned()
+            .map(|store| store as Arc<dyn lash_core::RuntimePersistence>))
+    }
+
     async fn pending_turn_cancel_closure_pins(
         &self,
         _session_id: &SessionId,
@@ -2140,6 +2186,7 @@ use scope_support::{
 mod control_admin;
 mod core_session_builder;
 mod deployment_and_testing_facade;
+mod durable_session;
 mod harness;
 use harness::{
     core_without_session_store, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,

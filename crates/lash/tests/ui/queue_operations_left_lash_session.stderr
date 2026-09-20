@@ -1,0 +1,31 @@
+error[E0599]: no method named `pending_turn_inputs` found for struct `LashSession` in the current scope
+ --> tests/ui/queue_operations_left_lash_session.rs:7:21
+  |
+7 |     let _ = session.pending_turn_inputs().await;
+  |                     ^^^^^^^^^^^^^^^^^^^ method not found in `LashSession`
+
+error[E0599]: no method named `session_exists` found for struct `LashCore` in the current scope
+  --> tests/ui/queue_operations_left_lash_session.rs:11:18
+   |
+11 |     let _ = core.session_exists("s").await;
+   |                  ^^^^^^^^^^^^^^
+   |
+help: there is a method `sessions` with a similar name, but with different arguments
+  --> src/core.rs
+   |
+   |     pub async fn sessions(&self) -> Result<Vec<SessionSummary>> {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `await_queued_work_batch` found for struct `DurableSession` in the current scope
+  --> tests/ui/queue_operations_left_lash_session.rs:20:10
+   |
+19 |       let _ = durable
+   |  _____________-
+20 | |         .await_queued_work_batch(&lash::BatchId::from("qwb:batch"))
+   | |_________-^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: there is a method `cancel_queued_work_batch` with a similar name
+   |
+20 -         .await_queued_work_batch(&lash::BatchId::from("qwb:batch"))
+20 +         .cancel_queued_work_batch(&lash::BatchId::from("qwb:batch"))
+   |

@@ -276,6 +276,24 @@ impl lash::persistence::SessionStoreFactory for GatedSessionStoreFactory {
         }))
     }
 
+    // A decorator forwards the non-creating by-id seam, keeping the gate on
+    // the store it hands back.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
+        Ok(self
+            .inner
+            .open_existing_store_by_id(session_id)
+            .await?
+            .map(|inner| {
+                Arc::new(GatedRuntimePersistence {
+                    inner,
+                    gate: Arc::clone(&self.gate),
+                }) as Arc<dyn lash::persistence::RuntimePersistence>
+            }))
+    }
+
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }

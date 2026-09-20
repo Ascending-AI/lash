@@ -302,7 +302,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
         first.source_key,
         "command:refresh_tool_catalog:same-refresh"
     );
-    let queued = session.queued_work().await?;
+    let queued = session.durable().queued_work().await?;
     assert_eq!(queued.len(), 1);
     assert!(matches!(
         &queued[0].items[0].payload,
@@ -325,11 +325,12 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
     let cursor = session.observe().current_observation().cursor;
 
     let pending = session
+        .durable()
         .enqueue(TurnInput::text("queued observation"))
         .id("queue-observation")
         .send()
         .await?;
-    let inputs = session.pending_turn_inputs().await?;
+    let inputs = session.durable().pending_turn_inputs().await?;
     assert_eq!(
         inputs
             .iter()
@@ -337,7 +338,10 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
             .collect::<Vec<_>>(),
         vec![pending.input_id.as_str()]
     );
-    let cancelled = session.cancel_pending_turn_input(&pending.input_id).await?;
+    let cancelled = session
+        .durable()
+        .cancel_pending_turn_input(&pending.input_id)
+        .await?;
     assert!(matches!(
         cancelled,
         crate::PendingTurnInputCancelOutcome::Cancelled(_)
@@ -375,22 +379,26 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     let cursor = session.observe().current_observation().cursor;
 
     let first = session
+        .durable()
         .enqueue(TurnInput::text("first"))
         .id("edit:1")
         .send()
         .await?;
     let second = session
+        .durable()
         .enqueue(TurnInput::text("second"))
         .id("edit:2")
         .send()
         .await?;
     let third = session
+        .durable()
         .enqueue(TurnInput::text("third"))
         .id("edit:3")
         .send()
         .await?;
 
     let bulk = session
+        .durable()
         .cancel_pending_turn_inputs([
             lash_core::PendingTurnInputCancelTarget::source_key("host:edit:1"),
             lash_core::PendingTurnInputCancelTarget::source_key("host:missing"),
@@ -407,6 +415,7 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
     ));
 
     let suffix = session
+        .durable()
         .cancel_pending_turn_input_suffix(lash_core::PendingTurnInputCancelTarget::source_key(
             "host:edit:2",
         ))
@@ -423,7 +432,7 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
         &outcomes[1],
         crate::PendingTurnInputCancelOutcome::Cancelled(input) if input.input_id == third.input_id
     ));
-    assert!(session.pending_turn_inputs().await?.is_empty());
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
 
     let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor)? else {
         panic!("recent cursor should replay queue observation events");
@@ -597,7 +606,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
     assert!(!report.occurrence_id.is_empty());
     assert!(report.deliveries.is_empty());
 
-    assert!(session.queued_work().await?.is_empty());
+    assert!(session.durable().queued_work().await?.is_empty());
     let persisted = session.admin().state().persist_current().await?;
     assert_eq!(
         persisted.session_graph.leaf_node_id,
@@ -1168,7 +1177,7 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
         "direct ingress admits, it does not mint an identity to deduplicate by"
     );
     assert!(
-        session.pending_turn_inputs().await?.is_empty(),
+        session.durable().pending_turn_inputs().await?.is_empty(),
         "a committed turn settles the row it was admitted under"
     );
 

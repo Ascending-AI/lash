@@ -281,6 +281,7 @@ async fn drive_cancel_before_turn(
     let t3 = TurnId::from(format!("{session_id}:provider:003"));
 
     let pending = session
+        .durable()
         .enqueue(TurnInput::text("queued follow-up"))
         .id("follow-up-001")
         .ingress(TurnInputIngress::active_turn(
@@ -291,6 +292,7 @@ async fn drive_cancel_before_turn(
         .await
         .expect("enqueue active-turn input");
     let cancel = session
+        .durable()
         .cancel_pending_turn_input(&pending.input_id)
         .await
         .expect("cancel");
@@ -327,6 +329,7 @@ async fn drive_cancel_after_turn(
     obs.push(run_turn(&session, transport, "turn-1", &t1).await);
 
     let pending = session
+        .durable()
         .enqueue(TurnInput::text("queued follow-up"))
         .id("follow-up-001")
         .ingress(TurnInputIngress::active_turn(
@@ -337,6 +340,7 @@ async fn drive_cancel_after_turn(
         .await
         .expect("enqueue active-turn input");
     let cancel = session
+        .durable()
         .cancel_pending_turn_input(&pending.input_id)
         .await
         .expect("cancel");
@@ -368,6 +372,7 @@ async fn drive_no_cancel_control(
     let t2 = TurnId::from(format!("{session_id}:provider:002"));
 
     session
+        .durable()
         .enqueue(TurnInput::text("queued follow-up"))
         .id("follow-up-001")
         .ingress(TurnInputIngress::active_turn(
@@ -405,6 +410,7 @@ async fn drive_claim_then_cancel(
     let t2 = TurnId::from(format!("{session_id}:provider:002"));
 
     let pending = session
+        .durable()
         .enqueue(TurnInput::text("queued follow-up"))
         .id("follow-up-001")
         .ingress(TurnInputIngress::active_turn(
@@ -418,6 +424,7 @@ async fn drive_claim_then_cancel(
     let mut obs = Vec::new();
     obs.push(run_turn(&session, transport, "turn-1", &t1).await);
     let cancel = session
+        .durable()
         .cancel_pending_turn_input(&pending.input_id)
         .await
         .expect("cancel");

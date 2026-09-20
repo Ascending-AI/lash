@@ -576,21 +576,18 @@ fn turn_input_ingress_types_are_nameable(
     let _ = (ingress, boundary, state);
 }
 
-async fn queued_work_wait_is_nameable(session: &lash::LashSession) -> lash::Result<()> {
-    session
-        .await_queued_work_batch(&BatchId::from("qwb:batch"))
-        .await
-}
-
 async fn pending_turn_input_cancel_facade_is_nameable(
     session: &lash::LashSession,
     target: lash::PendingTurnInputCancelTarget,
 ) -> lash::Result<()> {
     let _: Vec<lash::PendingTurnInputCancelReceipt> = session
+        .durable()
         .cancel_pending_turn_inputs(vec![target.clone()])
         .await?;
-    let _: lash::PendingTurnInputSuffixCancelOutcome =
-        session.cancel_pending_turn_input_suffix(target).await?;
+    let _: lash::PendingTurnInputSuffixCancelOutcome = session
+        .durable()
+        .cancel_pending_turn_input_suffix(target)
+        .await?;
     Ok(())
 }
 
@@ -709,7 +706,6 @@ fn main() {
     let _ = observation_types_are_homed_in_observe;
     let _ = trigger_types_are_homed_in_triggers;
     let _ = cancellation_token_is_at_root;
-    let _ = queued_work_wait_is_nameable;
     let _ = pending_turn_input_cancel_facade_is_nameable;
     let _ = leaked_signature_types_are_homed;
 }

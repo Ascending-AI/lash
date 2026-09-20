@@ -1119,6 +1119,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
         .expect("open FIG-430 session");
 
     let outcome = session
+        .durable()
         .enqueue(lash_core::TurnInput::text("commit before dispatch"))
         .id("fig-430-retry")
         .send()
@@ -1127,6 +1128,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
         .await
         .expect("the failed post-commit wake must retry on its own");
     let persisted = session
+        .durable()
         .pending_turn_inputs()
         .await
         .expect("inspect committed pending input");
@@ -1157,6 +1159,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
     );
 
     let retry_receipt = session
+        .durable()
         .enqueue(lash_core::TurnInput::text("commit before dispatch"))
         .id("fig-430-retry")
         .send()
@@ -1169,6 +1172,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
     );
     assert_eq!(
         session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("inspect idempotent retry")

@@ -186,7 +186,7 @@ therefore a facade gap the next such module discovers, not a carve-out.
 ### Read-only handles
 
 Inspection hosts read settled session history, tree, and usage through
-`LashCore::read_session`, which returns the same `SessionReadView` a live
+`DurableSession::read` (ADR 0097; formerly `LashCore::read_session`), which returns the same `SessionReadView` a live
 session exposes without opening a runtime or acquiring its lease. Store
 implementors provide that capability through `SessionStoreFactory::read_session`;
 SQLite's `SqliteSessionStoreFactory::open_read_only` opens the catalog with

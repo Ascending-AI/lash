@@ -504,6 +504,7 @@ impl SqliteRuntimeReplayWorld {
             .unwrap_or(&event.boundary_id);
         let mut enqueue = runtime_session
             .session
+            .durable()
             .enqueue(lash::TurnInput::text(text.to_string()))
             .id(source_key);
         let ingress_mode = event
@@ -920,6 +921,7 @@ impl SqliteRuntimeReplayWorld {
         })?;
         let outcome = runtime_session
             .session
+            .durable()
             .cancel_pending_turn_input(&lash_core::InputId::from(input_id.as_str()))
             .await
             .map_err(|err| SqliteReplayError::Runtime(err.to_string()))?;

@@ -336,6 +336,16 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
         self.inner.create_store(request).await
     }
 
+    // A Durable Session acquires through the non-creating by-id seam. This
+    // fixture still leaves `open_existing_store` unimplemented, so the queued
+    // driver's claimability read stays "unknown" — the property under test.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+        lash_core::SessionStoreFactory::open_existing_store_by_id(&self.inner, session_id).await
+    }
+
     async fn session_was_deleted(
         &self,
         session_id: &SessionId,

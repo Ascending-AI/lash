@@ -1,0 +1,7 @@
+error[E0046]: not all trait items implemented, missing: `open_existing_store_by_id`
+  --> tests/ui/session_store_factory_requires_by_id_lookup.rs:46:1
+   |
+46 | impl SessionStoreFactory for SilentByIdFactory {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `open_existing_store_by_id` in implementation
+   |
+   = help: implement the missing item: `fn open_existing_store_by_id<'life0: 'async_trait, 'life1: 'async_trait, 'async_trait>(&'life0 self, _: &'life1 SessionId) -> Pin<Box<(dyn Future<Output = Result<Option<Arc<(dyn RuntimePersistence + 'static)>>, std::string::String>> + Send + 'async_trait)>> { todo!() }`

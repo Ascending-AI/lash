@@ -313,6 +313,27 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
             .map(|store| store as Arc<dyn crate::store::RuntimePersistence>))
     }
 
+    // The recorded stores are the catalog, so a by-id lookup is the same scan
+    // the request-shaped seam performs.
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
+        Ok(self
+            .stores
+            .lock_recover()
+            .iter()
+            .find(|store| {
+                store
+                    .session_meta
+                    .lock_recover()
+                    .as_ref()
+                    .is_some_and(|meta| meta.session_id == *session_id)
+            })
+            .cloned()
+            .map(|store| store as Arc<dyn crate::store::RuntimePersistence>))
+    }
+
     // Recorded stores are retained, never tombstoned: this fixture drops no
     // session, so no id has a deletion marker.
     async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {

@@ -422,6 +422,7 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
+        .durable()
         .enqueue(TurnInput::text("start chained frame handoff"))
         .id("queued-chained-continue-as")
         .send()
@@ -919,6 +920,7 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
             .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     first_session
+        .durable()
         .enqueue(TurnInput::text("what is the status of the migration?"))
         .id("fig1573-queued-request")
         .send()
@@ -975,7 +977,7 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
             .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     assert_eq!(
-        second_session.pending_turn_inputs().await?.len(),
+        second_session.durable().pending_turn_inputs().await?.len(),
         1,
         "the queued turn is still pending after the reopen"
     );
@@ -1063,6 +1065,7 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
             .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     first_session
+        .durable()
         .enqueue(TurnInput::text("what is the status of the migration?"))
         .id("fig1573-queued-request")
         .ingress(lash_core::TurnInputIngress::active_turn(
@@ -1108,7 +1111,7 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
             .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     assert_eq!(
-        second_session.pending_turn_inputs().await?.len(),
+        second_session.durable().pending_turn_inputs().await?.len(),
         2,
         "the hard kill leaves both the orphaned routed input and the killed turn's own \
          acceptance pending after the reopen"
@@ -1121,7 +1124,12 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
     for _attempt in 0..10 {
         if let Some(output) = second_session.queued_turn().run().await?.ran() {
             claimed = Some(output);
-            if second_session.pending_turn_inputs().await?.is_empty() {
+            if second_session
+                .durable()
+                .pending_turn_inputs()
+                .await?
+                .is_empty()
+            {
                 break;
             }
             continue;
@@ -1136,7 +1144,11 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
     );
     assert_eq!(output.assistant_message(), Some("the migration is green"));
     assert!(
-        second_session.pending_turn_inputs().await?.is_empty(),
+        second_session
+            .durable()
+            .pending_turn_inputs()
+            .await?
+            .is_empty(),
         "the drained input must leave the pending queue"
     );
     Ok(())

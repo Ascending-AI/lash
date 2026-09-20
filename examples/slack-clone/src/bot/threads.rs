@@ -121,7 +121,11 @@ pub async fn open_thread_session(
     let thread_id = thread_session_id(&record.channel_id, thread_ts);
 
     let child_exists = core
-        .session_exists(&thread_id)
+        .session(thread_id.clone())
+        .durable()
+        .await
+        .context("durable handle for the thread child session")?
+        .exists()
         .await
         .context("check whether the thread child session exists")?;
     let channel = if !child_exists {
@@ -358,6 +362,7 @@ async fn retain_boundary(
     derivation: Derivation,
 ) -> Result<bool> {
     let applications = session
+        .durable()
         .turn_input_applications()
         .await
         .context("read turn-input applications for fork boundary")?;
@@ -574,6 +579,7 @@ async fn seed_thread_root_and_uncommitted_context(
         })
         .collect();
     let applications = channel
+        .durable()
         .turn_input_applications()
         .await
         .context("read channel applications for thread inheritance")?;
@@ -593,6 +599,7 @@ async fn seed_thread_root_and_uncommitted_context(
         // mid-line labels nothing.
         if context.message_ts == thread_ts {
             thread
+                .durable()
                 .enqueue(TurnInput::text(format!(
                     "\n{THREAD_ROOT_SEED_PREFIX}{text}\n"
                 )))
@@ -615,6 +622,7 @@ async fn seed_thread_root_and_uncommitted_context(
             continue;
         }
         thread
+            .durable()
             .enqueue(TurnInput::text(text))
             .id(format!(
                 "thread-inherited:{}:{}",

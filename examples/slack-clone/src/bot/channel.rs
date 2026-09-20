@@ -7,7 +7,7 @@
 //! restarts, and never leaks between channels.
 //!
 //! **Ambient traffic is queued turn input, not a turn.** Messages that do not
-//! mention the bot are admitted with [`lash::LashSession::enqueue`] — durable,
+//! mention the bot are admitted with [`lash::DurableSession::enqueue`] — durable,
 //! ordered, model-visible — and no turn runs. When somebody finally does mention
 //! the bot, one queued drain folds the accumulated room context *and* the mention
 //! into a single turn. The bot has been listening the whole time without saying a
@@ -655,6 +655,7 @@ impl ChannelBot {
         // drained it committed.
         let prefix = if is_mention { "mention" } else { "ambient" };
         let receipt = session
+            .durable()
             .enqueue(TurnInput::text(text))
             .id(format!(
                 "{prefix}:{}:{}",

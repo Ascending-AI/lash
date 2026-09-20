@@ -607,146 +607,62 @@ impl RuntimeHandle {
         )
     }
 
+    /// Build this live session's Durable Session operations and its queue
+    /// store.
+    ///
+    /// The live handle reaches the queue through the same bodies a
+    /// catalog-acquired Durable Session uses; nothing here re-implements a
+    /// store call or a publication.
+    fn durable_queue(
+        &self,
+    ) -> Result<(super::DurableSessionOps, Arc<dyn crate::RuntimePersistence>), crate::RuntimeError>
+    {
+        let observation = self.observe();
+        let store = observation
+            .queue_store
+            .clone()
+            .ok_or_else(super::session_api::queued_turn_input_store_required)?;
+        let ops = super::DurableSessionOps::new(
+            SessionId::from(observation.session_id().to_string()),
+            Arc::clone(&observation.queued_work),
+            Arc::clone(&self.live_replay_store),
+        );
+        Ok((ops, store))
+    }
+
     pub async fn enqueue_turn_input(
         &self,
         input: crate::TurnInput,
         ingress: crate::TurnInputIngress,
         source_key: Option<String>,
     ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
-        let observation = self.observe();
-        let store = observation
-            .queue_store
-            .clone()
-            .ok_or_else(super::session_api::queued_turn_input_store_required)?;
-        let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
-        super::session_api::enqueue_turn_input_to_store(
-            SessionId::from(observation.session_id.as_ref().to_string()),
-            store,
-            Arc::clone(&observation.queued_work),
-            input,
-            ingress,
-            source_key,
-        )
-        .await
-        .inspect(|input| {
-            self.record_queue_changed(
-                SessionQueueEventKind::Enqueued,
-                if is_next_turn {
-                    vec![input.input_id.to_string()]
-                } else {
-                    Vec::new()
-                },
-            );
-        })
+        let (ops, store) = self.durable_queue()?;
+        ops.enqueue_turn_input(&store, input, ingress, source_key)
+            .await
     }
 
     pub async fn cancel_pending_turn_input(
         &self,
-        session_id: &SessionId,
         input_id: &str,
     ) -> Result<crate::PendingTurnInputCancelOutcome, crate::RuntimeError> {
-        let observation = self.observe();
-        let store = observation
-            .queue_store
-            .clone()
-            .ok_or_else(super::session_api::queued_turn_input_store_required)?;
-        store
-            .cancel_pending_turn_input(session_id, input_id)
-            .await
-            .map_err(|err| {
-                crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::StoreCommitFailed,
-                    err.to_string(),
-                )
-            })
-            .inspect(|outcome| {
-                if outcome.is_cancelled() {
-                    self.record_queue_changed(
-                        SessionQueueEventKind::Cancelled,
-                        vec![input_id.to_string()],
-                    );
-                }
-            })
+        let (ops, store) = self.durable_queue()?;
+        ops.cancel_pending_turn_input(&store, input_id).await
     }
 
     pub async fn cancel_pending_turn_inputs(
         &self,
-        session_id: &SessionId,
         targets: &[crate::PendingTurnInputCancelTarget],
     ) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, crate::RuntimeError> {
-        let observation = self.observe();
-        let store = observation
-            .queue_store
-            .clone()
-            .ok_or_else(super::session_api::queued_turn_input_store_required)?;
-        store
-            .cancel_pending_turn_inputs(session_id, targets)
-            .await
-            .map_err(|err| {
-                crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::StoreCommitFailed,
-                    err.to_string(),
-                )
-            })
-            .inspect(|results| {
-                let cancelled_ids = results
-                    .iter()
-                    .filter_map(|result| match &result.outcome {
-                        crate::PendingTurnInputCancelOutcome::Cancelled(input) => {
-                            Some(input.input_id.clone())
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                if !cancelled_ids.is_empty() {
-                    self.record_queue_changed(
-                        SessionQueueEventKind::Cancelled,
-                        cancelled_ids.iter().map(ToString::to_string).collect(),
-                    );
-                }
-            })
+        let (ops, store) = self.durable_queue()?;
+        ops.cancel_pending_turn_inputs(&store, targets).await
     }
 
     pub async fn cancel_pending_turn_input_suffix(
         &self,
-        session_id: &SessionId,
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, crate::RuntimeError> {
-        let observation = self.observe();
-        let store = observation
-            .queue_store
-            .clone()
-            .ok_or_else(super::session_api::queued_turn_input_store_required)?;
-        store
-            .cancel_pending_turn_input_suffix(session_id, anchor)
-            .await
-            .map_err(|err| {
-                crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::StoreCommitFailed,
-                    err.to_string(),
-                )
-            })
-            .inspect(|outcome| {
-                let crate::PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } = outcome
-                else {
-                    return;
-                };
-                let cancelled_ids = outcomes
-                    .iter()
-                    .filter_map(|outcome| match outcome {
-                        crate::PendingTurnInputCancelOutcome::Cancelled(input) => {
-                            Some(input.input_id.clone())
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                if !cancelled_ids.is_empty() {
-                    self.record_queue_changed(
-                        SessionQueueEventKind::Cancelled,
-                        cancelled_ids.iter().map(ToString::to_string).collect(),
-                    );
-                }
-            })
+        let (ops, store) = self.durable_queue()?;
+        ops.cancel_pending_turn_input_suffix(&store, anchor).await
     }
 
     /// Release a held queued-work claim without completing it, returning its
@@ -760,29 +676,8 @@ impl RuntimeHandle {
         &self,
         claim: &crate::QueuedWorkClaim,
     ) -> Result<(), crate::RuntimeError> {
-        let observation = self.observe();
-        let store = observation
-            .queue_store
-            .clone()
-            .ok_or_else(super::session_api::queued_turn_input_store_required)?;
-        store
-            .abandon_queued_work_claim(claim)
-            .await
-            .map_err(|err| {
-                crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::StoreCommitFailed,
-                    err.to_string(),
-                )
-            })?;
-        self.record_queue_changed(
-            SessionQueueEventKind::Enqueued,
-            claim
-                .batches
-                .iter()
-                .map(|batch| batch.batch_id.to_string())
-                .collect(),
-        );
-        Ok(())
+        let (ops, store) = self.durable_queue()?;
+        ops.abandon_queued_work_claim(&store, claim).await
     }
 
     /// Release a held pending-turn-input claim without completing it, returning
@@ -792,52 +687,16 @@ impl RuntimeHandle {
         &self,
         claim: &crate::TurnInputClaim,
     ) -> Result<(), crate::RuntimeError> {
-        let observation = self.observe();
-        let store = observation
-            .queue_store
-            .clone()
-            .ok_or_else(super::session_api::queued_turn_input_store_required)?;
-        store.abandon_turn_input_claim(claim).await.map_err(|err| {
-            crate::RuntimeError::new(crate::RuntimeErrorCode::StoreCommitFailed, err.to_string())
-        })?;
-        self.record_queue_changed(
-            SessionQueueEventKind::Enqueued,
-            claim
-                .inputs
-                .iter()
-                .map(|input| input.input_id.to_string())
-                .collect(),
-        );
-        Ok(())
+        let (ops, store) = self.durable_queue()?;
+        ops.abandon_turn_input_claim(&store, claim).await
     }
 
     pub async fn cancel_queued_work_batch(
         &self,
-        session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, crate::RuntimeError> {
-        let observation = self.observe();
-        let store = observation
-            .queue_store
-            .clone()
-            .ok_or_else(super::session_api::queued_turn_input_store_required)?;
-        store
-            .cancel_queued_work_batch(session_id, batch_id)
-            .await
-            .map_err(|err| {
-                crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::StoreCommitFailed,
-                    err.to_string(),
-                )
-            })
-            .inspect(|batch| {
-                if batch.is_some() {
-                    self.record_queue_changed(
-                        SessionQueueEventKind::Cancelled,
-                        vec![batch_id.to_string()],
-                    );
-                }
-            })
+        let (ops, store) = self.durable_queue()?;
+        ops.cancel_queued_work_batch(&store, batch_id).await
     }
 
     /// How many live references share this handle's runtime, including this

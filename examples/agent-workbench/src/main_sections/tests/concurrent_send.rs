@@ -829,7 +829,11 @@ async fn slow_delete_retention_is_bounded_and_can_be_retried() {
     assert!(
         !state
             .core
-            .session_was_deleted(&old_session_id)
+            .session(old_session_id.clone())
+            .durable()
+            .await
+            .expect("durable handle for the session")
+            .was_deleted()
             .await
             .expect("read durable deletion fence after timeout")
     );
@@ -878,7 +882,11 @@ async fn an_ambiguous_delete_attach_failure_never_claims_the_session_remains_liv
     assert!(
         !state
             .core
-            .session_was_deleted(&old_session_id)
+            .session(old_session_id.clone())
+            .durable()
+            .await
+            .expect("durable handle for the session")
+            .was_deleted()
             .await
             .expect("read durable deletion fence")
     );

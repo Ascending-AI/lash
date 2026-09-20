@@ -93,6 +93,7 @@ pub use lash_core_execution::triggers;
 
 pub mod facade_support {
     pub use crate::runtime::effect::bind_store_turn_control_authority;
+    pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.

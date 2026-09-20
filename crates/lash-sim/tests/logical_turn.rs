@@ -335,6 +335,7 @@ async fn whole_runtime_host_config_without_resolver_uses_builder_provider() {
         .await
         .expect("open builder-provider session");
     session
+        .durable()
         .enqueue(TurnInput::text("use the builder provider"))
         .send()
         .await
@@ -459,6 +460,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .await
         .expect("open sim session");
     let first = session
+        .durable()
         .enqueue(TurnInput::text("first queued turn"))
         .id("first")
         .send()
@@ -473,6 +475,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .await
         .expect("first provider call started");
     let second = session
+        .durable()
         .enqueue(TurnInput::text("second queued turn"))
         .id("second")
         .send()
@@ -487,10 +490,12 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .expect("switch commit reached observable boundary");
 
     let pending_at_commit = session
+        .durable()
         .pending_turn_inputs()
         .await
         .expect("pending inputs at switch commit");
     let queued_at_commit = session
+        .durable()
         .queued_work()
         .await
         .expect("outbox at switch commit");
@@ -556,6 +561,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
     );
     assert_eq!(
         session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("pending after follow-on")
@@ -590,12 +596,20 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
     );
     assert!(
         session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("final inputs")
             .is_empty()
     );
-    assert!(session.queued_work().await.expect("final queue").is_empty());
+    assert!(
+        session
+            .durable()
+            .queued_work()
+            .await
+            .expect("final queue")
+            .is_empty()
+    );
 }
 
 struct BoundedSwitchTools {
@@ -686,6 +700,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("open finish session");
     finish_session
+        .durable()
         .enqueue(TurnInput::text("finish claimed input"))
         .send()
         .await
@@ -725,6 +740,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("open cancel session");
     cancel_session
+        .durable()
         .enqueue(TurnInput::text("cancel claimed input"))
         .send()
         .await
@@ -763,6 +779,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("open error session");
     error_session
+        .durable()
         .enqueue(TurnInput::items([InputItem::attachment(
             lash_core::AttachmentSource::external_url(
                 lash_core::MediaType::parse("application/pdf").unwrap(),
@@ -824,6 +841,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("open bound session");
     bound_session
+        .durable()
         .enqueue(TurnInput::text("run beyond the frame switch bound"))
         .send()
         .await
@@ -848,6 +866,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
     assert_eq!(call_index.load(Ordering::SeqCst), SWITCH_BOUND);
     assert!(
         bound_session
+            .durable()
             .queued_work()
             .await
             .expect("bounded queue")
@@ -855,6 +874,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
     );
     assert!(
         bound_session
+            .durable()
             .pending_turn_inputs()
             .await
             .expect("bounded inputs")
@@ -938,6 +958,7 @@ finish({ baton: baton });
         .await
         .expect("open RLM seed session");
     session
+        .durable()
         .enqueue(TurnInput::text("switch with an RLM seed"))
         .send()
         .await
@@ -1067,6 +1088,7 @@ await control.continue_as({
         .await
         .expect("open shadowed-control session");
     session
+        .durable()
         .enqueue(TurnInput::text("bind a local `control`"))
         .send()
         .await
@@ -1087,6 +1109,7 @@ await control.continue_as({
     let calls_after_binding = call_index.load(Ordering::SeqCst);
 
     session
+        .durable()
         .enqueue(TurnInput::text("switch with an RLM seed"))
         .send()
         .await
