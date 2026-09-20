@@ -488,7 +488,7 @@ fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
 
     let error = state
         .restore_execution_state(&lash_core::plugin::HydratedExecutionState {
-            root: old_snapshot,
+            root: old_snapshot.into(),
             components: BTreeMap::new(),
         })
         .expect_err("old JSON must not have a compatibility decoder");
@@ -622,7 +622,8 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
             files: BTreeMap::new(),
             deferred_resolutions: Default::default(),
         })
-        .expect("previous envelope"),
+        .expect("previous envelope")
+        .into(),
         components: BTreeMap::new(),
     };
     let mut target = RlmExecutionState::new();
@@ -674,7 +675,8 @@ fn previous_snapshot_version_is_typed_rejection_for_missing_child_attempt_bound(
             deferred_resolutions: Default::default(),
             deferred_trigger_resolutions: Default::default(),
         })
-        .expect("encode version-19 root"),
+        .expect("encode version-19 root")
+        .into(),
         components: BTreeMap::new(),
     };
     let mut target = RlmExecutionState::for_engine("lashlang");
@@ -724,9 +726,10 @@ fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
             })
             .into_iter()
             .collect();
-        let mut components = BTreeMap::from([(global_component.clone(), global_body.clone())]);
+        let mut components =
+            BTreeMap::from([(global_component.clone(), global_body.clone().into())]);
         if include_file_leaf {
-            components.insert(file_component, file_body);
+            components.insert(file_component, file_body.into());
         }
         let hydration = lash_core::plugin::HydratedExecutionState {
             root: rmp_serde::to_vec_named(&PreviousEnvelope {
@@ -743,7 +746,8 @@ fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
                 files,
                 deferred_resolutions: Default::default(),
             })
-            .expect("encode previous root"),
+            .expect("encode previous root")
+            .into(),
             components,
         };
 
@@ -784,7 +788,8 @@ fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
             files: BTreeMap::new(),
             deferred_resolutions: Default::default(),
         })
-        .expect("encode v14 root with unexpected files field"),
+        .expect("encode v14 root with unexpected files field")
+        .into(),
         components: BTreeMap::new(),
     };
     let mut target = RlmExecutionState::for_engine("lashlang");
@@ -1012,7 +1017,7 @@ fn restore_rejects_a_leaf_whose_body_does_not_match_its_content_address() {
     let mut tampered = hydration.clone();
     tampered
         .components
-        .insert(key.clone(), b"tampered body".to_vec());
+        .insert(key.clone(), b"tampered body".as_slice().into());
 
     let error = live
         .restore_execution_state(&tampered)
@@ -1041,7 +1046,7 @@ fn restore_rejects_a_hydration_carrying_a_leaf_the_root_does_not_reference() {
     let mut tampered = hydration.clone();
     tampered
         .components
-        .insert(surplus.clone(), b"orphan".to_vec());
+        .insert(surplus.clone(), b"orphan".as_slice().into());
 
     let error = live
         .restore_execution_state(&tampered)

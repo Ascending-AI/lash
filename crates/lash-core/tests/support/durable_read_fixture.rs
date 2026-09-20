@@ -561,7 +561,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             .expect("build distinctive fixture tool state"),
     ));
     loaded.set_plugin_state(Some(fixture_plugin_state()));
-    loaded.set_execution_state_snapshot(Some(vec![0x46, 0x49, 0x47, 0x38, 0x38, 0x37]));
+    loaded.set_execution_state_snapshot(Some(vec![0x46, 0x49, 0x47, 0x38, 0x38, 0x37].into()));
     let usage = TokenLedgerEntry {
         source: "durable-read-turn".to_string(),
         model: "durable-read-model".to_string(),

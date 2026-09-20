@@ -996,7 +996,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
     .await;
     runtime
         .state
-        .set_execution_state_snapshot(Some(b"old-frame-root".to_vec()));
+        .set_execution_state_snapshot(Some(b"old-frame-root".to_vec().into()));
     let old_frame = runtime.state.current_frame_node_id.clone();
     let mut replacement = runtime.state.clone();
     lash_core::runtime::state::open_agent_frame_in_state_with_clock(

@@ -24,7 +24,7 @@ where
         session_id: SessionId::from("checkpoint-component-refs"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    state.set_execution_state_snapshot(Some(b"known-execution-state".to_vec()));
+    state.set_execution_state_snapshot(Some(b"known-execution-state".to_vec().into()));
     let mut first_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     first_commit.checkpoint.components.extend([
         (
@@ -232,7 +232,7 @@ where
         crate::HydratedCheckpointComponent::Changed {
             encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION + 1,
             body_ref: crate::store::BlobRef::for_content(b"unsupported"),
-            body: b"unsupported".to_vec(),
+            body: b"unsupported".as_slice().into(),
         },
     );
     let mismatch_error = cold_reopen

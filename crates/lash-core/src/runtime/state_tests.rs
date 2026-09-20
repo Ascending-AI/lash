@@ -69,10 +69,11 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     let mut snapshot_a = crate::plugin::ExecutionStateSnapshot::from_root(Some(
         br#"{"generation":"a","leaves":["execution_state/leaf-a","execution_state/leaf-b"]}"#
-            .to_vec(),
+            .as_slice()
+            .into(),
     ));
-    snapshot_a.changed_component(LEAF_A, b"generation-a leaf-a".to_vec());
-    snapshot_a.changed_component(LEAF_B, b"generation-a leaf-b".to_vec());
+    snapshot_a.changed_component(LEAF_A, b"generation-a leaf-a".as_slice());
+    snapshot_a.changed_component(LEAF_B, b"generation-a leaf-b".as_slice());
     generation_a
         .set_execution_state_components(snapshot_a)
         .expect("stage valid generation-A two-leaf execution state");
@@ -89,7 +90,8 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     generation_b.apply_persisted_commit_result(result_a.clone());
     let mut snapshot_b = crate::plugin::ExecutionStateSnapshot::from_root(Some(
         br#"{"generation":"b","leaves":["execution_state/leaf-a","execution_state/leaf-b"]}"#
-            .to_vec(),
+            .as_slice()
+            .into(),
     ));
     snapshot_b.unchanged_component(LEAF_A);
     snapshot_b.unchanged_component(LEAF_B);

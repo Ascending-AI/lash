@@ -1340,7 +1340,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    state.set_execution_state_snapshot(Some(old_version_snapshot));
+    state.set_execution_state_snapshot(Some(old_version_snapshot.into()));
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .provider(mock_provider())

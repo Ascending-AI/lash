@@ -338,7 +338,7 @@ where
 
 async fn put_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    blobs: &std::collections::BTreeMap<String, Vec<u8>>,
+    blobs: &std::collections::BTreeMap<String, std::sync::Arc<[u8]>>,
 ) -> Result<(), StoreError> {
     let blobs = blobs.iter().collect::<Vec<_>>();
     for chunk in blobs.chunks(CHECKPOINT_COMPONENT_REF_CHUNK_SIZE) {
@@ -348,7 +348,7 @@ async fn put_checkpoint_blobs_tx(
             .collect::<Vec<_>>();
         let contents = chunk
             .iter()
-            .map(|(_, content)| content.as_slice())
+            .map(|(_, content)| &content[..])
             .collect::<Vec<_>>();
         sqlx::query(
             "INSERT INTO lash_blobs (hash, content)
@@ -450,7 +450,7 @@ async fn lock_checkpoint_blobs_tx(
 async fn checkpoint_component_bodies_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     manifest: &SessionCheckpoint,
-) -> Result<std::collections::HashMap<String, Vec<u8>>, StoreError> {
+) -> Result<std::collections::HashMap<String, std::sync::Arc<[u8]>>, StoreError> {
     let blob_refs = manifest
         .components
         .values()
@@ -465,7 +465,10 @@ async fn checkpoint_component_bodies_tx(
             .await
             .map_err(store_sqlx_error)?;
         for row in rows {
-            bodies.insert(row.get::<String, _>(0), row.get::<Vec<u8>, _>(1));
+            bodies.insert(
+                row.get::<String, _>(0),
+                std::sync::Arc::from(row.get::<Vec<u8>, _>(1)),
+            );
         }
     }
     Ok(bodies)
@@ -502,7 +505,7 @@ pub(crate) async fn put_checkpoint_tx(
     acquisition_order.push((checkpoint_ref.as_str().to_string(), None));
     acquisition_order.sort();
     let mut supplied_blobs = std::collections::BTreeMap::new();
-    supplied_blobs.insert(checkpoint_ref.as_str().to_string(), bytes);
+    supplied_blobs.insert(checkpoint_ref.as_str().to_string(), bytes.into());
     for (key, descriptor) in &manifest.components {
         let component =
             checkpoint
@@ -513,14 +516,12 @@ pub(crate) async fn put_checkpoint_tx(
                     message: format!("manifest projection lost component `{key}`"),
                 })?;
         let (stored_ref, body) = match component {
-            HydratedCheckpointComponent::Changed { body_ref, body, .. } => {
-                (body_ref.clone(), body.as_slice())
-            }
+            HydratedCheckpointComponent::Changed { body_ref, body, .. } => (body_ref.clone(), body),
             HydratedCheckpointComponent::Hydrated { body, .. } => {
                 let stored_ref = BlobRef::for_content(body);
                 #[cfg(feature = "perf-witness")]
                 lash_core::perf_witness::record_hash_pass(body.len());
-                (stored_ref, body.as_slice())
+                (stored_ref, body)
             }
             HydratedCheckpointComponent::Unchanged { .. } => continue,
         };
@@ -529,12 +530,9 @@ pub(crate) async fn put_checkpoint_tx(
             &stored_ref,
             &descriptor.blob_ref,
         )?;
-        supplied_blobs.entry(stored_ref.0).or_insert_with(|| {
-            let copied = body.to_vec();
-            #[cfg(feature = "perf-witness")]
-            lash_core::perf_witness::record_body_copy(body.len());
-            copied
-        });
+        supplied_blobs
+            .entry(stored_ref.0)
+            .or_insert_with(|| std::sync::Arc::clone(body));
     }
     put_checkpoint_blobs_tx(tx, &supplied_blobs).await?;
     lock_checkpoint_blobs_tx(tx, &acquisition_order).await?;
@@ -580,12 +578,12 @@ pub(crate) async fn get_checkpoint_tx(
                 blob_ref: descriptor.blob_ref.clone(),
             }
         })?;
-        let bytes = body.clone();
-        #[cfg(feature = "perf-witness")]
-        lash_core::perf_witness::record_body_copy(body.len());
         components.insert(
             key.clone(),
-            lash_core::HydratedCheckpointComponent::hydrated(descriptor.clone(), bytes),
+            lash_core::HydratedCheckpointComponent::hydrated(
+                descriptor.clone(),
+                std::sync::Arc::clone(body),
+            ),
         );
     }
     Ok(Some(HydratedSessionCheckpoint {

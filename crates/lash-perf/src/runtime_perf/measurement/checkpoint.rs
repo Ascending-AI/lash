@@ -370,7 +370,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             + loaded_execution_state
                 .components
                 .values()
-                .map(Vec::len)
+                .map(|v| v.len())
                 .sum::<usize>()) as u64;
 
         let (_, phase) = measure_runtime_perf_phase("checkpoint_state.execution_restore", || {
@@ -511,7 +511,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
 
 fn changed_execution_state_components(
     snapshot: &lash_core::plugin::ExecutionStateSnapshot,
-) -> anyhow::Result<BTreeMap<String, Vec<u8>>> {
+) -> anyhow::Result<BTreeMap<String, Arc<[u8]>>> {
     snapshot
         .components
         .iter()
@@ -530,18 +530,19 @@ fn execution_state_from_checkpoint(
     checkpoint: &lash_core::HydratedSessionCheckpoint,
 ) -> anyhow::Result<lash_core::plugin::HydratedExecutionState> {
     let root = checkpoint
-        .component_body(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
-        .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted execution-state root"))?
-        .to_vec();
+        .component(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+        .and_then(lash_core::HydratedCheckpointComponent::body_arc)
+        .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted execution-state root"))?;
     let mut components = BTreeMap::new();
     for key in checkpoint.components.keys() {
         if !key.starts_with("execution_state/") {
             continue;
         }
         let body = checkpoint
-            .component_body(key)
+            .component(key)
+            .and_then(lash_core::HydratedCheckpointComponent::body_arc)
             .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted body for `{key}`"))?;
-        components.insert(key.clone(), body.to_vec());
+        components.insert(key.clone(), body);
     }
     Ok(lash_core::plugin::HydratedExecutionState { root, components })
 }

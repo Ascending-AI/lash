@@ -1397,7 +1397,7 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
             returned_state: &returned_state,
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Replace(
-                crate::plugin::ExecutionStateSnapshot::from_root(Some(b"runtime".to_vec())),
+                crate::plugin::ExecutionStateSnapshot::from_root(Some(b"runtime".to_vec().into())),
             ),
             agent_frame_switch_materializes: false,
             store: Some(&store),
@@ -1691,7 +1691,7 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
     state.token_ledger = usage.clone();
     state.set_tool_state_snapshot(Some(crate::ToolState::default()));
     state.set_plugin_state(Some(crate::PluginState::default()));
-    state.set_execution_state_snapshot(Some(b"runtime".to_vec()));
+    state.set_execution_state_snapshot(Some(b"runtime".to_vec().into()));
     let mut pipeline = TurnBoundary::from_state(state);
     let returned_state = pipeline.export_state_for_assembly();
 
@@ -1736,7 +1736,7 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
     // Without a store the committed execution snapshot is the only accepted
     // copy, so the storeless release keeps it resident for a later restore.
     assert_eq!(
-        state.execution_state_snapshot(),
+        state.execution_state_snapshot().as_deref(),
         Some(b"runtime".as_slice()),
         "storeless commits retain the accepted execution snapshot"
     );

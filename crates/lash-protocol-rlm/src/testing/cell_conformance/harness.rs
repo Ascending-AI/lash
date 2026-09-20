@@ -209,7 +209,7 @@ impl Session {
     /// everything. This is the number that gets stored per turn.
     pub(crate) fn persisted_bytes(&self) -> usize {
         let hydrated = self.persisted_state();
-        hydrated.root.len() + hydrated.components.values().map(Vec::len).sum::<usize>()
+        hydrated.root.len() + hydrated.components.values().map(|v| v.len()).sum::<usize>()
     }
 
     /// Runs a cell through the VM's process-mode effect boundary, snapshots

@@ -1,4 +1,25 @@
 use super::*;
+use std::sync::Arc;
+
+/// `serde_bytes` wire shape for an `Arc<[u8]>` body: identical bytes encoding
+/// on serialize, one copy into the shared buffer on deserialize.
+mod arc_serde_bytes {
+    use std::sync::Arc;
+
+    pub(super) fn serialize<S: serde::Serializer>(
+        body: &Arc<[u8]>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(body)
+    }
+
+    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Arc<[u8]>, D::Error> {
+        let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
+        Ok(Arc::from(bytes))
+    }
+}
 
 pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 3;
 
@@ -82,16 +103,16 @@ pub enum HydratedCheckpointComponent {
         /// Content address derived when the changed body entered the commit plan.
         #[serde(skip_serializing)]
         body_ref: BlobRef,
-        #[serde(with = "serde_bytes")]
-        body: Vec<u8>,
+        #[serde(with = "arc_serde_bytes")]
+        body: Arc<[u8]>,
     },
     Unchanged {
         descriptor: CheckpointComponentDescriptor,
     },
     Hydrated {
         descriptor: CheckpointComponentDescriptor,
-        #[serde(with = "serde_bytes")]
-        body: Vec<u8>,
+        #[serde(with = "arc_serde_bytes")]
+        body: Arc<[u8]>,
     },
 }
 
@@ -104,16 +125,16 @@ impl<'de> serde::Deserialize<'de> for HydratedCheckpointComponent {
         enum SerializedHydratedCheckpointComponent {
             Changed {
                 encoding_version: u32,
-                #[serde(with = "serde_bytes")]
-                body: Vec<u8>,
+                #[serde(with = "arc_serde_bytes")]
+                body: Arc<[u8]>,
             },
             Unchanged {
                 descriptor: CheckpointComponentDescriptor,
             },
             Hydrated {
                 descriptor: CheckpointComponentDescriptor,
-                #[serde(with = "serde_bytes")]
-                body: Vec<u8>,
+                #[serde(with = "arc_serde_bytes")]
+                body: Arc<[u8]>,
             },
         }
 
@@ -144,11 +165,11 @@ impl HydratedCheckpointComponent {
     /// to smuggle bytes encoded for a different version. The content address is
     /// retained beside the body so every later commit projection can reuse the
     /// same digest.
-    pub fn changed(body: Vec<u8>) -> Self {
-        Self::changed_with_encoding_version(body, CHECKPOINT_COMPONENT_ENCODING_VERSION)
+    pub fn changed(body: impl Into<Arc<[u8]>>) -> Self {
+        Self::changed_with_encoding_version(body.into(), CHECKPOINT_COMPONENT_ENCODING_VERSION)
     }
 
-    fn changed_with_encoding_version(body: Vec<u8>, encoding_version: u32) -> Self {
+    fn changed_with_encoding_version(body: Arc<[u8]>, encoding_version: u32) -> Self {
         let body_ref = BlobRef::for_content(&body);
         #[cfg(feature = "perf-witness")]
         crate::perf_witness::record_hash_pass(body.len());
@@ -178,8 +199,11 @@ impl HydratedCheckpointComponent {
     /// loaded checkpoint manifest. The caller must supply the bytes named by
     /// `descriptor`; [`HydratedSessionCheckpoint::manifest`] verifies their
     /// content address before the value may be projected back to a root.
-    pub fn hydrated(descriptor: CheckpointComponentDescriptor, body: Vec<u8>) -> Self {
-        Self::Hydrated { descriptor, body }
+    pub fn hydrated(descriptor: CheckpointComponentDescriptor, body: impl Into<Arc<[u8]>>) -> Self {
+        Self::Hydrated {
+            descriptor,
+            body: body.into(),
+        }
     }
 
     /// Returns the codec version that governs this component's logical bytes.
@@ -224,6 +248,18 @@ impl HydratedCheckpointComponent {
     pub fn body(&self) -> Option<&[u8]> {
         match self {
             Self::Changed { body, .. } | Self::Hydrated { body, .. } => Some(body),
+            Self::Unchanged { .. } => None,
+        }
+    }
+
+    /// Returns a shared handle to the carried body bytes, if any.
+    ///
+    /// Integrator class (ADR 0051): same contract as [`Self::body`], but the
+    /// clone is a refcount bump instead of a `to_vec` copy — callers that keep
+    /// or forward the bytes should prefer it.
+    pub fn body_arc(&self) -> Option<Arc<[u8]>> {
+        match self {
+            Self::Changed { body, .. } | Self::Hydrated { body, .. } => Some(Arc::clone(body)),
             Self::Unchanged { .. } => None,
         }
     }
@@ -342,13 +378,16 @@ impl HydratedSessionCheckpoint {
     /// Opaque owners such as protocol execution state use this instead of
     /// [`Self::decode_component`]: Lash validates the envelope but does not
     /// interpret owner-defined body bytes.
-    pub(crate) fn checked_component_body(&self, key: &str) -> Result<Option<&[u8]>, StoreError> {
+    pub(crate) fn checked_component_body(
+        &self,
+        key: &str,
+    ) -> Result<Option<Arc<[u8]>>, StoreError> {
         let Some(component) = self.component(key) else {
             return Ok(None);
         };
         ensure_checkpoint_component_encoding_version(key, component.encoding_version())?;
         component
-            .body()
+            .body_arc()
             .map(Some)
             .ok_or_else(|| StoreError::StoredDataCorrupt {
                 record_kind: "HydratedSessionCheckpoint",
@@ -369,7 +408,7 @@ impl HydratedSessionCheckpoint {
         let Some(body) = self.checked_component_body(key)? else {
             return Ok(None);
         };
-        rmp_serde::from_slice(body)
+        rmp_serde::from_slice(&body)
             .map(Some)
             .map_err(|error| StoreError::StoredDataCorrupt {
                 record_kind: "SessionCheckpoint component",
@@ -432,7 +471,7 @@ mod checkpoint_tests {
                 HydratedCheckpointComponent::Changed {
                     encoding_version: CHECKPOINT_COMPONENT_ENCODING_VERSION + 1,
                     body_ref: BlobRef::for_content(b"owner-defined"),
-                    body: b"owner-defined".to_vec(),
+                    body: Arc::from(&b"owner-defined"[..]),
                 },
             )]
             .into_iter()

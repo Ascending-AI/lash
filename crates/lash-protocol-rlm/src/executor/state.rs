@@ -406,12 +406,12 @@ fn body_prefers_leaf(encoded_len: usize) -> bool {
 fn persist_value_body(
     body: Vec<u8>,
     prior_leaf_keys: &BTreeSet<String>,
-    changed_leaves: &mut BTreeMap<String, Vec<u8>>,
+    changed_leaves: &mut BTreeMap<String, Arc<[u8]>>,
 ) -> PersistedValue {
     if body_prefers_leaf(body.len()) {
         let component = leaf_component_key(&body);
         if !prior_leaf_keys.contains(&component) {
-            changed_leaves.insert(component.clone(), body);
+            changed_leaves.insert(component.clone(), body.into());
         }
         PersistedValue::Leaf { component }
     } else {
@@ -474,7 +474,7 @@ fn resolve_leaf<'a>(
     let body = state
         .components
         .get(component)
-        .map(Vec::as_slice)
+        .map(Arc::as_ref)
         .ok_or_else(|| RlmSnapshotError::MissingLeaf {
             logical_key: logical_key.to_string(),
             component: component.to_string(),
@@ -890,7 +890,8 @@ impl RlmExecutionState {
         })?;
 
         let leaf_keys = root_leaf_keys(&root);
-        let mut snapshot = lash_core::plugin::ExecutionStateSnapshot::from_root(Some(encoded));
+        let mut snapshot =
+            lash_core::plugin::ExecutionStateSnapshot::from_root(Some(encoded.into()));
         for key in &leaf_keys {
             if let Some(body) = changed_leaves.remove(key) {
                 snapshot.changed_component(key.clone(), body);

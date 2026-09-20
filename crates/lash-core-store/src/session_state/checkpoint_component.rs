@@ -6,6 +6,8 @@
 //! an unchanged component is `ResidentCheckpointComponentBody`'s payload
 //! `None`.
 
+use std::sync::Arc;
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub(super) enum ResidentCheckpointComponentBody {
     ToolState {
@@ -16,8 +18,8 @@ pub(super) enum ResidentCheckpointComponentBody {
         snapshot: Option<crate::PluginState>,
         generations: std::collections::BTreeMap<String, u64>,
     },
-    ExecutionState(Option<Vec<u8>>),
-    Opaque(Option<Vec<u8>>),
+    ExecutionState(Option<Arc<[u8]>>),
+    Opaque(Option<Arc<[u8]>>),
 }
 
 /// A body pending its next commit: ADR 0056's "present body" state, where the
@@ -32,8 +34,8 @@ pub(super) enum PendingCheckpointComponentBody {
         snapshot: crate::PluginState,
         generations: std::collections::BTreeMap<String, u64>,
     },
-    ExecutionState(Vec<u8>),
-    Opaque(Vec<u8>),
+    ExecutionState(Arc<[u8]>),
+    Opaque(Arc<[u8]>),
 }
 
 impl PendingCheckpointComponentBody {
@@ -149,31 +151,31 @@ impl ResidentCheckpointComponent {
         }
     }
 
-    pub(super) fn execution_state_body(&self) -> Option<&[u8]> {
+    pub(super) fn execution_state_body(&self) -> Option<Arc<[u8]>> {
         match self {
             Self::Unchanged {
                 body: ResidentCheckpointComponentBody::ExecutionState(body),
                 ..
-            } => body.as_deref(),
+            } => body.clone(),
             Self::Changed {
                 body: PendingCheckpointComponentBody::ExecutionState(body),
                 ..
-            } => Some(body),
+            } => Some(Arc::clone(body)),
             _ => None,
         }
     }
 
     /// The resident bytes of a keyed execution-state leaf.
-    pub(super) fn opaque_body(&self) -> Option<&[u8]> {
+    pub(super) fn opaque_body(&self) -> Option<Arc<[u8]>> {
         match self {
             Self::Unchanged {
                 body: ResidentCheckpointComponentBody::Opaque(body),
                 ..
-            } => body.as_deref(),
+            } => body.clone(),
             Self::Changed {
                 body: PendingCheckpointComponentBody::Opaque(body),
                 ..
-            } => Some(body),
+            } => Some(Arc::clone(body)),
             _ => None,
         }
     }
@@ -186,7 +188,7 @@ impl ResidentCheckpointComponent {
                 std::mem::replace(body, ResidentCheckpointComponentBody::Opaque(None))
             }
             Self::Changed { body, .. } => {
-                std::mem::replace(body, PendingCheckpointComponentBody::Opaque(Vec::new()))
+                std::mem::replace(body, PendingCheckpointComponentBody::Opaque(Arc::default()))
                     .into_resident()
             }
         };

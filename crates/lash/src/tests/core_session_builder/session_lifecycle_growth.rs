@@ -171,7 +171,8 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
             LARGE_BINDINGS,
             "sixteen distinct large leaves"
         );
-        let state_bytes = state.root.len() + state.components.values().map(Vec::len).sum::<usize>();
+        let state_bytes =
+            state.root.len() + state.components.values().map(|v| v.len()).sum::<usize>();
         assert!(state_bytes > LARGE_BINDINGS * VALUE_BYTES);
         samples.lock_recover().clear();
         let mut peaks = Vec::new();

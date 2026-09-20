@@ -229,7 +229,7 @@ impl Store {
     fn checkpoint_component_bodies_conn(
         conn: &Connection,
         checkpoint: &SessionCheckpoint,
-    ) -> Result<std::collections::HashMap<String, Vec<u8>>, StoreError> {
+    ) -> Result<std::collections::HashMap<String, std::sync::Arc<[u8]>>, StoreError> {
         let blob_refs = checkpoint
             .components
             .values()
@@ -255,7 +255,7 @@ impl Store {
             for row in rows {
                 let (hash, bytes) = row.map_err(sqlite_error)?;
                 let body = decode_artifact_blob(&bytes)?;
-                bodies.insert(hash, body);
+                bodies.insert(hash, std::sync::Arc::from(body));
             }
         }
         Ok(bodies)
@@ -294,12 +294,12 @@ impl Store {
                     blob_ref: descriptor.blob_ref.clone(),
                 }
             })?;
-            let bytes = body.clone();
-            #[cfg(feature = "perf-witness")]
-            lash_core::perf_witness::record_body_copy(body.len());
             components.insert(
                 key.clone(),
-                lash_core::HydratedCheckpointComponent::hydrated(descriptor.clone(), bytes),
+                lash_core::HydratedCheckpointComponent::hydrated(
+                    descriptor.clone(),
+                    std::sync::Arc::clone(body),
+                ),
             );
         }
         Ok(Some(HydratedSessionCheckpoint {

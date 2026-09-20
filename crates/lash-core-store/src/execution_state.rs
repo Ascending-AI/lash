@@ -3,6 +3,7 @@ use serde::de::DeserializeOwned;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Complete protocol-owned execution-state component update for one checkpoint.
 ///
@@ -12,20 +13,22 @@ use std::collections::BTreeMap;
 /// An absent key is deleted. An absent root requires an empty leaf set.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ExecutionStateSnapshot {
-    pub root: Option<Vec<u8>>,
+    pub root: Option<Arc<[u8]>>,
     pub components: BTreeMap<String, ExecutionStateComponentSnapshot>,
 }
 impl ExecutionStateSnapshot {
-    pub fn from_root(root: Option<Vec<u8>>) -> Self {
+    pub fn from_root(root: Option<Arc<[u8]>>) -> Self {
         Self {
             root,
             components: BTreeMap::new(),
         }
     }
 
-    pub fn changed_component(&mut self, key: impl Into<String>, body: Vec<u8>) {
-        self.components
-            .insert(key.into(), ExecutionStateComponentSnapshot::Changed(body));
+    pub fn changed_component(&mut self, key: impl Into<String>, body: impl Into<Arc<[u8]>>) {
+        self.components.insert(
+            key.into(),
+            ExecutionStateComponentSnapshot::Changed(body.into()),
+        );
     }
 
     pub fn unchanged_component(&mut self, key: impl Into<String>) {
@@ -46,14 +49,14 @@ impl ExecutionStateSnapshot {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExecutionStateComponentSnapshot {
-    Changed(Vec<u8>),
+    Changed(Arc<[u8]>),
     Unchanged,
 }
 /// Fully hydrated protocol-owned execution state supplied during restore.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HydratedExecutionState {
-    pub root: Vec<u8>,
-    pub components: BTreeMap<String, Vec<u8>>,
+    pub root: Arc<[u8]>,
+    pub components: BTreeMap<String, Arc<[u8]>>,
 }
 /// Plugin-owned options carried on a `SessionCreateRequest`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

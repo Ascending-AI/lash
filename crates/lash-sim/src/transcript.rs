@@ -634,7 +634,7 @@ mod tests {
         };
         state.set_tool_state_snapshot(Some(tool_state(1)));
         state.set_plugin_state(Some(PluginState::default()));
-        state.set_execution_state_snapshot(Some(b"first execution state".to_vec()));
+        state.set_execution_state_snapshot(Some(b"first execution state".to_vec().into()));
         let first = store
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await
@@ -644,7 +644,7 @@ mod tests {
         state.turn_index = 2;
         state.set_tool_state_snapshot(Some(tool_state(2)));
         state.set_plugin_state(Some(PluginState::default()));
-        state.set_execution_state_snapshot(Some(b"changed execution state".to_vec()));
+        state.set_execution_state_snapshot(Some(b"changed execution state".to_vec().into()));
         let second = store
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
             .await

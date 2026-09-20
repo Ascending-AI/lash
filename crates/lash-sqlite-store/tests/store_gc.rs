@@ -275,7 +275,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .await
         .expect("create retained session");
     let mut deleted_state = factory_state(&deleted_store, &SessionId::from("delete/me"), 0).await;
-    deleted_state.set_execution_state_snapshot(Some(vec![1, 2, 3]));
+    deleted_state.set_execution_state_snapshot(Some(vec![1, 2, 3].into()));
     deleted_store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&deleted_state, &[]))
         .await
