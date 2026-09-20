@@ -472,16 +472,10 @@ async fn run_generated_evidence_profile(
     let events_sha256 = write_event_lines(&artifact_root.join(GENERATED_SIM_EVENTS), &event_lines)?;
     write_failure_artifact_shape(artifact_root)?;
 
-    let oracle_passes = oracle_verdicts
-        .iter()
-        .filter(|verdict| verdict.status == OracleStatus::Passed)
-        .count();
-    let oracle_failures = oracle_verdicts.len() - oracle_passes;
-    let real_observation_oracles = oracle_verdicts
-        .iter()
-        .filter(|verdict| verdict.observation_class == OracleObservationClass::RealObservation)
-        .count();
-    let model_property_oracles = oracle_verdicts.len() - real_observation_oracles;
+    let mut oracle_census = OracleCensus::default();
+    for verdict in &oracle_verdicts {
+        oracle_census.record(verdict);
+    }
     let scheduler_controlled_boundaries = event_lines
         .iter()
         .filter(|line| line.event.scheduler.scheduler_controlled)
@@ -494,14 +488,6 @@ async fn run_generated_evidence_profile(
                 .get(PendingRuntimeBoundary::PAYLOAD_KEY)
                 .is_some()
         })
-        .count();
-    let scenario_contract_oracles = oracle_verdicts
-        .iter()
-        .filter(|verdict| verdict.oracle_id.starts_with("sim.oracle.scenario."))
-        .count();
-    let scenario_contract_mini_oracles = oracle_verdicts
-        .iter()
-        .filter(|verdict| verdict.oracle_id.starts_with("sim.oracle.scenario-mini."))
         .count();
     let scenario_contract_slices =
         write_scenario_contract_slices(artifact_root, &event_lines, &oracle_verdicts)?;
@@ -561,15 +547,15 @@ async fn run_generated_evidence_profile(
             replay_reports: reached_seeds,
             minimized_replays: reached_seeds,
             backend_replays: reached_seeds,
-            scenario_contract_oracles,
-            scenario_contract_mini_oracles,
+            scenario_contract_oracles: oracle_census.scenario_contract_oracles(),
+            scenario_contract_mini_oracles: oracle_census.scenario_contract_mini_oracles(),
             scenario_contract_slices: scenario_contract_slice_count,
             scenario_contract_packages: scenario_contract_package_count,
             generated_backend_regression_fixtures: generated_backend_regression_fixture_count,
-            oracle_passes,
-            oracle_failures,
-            real_observation_oracles,
-            model_property_oracles,
+            oracle_passes: oracle_census.oracle_passes(),
+            oracle_failures: oracle_census.oracle_failures(),
+            real_observation_oracles: oracle_census.real_observation_oracles(),
+            model_property_oracles: oracle_census.model_property_oracles(),
             model_store_sessions,
             interleaving_depth_max,
             interleaving_depth_min: if interleaving_depth_min == usize::MAX {
@@ -636,16 +622,10 @@ async fn run_generated_search_profile(
             .semantic_channel_invariant
             .clone(),
     ];
-    let mut oracle_passes = recorded_verdicts
-        .iter()
-        .filter(|verdict| verdict.status == OracleStatus::Passed)
-        .count();
-    let mut oracle_failures = recorded_verdicts.len() - oracle_passes;
-    let mut real_observation_oracles = recorded_verdicts
-        .iter()
-        .filter(|verdict| verdict.observation_class == OracleObservationClass::RealObservation)
-        .count();
-    let mut model_property_oracles = recorded_verdicts.len() - real_observation_oracles;
+    let mut oracle_census = OracleCensus::default();
+    for verdict in &recorded_verdicts {
+        oracle_census.record(verdict);
+    }
 
     let mut provider_matrix_by_kind: BTreeMap<String, GeneratedRuntimeProviderMatrixRow> =
         BTreeMap::new();
@@ -653,8 +633,6 @@ async fn run_generated_search_profile(
     let mut runtime_turn_proofs = 0usize;
     let mut scheduler_controlled_boundaries = 0usize;
     let mut scheduler_owned_runtime_completions = 0usize;
-    let mut scenario_contract_oracles = 0usize;
-    let mut scenario_contract_mini_oracles = 0usize;
     let mut model_store_sessions = 0usize;
     let mut interleaving_depth_max = 0usize;
     let mut interleaving_depth_min = usize::MAX;
@@ -708,33 +686,25 @@ async fn run_generated_search_profile(
         interleaving_depth_min = interleaving_depth_min.min(seed_interleaving_depth);
         model_store_sessions += trace.final_summary.session_count;
         for verdict in &trace.oracles {
-            match verdict.observation_class {
-                OracleObservationClass::RealObservation => real_observation_oracles += 1,
-                OracleObservationClass::ModelProperty => model_property_oracles += 1,
-            }
-            if verdict.oracle_id.starts_with("sim.oracle.scenario-mini.") {
-                scenario_contract_mini_oracles += 1;
-            } else if verdict.oracle_id.starts_with("sim.oracle.scenario.") {
-                scenario_contract_oracles += 1;
-            }
-            if verdict.status == OracleStatus::Passed {
-                oracle_passes += 1;
-            } else {
-                oracle_failures += 1;
+            oracle_census.record(verdict);
+            if verdict.status != OracleStatus::Passed {
                 recorded_verdicts.push(verdict.clone());
             }
         }
 
-        // In-memory determinism replay for every search seed.
+        // In-memory determinism replay for every search seed. The replay
+        // check emits no verdict row, but it is an evaluated oracle check and
+        // joins the census under its own oracle id.
         let replay_outcome = replay_trace(&trace_path, &trace);
-        model_property_oracles += 1;
-        match &replay_outcome {
-            Ok(_) => oracle_passes += 1,
-            Err(_) => oracle_failures += 1,
-        }
+        oracle_census.record_unverdicted(
+            REPLAY_DETERMINISM_ORACLE,
+            match &replay_outcome {
+                Ok(_) => OracleStatus::Passed,
+                Err(_) => OracleStatus::Failed,
+            },
+        );
         let determinism_failure = if seed_index % 20 == 0 {
             determinism_attempted += 1;
-            model_property_oracles += 1;
             let rerun = run_generated_workload(
                 generate_workload(seed, profile, boundary_limit)?,
                 &fixed_manifest.script_bundle_hash,
@@ -744,11 +714,13 @@ async fn run_generated_search_profile(
             match require_identical_simulation_rerun(seed_index, &trace, &rerun) {
                 Ok(()) => {
                     reproduced_identically += 1;
-                    oracle_passes += 1;
+                    oracle_census
+                        .record_unverdicted(REPLAY_DETERMINISM_ORACLE, OracleStatus::Passed);
                     None
                 }
                 Err(err) => {
-                    oracle_failures += 1;
+                    oracle_census
+                        .record_unverdicted(REPLAY_DETERMINISM_ORACLE, OracleStatus::Failed);
                     Some(DeterminismFailure {
                         error: err.to_string(),
                         rerun,
@@ -918,11 +890,6 @@ async fn run_generated_search_profile(
     }
 
     write_failure_artifact_shape(artifact_root)?;
-    debug_assert_eq!(
-        real_observation_oracles + model_property_oracles,
-        oracle_passes + oracle_failures,
-        "every evaluated oracle must contribute to the observation-class census"
-    );
     let generated_runtime_provider_matrix = finish_runtime_provider_matrix(provider_matrix_by_kind);
     let summary_path = artifact_root.join(GENERATED_SIM_SUMMARY);
     let report = GeneratedSimProfileReport {
@@ -968,15 +935,15 @@ async fn run_generated_search_profile(
             replay_reports: 0,
             minimized_replays: 0,
             backend_replays: 0,
-            scenario_contract_oracles,
-            scenario_contract_mini_oracles,
+            scenario_contract_oracles: oracle_census.scenario_contract_oracles(),
+            scenario_contract_mini_oracles: oracle_census.scenario_contract_mini_oracles(),
             scenario_contract_slices: 0,
             scenario_contract_packages: 0,
             generated_backend_regression_fixtures: 0,
-            oracle_passes,
-            oracle_failures,
-            real_observation_oracles,
-            model_property_oracles,
+            oracle_passes: oracle_census.oracle_passes(),
+            oracle_failures: oracle_census.oracle_failures(),
+            real_observation_oracles: oracle_census.real_observation_oracles(),
+            model_property_oracles: oracle_census.model_property_oracles(),
             model_store_sessions,
             interleaving_depth_max,
             interleaving_depth_min: if interleaving_depth_min == usize::MAX {
