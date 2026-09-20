@@ -144,7 +144,12 @@ class FeatureCoverageContractTests(unittest.TestCase):
                   bazel-tests:
                     steps:
                       - name: Test deterministic workspace suite with shared cache
-                        run: bazel test //:workspace_tests //:workspace_compile
+                        run: bazel test //:workspace_tests
+
+                  lint:
+                    steps:
+                      - name: Clippy (workspace, all targets, shared cache)
+                        run: bazel build //:workspace_clippy //:feature_lane_clippy
 
                   repo-gates:
                     steps:

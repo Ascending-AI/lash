@@ -1182,11 +1182,13 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
     if re.search(r"^      - check\s*$", conclusion, re.MULTILINE) is None:
         failures.append("ci-conclusion does not require the baseline check job")
 
-    # The workspace default baseline is the Bazel `//:workspace_compile`
-    # aggregate, carried by the partition job's single invocation.
-    bazel_job = workflow_job_block(workflow, "bazel-tests")
-    if "//:workspace_compile" not in bazel_job:
-        failures.append("bazel-tests does not execute the workspace default baseline")
+    # The workspace default baseline is the Lint job's `//:workspace_clippy`
+    # aggregate: the clippy action type-checks the same all-targets shape the
+    # retired Cargo check lane carried, so the test partition does not need a
+    # second workspace compile on its critical path.
+    lint_job = workflow_job_block(workflow, "lint")
+    if "//:workspace_clippy" not in lint_job:
+        failures.append("lint does not execute the workspace default baseline")
 
     repo_gates = workflow_job_block(workflow, "repo-gates")
     for invocation in (

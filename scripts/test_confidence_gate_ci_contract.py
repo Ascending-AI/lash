@@ -2680,8 +2680,8 @@ derive_mutation_jobs() {{
         self.assertIn("--no-fail-fast", workspace_tests)
 
         # check is the API seal lane, nothing else: the workspace compile
-        # proof moved into the Bazel partition's `//:workspace_compile`
-        # argument. Gates that neither warm nor consume the seal cache are
+        # proof rides the Lint job's `//:workspace_clippy` aggregate. Gates
+        # that neither warm nor consume the seal cache are
         # sibling jobs, not serial steps behind twelve minutes of compilation.
         # Doctests were removed from the repository by ruling (2026-09-13), so
         # no half of this job runs them on either trust path.
