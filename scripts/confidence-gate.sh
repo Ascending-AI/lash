@@ -1138,8 +1138,9 @@ run_state_machine_and_fault_matrix() {
 
   if area_selected trigger; then
     step "Durable trigger fault-matrix evidence"
-    run_cargo_tests -p lash-internal-core --locked sweep_reconciles_reserved_trigger_delivery_without_process
-    run_cargo_tests -p lash-internal-core --locked \
+    run_cargo_tests -p lash-internal-core-worker --locked \
+      sweep_reconciles_reserved_trigger_delivery_without_process
+    run_cargo_tests -p lash-internal-core-worker --locked \
       sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process
   fi
 
