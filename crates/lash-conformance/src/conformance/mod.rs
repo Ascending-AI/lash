@@ -20,6 +20,9 @@
 //! `runtime_persistence_reopenable_tests!`. Each generated test constructs its
 //! own backend fixture and reports the violated law independently. Other
 //! entry points can be called from backend-specific `#[tokio::test]` functions.
+//! A public law that no catalogue row names never runs on any backend;
+//! `scripts/check_conformance_law_registration.py` fails the build in that
+//! case and names the unregistered law.
 
 pub use lash_core::testing::coordinate_tool_provider_with_services;
 
