@@ -257,15 +257,18 @@ description = "stable process-registration definition fingerprint"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/process/validation.rs"]
+paths = [
+  "crates/lash-core-execution/src/runtime/process/validation.rs",
+  "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
+]
 symbols = [
   "process_registration_fingerprint_preimage",
   "project_registration_output_contract",
-  "project_registration_event_type",
-  "project_registration_value_selector",
+  "project_process_event_type",
+  "project_process_value_selector",
   "project_registration_causal_ref",
-  "project_registration_payload_leaf",
-  "project_registration_schema_leaf",
+  "project_process_payload_leaf",
+  "project_process_schema_leaf",
 ]
 
 [[surface]]
@@ -280,16 +283,19 @@ symbols = ["trigger_command_preimage"]
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers/router.rs"]
+paths = [
+  "crates/lash-core-execution/src/triggers/router.rs",
+  "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
+]
 symbols = [
   "project_trigger_owner",
   "project_trigger_actor",
   "project_trigger_draft",
-  "project_trigger_event_type",
-  "project_trigger_value_selector",
+  "project_process_event_type",
+  "project_process_value_selector",
   "project_trigger_process_input",
-  "project_trigger_payload_leaf",
-  "project_trigger_schema_leaf",
+  "project_process_payload_leaf",
+  "project_process_schema_leaf",
 ]
 
 [[surface]]
@@ -314,16 +320,19 @@ description = "stable trigger-subscription definition fingerprint"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers/router.rs"]
+paths = [
+  "crates/lash-core-execution/src/triggers/router.rs",
+  "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
+]
 symbols = [
   "trigger_subscription_definition_preimage",
   "project_trigger_owner",
   "project_trigger_draft",
-  "project_trigger_event_type",
-  "project_trigger_value_selector",
+  "project_process_event_type",
+  "project_process_value_selector",
   "project_trigger_process_input",
-  "project_trigger_payload_leaf",
-  "project_trigger_schema_leaf",
+  "project_process_payload_leaf",
+  "project_process_schema_leaf",
 ]
 
 [[surface]]
@@ -343,8 +352,11 @@ description = "stable default trigger-source key"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers/router.rs"]
-symbols = ["trigger_source_preimage", "project_trigger_payload_leaf"]
+paths = [
+  "crates/lash-core-execution/src/triggers/router.rs",
+  "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
+]
+symbols = ["trigger_source_preimage", "project_process_payload_leaf"]
 
 [[surface]]
 constant = "TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION"

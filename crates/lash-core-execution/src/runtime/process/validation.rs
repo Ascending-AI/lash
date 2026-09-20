@@ -10,6 +10,9 @@ use super::events::{
     ProcessEventSemanticsSpec, ProcessTerminalSemantics, ProcessWakeDelivery,
     default_process_event_types, is_runtime_lifecycle_event_type, runtime_lifecycle_event_type,
 };
+use super::identity_projection::{
+    project_process_event_type, project_process_payload_leaf, project_process_schema_leaf,
+};
 use super::materialization::materialize_process_event_semantics;
 use super::model::{
     AbandonRequest, ProcessExternalRef, ProcessRecord, ProcessRef, ProcessRegistration,
@@ -866,7 +869,7 @@ fn process_registration_fingerprint_preimage(
             fingerprint.string(call_id);
             fingerprint.string(tool_id.as_str());
             fingerprint.string(tool_name);
-            project_registration_payload_leaf(&mut fingerprint, args);
+            project_process_payload_leaf(&mut fingerprint, args);
             fingerprint.optional(replay.as_ref(), |identity, replay| {
                 let lash_sansio::llm::types::ProviderReplayMeta {
                     item_id,
@@ -877,12 +880,12 @@ fn process_registration_fingerprint_preimage(
                 identity.optional(opaque.as_deref(), |identity, value| identity.string(value));
                 identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
             });
-            project_registration_payload_leaf(&mut fingerprint, prepared_payload);
+            project_process_payload_leaf(&mut fingerprint, prepared_payload);
         }
         super::model::ProcessInput::Engine { kind, payload } => {
             fingerprint.tag(2);
             fingerprint.string(kind);
-            project_registration_payload_leaf(&mut fingerprint, payload);
+            project_process_payload_leaf(&mut fingerprint, payload);
         }
         super::model::ProcessInput::SessionTurn {
             definition_key,
@@ -896,7 +899,7 @@ fn process_registration_fingerprint_preimage(
         }
         super::model::ProcessInput::External { metadata } => {
             fingerprint.tag(4);
-            project_registration_payload_leaf(&mut fingerprint, metadata);
+            project_process_payload_leaf(&mut fingerprint, metadata);
         }
     }
     fingerprint.tag(match disposition {
@@ -978,7 +981,7 @@ fn process_registration_fingerprint_preimage(
     fingerprint.sequence(
         application_event_types.iter().copied(),
         |identity, event_type| {
-            project_registration_event_type(identity, event_type);
+            project_process_event_type(identity, event_type);
         },
     );
 
@@ -1003,72 +1006,7 @@ fn project_registration_output_contract(
         } => {
             identity.tag(2);
             identity.string(input_field);
-            identity.optional(default_schema.as_ref(), project_registration_schema_leaf);
-        }
-    }
-}
-
-fn project_registration_event_type(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    event_type: &super::events::ProcessEventType,
-) {
-    let super::events::ProcessEventType {
-        name,
-        payload_schema,
-        semantics,
-    } = event_type;
-    identity.string(name);
-    let crate::LashSchema { schema } = payload_schema;
-    project_registration_schema_leaf(identity, schema);
-    let super::events::ProcessEventSemanticsSpec { terminal, wake } = semantics;
-    identity.optional(terminal.as_ref(), |identity, terminal| {
-        let super::events::ProcessTerminalSpec {
-            status,
-            await_output,
-        } = terminal;
-        identity.tag(match status {
-            super::model::ProcessStatus::Running => 1,
-            super::model::ProcessStatus::Waiting => 2,
-            super::model::ProcessStatus::Completed => 3,
-            super::model::ProcessStatus::Failed => 4,
-            super::model::ProcessStatus::Cancelled => 5,
-            super::model::ProcessStatus::Abandoned => 6,
-            super::model::ProcessStatus::CallerDeparted => 7,
-        });
-        identity.optional(await_output.as_ref(), project_registration_value_selector);
-    });
-    identity.optional(wake.as_ref(), |identity, wake| {
-        let super::events::ProcessWakeSpec { when, input } = wake;
-        identity.optional(when.as_ref(), project_registration_value_selector);
-        project_registration_value_selector(identity, input);
-    });
-}
-
-fn project_registration_value_selector(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    selector: &super::events::ProcessValueSelector,
-) {
-    match selector {
-        super::events::ProcessValueSelector::Payload => identity.tag(1),
-        super::events::ProcessValueSelector::Pointer(pointer) => {
-            identity.tag(2);
-            identity.string(pointer);
-        }
-        super::events::ProcessValueSelector::Const(value) => {
-            identity.tag(3);
-            project_registration_payload_leaf(identity, value);
-        }
-        super::events::ProcessValueSelector::Template { template, fields } => {
-            identity.tag(4);
-            identity.string(template);
-            identity.sequence(fields.iter(), |identity, (name, selector)| {
-                identity.string(name);
-                project_registration_value_selector(identity, selector);
-            });
-        }
-        super::events::ProcessValueSelector::Present(pointer) => {
-            identity.tag(5);
-            identity.string(pointer);
+            identity.optional(default_schema.as_ref(), project_process_schema_leaf);
         }
     }
 }
@@ -1138,20 +1076,6 @@ fn project_registration_causal_ref(
             identity.string(node_id);
         }
     }
-}
-
-fn project_registration_payload_leaf(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    value: &serde_json::Value,
-) {
-    identity.bytes(&crate::identity_json::payload_leaf(value));
-}
-
-fn project_registration_schema_leaf(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    value: &serde_json::Value,
-) {
-    identity.bytes(&crate::identity_json::schema_leaf(value));
 }
 
 /// Fingerprint the normalized registration definition plus its atomic initial

@@ -1,4 +1,7 @@
 use super::*;
+use crate::runtime::process::identity_projection::{
+    project_process_event_type, project_process_payload_leaf, project_process_schema_leaf,
+};
 
 // Bumped to 3 (FIG-2913): the preimage projects the admitted source
 // contract and provider route the subscription now captures.
@@ -159,8 +162,8 @@ pub(super) fn project_trigger_draft(
     identity.optional(name.as_deref(), |identity, name| identity.string(name));
     identity.string(source_type);
     identity.string(source_key);
-    project_trigger_payload_leaf(identity, source);
-    project_trigger_schema_leaf(identity, &payload_schema.schema);
+    project_process_payload_leaf(identity, source);
+    project_process_schema_leaf(identity, &payload_schema.schema);
     project_trigger_source_capture(identity, source_capture);
     project_trigger_process_input(identity, target, family_version);
     let crate::ProcessIdentity {
@@ -176,12 +179,12 @@ pub(super) fn project_trigger_draft(
     // subscription names. The bytes therefore stay identical to the pre-FIG-2992
     // untyped blob and no family rotation is needed.
     identity.optional(definition.as_ref(), |identity, definition| {
-        project_trigger_payload_leaf(identity, definition.definition.as_json());
+        project_process_payload_leaf(identity, definition.definition.as_json());
     });
     let mut event_types = event_types.iter().collect::<Vec<_>>();
     event_types.sort_by(|left, right| left.name.cmp(&right.name));
     identity.sequence(event_types, |identity, event_type| {
-        project_trigger_event_type(identity, event_type);
+        project_process_event_type(identity, event_type);
     });
     identity.sequence(input_template.iter(), |identity, (name, binding)| {
         identity.string(name);
@@ -189,7 +192,7 @@ pub(super) fn project_trigger_draft(
             TriggerInputBinding::Event => identity.tag(1),
             TriggerInputBinding::Fixed { value } => {
                 identity.tag(2);
-                project_trigger_payload_leaf(identity, value);
+                project_process_payload_leaf(identity, value);
             }
         }
     });
@@ -215,78 +218,13 @@ pub(super) fn project_trigger_source_capture(
     identity.sequence(constructor_path.iter(), |identity, segment| {
         identity.string(segment);
     });
-    project_trigger_schema_leaf(identity, &config_schema.schema);
+    project_process_schema_leaf(identity, &config_schema.schema);
     match route {
         TriggerProviderRoute::Resident => identity.tag(1),
         TriggerProviderRoute::Provider { provider_id, route } => {
             identity.tag(2);
             identity.string(provider_id);
-            project_trigger_payload_leaf(identity, route);
-        }
-    }
-}
-
-fn project_trigger_event_type(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    event_type: &crate::ProcessEventType,
-) {
-    let crate::ProcessEventType {
-        name,
-        payload_schema,
-        semantics,
-    } = event_type;
-    identity.string(name);
-    let crate::LashSchema { schema } = payload_schema;
-    project_trigger_schema_leaf(identity, schema);
-    let crate::ProcessEventSemanticsSpec { terminal, wake } = semantics;
-    identity.optional(terminal.as_ref(), |identity, terminal| {
-        let crate::ProcessTerminalSpec {
-            status,
-            await_output,
-        } = terminal;
-        identity.tag(match status {
-            crate::ProcessStatus::Running => 1,
-            crate::ProcessStatus::Waiting => 2,
-            crate::ProcessStatus::Completed => 3,
-            crate::ProcessStatus::Failed => 4,
-            crate::ProcessStatus::Cancelled => 5,
-            crate::ProcessStatus::Abandoned => 6,
-            crate::ProcessStatus::CallerDeparted => 7,
-        });
-        identity.optional(await_output.as_ref(), project_trigger_value_selector);
-    });
-    identity.optional(wake.as_ref(), |identity, wake| {
-        let crate::ProcessWakeSpec { when, input } = wake;
-        identity.optional(when.as_ref(), project_trigger_value_selector);
-        project_trigger_value_selector(identity, input);
-    });
-}
-
-fn project_trigger_value_selector(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    selector: &crate::ProcessValueSelector,
-) {
-    match selector {
-        crate::ProcessValueSelector::Payload => identity.tag(1),
-        crate::ProcessValueSelector::Pointer(pointer) => {
-            identity.tag(2);
-            identity.string(pointer);
-        }
-        crate::ProcessValueSelector::Const(value) => {
-            identity.tag(3);
-            project_trigger_payload_leaf(identity, value);
-        }
-        crate::ProcessValueSelector::Template { template, fields } => {
-            identity.tag(4);
-            identity.string(template);
-            identity.sequence(fields.iter(), |identity, (name, selector)| {
-                identity.string(name);
-                project_trigger_value_selector(identity, selector);
-            });
-        }
-        crate::ProcessValueSelector::Present(pointer) => {
-            identity.tag(5);
-            identity.string(pointer);
+            project_process_payload_leaf(identity, route);
         }
     }
 }
@@ -310,7 +248,7 @@ fn project_trigger_process_input(
             identity.string(call_id);
             identity.string(tool_id.as_str());
             identity.string(tool_name);
-            project_trigger_payload_leaf(identity, args);
+            project_process_payload_leaf(identity, args);
             identity.optional(replay.as_ref(), |identity, replay| {
                 let lash_sansio::llm::types::ProviderReplayMeta {
                     item_id,
@@ -323,12 +261,12 @@ fn project_trigger_process_input(
                     identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
                 }
             });
-            project_trigger_payload_leaf(identity, prepared_payload);
+            project_process_payload_leaf(identity, prepared_payload);
         }
         crate::ProcessInput::Engine { kind, payload } => {
             identity.tag(2);
             identity.string(kind);
-            project_trigger_payload_leaf(identity, payload);
+            project_process_payload_leaf(identity, payload);
         }
         crate::ProcessInput::SessionTurn {
             definition_key,
@@ -346,29 +284,15 @@ fn project_trigger_process_input(
                 } => {
                     identity.tag(2);
                     identity.string(input_field);
-                    identity.optional(default_schema.as_ref(), project_trigger_schema_leaf);
+                    identity.optional(default_schema.as_ref(), project_process_schema_leaf);
                 }
             }
         }
         crate::ProcessInput::External { metadata } => {
             identity.tag(4);
-            project_trigger_payload_leaf(identity, metadata);
+            project_process_payload_leaf(identity, metadata);
         }
     }
-}
-
-pub(super) fn project_trigger_payload_leaf(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    value: &serde_json::Value,
-) {
-    identity.bytes(&crate::identity_json::payload_leaf(value));
-}
-
-pub(super) fn project_trigger_schema_leaf(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    value: &serde_json::Value,
-) {
-    identity.bytes(&crate::identity_json::schema_leaf(value));
 }
 
 pub(super) fn reserve_in_memory_for_occurrence(
@@ -446,7 +370,7 @@ fn trigger_source_preimage(source_type: &str, source: &serde_json::Value) -> Vec
         TRIGGER_SOURCE_FAMILY_VERSION,
     );
     identity.string(source_type);
-    project_trigger_payload_leaf(&mut identity, source);
+    project_process_payload_leaf(&mut identity, source);
     identity.finish()
 }
 
