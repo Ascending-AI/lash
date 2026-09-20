@@ -143,44 +143,57 @@ pub use runtime::{
 };
 
 pub fn format_runtime_diagnostic(source: &str, error: &RuntimeError, span: Option<Span>) -> String {
-    let Some(span) = span else {
-        return format_message_with_hint(&error.to_string(), runtime_hint(error));
-    };
-    format_source_diagnostic(source, span, &error.to_string(), runtime_hint(error))
+    format_source_diagnostic(
+        source,
+        span,
+        &error.to_string(),
+        runtime_hint(error).as_slice(),
+    )
 }
 
 pub fn format_link_diagnostic(source: &str, error: &LinkError) -> String {
     let hint = link_hint(error);
-    match error.span() {
-        Some(span) => format_source_diagnostic(source, span, &error.to_string(), hint.as_deref()),
-        None => format_message_with_hint(&error.to_string(), hint.as_deref()),
-    }
+    format_source_diagnostic(
+        source,
+        error.span(),
+        &error.to_string(),
+        hint.as_deref().as_slice(),
+    )
 }
 
-fn format_source_diagnostic(source: &str, span: Span, message: &str, hint: Option<&str>) -> String {
-    let start = span.start.min(source.len());
-    let (line, column, _line_start, line_end, source_line) = line_column_snippet(source, start);
-    let caret_pad = " ".repeat(column.saturating_sub(1));
-    let underline_len = if start < line_end {
-        let underline_end = span.end.max(start.saturating_add(1)).min(line_end);
-        source[start..underline_end].chars().count().max(1)
-    } else {
-        1
+/// Renders `message` against the submitted `source`: the offending line, a
+/// caret underline under `span`, and each hint on its own `hint:` line. A
+/// `None` span renders the message and hints alone.
+///
+/// Both dialects render through here — TypeScript's `format_diagnostic` is a
+/// thin caller — so a session reads both dialects' failures with the same
+/// eyes.
+pub fn format_source_diagnostic(
+    source: &str,
+    span: Option<Span>,
+    message: &str,
+    hints: &[&str],
+) -> String {
+    let mut diagnostic = match span {
+        Some(span) => {
+            let start = span.start.min(source.len());
+            let (line, column, _line_start, line_end, source_line) =
+                line_column_snippet(source, start);
+            let caret_pad = " ".repeat(column.saturating_sub(1));
+            let underline_len = if start < line_end {
+                let underline_end = span.end.max(start.saturating_add(1)).min(line_end);
+                source[start..underline_end].chars().count().max(1)
+            } else {
+                1
+            };
+            let underline = format!("^{}", "~".repeat(underline_len.saturating_sub(1)));
+            format!(
+                "{message}\n--> line {line}, column {column}\n{source_line}\n{caret_pad}{underline}"
+            )
+        }
+        None => message.to_string(),
     };
-    let underline = format!("^{}", "~".repeat(underline_len.saturating_sub(1)));
-    let mut diagnostic = format!(
-        "{message}\n--> line {line}, column {column}\n{source_line}\n{caret_pad}{underline}"
-    );
-    if let Some(hint) = hint {
-        diagnostic.push_str("\nhint: ");
-        diagnostic.push_str(hint);
-    }
-    diagnostic
-}
-
-fn format_message_with_hint(message: &str, hint: Option<&str>) -> String {
-    let mut diagnostic = message.to_string();
-    if let Some(hint) = hint {
+    for hint in hints {
         diagnostic.push_str("\nhint: ");
         diagnostic.push_str(hint);
     }
@@ -366,11 +379,11 @@ mod tests {
     #[test]
     fn message_hint_format_preserves_message_and_appends_hint() {
         assert_eq!(
-            format_message_with_hint("plain failure", None),
+            format_source_diagnostic("", None, "plain failure", &[]),
             "plain failure"
         );
         assert_eq!(
-            format_message_with_hint("tool failed", Some("inspect `.error`")),
+            format_source_diagnostic("", None, "tool failed", &["inspect `.error`"]),
             "tool failed\nhint: inspect `.error`"
         );
     }

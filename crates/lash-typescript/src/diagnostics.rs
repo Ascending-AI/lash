@@ -662,61 +662,24 @@ impl std::error::Error for Diagnostic {}
 /// handed the cell verbatim, with no wrapper, prelude, or preamble in front of
 /// it — so line 1 here is the model's line 1 and needs no remapping. The layout
 /// is Lashlang's `format_source_diagnostic`, deliberately: a session reads both
-/// dialects' failures with the same eyes.
+/// dialects' failures with the same eyes. This is a thin caller — the snippet,
+/// caret, and hint rendering all live in lashlang.
 pub fn format_diagnostic(source: &str, diagnostic: &Diagnostic) -> String {
-    let mut rendered = format!(
+    let message = format!(
         "{}: {}",
         diagnostic.code.as_str(),
         diagnostic.message.trim_end()
     );
-    if let Some(span) = diagnostic.span {
-        let start = span.start.min(source.len());
-        let (line, column, line_end, source_line) = line_column_snippet(source, start);
-        let caret_pad = " ".repeat(column.saturating_sub(1));
-        let underline_len = if start < line_end {
-            let underline_end = span.end.max(start.saturating_add(1)).min(line_end);
-            source[start..underline_end].chars().count().max(1)
-        } else {
-            1
-        };
-        let underline = format!("^{}", "~".repeat(underline_len.saturating_sub(1)));
-        rendered.push_str(&format!(
-            "\n--> line {line}, column {column}\n{source_line}\n{caret_pad}{underline}"
-        ));
-    }
-    for suggestion in &diagnostic.suggestions {
-        rendered.push_str("\nhint: ");
-        rendered.push_str(suggestion);
-    }
-    rendered
-}
-
-/// The 1-based line and column of `offset`, the end of its line, and the line
-/// itself. A byte offset that lands mid-character is clamped to the character
-/// boundary before it rather than panicking on a slice.
-fn line_column_snippet(source: &str, offset: usize) -> (usize, usize, usize, String) {
-    let offset = offset.min(source.len());
-    let mut line = 1usize;
-    let mut line_start = 0usize;
-    for (index, character) in source.char_indices() {
-        if index >= offset {
-            break;
-        }
-        if character == '\n' {
-            line += 1;
-            line_start = index + character.len_utf8();
-        }
-    }
-    let line_end = source[line_start..]
-        .find('\n')
-        .map_or(source.len(), |offset| line_start + offset);
-    let column = source[line_start..offset.max(line_start)].chars().count() + 1;
-    (
-        line,
-        column,
-        line_end,
-        source[line_start..line_end].to_string(),
-    )
+    let hints = diagnostic
+        .suggestions
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let span = diagnostic.span.map(|span| lashlang::Span {
+        start: span.start,
+        end: span.end,
+    });
+    lashlang::format_source_diagnostic(source, span, &message, &hints)
 }
 
 #[cfg(test)]

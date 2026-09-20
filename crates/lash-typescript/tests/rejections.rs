@@ -500,6 +500,24 @@ fn a_rejection_points_at_the_line_the_model_wrote() {
     );
 }
 
+/// Both dialects render through one shared renderer, so a CRLF source line
+/// echoes without its carriage return in TypeScript too.
+#[test]
+fn a_rejection_trims_the_carriage_return_off_the_echoed_line() {
+    let source = "const rows = [1];\r\nclass Accumulator {}\r\n";
+    let error = lash_typescript::validate(source).expect_err("classes are refused");
+    let rendered = lash_typescript::format_diagnostic(source, &error);
+
+    assert!(
+        rendered.contains("--> line 2, column 1\nclass Accumulator {}\n^"),
+        "the echoed line must not carry its `\\r`: {rendered:?}"
+    );
+    assert!(
+        !rendered.contains('\r'),
+        "no carriage return reaches the rendered diagnostic: {rendered:?}"
+    );
+}
+
 /// A code used at more than one site cannot rely on the per-code table alone.
 ///
 /// `TS_AWAIT_UNSUPPORTED` is the clearest case: every site that emits it is
