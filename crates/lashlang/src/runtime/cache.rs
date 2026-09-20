@@ -29,6 +29,87 @@ pub struct CompiledProgramCacheStats {
 
 const DEFAULT_COMPILED_PROCESS_CACHE_CAPACITY: usize = 64;
 
+/// The MRU bookkeeping the three caches in this file share: the entries
+/// deque (the front is the eviction candidate, the back is most recently
+/// used), the hit/miss/eviction counters, and the capacity-bound insert.
+/// What an entry holds and how a lookup matches stay with each cache — this
+/// type only owns the policy every cache applies identically.
+struct MruEntries<E> {
+    entries: VecDeque<E>,
+    hits: u64,
+    misses: u64,
+    evictions: u64,
+    capacity: usize,
+}
+
+impl<E> MruEntries<E> {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            entries: VecDeque::with_capacity(capacity),
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+            capacity,
+        }
+    }
+
+    /// A cache hit under the shared policy: probe the back entry, else find
+    /// and promote the match to the back. Returns the matched entry in its
+    /// promoted position.
+    #[expect(
+        clippy::expect_used,
+        reason = "the index came from position() over this same entries vec a few lines above"
+    )]
+    fn lookup(&mut self, matches: impl Fn(&E) -> bool) -> Option<&E> {
+        if self.entries.back().is_some_and(&matches) {
+            self.hits += 1;
+            return self.entries.back();
+        }
+        let index = self.entries.iter().position(matches)?;
+        self.hits += 1;
+        let entry = self
+            .entries
+            .remove(index)
+            .expect("cache index came from existing entry");
+        self.entries.push_back(entry);
+        self.entries.back()
+    }
+
+    fn miss(&mut self) {
+        self.misses += 1;
+    }
+
+    /// Stores the entry a miss produced. Capacity zero bypasses residency
+    /// entirely; at capacity the front entry is evicted.
+    fn insert(&mut self, entry: E) {
+        if self.capacity == 0 {
+            return;
+        }
+        if self.entries.len() == self.capacity {
+            self.entries.pop_front();
+            self.evictions += 1;
+        }
+        self.entries.push_back(entry);
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.hits = 0;
+        self.misses = 0;
+        self.evictions = 0;
+    }
+
+    fn stats(&self) -> CompiledProgramCacheStats {
+        CompiledProgramCacheStats {
+            hits: self.hits,
+            misses: self.misses,
+            evictions: self.evictions,
+            entries: self.entries.len(),
+            capacity: self.capacity,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CompiledProcessCacheKey {
     pub module_ref: crate::ModuleRef,
@@ -80,11 +161,7 @@ impl CompiledProcessCacheKey {
 }
 
 pub struct CompiledProcessCache {
-    entries: VecDeque<CachedCompiledProcess>,
-    hits: u64,
-    misses: u64,
-    evictions: u64,
-    capacity: usize,
+    mru: MruEntries<CachedCompiledProcess>,
 }
 
 struct CachedCompiledProcess {
@@ -100,18 +177,10 @@ impl CompiledProcessCache {
     pub fn with_capacity(capacity: usize) -> Self {
         prewarm();
         Self {
-            entries: VecDeque::with_capacity(capacity),
-            hits: 0,
-            misses: 0,
-            evictions: 0,
-            capacity,
+            mru: MruEntries::with_capacity(capacity),
         }
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the index came from position() over this same entries vec a few lines above"
-    )]
     pub fn get_or_compile(
         &mut self,
         artifact: &ModuleArtifact,
@@ -119,39 +188,18 @@ impl CompiledProcessCache {
         host_requirements_ref: &HostRequirementsRef,
     ) -> Result<Arc<CompiledProgram>, crate::RuntimeError> {
         // Compare borrowed: a hit must not allocate a key it only reads.
-        let matches = |entry: &CachedCompiledProcess| {
+        if let Some(entry) = self.mru.lookup(|entry| {
             entry
                 .key
                 .matches(&artifact.module_ref, process_ref, host_requirements_ref)
-        };
-        if let Some(entry) = self.entries.back()
-            && matches(entry)
-        {
-            self.hits += 1;
+        }) {
             return Ok(entry.compiled.clone());
         }
-        if let Some(index) = self.entries.iter().position(matches) {
-            self.hits += 1;
-            let entry = self
-                .entries
-                .remove(index)
-                .expect("cache index came from existing entry");
-            let compiled = entry.compiled.clone();
-            self.entries.push_back(entry);
-            return Ok(compiled);
-        }
 
-        self.misses += 1;
+        self.mru.miss();
         let compiled = Arc::new(compile_module_artifact_process(artifact, process_ref)?);
-        if self.capacity == 0 {
-            return Ok(compiled);
-        }
-        if self.entries.len() == self.capacity {
-            self.entries.pop_front();
-            self.evictions += 1;
-        }
         // Only a miss stores an entry, so only a miss pays for the owned key.
-        self.entries.push_back(CachedCompiledProcess {
+        self.mru.insert(CachedCompiledProcess {
             key: CompiledProcessCacheKey::new(
                 artifact.module_ref.clone(),
                 process_ref.clone(),
@@ -163,20 +211,11 @@ impl CompiledProcessCache {
     }
 
     pub fn clear(&mut self) {
-        self.entries.clear();
-        self.hits = 0;
-        self.misses = 0;
-        self.evictions = 0;
+        self.mru.clear();
     }
 
     pub fn stats(&self) -> CompiledProgramCacheStats {
-        CompiledProgramCacheStats {
-            hits: self.hits,
-            misses: self.misses,
-            evictions: self.evictions,
-            entries: self.entries.len(),
-            capacity: self.capacity,
-        }
+        self.mru.stats()
     }
 }
 
@@ -210,11 +249,7 @@ impl CompiledLinkedProgram {
 }
 
 pub struct LinkedProgramCache {
-    entries: VecDeque<CachedLinkedProgram>,
-    hits: u64,
-    misses: u64,
-    evictions: u64,
-    capacity: usize,
+    mru: MruEntries<CachedLinkedProgram>,
 }
 
 struct CachedLinkedProgram {
@@ -232,11 +267,7 @@ impl LinkedProgramCache {
     pub fn with_capacity(capacity: usize) -> Self {
         prewarm();
         Self {
-            entries: VecDeque::with_capacity(capacity),
-            hits: 0,
-            misses: 0,
-            evictions: 0,
-            capacity,
+            mru: MruEntries::with_capacity(capacity),
         }
     }
 
@@ -264,10 +295,6 @@ impl LinkedProgramCache {
     ///
     /// A hit is recorded and promoted exactly as it is on the compiling paths,
     /// so this is the lookup those paths use rather than a peek beside them.
-    #[expect(
-        clippy::expect_used,
-        reason = "the index came from position() over this same entries vec a few lines above"
-    )]
     pub fn cached_linked_program(
         &mut self,
         source: &str,
@@ -275,25 +302,9 @@ impl LinkedProgramCache {
     ) -> Option<Arc<CompiledLinkedProgram>> {
         let source_hash = program_source_hash(source);
         let surface = surface.borrow();
-        if let Some(entry) = self.entries.back()
-            && linked_program_matches(entry, source_hash, source, surface)
-        {
-            self.hits += 1;
-            return Some(entry.program.clone());
-        }
-
-        let index = self
-            .entries
-            .iter()
-            .position(|entry| linked_program_matches(entry, source_hash, source, surface))?;
-        self.hits += 1;
-        let entry = self
-            .entries
-            .remove(index)
-            .expect("cache index came from existing entry");
-        let program = entry.program.clone();
-        self.entries.push_back(entry);
-        Some(program)
+        self.mru
+            .lookup(|entry| linked_program_matches(entry, source_hash, source, surface))
+            .map(|entry| entry.program.clone())
     }
 
     fn link_and_cache(
@@ -303,18 +314,11 @@ impl LinkedProgramCache {
         surface: &LashlangHostEnvironment,
     ) -> Result<Arc<CompiledLinkedProgram>, LinkError> {
         let source_hash = program_source_hash(source);
-        self.misses += 1;
+        self.mru.miss();
         let linked = LinkedModule::link(program, surface)?;
         let compiled = Arc::new(compile_linked(&linked));
         let program = Arc::new(CompiledLinkedProgram { linked, compiled });
-        if self.capacity == 0 {
-            return Ok(program);
-        }
-        if self.entries.len() == self.capacity {
-            self.entries.pop_front();
-            self.evictions += 1;
-        }
-        self.entries.push_back(CachedLinkedProgram {
+        self.mru.insert(CachedLinkedProgram {
             source_hash,
             source: Arc::<str>::from(source),
             process_handles: surface.process_handles.clone(),
@@ -324,20 +328,11 @@ impl LinkedProgramCache {
     }
 
     pub fn clear(&mut self) {
-        self.entries.clear();
-        self.hits = 0;
-        self.misses = 0;
-        self.evictions = 0;
+        self.mru.clear();
     }
 
     pub fn stats(&self) -> CompiledProgramCacheStats {
-        CompiledProgramCacheStats {
-            hits: self.hits,
-            misses: self.misses,
-            evictions: self.evictions,
-            entries: self.entries.len(),
-            capacity: self.capacity,
-        }
+        self.mru.stats()
     }
 }
 
@@ -348,11 +343,7 @@ impl Default for LinkedProgramCache {
 }
 
 pub struct CompiledProgramCache {
-    entries: VecDeque<CachedCompiledProgram>,
-    hits: u64,
-    misses: u64,
-    evictions: u64,
-    capacity: usize,
+    mru: MruEntries<CachedCompiledProgram>,
 }
 
 struct CachedCompiledProgram {
@@ -369,11 +360,7 @@ impl CompiledProgramCache {
     pub fn with_capacity(capacity: usize) -> Self {
         prewarm();
         Self {
-            entries: VecDeque::with_capacity(capacity),
-            hits: 0,
-            misses: 0,
-            evictions: 0,
-            capacity,
+            mru: MruEntries::with_capacity(capacity),
         }
     }
 
@@ -395,44 +382,17 @@ impl CompiledProgramCache {
     ///
     /// A hit is recorded and promoted exactly as it is on the compiling paths,
     /// so this is the lookup those paths use rather than a peek beside them.
-    #[expect(
-        clippy::expect_used,
-        reason = "the index came from position() over this same entries vec two lines above"
-    )]
     pub fn cached_compiled_program(&mut self, source: &str) -> Option<Arc<CompiledProgram>> {
         let source_hash = program_source_hash(source);
-        if let Some(entry) = self.entries.back()
-            && program_source_matches(entry, source_hash, source)
-        {
-            self.hits += 1;
-            return Some(entry.compiled.clone());
-        }
-
-        let index = self
-            .entries
-            .iter()
-            .position(|entry| program_source_matches(entry, source_hash, source))?;
-        self.hits += 1;
-        let entry = self
-            .entries
-            .remove(index)
-            .expect("cache index came from existing entry");
-        let compiled = entry.compiled.clone();
-        self.entries.push_back(entry);
-        Some(compiled)
+        self.mru
+            .lookup(|entry| program_source_matches(entry, source_hash, source))
+            .map(|entry| entry.compiled.clone())
     }
 
     fn compile_and_cache(&mut self, source: &str, program: Program) -> Arc<CompiledProgram> {
-        self.misses += 1;
+        self.mru.miss();
         let compiled = Arc::new(compile_program_internal(&program));
-        if self.capacity == 0 {
-            return compiled;
-        }
-        if self.entries.len() == self.capacity {
-            self.entries.pop_front();
-            self.evictions += 1;
-        }
-        self.entries.push_back(CachedCompiledProgram {
+        self.mru.insert(CachedCompiledProgram {
             source_hash: program_source_hash(source),
             source: Arc::<str>::from(source),
             compiled: compiled.clone(),
@@ -441,20 +401,11 @@ impl CompiledProgramCache {
     }
 
     pub fn clear(&mut self) {
-        self.entries.clear();
-        self.hits = 0;
-        self.misses = 0;
-        self.evictions = 0;
+        self.mru.clear();
     }
 
     pub fn stats(&self) -> CompiledProgramCacheStats {
-        CompiledProgramCacheStats {
-            hits: self.hits,
-            misses: self.misses,
-            evictions: self.evictions,
-            entries: self.entries.len(),
-            capacity: self.capacity,
-        }
+        self.mru.stats()
     }
 }
 
