@@ -262,6 +262,14 @@ declare -A MUTATION_PACKAGES_FULL_MUTANTS=(
   [lash-internal-postgres-store]="8"
 )
 MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=16
+# The five durable_fault_matrix_real_cargo_filters_chunk_* probes each fork a
+# real `cargo test -- --list` (~90 s apiece in a cold mutants tree, ~447 s
+# together in run 35117123483) — they verify Cargo's own name-filter
+# selection, not behavior mutants can reach, and alone exceed the baseline's
+# per-test timeout. The trunk-only `Test heavy suites` job owns them and the
+# ordinary Bazel targets already skip them, so the mutation lanes skip them
+# identically by forwarding the filter through `cargo test` to libtest.
+MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'
 case "$lane" in
   fast) default_mutation_scope="none" ;;
   default|mutation) default_mutation_scope="targeted" ;;
@@ -383,7 +391,10 @@ start_gate_postgres() {
 }
 
 assert_no_panics_in_artifacts() {
-  if [ -d "$out_dir" ] && grep -RFn --include='*.log' 'panicked at' "$out_dir" >&2; then
+  # cargo-mutants writes each mutant's run logs under `mutants.out/log/`; a
+  # caught mutant is *expected* to panic, so those logs are evidence of the
+  # lane working, not evidence of a defect. Scan every other artifact.
+  if [ -d "$out_dir" ] && grep -RFn --include='*.log' --exclude-dir='mutants.out' 'panicked at' "$out_dir" >&2; then
     echo "panic gate: FAILED (a Rust panic marker found in confidence artifacts)" >&2
     return 1
   fi
@@ -2439,7 +2450,8 @@ run_mutation_smoke() {
         --shard "$shard" \
         --timeout "$timeout" \
         --minimum-test-timeout 30 \
-        --output "${out_dir}/mutants-${package}-smoke"
+        --output "${out_dir}/mutants-${package}-smoke" \
+        -- -- --skip="${MUTATION_EXCLUDED_TEST_NAME}"
     else
       MUTATION_RECORDED_SHARD="$shard" \
         MUTATION_RECORDED_MUTANTS_FOUND="${mutation_packages_mutants_found:-}" \
@@ -2453,7 +2465,8 @@ run_mutation_smoke() {
         --jobs "$mutation_jobs" \
         --timeout "$timeout" \
         --minimum-test-timeout 30 \
-        --output "${out_dir}/mutants-${package}-smoke"
+        --output "${out_dir}/mutants-${package}-smoke" \
+        -- -- --skip="${MUTATION_EXCLUDED_TEST_NAME}"
     fi
   done
 }
@@ -2476,7 +2489,8 @@ run_area_targeted_mutation_evidence() {
         --shard "$shard" \
         --timeout "$timeout" \
         --minimum-test-timeout 30 \
-        --output "$artifact"
+        --output "$artifact" \
+        -- -- --skip="${MUTATION_EXCLUDED_TEST_NAME}"
     else
       run_mutants_recorded "$package area:${area} targeted shard" "$artifact" \
         cargo mutants \
@@ -2488,7 +2502,8 @@ run_area_targeted_mutation_evidence() {
         --jobs "$mutation_jobs" \
         --timeout "$timeout" \
         --minimum-test-timeout 30 \
-        --output "$artifact"
+        --output "$artifact" \
+        -- -- --skip="${MUTATION_EXCLUDED_TEST_NAME}"
     fi
   done
 }
@@ -2593,7 +2608,8 @@ run_mutation_full() {
         --timeout "$timeout" \
         --minimum-test-timeout 60 \
         "${shard_args[@]}" \
-        --output "${out_dir}/mutants-${package}-full"
+        --output "${out_dir}/mutants-${package}-full" \
+        -- -- --skip="${MUTATION_EXCLUDED_TEST_NAME}"
     else
       MUTATION_RECORDED_SHARD="${shard:-}" \
         MUTATION_RECORDED_MUTANTS_FOUND="${mutation_packages_mutants_found:-}" \
@@ -2607,7 +2623,8 @@ run_mutation_full() {
         --timeout "$timeout" \
         --minimum-test-timeout 60 \
         "${shard_args[@]}" \
-        --output "${out_dir}/mutants-${package}-full"
+        --output "${out_dir}/mutants-${package}-full" \
+        -- -- --skip="${MUTATION_EXCLUDED_TEST_NAME}"
     fi
   done
 }

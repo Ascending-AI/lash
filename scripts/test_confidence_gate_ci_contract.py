@@ -1383,6 +1383,7 @@ set -euo pipefail
 {full_fn}
 area_mutation_file_args=()
 MUTATION_PACKAGES_SMOKE_MUTANTS=12
+MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'
 declare -A MUTATION_PACKAGES_FULL_MUTANTS=([pkg-x]="5")
 MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=4
 selected_packages=(pkg-x)
@@ -1459,6 +1460,89 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("--shard 3/7 ", result.stdout)
+
+    def test_mutation_package_loops_skip_the_real_cargo_fault_matrix_probes(self) -> None:
+        """The fault-matrix chunk tests fork a real `cargo test` each and alone
+        exceed the baseline's per-test timeout; every package-scoped
+        cargo-mutants run must forward the same skip the Bazel targets use."""
+        gate = GATE.read_text(encoding="utf-8")
+        self.assertIn(
+            "MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'",
+            gate,
+        )
+        for function in (
+            "run_mutation_smoke",
+            "run_mutation_full",
+            "run_area_targeted_mutation_evidence",
+        ):
+            body = shell_function_body(gate, function)
+            invocations = body.count("cargo mutants")
+            self.assertGreater(invocations, 0, function)
+            self.assertEqual(
+                invocations,
+                body.count('-- -- --skip="${MUTATION_EXCLUDED_TEST_NAME}"'),
+                f"{function}: every cargo-mutants call must skip the real-Cargo "
+                "fault-matrix probes",
+            )
+
+        smoke_fn = shell_function_definition(gate, "run_mutation_smoke")
+        harness = f"""\
+set -euo pipefail
+{smoke_fn}
+MUTATION_PACKAGES_SMOKE_MUTANTS=4
+MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'
+selected_packages=(pkg-x)
+area_mutation_file_args=()
+out_dir="$1"
+mutation_jobs=2
+step() {{ :; }}
+require_tool() {{ :; }}
+cargo() {{ :; }}
+run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
+"""
+        env = dict(os.environ, LASH_MUTATION_SMOKE_SHARD="1/2")
+        result = subprocess.run(
+            ["bash", "-c", harness + "\nrun_mutation_smoke", "t", "/tmp/x"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn(
+            "-- -- --skip=durable_fault_matrix_real_cargo_filters_chunk_",
+            result.stdout,
+        )
+
+    def test_panic_gate_scans_ordinary_logs_but_not_mutants_out(self) -> None:
+        """A caught mutant's own log legitimately contains `panicked at`; the
+        gate must fail on panic markers only outside `mutants.out/`."""
+        gate = GATE.read_text(encoding="utf-8")
+        function = shell_function_definition(gate, "assert_no_panics_in_artifacts")
+        harness = f"{function}\nout_dir=\"$1\"\nassert_no_panics_in_artifacts"
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = pathlib.Path(tmp) / "out"
+            (out_dir / "mutants.out" / "log").mkdir(parents=True)
+            (out_dir / "mutants.out" / "log" / "mutant.log").write_text(
+                "thread '<unnamed>' panicked at crates/pkg/src/lib.rs:1:1\n"
+            )
+            clean = subprocess.run(
+                ["bash", "-c", harness, "t", str(out_dir)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, clean.returncode, clean.stderr)
+            self.assertIn("panic gate: clean", clean.stdout)
+
+            (out_dir / "sim-evidence.log").write_text(
+                "panicked at crates/lash-sim/src/runner.rs:9:3\n"
+            )
+            dirty = subprocess.run(
+                ["bash", "-c", harness, "t", str(out_dir)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(1, dirty.returncode, dirty.stderr)
+            self.assertIn("panic gate: FAILED", dirty.stderr)
 
     def test_lane_composition_is_declared_once_per_path(self) -> None:
         """Four hand-written copies of the same composition is three too many.

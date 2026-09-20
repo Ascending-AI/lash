@@ -5,7 +5,7 @@
 
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::{Layer, Registry};
@@ -129,11 +129,34 @@ impl<S: tracing::Subscriber> Layer<S> for EventCapture {
     }
 }
 
+/// Keep a permanently live [`tracing::Dispatch`] registered for the process.
+///
+/// `tracing` rebuilds every callsite's cached `Interest` and the process-wide
+/// `LevelFilter` from the dispatchers alive at rebuild time. When at most one
+/// dispatcher is registered it consults the calling thread's current default
+/// instead, and a thread with none yields `Dispatch::none` — `Interest::never`
+/// plus `LevelFilter::OFF` for every callsite in the process. Under
+/// `cargo test` (the mutation baseline runner), a sibling case emitting a
+/// never-before-seen callsite can trigger exactly that rebuild while a
+/// capture is installed, silently dropping this test's own events even on the
+/// thread that owns the scoped default; the Bazel targets hide it by running
+/// `RUST_TEST_THREADS=1`. Holding one extra dispatcher for the process
+/// lifetime keeps the registered count above one during every capture window,
+/// so rebuilds iterate the live dispatchers rather than a defaultless
+/// thread's fallback.
+fn pin_accounting_dispatch() {
+    static PIN: Once = Once::new();
+    PIN.call_once(|| {
+        std::mem::forget(tracing::Dispatch::new(Registry::default()));
+    });
+}
+
 /// Run `body` with a capture layer installed as the thread-local dispatcher.
 pub fn capturing_sync<F, T>(body: F) -> (T, EventCapture)
 where
     F: FnOnce() -> T,
 {
+    pin_accounting_dispatch();
     let capture = EventCapture::default();
     let subscriber = Registry::default().with(capture.clone());
     let guard = tracing::subscriber::set_default(subscriber);
@@ -151,6 +174,7 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = T>,
 {
+    pin_accounting_dispatch();
     let capture = EventCapture::default();
     let subscriber = Registry::default().with(capture.clone());
     let guard = tracing::subscriber::set_default(subscriber);
@@ -166,6 +190,7 @@ where
     F: FnOnce(EventCapture) -> Fut,
     Fut: std::future::Future<Output = T>,
 {
+    pin_accounting_dispatch();
     let capture = EventCapture::default();
     let subscriber = Registry::default().with(capture.clone());
     let guard = tracing::subscriber::set_default(subscriber);
