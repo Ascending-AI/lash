@@ -6,6 +6,7 @@
 use crate::SessionError;
 use crate::provider::ProviderHandle;
 pub use lash_core_store::session_policy::*;
+use std::sync::Arc;
 
 use super::LashRuntime;
 
@@ -408,6 +409,18 @@ impl LashRuntime {
         Ok(generation)
     }
 
+    /// The report from the most recent persisted tool-state install on this
+    /// runtime.
+    ///
+    /// Present after any open that restored tool state, and replaced by every
+    /// later host restore, persisted-state install or resident re-sync. It is
+    /// how those internal reloads deliver their answer: the paths that have no
+    /// return value leave the typed report here (and on the trace) instead of
+    /// dropping it (FIG-3367).
+    pub fn tool_restore_report(&self) -> Option<&crate::ToolRestoreReport> {
+        self.tool_restore_report.as_ref()
+    }
+
     /// Restore a persisted tool-state snapshot over the live source surface.
     ///
     /// Unlike [`apply_tool_state`](Self::apply_tool_state) — a generation-checked
@@ -421,30 +434,41 @@ impl LashRuntime {
     /// Persisted tools that no registered source resolves become orphans
     /// (kept as non-members, rebound when their source returns) and are listed
     /// in the returned [`crate::ToolRestoreReport`].
+    ///
+    /// This is an install onto a *live* runtime, so it never refuses: the
+    /// host's [`ToolSourcePolicy`](crate::ToolSourcePolicy) applies to opening
+    /// a session, not to a restore the host asked for on one it already holds.
+    /// A lost member comes back in the report, which is also retained for
+    /// [`tool_restore_report`](Self::tool_restore_report).
     pub async fn restore_tool_state(
         &mut self,
         snapshot: crate::ToolState,
     ) -> Result<crate::ToolRestoreReport, SessionError> {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
+        let tracing = self.host.core.tracing.clone();
+        let clock = Arc::clone(&self.host.core.clock);
+        let session_id = self.state.session_id.clone();
         let Some(session) = self.session.as_mut() else {
             return Err(SessionError::Protocol(
                 "runtime session not available".to_string(),
             ));
         };
-        let report = session
-            .plugins()
-            .tool_registry()
-            .restore_state(snapshot)
-            .map_err(|err| SessionError::Protocol(format!("tool restore failed: {err}")))?;
-        if !report.orphaned.is_empty() {
-            tracing::warn!(
-                orphaned = ?report.orphaned,
-                "tool state restored with orphaned tools: no registered source \
-                 resolves them; they remain non-members until their source returns"
-            );
-        }
+        let registry = session.plugins().tool_registry();
+        let report = crate::runtime::tool_restore::install_persisted_tool_state(
+            registry.as_ref(),
+            snapshot,
+            // A live runtime: this returns the report to its caller and
+            // never refuses, whatever the host's open policy is (FIG-3367).
+            crate::runtime::tool_restore::ToolRestoreContext::for_live_install(
+                &session_id,
+                crate::runtime::ToolRestoreSite::HostRestore,
+                &tracing,
+                clock.as_ref(),
+            ),
+        )?;
         session.refresh_tool_catalog().await?;
+        self.tool_restore_report = Some(report.clone());
         self.stamp_live_plugin_state();
         Ok(report)
     }

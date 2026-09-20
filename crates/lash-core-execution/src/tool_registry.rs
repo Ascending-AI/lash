@@ -23,7 +23,9 @@ use sources::{
     InternalProcessToolSource, OrchestratingToolSource, ToolBinding, ToolProviderSource,
 };
 mod registry_types;
-pub use registry_types::{ReconfigureError, ToolRegistry, ToolRestoreReport};
+pub use registry_types::{
+    ReconfigureError, SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy,
+};
 pub(crate) use registry_types::{ToolRegistrationKind, ToolSourceKey};
 use registry_types::{
     ToolRegistryEntry, ToolRegistryInner, ToolRegistryState, ToolSurface, ToolSurfaceInsertError,

@@ -111,6 +111,16 @@ pub struct RuntimeControlConfig {
     /// for claimability and handoff (ADR 0029). Defaults to
     /// [`crate::LeaseTimings::default`] (30s TTL / 10s renew).
     pub lease_timings: crate::LeaseTimings,
+    /// What an open does when a persisted tool id no registered source
+    /// resolves. Defaults to
+    /// [`ToolSourcePolicy::Tolerate`](crate::ToolSourcePolicy): the session
+    /// opens and the host receives the typed
+    /// [`ToolRestoreReport`](crate::ToolRestoreReport). Set
+    /// [`Require`](crate::ToolSourcePolicy::Require) in unattended or
+    /// fixed-tool deployments to refuse an open that lost a catalog member.
+    /// It is carried on the host config, not on the session, so every
+    /// runtime-initiated construction honours the host's choice.
+    pub tool_source_policy: crate::ToolSourcePolicy,
     /// Attempt bound stamped onto every child a script engine starts on the
     /// model's behalf, where no host or tool author is present to state one.
     /// Resolved once per execution segment and recorded on the child's record,
@@ -174,6 +184,7 @@ impl RuntimeHostConfig {
                     DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT,
                 )
                 .expect("the managed-turn concurrency default is non-zero"),
+                tool_source_policy: crate::ToolSourcePolicy::default(),
                 engine_child_max_attempts: DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS,
             },
             tracing: RuntimeTracingConfig {

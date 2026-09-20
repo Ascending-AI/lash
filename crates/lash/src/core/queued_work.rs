@@ -19,12 +19,34 @@ pub(crate) struct NativeQueuedWorkRunConfig {
     pub(super) process_lifecycle_available: bool,
 }
 
-pub(super) struct NativeQueuedWorkRunHandle {
+/// Build the queued-work driver a core would run for its own sessions.
+///
+/// The driver is wired inside the core's port setup, where a test cannot reach
+/// it; this assembles the same config from the same core so a test can drive
+/// one batch directly and read the failure class it produces.
+#[cfg(test)]
+pub(crate) fn native_queued_work_handle_for_tests(
+    core: &crate::LashCore,
+    store_factory: Arc<dyn SessionStoreFactory>,
+) -> NativeQueuedWorkRunHandle {
+    NativeQueuedWorkRunHandle::new(Arc::new(NativeQueuedWorkRunConfig {
+        session_execution_owner: core.session_execution_owner.clone(),
+        env: core.env.clone(),
+        policy: core.policy.clone(),
+        protocol_factory: core.protocol_factory.clone(),
+        plugin_factories: Arc::clone(&core.plugin_factories),
+        store_factory,
+        live_replay_store: Arc::clone(&core.live_replay_store),
+        process_lifecycle_available: core.process_lifecycle_available,
+    }))
+}
+
+pub(crate) struct NativeQueuedWorkRunHandle {
     config: Arc<NativeQueuedWorkRunConfig>,
 }
 
 impl NativeQueuedWorkRunHandle {
-    pub(super) fn new(config: Arc<NativeQueuedWorkRunConfig>) -> Self {
+    pub(crate) fn new(config: Arc<NativeQueuedWorkRunConfig>) -> Self {
         Self { config }
     }
 

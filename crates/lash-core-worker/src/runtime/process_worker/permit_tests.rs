@@ -148,61 +148,65 @@ async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
     ));
 
     PROCESS_EXECUTION_PERMIT
-        .scope(execution_permit, async move {
-            let transport = mock_provider(vec![
-                MockCall {
-                    stream_events: vec![crate::llm::types::LlmStreamEvent::Part(
-                        crate::LlmOutputPart::ToolCall {
-                            call_id: "park-1".to_string(),
-                            tool_name: "park_permit".to_string(),
-                            input_json: "{}".to_string(),
-                            replay: None,
-                        },
-                    )],
-                    response: Ok(crate::LlmResponse::default()),
-                },
-                // Safety net: the cancelled turn should not call the
-                // provider again, but a second call must not panic the mock.
-                MockCall {
-                    stream_events: Vec::new(),
-                    response: Ok(crate::LlmResponse::default()),
-                },
-            ]);
-            let (started_tx, mut started_rx) = tokio::sync::mpsc::channel::<()>(1);
-            let tools: Arc<dyn crate::ToolProvider> = Arc::new(PermitParkingTool {
-                started: started_tx,
-            });
-            let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+        .scope(
+            execution_permit,
+            Box::pin(async move {
+                let transport = mock_provider(vec![
+                    MockCall {
+                        stream_events: vec![crate::llm::types::LlmStreamEvent::Part(
+                            crate::LlmOutputPart::ToolCall {
+                                call_id: "park-1".to_string(),
+                                tool_name: "park_permit".to_string(),
+                                input_json: "{}".to_string(),
+                                replay: None,
+                            },
+                        )],
+                        response: Ok(crate::LlmResponse::default()),
+                    },
+                    // Safety net: the cancelled turn should not call the
+                    // provider again, but a second call must not panic the mock.
+                    MockCall {
+                        stream_events: Vec::new(),
+                        response: Ok(crate::LlmResponse::default()),
+                    },
+                ]);
+                let (started_tx, mut started_rx) = tokio::sync::mpsc::channel::<()>(1);
+                let tools: Arc<dyn crate::ToolProvider> = Arc::new(PermitParkingTool {
+                    started: started_tx,
+                });
+                let mut runtime =
+                    runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
 
-            let cancel = tokio_util::sync::CancellationToken::new();
-            let cancel_trigger = cancel.clone();
-            crate::task::spawn(async move {
-                // Cancel only once the tool has actually parked the slot.
-                let _ = started_rx.recv().await;
-                cancel_trigger.cancel();
-            });
+                let cancel = tokio_util::sync::CancellationToken::new();
+                let cancel_trigger = cancel.clone();
+                crate::task::spawn(async move {
+                    // Cancel only once the tool has actually parked the slot.
+                    let _ = started_rx.recv().await;
+                    cancel_trigger.cancel();
+                });
 
-            let turn = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                runtime.run_turn_assembled(
-                    crate::TurnInput::text("park the run's permit"),
-                    cancel,
-                    named_turn_scope(
-                        &SessionId::from("root"),
-                        &TurnId::from("permit-cancel-grace-turn"),
+                let turn = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    runtime.run_turn_assembled(
+                        crate::TurnInput::text("park the run's permit"),
+                        cancel,
+                        named_turn_scope(
+                            &SessionId::from("root"),
+                            &TurnId::from("permit-cancel-grace-turn"),
+                        ),
                     ),
-                ),
-            )
-            .await
-            .expect("cancelled turn must finish");
-            assert!(turn.is_ok(), "cancelled turn: {turn:?}");
+                )
+                .await
+                .expect("cancelled turn must finish");
+                assert!(turn.is_ok(), "cancelled turn: {turn:?}");
 
-            assert_eq!(
-                semaphore.available_permits(),
-                0,
-                "the run must hold its execution slot again after the cancel grace \
+                assert_eq!(
+                    semaphore.available_permits(),
+                    0,
+                    "the run must hold its execution slot again after the cancel grace \
                  dropped the parked tool"
-            );
-        })
+                );
+            }),
+        )
         .await;
 }

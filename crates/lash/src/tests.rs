@@ -2208,6 +2208,7 @@ mod rolling_history_persistence;
 #[cfg(feature = "rlm")]
 mod stack_budget;
 mod tool_intent_ingress;
+mod tool_restore_report;
 mod turn_streaming;
 mod usage_durability;
 
