@@ -34,7 +34,6 @@ pub struct PrepareTurnRequest {
     pub state: SessionReadView,
     pub messages: crate::MessageSequence,
     pub sessions: Arc<dyn SessionStateService>,
-    pub session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub session_graph: Arc<dyn SessionGraphService>,
     pub turn_context: crate::TurnContext,
 }
@@ -97,9 +96,6 @@ impl PluginTerminalStrength {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PluginDirective {
-    CreateSession {
-        request: Box<SessionCreateRequest>,
-    },
     EmitRuntimeEvents {
         events: Vec<PluginRuntimeEvent>,
     },
@@ -356,21 +352,18 @@ pub enum AmbientDirectiveAction {
 }
 
 pub enum AmbientDirectiveError {
-    CreateSession(String),
     EmitTrace(PluginError),
 }
 
 impl AmbientDirectiveError {
     pub(crate) fn into_plugin_error(self) -> PluginError {
         match self {
-            Self::CreateSession(message) => PluginError::Session(message),
             Self::EmitTrace(error) => error,
         }
     }
 
     pub(crate) fn message(&self) -> String {
         match self {
-            Self::CreateSession(message) => message.clone(),
             Self::EmitTrace(error) => error.to_string(),
         }
     }
@@ -378,17 +371,9 @@ impl AmbientDirectiveError {
 
 pub async fn interpret_ambient_directive(
     emitted: PluginOwned<PluginDirective>,
-    session_lifecycle: &Arc<dyn SessionLifecycleService>,
     session_graph: &Arc<dyn SessionGraphService>,
 ) -> Result<AmbientDirectiveAction, AmbientDirectiveError> {
     match emitted.value {
-        PluginDirective::CreateSession { request } => {
-            session_lifecycle
-                .create_session(*request)
-                .await
-                .map_err(|error| AmbientDirectiveError::CreateSession(error.to_string()))?;
-            Ok(AmbientDirectiveAction::None)
-        }
         PluginDirective::EmitRuntimeEvents { events } => {
             Ok(AmbientDirectiveAction::EmitRuntimeEvents {
                 plugin_id: emitted.plugin_id,
@@ -455,11 +440,8 @@ mod tests {
                 Some(PluginTerminalStrength::DeniedShortCircuit),
             ),
             (
-                BeforeToolCallPluginDirective::Ambient(PluginDirective::CreateSession {
-                    request: Box::new(SessionCreateRequest::root(
-                        SessionStartPoint::Empty,
-                        PluginOptions::default(),
-                    )),
+                BeforeToolCallPluginDirective::Ambient(PluginDirective::EmitRuntimeEvents {
+                    events: Vec::new(),
                 }),
                 None,
             ),

@@ -38,8 +38,8 @@ pub(in crate::runtime::session_manager) async fn materialize_session_create_plan
     )?;
     if let Some(session) = runtime.session.as_mut() {
         session.set_context_overlay(
-            plan.context_overlay.tool_providers.clone(),
-            plan.context_overlay.prompt_contributions.clone(),
+            Vec::new(),
+            Vec::new(),
             plan.context_overlay.include_base_tools,
         )?;
     }

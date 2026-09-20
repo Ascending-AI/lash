@@ -570,7 +570,6 @@ impl LashRuntime {
             .finalize_turn_with_phase_probe(
                 assembled,
                 manager.state_service(),
-                manager.lifecycle_service(),
                 manager.graph_service(),
                 self.turn_phase_probe.clone(),
                 &trace_turn_id,

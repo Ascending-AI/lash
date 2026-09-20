@@ -1,9 +1,9 @@
+use crate::ToolOutcome;
 use crate::plugin::{
     AfterToolCallPluginDirective, AmbientDirectiveAction, AmbientDirectiveError,
     BeforeToolCallPluginDirective, PluginOwned, PluginTerminalStrength as ToolTerminalKind,
     interpret_ambient_directive,
 };
-use crate::{ToolFailure, ToolFailureClass, ToolOutcome};
 
 use super::context::ToolDispatchContext;
 
@@ -51,7 +51,6 @@ impl BeforeToolDirectiveFold {
                             plugin_id: plugin_id.clone(),
                             value: directive,
                         },
-                        &context.session_lifecycle,
                         &context.session_graph,
                     )
                     .await
@@ -189,7 +188,6 @@ pub(super) async fn apply_after_tool_directives(
                         plugin_id: plugin_id.clone(),
                         value: directive,
                     },
-                    &context.session_lifecycle,
                     &context.session_graph,
                 )
                 .await
@@ -197,13 +195,6 @@ pub(super) async fn apply_after_tool_directives(
                     Ok(action) => apply_ambient_action(context, action).await,
                     Err(error) => {
                         let result = match error {
-                            AmbientDirectiveError::CreateSession(message) => {
-                                ToolOutcome::failure(ToolFailure::runtime(
-                                    ToolFailureClass::Internal,
-                                    "plugin_session_create_failed",
-                                    message,
-                                ))
-                            }
                             AmbientDirectiveError::EmitTrace(error) => {
                                 ToolOutcome::err_fmt(error.to_string())
                             }

@@ -7,7 +7,6 @@ pub use lash_core_store::session_identity::{
 };
 
 use crate::SessionId;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -503,15 +502,11 @@ mod observer_intent_relation_cutover_tests {
 #[derive(Clone)]
 pub struct SessionContextOverlay {
     pub include_base_tools: bool,
-    pub tool_providers: Vec<Arc<dyn ToolProvider>>,
-    pub prompt_contributions: Vec<PromptContribution>,
 }
 impl Default for SessionContextOverlay {
     fn default() -> Self {
         Self {
             include_base_tools: true,
-            tool_providers: Vec::new(),
-            prompt_contributions: Vec::new(),
         }
     }
 }
@@ -519,11 +514,6 @@ impl std::fmt::Debug for SessionContextOverlay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SessionContextOverlay")
             .field("include_base_tools", &self.include_base_tools)
-            .field("tool_provider_count", &self.tool_providers.len())
-            .field(
-                "prompt_contribution_count",
-                &self.prompt_contributions.len(),
-            )
             .finish()
     }
 }

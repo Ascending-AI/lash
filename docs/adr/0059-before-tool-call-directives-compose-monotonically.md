@@ -134,9 +134,11 @@ secondary channel remains best-effort when full or closed.
   pins the result tie-break after clean reinspection. Conflict evidence is
   bounded and identity-bearing, and one plugin's own multiple terminals produce
   no self-conflict.
-- A `CreateSession` or `EmitTrace` error contributes a denied terminal without
+- An `EmitTrace` error contributes a denied terminal without
   stopping the directive fold. Later directives, including side effects, still
-  run.
+  run. (`CreateSession` contributed the same way until FIG-3375 removed the
+  variant; ambient directives no longer create sessions — an orchestrating
+  tool that needs a related session turn spawns a `SessionTurn` process.)
 - Tool-hook directives remain transient in-process values. Each hook boundary
   has its own directive enum, so a directive that is illegal at that boundary
   is a compile error and needs no runtime denial, persistence migration, or

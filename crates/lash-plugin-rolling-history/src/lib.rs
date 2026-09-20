@@ -525,8 +525,6 @@ async fn summarize_compaction_prefix(
     )
     .with_context_overlay(SessionContextOverlay {
         include_base_tools: false,
-        tool_providers: Vec::new(),
-        prompt_contributions: Vec::new(),
     })
     .with_session_id(compaction_session_id);
     let handle = session_lifecycle
