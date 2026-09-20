@@ -320,7 +320,6 @@ pub struct TurnCancelRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// Policy for active-turn input the cancelled turn did not deliver.
-    #[serde(default, skip_serializing_if = "turn_cancel_disposition_is_defer")]
     pub undelivered: TurnCancelDisposition,
     /// When the request is honoured. `Immediate` fires the cooperative token
     /// and backtracks to the last checkpoint; `AfterStep` waits for the step
@@ -401,10 +400,6 @@ pub struct TurnCancelRequestRecord {
     pub request: TurnCancelRequest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<TurnCancelInputOutcome>,
-}
-
-fn turn_cancel_disposition_is_defer(disposition: &TurnCancelDisposition) -> bool {
-    matches!(disposition, TurnCancelDisposition::Defer)
 }
 
 /// Shared origin hint for a process-local cancellation token.
