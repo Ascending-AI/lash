@@ -1294,7 +1294,11 @@ mod discovery_tests {
                         )
                     } else {
                         dialect
-                            .render_execution_section(Default::default(), &visible)
+                            .render_execution_section(
+                                Default::default(),
+                                &visible,
+                                crate::plugin::RlmChannel::Cell,
+                            )
                             .unwrap()
                     };
                     let text = with_discovery_sentence(execution, discovery.as_ref(), &dialect);

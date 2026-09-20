@@ -206,7 +206,11 @@ fn assembled_prompt_fragments_with_projection(
     let mut fragments = vec![(
         "execution section",
         dialect
-            .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog)
+            .render_execution_section(
+                crate::protocol::RlmPromptFeatures::default(),
+                &catalog,
+                crate::plugin::RlmChannel::Cell,
+            )
             .expect("render execution section"),
     )];
 
@@ -302,23 +306,38 @@ fn assembled_prompt_fragments_with_projection(
     fragments.push((
         "finalization",
         dialect
-            .finalization_copy(&lash_rlm_types::RlmTermination::FinishRequired { schema: None })
+            .finalization_copy(
+                &lash_rlm_types::RlmTermination::FinishRequired { schema: None },
+                crate::plugin::RlmChannel::Cell,
+            )
             .to_string(),
     ));
     fragments.push((
         "finalization (natural)",
         dialect
-            .finalization_copy(&lash_rlm_types::RlmTermination::Natural)
+            .finalization_copy(
+                &lash_rlm_types::RlmTermination::Natural,
+                crate::plugin::RlmChannel::Cell,
+            )
             .to_string(),
     ));
     fragments.push((
         "finalization (schema)",
-        dialect.finalization_copy(&lash_rlm_types::RlmTermination::FinishRequired {
-            schema: Some(serde_json::json!({"type": "number"})),
-        }),
+        dialect.finalization_copy(
+            &lash_rlm_types::RlmTermination::FinishRequired {
+                schema: Some(serde_json::json!({"type": "number"})),
+            },
+            crate::plugin::RlmChannel::Cell,
+        ),
     ));
-    fragments.push(("finish required", dialect.finish_required_copy(false)));
-    fragments.push(("finish schema", dialect.finish_required_copy(true)));
+    fragments.push((
+        "finish required",
+        dialect.finish_required_copy(false, crate::plugin::RlmChannel::Cell),
+    ));
+    fragments.push((
+        "finish schema",
+        dialect.finish_required_copy(true, crate::plugin::RlmChannel::Cell),
+    ));
     fragments.push(("schema mismatch", dialect.finish_schema_mismatch_copy()));
     fragments.push((
         "invalid cell retry",

@@ -74,7 +74,7 @@ pub(super) fn finish_required_reminder_message(
         "No code from that response executed. Markdown code fences do not execute here. Resend the needed program between `{}` and `{}` on their own lines, without backticks. {}",
         tags.open,
         tags.close,
-        dialect.finish_required_copy(requires_schema),
+        dialect.finish_required_copy(requires_schema, crate::plugin::RlmChannel::Cell),
     );
     Message {
         id: id.clone(),
