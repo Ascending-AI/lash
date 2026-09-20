@@ -58,7 +58,7 @@ pub use registration_refusals::{
 };
 pub use support::TestProcessRegistryWriteExt;
 use support::{ExecutionWritePause, process_lease_expired, validate_in_memory_execution_authority};
-use types::{ManagedLeaseMap, ManagedProcessRecord, RegistryState};
+use types::{ManagedLeaseMap, ManagedProcessMap, ManagedProcessRecord, RegistryState};
 pub use types::{RawProcessRegistryStateForTesting, TestLocalProcessRegistry};
 
 /// A validated event append: the plan plus the scheduling coordinates the
@@ -143,10 +143,12 @@ impl TestLocalProcessRegistry {
                 self.insert_wake_delivery(state, wake_delivery.as_ref())?;
                 if let Some(repaired) = repair_record {
                     let change_seq = next_change_seq(state);
-                    let record = state
-                        .managed
-                        .get_mut(process_id)
-                        .expect("event appends target a managed row");
+                    let record = Arc::make_mut(
+                        state
+                            .managed
+                            .get_mut(process_id)
+                            .expect("event appends target a managed row"),
+                    );
                     record.record = repaired;
                     record.change_seq = change_seq;
                 }
@@ -176,10 +178,12 @@ impl TestLocalProcessRegistry {
                 );
                 self.pause_append_after_outbox().await;
                 let change_seq = next_change_seq(state);
-                let record = state
-                    .managed
-                    .get_mut(process_id)
-                    .expect("event appends target a managed row");
+                let record = Arc::make_mut(
+                    state
+                        .managed
+                        .get_mut(process_id)
+                        .expect("event appends target a managed row"),
+                );
                 record.record = projected_record;
                 record.change_seq = change_seq;
                 record.events.push(event.clone());
@@ -932,7 +936,7 @@ impl TestLocalProcessRegistry {
     /// The prune eligibility predicate, shared by the survey and the prune so
     /// the two can never drift.
     fn prunable_process_ids(
-        managed: &HashMap<ProcessId, ManagedProcessRecord>,
+        managed: &ManagedProcessMap,
         cutoff_epoch_ms: u64,
         filter: Option<&ProcessListFilter>,
         watermark: ProjectionWatermark,

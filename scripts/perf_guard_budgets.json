@@ -2008,7 +2008,7 @@
               "required": false
             },
             "turn.parent_end": {
-              "budget_ms": 11.596,
+              "budget_ms": 0.9,
               "required": false
             },
             "turn_cancel.start_gate": {

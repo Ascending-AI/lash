@@ -96,7 +96,11 @@ pub struct RawProcessRegistryStateForTesting {
     pub tombstones: Vec<ProcessTombstone>,
 }
 
-pub(super) type ManagedProcessMap = HashMap<ProcessId, ManagedProcessRecord>;
+/// Entries sit behind `Arc` so the staged clone in `write` bumps refcounts
+/// instead of deep-copying every record, event log, and keyed-event map on
+/// each mutation — under a live workload that clone dominates the write-lock
+/// hold and serializes unrelated operations into millisecond waits.
+pub(super) type ManagedProcessMap = HashMap<ProcessId, Arc<ManagedProcessRecord>>;
 /// Parent-end ledger keyed by the scope's storage kind and id, so a turn
 /// parent is representable alongside a process parent.
 pub(super) type ParentEndLedger = HashMap<(String, String), crate::ParentEndPlan>;
