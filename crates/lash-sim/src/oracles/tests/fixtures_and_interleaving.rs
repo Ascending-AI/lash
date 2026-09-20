@@ -618,46 +618,12 @@ pub(super) fn replay_contract_execution_fixture(contract: &str) -> serde_json::V
 }
 
 pub(super) fn contract_execution_fixture_events(start_sequence: usize) -> Vec<DeliveredBoundary> {
-    [
-        "standard.initial_request_projection",
-        "standard.empty_response_finishes",
-        "standard.provider_error_without_checkpoint",
-        "standard.native_tool_loop_reenters_model",
-        "standard.parallel_tool_results_checkpoint_once",
-        "standard.tool_failure_feedback_reenters_model",
-        "standard.streamed_text_finalizes_once",
-        "rlm.natural_prose_finalizes",
-        "rlm.typed_prose_requires_finish",
-        "rlm.finish_required_max_turn_stop",
-        "rlm.exec_error_max_turn_stop",
-        "rlm.typed_finish_emits_outcome_and_done",
-        "rlm.finish_required_diagnostic_counts",
-        "rlm.natural_diagnostic_counts",
-        "rlm.cell_diagnostic_counts",
-        "rlm.retired_marker_plain_lashlang_text",
-        "rlm.lashlang_cell_exec_continues",
-        "rlm.streamed_lashlang_cell_exec_persists_trajectory",
-        "rlm.empty_options_natural_default",
-        "rlm.exec_result_no_tool_call_replay",
-        "rlm.exec_tool_control_frame_switch_terminal",
-        "rlm.exec_tool_control_fail_terminal",
-        "rlm.natural_allows_finish_value",
-        "rlm.typed_schema_mismatch_repair_loop",
-        "rlm.typed_schema_any_of_mismatch",
-        "agent.foreground_tool_call_round_trip",
-        "agent.started_process_tool_call_graph",
-        "agent.durable_input_suspension_resolution",
-        "agent.started_process_subagent_spawn",
-        "agent.nested_process_start_await",
-        "agent.session_turn_process_child",
-        "agent.failed_child_preserves_failure_graph",
-        "agent.parallel_spawn_and_join",
-        "agent.tuple_values_finish_as_json_arrays",
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(offset, contract)| contract_execution_fixture_event(start_sequence + offset, contract))
-    .collect()
+    all_contract_fact_specs()
+        .enumerate()
+        .map(|(offset, row)| {
+            contract_execution_fixture_event(start_sequence + offset, row.spec.semantic_oracle)
+        })
+        .collect()
 }
 
 pub(super) fn contract_execution_fixture_event(
