@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 46,
-  "cargo_target_count": 137,
+  "cargo_target_count": 138,
   "feature_lane_units": [
     {
       "features": [],
@@ -9406,6 +9406,16 @@
         "testing"
       ],
       "kind": "test",
+      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_9f57b6db",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "default",
+        "lashlang",
+        "testing"
+      ],
+      "kind": "test",
       "label": "//crates/lash-postgres-store:integration__test__fv_9f57b6db",
       "package": "lash-internal-postgres-store"
     },
@@ -17574,7 +17584,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 189,
+  "generated_label_count": 190,
   "packages": [
     {
       "declared_features": [],
@@ -18610,6 +18620,16 @@
           "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
           "kind": "test",
           "label": "//crates/lash-postgres-store:schema_drift__test",
+          "tags": [
+            "cargo-service-gate",
+            "manual"
+          ]
+        },
+        {
+          "cargo": "host_provisioned_rollout",
+          "cargo_only": "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service",
+          "kind": "test",
+          "label": "//crates/lash-postgres-store:host_provisioned_rollout__test",
           "tags": [
             "cargo-service-gate",
             "manual"

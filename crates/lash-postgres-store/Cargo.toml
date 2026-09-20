@@ -91,6 +91,10 @@ name = "schema_drift"
 path = "tests/schema_drift.rs"
 
 [[test]]
+name = "host_provisioned_rollout"
+path = "tests/host_provisioned_rollout.rs"
+
+[[test]]
 name = "schema_constraints"
 path = "tests/schema_constraints.rs"
 
