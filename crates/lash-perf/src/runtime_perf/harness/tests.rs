@@ -1,6 +1,154 @@
 use super::super::prompt::benchmark_prompt;
+use super::super::scenarios::ScenarioWiring;
 use super::*;
 use tokio_util::sync::CancellationToken;
+
+fn benchmark_plugin_ids(scenario: RuntimePerfScenario) -> Vec<&'static str> {
+    let effect_host: Arc<dyn lash_core::EffectHost> = Arc::new(
+        lash_core::facade_support::NativeEffectHost::default()
+            .allow_process_lifetime_completion_keys(),
+    );
+    let settlement_control = scenario
+        .settlement_children()
+        .map(|_| Arc::new(BenchmarkSettlementControl::new()));
+    let tool_catalog_observer = scenario
+        .wiring()
+        .tool_catalog_observer
+        .then(|| Arc::new(BenchmarkToolCatalogObserver::default()));
+    benchmark_plugin_factories(
+        scenario,
+        &effect_host,
+        settlement_control.as_ref(),
+        tool_catalog_observer.as_ref(),
+    )
+    .iter()
+    .map(|factory| factory.id())
+    .collect()
+}
+
+#[test]
+fn scenario_wiring_drives_the_benchmark_plugin_list_in_order() {
+    const TOOLS: &str = "runtime_perf_tools";
+    let expected: Vec<(RuntimePerfScenario, Vec<&'static str>)> = vec![
+        (RuntimePerfScenario::RlmLlmQuery, vec![TOOLS, "llm_tools"]),
+        (
+            RuntimePerfScenario::RlmSubagentSpawn,
+            vec![TOOLS, "subagents"],
+        ),
+        (
+            RuntimePerfScenario::RlmObliqueStackMix,
+            vec![TOOLS, "subagents", "runtime_perf_oblique_tools"],
+        ),
+        (
+            RuntimePerfScenario::RlmLargeToolCatalog,
+            vec![TOOLS, "runtime_perf_large_tool_catalog"],
+        ),
+        (
+            RuntimePerfScenario::ToolDiscoverySearch,
+            vec![TOOLS, "runtime_perf_large_tool_catalog"],
+        ),
+        (
+            RuntimePerfScenario::RlmToolCatalogCold,
+            vec![
+                TOOLS,
+                "runtime_perf_large_tool_catalog",
+                "runtime_perf_tool_catalog_observer",
+            ],
+        ),
+        (
+            RuntimePerfScenario::RlmToolCatalogWarm,
+            vec![
+                TOOLS,
+                "runtime_perf_large_tool_catalog",
+                "runtime_perf_tool_catalog_observer",
+            ],
+        ),
+        (
+            RuntimePerfScenario::RlmTriggerMailPipeline,
+            vec![TOOLS, "runtime_perf_workbench_trigger"],
+        ),
+        (
+            RuntimePerfScenario::DeepTurnComposition,
+            vec![TOOLS, "subagents", "runtime_perf_workbench_trigger"],
+        ),
+        (
+            RuntimePerfScenario::AsyncProcessSettlement2Children,
+            vec![TOOLS, "runtime_perf_workbench_trigger"],
+        ),
+        (
+            RuntimePerfScenario::AsyncProcessSettlement8Children,
+            vec![TOOLS, "runtime_perf_workbench_trigger"],
+        ),
+        (
+            RuntimePerfScenario::DurableAgentChildTurnSqlite,
+            vec![TOOLS, "subagents"],
+        ),
+        (
+            RuntimePerfScenario::DurableAgentChildTurnPostgres,
+            vec![TOOLS, "subagents"],
+        ),
+        (
+            RuntimePerfScenario::HighTrafficLoadSqlite,
+            vec![TOOLS, "subagents", "runtime_perf_workbench_trigger"],
+        ),
+        (
+            RuntimePerfScenario::HighTrafficLoadPostgres,
+            vec![TOOLS, "subagents", "runtime_perf_workbench_trigger"],
+        ),
+        (
+            RuntimePerfScenario::HighTrafficKneeSqlite,
+            vec![TOOLS, "subagents", "runtime_perf_workbench_trigger"],
+        ),
+        (
+            RuntimePerfScenario::HighTrafficKneePostgres,
+            vec![TOOLS, "subagents", "runtime_perf_workbench_trigger"],
+        ),
+    ];
+    let pinned: std::collections::HashSet<RuntimePerfScenario> =
+        expected.iter().map(|(scenario, _)| *scenario).collect();
+    for (scenario, ids) in expected {
+        assert_eq!(
+            benchmark_plugin_ids(scenario),
+            ids,
+            "benchmark plugin order changed for {}",
+            scenario.name()
+        );
+    }
+    for metadata in RuntimePerfScenario::METADATA {
+        if pinned.contains(&metadata.scenario) {
+            continue;
+        }
+        assert_eq!(
+            benchmark_plugin_ids(metadata.scenario),
+            vec![TOOLS],
+            "{} unexpectedly installs benchmark plugins",
+            metadata.name
+        );
+    }
+}
+
+#[test]
+fn rlm_globals_carve_out_lives_only_in_the_rlm_arm() {
+    // The store/registry carve-out used to be written in both execution-mode
+    // arms; in the Standard arm `RlmGlobals` cannot appear because the metadata
+    // table declares it RLM, so both predicates were unconditionally constant.
+    // The wiring column now carries the fact once.
+    let wiring = RuntimePerfScenario::RlmGlobals.wiring();
+    assert_eq!(
+        RuntimePerfScenario::RlmGlobals.execution_mode(),
+        ExecutionMode::Rlm
+    );
+    assert!(!wiring.process_registry);
+    assert!(!wiring.queued_work);
+    assert_eq!(
+        RuntimePerfScenario::RlmGlobals.wiring(),
+        ScenarioWiring {
+            process_registry: false,
+            queued_work: false,
+            ..ScenarioWiring::DEFAULT
+        }
+    );
+}
 
 #[tokio::test]
 async fn rlm_globals_keeps_fixed_session_projection_across_real_turns() {
