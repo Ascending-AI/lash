@@ -255,13 +255,6 @@ pub struct SessionTurnInput {
 pub struct SessionTurnRequest<'run> {
     turn: SessionTurnInput,
     scoped_effect_controller: crate::ScopedEffectController<'run>,
-    admission_class: ManagedTurnAdmissionClass,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ManagedTurnAdmissionClass {
-    Normal,
-    RuntimeInternalCompaction,
 }
 
 impl<'run> SessionTurnRequest<'run> {
@@ -315,37 +308,6 @@ impl<'run> SessionTurnRequest<'run> {
         Self::from_validated_scope(session_id, turn_id, input, scoped_effect_controller)
     }
 
-    /// Build the managed child turn used by runtime-owned history compaction.
-    ///
-    /// Compaction has its own physical session and turn ids, while its effects
-    /// remain authorized by the scope that admitted the parent runtime run.
-    /// Keeping those identities separate prevents a borrowed or shared
-    /// controller from presenting an address that disagrees with its host
-    /// fence. A session-deletion scope cannot authorize turn execution.
-    pub fn new_runtime_internal_compaction(
-        session_id: impl Into<SessionId>,
-        turn_id: impl Into<TurnId>,
-        input: TurnInput,
-        scoped_effect_controller: crate::ScopedEffectController<'run>,
-    ) -> Result<Self, PluginError> {
-        if matches!(
-            scoped_effect_controller.execution_scope(),
-            crate::ExecutionScope::SessionDelete { .. }
-        ) {
-            return Err(PluginError::Session(
-                "runtime-internal compaction requires a turn-bearing execution scope".to_string(),
-            ));
-        }
-        let mut request = Self::from_validated_scope(
-            session_id.into(),
-            turn_id.into(),
-            input,
-            scoped_effect_controller,
-        )?;
-        request.admission_class = ManagedTurnAdmissionClass::RuntimeInternalCompaction;
-        Ok(request)
-    }
-
     fn from_validated_scope(
         session_id: SessionId,
         turn_id: TurnId,
@@ -372,21 +334,7 @@ impl<'run> SessionTurnRequest<'run> {
                 input,
             },
             scoped_effect_controller,
-            admission_class: ManagedTurnAdmissionClass::Normal,
         })
-    }
-
-    /// Mark correctness-critical rolling-history compaction as runtime-internal.
-    ///
-    /// The turn remains registered for collision checks and observability, but
-    /// it does not consume or compete for the host's managed-turn admission cap.
-    pub fn with_runtime_internal_compaction_admission(mut self) -> Self {
-        self.admission_class = ManagedTurnAdmissionClass::RuntimeInternalCompaction;
-        self
-    }
-
-    pub fn admission_class(&self) -> ManagedTurnAdmissionClass {
-        self.admission_class
     }
 
     pub fn session_id(&self) -> &str {

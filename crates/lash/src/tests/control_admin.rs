@@ -213,15 +213,20 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     else {
         panic!("recent cursor should replay compaction observation events");
     };
+    // Compaction is a direct completion now (FIG-3374): the result commits in
+    // the same publication as the frame switch, so the resident change rides
+    // on `Committed`'s read view rather than a separate `ResidentChanged`.
     assert!(
         events.windows(2).any(|window| matches!(
             (&window[0].payload, &window[1].payload),
             (
                 lash_core::SessionObservationEventPayload::AgentFrameSwitched { .. },
-                lash_core::SessionObservationEventPayload::ResidentChanged { .. }
-            )
+                lash_core::SessionObservationEventPayload::Committed { read_view }
+            ) if read_view.messages().iter().any(|message| {
+                message.parts[0].content.contains("old durable request summarized")
+            })
         )),
-        "expected AgentFrameSwitched immediately followed by ResidentChanged, got {events:?}"
+        "expected AgentFrameSwitched immediately followed by Committed carrying the summary, got {events:?}"
     );
 
     let after = session.admin().state().persist_current().await?;

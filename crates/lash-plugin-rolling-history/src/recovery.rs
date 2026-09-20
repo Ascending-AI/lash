@@ -13,9 +13,9 @@ use super::*;
 // 2. The next turn (on restore included) re-derives the pending recovery from
 //    that durable marker plus the terminal records; hooks are best-effort and
 //    are never trusted across drives.
-// 3. Recovery summarizes the whole committed history through the existing
-//    `new_runtime_internal_compaction` managed child turn, with the oversized
-//    parts elided first so the summarizer request itself fits the window.
+// 3. Recovery summarizes the whole committed history through one direct LLM
+//    completion on the session's own journal lane, with the oversized parts
+//    elided first so the summarizer request itself fits the window.
 // 4. The summary and one terminal record are appended through the pinning
 //    graph seam under a stable operation id, and the continuing turn runs in
 //    a fresh recovered window (system prefix + summary + current request).
@@ -233,17 +233,20 @@ pub(crate) async fn append_recovery_record(
     suffix: String,
     nodes: Vec<lash_core::SessionAppendNode>,
 ) -> Result<(), ContextError> {
-    let (child_session, _) = compaction_child_ids(
+    let (compaction_frame_id, _) = compaction_request_ids(
         session_id,
         history_snapshot,
         request_snapshot,
         prompt_text,
         execution_scope,
     )?;
-    let discriminator = child_session
+    let discriminator = compaction_frame_id
         .as_str()
         .split_once("-compaction:")
-        .map_or_else(|| child_session.to_string(), |(_, tail)| tail.to_string());
+        .map_or_else(
+            || compaction_frame_id.to_string(),
+            |(_, tail)| tail.to_string(),
+        );
     let request = lash_core::AppendSessionNodesRequest {
         operation_id: format!("rolling-history-overflow-recovery/{suffix}/{discriminator}"),
         nodes,
@@ -344,20 +347,20 @@ pub(crate) async fn record_and_project_failure(
 /// records the attempt (and, at the cap, the exhausted record) and returns `None`, leaving
 /// the turn on the ordinary rolling projection.
 ///
-/// FIG-3107: the summarizer now runs on the real compaction seam — an ordinary
-/// `new_runtime_internal_compaction` managed child turn over the committed
-/// history — and the summary lands in a durable recovery frame through
+/// FIG-3374: the summarizer is one direct LLM completion over the committed
+/// history on the session's own journal lane, and the summary lands in a
+/// durable recovery frame through
 /// [`SessionGraphService::switch_agent_frame`], the same durable semantics as
 /// the in-turn frame-switch control. Recovery no longer projects a window
-/// into the exhausted frame, and no `DirectCompletionClient` is spent: the
-/// residual window projection below covers only this running turn's prompt
-/// view, while the durable session continues in the switched frame.
+/// into the exhausted frame: the residual window projection below covers only
+/// this running turn's prompt view, while the durable session continues in
+/// the switched frame.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_overflow_recovery(
     session_id: &SessionId,
     history_messages: &[Message],
     history_snapshot: &SessionSnapshot,
-    session_lifecycle: Arc<dyn lash_core::plugin::SessionLifecycleService>,
+    direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
     session_graph: &dyn lash_core::plugin::SessionGraphService,
     scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
     current_frame_node_id: Option<&str>,
@@ -448,17 +451,16 @@ pub(crate) async fn run_overflow_recovery(
         .await;
     }
 
-    // The summarizer runs as the runtime-internal compaction managed child
-    // turn: the same seam the ordinary compaction policy uses, hydrated from
-    // the parent's durable state (FIG-3107).
+    // The summarizer is one direct completion on the same seam the ordinary
+    // compaction policy uses (FIG-3374).
     let summary = {
         let summarized = summarize_compaction_prefix(
             session_id,
             history_snapshot,
             summarizer_prefix.clone(),
             Some(&recovery_instructions(elided_parts)),
-            session_lifecycle,
-            scoped_effect_controller.clone(),
+            direct_completions,
+            scoped_effect_controller,
         )
         .await;
         match summarized {
@@ -551,17 +553,20 @@ async fn switch_recovery_frame(
     current_frame_node_id: Option<&str>,
     summary: &str,
 ) -> Result<(), ContextError> {
-    let (child_session, _) = compaction_child_ids(
+    let (compaction_frame_id, _) = compaction_request_ids(
         session_id,
         history_snapshot,
         request_snapshot,
         prompt_text,
         scoped_effect_controller.execution_scope(),
     )?;
-    let discriminator = child_session
+    let discriminator = compaction_frame_id
         .as_str()
         .split_once("-compaction:")
-        .map_or_else(|| child_session.to_string(), |(_, tail)| tail.to_string());
+        .map_or_else(
+            || compaction_frame_id.to_string(),
+            |(_, tail)| tail.to_string(),
+        );
     let frame_key = lash_core::FrameKey::from_compaction_material(
         session_id,
         &format!("rolling-history-overflow-recovery:{discriminator}"),

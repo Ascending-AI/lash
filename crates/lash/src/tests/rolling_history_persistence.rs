@@ -339,6 +339,7 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
         .expect("SQLite host supplies the repeated admin scope");
 
     for expected_summary in expected_summaries {
+        let usage_before = session.usage_report().usage.usage.output_tokens;
         assert!(
             session
                 .admin()
@@ -356,6 +357,14 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
             view.messages()[0].parts[0]
                 .content()
                 .contains(expected_summary)
+        );
+        // The administrative compaction owns no turn, so its direct completion
+        // usage must settle at the compact_context boundary (FIG-3374).
+        let usage_after = session.usage_report().usage.usage.output_tokens;
+        assert_eq!(
+            usage_after,
+            usage_before + 1,
+            "the summarizer's usage must settle at the compaction boundary"
         );
     }
     Ok(())
