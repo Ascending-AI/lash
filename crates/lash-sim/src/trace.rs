@@ -264,11 +264,7 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.provider-turn-interleaving-depth.v1"
         | "sim.oracle.sqlite-model-replay.v1"
         | "sim.oracle.postgres-model-replay.v1" => Some(ModelProperty),
-        id if id.starts_with("sim.oracle.scenario.")
-            || id.starts_with("sim.oracle.scenario-mini.") =>
-        {
-            Some(ModelProperty)
-        }
+        id if scenario_oracle_partition(id).is_some() => Some(ModelProperty),
         "runtime.turn_contract"
         | "sim.oracle.abandoned-requires-evidence.v1"
         | "sim.oracle.backend-failure-observed.v1"
@@ -334,6 +330,93 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.worker-failover-continues-work.v1"
         | "sim.oracle.worker-stale-completion-rejected.v1" => Some(RealObservation),
         _ => None,
+    }
+}
+
+/// Which scenario-contract oracle partition an oracle id belongs to. This is
+/// the single spelling of the `sim.oracle.scenario.` / `sim.oracle.scenario-mini.`
+/// prefix rule; both the observation classifier above and the oracle census
+/// below classify through it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScenarioOraclePartition {
+    Contract,
+    ContractMini,
+}
+
+pub fn scenario_oracle_partition(oracle_id: &str) -> Option<ScenarioOraclePartition> {
+    if oracle_id.starts_with("sim.oracle.scenario-mini.") {
+        Some(ScenarioOraclePartition::ContractMini)
+    } else if oracle_id.starts_with("sim.oracle.scenario.") {
+        Some(ScenarioOraclePartition::Contract)
+    } else {
+        None
+    }
+}
+
+/// Running census of evaluated oracle checks for the generated-sim profile
+/// summary. Every published number derives from one total plus two
+/// partitions, so the census halves cannot disagree: each recorded check
+/// contributes to the total, to pass/fail, and to exactly one observation
+/// class.
+#[derive(Clone, Debug, Default)]
+pub struct OracleCensus {
+    total: usize,
+    failures: usize,
+    real_observation: usize,
+    scenario_contract: usize,
+    scenario_contract_mini: usize,
+}
+
+impl OracleCensus {
+    /// Record one evaluated verdict. Its status, observation class and
+    /// scenario partition all come from the verdict itself.
+    pub fn record(&mut self, verdict: &OracleVerdict) {
+        self.record_unverdicted(&verdict.oracle_id, verdict.status.clone());
+    }
+
+    /// Record one evaluated check that produces no `OracleVerdict` row (the
+    /// search lane's per-seed replay outcome and determinism rerun). The
+    /// classification still comes from the observation classifier keyed on
+    /// the check's oracle id.
+    pub fn record_unverdicted(&mut self, oracle_id: &str, status: OracleStatus) {
+        let observation_class = oracle_observation_class(oracle_id)
+            .unwrap_or_else(|| panic!("oracle `{oracle_id}` has no observation-class declaration"));
+        self.total += 1;
+        if status == OracleStatus::Failed {
+            self.failures += 1;
+        }
+        if observation_class == OracleObservationClass::RealObservation {
+            self.real_observation += 1;
+        }
+        match scenario_oracle_partition(oracle_id) {
+            Some(ScenarioOraclePartition::Contract) => self.scenario_contract += 1,
+            Some(ScenarioOraclePartition::ContractMini) => self.scenario_contract_mini += 1,
+            None => {}
+        }
+    }
+
+    pub fn oracle_passes(&self) -> usize {
+        self.total - self.failures
+    }
+
+    pub fn oracle_failures(&self) -> usize {
+        self.failures
+    }
+
+    pub fn real_observation_oracles(&self) -> usize {
+        self.real_observation
+    }
+
+    pub fn model_property_oracles(&self) -> usize {
+        self.total - self.real_observation
+    }
+
+    pub fn scenario_contract_oracles(&self) -> usize {
+        self.scenario_contract
+    }
+
+    pub fn scenario_contract_mini_oracles(&self) -> usize {
+        self.scenario_contract_mini
     }
 }
 

@@ -45,9 +45,10 @@ use crate::generator::{
 };
 use crate::minimize::{MinimizeError, minimize_trace};
 use crate::oracles::{
-    LiveProviderFailureFacts, combine_oracles, live_provider_failure_coverage,
-    peak_concurrent_live_turns, pending_tool_completion, replay_determinism,
-    runtime_final_value_semantic, runtime_provider_turn, scenario_contract_generated_facts,
+    LiveProviderFailureFacts, REPLAY_DETERMINISM_ORACLE, combine_oracles,
+    live_provider_failure_coverage, peak_concurrent_live_turns, pending_tool_completion,
+    replay_determinism, runtime_final_value_semantic, runtime_provider_turn,
+    scenario_contract_generated_facts,
 };
 use crate::provider::{
     ProviderWireEvent, ProviderWireHeader, ProviderWireScript, ScriptedLlmHttpExchange,
@@ -79,7 +80,7 @@ use crate::store::{
     ObservedSessionStoreFactory,
 };
 use crate::trace::{
-    AbstractWorldSummary, OracleObservationClass, OracleStatus, OracleVerdict, SimulationTrace,
+    AbstractWorldSummary, OracleCensus, OracleStatus, OracleVerdict, SimulationTrace,
     TraceEventLine, TraceIoError, write_event_lines, write_replay_report, write_trace,
 };
 
