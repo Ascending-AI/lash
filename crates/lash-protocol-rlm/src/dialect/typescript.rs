@@ -394,6 +394,7 @@ impl TypescriptDialect {
         &self,
         features: crate::protocol::RlmPromptFeatures,
         tool_catalog: &lash_core::ToolCatalog,
+        channel: crate::plugin::RlmChannel,
     ) -> Result<String, SessionError> {
         let tools = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, self, features);
         let tools = if tools.is_empty() {
@@ -407,7 +408,23 @@ impl TypescriptDialect {
         } else {
             "**Tools** or **Host Surface**"
         };
-        let response_shape = super::cell_response_shape(self.cell_tags());
+        // Transport prose is authored per channel, side by side, rather than
+        // derived from the cell wording by string replacement (FIG-2881).
+        let action = match channel {
+            crate::plugin::RlmChannel::Cell => {
+                format!("a paired `{}` block", self.cell_tags().open)
+            }
+            crate::plugin::RlmChannel::NativeTool => "the `execute_code` program".to_string(),
+        };
+        let response_shape = match channel {
+            crate::plugin::RlmChannel::Cell => super::cell_response_shape(self.cell_tags()),
+            crate::plugin::RlmChannel::NativeTool => concat!(
+                "### Tool transport\n\nEach response makes one `execute_code` call with ",
+                "`{\"code\": \"<complete program>\"}`. Tool calls and `finish` run inside ",
+                "the program; prose before the call is commentary.\n"
+            )
+            .to_string(),
+        };
         let environment = self
             .surface
             .host_environment(tool_catalog)
@@ -432,23 +449,44 @@ impl TypescriptDialect {
 
 `console.log(value)` shows output in the next step; `print(value)` shows a structured value, summarised field by field rather than cut off when it is large; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{{ code, details }}`.{sleep}{durable}"#
         );
-        let example =
-            "### Example cell\n\n<typescript>\nconst total = 1 + 2;\nfinish(total);\n</typescript>";
+        // One worked program, rendered in each channel's own call shape.
+        let example_program = "const total = 1 + 2;\nfinish(total);";
+        let example = match channel {
+            crate::plugin::RlmChannel::Cell => format!(
+                "### Example cell\n\n{open}\n{example_program}\n{close}",
+                open = self.cell_tags().open,
+                close = self.cell_tags().close,
+            ),
+            crate::plugin::RlmChannel::NativeTool => format!(
+                "### Example execute_code call\n\nexecute_code({})",
+                serde_json::json!({"code": example_program})
+            ),
+        };
         // `tools` and `host_surface` either carry their own leading `\n\n` or
         // are empty, so they append directly — an unconditional separator here
         // leaves stray blank lines where a skipped block would have gone.
         Ok(format!(
-            "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}{tools}{host_surface}"
+            "Use prose for conversation; use {action} for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}{tools}{host_surface}"
         ))
     }
 
-    pub(crate) fn finalization_copy(&self, termination: &lash_rlm_types::RlmTermination) -> String {
+    pub(crate) fn finalization_copy(
+        &self,
+        termination: &lash_rlm_types::RlmTermination,
+        channel: crate::plugin::RlmChannel,
+    ) -> String {
         match termination {
             lash_rlm_types::RlmTermination::FinishRequired { schema } => {
-                self.finish_required_finalization(schema.is_some())
+                self.finish_required_finalization(schema.is_some(), channel)
             }
             lash_rlm_types::RlmTermination::Natural => {
-                "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step in a block, and call `finish(value)` inside the program to return a computed value.".to_string()
+                let step = match channel {
+                    crate::plugin::RlmChannel::Cell => "in a block",
+                    crate::plugin::RlmChannel::NativeTool => "in an `execute_code` call",
+                };
+                format!(
+                    "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step {step}, and call `finish(value)` inside the program to return a computed value."
+                )
             }
         }
     }
@@ -461,11 +499,24 @@ impl TypescriptDialect {
         }
     }
 
-    pub(crate) fn finish_required_copy(&self, requires_schema: bool) -> String {
-        if requires_schema {
-            "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete, with a value matching the required output schema.".to_string()
-        } else {
-            "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete. Use `finish(null)` only when null is intentional.".to_string()
+    pub(crate) fn finish_required_copy(
+        &self,
+        requires_schema: bool,
+        channel: crate::plugin::RlmChannel,
+    ) -> String {
+        match (channel, requires_schema) {
+            (crate::plugin::RlmChannel::Cell, true) => {
+                "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete, with a value matching the required output schema.".to_string()
+            }
+            (crate::plugin::RlmChannel::Cell, false) => {
+                "Call `finish(value)` inside a paired `<typescript>...</typescript>` block when the task is complete. Use `finish(null)` only when null is intentional.".to_string()
+            }
+            (crate::plugin::RlmChannel::NativeTool, true) => {
+                "Call `finish(value)` inside the `code` argument of an `execute_code` call when the task is complete, with a value matching the required output schema.".to_string()
+            }
+            (crate::plugin::RlmChannel::NativeTool, false) => {
+                "Call `finish(value)` inside the `code` argument of an `execute_code` call when the task is complete. Use `finish(null)` only when null is intentional.".to_string()
+            }
         }
     }
 
@@ -520,15 +571,26 @@ impl TypescriptDialect {
         crate::cell_scan::render_cell_text(self.cell_tags(), prose, code)
     }
 
-    pub(crate) fn finish_required_finalization(&self, requires_schema: bool) -> String {
+    pub(crate) fn finish_required_finalization(
+        &self,
+        requires_schema: bool,
+        channel: crate::plugin::RlmChannel,
+    ) -> String {
         let vocabulary = self.prompt_vocabulary();
-        let mut text = format!(
-            "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
-            open = self.cell_tags().open,
-            close = self.cell_tags().close,
-            finish = vocabulary.finish_statement,
-            finish_null = vocabulary.finish_null_statement,
-        );
+        let mut text = match channel {
+            crate::plugin::RlmChannel::Cell => format!(
+                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
+                open = self.cell_tags().open,
+                close = self.cell_tags().close,
+                finish = vocabulary.finish_statement,
+                finish_null = vocabulary.finish_null_statement,
+            ),
+            crate::plugin::RlmChannel::NativeTool => format!(
+                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call `{finish}` until the answer is in hand; the final response's `execute_code` call runs `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the `execute_code` call that performs it.",
+                finish = vocabulary.finish_statement,
+                finish_null = vocabulary.finish_null_statement,
+            ),
+        };
         if requires_schema {
             text.push_str(" The value must match the REQUIRED OUTPUT contract.");
         }
@@ -649,6 +711,7 @@ mod tests {
             .render_execution_section(
                 crate::protocol::RlmPromptFeatures::default(),
                 &lash_core::ToolCatalog::from_tool_definitions(vec![]),
+                crate::plugin::RlmChannel::Cell,
             )
             .expect("render execution section");
 
@@ -739,7 +802,11 @@ mod tests {
         .with_tool_binding(ToolBinding::new(["web"], "fetch"));
         let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
         let section = dialect
-            .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog)
+            .render_execution_section(
+                crate::protocol::RlmPromptFeatures::default(),
+                &catalog,
+                crate::plugin::RlmChannel::Cell,
+            )
             .expect("render execution section");
         assert!(
             section.contains("web.fetch({ url: string }): Promise<string>"),
@@ -783,7 +850,11 @@ mod tests {
         );
         let render = |catalog: &lash_core::ToolCatalog| {
             dialect
-                .render_execution_section(crate::protocol::RlmPromptFeatures::default(), catalog)
+                .render_execution_section(
+                    crate::protocol::RlmPromptFeatures::default(),
+                    catalog,
+                    crate::plugin::RlmChannel::Cell,
+                )
                 .expect("render execution section")
         };
 
@@ -865,6 +936,7 @@ mod tests {
             .render_execution_section(
                 crate::protocol::RlmPromptFeatures::default(),
                 &lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+                crate::plugin::RlmChannel::Cell,
             )
             .expect("render execution section");
         let real = lash_typescript::DiagnosticCode::ALL
@@ -1166,7 +1238,11 @@ mod tests {
             admitted.iter().map(|(tool, ..)| tool.clone()).collect(),
         );
         let section = TypescriptDialect::prompt_only(LashlangSurface::default())
-            .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog)
+            .render_execution_section(
+                crate::protocol::RlmPromptFeatures::default(),
+                &catalog,
+                crate::plugin::RlmChannel::Cell,
+            )
             .expect("render execution section");
         let declarations = tool_declarations(&section);
         assert_eq!(

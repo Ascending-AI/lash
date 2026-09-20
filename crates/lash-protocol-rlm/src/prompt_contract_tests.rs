@@ -82,7 +82,7 @@ fn system_with(
         execution_section(dialect, features, &catalog)
     } else {
         dialect
-            .render_execution_section(features, &catalog)
+            .render_execution_section(features, &catalog, crate::plugin::RlmChannel::Cell)
             .unwrap()
     };
     let prompt = lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
@@ -210,7 +210,11 @@ fn the_process_block_follows_the_catalogue_and_sleep_follows_its_ability() {
         };
         let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
         let text = dialect
-            .render_execution_section(crate::protocol::RlmPromptFeatures::default(), &catalog())
+            .render_execution_section(
+                crate::protocol::RlmPromptFeatures::default(),
+                &catalog(),
+                crate::plugin::RlmChannel::Cell,
+            )
             .unwrap();
         assert_eq!(
             text.contains("`await sleep(ms)` pauses the program."),
@@ -368,7 +372,8 @@ fn prompt_section_order_and_termination_have_one_owner() {
                 lash_rlm_types::RlmTermination::Natural,
                 lash_rlm_types::RlmTermination::FinishRequired { schema: None },
             ] {
-                let policy = dialect.finalization_copy(&termination);
+                let policy =
+                    dialect.finalization_copy(&termination, crate::plugin::RlmChannel::Cell);
                 assert!(!policy.contains("standalone"));
                 assert!(!policy.contains("only those listed"));
                 assert!(!policy.contains("Return exactly"));
@@ -419,7 +424,11 @@ fn each_host_capability_gates_its_own_vocabulary() {
                     execution_section(&dialect, features, &catalog)
                 } else {
                     dialect
-                        .render_execution_section(features, &catalog)
+                        .render_execution_section(
+                            features,
+                            &catalog,
+                            crate::plugin::RlmChannel::Cell,
+                        )
                         .unwrap()
                 };
                 for needle in needles {
@@ -556,7 +565,11 @@ fn opening_line_names_exactly_the_available_sections() {
             }
             let dialect = crate::dialect::TypescriptDialect::prompt_only(surface);
             let text = dialect
-                .render_execution_section(Default::default(), &catalog())
+                .render_execution_section(
+                    Default::default(),
+                    &catalog(),
+                    crate::plugin::RlmChannel::Cell,
+                )
                 .unwrap();
             let expected = if host_surface {
                 "Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools** or **Host Surface**."
@@ -565,6 +578,33 @@ fn opening_line_names_exactly_the_available_sections() {
             };
             assert_eq!(text.lines().next(), Some(expected));
             assert_eq!(text.contains("### Host Surface"), host_surface);
+        }
+    }
+}
+
+#[test]
+fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
+    // FIG-2881: semantic guard for the authored native copy. The prompt must
+    // teach the `execute_code` transport itself, and no cell-channel tag
+    // syntax may survive into it — wording-only assertions let a derivation
+    // silently produce incoherent copy.
+    for enabled in [false, true] {
+        let dialect = dialect(enabled);
+        for catalog in [catalog(), process_catalog()] {
+            let prompt = system_with(&dialect, true, enabled, catalog);
+            assert!(prompt.contains("### Tool transport"), "{prompt}");
+            assert!(prompt.contains("`execute_code`"), "{prompt}");
+            for needle in [
+                "<typescript>",
+                "</typescript>",
+                "### Response shape",
+                "### Example cell",
+            ] {
+                assert!(
+                    !prompt.contains(needle),
+                    "native prompt leaks cell syntax `{needle}`: {prompt}"
+                );
+            }
         }
     }
 }

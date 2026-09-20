@@ -56,7 +56,7 @@ pub(super) fn finish_required_reminder_message(
         role: MessageRole::System,
         parts: shared_parts(vec![Part::text(
             format!("{id}.p0"),
-            super::prompt::transport_copy(&dialect.finish_required_copy(requires_schema), dialect),
+            dialect.finish_required_copy(requires_schema, crate::plugin::RlmChannel::NativeTool),
             None,
         )]),
         origin: Some(lash_core::MessageOrigin::Plugin {
@@ -72,7 +72,7 @@ pub(super) fn finish_schema_mismatch_message(dialect: &TypescriptDialect, id: St
         role: MessageRole::System,
         parts: shared_parts(vec![Part::text(
             format!("{id}.p0"),
-            super::prompt::transport_copy(&dialect.finish_schema_mismatch_copy(), dialect),
+            dialect.finish_schema_mismatch_copy(),
             None,
         )]),
         origin: Some(lash_core::MessageOrigin::Plugin {

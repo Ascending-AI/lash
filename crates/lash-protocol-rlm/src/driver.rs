@@ -122,7 +122,11 @@ pub(crate) fn build_rlm_preamble_with_dialect(
 
     prompt_contributions.extend(input.extra_prompt_contributions);
     let execution = dialect
-        .render_execution_section(config.prompt_features, tool_catalog)
+        .render_execution_section(
+            config.prompt_features,
+            tool_catalog,
+            crate::plugin::RlmChannel::Cell,
+        )
         .expect("validated dialect surface");
     let execution = crate::tool_catalog::with_discovery_sentence(
         execution,
@@ -296,7 +300,9 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         let options = decode_rlm_options(&ctx.config.termination)
             .expect("RLM turn options are validated before prompt projection");
         let termination = options.effective_termination();
-        let finalization = self.dialect.finalization_copy(&termination);
+        let finalization = self
+            .dialect
+            .finalization_copy(&termination, crate::plugin::RlmChannel::Cell);
         let required_output = required_output_block(&termination);
         let vocabulary = self.dialect.prompt_vocabulary();
         let final_answer_format = final_answer_format_prompt(&options, vocabulary);
@@ -463,7 +469,8 @@ fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 fn rlm_finalization_prompt(termination: &RlmTermination) -> String {
-    TypescriptDialect::prompt_only(LashlangSurface::default()).finalization_copy(termination)
+    TypescriptDialect::prompt_only(LashlangSurface::default())
+        .finalization_copy(termination, crate::plugin::RlmChannel::Cell)
 }
 
 impl RlmContextProjector {
