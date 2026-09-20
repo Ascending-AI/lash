@@ -189,14 +189,82 @@ impl ToolRegistryInner {
     }
 }
 
-/// Outcome of `ToolRegistry::restore_state`: the adopted generation plus the
-/// ids of persisted tools that no registered source currently resolves.
-/// Hosts should surface a non-empty `orphaned` list to the user — the session
-/// opened, but those tools are non-members until their source returns.
+/// A persisted tool identity that a live id has replaced by owning its
+/// model-facing name. The old grant is not transferred: the live id is a
+/// default member and the retired id is dropped from the surface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SupersededToolIdentity {
+    /// The persisted tool id no source resolves any more.
+    pub retired_id: ToolId,
+    /// The live tool id that now owns the model-facing name.
+    pub live_id: ToolId,
+    /// The model-facing name both identities carry.
+    pub name: String,
+}
+
+/// Outcome of `ToolRegistry::restore_state`: the adopted generation plus what
+/// happened to each persisted tool id no registered source resolved.
+///
+/// The three classes are different facts about the session, and only the first
+/// is capability loss:
+///
+/// * [`lost_members`](Self::lost_members) — persisted `member: true`, nothing
+///   resolves the id. The session opened without a tool the host had curated
+///   in. This is what a host surfaces to its user and what
+///   [`ToolSourcePolicy::Require`] refuses on.
+/// * [`parked_opt_outs`](Self::parked_opt_outs) — unresolved ids the host had
+///   already opted out of (`member: false`). Nothing the session could use is
+///   missing; the entry is kept so the opt-out survives the source's return.
+/// * [`superseded_identities`](Self::superseded_identities) — an old id dropped
+///   because a live id owns its model-facing name. The capability is present
+///   under a new identity, which is a default member.
+///
+/// Entries in the first two classes remain in tool state as orphans and rebind
+/// automatically when their source returns.
 #[derive(Clone, Debug, Default)]
 pub struct ToolRestoreReport {
     pub generation: u64,
-    pub orphaned: Vec<ToolId>,
+    pub lost_members: Vec<ToolId>,
+    pub parked_opt_outs: Vec<ToolId>,
+    pub superseded_identities: Vec<SupersededToolIdentity>,
+}
+
+impl ToolRestoreReport {
+    /// True when a persisted catalog member has no live source: the one class
+    /// that means the session lost a capability.
+    pub fn has_lost_members(&self) -> bool {
+        !self.lost_members.is_empty()
+    }
+
+    /// True when the restore has nothing at all to report about sources.
+    pub fn is_clean(&self) -> bool {
+        self.lost_members.is_empty()
+            && self.parked_opt_outs.is_empty()
+            && self.superseded_identities.is_empty()
+    }
+
+    /// The ids retained as orphaned entries: lost members and parked opt-outs.
+    /// A superseded identity is not retained, so it is not listed here.
+    pub fn orphaned_ids(&self) -> impl Iterator<Item = &ToolId> {
+        self.lost_members.iter().chain(self.parked_opt_outs.iter())
+    }
+}
+
+/// Host policy for opening a session whose persisted tools no live source
+/// resolves.
+///
+/// The default is [`Tolerate`](Self::Tolerate): locking a user out of a
+/// conversation is worse than degrading it, so a lost tool is a typed fact the
+/// host receives rather than a refusal. Unattended and fixed-tool deployments
+/// opt into [`Require`](Self::Require).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolSourcePolicy {
+    /// Open succeeds and the [`ToolRestoreReport`] is delivered to the host.
+    #[default]
+    Tolerate,
+    /// Open refuses when the report has lost members. Parked opt-outs and
+    /// superseded identities never refuse: neither is a missing capability.
+    Require,
 }
 
 #[derive(Clone)]

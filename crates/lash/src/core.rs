@@ -18,7 +18,7 @@ use lash_sansio::SessionId;
 
 mod advanced_builder;
 mod drain;
-mod queued_work;
+pub(crate) mod queued_work;
 mod runtime_host_config;
 mod session_policy;
 mod work_drivers;
@@ -147,6 +147,7 @@ impl LashCore {
             provider: None,
             plugin_factories: Vec::new(),
             plugin_options: PluginOptions::default(),
+            tool_source_policy: None,
         }
     }
 
@@ -825,6 +826,7 @@ pub struct LashCoreBuilder {
     trace_level: Option<lash_trace::TraceLevel>,
     trace_context: Option<lash_trace::TraceContext>,
     termination: Option<TerminationPolicy>,
+    tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     abort_drain_grace: Option<std::time::Duration>,
     // Advanced full-config override; used as the base core when present.
     runtime_host_config: Option<RuntimeHostConfig>,
@@ -869,6 +871,7 @@ impl LashCoreBuilder {
             trace_level: None,
             trace_context: None,
             termination: None,
+            tool_source_policy: None,
             abort_drain_grace: None,
             runtime_host_config: None,
             tool_providers: Vec::new(),
@@ -1063,6 +1066,28 @@ impl LashCoreBuilder {
     /// Configures the termination and returns the updated builder.
     pub fn termination(mut self, termination: TerminationPolicy) -> Self {
         self.termination = Some(termination);
+        self
+    }
+
+    /// Choose what an open does when a session's persisted tools have no live
+    /// source.
+    ///
+    /// The default is [`ToolSourcePolicy::Tolerate`](lash_core::ToolSourcePolicy::Tolerate):
+    /// the session opens and the host receives a typed
+    /// [`ToolRestoreReport`](crate::support::ToolRestoreReport), because
+    /// locking a user out of a conversation is worse than degrading it.
+    /// Unattended and fixed-tool deployments set
+    /// [`Require`](lash_core::ToolSourcePolicy::Require), which refuses an open
+    /// whose report has lost members — a persisted Tool Catalog member no
+    /// registered source resolves. Parked opt-outs and superseded identities
+    /// never refuse.
+    ///
+    /// The choice is carried on the core's host config, so runtime-initiated
+    /// constructions (managed children, the queued-work driver, resume) honour
+    /// it too. One open may override it with
+    /// [`SessionBuilder::tool_source_policy`](crate::SessionBuilder::tool_source_policy).
+    pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {
+        self.tool_source_policy = Some(policy);
         self
     }
 

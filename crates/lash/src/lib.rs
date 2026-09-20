@@ -254,7 +254,8 @@ pub mod tools {
     };
     pub use lash_core::{
         ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,
-        facade_support::ToolRestoreReport, facade_support::ToolStateEntry,
+        facade_support::SupersededToolIdentity, facade_support::ToolRestoreReport,
+        facade_support::ToolSourcePolicy, facade_support::ToolStateEntry,
     };
     /// Runtime-owned tool-intent admission records used by process-registry integrators.
     pub use lash_core::{ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord};

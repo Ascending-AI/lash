@@ -107,6 +107,9 @@ mod approvals_tests;
 #[cfg(test)]
 #[path = "tests/deferred_tools.rs"]
 mod deferred_tools_tests;
+#[cfg(test)]
+#[path = "tests/tool_loss.rs"]
+mod tool_loss_tests;
 pub(super) fn explicit_durable_test_facets(data_dir: &std::path::Path) -> lash::LashCoreBuilder {
     let artifact_store = Arc::new(sync_await({
         let path = data_dir.join("artifacts.db");

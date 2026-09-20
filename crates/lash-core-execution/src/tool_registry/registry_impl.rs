@@ -172,11 +172,33 @@ impl ToolRegistry {
     /// registry identity; the live manifest wins on rebind, with persisted Tool
     /// Host curation is preserved per id. The live source also re-derives the
     /// registration lane, so snapshots written before lane persistence remain
-    /// resumable. Newly advertised ids are members by default. Consequently an
-    /// opt-out does not transfer when a provider replaces a tool with a new id,
-    /// even if it reuses the same name. Multiple
+    /// resumable. Newly advertised ids are members by default. Multiple
     /// sources resolving the same id or advertised name still fail because
     /// execution authority and model-facing names must both be unambiguous.
+    ///
+    /// ## What orphaning does and does not change (FIG-3353)
+    ///
+    /// * **Same-id curation survives orphaning.** The host's `member` bit is
+    ///   carried onto the orphaned entry and restored against the live manifest
+    ///   when the source returns; effective membership is derived
+    ///   (`member && !orphaned`), never rewritten. A commit taken while a tool
+    ///   is orphaned therefore does not persist it as a non-member for good.
+    /// * **Alias replacement is the exception.** When a *different* live id owns
+    ///   the persisted entry's model-facing name, the persisted identity is
+    ///   superseded: it is dropped rather than orphaned, the grant is not
+    ///   transferred, and the new id is a default member. An opt-out recorded
+    ///   against the old id does not travel to the replacement. The restore
+    ///   reports this as a
+    ///   [`SupersededToolIdentity`](crate::tool_registry::SupersededToolIdentity),
+    ///   not as loss.
+    /// * **The orphan flag and the catalog generation are the only durable
+    ///   trace** an orphaning restore leaves. Nothing else about the entry
+    ///   changes, so the durable evidence a host can read back is the persisted
+    ///   `orphaned: true` entry plus the generation the restore adopted.
+    ///
+    /// The three classes of unresolved id are separated in the returned
+    /// [`ToolRestoreReport`]; only lost members mean the session is missing a
+    /// capability.
     pub fn restore_state(
         &self,
         snapshot: ToolState,
@@ -212,7 +234,9 @@ impl ToolRegistry {
             authority.state.generation = generation;
             return Ok(ToolRestoreReport {
                 generation,
-                orphaned: rebound.orphaned,
+                lost_members: rebound.unresolved.lost_members,
+                parked_opt_outs: rebound.unresolved.parked_opt_outs,
+                superseded_identities: rebound.unresolved.superseded_identities,
             });
         }
     }

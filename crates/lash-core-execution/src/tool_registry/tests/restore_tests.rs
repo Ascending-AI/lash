@@ -23,10 +23,7 @@ fn restore_state_adopts_generation_at_or_above_three() {
         restored.generation, 3,
         "restore returns the adopted generation"
     );
-    assert!(
-        restored.orphaned.is_empty(),
-        "all tools resolve, so nothing orphans"
-    );
+    assert!(restored.is_clean(), "all tools resolve, so nothing orphans");
     assert_eq!(
         target.generation(),
         3,
@@ -68,7 +65,9 @@ async fn restore_orphans_unresolved_tools_instead_of_failing() {
     let report = target
         .restore_state(snapshot)
         .expect("restore tolerates the missing source");
-    assert_eq!(report.orphaned, vec![tool_id("mcp__demo__search")]);
+    assert_eq!(report.lost_members, vec![tool_id("mcp__demo__search")]);
+    assert!(report.parked_opt_outs.is_empty());
+    assert!(report.superseded_identities.is_empty());
 
     // Orphans are non-members: excluded from the catalog listing entirely.
     assert!(
@@ -119,7 +118,7 @@ async fn crafted_orchestrating_orphan_cannot_block_a_legitimate_leaf_registratio
     let report = target
         .restore_state(crafted_snapshot)
         .expect("an unresolved crafted entry remains an orphan");
-    assert_eq!(report.orphaned, vec![tool_id("mock_tool")]);
+    assert_eq!(report.lost_members, vec![tool_id("mock_tool")]);
     assert!(target.is_orchestrating_tool(&tool_id("mock_tool")));
 
     let orphan_result = execute_leaf_by_id(
@@ -229,7 +228,7 @@ fn orphan_rebinds_at_explicit_source_admission() {
     let snapshot = host_only_snapshot(1);
     let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
     let report = target.restore_state(snapshot).expect("restore");
-    assert_eq!(report.orphaned, vec![tool_id("host_only")]);
+    assert_eq!(report.lost_members, vec![tool_id("host_only")]);
 
     target
         .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
@@ -257,7 +256,7 @@ fn restore_binds_snapshot_id_from_source_that_advertises_nothing() {
         .expect("lazy source registered before restore");
     let report = target.restore_state(snapshot).expect("lazy id binds");
 
-    assert!(report.orphaned.is_empty());
+    assert!(report.is_clean());
     let exported = target.export_state();
     let entry = exported
         .get(&tool_id("host_only"))
@@ -330,7 +329,18 @@ fn restore_drops_superseded_orphan_and_does_not_transfer_opt_out() {
     let report = target
         .restore_state(snapshot)
         .expect("same name with a different id supersedes the old orphan");
-    assert!(report.orphaned.is_empty());
+    // A replaced identity is neither loss nor an opt-out: the capability is
+    // live under a new id, and the report says so by name (FIG-3367).
+    assert!(report.lost_members.is_empty());
+    assert!(report.parked_opt_outs.is_empty());
+    assert_eq!(
+        report.superseded_identities,
+        vec![crate::tool_registry::SupersededToolIdentity {
+            retired_id: tool_id("mcp__demo__search"),
+            live_id: crate::ToolId::from("tool:replaced"),
+            name: "mcp__demo__search".to_string(),
+        }]
+    );
 
     let exported = target.export_state();
     assert!(
@@ -503,7 +513,10 @@ fn remove_source_preserves_non_member_curation_across_reattach() {
     let report = restored
         .restore_state(decoded)
         .expect("restore detached state");
-    assert_eq!(report.orphaned, vec![external_id.clone()]);
+    // The stored `member: false` curation makes this a parked opt-out, not a
+    // lost capability: nothing the session could have used went missing.
+    assert!(report.lost_members.is_empty());
+    assert_eq!(report.parked_opt_outs, vec![external_id.clone()]);
     assert!(
         restored
             .export_state()
@@ -650,7 +663,7 @@ async fn restore_orphans_stored_internal_entry_without_a_matching_internal_sourc
     let report = registry
         .restore_state(ToolState::new(registry.generation(), entries))
         .expect("an absent internal source orphans the stored entry");
-    assert_eq!(report.orphaned, vec![tool_id("internal_probe")]);
+    assert_eq!(report.lost_members, vec![tool_id("internal_probe")]);
     let entry = registry
         .export_state()
         .get(&tool_id("internal_probe"))

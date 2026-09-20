@@ -52,6 +52,7 @@ impl LashRuntime {
         &mut self,
         state: RuntimeSessionState,
     ) -> Result<(), SessionError> {
+        let mut installed_tool_restore = None;
         if let Some(session) = self.session.as_ref() {
             if let Some(snapshot) = state.plugin_state() {
                 session
@@ -75,20 +76,23 @@ impl LashRuntime {
             // surface that reached generation >= 2 restores cleanly; live
             // changes bump once so the next commit captures them.
             if let Some(tool_state) = state.tool_state_snapshot().cloned() {
-                let report = session
-                    .plugins()
-                    .tool_registry()
-                    .restore_state(tool_state)
-                    .map_err(|err| SessionError::Protocol(err.to_string()))?;
-                if !report.orphaned.is_empty() {
-                    tracing::warn!(
-                        session_id = %state.session_id,
-                        orphaned = ?report.orphaned,
-                        "persisted state installed with orphaned tools: no registered \
-                         source resolves them; they remain non-members until their source returns"
-                    );
-                }
+                let registry = session.plugins().tool_registry();
+                let report = crate::runtime::tool_restore::install_persisted_tool_state(
+                    registry.as_ref(),
+                    tool_state,
+                    crate::runtime::tool_restore::ToolRestoreContext {
+                        session_id: &state.session_id,
+                        site: crate::runtime::ToolRestoreSite::PersistedStateInstall,
+                        policy: self.host.core.control.tool_source_policy,
+                        tracing: &self.host.core.tracing,
+                        clock: self.host.core.clock.as_ref(),
+                    },
+                )?;
+                installed_tool_restore = Some(report);
             }
+        }
+        if installed_tool_restore.is_some() {
+            self.tool_restore_report = installed_tool_restore;
         }
         self.state = state;
         self.publish_plugin_tool_access();

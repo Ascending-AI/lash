@@ -320,7 +320,7 @@ async fn pinned_source_rebinds_nonadvertised_orphan_when_its_provider_returns() 
     let report = registry
         .restore_state(ToolState::new(registry.generation(), entries))
         .expect("unavailable exact-id route restores as an orphan");
-    assert_eq!(report.orphaned, vec![tool_id("returning_resident")]);
+    assert_eq!(report.lost_members, vec![tool_id("returning_resident")]);
 
     available.store(true, Ordering::SeqCst);
     let pinned = registry

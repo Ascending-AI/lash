@@ -418,8 +418,10 @@ pub mod facade_support {
     pub use crate::tool_provider::ToolTriggerClient;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
     pub use crate::tool_registry::ReconfigureError;
+    pub use crate::tool_registry::SupersededToolIdentity;
     pub use crate::tool_registry::ToolRestoreReport;
     pub use crate::tool_registry::ToolSourceHandle;
+    pub use crate::tool_registry::ToolSourcePolicy;
     pub use crate::tool_registry::ToolStateEntry;
     pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
     pub use crate::triggers::InMemoryTriggerStore;
@@ -606,7 +608,9 @@ pub use tool_provider::{
     ToolAttachmentClient, ToolDirectCompletionClient, ToolDispatchClient, ToolProcessEventClient,
     ToolSessionAdmin, ToolSessionModel,
 };
-pub use tool_registry::{ToolRegistry, ToolState};
+pub use tool_registry::{
+    SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy, ToolState,
+};
 pub use tool_result::{
     CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,
     ToolOutcome,

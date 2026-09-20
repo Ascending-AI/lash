@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Ratified on FIG-3366.
+Accepted. Ratified on FIG-3366; extended on FIG-3367 with the tool-restore
+report and the tool-source policy.
 
 ## Context
 
@@ -129,3 +130,86 @@ Two correctly bound stores may address one session at once — that was already
 true and is now first-class. Replacing a binding's owner services is still
 forbidden, which is why the binding-derived handle reuses the binding's ports
 instead of consulting the core.
+
+## Extension (FIG-3367): tool loss at open is a typed fact, with one owner
+
+The Durable Session removed the *reason* a poll orphaned tools. It did not
+answer the other half of FIG-3353: what a host is told when an open really does
+lose them. `ToolRestoreReport` said hosts should surface orphans, and no host
+could — cold open and persisted-state install turned it into a `tracing::warn!`,
+resident re-sync discarded it, and only the explicit host restore returned it.
+
+### One owner for installing persisted tool state
+
+`install_persisted_tool_state` in `lash-core` is the single site that reconciles
+a persisted `ToolState` onto a session's registry. The four constructions that
+install — `from_host_state` (every builder open, resume, managed-child
+materialise, queued-work rebuild, remote host open), the host `restore_tool_state`,
+the persisted-state install, and the resident re-sync — call it and none logs
+and drops. Reconcile semantics, the generation rule and the persisted encoding
+are unchanged: the owner classifies what reconcile already decided.
+
+### The report separates three facts
+
+An unresolved persisted tool id is one of three things, and only the first is
+capability loss:
+
+* **Lost member** — persisted `member: true`, no live source resolves the id.
+* **Parked opt-out** — unresolved, `member: false`. The host had already turned
+  it off; nothing it could use is missing.
+* **Superseded identity** — a live id owns the old id's model-facing name. The
+  capability is present under a new identity, which is a default member, and the
+  old grant does not transfer.
+
+Only lost members log at warn. Before this, an opt-out counted as loss and a
+replacement was silently invisible, so a refusal built on the old list would
+have rejected intentional opt-outs and waved replacements through.
+
+### Delivery
+
+* **Open** keeps the report on the runtime; the facade reads it as
+  `LashSession::tool_restore_report()`. A refused open carries it on the typed
+  error instead.
+* **Internal reloads** (resident re-sync, persisted-state install) replace that
+  same retained report and emit a `tool_restore.report` trace event naming the
+  site, the policy and all three classes.
+
+The report is deliberately *not* a Session Observation Event: that enum crosses
+the remote protocol as `RemoteSessionObservationEvent`, and the report is not
+wire state. Nothing about the report reaches `REMOTE_PROTOCOL_VERSION` or any
+persisted encoding.
+
+### Tool-source policy
+
+`ToolSourcePolicy` is set at core assembly (`LashCoreBuilder::tool_source_policy`),
+overridable per open (`SessionBuilder::tool_source_policy`), and carried on the
+runtime host config so runtime-initiated constructions honour it.
+
+* **Tolerate** (the default) — the session opens and the report is delivered.
+* **Require** — the open refuses with `SessionError::ToolSourcesUnavailable`
+  when the report has lost members. Parked opt-outs and superseded identities
+  never refuse.
+
+Tolerate is the default because locking a user out of a conversation is worse
+than degrading it: a chat whose MCP server is down is still worth reading and
+often still worth continuing. Unattended and fixed-tool deployments — a queued
+worker, a scheduled agent, a service whose tool set is part of its contract —
+set Require, where running without a tool silently is the worse failure. There
+are two values on purpose: per-tool "required" declarations wait for a host that
+needs them, and Require is not advertised as a complete runnability check.
+
+A refusal promises: no config or state commit, no protocol restore, no
+`SessionRestored`, and a released Session Execution Lease (a following open
+acquires it). It does not promise zero side effects. By the time tool state is
+installed, the observer-intent reconcile has run, the admitted load has claimed
+and released its lease, plugins have materialised and `initialize_session` has
+run. A zero-side-effect refusal would need a separate preflight contract.
+
+### What an orphaned commit leaves durable
+
+FIG-3353 asked whether a commit taken while tools are orphaned persists them as
+non-members for good. It does not. An orphan keeps the host's `member` bit,
+effective membership is derived (`member && !orphaned`), and rebind restores it
+against the live manifest. The orphan flag and the catalog generation are the
+only durable trace. Alias replacement is the exception: a superseded identity is
+dropped rather than orphaned and its opt-out does not transfer to the new id.
