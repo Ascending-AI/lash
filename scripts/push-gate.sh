@@ -214,6 +214,29 @@ run_workspace_check() {
   cargo check --workspace --all-targets --locked ${ci_features}
 }
 
+# The trybuild compile-fail fixtures under crates/lash/tests/ui are data to
+# every compile-shaped gate: `cargo check --all-targets` never builds them and
+# no `:all` Bazel wildcard reaches the `manual`-tagged `ui_fixtures` target
+# (FIG-2801). CI's seal lane runs them whenever the facade crate or a root
+# manifest moves (scripts/ci_plan.py `_is_facade_path`); the same trigger set
+# runs `just seal` here so a re-export break reds before the push, not on CI.
+api_surface_touched() {
+  local base_ref merge_base
+  if ! base_ref="$(resolve_gate_base)"; then
+    return 0
+  fi
+  if ! merge_base="$(git merge-base "$base_ref" HEAD 2>/dev/null)"; then
+    return 0
+  fi
+  git diff --name-only "$merge_base" HEAD -- crates/lash Cargo.toml Cargo.lock \
+    | grep -q .
+}
+
+run_api_surface_seal() {
+  step "API surface seal (ui fixtures)"
+  just seal
+}
+
 run_workflow_graph_integration() {
   step "Workflow graph example integration"
   just workflow-graph-integration-verify
@@ -467,6 +490,9 @@ python3 scripts/check-transcript-diff.py --advisory
 scoped SCRIPTS "Repository script tests" run_release_script_tests
 
 scoped RUST_COMPILE "Workspace check" run_workspace_check
+if api_surface_touched; then
+  scoped RUST_COMPILE "API surface seal (ui fixtures)" run_api_surface_seal
+fi
 scoped RUST_COMPILE "lash-runtime feature boundary" run_runtime_feature_boundary_check
 scoped RUST_COMPILE "Postgres conformance" run_postgres_conformance
 scoped RUST_COMPILE "MinIO/S3 conformance" run_minio_conformance
