@@ -700,6 +700,18 @@ WORKSPACE_DEV_SUITE_LABELS = [
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
 
+WORKSPACE_TAIL_SUITE_LABELS = [
+    "//crates/lash-sim:lash-sim__unit_test",
+    "//crates/lash-typescript:integration__test",
+    "//examples/agent-service:agent-service__unit_test",
+    "//examples/agent-service:fresh_boot__test",
+    "//examples/agent-workbench:agent-workbench__unit_test",
+    "//examples/slack-clone:mcp__test",
+    "//examples/slack-clone:slack-clone__unit_test",
+    "//examples/toolbench:toolbench__unit_test",
+    "//examples/workflow-graph-roundtrip:test_batch",
+]
+
 WORKSPACE_DEV_TEST_TARGETS = [
     "//crates/lash-conformance:lash-conformance__unit_test",
     "//crates/lash-core-effect:lash-core-effect__unit_test",

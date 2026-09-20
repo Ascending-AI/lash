@@ -187,6 +187,26 @@ class BazelTestContractTests(unittest.TestCase):
         dev_suite = set(generated_list("WORKSPACE_DEV_SUITE_LABELS"))
         self.assertEqual((dev_labels - batched) | set(batches), dev_suite)
 
+        # The parallel tail leg must stay a strict subset of the suite: a
+        # label in the tail but not the suite would silently run nowhere on
+        # the main leg's `//:workspace_tests -//:workspace_tail_tests`.
+        tail_suite = set(generated_list("WORKSPACE_TAIL_SUITE_LABELS"))
+        self.assertLessEqual(tail_suite, suite_labels)
+        self.assertEqual(
+            {
+                "//crates/lash-sim:lash-sim__unit_test",
+                "//crates/lash-typescript:integration__test",
+                "//examples/agent-service:agent-service__unit_test",
+                "//examples/agent-service:fresh_boot__test",
+                "//examples/agent-workbench:agent-workbench__unit_test",
+                "//examples/slack-clone:mcp__test",
+                "//examples/slack-clone:slack-clone__unit_test",
+                "//examples/toolbench:toolbench__unit_test",
+                "//examples/workflow-graph-roundtrip:test_batch",
+            },
+            tail_suite,
+        )
+
         by_label = {target["label"]: target for target in targets}
         self.assertTrue(
             all(
@@ -330,6 +350,21 @@ class BazelTestContractTests(unittest.TestCase):
             bazel_job["if"],
         )
         self.assertIn("bazel-tests", jobs["ci-conclusion"]["needs"])
+
+        # The tail leg runs `//:workspace_tail_tests` on a parallel runner
+        # under the identical trust gate and pool environment, so the
+        # partition's wall clock is max(legs), not sum.
+        tail_job = jobs["bazel-tests-tail"]
+        self.assertEqual("build-cache", tail_job["environment"])
+        self.assertEqual(bazel_job["if"], tail_job["if"])
+        tail_run = job_step(
+            tail_job, "Test the workspace tail suite with shared cache"
+        )["run"]
+        self.assertIn("//:workspace_tail_tests", tail_run)
+        self.assertIn("${BAZEL_SHARED_CACHE_FLAGS}", tail_run)
+        self.assertIn("--remote_download_outputs=minimal", tail_run)
+        self.assertIn("--cache_test_results=yes", tail_run)
+        self.assertIn("bazel-tests-tail", jobs["ci-conclusion"]["needs"])
         self.assertEqual(
             "${{ needs.plan.outputs.bazel_trusted }}",
             job_step(jobs["ci-conclusion"], "Validate CI conclusion")["env"][
@@ -886,6 +921,7 @@ class BazelTestContractTests(unittest.TestCase):
             jobs["bazel-tests"], "Test deterministic workspace suite with shared cache"
         )
         self.assertIn("//:workspace_tests", bazel_test["run"])
+        self.assertIn("-//:workspace_tail_tests", bazel_test["run"])
         self.assertNotIn("//:workspace_compile", bazel_test["run"])
         self.assertNotIn("workspace_doctests", bazel_test["run"])
         self.assertIn("--remote_download_outputs=minimal", bazel_test["run"])
@@ -992,7 +1028,7 @@ class BazelTestContractTests(unittest.TestCase):
             job: {"result": "success", "outputs": {}}
             for job in ci_plan.UNGATED_JOBS
             | set(ci_plan.GATED_JOBS)
-            | {ci_plan.BAZEL_TEST_JOB}
+            | ci_plan.BAZEL_TEST_JOBS
         }
         needs["plan"]["outputs"] = {
             "docs_only": "false",
@@ -1001,7 +1037,8 @@ class BazelTestContractTests(unittest.TestCase):
         }
         for job in ci_plan.DISPATCH_ONLY_JOBS:
             needs[job]["result"] = "skipped"
-        needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
+        for job in ci_plan.BAZEL_TEST_JOBS:
+            needs[job]["result"] = "skipped"
         self.assertEqual(
             [], ci_plan.evaluate_conclusion(needs, "pull_request", bazel_is_trusted=False)
         )

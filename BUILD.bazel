@@ -14,6 +14,7 @@ load(
     "WORKSPACE_DEFERRED_TEST_TARGETS",
     "WORKSPACE_DEV_SUITE_LABELS",
     "WORKSPACE_RUST_SOURCE_TARGETS",
+    "WORKSPACE_TAIL_SUITE_LABELS",
     "WORKSPACE_TEST_SUITE_LABELS",
     "WORKSPACE_TEST_TARGETS",
 )
@@ -42,6 +43,16 @@ filegroup(
 test_suite(
     name = "workspace_tests",
     tests = WORKSPACE_TEST_SUITE_LABELS,
+)
+
+# The measured long tail of `workspace_tests`: every `//examples/` leaf, which
+# trails the serial rebuild of a core-touching diff, plus the `dev-deferred`
+# slow labels. CI's `bazel-tests` leg subtracts this suite and a second job
+# runs it in parallel, so the partition's wall clock is max(legs), not sum.
+# Locally `//:workspace_tests` still runs the whole partition in one command.
+test_suite(
+    name = "workspace_tail_tests",
+    tests = WORKSPACE_TAIL_SUITE_LABELS,
 )
 
 # The feature-coverage lanes of scripts/feature-coverage.toml, compiled at each

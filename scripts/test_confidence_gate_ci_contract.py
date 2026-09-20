@@ -612,7 +612,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             job: {"result": "success", "outputs": {}}
             for job in plan["UNGATED_JOBS"]
             | set(plan["GATED_JOBS"])
-            | {plan["BAZEL_TEST_JOB"]}
+            | plan["BAZEL_TEST_JOBS"]
         }
         needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "true") | {
             "docs_only": "false",
@@ -692,7 +692,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             pr_needs[job] = {"result": "success", "outputs": {}}
         for job in plan["GATED_JOBS"]:
             pr_needs[job] = {"result": "skipped", "outputs": {}}
-        pr_needs[plan["BAZEL_TEST_JOB"]] = {"result": "skipped", "outputs": {}}
+        for job in plan["BAZEL_TEST_JOBS"]:
+            pr_needs[job] = {"result": "skipped", "outputs": {}}
         self.assertEqual([], evaluate(pr_needs, "pull_request"))
 
         # The release gate is what makes the full profile mandatory: a release

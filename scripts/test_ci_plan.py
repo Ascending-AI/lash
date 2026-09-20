@@ -295,7 +295,7 @@ def successful_needs() -> dict[str, dict[str, object]]:
         job: {"result": "success", "outputs": {}}
         for job in ci_plan.UNGATED_JOBS
         | set(ci_plan.GATED_JOBS)
-        | {ci_plan.BAZEL_TEST_JOB}
+        | ci_plan.BAZEL_TEST_JOBS
     }
     needs["plan"]["outputs"] = plan_outputs
     return needs
@@ -315,7 +315,8 @@ class ConclusionTests(unittest.TestCase):
         self.assertEqual([], ci_plan.evaluate_conclusion(trusted, bazel_is_trusted=True))
 
         untrusted = successful_needs()
-        untrusted[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
+        for job in ci_plan.BAZEL_TEST_JOBS:
+            untrusted[job]["result"] = "skipped"
         self.assertEqual(
             [], ci_plan.evaluate_conclusion(untrusted, bazel_is_trusted=False)
         )
@@ -344,7 +345,8 @@ class ConclusionTests(unittest.TestCase):
                         needs["plan"]["outputs"].update({"docs_only": "true", **{f: "false" for f in ci_plan.FAMILIES}})
                         for gated in ci_plan.GATED_JOBS:
                             needs[gated]["result"] = "skipped"
-                        needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
+                        for bazel_job in ci_plan.BAZEL_TEST_JOBS:
+                            needs[bazel_job]["result"] = "skipped"
                         needs[job]["result"] = result
                         problems = ci_plan.evaluate_conclusion(needs, event_name=event)
                         self.assertTrue(any(job in problem for problem in problems))
@@ -364,7 +366,8 @@ class ConclusionTests(unittest.TestCase):
         needs["plan"]["outputs"].update({"docs_only": "true", **{family: "false" for family in ci_plan.FAMILIES}})
         for job in ci_plan.GATED_JOBS:
             needs[job]["result"] = "skipped"
-        needs[ci_plan.BAZEL_TEST_JOB]["result"] = "skipped"
+        for job in ci_plan.BAZEL_TEST_JOBS:
+            needs[job]["result"] = "skipped"
         self.assertEqual([], ci_plan.evaluate_conclusion(needs))
 
     def test_wrongly_skipped_job_fails(self) -> None:
