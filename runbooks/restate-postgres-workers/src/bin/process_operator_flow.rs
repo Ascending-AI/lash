@@ -1256,7 +1256,7 @@ mod tests {
 
     fn extraction_diagnostic(counts: Value, decision: &str) -> Value {
         json!({
-            "schema_version": 21,
+            "schema_version": 22,
             "type": "protocol_step",
             "plugin_id": "rlm_protocol",
             "payload": {
@@ -1278,7 +1278,7 @@ mod tests {
     #[test]
     fn the_dialect_is_read_from_the_committed_cells_own_diagnostic() {
         let records = vec![
-            json!({ "schema_version": 21, "type": "turn_started" }),
+            json!({ "schema_version": 22, "type": "turn_started" }),
             extraction_diagnostic(
                 json!({ "code_chars": 18, "typescript_cell_count": 1 }),
                 "execute_typescript",
@@ -1293,7 +1293,7 @@ mod tests {
     #[test]
     fn a_trace_with_no_executed_cell_names_no_dialect() {
         let records = vec![
-            json!({ "schema_version": 21, "type": "turn_started" }),
+            json!({ "schema_version": 22, "type": "turn_started" }),
             extraction_diagnostic(
                 json!({ "code_chars": 0, "typescript_cell_count": 0 }),
                 "stop_no_progress",
