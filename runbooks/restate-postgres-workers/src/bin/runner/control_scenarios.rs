@@ -1045,10 +1045,9 @@ pub(super) async fn wait_for_invocation_suspended(
             .invocation_status(invocation_id)
             .await
             .context("read Restate invocation suspension status")?;
-        if last_status
-            .as_ref()
-            .is_some_and(|status| status.status == "suspended")
-        {
+        if last_status.as_ref().is_some_and(|status| {
+            status.status == lash_restate::RestateInvocationLifecycle::Suspended
+        }) {
             return Ok(());
         }
         if Instant::now() >= deadline {

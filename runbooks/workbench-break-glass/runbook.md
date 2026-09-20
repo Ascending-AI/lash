@@ -112,8 +112,11 @@ Require exactly one active row and save the query response as
 ## Phase 2 — Admin-KILL the invocation
 
 Send `PATCH $ADMIN/invocations/<exact-invocation-id>/kill`. Poll the exact invocation via
-`$ADMIN/query` until its status is no longer `pending`, `ready`, `running`, `backing-off`,
-or `suspended`. Save the response as `02-killed-invocation.json`.
+`$ADMIN/query` until its status is no longer open. The open set lives in
+`RestateInvocationLifecycle` (`crates/lash-restate/src/ingress.rs`) — `pending`, `ready`,
+`running`, `backing-off`, `suspended`, plus any status this Lash version does not
+recognise — so poll until `is_open()` would answer false rather than spelling the list
+here. Save the response as `02-killed-invocation.json`.
 
 Before touching Stop, gate that no source claims cancellation:
 

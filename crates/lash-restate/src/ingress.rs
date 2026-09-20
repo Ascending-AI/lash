@@ -757,7 +757,7 @@ impl RestateAdminClient {
         let id = sql_string_literal(invocation_id.as_str());
         let mut rows = self
             .query_json::<RestateInvocationStatus>(&format!(
-                "SELECT id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure FROM sys_invocation WHERE id = {id}"
+                "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE id = {id}"
             ))
             .await?;
         Ok(rows.pop())
@@ -774,7 +774,7 @@ impl RestateAdminClient {
         let handler = sql_string_literal(handler);
         let mut rows = self
             .query_json::<RestateInvocationStatus>(&format!(
-                "SELECT id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure FROM sys_invocation WHERE target_service_name = {workflow} AND target_service_key = {workflow_key} AND target_handler_name = {handler} ORDER BY modified_at DESC LIMIT 1"
+                "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS} FROM sys_invocation WHERE target_service_name = {workflow} AND target_service_key = {workflow_key} AND target_handler_name = {handler} ORDER BY modified_at DESC LIMIT 1"
             ))
             .await?;
         Ok(rows.pop())
@@ -798,7 +798,8 @@ impl RestateAdminClient {
             .collect::<Vec<_>>()
             .join(" OR ");
         self.query_json(&format!(
-            "SELECT id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure, pinned_deployment_id FROM sys_invocation WHERE status IN ('pending', 'ready', 'running', 'backing-off', 'suspended') AND ({service_filter}) ORDER BY modified_at DESC"
+            "SELECT {RESTATE_INVOCATION_STATUS_COLUMNS}, pinned_deployment_id FROM sys_invocation WHERE {} AND ({service_filter}) ORDER BY modified_at DESC",
+            open_invocation_statuses_sql()
         ))
         .await
     }
@@ -807,9 +808,10 @@ impl RestateAdminClient {
     pub async fn open_invocations_by_deployment(
         &self,
     ) -> Result<Vec<DeploymentOpenInvocations>, RestateHttpError> {
-        self.query_json(
-            "SELECT pinned_deployment_id, COUNT(1) as open_count FROM sys_invocation WHERE status IN ('pending', 'ready', 'running', 'backing-off', 'suspended') GROUP BY pinned_deployment_id",
-        )
+        self.query_json(&format!(
+            "SELECT pinned_deployment_id, COUNT(1) as open_count FROM sys_invocation WHERE {} GROUP BY pinned_deployment_id",
+            open_invocation_statuses_sql()
+        ))
         .await
     }
 
@@ -879,6 +881,110 @@ impl RestateAdminClient {
     }
 }
 
+/// A `sys_invocation.status` value parsed into the lifecycle Restate
+/// publishes.
+///
+/// An unrecognized status decodes to [`Unknown`](Self::Unknown) carrying the
+/// raw string rather than failing, and counts as open: a Restate release
+/// that adds or renames a non-terminal status must not make open invocations
+/// invisible to the predicate and queries the immutable-deployment drains
+/// are gated on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RestateInvocationLifecycle {
+    Pending,
+    Ready,
+    Running,
+    BackingOff,
+    Suspended,
+    Completed,
+    Failed,
+    Unknown(String),
+}
+
+impl RestateInvocationLifecycle {
+    /// The known statuses that count as open, in one place: the SQL `IN`
+    /// fragment below and [`is_open`](Self::is_open) both read this table.
+    const KNOWN_OPEN: &[Self] = &[
+        Self::Pending,
+        Self::Ready,
+        Self::Running,
+        Self::BackingOff,
+        Self::Suspended,
+    ];
+
+    /// The wire spelling of this status, as stored in `sys_invocation`.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pending => "pending",
+            Self::Ready => "ready",
+            Self::Running => "running",
+            Self::BackingOff => "backing-off",
+            Self::Suspended => "suspended",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Unknown(raw) => raw,
+        }
+    }
+
+    /// Whether this status means the invocation is still open. An
+    /// unrecognized status is open: a drain must not declare itself complete
+    /// on a status it cannot name.
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Unknown(_)) || Self::KNOWN_OPEN.contains(self)
+    }
+
+    /// This status as a single-quoted SQL string literal, for `IN` filters
+    /// that must name the same vocabulary the predicate reads.
+    pub fn sql_literal(&self) -> String {
+        sql_string_literal(self.as_str())
+    }
+}
+
+impl fmt::Display for RestateInvocationLifecycle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for RestateInvocationLifecycle {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RestateInvocationLifecycle {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Ok(match raw.as_str() {
+            "pending" => Self::Pending,
+            "ready" => Self::Ready,
+            "running" => Self::Running,
+            "backing-off" => Self::BackingOff,
+            "suspended" => Self::Suspended,
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            _ => Self::Unknown(raw),
+        })
+    }
+}
+
+/// The `sys_invocation` projection `RestateInvocationStatus` deserializes
+/// from; every query selecting that row reads this one list so the
+/// projection and the struct's fields cannot drift.
+const RESTATE_INVOCATION_STATUS_COLUMNS: &str = "id, target, target_service_name, target_service_key, target_handler_name, status, completion_result, completion_failure";
+
+/// The `sys_invocation` filter that selects still-open invocations, derived
+/// from [`RestateInvocationLifecycle::KNOWN_OPEN`] so the SQL text and
+/// `is_open` can never spell different sets.
+fn open_invocation_statuses_sql() -> String {
+    let statuses = RestateInvocationLifecycle::KNOWN_OPEN
+        .iter()
+        .map(RestateInvocationLifecycle::sql_literal)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("status IN ({statuses})")
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct RestateInvocationStatus {
     pub id: String,
@@ -889,7 +995,7 @@ pub struct RestateInvocationStatus {
     #[serde(default)]
     pub target_service_key: Option<String>,
     pub target_handler_name: String,
-    pub status: String,
+    pub status: RestateInvocationLifecycle,
     #[serde(default)]
     pub completion_result: Option<String>,
     #[serde(default)]
@@ -902,14 +1008,12 @@ impl RestateInvocationStatus {
     }
 
     pub fn is_still_active(&self) -> bool {
-        matches!(
-            self.status.as_str(),
-            "pending" | "ready" | "running" | "backing-off" | "suspended"
-        )
+        self.status.is_open()
     }
 
     pub fn completed_successfully(&self) -> bool {
-        self.status == "completed" && self.completion_result.as_deref() == Some("success")
+        self.status == RestateInvocationLifecycle::Completed
+            && self.completion_result.as_deref() == Some("success")
     }
 }
 
@@ -923,7 +1027,57 @@ pub struct DeploymentOpenInvocations {
 
 #[cfg(test)]
 mod tests {
-    use super::{DeploymentOpenInvocations, RestateInvocationStatus};
+    use super::{
+        DeploymentOpenInvocations, RestateInvocationLifecycle, RestateInvocationStatus,
+        open_invocation_statuses_sql,
+    };
+
+    #[test]
+    fn an_unrecognized_status_decodes_to_unknown_and_reports_open() {
+        let row: RestateInvocationStatus = serde_json::from_str(
+            r#"{
+                "id": "invocation-1",
+                "target": "service/handler",
+                "target_service_name": "service",
+                "target_handler_name": "handler",
+                "status": "zombie-from-a-future-restate"
+            }"#,
+        )
+        .expect("an unrecognized status must not fail decoding");
+
+        assert_eq!(
+            row.status,
+            RestateInvocationLifecycle::Unknown("zombie-from-a-future-restate".to_string())
+        );
+        assert!(
+            row.is_still_active(),
+            "an unknown status is open: a drain must not declare itself complete on it"
+        );
+        assert_eq!(row.status.as_str(), "zombie-from-a-future-restate");
+    }
+
+    #[test]
+    fn the_open_status_sql_filter_names_exactly_the_known_open_variants() {
+        assert_eq!(
+            open_invocation_statuses_sql(),
+            "status IN ('pending', 'ready', 'running', 'backing-off', 'suspended')"
+        );
+        for status in [
+            RestateInvocationLifecycle::Pending,
+            RestateInvocationLifecycle::Ready,
+            RestateInvocationLifecycle::Running,
+            RestateInvocationLifecycle::BackingOff,
+            RestateInvocationLifecycle::Suspended,
+        ] {
+            assert!(status.is_open(), "{status} is a known open status");
+        }
+        for status in [
+            RestateInvocationLifecycle::Completed,
+            RestateInvocationLifecycle::Failed,
+        ] {
+            assert!(!status.is_open(), "{status} is terminal");
+        }
+    }
 
     #[test]
     fn invocation_status_deserializes_captured_rows_with_and_without_deployment() {

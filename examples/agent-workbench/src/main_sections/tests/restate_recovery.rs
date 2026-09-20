@@ -682,7 +682,7 @@ async fn wait_for_restate_invocation_completion(
             .invocation_status(invocation_id)
             .await
             .expect("query Restate invocation status")
-            && status.status == "completed"
+            && status.status == lash_restate::RestateInvocationLifecycle::Completed
         {
             return status;
         }
@@ -2241,10 +2241,9 @@ async fn wait_for_workbench_restate_invocation_suspended(
             .invocation_status(invocation_id)
             .await
             .expect("query Restate invocation status");
-        if last_status
-            .as_ref()
-            .is_some_and(|status| status.status == "suspended")
-        {
+        if last_status.as_ref().is_some_and(|status| {
+            status.status == lash_restate::RestateInvocationLifecycle::Suspended
+        }) {
             return;
         }
         assert!(
@@ -2354,7 +2353,9 @@ async fn wait_for_restate_workflow_success(
             .expect("query queued-work workflow status")
         {
             Some(status) if status.completed_successfully() => return,
-            Some(status) if status.status == "completed" => {
+            Some(status)
+                if status.status == lash_restate::RestateInvocationLifecycle::Completed =>
+            {
                 panic!(
                     "Restate workflow {workflow}/{workflow_key} completed unsuccessfully: {status:#?}"
                 )

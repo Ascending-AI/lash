@@ -128,7 +128,7 @@ pub use effect_host::RestateEffectHost;
 pub use ingress::{
     DeploymentOpenInvocations, RestateAdminClient, RestateAuthorityId, RestateConnection,
     RestateConnectionConfig, RestateHttpError, RestateIngressClient, RestateInvocationId,
-    RestateInvocationStatus,
+    RestateInvocationLifecycle, RestateInvocationStatus,
 };
 pub use process::{
     LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,
