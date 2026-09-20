@@ -9,6 +9,7 @@ load(
     "//tools/bazel:workspace_targets.bzl",
     "WORKSPACE_CLIPPY_TARGETS",
     "WORKSPACE_COMPILE_TARGETS",
+    "WORKSPACE_DOC_TARGETS",
     "WORKSPACE_BAZEL_TEST_TARGETS",
     "WORKSPACE_DEFERRED_TEST_TARGETS",
     "WORKSPACE_DEV_SUITE_LABELS",
@@ -174,6 +175,16 @@ lash_rust_clippy(
     name = "feature_lane_clippy",
     testonly = True,
     deps = FEATURE_LANE_CLIPPY_TARGETS,
+)
+
+# The `cargo doc --workspace` shape: one rust_doc action per library crate.
+# Building this aggregate downloads nothing; `scripts/hermetic-build.sh doc`
+# adds `--remote_download_outputs=toplevel` so the rendered trees land in
+# bazel-bin for local viewing.
+filegroup(
+    name = "workspace_docs",
+    srcs = WORKSPACE_DOC_TARGETS,
+    testonly = True,
 )
 
 # This target keeps the complete Bazel and Cargo-owned test label set queryable.

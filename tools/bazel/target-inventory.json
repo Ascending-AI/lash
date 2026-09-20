@@ -17597,6 +17597,7 @@
         "tracing",
         "uuid"
       ],
+      "doc": "//crates/lash-conformance:lash-conformance__doc",
       "manifest": "crates/lash-conformance/Cargo.toml",
       "package": "lash-internal-conformance",
       "resolved_features": [],
@@ -17640,6 +17641,7 @@
         "tracing",
         "uuid"
       ],
+      "doc": "//crates/lash-core-effect:lash-core-effect__doc",
       "manifest": "crates/lash-core-effect/Cargo.toml",
       "package": "lash-internal-core-effect",
       "resolved_features": [
@@ -17700,6 +17702,7 @@
         "tracing-subscriber",
         "uuid"
       ],
+      "doc": "//crates/lash-core-execution:lash-core-execution__doc",
       "manifest": "crates/lash-core-execution/Cargo.toml",
       "package": "lash-internal-core-execution",
       "resolved_features": [
@@ -17745,6 +17748,7 @@
         "tracing-subscriber",
         "uuid"
       ],
+      "doc": "//crates/lash-core-ids:lash-core-ids__doc",
       "manifest": "crates/lash-core-ids/Cargo.toml",
       "package": "lash-internal-core-ids",
       "resolved_features": [
@@ -17792,6 +17796,7 @@
         "tracing",
         "uuid"
       ],
+      "doc": "//crates/lash-core-llm:lash-core-llm__doc",
       "manifest": "crates/lash-core-llm/Cargo.toml",
       "package": "lash-internal-core-llm",
       "resolved_features": [
@@ -17836,6 +17841,7 @@
         "tracing",
         "uuid"
       ],
+      "doc": "//crates/lash-core-memory:lash-core-memory__doc",
       "manifest": "crates/lash-core-memory/Cargo.toml",
       "package": "lash-internal-core-memory",
       "resolved_features": [
@@ -17886,6 +17892,7 @@
         "tracing",
         "uuid"
       ],
+      "doc": "//crates/lash-core-store:lash-core-store__doc",
       "manifest": "crates/lash-core-store/Cargo.toml",
       "package": "lash-internal-core-store",
       "resolved_features": [
@@ -17937,6 +17944,7 @@
         "tracing",
         "uuid"
       ],
+      "doc": "//crates/lash-core-worker:lash-core-worker__doc",
       "manifest": "crates/lash-core-worker/Cargo.toml",
       "package": "lash-internal-core-worker",
       "resolved_features": [
@@ -17996,6 +18004,7 @@
         "tracing-subscriber",
         "uuid"
       ],
+      "doc": "//crates/lash-core:lash-core__doc",
       "manifest": "crates/lash-core/Cargo.toml",
       "package": "lash-internal-core",
       "resolved_features": [
@@ -18094,6 +18103,7 @@
         "thiserror",
         "tokio"
       ],
+      "doc": "//crates/lash-http-transport:lash-http-transport__doc",
       "manifest": "crates/lash-http-transport/Cargo.toml",
       "package": "lash-internal-http-transport",
       "resolved_features": [],
@@ -18137,6 +18147,7 @@
         "tracing",
         "uuid"
       ],
+      "doc": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__doc",
       "manifest": "crates/lash-lashlang-runtime/Cargo.toml",
       "package": "lash-internal-lashlang-runtime",
       "resolved_features": [],
@@ -18173,6 +18184,7 @@
         "serde_json",
         "tokio"
       ],
+      "doc": "//crates/lash-llm-tools:lash-llm-tools__doc",
       "manifest": "crates/lash-llm-tools/Cargo.toml",
       "package": "lash-internal-llm-tools",
       "resolved_features": [
@@ -18214,6 +18226,7 @@
         "tokio",
         "tracing"
       ],
+      "doc": "//crates/lash-llm-transport:lash-llm-transport__doc",
       "manifest": "crates/lash-llm-transport/Cargo.toml",
       "package": "lash-internal-llm-transport",
       "resolved_features": [
@@ -18281,6 +18294,7 @@
         "tokio-util",
         "uuid"
       ],
+      "doc": "//crates/lash-perf:lash-perf__doc",
       "manifest": "crates/lash-perf/Cargo.toml",
       "package": "lash-perf",
       "resolved_features": [
@@ -18343,6 +18357,7 @@
         "tracing",
         "tracing-subscriber"
       ],
+      "doc": "//crates/lash-plugin-mcp:lash-plugin-mcp__doc",
       "manifest": "crates/lash-plugin-mcp/Cargo.toml",
       "package": "lash-internal-plugin-mcp",
       "resolved_features": [
@@ -18382,6 +18397,7 @@
         "serde_json",
         "tokio"
       ],
+      "doc": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__doc",
       "manifest": "crates/lash-plugin-process-controls/Cargo.toml",
       "package": "lash-internal-plugin-process-controls",
       "resolved_features": [
@@ -18416,6 +18432,7 @@
         "serde_json",
         "tokio"
       ],
+      "doc": "//crates/lash-plugin-rolling-history:lash-plugin-rolling-history__doc",
       "manifest": "crates/lash-plugin-rolling-history/Cargo.toml",
       "package": "lash-internal-plugin-rolling-history",
       "resolved_features": [],
@@ -18446,6 +18463,7 @@
         "serde",
         "serde_json"
       ],
+      "doc": "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__doc",
       "manifest": "crates/lash-plugin-tool-output-budget/Cargo.toml",
       "package": "lash-internal-plugin-tool-output-budget",
       "resolved_features": [],
@@ -18502,6 +18520,7 @@
         "tracing-subscriber",
         "uuid"
       ],
+      "doc": "//crates/lash-postgres-store:lash-postgres-store__doc",
       "manifest": "crates/lash-postgres-store/Cargo.toml",
       "package": "lash-internal-postgres-store",
       "resolved_features": [
@@ -18641,6 +18660,7 @@
         "tokio",
         "uuid"
       ],
+      "doc": "//crates/lash-protocol-rlm:lash-protocol-rlm__doc",
       "manifest": "crates/lash-protocol-rlm/Cargo.toml",
       "package": "lash-internal-protocol-rlm",
       "resolved_features": [
@@ -18704,6 +18724,7 @@
         "tokio",
         "tokio-util"
       ],
+      "doc": "//crates/lash-protocol-standard:lash-protocol-standard__doc",
       "manifest": "crates/lash-protocol-standard/Cargo.toml",
       "package": "lash-internal-protocol-standard",
       "resolved_features": [
@@ -18769,6 +18790,7 @@
         "tokio",
         "uuid"
       ],
+      "doc": "//crates/lash-provider-anthropic:lash-provider-anthropic__doc",
       "manifest": "crates/lash-provider-anthropic/Cargo.toml",
       "package": "lash-internal-provider-anthropic",
       "resolved_features": [
@@ -18825,6 +18847,7 @@
         "tokio",
         "uuid"
       ],
+      "doc": "//crates/lash-provider-auth:lash-provider-auth__doc",
       "manifest": "crates/lash-provider-auth/Cargo.toml",
       "package": "lash-internal-provider-auth",
       "resolved_features": [],
@@ -18867,6 +18890,7 @@
         "tokio",
         "uuid"
       ],
+      "doc": "//crates/lash-provider-google:lash-provider-google__doc",
       "manifest": "crates/lash-provider-google/Cargo.toml",
       "package": "lash-internal-provider-google",
       "resolved_features": [
@@ -18935,6 +18959,7 @@
         "tracing",
         "uuid"
       ],
+      "doc": "//crates/lash-provider-openai:lash-provider-openai__doc",
       "manifest": "crates/lash-provider-openai/Cargo.toml",
       "package": "lash-internal-provider-openai",
       "resolved_features": [
@@ -18981,6 +19006,7 @@
         "hashbrown",
         "memchr"
       ],
+      "doc": "//crates/lash-regress:lash-regress__doc",
       "manifest": "crates/lash-regress/Cargo.toml",
       "package": "lash-regress",
       "resolved_features": [
@@ -19047,6 +19073,7 @@
         "thiserror",
         "tokio"
       ],
+      "doc": "//crates/lash-remote-protocol:lash-remote-protocol__doc",
       "manifest": "crates/lash-remote-protocol/Cargo.toml",
       "package": "lash-internal-remote-protocol",
       "resolved_features": [
@@ -19109,6 +19136,7 @@
         "tokio-util",
         "tracing"
       ],
+      "doc": "//crates/lash-restate:lash-restate__doc",
       "manifest": "crates/lash-restate/Cargo.toml",
       "package": "lash-internal-restate",
       "resolved_features": [],
@@ -19137,6 +19165,7 @@
         "serde",
         "serde_json"
       ],
+      "doc": "//crates/lash-rlm-types:lash-rlm-types__doc",
       "manifest": "crates/lash-rlm-types/Cargo.toml",
       "package": "lash-internal-rlm-types",
       "resolved_features": [],
@@ -19172,6 +19201,7 @@
         "tokio",
         "url"
       ],
+      "doc": "//crates/lash-s3-store:lash-s3-store__doc",
       "manifest": "crates/lash-s3-store/Cargo.toml",
       "package": "lash-internal-s3-store",
       "resolved_features": [
@@ -19212,6 +19242,7 @@
         "serde",
         "serde_json"
       ],
+      "doc": "//crates/lash-sansio:lash-sansio__doc",
       "manifest": "crates/lash-sansio/Cargo.toml",
       "package": "lash-internal-sansio",
       "resolved_features": [
@@ -19272,6 +19303,7 @@
         "tempfile",
         "tokio"
       ],
+      "doc": "//crates/lash-sim:lash-sim__doc",
       "manifest": "crates/lash-sim/Cargo.toml",
       "package": "lash-sim",
       "resolved_features": [],
@@ -19400,6 +19432,7 @@
         "tracing-subscriber",
         "uuid"
       ],
+      "doc": "//crates/lash-sqlite-store:lash-sqlite-store__doc",
       "manifest": "crates/lash-sqlite-store/Cargo.toml",
       "package": "lash-internal-sqlite-store",
       "resolved_features": [
@@ -19478,6 +19511,7 @@
         "tokio",
         "tokio-util"
       ],
+      "doc": "//crates/lash-subagents:lash-subagents__doc",
       "manifest": "crates/lash-subagents/Cargo.toml",
       "package": "lash-internal-subagents",
       "resolved_features": [],
@@ -19510,6 +19544,7 @@
         "lash-internal-lashlang-runtime",
         "serde_json"
       ],
+      "doc": "//crates/lash-tool-support:lash-tool-support__doc",
       "manifest": "crates/lash-tool-support/Cargo.toml",
       "package": "lash-internal-tool-support",
       "resolved_features": [
@@ -19550,6 +19585,7 @@
         "thiserror",
         "uuid"
       ],
+      "doc": "//crates/lash-trace:lash-trace__doc",
       "manifest": "crates/lash-trace/Cargo.toml",
       "package": "lash-internal-trace",
       "resolved_features": [
@@ -19601,6 +19637,7 @@
         "thiserror",
         "tokio"
       ],
+      "doc": "//crates/lash-typescript:lash-typescript__doc",
       "manifest": "crates/lash-typescript/Cargo.toml",
       "package": "lash-internal-typescript",
       "resolved_features": [
@@ -19698,6 +19735,7 @@
         "trybuild",
         "uuid"
       ],
+      "doc": "//crates/lash:lash__doc",
       "manifest": "crates/lash/Cargo.toml",
       "package": "lash-runtime",
       "resolved_features": [
@@ -19827,6 +19865,7 @@
         "tokio",
         "url"
       ],
+      "doc": "//crates/lashlang:lashlang__doc",
       "manifest": "crates/lashlang/Cargo.toml",
       "package": "lash-internal-lashlang",
       "resolved_features": [
@@ -19953,6 +19992,7 @@
         "tokio-stream",
         "uuid"
       ],
+      "doc": null,
       "manifest": "examples/agent-service/Cargo.toml",
       "package": "agent-service",
       "resolved_features": [],
@@ -20032,6 +20072,7 @@
         "tracing-subscriber",
         "uuid"
       ],
+      "doc": null,
       "manifest": "examples/agent-workbench/Cargo.toml",
       "package": "agent-workbench",
       "resolved_features": [
@@ -20087,6 +20128,7 @@
         "tokio-stream",
         "uuid"
       ],
+      "doc": "//examples/slack-clone:slack-clone__doc",
       "manifest": "examples/slack-clone/Cargo.toml",
       "package": "slack-clone",
       "resolved_features": [],
@@ -20169,6 +20211,7 @@
         "tracing",
         "tracing-subscriber"
       ],
+      "doc": null,
       "manifest": "examples/toolbench/Cargo.toml",
       "package": "toolbench",
       "resolved_features": [],
@@ -20207,6 +20250,7 @@
         "tokio-stream",
         "uuid"
       ],
+      "doc": "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__doc",
       "manifest": "examples/workflow-graph-roundtrip/Cargo.toml",
       "package": "workflow-graph-roundtrip",
       "resolved_features": [],
@@ -20313,6 +20357,7 @@
         "tracing-subscriber",
         "uuid"
       ],
+      "doc": "//runbooks/restate-postgres-workers:restate-postgres-workers__doc",
       "manifest": "runbooks/restate-postgres-workers/Cargo.toml",
       "package": "lash-restate-postgres-workers-e2e",
       "resolved_features": [],
@@ -20431,6 +20476,7 @@
         "tempfile",
         "tokio"
       ],
+      "doc": null,
       "manifest": "runbooks/rlm-smoke/Cargo.toml",
       "package": "rlm-smoke-host",
       "resolved_features": [],

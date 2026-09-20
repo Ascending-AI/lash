@@ -8,6 +8,8 @@ load(
     "lash_rust_unit_test",
 )
 
+load("@rules_rust//rust:defs.bzl", "rust_doc")
+
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_library(
@@ -24,6 +26,12 @@ lash_rust_library(
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
     version = "0.0.0-dev",
+)
+
+rust_doc(
+    name = "lash-typescript__doc",
+    crate = ":lash-typescript",
+    testonly = True,
 )
 
 lash_rust_unit_test(
