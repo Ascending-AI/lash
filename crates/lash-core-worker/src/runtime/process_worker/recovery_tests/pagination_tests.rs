@@ -129,7 +129,7 @@ async fn process_slot_reservation_is_cancelled_when_the_dispatcher_shuts_down() 
             .execution_scheduler
             .state
             .lock_recover()
-            .dispatcher_running
+            .dispatcher_running()
             || !reserve_dropped.load(Ordering::SeqCst)
         {
             tokio::task::yield_now().await;
@@ -333,6 +333,145 @@ async fn concurrent_drive_rescan_survives_the_initial_fetch_error() {
         "the initial caller still receives its typed fetch failure"
     );
     wait_for_terminal_count(&registry, 1, "concurrent rescan survivor").await;
+}
+
+/// The error path consumes a pending rescan into the `Ready` restart it
+/// schedules: the restarted dispatcher's fresh scan *is* that rescan, so the
+/// flag must not survive to schedule a second, redundant pass.
+#[tokio::test]
+async fn a_failed_scan_consumes_the_pending_rescan_without_a_redundant_pass() {
+    let started = Arc::new(AtomicUsize::new(0));
+    let started_changed = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(1));
+    let run_handle = Arc::new(LateBoundProcessWork::default());
+    let (_worker, registry, run_handle, env_ref, test_registry) =
+        worker_with_engine_registry_timings_supplier_and_sink(
+            1,
+            Arc::new(GatedSuccessEngine {
+                started,
+                started_changed,
+                release,
+            }),
+            run_handle,
+            None,
+            None,
+            None,
+            crate::NativeSubstrateConfig {
+                worker_sweep: crate::WorkerSweepPolicy {
+                    // Keep the idle-dispatcher sweep out of the read count.
+                    rescan_interval: Duration::from_secs(3600),
+                    ..crate::WorkerSweepPolicy::default()
+                },
+                ..crate::NativeSubstrateConfig::default()
+            },
+        )
+        .await;
+    registry
+        .register_process(engine_registration(
+            "consumed-rescan-row",
+            "gated-success",
+            env_ref,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("register consumed-rescan process");
+    test_registry
+        .set_worklist_page_errors_for_testing(0, vec![injected_worklist_error("initial")])
+        .await;
+    let pause = test_registry.pause_next_worklist_page_for_testing();
+    let first_drive = {
+        let run_handle = Arc::clone(&run_handle);
+        crate::task::spawn(async move { run_handle.enable_and_drive().await })
+    };
+    pause.wait_until_validated().await;
+    let _ = run_handle
+        .enable_and_drive()
+        .await
+        .expect("concurrent drive records its rescan intent");
+    pause.resume();
+    assert!(
+        first_drive
+            .await
+            .expect("initial drive task joins")
+            .is_err(),
+        "the initial caller still receives its typed fetch failure"
+    );
+    wait_for_terminal_count(&registry, 1, "consumed rescan row").await;
+
+    // The failed first read plus the rescan it owed: a third read means the
+    // pending flag survived the error path and scheduled a redundant pass.
+    let redundant = tokio::time::timeout(Duration::from_millis(500), async {
+        while test_registry.worklist_page_reads_for_testing().await.len() < 3 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    let reads = test_registry.worklist_page_reads_for_testing().await;
+    assert!(
+        redundant.is_err(),
+        "the consumed rescan must not schedule a redundant pass: {reads:?}"
+    );
+    assert_eq!(reads.len(), 2, "one failed read plus the rescan it owed");
+}
+
+/// A dispatcher that unwinds mid-scan frees the latch and rewinds the scan to
+/// the cursor it was reading; the next drive claims a replacement dispatcher
+/// and the queued row still drains to terminal.
+#[tokio::test]
+async fn a_dispatcher_unwind_mid_scan_is_drained_by_the_replacement() {
+    let started = Arc::new(AtomicUsize::new(0));
+    let started_changed = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(1));
+    let run_handle = Arc::new(LateBoundProcessWork::default());
+    let (worker, registry, run_handle, env_ref, _test_registry) = worker_with_engine_and_registry(
+        1,
+        Arc::new(GatedSuccessEngine {
+            started,
+            started_changed,
+            release,
+        }),
+        run_handle,
+    )
+    .await;
+    registry
+        .register_process(engine_registration(
+            "unwind-drained-row",
+            "gated-success",
+            env_ref,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("register unwind-drain process");
+
+    // A dispatcher that died mid-fetch: latch held, scan fetching the head.
+    {
+        let mut state = worker.execution_scheduler.state.lock_recover();
+        assert!(state.claim_dispatcher());
+        state.extra = ProcessWorklistScan::Fetching {
+            continuation: None,
+            rescan: false,
+        };
+    }
+    let task_scheduler = Arc::clone(&worker.execution_scheduler);
+    let task = crate::task::spawn(async move {
+        let _guard = ProcessExecutionDispatcherGuard::new(task_scheduler);
+        panic!("test dispatcher unwind");
+    });
+    assert!(task.await.expect_err("dispatcher task panics").is_panic());
+    assert!(
+        !worker
+            .execution_scheduler
+            .state
+            .lock_recover()
+            .dispatcher_running(),
+        "the unwind frees the dispatcher latch for a replacement"
+    );
+
+    let _ = run_handle
+        .enable_and_drive()
+        .await
+        .expect("the next drive claims a replacement dispatcher");
+    wait_for_terminal_count(&registry, 1, "row drained after dispatcher unwind").await;
 }
 
 #[tokio::test]

@@ -540,7 +540,7 @@ async fn public_single_pass_handle_never_eagerly_rehydrates_a_positive_peek() {
         .expect("the single pass retires the demand without rehydrating the positive peek");
     let state = driver.inner.scheduler.lock_state();
     assert!(
-        !state.dispatcher_running,
+        !state.dispatcher_running(),
         "the dispatcher retires after the single pass"
     );
     assert_eq!(state.active, 0);
@@ -809,7 +809,7 @@ async fn work_cadence_policy_limits_transient_wake_attempts() {
     );
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let dispatcher_running = driver.inner.scheduler.lock_state().dispatcher_running;
+            let dispatcher_running = driver.inner.scheduler.lock_state().dispatcher_running();
             if attempts.load(Ordering::SeqCst) > 0 && !dispatcher_running {
                 break;
             }

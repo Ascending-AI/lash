@@ -49,14 +49,7 @@ impl DurableProcessWorker {
                 });
             }
         }
-        state.extra.worklist_scan = match page.continuation {
-            Some(continuation) => ProcessWorklistScan::Ready(Some(continuation)),
-            None if state.extra.rescan_requested => {
-                state.extra.rescan_requested = false;
-                ProcessWorklistScan::Ready(None)
-            }
-            None => ProcessWorklistScan::Idle,
-        };
+        state.extra.page_installed(page.continuation);
         self.execution_scheduler.metrics.intake_depth(
             WorkerSlotKind::Process,
             state.pending.len() + state.rerun.len(),
@@ -81,11 +74,7 @@ impl DurableProcessWorker {
         let limit = std::num::NonZeroUsize::new(available)
             .unwrap_or(std::num::NonZeroUsize::MIN)
             .min(self.config.native_substrate.worker_sweep.intake_page);
-        let ProcessWorklistScan::Ready(continuation) = &state.extra.worklist_scan else {
-            return None;
-        };
-        let continuation = continuation.clone();
-        state.extra.worklist_scan = ProcessWorklistScan::Fetching(continuation.clone());
+        let continuation = state.extra.take_page_request()?;
         Some((limit, continuation))
     }
 
@@ -154,5 +143,158 @@ impl DurableProcessWorker {
             state.pending.len() + state.rerun.len(),
         );
         Some((record, permit))
+    }
+}
+
+/// The worklist paging state the process scheduler carries beside the shared
+/// coalescing protocol fields, under the same lock.
+///
+/// A recorded rescan rides inside the in-flight variants, so "a rescan is
+/// owed while no scan is running" is unrepresentable: the fact can only ever
+/// describe the scan it belongs to.
+#[derive(Default)]
+pub(super) enum ProcessWorklistScan {
+    /// No scan is running and none is owed.
+    #[default]
+    Idle,
+    /// A page fetch is in flight. `rescan` records that a drive arrived
+    /// mid-pass and the worklist must be read again from the head once this
+    /// pass ends.
+    Fetching {
+        continuation: Option<crate::ProcessWorklistCursor>,
+        rescan: bool,
+    },
+    /// Between pages: `continuation` is the next page to fetch. `rescan`
+    /// means a full pass from the head is owed once this one ends.
+    Ready {
+        continuation: Option<crate::ProcessWorklistCursor>,
+        rescan: bool,
+    },
+}
+
+/// What an admission pass must do about the worklist — the answer that
+/// decides whether the call's report reads `Scanned` or `Coalesced`.
+pub(super) enum ProcessPassBegin {
+    /// The scan was idle: this call reads the first page itself.
+    FetchInitialPage,
+    /// A scan is already in flight: this pass recorded its rescan on it and
+    /// takes no intake of its own.
+    Coalesced,
+}
+
+impl ProcessWorklistScan {
+    /// Begin an admission pass: idle scans start fetching the first page;
+    /// anything already running records that a rescan is owed.
+    pub(super) fn begin_pass(&mut self) -> ProcessPassBegin {
+        match self {
+            Self::Idle => {
+                *self = Self::Fetching {
+                    continuation: None,
+                    rescan: false,
+                };
+                ProcessPassBegin::FetchInitialPage
+            }
+            Self::Fetching { rescan, .. } | Self::Ready { rescan, .. } => {
+                *rescan = true;
+                ProcessPassBegin::Coalesced
+            }
+        }
+    }
+
+    /// The pass's own fetch failed. A recorded rescan is consumed into a ready
+    /// restart from the head of the worklist — the returned flag says that
+    /// restart needs a dispatcher to run it.
+    pub(super) fn scan_failed(&mut self) -> bool {
+        let rescan = self.rescan();
+        *self = if rescan {
+            Self::Ready {
+                continuation: None,
+                rescan: false,
+            }
+        } else {
+            Self::Idle
+        };
+        rescan
+    }
+
+    /// A fetched page was admitted. A trailing continuation keeps the pass
+    /// ready; the last page idles the scan, or restarts it from the head when
+    /// a rescan was recorded mid-pass.
+    pub(super) fn page_installed(&mut self, next: Option<crate::ProcessWorklistCursor>) {
+        let rescan = self.rescan();
+        *self = match next {
+            Some(continuation) => Self::Ready {
+                continuation: Some(continuation),
+                rescan,
+            },
+            None if rescan => Self::Ready {
+                continuation: None,
+                rescan: false,
+            },
+            None => Self::Idle,
+        };
+    }
+
+    /// Take the ready continuation into an in-flight fetch. `None` while the
+    /// scan is not ready to page.
+    pub(super) fn take_page_request(&mut self) -> Option<Option<crate::ProcessWorklistCursor>> {
+        let Self::Ready {
+            continuation,
+            rescan,
+        } = self
+        else {
+            return None;
+        };
+        let continuation = continuation.clone();
+        *self = Self::Fetching {
+            continuation: continuation.clone(),
+            rescan: *rescan,
+        };
+        Some(continuation)
+    }
+
+    /// A dispatcher-side fetch failed for good: the scan parks ready at the
+    /// failed cursor with a rescan owed for whichever dispatcher runs next.
+    pub(super) fn park_for_rescan(&mut self, continuation: Option<crate::ProcessWorklistCursor>) {
+        *self = Self::Ready {
+            continuation,
+            rescan: true,
+        };
+    }
+
+    /// The idle sweep's fresh scan: idle becomes ready at the head of the
+    /// worklist, where the next dispatcher pass reads from.
+    pub(super) fn schedule_idle_pass(&mut self) {
+        if matches!(self, Self::Idle) {
+            *self = Self::Ready {
+                continuation: None,
+                rescan: false,
+            };
+        }
+    }
+
+    fn rescan(&self) -> bool {
+        match self {
+            Self::Fetching { rescan, .. } | Self::Ready { rescan, .. } => *rescan,
+            Self::Idle => false,
+        }
+    }
+}
+
+impl CoalescingExtra for ProcessWorklistScan {
+    /// A dispatcher that exits mid-fetch rewinds the scan to the cursor it was
+    /// reading, so the next dispatcher retries that cursor rather than
+    /// skipping it.
+    fn on_dispatcher_exit(&mut self) {
+        if let Self::Fetching {
+            continuation,
+            rescan,
+        } = self
+        {
+            *self = Self::Ready {
+                continuation: continuation.clone(),
+                rescan: *rescan,
+            };
+        }
     }
 }
