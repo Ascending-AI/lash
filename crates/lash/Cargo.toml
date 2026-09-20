@@ -67,8 +67,6 @@ rlm = [
     "dep:lash-protocol-rlm",
     "dep:lash-rlm-types",
     "dep:lashlang",
-    "lash-protocol-standard/lashlang",
-    "lash-tool-support/lashlang",
 ]
 
 # Host-wired extension features (ADR 0079 section 1). Each gates one
