@@ -150,3 +150,151 @@ fn wake_delivery_statements_keep_their_previous_bytes() {
     assert!(SELECT_CLAIMABLE_WAKE_SQL_PREFIX.contains("WHERE earlier.state <> 'enqueued'\n"));
     assert!(SELECT_CLAIMABLE_WAKE_SQL_PREFIX.contains("earlier.state = 'discarded'\n"));
 }
+
+/// FIG-3399: the same predicates, reached through the renderer's vocabulary
+/// axis instead of a `format!`.
+///
+/// A neutral statement names a lifecycle predicate as a `{{term(column)}}`
+/// token; the backend supplies the expansions from the one source this
+/// repository has for them, and the renderer expands them once. These tests
+/// are the proof that the axis is byte-faithful: the rendered statements are
+/// character for character what the `format!` sites produce today, and the
+/// rendered predicates are character for character what the schema's partial
+/// indexes declare. No production statement moves here — FIG-3384 owns that.
+mod vocabulary_tokens {
+    use super::{
+        COLLECT_NON_TERMINAL_SQL, CONTINUE_WORKLIST_PAGE_SQL, COUNT_NON_TERMINAL_SQL,
+        FIRST_WORKLIST_PAGE_SQL, MAX_WORKLIST_PROCESS_ID_SQL,
+    };
+    use lash_core::store_backend_support as vocabulary;
+    use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm, render};
+
+    /// How a backend registers its expansions: one entry per term, each the
+    /// `lash-core` helper that already generates it from the enum.
+    const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
+        VocabularyTerm::new(
+            "live_process_status",
+            vocabulary::live_process_status_predicate_sql,
+        ),
+        VocabularyTerm::new(
+            "retired_process_status",
+            vocabulary::retired_process_status_predicate_sql,
+        ),
+        VocabularyTerm::new(
+            "nonterminal_process_status",
+            vocabulary::nonterminal_process_status_predicate_sql,
+        ),
+        VocabularyTerm::new(
+            "undelivered_wake_delivery_state",
+            vocabulary::undelivered_wake_delivery_state_predicate_sql,
+        ),
+    ]);
+
+    /// The process registry lives on one connection, so its tables are
+    /// addressed unqualified — the spelling its `INDEXED BY` plans were
+    /// measured against.
+    fn rendered(neutral: &str) -> String {
+        render(
+            neutral,
+            Dialect::sqlite_unqualified().with_vocabulary(PROCESS_LIFECYCLE),
+            &["processes", "process_wake_deliveries"],
+        )
+        .expect("neutral statement renders")
+    }
+
+    #[test]
+    fn a_worklist_statement_renders_to_the_bytes_the_format_site_produces() {
+        assert_eq!(
+            rendered(
+                "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_live_worklist
+     WHERE {{live_process_status(status)}}"
+            ),
+            COUNT_NON_TERMINAL_SQL.as_str()
+        );
+        assert_eq!(
+            rendered(
+                "SELECT MAX(process_id) FROM processes INDEXED BY idx_processes_live_worklist
+     WHERE {{live_process_status(status)}}"
+            ),
+            MAX_WORKLIST_PROCESS_ID_SQL.as_str()
+        );
+        assert_eq!(
+            rendered(
+                "SELECT record_json FROM processes
+     INDEXED BY idx_processes_live_worklist
+     WHERE {{live_process_status(status)}} AND process_id <= ?1
+     ORDER BY process_id ASC LIMIT ?3"
+            ),
+            FIRST_WORKLIST_PAGE_SQL.as_str()
+        );
+        assert_eq!(
+            rendered(
+                "SELECT record_json FROM processes
+     INDEXED BY idx_processes_live_worklist
+     WHERE {{live_process_status(status)}}
+       AND process_id <= ?1 AND process_id > ?2
+     ORDER BY process_id ASC LIMIT ?3"
+            ),
+            CONTINUE_WORKLIST_PAGE_SQL.as_str()
+        );
+        assert_eq!(
+            rendered(
+                "SELECT record_json FROM processes
+                         WHERE {{live_process_status(status)}}
+                         ORDER BY process_id ASC"
+            ),
+            COLLECT_NON_TERMINAL_SQL.as_str()
+        );
+    }
+
+    /// Every partial index whose `WHERE` is lifecycle vocabulary, matched
+    /// against what a token renders. A partial index only helps a query whose
+    /// predicate matches it byte for byte, so this is the assertion the
+    /// vocabulary axis has to hold to be usable at all.
+    #[test]
+    fn every_vocabulary_partial_index_predicate_is_what_a_token_renders() {
+        let schema = crate::schema::PROCESS_SCHEMA;
+        for (index, declared) in [
+            (
+                "idx_processes_live_worklist",
+                format!(
+                    "    ON processes(process_id) WHERE {};",
+                    rendered("{{live_process_status(status)}}")
+                ),
+            ),
+            (
+                "idx_processes_recent_retired",
+                format!(
+                    "    ON processes(updated_at_ms, process_id)\n    WHERE {};",
+                    rendered("{{retired_process_status(status)}}")
+                ),
+            ),
+            (
+                "idx_processes_pending_cancel",
+                format!(
+                    "    WHERE cancel_requested_at_ms IS NOT NULL\n      AND {};",
+                    rendered("{{nonterminal_process_status(status)}}")
+                ),
+            ),
+            (
+                "idx_processes_parent_end_pending",
+                format!(
+                    "      AND cancel_requested_at_ms IS NULL\n      AND {};",
+                    rendered("{{live_process_status(status)}}")
+                ),
+            ),
+            (
+                "idx_wake_deliveries_pending",
+                format!(
+                    "    WHERE {};",
+                    rendered("{{undelivered_wake_delivery_state(state)}}")
+                ),
+            ),
+        ] {
+            assert!(
+                schema.contains(&declared),
+                "`{index}`'s declared predicate is not what the token renders:\n{declared}"
+            );
+        }
+    }
+}

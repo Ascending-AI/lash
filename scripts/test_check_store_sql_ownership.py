@@ -40,6 +40,8 @@ COPIED = (
     "crates/lash-store-sql",
     "crates/lash-sqlite-store/src",
     "crates/lash-postgres-store/src",
+    # The manifest exempts this subtree, and the gate checks it is really there.
+    "runbooks/restate-postgres-workers/src",
 )
 # The manifest's exempted sources, which the gate checks still exist.
 COPIED_FILES = ("crates/lash-sim/src/postgres_replay.rs",)
@@ -62,7 +64,7 @@ class SeededTree:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, destination)
         for base in ("examples", "runbooks"):
-            (self.directory / base).mkdir(exist_ok=True)
+            (self.directory / base).mkdir(exist_ok=True, parents=True)
 
     def read(self, relative: str) -> str:
         return (self.directory / relative).read_text(encoding="utf-8")
@@ -198,6 +200,127 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
             any("await_event_waits" in failure for failure in failures),
             f"the gate is meant to be silent about an unconverted family; got {failures}",
         )
+
+    # --- FIG-3399 -------------------------------------------------------
+
+    def test_a_cross_family_statement_without_a_manifest_entry_is_refused(self) -> None:
+        """The shared quiescence read spans the effect and wait families."""
+        text = self.tree.read("crates/lash-store-sql/dialect-only.toml")
+        marker = '[[cross_family]]\nstatement = "effect_journal.scope_is_quiescent"'
+        start = text.index(marker)
+        end = text.index('"""', text.index("reason =", start) + len('reason = """')) + 3
+        self.tree.write(
+            "crates/lash-store-sql/dialect-only.toml", text[:start] + text[end:]
+        )
+        self.assert_refused("is not declared in crates/lash-store-sql/dialect-only.toml")
+
+    def test_a_cross_family_entry_that_misstates_what_it_touches_is_refused(self) -> None:
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            'owner = "crates/lash-store-sql/src/effect.rs"\ntouches = ["await_event_waits"]',
+            'owner = "crates/lash-store-sql/src/effect.rs"\ntouches = ["await_event_meta"]',
+        )
+        self.assert_refused("but the cross-family entry lists")
+
+    def test_a_cross_family_entry_naming_the_wrong_owner_is_refused(self) -> None:
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            'owner = "crates/lash-store-sql/src/effect.rs"\ntouches = ["await_event_waits"]',
+            'owner = "crates/lash-store-sql/src/wait/waits.rs"\ntouches = ["await_event_waits"]',
+        )
+        self.assert_refused("names owner `crates/lash-store-sql/src/wait/waits.rs`")
+
+    def test_a_cross_family_entry_for_a_statement_that_is_not_cross_family_is_refused(
+        self,
+    ) -> None:
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            '[[cross_family]]\nstatement = "effect_journal.scope_is_quiescent"',
+            '[[cross_family]]\nstatement = "effect_journal.select_session_free_scope_ids"\n'
+            'owner = "crates/lash-store-sql/src/effect.rs"\n'
+            'touches = ["await_event_waits"]\n'
+            'reason = "invented"\n\n'
+            '[[cross_family]]\nstatement = "effect_journal.scope_is_quiescent"',
+        )
+        self.assert_refused("reaches no converted table outside its own family")
+
+    def test_a_statement_spelling_a_vocabulary_literal_itself_is_refused(self) -> None:
+        """FIG-2844's rule, held over the statement text this gate parses.
+
+        `effect_journal.scope_is_quiescent` really does spell
+        `status = 'in_progress'`; declaring that column vocabulary-valued is
+        what makes spelling it a finding, and a `{{term(column)}}` token the
+        remedy.
+        """
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            "[families.effect.table_modules]",
+            "[families.effect.vocabulary_columns]\n"
+            'runtime_effect_replay = ["status"]\n\n'
+            "[families.effect.table_modules]",
+        )
+        self.assert_refused("spells `status = '…'` over `runtime_effect_replay`")
+
+    def test_vocabulary_columns_on_a_table_the_family_does_not_own_is_refused(self) -> None:
+        self.tree.substitute(
+            "crates/lash-store-sql/dialect-only.toml",
+            "[families.effect.table_modules]",
+            "[families.effect.vocabulary_columns]\n"
+            'await_event_waits = ["status"]\n\n'
+            "[families.effect.table_modules]",
+        )
+        self.assert_refused("which is not one of its tables")
+
+    def test_prose_that_merely_carries_a_sql_word_is_not_a_statement(self) -> None:
+        """The gate matches SQL structure, not a keyword in a sentence.
+
+        Each of these was found in the tree by the keyword-only rule: a
+        conformance test name, a tool name, an HTTP route. The fourth is a
+        real statement that looks like the first.
+        """
+        for prose, table in (
+            ("the constant wake merge key must batch compatible wakes across processes", "processes"),
+            ("api.sessions.select", "sessions"),
+            ("/api/sessions/select", "sessions"),
+            ("triggers.update", "triggers"),
+            ("SELECT the processes to update, then merge them", "processes"),
+        ):
+            # Precondition: the keyword-only rule this replaces did match each
+            # of them, so the case proves a change rather than a tautology.
+            self.assertTrue(
+                GATE.names_table(prose, table)
+                and any(
+                    keyword in prose.upper() for keyword in GATE.SQL_KEYWORDS
+                ),
+                f"case no longer exercises the old rule: {prose!r}",
+            )
+            self.assertFalse(
+                GATE.is_sql_over(prose, table),
+                f"prose read as SQL over `{table}`: {prose!r}",
+            )
+        for sql, table in (
+            ("SELECT record_json FROM processes WHERE process_id = ?1", "processes"),
+            ("UPDATE lash_processes SET status = $2 WHERE process_id = $1", "processes"),
+            ("INSERT INTO processes (process_id) VALUES (?1)", "processes"),
+            ("DELETE FROM lash_sessions WHERE session_id = $1", "sessions"),
+        ):
+            self.assertTrue(GATE.is_sql_over(sql, table), f"real SQL missed: {sql!r}")
+
+    def test_a_prose_literal_naming_a_converted_table_is_not_stray_sql(self) -> None:
+        self.tree.substitute(
+            "crates/lash-sqlite-store/src/retention.rs",
+            "let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);",
+            'let _prose = "a SELECT over await_event_waits is how the sweep reads a promise";\n'
+            "    let cutoff = clamp_epoch_ms(bound.committed_before_epoch_ms);",
+        )
+        self.assertEqual(self.tree.failures(), [])
+
+    def test_an_exempted_subtree_may_spell_sql_and_its_neighbours_may_not(self) -> None:
+        stray = 'pub const PROBE: &str = "SELECT key_id FROM await_event_waits WHERE key_id = ?1";\n'
+        self.tree.write("runbooks/restate-postgres-workers/src/probe_fig3399.rs", stray)
+        self.assertEqual(self.tree.failures(), [])
+        self.tree.write("runbooks/other-harness/src/probe_fig3399.rs", stray)
+        self.assert_refused("runbooks/other-harness/src/probe_fig3399.rs")
 
     def test_a_test_module_may_spell_sql_freely(self) -> None:
         self.tree.substitute(

@@ -20,6 +20,159 @@ fn postgres(neutral: &str) -> String {
     render(neutral, Dialect::postgres(), TABLES).expect("renders")
 }
 
+/// A stand-in for the backend's real vocabulary: the same `fn(&str) -> String`
+/// shape `lash_core::store_backend_support` exports, spelling two terms the
+/// process family will use.
+fn live_status(column: &str) -> String {
+    format!("{column} IN ('running', 'waiting')")
+}
+
+fn retired_status(column: &str) -> String {
+    format!("{column} NOT IN ('running', 'waiting')")
+}
+
+const VOCABULARY: Vocabulary = Vocabulary::new(&[
+    VocabularyTerm::new("live_process_status", live_status),
+    VocabularyTerm::new("retired_process_status", retired_status),
+]);
+
+fn with_vocabulary(neutral: &str) -> Result<String, RenderError> {
+    render(
+        neutral,
+        Dialect::postgres().with_vocabulary(VOCABULARY),
+        TABLES,
+    )
+}
+
+#[test]
+fn a_vocabulary_token_expands_once_for_both_backends() {
+    let neutral = "SELECT 1 FROM await_event_waits \
+                   WHERE {{live_process_status(status)}} AND key_id = ?1";
+
+    assert_eq!(
+        with_vocabulary(neutral).expect("renders"),
+        "SELECT 1 FROM lash_await_event_waits \
+         WHERE status IN ('running', 'waiting') AND key_id = $1"
+    );
+    assert_eq!(
+        render(
+            neutral,
+            Dialect::sqlite("main").with_vocabulary(VOCABULARY),
+            TABLES,
+        )
+        .expect("renders"),
+        "SELECT 1 FROM main.await_event_waits \
+         WHERE status IN ('running', 'waiting') AND key_id = ?1"
+    );
+}
+
+#[test]
+fn a_token_carries_a_qualified_column_and_tolerates_inner_spacing() {
+    assert_eq!(
+        with_vocabulary(
+            "SELECT 1 FROM await_event_waits WHERE {{ retired_process_status( p.status ) }}"
+        )
+        .expect("renders"),
+        "SELECT 1 FROM lash_await_event_waits WHERE p.status NOT IN ('running', 'waiting')"
+    );
+}
+
+#[test]
+fn a_token_spelling_inside_a_string_literal_or_a_comment_is_text_not_a_token() {
+    // The literal beside the token contains the token's own spelling; only the
+    // one outside the quotes expands.
+    assert_eq!(
+        with_vocabulary(
+            "UPDATE await_event_waits SET wait_json = '{{live_process_status(status)}}' \
+             WHERE {{live_process_status(status)}}"
+        )
+        .expect("renders"),
+        "UPDATE lash_await_event_waits SET wait_json = '{{live_process_status(status)}}' \
+         WHERE status IN ('running', 'waiting')"
+    );
+    let commented = with_vocabulary(
+        "SELECT 1 FROM await_event_waits\n\
+         -- {{nonexistent_term(status)}} is prose\n\
+         /* {{also_nonexistent(status)}} */ WHERE {{live_process_status(status)}}",
+    )
+    .expect("renders");
+    assert!(commented.contains("-- {{nonexistent_term(status)}} is prose"));
+    assert!(commented.contains("/* {{also_nonexistent(status)}} */"));
+    assert!(commented.ends_with("WHERE status IN ('running', 'waiting')"));
+}
+
+#[test]
+fn a_token_with_no_expansion_is_refused_at_render_time() {
+    assert_eq!(
+        render(
+            "SELECT 1 FROM await_event_waits WHERE {{live_process_status(status)}}",
+            Dialect::postgres(),
+            TABLES,
+        )
+        .expect_err("no vocabulary attached"),
+        RenderError::VocabularyNotSupplied {
+            name: "live_process_status".to_string(),
+            at: 38,
+        }
+    );
+    assert_eq!(
+        with_vocabulary("SELECT 1 FROM await_event_waits WHERE {{pending_cancel(status)}}")
+            .expect_err("unknown term"),
+        RenderError::UnknownVocabularyTerm {
+            name: "pending_cancel".to_string(),
+            at: 38,
+            known: vec!["live_process_status", "retired_process_status"],
+        }
+    );
+}
+
+#[test]
+fn a_token_whose_column_is_not_an_identifier_is_refused() {
+    for column in ["'running'", "status = 1", "a.b.c", "", "status)"] {
+        let neutral =
+            format!("SELECT 1 FROM await_event_waits WHERE {{{{live_process_status({column})}}}}");
+        assert!(
+            matches!(
+                with_vocabulary(&neutral),
+                Err(RenderError::VocabularyColumnNotIdentifier { .. })
+                    | Err(RenderError::MalformedVocabularyToken { .. })
+            ),
+            "`{column}` must not render as a column reference"
+        );
+    }
+}
+
+#[test]
+fn a_malformed_or_unterminated_token_is_refused_rather_than_copied() {
+    assert_eq!(
+        with_vocabulary("SELECT 1 FROM await_event_waits WHERE {live_process_status(status)}")
+            .expect_err("single brace"),
+        RenderError::MalformedVocabularyToken {
+            at: 38,
+            reason: "a `{` that does not open a vocabulary token",
+        }
+    );
+    assert_eq!(
+        with_vocabulary("SELECT 1 FROM await_event_waits WHERE {{live_process_status(status)")
+            .expect_err("unterminated token"),
+        RenderError::Unterminated {
+            kind: "vocabulary token",
+            at: 38,
+        }
+    );
+    assert!(matches!(
+        with_vocabulary("SELECT 1 FROM await_event_waits WHERE {{live_process_status}}"),
+        Err(RenderError::MalformedVocabularyToken { .. })
+    ));
+    assert!(matches!(
+        with_vocabulary("SELECT 1 FROM await_event_waits WHERE status = 1}}"),
+        Err(RenderError::MalformedVocabularyToken {
+            reason: "a `}` outside a vocabulary token",
+            ..
+        })
+    ));
+}
+
 #[test]
 fn placeholders_take_the_backend_spelling_and_keep_their_numbers() {
     let neutral =
