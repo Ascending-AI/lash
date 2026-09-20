@@ -273,8 +273,11 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
         crate::ProcessWorklistCursor::new("test", "after-panic-boundary", "through-panic-boundary");
     {
         let mut state = scheduler.state.lock_recover();
-        state.dispatcher_running = true;
-        state.extra.worklist_scan = ProcessWorklistScan::Fetching(Some(continuation.clone()));
+        assert!(state.claim_dispatcher());
+        state.extra = ProcessWorklistScan::Fetching {
+            continuation: Some(continuation.clone()),
+            rescan: false,
+        };
     }
     let task_scheduler = Arc::clone(&scheduler);
     let task = crate::task::spawn(async move {
@@ -287,14 +290,17 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
         .await
         .expect("unwind cleanup notifies dispatcher waiters");
     assert!(
-        !scheduler.state.lock_recover().dispatcher_running,
+        !scheduler.state.lock_recover().dispatcher_running(),
         "a later drive pass must be able to start a replacement dispatcher"
     );
     let state = scheduler.state.lock_recover();
     assert!(
         matches!(
-            &state.extra.worklist_scan,
-            ProcessWorklistScan::Ready(Some(restored)) if restored == &continuation
+            &state.extra,
+            ProcessWorklistScan::Ready {
+                continuation: Some(restored),
+                ..
+            } if restored == &continuation
         ),
         "a later dispatcher must retry the cursor whose fetch panicked"
     );

@@ -196,7 +196,7 @@ impl QueuedWorkTaskDriver {
             {
                 let mut state = self.inner.scheduler.lock_state();
                 if state.queue_idle() {
-                    state.dispatcher_running = false;
+                    state.release_dispatcher();
                     dispatcher_guard.disarm();
                     return;
                 }

@@ -27,13 +27,15 @@ impl CoalescingExtra for () {}
 
 /// The protocol state shared by both schedulers. `pending` + `scheduled` +
 /// `rerun` coalesce repeated admissions per key; `active` counts in-flight
-/// executions; `dispatcher_running` is the single-dispatcher latch.
+/// executions; `dispatcher_running` is the single-dispatcher latch, mutated
+/// only through [`claim_dispatcher`](Self::claim_dispatcher) and
+/// [`release_dispatcher`](Self::release_dispatcher).
 pub struct CoalescingSchedulerState<K, W, E = ()> {
     pub pending: VecDeque<W>,
     pub scheduled: BTreeSet<K>,
     pub rerun: BTreeMap<K, W>,
     pub active: usize,
-    pub dispatcher_running: bool,
+    dispatcher_running: bool,
     pub extra: E,
 }
 
@@ -50,7 +52,7 @@ impl<K: Ord, W, E: Default> Default for CoalescingSchedulerState<K, W, E> {
     }
 }
 
-impl<K: Ord + Clone, W, E> CoalescingSchedulerState<K, W, E> {
+impl<K: Ord + Clone, W, E: CoalescingExtra> CoalescingSchedulerState<K, W, E> {
     /// Queue `work` under `key`, or coalesce it onto the in-flight attempt's
     /// retained rerun. Returns true when the key was newly scheduled.
     pub fn admit(&mut self, key: K, work: W, merge: impl FnOnce(&mut W, W)) -> bool {
@@ -83,6 +85,19 @@ impl<K: Ord + Clone, W, E> CoalescingSchedulerState<K, W, E> {
             self.dispatcher_running = true;
             true
         }
+    }
+
+    /// Whether the dispatcher latch is held.
+    pub fn dispatcher_running(&self) -> bool {
+        self.dispatcher_running
+    }
+
+    /// Release the dispatcher latch and give the host's extra state its exit
+    /// hook. Every dispatcher stop — unwind guard or deliberate park — goes
+    /// through here so the latch and the host rewind cannot drift apart.
+    pub fn release_dispatcher(&mut self) {
+        self.dispatcher_running = false;
+        self.extra.on_dispatcher_exit();
     }
 
     /// No queued work and nothing executing.
@@ -123,6 +138,15 @@ pub trait CoalescingSchedulerHandle: Send + Sync + 'static {
         drop(state);
         self.changed().notify_one();
     }
+
+    /// Park the dispatcher: release the latch, run the host's exit hook, then
+    /// notify so a later pass can claim a replacement. `Drop` cannot await,
+    /// so the unwind guard and every deliberate stop share this one non-async
+    /// method.
+    fn park_dispatcher(&self) {
+        self.state().lock_recover().release_dispatcher();
+        self.changed().notify_one();
+    }
 }
 
 /// Clears the single-dispatcher latch if the dispatcher task unwinds or ends
@@ -151,10 +175,6 @@ impl<S: CoalescingSchedulerHandle> Drop for CoalescingDispatcherGuard<S> {
         if !self.armed {
             return;
         }
-        let mut state = self.scheduler.state().lock_recover();
-        state.dispatcher_running = false;
-        state.extra.on_dispatcher_exit();
-        drop(state);
-        self.scheduler.changed().notify_one();
+        self.scheduler.park_dispatcher();
     }
 }

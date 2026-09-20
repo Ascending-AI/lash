@@ -129,7 +129,7 @@ async fn process_slot_reservation_is_cancelled_when_the_dispatcher_shuts_down() 
             .execution_scheduler
             .state
             .lock_recover()
-            .dispatcher_running
+            .dispatcher_running()
             || !reserve_dropped.load(Ordering::SeqCst)
         {
             tokio::task::yield_now().await;
@@ -412,6 +412,66 @@ async fn a_failed_scan_consumes_the_pending_rescan_without_a_redundant_pass() {
         "the consumed rescan must not schedule a redundant pass: {reads:?}"
     );
     assert_eq!(reads.len(), 2, "one failed read plus the rescan it owed");
+}
+
+/// A dispatcher that unwinds mid-scan frees the latch and rewinds the scan to
+/// the cursor it was reading; the next drive claims a replacement dispatcher
+/// and the queued row still drains to terminal.
+#[tokio::test]
+async fn a_dispatcher_unwind_mid_scan_is_drained_by_the_replacement() {
+    let started = Arc::new(AtomicUsize::new(0));
+    let started_changed = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(1));
+    let run_handle = Arc::new(LateBoundProcessWork::default());
+    let (worker, registry, run_handle, env_ref, _test_registry) = worker_with_engine_and_registry(
+        1,
+        Arc::new(GatedSuccessEngine {
+            started,
+            started_changed,
+            release,
+        }),
+        run_handle,
+    )
+    .await;
+    registry
+        .register_process(engine_registration(
+            "unwind-drained-row",
+            "gated-success",
+            env_ref,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("register unwind-drain process");
+
+    // A dispatcher that died mid-fetch: latch held, scan fetching the head.
+    {
+        let mut state = worker.execution_scheduler.state.lock_recover();
+        assert!(state.claim_dispatcher());
+        state.extra = ProcessWorklistScan::Fetching {
+            continuation: None,
+            rescan: false,
+        };
+    }
+    let task_scheduler = Arc::clone(&worker.execution_scheduler);
+    let task = crate::task::spawn(async move {
+        let _guard = ProcessExecutionDispatcherGuard::new(task_scheduler);
+        panic!("test dispatcher unwind");
+    });
+    assert!(task.await.expect_err("dispatcher task panics").is_panic());
+    assert!(
+        !worker
+            .execution_scheduler
+            .state
+            .lock_recover()
+            .dispatcher_running(),
+        "the unwind frees the dispatcher latch for a replacement"
+    );
+
+    let _ = run_handle
+        .enable_and_drive()
+        .await
+        .expect("the next drive claims a replacement dispatcher");
+    wait_for_terminal_count(&registry, 1, "row drained after dispatcher unwind").await;
 }
 
 #[tokio::test]
