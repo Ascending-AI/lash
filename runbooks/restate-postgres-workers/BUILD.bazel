@@ -8,6 +8,8 @@ load(
     "lash_rust_unit_test",
 )
 
+load("@rules_rust//rust:defs.bzl", "rust_doc")
+
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_library(
@@ -20,6 +22,12 @@ lash_rust_library(
     manifest_dir = "runbooks/restate-postgres-workers",
     package_name = "lash-restate-postgres-workers-e2e",
     version = "0.0.0",
+)
+
+rust_doc(
+    name = "restate-postgres-workers__doc",
+    crate = ":restate-postgres-workers",
+    testonly = True,
 )
 
 lash_rust_unit_test(

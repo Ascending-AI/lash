@@ -8,6 +8,8 @@ load(
     "lash_rust_unit_test",
 )
 
+load("@rules_rust//rust:defs.bzl", "rust_doc")
+
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_library(
@@ -26,6 +28,12 @@ lash_rust_library(
     manifest_dir = "crates/lash-plugin-mcp",
     package_name = "lash-internal-plugin-mcp",
     version = "0.0.0-dev",
+)
+
+rust_doc(
+    name = "lash-plugin-mcp__doc",
+    crate = ":lash-plugin-mcp",
+    testonly = True,
 )
 
 lash_rust_unit_test(

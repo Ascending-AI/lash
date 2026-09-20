@@ -8,6 +8,8 @@ load(
     "lash_rust_unit_test",
 )
 
+load("@rules_rust//rust:defs.bzl", "rust_doc")
+
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_library(
@@ -41,6 +43,12 @@ lash_rust_library(
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     version = "0.0.0-dev",
+)
+
+rust_doc(
+    name = "lash__doc",
+    crate = ":lash",
+    testonly = True,
 )
 
 lash_rust_unit_test(

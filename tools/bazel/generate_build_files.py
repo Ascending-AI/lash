@@ -507,9 +507,13 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         if enabled_by_resolved_features(target)
     }
     primary_target = pathlib.PurePosixPath(package_dir).name
+    doc_label = None
     library_label = f":{primary_target}" if library else None
     library_crate = library["name"] if library else None
-    chunks = [GENERATED_HEADER, LOAD, "package(default_visibility = [\"//visibility:public\"])\n\n"]
+    chunks = [GENERATED_HEADER, LOAD]
+    if library:
+        chunks.append('load("@rules_rust//rust:defs.bzl", "rust_doc")\n\n')
+    chunks.append("package(default_visibility = [\"//visibility:public\"])\n\n")
     inventory_targets = []
 
     has_build_script = any("custom-build" in target["kind"] for target in package["targets"])
@@ -566,6 +570,17 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    version = {quote(version)},\n"
             ")\n\n"
         )
+        # `cargo doc` documents each library crate; rust_doc resolves the
+        # crate's own deps transitively from its CrateInfo, so one target per
+        # library reproduces the workspace doc build.
+        chunks.append(
+            "rust_doc(\n"
+            f"    name = {quote(primary_target + '__doc')},\n"
+            f"    crate = {quote(':' + primary_target)},\n"
+            "    testonly = True,\n"
+            ")\n\n"
+        )
+        doc_label = f"//{package_dir}:{primary_target}__doc"
         inventory_targets.append({"kind": "lib", "cargo": library["name"], "label": f"//{package_dir}:{primary_target}"})
         if library.get("test", False):
             unit_compile_data = unit_test_compile_data(package["name"])
@@ -865,6 +880,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         "dependencies": sorted(
             {dependency["name"] for dependency in package["dependencies"]}
         ),
+        "doc": doc_label,
         "manifest": manifest,
         "package": package["name"],
         "resolved_features": features,
@@ -933,6 +949,11 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
             for target in labels
             if target["label"] is not None
             and target["kind"] != "custom-build"
+        ),
+        # One rust_doc target per library crate: the `cargo doc --workspace`
+        # shape as cached Bazel actions.
+        "WORKSPACE_DOC_TARGETS": sorted(
+            item["doc"] for item in inventory if item["doc"] is not None
         ),
         "WORKSPACE_RUST_SOURCE_TARGETS": sorted(
             f"//{pathlib.PurePosixPath(package['manifest']).parent.as_posix()}:rust_sources"

@@ -8,6 +8,8 @@ load(
     "lash_rust_unit_test",
 )
 
+load("@rules_rust//rust:defs.bzl", "rust_doc")
+
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_library(
@@ -32,6 +34,12 @@ lash_rust_library(
     manifest_dir = "crates/lash-regress",
     package_name = "lash-regress",
     version = "0.0.0-dev",
+)
+
+rust_doc(
+    name = "lash-regress__doc",
+    crate = ":lash-regress",
+    testonly = True,
 )
 
 lash_rust_unit_test(

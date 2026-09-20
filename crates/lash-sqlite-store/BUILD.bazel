@@ -8,6 +8,8 @@ load(
     "lash_rust_unit_test",
 )
 
+load("@rules_rust//rust:defs.bzl", "rust_doc")
+
 package(default_visibility = ["//visibility:public"])
 
 lash_rust_library(
@@ -30,6 +32,12 @@ lash_rust_library(
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
     version = "0.0.0-dev",
+)
+
+rust_doc(
+    name = "lash-sqlite-store__doc",
+    crate = ":lash-sqlite-store",
+    testonly = True,
 )
 
 lash_rust_unit_test(
