@@ -1396,6 +1396,9 @@ impl fmt::Display for SchemaReport {
                  await-event revocation ledger, the effect journal, and the Restate state \
                  together — any one of them left behind still refers to sessions the recreated \
                  database does not have. \
+                 `PostgresStorage::teardown_ddl()` (committed as \
+                 crates/lash-postgres-store/teardown.sql) drops every lash-owned object so \
+                 `schema.sql` can be re-applied cleanly. \
                  docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md \
                  records why this boundary refuses instead of migrating. This gate is \
                  unconditional and no `SchemaCheck` relaxes it."
