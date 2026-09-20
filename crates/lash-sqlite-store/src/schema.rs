@@ -612,9 +612,9 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 ///
 /// An additive, index-only catalog change does **not** bump this version. Every
 /// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
-/// schema, so a version-43 file written by an older binary self-heals into the
-/// newer index set on first open, and a newer file stays readable by the older
-/// binary — the two are mutually compatible on the same path. Bumping instead
+/// schema, so a same-version file written before the index existed self-heals
+/// into the newer index set on first open, and a newer file stays readable by
+/// the older binary — the two are mutually compatible on the same stamp. Bumping instead
 /// would reject-and-recreate live stores for a change that costs nothing to
 /// apply in place. The idle-arbitration ordering indexes
 /// (`idx_queued_work_session_command_order`,
@@ -631,8 +631,9 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// removes the readerless requested-ancestor receipt column. Older stores are
 /// rejected and recreated; there is no compatibility read or migration path.
 /// Version 44 folds the two pending observer-intent encodings into one
-/// attributed table and removes the relation-wrapper depth counter. Version 43
-/// is migrated forward in place; older stores remain recreate-only.
+/// attributed table and removes the relation-wrapper depth counter. Version-43
+/// catalogs are rejected and recreated like every other predecessor: the
+/// in-place fold was deleted under the store-version window.
 /// Version 45 switches content and semantic identities to domain-tagged BLAKE3.
 /// Existing stores are rejected rather than reinterpreting SHA-256 rows.
 /// Version 46 adds DDL-enforced session relation, causal-reference, and observer-
@@ -724,53 +725,6 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// with no owner was representable. A pre-70 database is rejected at open and
 /// recreated.
 pub(crate) const SCHEMA_VERSION: i32 = 70;
-
-const SESSION_43_TO_44_MIGRATION: &str = "
-CREATE TABLE session_meta_pending_observer_intents (
-    session_id          TEXT NOT NULL,
-    process_index       INTEGER NOT NULL,
-    process_id          TEXT NOT NULL,
-    process_incarnation INTEGER,
-    attribution         TEXT NOT NULL CONSTRAINT ck_session_meta_pending_observer_intents_attribution CHECK (attribution IN ('host_requested', 'fork_inherited')),
-    PRIMARY KEY (session_id, process_id),
-    UNIQUE (session_id, process_index),
-    FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
-);
-
-WITH candidates AS (
-    SELECT session_id, process_id, 0 AS attribution_rank,
-           layer_index AS source_group, process_index AS source_index,
-           'host_requested' AS attribution
-      FROM session_meta_observer_intent_processes
-    UNION ALL
-    SELECT session_id, process_id, 1 AS attribution_rank,
-           0 AS source_group, process_index AS source_index,
-           'fork_inherited' AS attribution
-      FROM session_meta_fork_pending_observer_processes
-), occurrences AS (
-    SELECT *, ROW_NUMBER() OVER (
-        PARTITION BY session_id, process_id
-        ORDER BY attribution_rank, source_group, source_index
-    ) AS occurrence
-      FROM candidates
-), indexed AS (
-    SELECT session_id, process_id, attribution,
-           ROW_NUMBER() OVER (
-               PARTITION BY session_id
-               ORDER BY attribution_rank, source_group, source_index, process_id
-           ) - 1 AS process_index
-      FROM occurrences
-     WHERE occurrence = 1
-)
-INSERT INTO session_meta_pending_observer_intents
-    (session_id, process_index, process_id, process_incarnation, attribution)
-SELECT session_id, process_index, process_id, NULL, attribution
-  FROM indexed;
-
-DROP TABLE session_meta_observer_intent_processes;
-DROP TABLE session_meta_fork_pending_observer_processes;
-ALTER TABLE session_meta DROP COLUMN observer_intent_depth;
-";
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -1376,15 +1330,6 @@ fn prepare_versioned_schema_at_version<'connection>(
         stamp_writing_release(&tx, database)?;
         return Ok(tx);
     }
-    // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
-    // unreachable for production opens now that SCHEMA_VERSION is 50.
-    if database == SqliteDatabase::DurableCore && user_version == 43 && schema_version == 44 {
-        tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
-        apply_schema(&tx)?;
-        tx.pragma_update(None, "user_version", schema_version)?;
-        stamp_writing_release(&tx, database)?;
-        return Ok(tx);
-    }
     let writing_release = release_stamp_holder(database)
         .then(|| crate::release_stamp::read_release(&tx))
         .flatten();
@@ -1461,10 +1406,14 @@ pub(crate) fn unsupported_schema_message(
 mod observer_intent_migration_tests {
     use super::*;
 
+    /// The deleted 43-to-44 arm upgraded exactly this catalog in place. Under
+    /// the store-version window a component-43 stamp is pre-cutover data: the
+    /// same fixture must now be refused at both the retired seam and the
+    /// production version, with its bytes untouched.
     #[test]
-    fn historical_component_43_to_44_migration_stays_pinned() {
+    fn component_43_durable_core_is_refused_instead_of_migrated() {
         let mut connection = Connection::open_in_memory().expect("open migration fixture");
-        prepare_versioned_schema_at_version(&mut connection, SqliteDatabase::DurableCore, 44)
+        prepare_versioned_schema(&mut connection, SqliteDatabase::DurableCore)
             .expect("create current fixture")
             .commit()
             .expect("commit current fixture");
@@ -1500,77 +1449,42 @@ mod observer_intent_migration_tests {
             )
             .expect("build component-43 observer-intent fixture");
 
-        prepare_versioned_schema_at_version(&mut connection, SqliteDatabase::DurableCore, 44)
-            .expect("migrate component 43")
-            .commit()
-            .expect("commit component-44 migration");
-
-        let rows = connection
-            .prepare(
-                "SELECT process_index, process_id, process_incarnation, attribution
-                 FROM session_meta_pending_observer_intents
-                 WHERE session_id = 'fold-session' ORDER BY process_index",
-            )
-            .expect("prepare folded intent read")
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<i64>>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })
-            .expect("read folded intents")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("decode folded intents");
-        assert_eq!(
-            rows,
-            vec![
-                (
-                    0,
-                    "shared-process".to_string(),
-                    None,
-                    "host_requested".to_string()
-                ),
-                (
-                    1,
-                    "host-only-process".to_string(),
-                    None,
-                    "host_requested".to_string()
-                ),
-                (
-                    2,
-                    "fork-only-process".to_string(),
-                    None,
-                    "fork_inherited".to_string()
-                ),
-            ]
+        let retired_seam =
+            prepare_versioned_schema_at_version(&mut connection, SqliteDatabase::DurableCore, 44)
+                .expect_err("the retired 43-to-44 arm must not accept its old source");
+        assert!(
+            retired_seam
+                .to_string()
+                .contains("supports schema version 44, but the database reports version 43"),
+            "the retired seam must refuse with the recreate message: {retired_seam}"
         );
+        let production = prepare_versioned_schema(&mut connection, SqliteDatabase::DurableCore)
+            .expect_err("a component-43 stamp is refused at the current version");
+        assert!(
+            production.to_string().contains(&format!(
+                "supports schema version {}, but the database reports version 43",
+                SCHEMA_VERSION
+            )),
+            "open must refuse a pre-cutover stamp: {production}"
+        );
+
         assert_eq!(
             connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
-                .expect("read migrated version"),
-            44
+                .expect("read refused version"),
+            43,
+            "a refused open must not relabel the old catalog"
         );
-        assert!(
-            connection
-                .execute(
-                    "UPDATE session_meta SET observer_intent_depth = 1 WHERE session_id = 'fold-session'",
-                    [],
-                )
-                .is_err(),
-            "the removed depth counter cannot represent a rows/counter disagreement"
-        );
-        assert!(
-            connection
-                .execute(
-                    "INSERT INTO session_meta_pending_observer_intents
-                     (session_id, process_index, process_id, attribution)
-                     VALUES ('fold-session', 3, 'invalid-process', 'relation_injected')",
-                    [],
-                )
-                .is_err(),
-            "the attribution CHECK must reject relation-borne intent labels"
+        let legacy_rows: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM session_meta_observer_intent_processes",
+                [],
+                |row| row.get(0),
+            )
+            .expect("the legacy table must survive the refused open");
+        assert_eq!(
+            legacy_rows, 2,
+            "a refused open must not run the deleted fold"
         );
     }
 }
