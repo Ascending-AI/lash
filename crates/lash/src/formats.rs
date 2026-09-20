@@ -8,11 +8,10 @@
 //! were unreachable from a host at all. Four were private to their own module.
 //!
 //! The table is **exhaustive over the durable formats this build writes**, which
-//! is a stronger claim than "the ones that are easy to report" and the reason
-//! [`FormatVersion`] has three shapes rather than one. A format whose boundary
-//! is a forward-only fence rather than an exact match belongs here with that
-//! contract stated; leaving it out because the enum had no shape for it would
-//! have made the manifest quietly narrower than the boundary it describes.
+//! is a stronger claim than "the ones that are easy to report". Every boundary
+//! is an exact match or an opaque identity — the store-version window removed
+//! the last forward-only fence, so no row may claim that older generations
+//! still load.
 //!
 //! **This module re-exports; it does not redefine.** Each constant below is the
 //! same symbol the code that writes the format uses, lifted through its owning
@@ -74,9 +73,6 @@ pub enum DurableFormat {
     /// The serialized wake-delivery payload a process outbox row carries.
     ProcessWakeDelivery,
     /// The persisted JSON body of a session-graph node.
-    ///
-    /// The one forward-only format in this table — see
-    /// [`FormatVersion::ForwardOnly`].
     SessionNodeBody,
     /// Compiled Lashlang bytecode. Identity-checked rather than
     /// version-compared — see [`FormatProbe::IdentityOnly`].
@@ -131,17 +127,6 @@ pub enum FormatVersion {
     Counter(u32),
     /// An opaque build identity compared for equality.
     Identity(&'static str),
-    /// A forward-only generation fence: stored bytes at this generation or
-    /// *older* load, and a strictly newer generation is refused.
-    ///
-    /// The comparison is one-directional, which is a different contract from
-    /// [`FormatVersion::Counter`] and not a weaker version of it. Immutable
-    /// history is why: a session-graph node is never rewritten, so a body from
-    /// an older generation still means exactly what it meant, while a body from
-    /// a generation this build has never seen cannot be given a shape. Reporting
-    /// such a fence as a counter would tell an operator that rolling *back* is a
-    /// refusal when it is the supported direction.
-    ForwardOnly(u32),
 }
 
 impl std::fmt::Display for FormatVersion {
@@ -149,9 +134,6 @@ impl std::fmt::Display for FormatVersion {
         match self {
             FormatVersion::Counter(version) => write!(f, "{version}"),
             FormatVersion::Identity(identity) => write!(f, "{identity}"),
-            // The suffix is the contract, not decoration: the bare integer
-            // would read as an exact-match boundary.
-            FormatVersion::ForwardOnly(generation) => write!(f, "{generation} or older"),
         }
     }
 }
@@ -233,7 +215,7 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
         },
         DurableFormatEntry {
             format: DurableFormat::SessionNodeBody,
-            version: FormatVersion::ForwardOnly(SESSION_NODE_BODY_SCHEMA_VERSION),
+            version: FormatVersion::Counter(SESSION_NODE_BODY_SCHEMA_VERSION),
             owning_crate: "lash-core",
             constant: "SESSION_NODE_BODY_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
@@ -406,26 +388,20 @@ mod tests {
             FormatVersion::Identity("lashlang-vm-abi-v6").to_string(),
             "lashlang-vm-abi-v6"
         );
-        // A forward-only fence must not render as a bare integer: the number
-        // alone reads as an exact-match boundary, which is the wrong contract.
-        assert_eq!(FormatVersion::ForwardOnly(1).to_string(), "1 or older");
     }
 
     #[test]
-    fn the_forward_only_fence_is_listed_with_its_own_comparison_shape() {
-        // Omitting it because the enum had no shape for a one-directional
-        // boundary is exactly how a manifest becomes narrower than the truth.
+    fn the_node_body_fence_is_listed_as_an_exact_match() {
+        // It was once the manifest's one forward-only fence: under the
+        // store-version window an older generation is pre-cutover data, so
+        // reporting it as readable-in-one-direction would tell an operator that
+        // rolling back is supported when it is refused like anything else.
         let entry = durable_format(DurableFormat::SessionNodeBody)
             .expect("graph node bodies are in every build");
         assert_eq!(
             entry.version,
-            FormatVersion::ForwardOnly(lash_core::SESSION_NODE_BODY_SCHEMA_VERSION)
+            FormatVersion::Counter(lash_core::SESSION_NODE_BODY_SCHEMA_VERSION)
         );
         assert_eq!(entry.owning_crate, "lash-core");
-        assert!(
-            !matches!(entry.version, FormatVersion::Counter(_)),
-            "a forward-only fence reported as a counter tells an operator that \
-             rolling back is a refusal when it is the supported direction"
-        );
     }
 }

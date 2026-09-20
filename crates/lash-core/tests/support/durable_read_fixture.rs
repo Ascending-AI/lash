@@ -101,12 +101,13 @@
 //! test.
 //!
 //! A shape older than what this build writes therefore belongs in a frozen byte
-//! literal beside the decoder that must keep reading it —
-//! `session_graph_tests.rs::unstamped_conversation_bodies_keep_loading` and
-//! `::unstamped_stored_bodies_keep_loading` are that, for the node body — not in a
-//! generated artifact. Read this fixture as "the previous committed writer's
-//! output", which is the drift it exists to catch, and put "some writer, once, long
-//! ago" somewhere regeneration cannot reach.
+//! literal beside the decoder that once had to keep reading it —
+//! `session_graph_tests.rs::unstamped_conversation_bodies_are_refused` and
+//! `::unstamped_stored_bodies_are_refused` are that, for the node body — not in a
+//! generated artifact. Under the store-version window those literals witness
+//! refusal rather than a tolerated read. Read this fixture as "the previous
+//! committed writer's output", which is the drift it exists to catch, and put
+//! "some writer, once, long ago" somewhere regeneration cannot reach.
 //!
 //! ## Coverage
 //!
@@ -261,7 +262,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 86;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 87;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -455,6 +456,11 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (
             crate::CLOSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             85,
+            86,
+        ),
+        (
+            crate::SETTLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            86,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {

@@ -41,6 +41,9 @@ const PASSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const CLOSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-85-9b80fb5b7/postgres-expected.json",
 ];
+const SETTLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-86-a1cf357c7/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -470,6 +473,18 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("refresh refusal fixture head schema without changing its checkpoint");
+    // Node bodies are part of the same enclosing catalog: under the
+    // exact-match generation fence a pre-window stamp refuses the read before
+    // hydration reaches the component the fixture exists to exercise.
+    sqlx::query(
+        "UPDATE lash_graph_nodes
+            SET node_json = jsonb_set(
+                node_json::jsonb, '{schema_version}', to_jsonb($1::bigint))::text",
+    )
+    .bind(i64::from(lash_core::SESSION_NODE_BODY_SCHEMA_VERSION))
+    .execute(&pool)
+    .await
+    .expect("restamp refusal fixture node bodies at the current generation");
     upgrade_prior_fixture_checkpoint_manifests(&pool).await;
     pool.close().await;
     let storage = PostgresStorage::connect(&fixture_database_url)

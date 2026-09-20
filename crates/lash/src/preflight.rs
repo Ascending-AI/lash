@@ -217,7 +217,7 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             primary: true,
         },
         DurableFormat::SessionNodeBody => SurfaceRelation::Unwalkable(
-            "no bounded surface: one row per graph node, and the boundary is forward-only",
+            "no bounded surface: one row per graph node, and the boundary is exact-match",
         ),
         DurableFormat::Bytecode => SurfaceRelation::Walk {
             surface: DurableSurface::ParkedSegment,

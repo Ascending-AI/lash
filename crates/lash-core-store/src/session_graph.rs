@@ -11,9 +11,6 @@ use crate::{BaseRenderCache, ClockWallTime, Message, PromptUsage, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
 use lash_sansio::core_support::MessageCoreSupport;
 
-#[path = "session_graph_legacy_response.rs"]
-mod legacy_response;
-
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RealizedNodeTimestamp {
     pub node_id: NodeId,
@@ -206,11 +203,11 @@ pub struct SessionNodeRecord {
 /// demand the advance — the guard is what a shape change collides with, so no
 /// node-body field arrives by review attention alone.
 ///
-/// Graph nodes are immutable history, so the generation is a forward-only
-/// fence rather than an equality check: a body stamped at this generation or
-/// older loads, and a body from a strictly newer generation is refused with the
-/// generation it carries. Bodies written before the stamp existed carry no
-/// field and are generation 1 by definition.
+/// The generation is an exact-match fence: a body must state this generation
+/// to load. A strictly newer generation cannot be given a shape this build
+/// knows, and under the store-version window an older generation — or a body
+/// written before the stamp existed, which carries no field at all — is
+/// pre-cutover data refused at read rather than silently upgraded.
 ///
 /// Version 4 persists `RetryDecision.charge_safety` when present; older bodies
 /// omit it and continue to decode through the field's `default`.
@@ -223,9 +220,7 @@ pub struct SessionNodeRecord {
 /// Version 7 persists tool-access and subagent authority in the durable
 /// session configuration.
 ///
-/// Version 3 removes the duplicated `LlmResponse.full_text` member. The
-/// pre-v3 decode path below projects that legacy value into response parts
-/// before typed decoding when the parts carry no visible assistant prose.
+/// Version 3 removes the duplicated `LlmResponse.full_text` member.
 ///
 /// Version 11 carries host instruction roles and native feedback capabilities.
 ///
@@ -242,21 +237,11 @@ pub struct SessionNodeRecord {
 /// messages so client-side retention can make deterministic whole-segment cuts.
 ///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
-/// wiring a store. The manifest reports it as a forward-only fence rather than a
-/// counter, because that is what the check above is.
+/// wiring a store.
 pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 15;
-
-/// Generation of a body written before the stamp existed.
-///
-/// The pre-stamp shape is exactly generation 1, so an absent field is that
-/// generation stated rather than an unknown one tolerated.
-fn unstamped_node_body_schema_version() -> u32 {
-    1
-}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {
-    #[serde(default = "unstamped_node_body_schema_version")]
     schema_version: u32,
     timestamp: String,
     #[serde(flatten)]
@@ -809,30 +794,44 @@ impl SessionNodeRecord {
     /// Reassembles a node for store implementors from dedicated identity/parent columns and the
     /// immutable JSON body; malformed body JSON is returned as an error.
     ///
-    /// A body from a strictly newer node-body generation is refused rather than
-    /// decoded on a shape this build does not know; older and unstamped bodies
-    /// load unchanged.
+    /// The stamp is checked before the payload is decoded: a body from a
+    /// strictly newer node-body generation cannot be given a shape this build
+    /// knows, and an older or unstamped body is pre-cutover data the
+    /// store-version window refuses rather than silently upgrades.
     pub fn decode_storage_body(
         node_id: String,
         parent_node_id: Option<String>,
         node_json: &str,
     ) -> Result<Self, serde_json::Error> {
-        let mut value = serde_json::from_str::<serde_json::Value>(node_json)?;
-        let body_schema_version = value
+        let value = serde_json::from_str::<serde_json::Value>(node_json)?;
+        let found = value
             .get("schema_version")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or_else(|| u64::from(unstamped_node_body_schema_version()));
-        if body_schema_version <= 2 {
-            legacy_response::upgrade_session_node_llm_responses(&mut value);
+            .and_then(serde_json::Value::as_u64);
+        let current = u64::from(SESSION_NODE_BODY_SCHEMA_VERSION);
+        match found {
+            Some(version) if version == current => {}
+            Some(version) if version > current => {
+                return Err(serde::de::Error::custom(format!(
+                    "graph node body is schema version {version}, but this build reads exactly \
+                     {current}; remedy: run a Lash build at or past that node-body generation"
+                )));
+            }
+            Some(version) => {
+                return Err(serde::de::Error::custom(format!(
+                    "graph node body is schema version {version}, but this build reads exactly \
+                     {current}; remedy: drain affected sessions and recreate the store with this \
+                     Lash version"
+                )));
+            }
+            None => {
+                return Err(serde::de::Error::custom(format!(
+                    "graph node body carries no schema_version stamp, but this build reads \
+                     exactly generation {current}; remedy: drain affected sessions and recreate \
+                     the store with this Lash version"
+                )));
+            }
         }
         let body = serde_json::from_value::<StoredSessionNodeBody>(value)?;
-        if body.schema_version > SESSION_NODE_BODY_SCHEMA_VERSION {
-            return Err(serde::de::Error::custom(format!(
-                "graph node body is schema version {}, but this build reads at most {}; \
-                 remedy: run a Lash build at or past that node-body generation",
-                body.schema_version, SESSION_NODE_BODY_SCHEMA_VERSION
-            )));
-        }
         Ok(Self {
             node_id: NodeId::from(node_id),
             parent_node_id: parent_node_id.map(NodeId::from),
