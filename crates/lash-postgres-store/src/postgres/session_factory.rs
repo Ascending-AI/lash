@@ -599,10 +599,15 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-        let rows = sqlx::query("SELECT DISTINCT attachment_id FROM lash_attachment_manifest")
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        let rows = sqlx::query(
+            crate::attachments::attachment_sql()
+                .manifest
+                .select_rooted_ids
+                .sql(),
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
         rows.into_iter()
             .map(|row| attachment_id_from_sql("AttachmentManifest", "attachment_id", row.get(0)))
@@ -657,9 +662,10 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
             return Ok(lash_core::AttachmentCondemnation::RootPresent);
         }
         let inserted = sqlx::query(
-            "INSERT INTO lash_attachment_condemnations (attachment_id, phase)
-             VALUES ($1, 'condemned')
-             ON CONFLICT (attachment_id) DO NOTHING",
+            crate::attachments::attachment_sql()
+                .condemnation_postgres
+                .insert_condemned
+                .sql(),
         )
         .bind(id.as_str())
         .execute(&mut *tx)
@@ -671,11 +677,16 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
             // it is stale evidence of an upload whose bytes this sweep is about
             // to delete. Clearing them here is what makes a negative byte-absence
             // tombstone unnecessary.
-            sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = $1")
-                .bind(id.as_str())
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
+            sqlx::query(
+                crate::attachments::attachment_sql()
+                    .manifest
+                    .delete_by_id
+                    .sql(),
+            )
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(if inserted == 1 {
@@ -698,8 +709,10 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         let armed = sqlx::query(
-            "UPDATE lash_attachment_condemnations SET phase = 'deleting'
-             WHERE attachment_id = $1 AND phase = 'condemned' AND write_token IS NULL",
+            crate::attachments::attachment_sql()
+                .condemnation
+                .arm_delete
+                .sql(),
         )
         .bind(id.as_str())
         .execute(&mut *tx)
@@ -736,8 +749,10 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         sqlx::query(
-            "DELETE FROM lash_attachment_condemnations
-             WHERE attachment_id = $1 AND phase = 'deleting'",
+            crate::attachments::attachment_sql()
+                .condemnation
+                .delete_armed
+                .sql(),
         )
         .bind(id.as_str())
         .execute(&mut *tx)

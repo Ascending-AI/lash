@@ -103,6 +103,7 @@ use session_deletion::{
     warn_process_registry_not_wired,
 };
 
+mod artifact_store;
 mod attachments;
 mod await_event;
 mod blobs;

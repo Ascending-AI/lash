@@ -1,16 +1,32 @@
-//! The lashlang module-artifact store and the attachment write-ahead manifest.
+//! The attachment write-ahead manifest and its garbage-collection fence.
 //!
-//! Both traits in this module are `#[async_trait]` surfaces over the async
-//! [`SqliteConnection`]: their bodies `.await` the connection wrapper directly
-//! on the caller's runtime, with no `block_on` and no thread hop.
+//! The SQLite owner of the attachment family: `attachment_manifest` (one row
+//! per session/digest intent) and `attachment_condemnations` (the CAS fence
+//! that decides whether a digest's bytes may be deleted).
+//!
+//! Every atom runs inside `SqliteConnection::write`/`write_flow`
+//! (`BEGIN IMMEDIATE`) or an explicit read, so the condemnation check, the
+//! root predicate and the write they guard cannot interleave with a competing
+//! writer. That is the whole of SQLite's half of the fence: PostgreSQL needs a
+//! per-digest advisory lock to buy the same thing under `READ COMMITTED`.
 //!
 //! Every DB body is a synchronous rusqlite closure handed to `conn.call`
 //! (reads) or `conn.write` (read-then-write); only the wrapper call is awaited.
 
+use std::sync::LazyLock;
+
+use crate::scope_fence::Schema;
 use lash_sansio::SessionId;
+use lash_store_sql::attachment::condemnation::CondemnationStatements;
+use lash_store_sql::attachment::manifest::ManifestStatements;
+
 /// FIG-653: graph retention is a prune precondition for committed attachment roots.
 /// Owner-level retention deliberately includes suffix attachments: the manifest
 /// has no node edge. Forks and pins keep these rows until their final prefix dies.
+///
+/// FIG-3399: this statement reads `deleted_sessions` and `graph_nodes`, which
+/// no converted family owns, so the renderer cannot yet be told about it. It
+/// stays a literal here until the cross-family axis lands.
 pub(crate) const RECLAIM_DELETED_ATTACHMENT_ROOTS: &str =
     "DELETE FROM attachment_manifest AS manifest
  WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
@@ -21,34 +37,81 @@ pub(crate) const RECLAIM_DELETED_ATTACHMENT_ROOTS: &str =
    ))";
 
 use super::*;
-#[cfg(feature = "lashlang")]
-use lash_sansio::sync::MutexExt;
 
-/// Logical keyspaces multiplexed onto the `artifact_refs` pointer table. Each
-/// namespace owns its own half of the `(namespace, artifact_ref)` composite
-/// primary key. The `blobs` table is content-addressed, but the `artifact_refs`
-/// pointer is *not*: without the namespace column, a module ref that collides
-/// with a process-execution-env ref would rewrite the same pointer row under
-/// `INSERT OR REPLACE`, so content-addressing alone does not keep the namespaces
-/// disjoint. The composite key does.
-pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
-pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
-
-/// The [`PersistedArtifactKind`] a pointer-table row carries, derived from the
-/// row's own namespace key — the namespace is the sole owner of the
-/// payload-family fact (FIG-1949). A new namespace must extend this match; an
-/// unknown namespace fails the caller rather than inheriting a sibling's label.
-pub(crate) fn artifact_namespace_kind(
-    namespace: &str,
-) -> Result<PersistedArtifactKind, StoreError> {
-    match namespace {
-        MODULE_ARTIFACT_NAMESPACE => Ok(PersistedArtifactKind::LashlangModule),
-        PROCESS_ENV_NAMESPACE => Ok(PersistedArtifactKind::ProcessExecutionEnv),
-        unknown => Err(stored_data_corrupt(
-            "artifact_refs namespace",
-            format!("unknown artifact namespace `{unknown}`"),
-        )),
+lash_store_sql::statements! {
+    /// `attachment_manifest` statements only SQLite issues.
+    pub(crate) struct ManifestSqliteStatements @ "attachment_manifest" {
+        /// Every uncommitted intent older than `?1`.
+        ///
+        /// The ordering is the fork: SQLite reports oldest intent first,
+        /// PostgreSQL reports digest order. Both are total and neither caller
+        /// depends on the other's, so the two orders are left exactly as they
+        /// stand rather than unified inside a refactor.
+        select_uncommitted = "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
+                 committed_at_ms, owner_kind, owner_id, owner_incarnation, written_at_ms
+             FROM attachment_manifest
+             WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
+             ORDER BY intent_at_ms ASC";
     }
+}
+
+lash_store_sql::statements! {
+    /// `attachment_condemnations` statements only SQLite issues.
+    pub(crate) struct CondemnationSqliteStatements @ "attachment_condemnation" {
+        /// Whether a physical delete is already in flight for `?1`.
+        ///
+        /// SQLite answers with the row's presence; PostgreSQL wraps the same
+        /// predicate in `SELECT EXISTS(…)` because its driver reads a scalar
+        /// rather than an optional row.
+        select_deleting = "SELECT 1 FROM attachment_condemnations
+             WHERE attachment_id = ?1 AND phase = 'deleting'";
+
+        /// Whether `?1` is condemned at all.
+        ///
+        /// SQLite alone asks this: it reads the absence and inserts under one
+        /// `BEGIN IMMEDIATE` lock, so the read is the contention check.
+        /// PostgreSQL cannot hold that across statements and detects a peer
+        /// sweeper through the insert's `ON CONFLICT` instead.
+        select_exists = "SELECT 1 FROM attachment_condemnations WHERE attachment_id = ?1";
+
+        /// Condemn `?1`.
+        ///
+        /// No `ON CONFLICT`: the absence of the row was read under the same
+        /// write lock this insert commits under, so a conflict here is a
+        /// defect and the constraint error is kept rather than swallowed.
+        insert_condemned = "INSERT INTO attachment_condemnations (attachment_id, phase)
+             VALUES (?1, 'condemned')";
+    }
+}
+
+/// Every attachment-family statement, rendered once.
+pub(crate) struct AttachmentSql {
+    /// `attachment_manifest` statements both backends issue verbatim.
+    pub(crate) manifest: ManifestStatements,
+    /// `attachment_manifest` statements only SQLite issues.
+    pub(crate) manifest_sqlite: ManifestSqliteStatements,
+    /// `attachment_condemnations` statements both backends issue verbatim.
+    pub(crate) condemnation: CondemnationStatements,
+    /// `attachment_condemnations` statements only SQLite issues.
+    pub(crate) condemnation_sqlite: CondemnationSqliteStatements,
+}
+
+/// Both tables live in the session catalog's own database and are never
+/// reached through an `ATTACH`ed name, so one dialect renders the family —
+/// unlike the effect journal, which is read through two schemas.
+static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
+    let dialect = Schema::Main.dialect();
+    AttachmentSql {
+        manifest: ManifestStatements::render(dialect),
+        manifest_sqlite: ManifestSqliteStatements::render(dialect),
+        condemnation: CondemnationStatements::render(dialect),
+        condemnation_sqlite: CondemnationSqliteStatements::render(dialect),
+    }
+});
+
+/// The attachment-family statements, rendered once at first use.
+pub(crate) fn attachment_sql() -> &'static AttachmentSql {
+    &ATTACHMENT_SQL
 }
 
 /// Adopt stored references under the boundary transaction.
@@ -65,8 +128,7 @@ pub(crate) fn commit_attachment_refs_conn(
     for id in attachment_ids {
         let deleting = tx
             .query_row(
-                "SELECT 1 FROM attachment_condemnations
-                 WHERE attachment_id = ?1 AND phase = 'deleting'",
+                attachment_sql().condemnation_sqlite.select_deleting.sql(),
                 params![id.as_str()],
                 |_| Ok(()),
             )
@@ -80,8 +142,7 @@ pub(crate) fn commit_attachment_refs_conn(
         // the same, and the earliest proven upload is the one that is copied.
         let written_at_ms = tx
             .query_row(
-                "SELECT MIN(written_at_ms) FROM attachment_manifest
-                 WHERE attachment_id = ?1 AND written_at_ms IS NOT NULL",
+                attachment_sql().manifest.select_earliest_written_at.sql(),
                 params![id.as_str()],
                 |row| row.get::<_, Option<i64>>(0),
             )
@@ -98,20 +159,17 @@ pub(crate) fn commit_attachment_refs_conn(
         // condemnation. A restoring writer's claim is left for that writer to
         // settle.
         tx.execute(
-            "DELETE FROM attachment_condemnations
-             WHERE attachment_id = ?1 AND phase = 'condemned' AND write_token IS NULL",
+            attachment_sql()
+                .condemnation
+                .delete_unclaimed_condemned
+                .sql(),
             params![id.as_str()],
         )
         .map_err(sqlite_error)?;
         // Copy the evidence onto the adopter's row so it outlives the
         // uploader's intent being forgotten.
         tx.execute(
-            "INSERT INTO attachment_manifest
-             (attachment_id, session_id, canonical_uri, intent_at_ms, written_at_ms, committed_at_ms)
-             VALUES (?2, ?3, ?4, ?1, ?5, ?1)
-             ON CONFLICT (session_id, attachment_id) DO UPDATE
-             SET committed_at_ms = COALESCE(attachment_manifest.committed_at_ms, excluded.committed_at_ms),
-                 written_at_ms = COALESCE(attachment_manifest.written_at_ms, excluded.written_at_ms)",
+            attachment_sql().manifest.upsert_adopted.sql(),
             params![
                 now,
                 id.as_str(),
@@ -123,519 +181,6 @@ pub(crate) fn commit_attachment_refs_conn(
         .map_err(sqlite_error)?;
     }
     Ok(())
-}
-
-impl Store {
-    async fn publish_artifact_ref_blob(
-        &self,
-        namespace: &'static str,
-        artifact_ref: String,
-        descriptor: BlobArtifactDescriptor,
-        bytes: Vec<u8>,
-        owner: lash_core::ArtifactOwner,
-    ) -> Result<(), StoreError> {
-        let blob_profile = self.options.blob_profile;
-        self.conn
-            .write(move |tx| {
-                let (owner_kind, owner_id) = owner
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                let retired = tx.query_row(
-                    "SELECT EXISTS (
-                         SELECT 1 FROM artifact_owner_retirements
-                         WHERE owner_kind = ?1 AND owner_id = ?2
-                     )",
-                    params![owner_kind, owner_id],
-                    |row| row.get::<_, bool>(0),
-                )?;
-                if retired {
-                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                        StoreError::ArtifactOwnerRetired,
-                    )));
-                }
-                let blob_ref =
-                    Self::insert_artifact_blob_conn(tx, descriptor, &bytes, blob_profile)?;
-                tx.execute(
-                    "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-                     VALUES (?1, ?2, ?3)
-                     ON CONFLICT (namespace, artifact_ref) DO NOTHING",
-                    params![namespace, artifact_ref, blob_ref.as_str()],
-                )?;
-                let stored_blob_ref: String = tx.query_row(
-                    "SELECT blob_ref FROM artifact_refs
-                     WHERE namespace = ?1 AND artifact_ref = ?2",
-                    params![namespace, artifact_ref],
-                    |row| row.get(0),
-                )?;
-                if stored_blob_ref != blob_ref.as_str() {
-                    return Err(rusqlite::Error::InvalidParameterName(format!(
-                        "artifact `{artifact_ref}` in namespace `{namespace}` is immutable"
-                    )));
-                }
-                tx.execute(
-                    "INSERT INTO artifact_owners
-                     (namespace, artifact_ref, owner_kind, owner_id)
-                     VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT DO NOTHING",
-                    params![namespace, artifact_ref, owner_kind, owner_id],
-                )?;
-                Ok(())
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
-    async fn transfer_artifact_ref_owner(
-        &self,
-        namespace: &'static str,
-        artifact_ref: String,
-        from: lash_core::ArtifactOwner,
-        to: lash_core::ArtifactOwner,
-    ) -> Result<(), StoreError> {
-        self.conn
-            .write(move |tx| {
-                let (from_kind, from_id) = from
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                let (to_kind, to_id) = to
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                let retired = tx.query_row(
-                    "SELECT EXISTS (
-                         SELECT 1 FROM artifact_owner_retirements
-                         WHERE owner_kind = ?1 AND owner_id = ?2
-                     )",
-                    params![to_kind, to_id],
-                    |row| row.get::<_, bool>(0),
-                )?;
-                if retired {
-                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                        StoreError::ArtifactDestinationOwnerRetired,
-                    )));
-                }
-                let inserted = tx.execute(
-                    "INSERT INTO artifact_owners
-                     (namespace, artifact_ref, owner_kind, owner_id)
-                     SELECT namespace, artifact_ref, ?3, ?4
-                     FROM artifact_owners
-                     WHERE namespace = ?1 AND artifact_ref = ?2
-                       AND owner_kind = ?5 AND owner_id = ?6
-                     ON CONFLICT DO NOTHING",
-                    params![namespace, artifact_ref, to_kind, to_id, from_kind, from_id],
-                )?;
-                if inserted == 0 {
-                    let destination_exists = tx.query_row(
-                        "SELECT EXISTS (
-                             SELECT 1 FROM artifact_owners
-                             WHERE namespace = ?1 AND artifact_ref = ?2
-                               AND owner_kind = ?3 AND owner_id = ?4
-                         )",
-                        params![namespace, artifact_ref, to_kind, to_id],
-                        |row| row.get::<_, bool>(0),
-                    )?;
-                    if !destination_exists {
-                        return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                            StoreError::ArtifactStagingEdgeMissing {
-                                artifact: format!("artifact `{artifact_ref}`"),
-                            },
-                        )));
-                    }
-                }
-                tx.execute(
-                    "DELETE FROM artifact_owners
-                     WHERE namespace = ?1 AND artifact_ref = ?2
-                       AND owner_kind = ?3 AND owner_id = ?4",
-                    params![namespace, artifact_ref, from_kind, from_id],
-                )?;
-                Ok(())
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
-    fn reclaim_unowned_artifact_conn(
-        tx: &rusqlite::Connection,
-        namespace: &str,
-        artifact_ref: &str,
-    ) -> rusqlite::Result<()> {
-        let blob_ref = tx
-            .query_row(
-                "SELECT blob_ref FROM artifact_refs
-                 WHERE namespace = ?1 AND artifact_ref = ?2",
-                params![namespace, artifact_ref],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        let Some(blob_ref) = blob_ref else {
-            return Ok(());
-        };
-        tx.execute(
-            "DELETE FROM artifact_refs
-             WHERE namespace = ?1 AND artifact_ref = ?2
-               AND NOT EXISTS (
-                   SELECT 1 FROM artifact_owners
-                   WHERE namespace = ?1 AND artifact_ref = ?2
-               )",
-            params![namespace, artifact_ref],
-        )?;
-        tx.execute(
-            "DELETE FROM blobs AS candidate
-             WHERE candidate.hash = ?1
-               AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)
-               AND NOT EXISTS (SELECT 1 FROM session_head WHERE checkpoint_ref = candidate.hash)
-               AND NOT EXISTS (SELECT 1 FROM node_anchors WHERE checkpoint_ref = candidate.hash)
-               AND NOT EXISTS (SELECT 1 FROM checkpoint_blob_refs WHERE blob_ref = candidate.hash)",
-            params![blob_ref],
-        )?;
-        Ok(())
-    }
-
-    async fn release_artifact_ref_owner(
-        &self,
-        namespace: &'static str,
-        artifact_ref: String,
-        owner: lash_core::ArtifactOwner,
-    ) -> Result<(), StoreError> {
-        self.conn
-            .write(move |tx| {
-                let (owner_kind, owner_id) = owner
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                tx.execute(
-                    "DELETE FROM artifact_owners
-                     WHERE namespace = ?1 AND artifact_ref = ?2
-                       AND owner_kind = ?3 AND owner_id = ?4",
-                    params![namespace, artifact_ref, owner_kind, owner_id],
-                )?;
-                Self::reclaim_unowned_artifact_conn(tx, namespace, &artifact_ref)
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
-    async fn retire_artifact_owner(
-        &self,
-        namespace: &'static str,
-        owner: lash_core::ArtifactOwner,
-    ) -> Result<(), StoreError> {
-        self.conn
-            .write(move |tx| {
-                if !matches!(owner, lash_core::ArtifactOwner::Execution(_)) {
-                    return Err(rusqlite::Error::InvalidParameterName(
-                        "only execution artifact owners can be retired".to_string(),
-                    ));
-                }
-                let (owner_kind, owner_id) = owner
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                tx.execute(
-                    "INSERT INTO artifact_owner_retirements (owner_kind, owner_id)
-                     VALUES (?1, ?2) ON CONFLICT DO NOTHING",
-                    params![owner_kind, owner_id],
-                )?;
-                let refs = {
-                    let mut stmt = tx.prepare(
-                        "SELECT artifact_ref FROM artifact_owners
-                         WHERE namespace = ?1 AND owner_kind = ?2 AND owner_id = ?3",
-                    )?;
-                    stmt.query_map(params![namespace, owner_kind, owner_id], |row| row.get(0))?
-                        .collect::<Result<Vec<String>, _>>()?
-                };
-                tx.execute(
-                    "DELETE FROM artifact_owners
-                     WHERE namespace = ?1 AND owner_kind = ?2 AND owner_id = ?3",
-                    params![namespace, owner_kind, owner_id],
-                )?;
-                for artifact_ref in refs {
-                    Self::reclaim_unowned_artifact_conn(tx, namespace, &artifact_ref)?;
-                }
-                Ok(())
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
-    async fn get_artifact_ref_blob(
-        &self,
-        namespace: &'static str,
-        artifact_ref: String,
-        missing_diagnostic: String,
-    ) -> Result<Option<Vec<u8>>, StoreError> {
-        let resolved = self
-            .conn
-            .call(move |conn| {
-                let blob_ref: Option<String> = conn
-                    .query_row(
-                        "SELECT blob_ref FROM artifact_refs
-                         WHERE namespace = ?1 AND artifact_ref = ?2",
-                        params![namespace, artifact_ref],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()?;
-                let Some(blob_ref) = blob_ref else {
-                    return Ok(None);
-                };
-                Ok(Some(
-                    Self::get_blob_conn(conn, &BlobRef(blob_ref))
-                        .map_err(sqlite_conversion_error)?,
-                ))
-            })
-            .await
-            .map_err(sqlite_error)?;
-        let Some(blob) = resolved else {
-            return Ok(None);
-        };
-        blob.ok_or_else(|| {
-            stored_data_corrupt(
-                "artifact reference",
-                format_args!("{missing_diagnostic} points at a missing blob"),
-            )
-        })
-        .map(Some)
-    }
-}
-
-#[cfg(feature = "lashlang")]
-#[async_trait::async_trait]
-impl lashlang::LashlangArtifactStore for Store {
-    fn pause_next_publication_for_testing(&self) -> Option<lashlang::ArtifactPublicationPause> {
-        let pause = lashlang::ArtifactPublicationPause::default();
-        *self.artifact_publication_pause.lock_recover() = Some(pause.clone());
-        Some(pause)
-    }
-
-    fn durability_tier(&self) -> lashlang::DurabilityTier {
-        lashlang::DurabilityTier::Durable
-    }
-
-    async fn publish_module_artifact(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
-            return Err(lashlang::ArtifactStoreError::Backend(
-                "invalid module reference".into(),
-            ));
-        }
-        let bytes = artifact
-            .to_store_bytes()
-            .map_err(|err| lashlang::ArtifactStoreError::Encode(err.to_string()))?;
-        let artifact_ref = artifact.module_ref.as_str().to_string();
-        let publication_pause = self.artifact_publication_pause.lock_recover().take();
-        if let Some(pause) = publication_pause {
-            pause.pause().await;
-        }
-        self.publish_artifact_ref_blob(
-            MODULE_ARTIFACT_NAMESPACE,
-            artifact_ref,
-            BlobArtifactDescriptor::lashlang_module(),
-            bytes,
-            owner.clone(),
-        )
-        .await
-        .map_err(lashlang::ArtifactStoreError::from)?;
-        self.artifact_cache
-            .lock_recover()
-            .insert(artifact.module_ref.clone(), Arc::new(artifact.clone()));
-        Ok(())
-    }
-
-    async fn retain_module_artifact(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        let bytes = self
-            .get_artifact_ref_blob(
-                MODULE_ARTIFACT_NAMESPACE,
-                module_ref.as_str().to_string(),
-                format!("lashlang module artifact `{module_ref}`"),
-            )
-            .await
-            .map_err(lashlang::ArtifactStoreError::from)?
-            .ok_or_else(|| {
-                lashlang::ArtifactStoreError::Backend(format!(
-                    "missing module artifact `{module_ref}`"
-                ))
-            })?;
-        self.publish_artifact_ref_blob(
-            MODULE_ARTIFACT_NAMESPACE,
-            module_ref.as_str().to_string(),
-            BlobArtifactDescriptor::lashlang_module(),
-            bytes,
-            owner.clone(),
-        )
-        .await
-        .map_err(lashlang::ArtifactStoreError::from)
-    }
-
-    async fn transfer_module_artifact(
-        &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.transfer_artifact_ref_owner(
-            MODULE_ARTIFACT_NAMESPACE,
-            module_ref.as_str().to_string(),
-            from.clone(),
-            to.clone(),
-        )
-        .await
-        .map_err(lashlang::ArtifactStoreError::from)
-    }
-
-    async fn release_module_artifact(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.release_artifact_ref_owner(
-            MODULE_ARTIFACT_NAMESPACE,
-            module_ref.as_str().to_string(),
-            owner.clone(),
-        )
-        .await
-        .map_err(lashlang::ArtifactStoreError::from)?;
-        self.artifact_cache.lock_recover().remove(module_ref);
-        Ok(())
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.retire_artifact_owner(MODULE_ARTIFACT_NAMESPACE, owner.clone())
-            .await
-            .map_err(lashlang::ArtifactStoreError::from)?;
-        self.artifact_cache.lock_recover().clear();
-        Ok(())
-    }
-
-    async fn get_module_artifact(
-        &self,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(module_ref.as_str()) {
-            return Err(lashlang::ArtifactStoreError::Backend(
-                "invalid module reference".into(),
-            ));
-        }
-        let artifact_ref = module_ref.as_str().to_string();
-        let Some(bytes) = self
-            .get_artifact_ref_blob(
-                MODULE_ARTIFACT_NAMESPACE,
-                artifact_ref,
-                format!("lashlang module artifact `{module_ref}`"),
-            )
-            .await
-            .map_err(lashlang::ArtifactStoreError::from)?
-        else {
-            self.artifact_cache.lock_recover().remove(module_ref);
-            return Ok(None);
-        };
-        if let Some(artifact) = self.artifact_cache.lock_recover().get(module_ref).cloned() {
-            return Ok(Some(artifact));
-        }
-        let artifact = Arc::new(
-            lashlang::ModuleArtifact::from_store_bytes(&bytes)
-                .map_err(lashlang::ArtifactStoreError::from)?,
-        );
-        self.artifact_cache
-            .lock_recover()
-            .insert(module_ref.clone(), artifact.clone());
-        Ok(Some(artifact))
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::ProcessExecutionEnvStore for Store {
-    async fn publish_process_execution_env(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-        bytes: &[u8],
-    ) -> Result<(), lash_core::PluginError> {
-        if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core::PluginError::Invoke(
-                "invalid process execution environment reference".into(),
-            ));
-        }
-        if !env_ref.matches_store_bytes(bytes) {
-            return Err(lash_core::PluginError::Session(format!(
-                "process execution environment bytes do not match `{env_ref}`"
-            )));
-        }
-        let artifact_ref = env_ref.as_str().to_string();
-        self.publish_artifact_ref_blob(
-            PROCESS_ENV_NAMESPACE,
-            artifact_ref,
-            BlobArtifactDescriptor::process_execution_env(),
-            bytes.to_vec(),
-            owner.clone(),
-        )
-        .await
-        .map_err(lash_core::artifact_store_plugin_error)
-    }
-
-    async fn transfer_process_execution_env(
-        &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core::PluginError> {
-        self.transfer_artifact_ref_owner(
-            PROCESS_ENV_NAMESPACE,
-            env_ref.as_str().to_string(),
-            from.clone(),
-            to.clone(),
-        )
-        .await
-        .map_err(lash_core::artifact_store_plugin_error)
-    }
-
-    async fn release_process_execution_env(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core::PluginError> {
-        self.release_artifact_ref_owner(
-            PROCESS_ENV_NAMESPACE,
-            env_ref.as_str().to_string(),
-            owner.clone(),
-        )
-        .await
-        .map_err(lash_core::artifact_store_plugin_error)
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lash_core::PluginError> {
-        self.retire_artifact_owner(PROCESS_ENV_NAMESPACE, owner.clone())
-            .await
-            .map_err(lash_core::artifact_store_plugin_error)
-    }
-
-    async fn get_process_execution_env(
-        &self,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, lash_core::PluginError> {
-        if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core::PluginError::Invoke(
-                "invalid process execution environment reference".into(),
-            ));
-        }
-        let artifact_ref = env_ref.as_str().to_string();
-        self.get_artifact_ref_blob(
-            PROCESS_ENV_NAMESPACE,
-            artifact_ref.clone(),
-            format!("process execution env `{artifact_ref}`"),
-        )
-        .await
-        .map_err(lash_core::artifact_store_plugin_error)
-    }
 }
 
 /// The `EXISTS (...)` body that decides whether one digest still has a live
@@ -695,10 +240,7 @@ impl Store {
         let rows = self
             .conn
             .call(|conn| {
-                let mut statement = conn.prepare(
-                    "SELECT attachment_id, phase, write_token, write_session_id
-                     FROM attachment_condemnations",
-                )?;
+                let mut statement = conn.prepare(attachment_sql().condemnation.select_all.sql())?;
                 statement
                     .query_map([], |row| {
                         Ok((
@@ -758,7 +300,7 @@ impl Store {
                     }
                     let condemned = tx
                         .query_row(
-                            "SELECT 1 FROM attachment_condemnations WHERE attachment_id = ?1",
+                            attachment_sql().condemnation_sqlite.select_exists.sql(),
                             params![attachment_id],
                             |_| Ok(()),
                         )
@@ -769,8 +311,7 @@ impl Store {
                         return Ok(lash_core::AttachmentCondemnation::AlreadyCondemned);
                     }
                     tx.execute(
-                        "INSERT INTO attachment_condemnations (attachment_id, phase)
-                         VALUES (?1, 'condemned')",
+                        attachment_sql().condemnation_sqlite.insert_condemned.sql(),
                         params![attachment_id],
                     )
                     .map_err(sqlite_error)?;
@@ -779,7 +320,7 @@ impl Store {
                     // sweep is about to delete. Clearing them here is what makes
                     // a negative byte-absence tombstone unnecessary.
                     tx.execute(
-                        "DELETE FROM attachment_manifest WHERE attachment_id = ?1",
+                        attachment_sql().manifest.delete_by_id.sql(),
                         params![attachment_id],
                     )
                     .map_err(sqlite_error)?;
@@ -807,8 +348,7 @@ impl Store {
             .conn
             .write(move |tx| {
                 tx.execute(
-                    "UPDATE attachment_condemnations SET phase = 'deleting'
-                     WHERE attachment_id = ?1 AND phase = 'condemned' AND write_token IS NULL",
+                    attachment_sql().condemnation.arm_delete.sql(),
                     params![attachment_id],
                 )
             })
@@ -831,10 +371,7 @@ impl Store {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    "DELETE FROM attachment_condemnations
-                     WHERE attachment_id = ?1
-                       AND (phase = 'deleting'
-                            OR (phase = 'condemned' AND write_token IS NULL))",
+                    attachment_sql().condemnation.delete_sweep_owned.sql(),
                     params![attachment_id],
                 )
             })
@@ -856,11 +393,7 @@ impl Store {
                 let outcome: Result<(), StoreError> = (|| {
                     let claim = tx
                         .query_row(
-                            "SELECT write_token, write_session_id
-                             FROM attachment_condemnations
-                             WHERE attachment_id = ?1
-                               AND phase = 'condemned'
-                               AND write_token IS NOT NULL",
+                            attachment_sql().condemnation.select_claim.sql(),
                             params![attachment_id],
                             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                         )
@@ -870,30 +403,19 @@ impl Store {
                         return Ok(());
                     };
                     tx.execute(
-                        "DELETE FROM attachment_manifest
-                         WHERE attachment_id = ?1 AND session_id = ?2
-                           AND written_at_ms IS NULL AND committed_at_ms IS NULL",
+                        attachment_sql().manifest.delete_unproven_for_session.sql(),
                         params![attachment_id, session_id],
                     )
                     .map_err(sqlite_error)?;
                     let condemned_superseded = tx
                         .execute(
-                            "DELETE FROM attachment_condemnations
-                             WHERE attachment_id = ?1 AND write_token = ?2
-                               AND phase = 'condemned'
-                               AND EXISTS (
-                                   SELECT 1 FROM attachment_manifest
-                                    WHERE attachment_id = ?1 AND session_id = ?3
-                                      AND committed_at_ms IS NOT NULL
-                               )",
+                            attachment_sql().condemnation.delete_superseded_claim.sql(),
                             params![attachment_id, token, session_id],
                         )
                         .map_err(sqlite_error)?;
                     if condemned_superseded == 0 {
                         tx.execute(
-                            "UPDATE attachment_condemnations
-                         SET write_token = NULL, write_session_id = NULL
-                         WHERE attachment_id = ?1 AND write_token = ?2",
+                            attachment_sql().condemnation.clear_write_claim.sql(),
                             params![attachment_id, token],
                         )
                         .map_err(sqlite_error)?;
@@ -920,8 +442,7 @@ impl Store {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    "DELETE FROM attachment_condemnations
-                     WHERE attachment_id = ?1 AND phase = 'deleting'",
+                    attachment_sql().condemnation.delete_armed.sql(),
                     params![attachment_id],
                 )
             })
@@ -963,8 +484,7 @@ impl AttachmentManifest for Store {
                         crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
                         let condemnation = tx
                             .query_row(
-                                "SELECT phase, write_token FROM attachment_condemnations
-                                 WHERE attachment_id = ?1",
+                                attachment_sql().condemnation.select_phase_and_claim.sql(),
                                 params![attachment_id],
                                 |row| {
                                     Ok((
@@ -989,11 +509,7 @@ impl AttachmentManifest for Store {
                             Some(("condemned", false)) => {
                                 let claimed = tx
                                     .execute(
-                                        "UPDATE attachment_condemnations
-                                         SET write_token = ?2, write_session_id = ?3
-                                         WHERE attachment_id = ?1
-                                           AND phase = 'condemned'
-                                           AND write_token IS NULL",
+                                        attachment_sql().condemnation.claim_write.sql(),
                                         params![
                                             attachment_id,
                                             write_id.as_hex(),
@@ -1018,17 +534,7 @@ impl AttachmentManifest for Store {
                         // with no upload stamp. Evidence and commitment already on
                         // the row were earned by earlier attempts and are kept.
                         tx.execute(
-                            "INSERT INTO attachment_manifest
-                            (attachment_id, session_id, canonical_uri, intent_at_ms, write_id,
-                             written_at_ms, committed_at_ms, owner_kind, owner_id, owner_incarnation)
-                         VALUES (?1, ?2, ?3, ?4, ?8, NULL, NULL, ?5, ?6, ?7)
-                         ON CONFLICT(session_id, attachment_id) DO UPDATE SET
-                            canonical_uri = excluded.canonical_uri,
-                            intent_at_ms = excluded.intent_at_ms,
-                            write_id = excluded.write_id,
-                            owner_kind = excluded.owner_kind,
-                            owner_id = excluded.owner_id,
-                            owner_incarnation = excluded.owner_incarnation",
+                            attachment_sql().manifest.insert_intent.sql(),
                             params![
                                 attachment_id,
                                 session_id.as_str(),
@@ -1074,10 +580,7 @@ impl AttachmentManifest for Store {
                         // stamped, and the first proven upload is kept.
                         let stamped = tx
                             .execute(
-                                "UPDATE attachment_manifest
-                                 SET written_at_ms = COALESCE(written_at_ms, ?4)
-                                 WHERE attachment_id = ?1 AND session_id = ?2
-                                   AND write_id = ?3",
+                                attachment_sql().manifest.stamp_written.sql(),
                                 params![
                                     attachment_id,
                                     session_id.as_str(),
@@ -1092,8 +595,7 @@ impl AttachmentManifest for Store {
                         // The bytes exist now, so this attempt's claim on the
                         // condemnation is released with the condemnation itself.
                         tx.execute(
-                            "DELETE FROM attachment_condemnations
-                             WHERE attachment_id = ?1 AND write_token = ?2",
+                            attachment_sql().condemnation.delete_by_write_token.sql(),
                             params![attachment_id, write_id],
                         )
                         .map_err(sqlite_error)?;
@@ -1124,31 +626,19 @@ impl AttachmentManifest for Store {
                         // Only this attempt's own unstamped, uncommitted row. A
                         // superseded permit matches nothing and deletes nothing.
                         tx.execute(
-                            "DELETE FROM attachment_manifest
-                             WHERE attachment_id = ?1 AND session_id = ?2
-                               AND write_id = ?3
-                               AND written_at_ms IS NULL AND committed_at_ms IS NULL",
+                            attachment_sql().manifest.delete_unproven_for_write.sql(),
                             params![attachment_id, session_id.as_str(), write_id],
                         )
                         .map_err(sqlite_error)?;
                         let condemned_superseded = tx
                             .execute(
-                                "DELETE FROM attachment_condemnations
-                                 WHERE attachment_id = ?1 AND write_token = ?2
-                                   AND phase = 'condemned'
-                                   AND EXISTS (
-                                       SELECT 1 FROM attachment_manifest
-                                        WHERE attachment_id = ?1 AND session_id = ?3
-                                          AND committed_at_ms IS NOT NULL
-                                   )",
+                                attachment_sql().condemnation.delete_superseded_claim.sql(),
                                 params![attachment_id, write_id, session_id.as_str()],
                             )
                             .map_err(sqlite_error)?;
                         if condemned_superseded == 0 {
                             tx.execute(
-                                "UPDATE attachment_condemnations
-                                 SET write_token = NULL, write_session_id = NULL
-                                 WHERE attachment_id = ?1 AND write_token = ?2",
+                                attachment_sql().condemnation.clear_write_claim.sql(),
                                 params![attachment_id, write_id],
                             )
                             .map_err(sqlite_error)?;
@@ -1201,14 +691,8 @@ impl AttachmentManifest for Store {
             let older_than = crate::clamp_epoch_ms(older_than_epoch_ms);
             self.conn
                 .call(move |conn| {
-                    let mut stmt = conn.prepare(
-                        "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
-                                committed_at_ms, owner_kind, owner_id, owner_incarnation,
-                                written_at_ms
-                         FROM attachment_manifest
-                         WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
-                         ORDER BY intent_at_ms ASC",
-                    )?;
+                    let mut stmt =
+                        conn.prepare(attachment_sql().manifest_sqlite.select_uncommitted.sql())?;
                     let rows = stmt.query_map(params![older_than], |row| {
                         let id: String = row.get(0)?;
                         let session_id: SessionId = SessionId::from(row.get::<_, String>(1)?);
@@ -1376,7 +860,7 @@ impl AttachmentManifest for Store {
             self.conn
                 .call(move |conn| {
                     let mut stmt =
-                        conn.prepare("SELECT DISTINCT attachment_id FROM attachment_manifest")?;
+                        conn.prepare(attachment_sql().manifest.select_rooted_ids.sql())?;
                     let rows = stmt.query_map([], |row| {
                         let id: String = row.get(0)?;
                         crate::attachment_id_from_sql("AttachmentManifest", "attachment_id", id)

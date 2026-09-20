@@ -948,12 +948,10 @@ impl SessionCommitStore for Store {
                     )?;
                     if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
                         tx.execute(
-                            "UPDATE attachment_manifest
-                                 SET committed_at_ms = COALESCE(committed_at_ms, ?1)
-                                 WHERE session_id = ?2
-                                   AND owner_kind = ?4
-                                   AND owner_id = ?3
-                                   AND committed_at_ms IS NULL",
+                            crate::attachments::attachment_sql()
+                                .manifest
+                                .commit_owned
+                                .sql(),
                             params![
                                 now as i64,
                                 commit.session_id.as_str(),

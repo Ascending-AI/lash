@@ -36,10 +36,10 @@ pub(crate) async fn lock_session_blob_candidates_tx(
     // blob row in the complete union is locked by ascending content hash before
     // any owner edge is severed.
     let locked = sqlx::query_scalar::<_, String>(
-        "SELECT hash FROM lash_blobs
-         WHERE hash = ANY($1::TEXT[])
-         ORDER BY hash
-         FOR UPDATE",
+        crate::blobs::blob_sql()
+            .postgres
+            .lock_reclaim_candidates
+            .sql(),
     )
     .bind(&candidate_vec)
     .fetch_all(&mut **tx)

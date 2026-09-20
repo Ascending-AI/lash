@@ -178,24 +178,20 @@ fn read_page(
 /// artifact reference remains visible as a named item. The blob envelope is
 /// storage bookkeeping; `logical_json_payload` removes it before the shared
 /// preflight extractor verifies the module identity.
-const MODULE_ARTIFACTS_SQL: &str = "\
-SELECT refs.artifact_ref, refs.blob_ref, blobs.content
-FROM artifact_refs AS refs
-LEFT JOIN blobs ON blobs.hash = refs.blob_ref
-WHERE refs.namespace = ?1
-  AND (?2 IS NULL OR refs.artifact_ref > ?2)
-ORDER BY refs.artifact_ref
-LIMIT ?3";
-
 fn read_module_artifacts(
     conn: &Connection,
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(MODULE_ARTIFACTS_SQL)?;
+    let mut statement = conn.prepare(
+        crate::artifact_store::artifact_sql()
+            .refs
+            .select_preflight_page
+            .sql(),
+    )?;
     let rows = statement.query_map(
         params![
-            crate::attachments::MODULE_ARTIFACT_NAMESPACE,
+            crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
             after,
             limit_binding(limit)
         ],
@@ -524,7 +520,12 @@ struct ManifestComponentProbe {
 }
 
 fn load_blob(conn: &Connection, blob_ref: &str) -> rusqlite::Result<Option<Vec<u8>>> {
-    let mut statement = conn.prepare("SELECT content FROM blobs WHERE hash = ?1")?;
+    let mut statement = conn.prepare(
+        crate::artifact_store::artifact_sql()
+            .blobs
+            .select_content
+            .sql(),
+    )?;
     let mut rows = statement.query(params![blob_ref])?;
     match rows.next()? {
         Some(row) => Ok(Some(row.get(0)?)),

@@ -95,7 +95,7 @@ impl PostgresSessionStore {
             // hard error so GC aborts rather than dropping a live checkpoint's
             // children; an absent one was already collected on a prior run.
             let bytes: Option<Vec<u8>> =
-                sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
+                sqlx::query_scalar(crate::blobs::blob_sql().shared.select_content.sql())
                     .bind(&checkpoint_hash)
                     .fetch_optional(&mut *tx)
                     .await
@@ -133,17 +133,18 @@ impl PostgresSessionStore {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let all_hashes =
-            sqlx::query_scalar::<_, String>("SELECT hash FROM lash_blobs ORDER BY hash ASC")
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
+        let all_hashes = sqlx::query_scalar::<_, String>(
+            crate::blobs::blob_sql().shared.select_all_hashes.sql(),
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         let mut deleted_blob_count = 0usize;
         for hash in &all_hashes {
             if retained.contains(hash) {
                 continue;
             }
-            sqlx::query("DELETE FROM lash_blobs WHERE hash = $1")
+            sqlx::query(crate::blobs::blob_sql().shared.delete_by_hash.sql())
                 .bind(hash)
                 .execute(&mut *tx)
                 .await

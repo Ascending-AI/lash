@@ -364,3 +364,44 @@ fn every_owned_statement_renders_for_both_backends() {
         }
     }
 }
+
+#[test]
+fn an_upserts_do_update_is_an_action_clause_not_a_table_position() {
+    // `UPDATE` heads a statement *and* closes `ON CONFLICT … DO`. Only the
+    // first takes a table; reading the second as one refuses every upsert in
+    // the crate on its `SET`.
+    let neutral = "INSERT INTO await_event_waits (key_id, scope_json)
+         VALUES (?1, ?2)
+         ON CONFLICT (key_id) DO UPDATE SET scope_json = excluded.scope_json";
+
+    assert_eq!(
+        sqlite(neutral),
+        "INSERT INTO main.await_event_waits (key_id, scope_json)
+         VALUES (?1, ?2)
+         ON CONFLICT (key_id) DO UPDATE SET scope_json = excluded.scope_json"
+    );
+    assert_eq!(
+        postgres(neutral),
+        "INSERT INTO lash_await_event_waits (key_id, scope_json)
+         VALUES ($1, $2)
+         ON CONFLICT (key_id) DO UPDATE SET scope_json = excluded.scope_json"
+    );
+}
+
+#[test]
+fn a_statement_heading_update_still_demands_a_table_it_owns() {
+    // The `DO` guard is the only thing that relaxes `UPDATE`, and it reaches
+    // exactly one token: a plain `UPDATE` over an unowned table is still the
+    // startup failure it was.
+    assert_eq!(
+        render(
+            "UPDATE processes SET status = 'running'",
+            Dialect::postgres(),
+            TABLES
+        ),
+        Err(RenderError::UnknownTable {
+            name: "processes".to_string(),
+            at: 7,
+        })
+    );
+}

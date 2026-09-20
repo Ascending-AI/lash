@@ -123,7 +123,10 @@ pub(super) async fn delete_session_from_catalog(
             for blob_ref in &candidates {
                 let exists = tx
                     .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)",
+                        crate::artifact_store::artifact_sql()
+                            .blobs_sqlite
+                            .select_exists
+                            .sql(),
                         params![blob_ref],
                         |row| row.get::<_, bool>(0),
                     )

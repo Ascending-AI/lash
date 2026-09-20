@@ -80,6 +80,8 @@
 
 mod render;
 
+pub mod artifact;
+pub mod attachment;
 pub mod effect;
 pub mod wait;
 
@@ -90,6 +92,12 @@ pub use render::{Dialect, Placeholder, RenderError, Vocabulary, VocabularyTerm, 
 /// The renderer refuses a statement that names a table outside this list, so
 /// the list is also the boundary of what neutral SQL may talk about.
 pub const TABLES: &[&str] = &[
+    artifact::blobs::TABLE,
+    artifact::owner_retirements::TABLE,
+    artifact::owners::TABLE,
+    artifact::refs::TABLE,
+    attachment::condemnation::TABLE,
+    attachment::manifest::TABLE,
     effect::replay::TABLE,
     effect::group::TABLE,
     effect::scope_retirement::TABLE,
@@ -106,6 +114,11 @@ pub const TABLES: &[&str] = &[
 #[must_use]
 pub fn all_statements() -> Vec<Statement> {
     let mut statements = Vec::new();
+    statements.extend_from_slice(artifact::blobs::BlobStatements::NEUTRAL);
+    statements.extend_from_slice(artifact::owners::OwnerStatements::NEUTRAL);
+    statements.extend_from_slice(artifact::owner_retirements::OwnerRetirementStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::manifest::ManifestStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);
     statements.extend_from_slice(effect::EffectJournalStatements::NEUTRAL);
     statements.extend_from_slice(effect::replay::ReplayStatements::NEUTRAL);
     statements.extend_from_slice(effect::group::GroupStatements::NEUTRAL);

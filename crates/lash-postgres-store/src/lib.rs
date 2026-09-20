@@ -1086,6 +1086,8 @@ mod await_event;
 mod artifact_store;
 #[path = "postgres/attachments.rs"]
 mod attachments;
+#[path = "postgres/blobs.rs"]
+mod blobs;
 #[path = "postgres/effect_replay.rs"]
 mod effect_replay;
 #[path = "postgres/evidence_retention.rs"]

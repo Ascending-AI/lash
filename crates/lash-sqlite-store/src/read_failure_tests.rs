@@ -1,5 +1,5 @@
 use super::*;
-use crate::attachments::MODULE_ARTIFACT_NAMESPACE;
+use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
 use lashlang::LashlangArtifactStore;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::instrument::WithSubscriber as _;

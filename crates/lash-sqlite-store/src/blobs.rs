@@ -10,7 +10,44 @@
 //! durable root.
 
 use super::*;
+use crate::artifact_store::artifact_sql;
 use lash_sansio::SessionId;
+
+lash_store_sql::statements! {
+    /// `blobs` statements only SQLite issues.
+    pub(crate) struct BlobSqliteStatements @ "blob" {
+        /// Store `?2` at content address `?1`, keeping what is already there.
+        ///
+        /// `INSERT OR IGNORE` is the fork, and it is a fork of shape rather
+        /// than of meaning: PostgreSQL writes a whole chunk in one round trip
+        /// through `unnest` and spells the same idempotence as
+        /// `ON CONFLICT DO NOTHING`. The bytes are content-addressed, so a
+        /// conflict is always the same bytes.
+        insert_ignore = "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, ?2)";
+
+        /// Which of the content addresses in the JSON array `?1` exist.
+        ///
+        /// The `json_each` table-valued function is the fork: it is how SQLite
+        /// binds a list to one statement, where PostgreSQL binds a text array.
+        /// PostgreSQL's counterpart also takes `FOR KEY SHARE`, which SQLite
+        /// does not need under `BEGIN IMMEDIATE`.
+        select_existing_hashes = "SELECT hash FROM blobs
+             WHERE hash IN (SELECT value FROM json_each(?1))";
+
+        /// The stored bytes for every content address in the JSON array `?1`.
+        /// Same `json_each` fork as select_existing_hashes.
+        select_bodies_by_hash = "SELECT hash, content FROM blobs
+             WHERE hash IN (SELECT value FROM json_each(?1))";
+
+        /// Whether a blob exists at `?1`.
+        ///
+        /// SQLite alone asks this: it is the session-delete sweep's proof that
+        /// an enumerated reference is not already dangling, taken under the
+        /// write lock. PostgreSQL gets the same proof from the row lock its
+        /// candidate read takes, so it has no separate existence check.
+        select_exists = "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)";
+    }
+}
 
 /// Versioned BLAKE3 content address that keys every row in the `blobs` table.
 fn blob_content_hash(content: &[u8]) -> String {
@@ -66,7 +103,7 @@ impl Store {
     ) -> Result<(), StoreError> {
         let stored = encode_artifact_blob(&descriptor, profile, content)?;
         conn.execute(
-            "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, ?2)",
+            artifact_sql().blobs_sqlite.insert_ignore.sql(),
             params![blob_ref.as_str(), stored],
         )
         .map_err(sqlite_error)?;
@@ -213,10 +250,7 @@ impl Store {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
             let mut statement = conn
-                .prepare(
-                    "SELECT hash FROM blobs
-                     WHERE hash IN (SELECT value FROM json_each(?1))",
-                )
+                .prepare(artifact_sql().blobs_sqlite.select_existing_hashes.sql())
                 .map_err(sqlite_error)?;
             let rows = statement
                 .query_map(params![encoded], |row| row.get::<_, String>(0))
@@ -242,10 +276,7 @@ impl Store {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
             let mut statement = conn
-                .prepare(
-                    "SELECT hash, content FROM blobs
-                     WHERE hash IN (SELECT value FROM json_each(?1))",
-                )
+                .prepare(artifact_sql().blobs_sqlite.select_bodies_by_hash.sql())
                 .map_err(sqlite_error)?;
             let rows = statement
                 .query_map(params![encoded], |row| {
@@ -267,7 +298,7 @@ impl Store {
     ) -> Result<Option<Vec<u8>>, StoreError> {
         let bytes: Option<Vec<u8>> = conn
             .query_row(
-                "SELECT content FROM blobs WHERE hash = ?1",
+                artifact_sql().blobs.select_content.sql(),
                 params![blob_ref.as_str()],
                 |row| row.get(0),
             )
