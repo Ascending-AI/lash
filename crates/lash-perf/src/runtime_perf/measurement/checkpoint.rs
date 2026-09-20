@@ -780,179 +780,81 @@ pub(crate) async fn run_once_embed(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
-    let total_started = Instant::now();
-    let before_memory = process_memory_sample();
-    let total_before_alloc = allocator_stats();
+    let mut run = RunRecorder::start(scenario, chat_turns);
+    let (store, session) = run
+        .build(async {
+            let store = Arc::new(RuntimePerfStore::default());
+            let core = build_embed_core(scenario, Arc::clone(&store))?;
+            let session = core
+                .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
+                .await
+                .with_context(|| format!("open embed session for {}", scenario.name()))?;
+            Ok((store, session))
+        })
+        .await?;
+    run.seed(async { Ok(()) }).await?;
 
-    let build_before_alloc = allocator_stats();
-    let build_started = Instant::now();
-    let store = Arc::new(RuntimePerfStore::default());
-    let core = build_embed_core(scenario, Arc::clone(&store))?;
-    let session = core
-        .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
-        .await
-        .with_context(|| format!("open embed session for {}", scenario.name()))?;
-    let build_runtime_ms = elapsed_ms(build_started);
-    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
-    let after_build_memory = process_memory_sample();
-
-    let seed_before_alloc = allocator_stats();
-    let seed_started = Instant::now();
-    let seed_state_ms = elapsed_ms(seed_started);
-    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
-    let after_seed_memory = process_memory_sample();
-
-    let mut turns = Vec::with_capacity(chat_turns);
     for turn_index in 0..chat_turns {
-        let before_turn_usage = SessionUsageReport::default();
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
-        let cancel = CancellationToken::new();
-        let turn = runtime_perf_timed(
-            scenario,
+        run.turn(
             turn_index,
-            "run_turn",
-            Some(cancel.clone()),
             async {
-                let effect_host = session.effect_host();
-                let scoped_effect_controller = effect_host
-                    .scoped(session.turn_scope(format!("runtime-perf-embed-{}", turn_index + 1)))
-                    .map_err(anyhow::Error::from)?;
-                session
-                    .turn(lash_core::TurnInput::text(benchmark_prompt(
-                        scenario, turn_index,
-                    )))
-                    .cancel(cancel)
-                    .advanced()
-                    .collect_session_events_with_scope(
-                        &lash::runtime::NoopEventSink,
-                        scoped_effect_controller,
+                let cancel = CancellationToken::new();
+                let turn = runtime_perf_timed(
+                    scenario,
+                    turn_index,
+                    "run_turn",
+                    Some(cancel.clone()),
+                    async {
+                        let effect_host = session.effect_host();
+                        let scoped_effect_controller = effect_host
+                            .scoped(
+                                session
+                                    .turn_scope(format!("runtime-perf-embed-{}", turn_index + 1)),
+                            )
+                            .map_err(anyhow::Error::from)?;
+                        session
+                            .turn(lash_core::TurnInput::text(benchmark_prompt(
+                                scenario, turn_index,
+                            )))
+                            .cancel(cancel)
+                            .advanced()
+                            .collect_session_events_with_scope(
+                                &lash::runtime::NoopEventSink,
+                                scoped_effect_controller,
+                            )
+                            .await
+                            .map_err(anyhow::Error::from)
+                    },
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "run embed runtime perf scenario {} turn {}",
+                        scenario.name(),
+                        turn_index + 1
                     )
-                    .await
-                    .map_err(anyhow::Error::from)
+                })?;
+                validate_runtime_perf_turn(scenario, turn_index, &turn)?;
+                Ok(TurnRun {
+                    value: (),
+                    tail: TurnTail {
+                        turn_usage: turn.usage,
+                        ..TurnTail::default()
+                    },
+                })
             },
+            async { Ok(()) },
         )
-        .await
-        .with_context(|| {
-            format!(
-                "run embed runtime perf scenario {} turn {}",
-                scenario.name(),
-                turn_index + 1
-            )
-        })?;
-        validate_runtime_perf_turn(scenario, turn_index, &turn)?;
-        let run_turn_ms = elapsed_ms(turn_started);
-        let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
-        let after_turn_memory = process_memory_sample();
-
-        let await_before_alloc = allocator_stats();
-        let background_started = Instant::now();
-        let await_background_work_ms = elapsed_ms(background_started);
-        let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
-        let after_await_memory = process_memory_sample();
-        let turn_total_alloc =
-            sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
-
-        turns.push(RuntimePerfTurnResult {
-            turn_index,
-            stages: turn_stages(
-                RuntimePerfStageRunResult::measured(
-                    run_turn_ms,
-                    run_turn_alloc,
-                    after_turn_memory.rss_kb,
-                ),
-                Some(RuntimePerfStageRunResult::measured(
-                    await_background_work_ms,
-                    await_background_work_alloc,
-                    after_await_memory.rss_kb,
-                )),
-                RuntimePerfStageRunResult::measured(
-                    round3(run_turn_ms + await_background_work_ms),
-                    turn_total_alloc,
-                    after_await_memory.rss_kb,
-                ),
-            ),
-            memory: RuntimePerfMemoryRunResult {
-                rss_before_kb: turn_before_memory.rss_kb,
-                peak_hwm_before_kb: turn_before_memory.hwm_kb,
-                peak_hwm_after_kb: after_await_memory.hwm_kb,
-                rss_growth_kb: diff_opt_i64(turn_before_memory.rss_kb, after_await_memory.rss_kb),
-                hwm_growth_kb: diff_opt_i64(turn_before_memory.hwm_kb, after_await_memory.hwm_kb),
-            },
-            phase_profile: BTreeMap::new(),
-            turn_usage: turn.usage,
-            usage_delta: before_turn_usage,
-            cumulative_usage: SessionUsageReport::default(),
-        });
+        .await?;
     }
 
-    let export_before_alloc = allocator_stats();
-    let export_started = Instant::now();
-    let read_view = session.read_view();
-    let export_state_ms = elapsed_ms(export_started);
-    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
-    let after_export_memory = process_memory_sample();
-    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
+    let read_view = run.export(async { Ok(session.read_view()) }).await?;
 
-    Ok(RuntimePerfRunResult {
-        scenario: scenario.name().to_string(),
-        scenario_harness: scenario.scenario_harness().name().to_string(),
-        chat_turns,
-        stack_profile: None,
-        stages: run_stages(
-            [
-                (
-                    stage::BUILD_RUNTIME,
-                    RuntimePerfStageRunResult::measured(
-                        build_runtime_ms,
-                        build_runtime_alloc,
-                        after_build_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::SEED_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        seed_state_ms,
-                        seed_state_alloc,
-                        after_seed_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::EXPORT_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        export_state_ms,
-                        export_state_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::TOTAL,
-                    RuntimePerfStageRunResult::measured(
-                        elapsed_ms(total_started),
-                        total_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-            ],
-            &turns,
-        ),
+    Ok(run.finish(RunTail {
         session_nodes: store.graph_node_count(),
         active_path_messages: read_view.messages().len(),
-        extra_counters: BTreeMap::new(),
-        metric_samples: BTreeMap::new(),
-        metric_samples_ms: BTreeMap::new(),
-        memory: RuntimePerfMemoryRunResult {
-            rss_before_kb: before_memory.rss_kb,
-            peak_hwm_before_kb: before_memory.hwm_kb,
-            peak_hwm_after_kb: after_export_memory.hwm_kb,
-            rss_growth_kb: diff_opt_i64(before_memory.rss_kb, after_export_memory.rss_kb),
-            hwm_growth_kb: diff_opt_i64(before_memory.hwm_kb, after_export_memory.hwm_kb),
-        },
-        phase_profile: BTreeMap::new(),
-        turns,
-        cumulative_usage: SessionUsageReport::default(),
-    })
+        ..RunTail::default()
+    }))
 }
 pub(crate) fn sum_phase_profiles<'a>(
     profiles: impl IntoIterator<Item = &'a BTreeMap<String, RuntimePerfPhaseRunResult>>,
