@@ -367,8 +367,8 @@ fn registration_kind_alone_selects_orchestration_dispatch() {
     assert!(orchestrating.is_orchestrating_tool(&tool_id("batch")));
 }
 
-#[tokio::test]
-async fn pre_cutover_batch_snapshot_restores_and_dispatches_as_orchestration() {
+#[test]
+fn pre_cutover_snapshot_without_registration_kind_is_refused() {
     let source = ToolRegistry::from_tool_registrations(
         Vec::new(),
         Vec::new(),
@@ -382,38 +382,40 @@ async fn pre_cutover_batch_snapshot_restores_and_dispatches_as_orchestration() {
     assert_eq!(
         legacy_entry.remove("registration_kind"),
         Some(json!("orchestrating")),
-        "the compatibility probe strips exactly the field introduced by the cutover"
+        "the compatibility probe strips exactly the field the cutover requires"
     );
-    assert_eq!(
-        legacy_entry.keys().collect::<Vec<_>>(),
-        vec!["manifest"],
-        "the remaining entry is exactly the pre-cutover writer shape"
-    );
-    let legacy_snapshot: ToolState =
-        serde_json::from_value(legacy_blob).expect("deserialize pre-cutover state");
 
-    let target = ToolRegistry::from_tool_registrations(
+    let error =
+        serde_json::from_value::<ToolState>(legacy_blob).expect_err("deserialize must refuse");
+    assert!(
+        error.to_string().contains("registration_kind"),
+        "the refusal must name the missing field: {error}"
+    );
+}
+
+#[test]
+fn pre_cutover_snapshot_without_orphaned_is_refused() {
+    let source = ToolRegistry::from_tool_registrations(
         Vec::new(),
         Vec::new(),
         vec![test_batch_orchestrating_tool()],
     )
-    .expect("target registry");
-    target
-        .restore_state(legacy_snapshot)
-        .expect("the live surface re-derives the registration lane");
-    assert!(
-        target.is_orchestrating_tool(&tool_id("batch")),
-        "the restored registration is effectively routed through the orchestrating lane"
+    .expect("source registry");
+    let mut legacy_blob = serde_json::to_value(source.export_state()).expect("serialize state");
+    let legacy_entry = legacy_blob["tools"]["tool:batch"]
+        .as_object_mut()
+        .expect("serialized batch entry");
+    assert_eq!(
+        legacy_entry.remove("orphaned"),
+        Some(json!(false)),
+        "the compatibility probe strips exactly the field the cutover requires"
     );
 
-    let context = crate::facade_support::OrchestrationContext::new(test_tool_context());
-    let result = target
-        .execute_orchestrating_by_id(&tool_id("batch"), &json!({}), &context)
-        .await;
-    assert!(result.is_success(), "batch takes the orchestrating route");
-    assert_eq!(
-        result.value_for_projection(),
-        json!({ "session_id": "registry-test" })
+    let error =
+        serde_json::from_value::<ToolState>(legacy_blob).expect_err("deserialize must refuse");
+    assert!(
+        error.to_string().contains("orphaned"),
+        "the refusal must name the missing field: {error}"
     );
 }
 

@@ -13,7 +13,9 @@ pub struct ToolStateEntry {
     /// last-known manifest, are excluded from the Tool Catalog (non-members
     /// until their source returns), and rebind automatically when a source
     /// re-advertises the same tool id.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    ///
+    /// Required in every serialized entry: a pre-cutover snapshot that omits
+    /// the flag fails to decode rather than being reconstructed as bound.
     pub orphaned: bool,
     /// ToolId-keyed host curation intent. Authority exclusions are transient
     /// policy and never change this bit. Hosts toggle it via
@@ -23,10 +25,10 @@ pub struct ToolStateEntry {
         skip_serializing_if = "is_default_member"
     )]
     pub member: bool,
-    /// Persisted registration-lane hint. Missing values from pre-cutover
-    /// snapshots decode as leaf registrations; on rebind the live source is
+    /// Persisted registration-lane hint. Required in every serialized entry:
+    /// a pre-cutover snapshot that omits it fails to decode rather than being
+    /// reconstructed as a leaf registration. On rebind the live source is
     /// authoritative and re-derives the effective lane.
-    #[serde(default, skip_serializing_if = "is_leaf_registration")]
     pub registration_kind: ToolRegistrationKind,
 }
 impl ToolStateEntry {
@@ -168,9 +170,6 @@ fn is_member_default() -> bool {
 }
 fn is_default_member(member: &bool) -> bool {
     *member
-}
-fn is_leaf_registration(kind: &ToolRegistrationKind) -> bool {
-    *kind == ToolRegistrationKind::Leaf
 }
 
 pub mod facade_ops {

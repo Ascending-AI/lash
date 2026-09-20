@@ -383,7 +383,7 @@ fn apply_state_round_trips_while_orphans_exist() {
 }
 
 #[test]
-fn orphan_flag_serializes_and_legacy_snapshots_deserialize_as_bound() {
+fn orphan_flag_serializes_on_every_entry_and_is_required() {
     let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
     target
         .restore_state(snapshot_with_external_tool())
@@ -393,20 +393,25 @@ fn orphan_flag_serializes_and_legacy_snapshots_deserialize_as_bound() {
         value["tools"]["tool:mcp__demo__search"]["orphaned"],
         json!(true)
     );
-    assert!(
-        value["tools"]["tool:mock_tool"].get("orphaned").is_none(),
-        "bound entries omit the flag, keeping old and new snapshots byte-compatible"
+    assert_eq!(
+        value["tools"]["tool:mock_tool"]["orphaned"],
+        json!(false),
+        "every entry states the flag: a snapshot its writer cannot decode is useless"
     );
 
-    let legacy: ToolStateEntry = serde_json::from_value(json!({
-        "manifest": value["tools"]["tool:mock_tool"]["manifest"]
+    let error = serde_json::from_value::<ToolStateEntry>(json!({
+        "manifest": value["tools"]["tool:mock_tool"]["manifest"],
+        "registration_kind": "leaf"
     }))
-    .expect("legacy entry without the flag deserializes");
-    assert!(!legacy.is_orphaned());
+    .expect_err("a pre-cutover entry without the flag must be refused");
+    assert!(
+        error.to_string().contains("orphaned"),
+        "the refusal must name the missing field: {error}"
+    );
 }
 
 #[test]
-fn legacy_member_false_decodes_as_host_curation_intent() {
+fn member_false_decodes_as_host_curation_intent() {
     let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source");
     let manifest = serde_json::to_value(
         source
@@ -416,19 +421,21 @@ fn legacy_member_false_decodes_as_host_curation_intent() {
             .manifest(),
     )
     .expect("serialize mock manifest");
-    let legacy: ToolStateEntry = serde_json::from_value(json!({
+    let entry: ToolStateEntry = serde_json::from_value(json!({
         "manifest": manifest,
-        "member": false
+        "orphaned": false,
+        "member": false,
+        "registration_kind": "leaf"
     }))
-    .expect("legacy non-member entry decodes");
+    .expect("non-member entry decodes");
 
     let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
     target
         .restore_state(ToolState::new(
             1,
-            [(tool_id("mock_tool"), legacy)].into_iter().collect(),
+            [(tool_id("mock_tool"), entry)].into_iter().collect(),
         ))
-        .expect("legacy curation restores against the live source");
+        .expect("non-member curation restores against the live source");
 
     assert!(
         !target
