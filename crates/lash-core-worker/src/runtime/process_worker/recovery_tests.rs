@@ -274,7 +274,7 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
     {
         let mut state = scheduler.state.lock_recover();
         state.dispatcher_running = true;
-        state.worklist_scan = ProcessWorklistScan::Fetching(Some(continuation.clone()));
+        state.extra.worklist_scan = ProcessWorklistScan::Fetching(Some(continuation.clone()));
     }
     let task_scheduler = Arc::clone(&scheduler);
     let task = crate::task::spawn(async move {
@@ -293,7 +293,7 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
     let state = scheduler.state.lock_recover();
     assert!(
         matches!(
-            &state.worklist_scan,
+            &state.extra.worklist_scan,
             ProcessWorklistScan::Ready(Some(restored)) if restored == &continuation
         ),
         "a later dispatcher must retry the cursor whose fetch panicked"

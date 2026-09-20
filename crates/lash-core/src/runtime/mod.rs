@@ -26,6 +26,8 @@ pub use lash_core_execution::runtime::effect;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_execution::runtime::effect;
 mod claim_settlement;
+#[doc(hidden)]
+pub mod coalescing_scheduler;
 mod environment;
 mod error;
 mod event_pump;

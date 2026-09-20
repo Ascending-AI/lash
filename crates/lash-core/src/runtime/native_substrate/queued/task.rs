@@ -1,4 +1,3 @@
-use crate::SessionId;
 #[cfg(test)]
 use std::future::Future;
 #[cfg(test)]
@@ -161,7 +160,6 @@ impl QueuedWorkTaskDriver {
     pub(super) async fn run_dispatcher(&self) {
         let mut dispatcher_guard =
             QueuedWorkExecutionDispatcherGuard::new(Arc::clone(&self.inner.scheduler));
-        let (completed_tx, mut completed_rx) = tokio::sync::mpsc::unbounded_channel();
         loop {
             while let Some((demand, permit)) = self.next_execution().await {
                 let driver = Self {
@@ -169,7 +167,7 @@ impl QueuedWorkTaskDriver {
                 };
                 let completion = QueuedWorkExecutionTaskCompletion {
                     session_id: demand.session_id.clone(),
-                    completed: completed_tx.clone(),
+                    scheduler: Arc::clone(&self.inner.scheduler),
                 };
                 let scheduler = Arc::clone(&self.inner.scheduler);
                 #[cfg(test)]
@@ -197,7 +195,7 @@ impl QueuedWorkTaskDriver {
 
             {
                 let mut state = self.inner.scheduler.lock_state();
-                if state.pending.is_empty() && state.active == 0 {
+                if state.queue_idle() {
                     state.dispatcher_running = false;
                     dispatcher_guard.disarm();
                     return;
@@ -206,28 +204,6 @@ impl QueuedWorkTaskDriver {
 
             tokio::select! {
                 () = self.inner.shutdown.cancelled() => return,
-                Some(session_id) = completed_rx.recv() => {
-                    let mut state = self.inner.scheduler.lock_state();
-                    if state.active == 0 {
-                        tracing::warn!(
-                            target: "lash_core::queued_work",
-                            session_id = session_id.as_ref().map(SessionId::as_str),
-                            event = "queued_work.scheduler_accounting",
-                            "queued-work execution completed without an active scheduler entry"
-                        );
-                    } else {
-                        state.active -= 1;
-                    }
-                    if let Some(demand) = state.rerun.remove(&session_id) {
-                        state.pending.push_back(demand);
-                    } else {
-                        state.scheduled.remove(&session_id);
-                    }
-                    self.inner.scheduler.metrics.intake_depth(
-                        WorkerSlotKind::QueuedWork,
-                        state.pending.len() + state.rerun.len(),
-                    );
-                }
                 () = self.inner.scheduler.changed.notified() => {}
             }
         }
@@ -256,14 +232,13 @@ impl QueuedWorkTaskDriver {
             return None;
         }
         let mut state = self.inner.scheduler.lock_state();
-        let Some(mut demand) = state.pending.pop_front() else {
+        let Some(mut demand) = state.pop_next() else {
             drop(permit);
             return None;
         };
         if let Some(coalesced) = state.rerun.remove(&demand.session_id) {
             demand.merge(coalesced);
         }
-        state.active += 1;
         self.inner.scheduler.metrics.intake_depth(
             WorkerSlotKind::QueuedWork,
             state.pending.len() + state.rerun.len(),
