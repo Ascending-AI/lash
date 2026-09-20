@@ -1,0 +1,217 @@
+=== effect::EffectJournalStatements | effect_journal.select_session_free_scope_ids
+SELECT scope_id FROM lash_runtime_effect_replay
+             WHERE session_id IS NULL
+             UNION
+             SELECT scope_id FROM lash_runtime_effect_group
+             WHERE session_id IS NULL
+=== effect::EffectJournalStatements | effect_journal.scope_is_quiescent
+SELECT EXISTS(
+                SELECT 1 FROM lash_runtime_effect_replay
+                WHERE scope_id = $1 AND status = 'in_progress'
+             ) OR EXISTS(
+                SELECT 1 FROM lash_runtime_effect_group AS grp
+                WHERE grp.scope_id = $1
+                  AND grp.children > (
+                      SELECT COUNT(*) FROM lash_runtime_effect_replay AS child
+                      WHERE child.scope_id = $1 AND child.group_key = grp.group_key
+                  )
+             ) OR EXISTS(
+                SELECT 1 FROM lash_await_event_waits
+                WHERE scope_json = $2 AND terminal_json IS NULL
+             )
+=== effect::replay::ReplayStatements | effect_replay.exists_by_key
+SELECT EXISTS(
+                 SELECT 1 FROM lash_runtime_effect_replay
+                 WHERE scope_id = $1 AND replay_key = $2
+             )
+=== effect::replay::ReplayStatements | effect_replay.take_over_lease
+UPDATE lash_runtime_effect_replay
+             SET lease_owner_id = $3,
+                 lease_token = $4,
+                 lease_expires_at_ms = $5,
+                 due_at_ms = $6,
+                 updated_at_ms = $7
+             WHERE scope_id = $1 AND replay_key = $2
+=== effect::replay::ReplayStatements | effect_replay.set_settlement_seq
+UPDATE lash_runtime_effect_replay
+             SET settlement_seq = $3
+             WHERE scope_id = $1 AND replay_key = $2
+=== effect::replay::ReplayStatements | effect_replay.select_unsettled_children
+SELECT scope_id, replay_key, envelope_json, status, outcome_json, error_json, lease_expires_at_ms
+             FROM lash_runtime_effect_replay
+             WHERE group_key = $1 AND settlement_seq IS NULL
+             ORDER BY replay_key
+=== effect::replay::ReplayStatements | effect_replay.select_settlement_by_rank
+SELECT settlement_seq, replay_key, status, outcome_json, error_json
+             FROM lash_runtime_effect_replay
+             WHERE group_key = $1 AND settlement_seq IS NOT NULL
+             ORDER BY settlement_seq
+             LIMIT 1 OFFSET $2
+=== effect::replay::ReplayStatements | effect_replay.delete_by_session
+DELETE FROM lash_runtime_effect_replay WHERE session_id = $1
+=== effect::replay::ReplayStatements | effect_replay.delete_by_scope
+DELETE FROM lash_runtime_effect_replay WHERE scope_id = $1
+=== effect::group::GroupStatements | effect_group.select_by_key
+SELECT group_key, scope_id, session_id, wake, loser_disposition,
+                    children, created_at_ms
+             FROM lash_runtime_effect_group
+             WHERE group_key = $1
+=== effect::group::GroupStatements | effect_group.bump_next_seq
+UPDATE lash_runtime_effect_group
+             SET next_seq = next_seq + 1
+             WHERE group_key = $1
+             RETURNING next_seq
+=== effect::group::GroupStatements | effect_group.delete_by_session
+DELETE FROM lash_runtime_effect_group WHERE session_id = $1
+=== effect::group::GroupStatements | effect_group.delete_by_scope
+DELETE FROM lash_runtime_effect_group WHERE scope_id = $1
+=== effect::scope_retirement::ScopeRetirementStatements | effect_scope_retirement.exists
+SELECT EXISTS(
+                 SELECT 1 FROM lash_effect_scope_retirements WHERE scope_id = $1
+             )
+=== effect::scope_retirement::ScopeRetirementStatements | effect_scope_retirement.delete_by_scope
+DELETE FROM lash_effect_scope_retirements WHERE scope_id = $1
+=== wait::waits::WaitStatements | await_event_wait.select_by_key
+SELECT scope_json, wait_json, session_id, turn_control, terminal_json
+             FROM lash_await_event_waits
+             WHERE key_id = $1
+=== wait::waits::WaitStatements | await_event_wait.list_pending_for_session
+SELECT key_id, scope_json, wait_json, turn_control
+             FROM lash_await_event_waits
+             WHERE session_id = $1
+               AND terminal_json IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_await_event_revoked_sessions
+                   WHERE session_id = $1
+               )
+             ORDER BY key_id
+=== wait::waits::WaitStatements | await_event_wait.delete_by_session
+DELETE FROM lash_await_event_waits WHERE session_id = $1
+=== wait::waits::WaitStatements | await_event_wait.delete_by_scope_json
+DELETE FROM lash_await_event_waits WHERE scope_json = $1
+=== wait::waits::WaitStatements | await_event_wait.select_session_free_scope_json
+SELECT DISTINCT scope_json FROM lash_await_event_waits WHERE session_id IS NULL
+=== wait::waits::WaitStatements | await_event_wait.count_by_key
+SELECT COUNT(*) FROM lash_await_event_waits WHERE key_id = $1
+=== wait::revoked_sessions::RevokedSessionStatements | await_event_revoked_session.exists
+SELECT EXISTS(
+                 SELECT 1 FROM lash_await_event_revoked_sessions WHERE session_id = $1
+             )
+=== wait::revoked_sessions::RevokedSessionStatements | await_event_revoked_session.insert_ignore
+INSERT INTO lash_await_event_revoked_sessions (session_id, revoked_at_ms)
+             VALUES ($1, $2)
+             ON CONFLICT (session_id) DO NOTHING
+=== postgres::EffectJournalPostgresStatements | effect_journal.insert_session_scope_fences
+INSERT INTO lash_effect_scope_retirements (
+                 scope_id, retired_at_ms, artifact_cleanup_completed
+             )
+             SELECT scope_id,
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+                    FALSE
+             FROM (
+                 SELECT DISTINCT scope_id FROM lash_runtime_effect_replay
+                 WHERE session_id = $1
+                 UNION
+                 SELECT DISTINCT scope_id FROM lash_runtime_effect_group
+                 WHERE session_id = $1
+             ) AS retired
+             ON CONFLICT (scope_id) DO NOTHING
+=== postgres::ReplayPostgresStatements | effect_replay.select_for_claim
+SELECT envelope_hash, envelope_json, status, outcome_json, error_json,
+                lease_expires_at_ms, due_at_ms
+             FROM lash_runtime_effect_replay
+             WHERE scope_id = $1 AND replay_key = $2
+             FOR UPDATE
+=== postgres::ReplayPostgresStatements | effect_replay.insert_claimed
+INSERT INTO lash_runtime_effect_replay (
+                scope_id, session_id, replay_key, envelope_hash,
+                envelope_json, status, outcome_json, error_json, lease_owner_id,
+                lease_token, lease_expires_at_ms, due_at_ms, group_key, settlement_seq,
+                created_at_ms, updated_at_ms
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8, $9, $10, $13, NULL, $11, $12)
+             ON CONFLICT (scope_id, replay_key) DO NOTHING
+=== postgres::ReplayPostgresStatements | effect_replay.finalize_terminal
+UPDATE lash_runtime_effect_replay
+             SET status = $6,
+                 outcome_json = $7,
+                 error_json = $8,
+                 lease_owner_id = NULL,
+                 lease_token = NULL,
+                 lease_expires_at_ms = 0,
+                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             WHERE scope_id = $1
+               AND replay_key = $2
+               AND envelope_hash = $3
+               AND lease_owner_id = $4
+               AND lease_token = $5
+               AND status = 'in_progress'
+               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             RETURNING group_key
+=== postgres::ReplayPostgresStatements | effect_replay.renew_lease
+UPDATE lash_runtime_effect_replay
+             SET lease_expires_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint + $6,
+                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             WHERE scope_id = $1
+               AND replay_key = $2
+               AND envelope_hash = $3
+               AND lease_owner_id = $4
+               AND lease_token = $5
+               AND status = 'in_progress'
+               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+=== postgres::GroupPostgresStatements | effect_group.insert_new
+INSERT INTO lash_runtime_effect_group (
+                group_key, scope_id, session_id, wake, loser_disposition,
+                children, next_seq, created_at_ms
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, 0, $7)
+             ON CONFLICT (group_key) DO NOTHING
+             RETURNING group_key, scope_id, session_id, wake, loser_disposition,
+                       children, created_at_ms
+=== postgres::ScopeRetirementPostgresStatements | effect_scope_retirement.insert_fence
+INSERT INTO lash_effect_scope_retirements (
+                 scope_id, retired_at_ms, artifact_cleanup_completed
+             )
+             VALUES ($1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT, FALSE)
+             ON CONFLICT (scope_id) DO NOTHING
+=== postgres::ScopeRetirementPostgresStatements | effect_scope_retirement.select_pending_artifact_cleanup
+SELECT scope_id FROM lash_effect_scope_retirements
+             WHERE artifact_cleanup_completed = FALSE
+             ORDER BY scope_id
+=== postgres::ScopeRetirementPostgresStatements | effect_scope_retirement.complete_artifact_cleanup
+UPDATE lash_effect_scope_retirements
+             SET artifact_cleanup_completed = TRUE
+             WHERE scope_id = $1
+=== postgres::WaitPostgresStatements | await_event_wait.insert_pending
+INSERT INTO lash_await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES ($1, $2, $3, $4, $5, NULL, $6, NULL)
+             ON CONFLICT (key_id) DO NOTHING
+=== postgres::WaitPostgresStatements | await_event_wait.insert_resolved
+INSERT INTO lash_await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+             ON CONFLICT (key_id) DO NOTHING
+             RETURNING key_id
+=== postgres::WaitPostgresStatements | await_event_wait.resolve_pending
+UPDATE lash_await_event_waits
+                 SET terminal_json = $6, resolved_at_ms = $7
+                 WHERE key_id = $1
+                   AND scope_json = $2
+                   AND wait_json = $3
+                   AND session_id IS NOT DISTINCT FROM $4
+                   AND turn_control = $5
+                   AND terminal_json IS NULL
+                 RETURNING terminal_json
+=== postgres::WaitPostgresStatements | await_event_wait.cancel_session_promises
+UPDATE lash_await_event_waits
+             SET terminal_json = $2, resolved_at_ms = $3
+             WHERE session_id = $1
+               AND terminal_json IS NULL
+               AND turn_control = FALSE
+=== postgres::MetaPostgresStatements | await_event_meta.select_signing_secret
+SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE
