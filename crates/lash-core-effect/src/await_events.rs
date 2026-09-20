@@ -58,16 +58,37 @@ struct ParkedWaiter {
 impl Drop for ParkedWaiter {
     fn drop(&mut self) {
         let mut state = self.shard.lock_recover();
-        if let Some(entry) = state.entries.get_mut(&self.key_id) {
+        if let Some(PromiseSlot::Live(entry)) = state.promises.get_mut(&self.key_id) {
             entry.waiters = entry.waiters.saturating_sub(1);
+        }
+    }
+}
+
+/// One promise's slot in the registry: live until it resolves, and — for
+/// turn-control keys — archived afterwards so a late resolve still reads its
+/// terminal. A key id occupies exactly one slot, so a promise cannot be live
+/// and archived at once.
+#[derive(Debug)]
+enum PromiseSlot {
+    Live(AwaitEventEntry),
+    ArchivedTurnControl(CompletedTurnControlEntry),
+}
+
+impl PromiseSlot {
+    fn verified_key(&self) -> &AwaitEventKey {
+        match self {
+            Self::Live(entry) => &entry.verified_key,
+            Self::ArchivedTurnControl(entry) => &entry.verified_key,
         }
     }
 }
 
 #[derive(Debug)]
 struct AwaitEventRegistryState {
-    entries: HashMap<String, AwaitEventEntry>,
-    completed_turn_control: HashMap<String, CompletedTurnControlEntry>,
+    promises: HashMap<String, PromiseSlot>,
+    /// Key ids of the archived turn-control slots, in archive order. It is
+    /// also the archived-slot count: every `ArchivedTurnControl` slot has
+    /// exactly one entry here.
     completed_turn_control_order: VecDeque<String>,
     revoked: bool,
 }
@@ -78,11 +99,25 @@ struct CompletedTurnControlEntry {
     terminal: Resolution,
 }
 
+/// What a presented key resolves to inside a locked shard: the revoked gate
+/// and the stored-key verification every reader performs, run once by
+/// [`AwaitEventRegistry::promise_lookup`].
+enum PromiseLookup<'a> {
+    /// The session is revoked or the scope retired. `resolve` routes this
+    /// through its outcome mapping; readers answer unknown-or-revoked.
+    Revoked,
+    /// A slot carries this key id and the presented key verifies against it.
+    Slot(&'a mut PromiseSlot),
+    /// A slot carries this key id but the presented key does not verify.
+    Mismatched,
+    /// No slot carries this key id.
+    Missing,
+}
+
 impl AwaitEventRegistryState {
     fn new() -> Self {
         Self {
-            entries: HashMap::new(),
-            completed_turn_control: HashMap::new(),
+            promises: HashMap::new(),
             completed_turn_control_order: VecDeque::new(),
             revoked: false,
         }
@@ -178,10 +213,14 @@ impl AwaitEventRegistry {
             return Ok(Vec::new());
         }
         let mut keys = state
-            .entries
+            .promises
             .values()
-            .filter(|entry| entry.terminal.is_none())
-            .map(|entry| entry.verified_key.clone())
+            .filter_map(|slot| match slot {
+                PromiseSlot::Live(entry) if entry.terminal.is_none() => {
+                    Some(entry.verified_key.clone())
+                }
+                _ => None,
+            })
             .collect::<Vec<_>>();
         keys.sort_unstable_by(|left, right| left.key_id.cmp(&right.key_id));
         Ok(keys)
@@ -198,6 +237,29 @@ impl AwaitEventRegistry {
         shard: &AwaitEventRegistryShard,
     ) -> std::sync::MutexGuard<'_, AwaitEventRegistryState> {
         shard.lock_recover()
+    }
+
+    /// The revoked gate and the stored-key verification every reader shares.
+    /// `resolve`, `peek_resolution`, and `await_resolution_inner` used to
+    /// spell the revoked → archived → live ladder by hand; a new reader that
+    /// took the natural hot-path order would read a stale live slot for an
+    /// already-archived turn-control gate — a waiter that hangs after its
+    /// terminal was recorded.
+    fn promise_lookup<'a>(
+        &self,
+        state: &'a mut AwaitEventRegistryState,
+        key: &AwaitEventKey,
+    ) -> Result<PromiseLookup<'a>, RuntimeError> {
+        if state.revoked || self.scope_is_retired(&key.scope)? {
+            return Ok(PromiseLookup::Revoked);
+        }
+        Ok(match state.promises.get_mut(&key.key_id) {
+            Some(slot) if Self::verified_key_matches(slot.verified_key(), key) => {
+                PromiseLookup::Slot(slot)
+            }
+            Some(_) => PromiseLookup::Mismatched,
+            None => PromiseLookup::Missing,
+        })
     }
 
     pub fn key_for(
@@ -310,52 +372,50 @@ impl AwaitEventRegistry {
         }
         let shard = self.shard_for_scope(&key.scope);
         let mut state = Self::locked_state(&shard);
-        let session_state =
-            (state.revoked || self.scope_is_retired(&key.scope)?).then_some(PromiseState::Revoked);
-        if let Some(transition) = session_state.map(|state| resolve(state, resolution.clone())) {
-            return Ok(transition
+        match self.promise_lookup(&mut state, key)? {
+            PromiseLookup::Revoked => {
+                return Ok(resolve(PromiseState::Revoked, resolution)
+                    .resolve_outcome()
+                    .expect("revoked resolve always has a public outcome"));
+            }
+            PromiseLookup::Mismatched => return Ok(ResolveOutcome::UnknownOrRevoked),
+            PromiseLookup::Slot(PromiseSlot::ArchivedTurnControl(completed)) => {
+                return Ok(resolve(
+                    PromiseState::Resolved(completed.terminal.clone()),
+                    resolution,
+                )
                 .resolve_outcome()
-                .expect("revoked resolve always has a public outcome"));
-        }
-        if let Some(completed) = state.completed_turn_control.get(&key.key_id) {
-            if !Self::verified_key_matches(&completed.verified_key, key) {
-                return Ok(ResolveOutcome::UnknownOrRevoked);
+                .expect("resolved promise always has a public outcome"));
             }
-            return Ok(resolve(
-                PromiseState::Resolved(completed.terminal.clone()),
-                resolution,
-            )
-            .resolve_outcome()
-            .expect("resolved promise always has a public outcome"));
-        }
-        if let Some(entry) = state.entries.get_mut(&key.key_id) {
-            if !Self::verified_key_matches(&entry.verified_key, key) {
-                return Ok(ResolveOutcome::UnknownOrRevoked);
-            }
-            let observed = entry
-                .terminal
-                .clone()
-                .map_or(PromiseState::Pending, PromiseState::Resolved);
-            match resolve(observed, resolution) {
-                PromiseTransition::Store(terminal) => {
-                    entry.terminal = Some(terminal);
-                    entry.notify.notify_waiters();
-                }
-                transition => {
-                    return Ok(transition
-                        .resolve_outcome()
-                        .expect("normal resolve always has a public outcome"));
+            PromiseLookup::Slot(PromiseSlot::Live(entry)) => {
+                let observed = entry
+                    .terminal
+                    .clone()
+                    .map_or(PromiseState::Pending, PromiseState::Resolved);
+                match resolve(observed, resolution) {
+                    PromiseTransition::Store(terminal) => {
+                        entry.terminal = Some(terminal);
+                        entry.notify.notify_waiters();
+                    }
+                    transition => {
+                        return Ok(transition
+                            .resolve_outcome()
+                            .expect("normal resolve always has a public outcome"));
+                    }
                 }
             }
-        } else {
-            let mut entry = AwaitEventEntry::for_key(key);
-            let PromiseTransition::Store(terminal) = resolve(PromiseState::Missing, resolution)
-            else {
-                unreachable!("missing promise always buffers the proposed terminal")
-            };
-            entry.terminal = Some(terminal);
-            entry.notify.notify_waiters();
-            state.entries.insert(key.key_id.clone(), entry);
+            PromiseLookup::Missing => {
+                let mut entry = AwaitEventEntry::for_key(key);
+                let PromiseTransition::Store(terminal) = resolve(PromiseState::Missing, resolution)
+                else {
+                    unreachable!("missing promise always buffers the proposed terminal")
+                };
+                entry.terminal = Some(terminal);
+                entry.notify.notify_waiters();
+                state
+                    .promises
+                    .insert(key.key_id.clone(), PromiseSlot::Live(entry));
+            }
         }
         if matches!(key.wait, AwaitEventWaitIdentity::TurnTerminal) {
             self.archive_turn_control(&mut state, key)?;
@@ -365,26 +425,20 @@ impl AwaitEventRegistry {
 
     pub fn peek_resolution(&self, key: &AwaitEventKey) -> Result<Option<Resolution>, RuntimeError> {
         let shard = self.shard_for_scope(&key.scope);
-        let state = Self::locked_state(&shard);
-        if state.revoked || self.scope_is_retired(&key.scope)? {
-            return Err(Self::unknown_or_revoked());
-        }
-        if let Some(completed) = state.completed_turn_control.get(&key.key_id) {
-            if !Self::verified_key_matches(&completed.verified_key, key) {
-                return Err(Self::unknown_or_revoked());
+        let mut state = Self::locked_state(&shard);
+        match self.promise_lookup(&mut state, key)? {
+            PromiseLookup::Revoked | PromiseLookup::Mismatched => Err(Self::unknown_or_revoked()),
+            PromiseLookup::Slot(PromiseSlot::ArchivedTurnControl(completed)) => {
+                Ok(Some(completed.terminal.clone()))
             }
-            return Ok(Some(completed.terminal.clone()));
-        }
-        if let Some(entry) = state.entries.get(&key.key_id) {
-            if !Self::verified_key_matches(&entry.verified_key, key) {
-                return Err(Self::unknown_or_revoked());
+            PromiseLookup::Slot(PromiseSlot::Live(entry)) => Ok(entry.terminal.clone()),
+            PromiseLookup::Missing => {
+                if !self.verify_uncached(key)? {
+                    return Err(Self::unknown_or_revoked());
+                }
+                Ok(None)
             }
-            return Ok(entry.terminal.clone());
         }
-        if !self.verify_uncached(key)? {
-            return Err(Self::unknown_or_revoked());
-        }
-        Ok(None)
     }
 
     fn archive_turn_control(
@@ -403,33 +457,32 @@ impl AwaitEventRegistry {
             &escalation_key.key_id,
             &terminal_key.key_id,
         ] {
-            let Some(entry) = state.entries.remove(key_id) else {
+            // Absent or already archived slots are left alone.
+            if !matches!(state.promises.get(key_id), Some(PromiseSlot::Live(_))) {
                 continue;
+            }
+            let Some(PromiseSlot::Live(entry)) = state.promises.remove(key_id) else {
+                unreachable!("checked live above");
             };
             let Some(terminal) = entry.terminal else {
                 // An escalation nobody wrote is a bare waiter slot the
                 // finished turn no longer needs.
                 continue;
             };
-            if state
-                .completed_turn_control
-                .insert(
-                    key_id.clone(),
-                    CompletedTurnControlEntry {
-                        verified_key: entry.verified_key,
-                        terminal,
-                    },
-                )
-                .is_none()
-            {
-                state.completed_turn_control_order.push_back(key_id.clone());
-            }
+            state.promises.insert(
+                key_id.clone(),
+                PromiseSlot::ArchivedTurnControl(CompletedTurnControlEntry {
+                    verified_key: entry.verified_key,
+                    terminal,
+                }),
+            );
+            state.completed_turn_control_order.push_back(key_id.clone());
         }
-        while state.completed_turn_control.len() > self.completed_turn_control_key_limit {
+        while state.completed_turn_control_order.len() > self.completed_turn_control_key_limit {
             let Some(key_id) = state.completed_turn_control_order.pop_front() else {
                 break;
             };
-            state.completed_turn_control.remove(&key_id);
+            state.promises.remove(&key_id);
         }
         Ok(())
     }
@@ -450,10 +503,6 @@ impl AwaitEventRegistry {
         .await
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the entry is inserted above under this same lock"
-    )]
     async fn await_resolution_inner(
         &self,
         key: &AwaitEventKey,
@@ -465,32 +514,29 @@ impl AwaitEventRegistry {
         loop {
             let notified = {
                 let mut state = Self::locked_state(&shard);
-                if state.revoked || self.scope_is_retired(&key.scope)? {
-                    return Err(Self::unknown_or_revoked());
-                }
-                if let Some(completed) = state.completed_turn_control.get(&key.key_id) {
-                    if !Self::verified_key_matches(&completed.verified_key, key) {
+                let entry = match self.promise_lookup(&mut state, key)? {
+                    PromiseLookup::Revoked | PromiseLookup::Mismatched => {
                         return Err(Self::unknown_or_revoked());
                     }
-                    return Ok(completed.terminal.clone());
-                }
-                if let Some(entry) = state.entries.get(&key.key_id)
-                    && !Self::verified_key_matches(&entry.verified_key, key)
-                {
-                    return Err(Self::unknown_or_revoked());
-                }
-                if !state.entries.contains_key(&key.key_id) {
-                    if !self.verify_uncached(key)? {
-                        return Err(Self::unknown_or_revoked());
+                    PromiseLookup::Slot(PromiseSlot::ArchivedTurnControl(completed)) => {
+                        return Ok(completed.terminal.clone());
                     }
-                    state
-                        .entries
-                        .insert(key.key_id.clone(), AwaitEventEntry::for_key(key));
-                }
-                let entry = state
-                    .entries
-                    .get_mut(&key.key_id)
-                    .expect("await-event entry inserted above");
+                    PromiseLookup::Slot(PromiseSlot::Live(entry)) => entry,
+                    PromiseLookup::Missing => {
+                        if !self.verify_uncached(key)? {
+                            return Err(Self::unknown_or_revoked());
+                        }
+                        state.promises.insert(
+                            key.key_id.clone(),
+                            PromiseSlot::Live(AwaitEventEntry::for_key(key)),
+                        );
+                        let Some(PromiseSlot::Live(entry)) = state.promises.get_mut(&key.key_id)
+                        else {
+                            unreachable!("await-event entry inserted above")
+                        };
+                        entry
+                    }
+                };
                 if let Some(terminal) = entry.terminal.clone() {
                     return Ok(terminal);
                 }
@@ -555,11 +601,12 @@ impl AwaitEventRegistry {
             let transition = revoke_session(state.revoked);
             let newly_revoked = transition == SessionRevocationTransition::MarkRevoked;
             state.revoked = true;
-            for entry in state.entries.values() {
-                entry.notify.notify_waiters();
+            for slot in state.promises.values() {
+                if let PromiseSlot::Live(entry) = slot {
+                    entry.notify.notify_waiters();
+                }
             }
-            state.entries.clear();
-            state.completed_turn_control.clear();
+            state.promises.clear();
             state.completed_turn_control_order.clear();
             newly_revoked
         };
@@ -616,31 +663,28 @@ impl AwaitEventRegistry {
         {
             let mut state = Self::locked_state(&self.unscoped_shard);
             if only_if_quiescent
-                && state
-                    .entries
-                    .values()
-                    .any(|entry| entry.verified_key.scope == *scope && entry.waiters > 0)
+                && state.promises.values().any(|slot| {
+                    matches!(slot, PromiseSlot::Live(entry)
+                        if entry.verified_key.scope == *scope && entry.waiters > 0)
+                })
             {
                 return Ok(false);
             }
-            state.entries.retain(|_, entry| {
-                if entry.verified_key.scope == *scope {
-                    entry.notify.notify_waiters();
-                    false
-                } else {
-                    true
+            state.promises.retain(|_, slot| {
+                if slot.verified_key().scope != *scope {
+                    return true;
                 }
+                if let PromiseSlot::Live(entry) = slot {
+                    entry.notify.notify_waiters();
+                }
+                false
             });
-            state
-                .completed_turn_control
-                .retain(|_, entry| entry.verified_key.scope != *scope);
             let AwaitEventRegistryState {
-                completed_turn_control,
+                promises,
                 completed_turn_control_order,
                 ..
             } = &mut *state;
-            completed_turn_control_order
-                .retain(|key_id| completed_turn_control.contains_key(key_id));
+            completed_turn_control_order.retain(|key_id| promises.contains_key(key_id));
             // Fence while the shard lock still excludes new waiters: the
             // quiescence proof above and the fence land together.
             self.retired_scopes.lock_recover().insert(scope_id);
@@ -675,8 +719,12 @@ impl AwaitEventRegistry {
         let mut counts = (0, 0, 0);
         for shard in shards {
             let state = Self::locked_state(&shard);
-            counts.0 += state.entries.len();
-            counts.1 += state.completed_turn_control.len();
+            for slot in state.promises.values() {
+                match slot {
+                    PromiseSlot::Live(_) => counts.0 += 1,
+                    PromiseSlot::ArchivedTurnControl(_) => counts.1 += 1,
+                }
+            }
             counts.2 += usize::from(state.revoked);
         }
         counts
@@ -686,14 +734,17 @@ impl AwaitEventRegistry {
     fn has_entry(&self, key: &AwaitEventKey) -> bool {
         let shard = self.shard_for_scope(&key.scope);
         let state = Self::locked_state(&shard);
-        state.entries.contains_key(&key.key_id)
+        matches!(state.promises.get(&key.key_id), Some(PromiseSlot::Live(_)))
     }
 
     #[cfg(test)]
     fn is_completed_turn_control(&self, key: &AwaitEventKey) -> bool {
         let shard = self.shard_for_scope(&key.scope);
         let state = Self::locked_state(&shard);
-        state.completed_turn_control.contains_key(&key.key_id)
+        matches!(
+            state.promises.get(&key.key_id),
+            Some(PromiseSlot::ArchivedTurnControl(_))
+        )
     }
 
     /// Resolve every *outstanding* wait for `session_id` with
@@ -706,7 +757,13 @@ impl AwaitEventRegistry {
             return Ok(());
         };
         let mut state = Self::locked_state(&shard);
-        for entry in state.entries.values_mut() {
+        for slot in state.promises.values_mut() {
+            // Archived slots are already terminal; only live entries are
+            // swept. The variant, not an unstated cross-collection
+            // assumption, is what excludes them.
+            let PromiseSlot::Live(entry) = slot else {
+                continue;
+            };
             let observed = entry
                 .terminal
                 .clone()
@@ -858,6 +915,50 @@ mod tests {
                 .expect("resolve next terminal");
         }
         assert_eq!(registry.counts(), (0, 2, 0));
+    }
+
+    /// Archiving replaces a live slot rather than duplicating the promise in
+    /// a second collection: the key id occupies exactly one archived slot,
+    /// and a resolve after archival reads that archived terminal back.
+    #[test]
+    fn archiving_leaves_one_archived_slot_which_late_resolves_read() {
+        let registry = AwaitEventRegistry::new();
+        let scope = turn_scope(&SessionId::from("archive-slot"), &TurnId::from("turn"));
+        let gate = registry
+            .key_for(&scope, AwaitEventWaitIdentity::TurnCancelGate)
+            .expect("gate key");
+        let terminal = registry
+            .key_for(&scope, AwaitEventWaitIdentity::TurnTerminal)
+            .expect("terminal key");
+
+        registry
+            .resolve(&gate, Resolution::Ok(serde_json::json!("sealed")))
+            .expect("resolve gate");
+        let terminal_resolution = Resolution::Ok(serde_json::json!({ "done": true }));
+        registry
+            .resolve(&terminal, terminal_resolution.clone())
+            .expect("resolve terminal");
+
+        let shard = registry.shard_for_scope(&scope);
+        let state = AwaitEventRegistry::locked_state(&shard);
+        for key in [&gate, &terminal] {
+            assert!(
+                matches!(
+                    state.promises.get(&key.key_id),
+                    Some(PromiseSlot::ArchivedTurnControl(_))
+                ),
+                "archiving leaves exactly one archived slot per key id"
+            );
+        }
+        drop(state);
+
+        let ResolveOutcome::AlreadyResolved { terminal: stored } = registry
+            .resolve(&terminal, Resolution::Ok(serde_json::json!("late-write")))
+            .expect("resolve after archival")
+        else {
+            panic!("a resolve after archival must report the stored terminal")
+        };
+        assert_eq!(stored, terminal_resolution);
     }
 
     #[tokio::test]
