@@ -75,6 +75,8 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // boundaries, so the pin tracks the
     // current target while the refusal below still names a SHA-256-era
     // generation: nothing older than 45 may ever open, whatever the target is.
+    // The 43→44 in-place upgrade arm is deleted, so a generation-43 stamp is
+    // refused outright rather than folded forward first.
     assert_eq!(expected, 70, "the pinned durable-core target changed");
 
     rewind_user_version(&path, 43);
