@@ -56,161 +56,56 @@ where
 pub(super) async fn run_once_turn_checkpoint(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
-    let total_started = Instant::now();
-    let before_memory = process_memory_sample();
-    let total_before_alloc = allocator_stats();
+    let mut run = RunRecorder::start(RuntimePerfScenario::TurnCheckpoint, chat_turns);
+    let configs = run.build(async { Ok(CheckpointConfigs::new()) }).await?;
+    let seed_messages = run.seed(async { Ok(checkpoint_messages()) }).await?;
 
-    let build_before_alloc = allocator_stats();
-    let build_started = Instant::now();
-    let configs = CheckpointConfigs::new();
-    let build_runtime_ms = elapsed_ms(build_started);
-    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
-    let after_build_memory = process_memory_sample();
-
-    let seed_before_alloc = allocator_stats();
-    let seed_started = Instant::now();
-    let seed_messages = checkpoint_messages();
-    let seed_state_ms = elapsed_ms(seed_started);
-    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
-    let after_seed_memory = process_memory_sample();
-
-    let mut turns = Vec::with_capacity(chat_turns);
     for turn_index in 0..chat_turns {
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
-        let mut phase_profile = BTreeMap::new();
-
-        let llm_phase = measure_checkpoint_phase("standard_llm_checkpoint", || {
-            checkpoint_pending_llm(&configs, &seed_messages, turn_index)
-        })?;
-        phase_profile.insert(llm_phase.0, llm_phase.1);
-
-        let tools_phase = measure_checkpoint_phase("standard_parallel_tools_checkpoint", || {
-            checkpoint_pending_parallel_tools(&configs, &seed_messages, turn_index)
-        })?;
-        phase_profile.insert(tools_phase.0, tools_phase.1);
-
-        let exec_phase = measure_checkpoint_phase("rlm_exec_checkpoint", || {
-            checkpoint_pending_exec(&configs, &seed_messages, turn_index)
-        })?;
-        phase_profile.insert(exec_phase.0, exec_phase.1);
-
-        let run_turn_ms = elapsed_ms(turn_started);
-        let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
-        let after_turn_memory = process_memory_sample();
-
-        let await_before_alloc = allocator_stats();
-        let background_started = Instant::now();
-        tokio::task::yield_now().await;
-        let await_background_work_ms = elapsed_ms(background_started);
-        let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
-        let after_await_memory = process_memory_sample();
-        let turn_total_alloc =
-            sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
-
-        turns.push(RuntimePerfTurnResult {
+        run.turn(
             turn_index,
-            stages: turn_stages(
-                RuntimePerfStageRunResult::measured(
-                    run_turn_ms,
-                    run_turn_alloc,
-                    after_turn_memory.rss_kb,
-                ),
-                Some(RuntimePerfStageRunResult::measured(
-                    await_background_work_ms,
-                    await_background_work_alloc,
-                    after_await_memory.rss_kb,
-                )),
-                RuntimePerfStageRunResult::measured(
-                    round3(run_turn_ms + await_background_work_ms),
-                    turn_total_alloc,
-                    after_await_memory.rss_kb,
-                ),
-            ),
-            memory: RuntimePerfMemoryRunResult {
-                rss_before_kb: turn_before_memory.rss_kb,
-                peak_hwm_before_kb: turn_before_memory.hwm_kb,
-                peak_hwm_after_kb: after_await_memory.hwm_kb,
-                rss_growth_kb: diff_opt_i64(turn_before_memory.rss_kb, after_await_memory.rss_kb),
-                hwm_growth_kb: diff_opt_i64(turn_before_memory.hwm_kb, after_await_memory.hwm_kb),
+            async {
+                let mut phase_profile = BTreeMap::new();
+
+                let llm_phase = measure_checkpoint_phase("standard_llm_checkpoint", || {
+                    checkpoint_pending_llm(&configs, &seed_messages, turn_index)
+                })?;
+                phase_profile.insert(llm_phase.0, llm_phase.1);
+
+                let tools_phase =
+                    measure_checkpoint_phase("standard_parallel_tools_checkpoint", || {
+                        checkpoint_pending_parallel_tools(&configs, &seed_messages, turn_index)
+                    })?;
+                phase_profile.insert(tools_phase.0, tools_phase.1);
+
+                let exec_phase = measure_checkpoint_phase("rlm_exec_checkpoint", || {
+                    checkpoint_pending_exec(&configs, &seed_messages, turn_index)
+                })?;
+                phase_profile.insert(exec_phase.0, exec_phase.1);
+
+                Ok(TurnRun {
+                    value: (),
+                    tail: TurnTail {
+                        phase_profile,
+                        ..TurnTail::default()
+                    },
+                })
             },
-            phase_profile,
-            turn_usage: TokenUsage::default(),
-            usage_delta: SessionUsageReport::default(),
-            cumulative_usage: SessionUsageReport::default(),
-        });
+            async {
+                tokio::task::yield_now().await;
+                Ok(())
+            },
+        )
+        .await?;
     }
 
-    let export_before_alloc = allocator_stats();
-    let export_started = Instant::now();
-    serde_json::to_vec(&seed_messages)?;
-    let export_state_ms = elapsed_ms(export_started);
-    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
-    let after_export_memory = process_memory_sample();
-    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
+    run.export(async { serde_json::to_vec(&seed_messages).map_err(anyhow::Error::from) })
+        .await?;
 
-    Ok(RuntimePerfRunResult {
-        scenario: RuntimePerfScenario::TurnCheckpoint.name().to_string(),
-        scenario_harness: RuntimePerfScenario::TurnCheckpoint
-            .scenario_harness()
-            .name()
-            .to_string(),
-        chat_turns,
-        stack_profile: None,
-        stages: run_stages(
-            [
-                (
-                    stage::BUILD_RUNTIME,
-                    RuntimePerfStageRunResult::measured(
-                        build_runtime_ms,
-                        build_runtime_alloc,
-                        after_build_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::SEED_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        seed_state_ms,
-                        seed_state_alloc,
-                        after_seed_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::EXPORT_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        export_state_ms,
-                        export_state_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::TOTAL,
-                    RuntimePerfStageRunResult::measured(
-                        elapsed_ms(total_started),
-                        total_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-            ],
-            &turns,
-        ),
+    Ok(run.finish(RunTail {
         session_nodes: seed_messages.len(),
         active_path_messages: seed_messages.len(),
-        extra_counters: BTreeMap::new(),
-        metric_samples: BTreeMap::new(),
-        metric_samples_ms: BTreeMap::new(),
-        memory: RuntimePerfMemoryRunResult {
-            rss_before_kb: before_memory.rss_kb,
-            peak_hwm_before_kb: before_memory.hwm_kb,
-            peak_hwm_after_kb: after_export_memory.hwm_kb,
-            rss_growth_kb: diff_opt_i64(before_memory.rss_kb, after_export_memory.rss_kb),
-            hwm_growth_kb: diff_opt_i64(before_memory.hwm_kb, after_export_memory.hwm_kb),
-        },
-        phase_profile: sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile)),
-        turns,
-        cumulative_usage: SessionUsageReport::default(),
-    })
+        ..RunTail::default()
+    }))
 }
 
 const CHECKPOINT_STATE_BINDINGS: usize = 300;
