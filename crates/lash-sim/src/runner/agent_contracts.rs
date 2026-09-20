@@ -654,7 +654,7 @@ async fn facade_final_value_execution_inner(
         .collect::<Vec<_>>();
     let facts = runtime_final_value_invariant_facts(&result, &recorded);
     require(
-        facts.passed
+        facts.passed()
             && facts.outcome_kind == "final_value"
             && facts.semantic_value.as_ref() == Some(&final_value)
             && final_value_events.iter().any(|value| value == &final_value)
@@ -1024,7 +1024,7 @@ async fn agent_process_execution_result(
         .collect::<Vec<_>>();
     let facts = runtime_final_value_invariant_facts(&result, &recorded);
     require(
-        facts.passed
+        facts.passed()
             && facts.outcome_kind == "final_value"
             && facts.semantic_value.as_ref() == Some(&final_value)
             && final_value_events.iter().any(|value| value == &final_value)

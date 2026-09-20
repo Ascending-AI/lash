@@ -168,6 +168,7 @@ pub fn reverify_runtime_invariant_facts(
         reverification.reverified_turn_count += 1;
 
         if let Some(graph) = facts.get("graph") {
+            let recorded = recorded_passed(event, "graph", graph)?;
             let graph: RuntimeGraphInvariantFacts =
                 serde_json::from_value(graph.clone()).map_err(|err| {
                     ReplayError::Divergence(format!(
@@ -175,15 +176,12 @@ pub fn reverify_runtime_invariant_facts(
                         event.boundary_id
                     ))
                 })?;
-            let recomputed = graph.duplicate_node_ids.is_empty()
-                && graph.missing_parent_links.is_empty()
-                && graph.cycle_node_ids.is_empty()
-                && graph.leaf_exists;
+            let recomputed = graph.passed();
             require_reverified(
                 event,
                 "graph",
                 recomputed,
-                graph.passed,
+                recorded,
                 format!(
                     "duplicates={:?} missing_parents={:?} cycles={:?} leaf_exists={}",
                     graph.duplicate_node_ids,
@@ -197,6 +195,7 @@ pub fn reverify_runtime_invariant_facts(
         }
 
         if let Some(agent_frame) = facts.get("agent_frame") {
+            let recorded = recorded_passed(event, "agent_frame", agent_frame)?;
             let agent_frame: RuntimeAgentFrameInvariantFacts =
                 serde_json::from_value(agent_frame.clone()).map_err(|err| {
                     ReplayError::Divergence(format!(
@@ -204,17 +203,12 @@ pub fn reverify_runtime_invariant_facts(
                         event.boundary_id
                     ))
                 })?;
-            let recomputed = agent_frame.active_frame_ids.len() == 1
-                && agent_frame.active_frame_ids.first() == Some(&agent_frame.current_frame_node_id)
-                && agent_frame.current_frame_exists
-                && agent_frame.current_frame_active
-                && agent_frame.nodes_without_agent_frame.is_empty()
-                && agent_frame.node_agent_frame_ids_without_record.is_empty();
+            let recomputed = agent_frame.passed();
             require_reverified(
                 event,
                 "agent_frame",
                 recomputed,
-                agent_frame.passed,
+                recorded,
                 format!(
                     "active_frames={:?} current={} exists={} active={} orphan_frames={:?}",
                     agent_frame.active_frame_ids,
@@ -233,6 +227,7 @@ pub fn reverify_runtime_invariant_facts(
         }
 
         if let Some(usage) = facts.get("usage") {
+            let recorded = recorded_passed(event, "usage", usage)?;
             let usage: RuntimeUsageInvariantFacts =
                 serde_json::from_value(usage.clone()).map_err(|err| {
                     ReplayError::Divergence(format!(
@@ -240,14 +235,12 @@ pub fn reverify_runtime_invariant_facts(
                         event.boundary_id
                     ))
                 })?;
-            let recomputed = usage.negative_fields.is_empty()
-                && usage.non_negative
-                && usage.usage_events_monotonic;
+            let recomputed = usage.passed();
             require_reverified(
                 event,
                 "usage",
                 recomputed,
-                usage.passed,
+                recorded,
                 format!(
                     "negative_fields={:?} non_negative={} monotonic={}",
                     usage.negative_fields, usage.non_negative, usage.usage_events_monotonic
@@ -258,6 +251,22 @@ pub fn reverify_runtime_invariant_facts(
         }
     }
     Ok(reverification)
+}
+
+/// The recorded `passed` flag is evidence to check against, never an input to
+/// the recompute: it is read from the raw fact JSON so a trace whose stored
+/// flag disagrees with its own structural fields still diverges.
+fn recorded_passed(
+    event: &DeliveredBoundary,
+    invariant: &str,
+    facts: &Value,
+) -> Result<bool, ReplayError> {
+    facts.get("passed").and_then(Value::as_bool).ok_or_else(|| {
+        ReplayError::Divergence(format!(
+            "boundary `{}` recorded an unreadable {invariant} invariant fact: missing field `passed`",
+            event.boundary_id
+        ))
+    })
 }
 
 fn require_reverified(

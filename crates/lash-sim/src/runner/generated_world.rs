@@ -1356,9 +1356,9 @@ async fn run_provider_turn_task(
             "session_id": true,
             "turn_index": true,
             "graph_non_empty": graph_node_count > 0,
-            "graph_acyclic": graph_invariant.passed,
-            "single_active_agent_frame": agent_frame_invariant.passed,
-            "usage_monotonic": usage_invariant.passed,
+            "graph_acyclic": graph_invariant.cycle_node_ids.is_empty(),
+            "single_active_agent_frame": agent_frame_invariant.active_frame_ids.len() == 1,
+            "usage_monotonic": usage_invariant.usage_events_monotonic,
             "transcript_contains_provider_output": read_view.messages().iter().any(|message| {
                 message.parts.iter().any(|part| part.content().contains(expected_text))
             }),
