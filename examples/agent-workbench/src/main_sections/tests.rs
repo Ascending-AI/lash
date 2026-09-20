@@ -1841,7 +1841,9 @@ async fn wait_for_restate_invocation_success(
             .expect("query Restate invocation status")
         {
             Some(status) if status.completed_successfully() => return,
-            Some(status) if status.status == "completed" => {
+            Some(status)
+                if status.status == lash_restate::RestateInvocationLifecycle::Completed =>
+            {
                 panic!("Restate invocation {invocation_id} completed unsuccessfully: {status:#?}")
             }
             Some(status) => {

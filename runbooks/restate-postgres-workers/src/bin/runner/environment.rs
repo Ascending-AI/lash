@@ -405,14 +405,17 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
                     && process_ids
                         .iter()
                         .any(|process_id| row.target_service_key.as_deref() == Some(process_id)))
-                && matches!(row.status.as_str(), "ready" | "running" | "backing-off")
+                && matches!(
+                    row.status,
+                    lash_restate::RestateInvocationLifecycle::Ready
+                        | lash_restate::RestateInvocationLifecycle::Running
+                        | lash_restate::RestateInvocationLifecycle::BackingOff
+                )
         });
         let callees_completed = !wait_rows.is_empty()
-            && wait_rows
-                .iter()
-                .all(|row| row.status == "completed" && row.completion_result.as_deref() == Some("success"));
+            && wait_rows.iter().all(|row| row.completed_successfully());
         let suspended_on_completed_promise = wait_rows.iter().any(|row| {
-            row.status == "suspended"
+            row.status == lash_restate::RestateInvocationLifecycle::Suspended
                 && row
                     .target_service_key
                     .as_ref()
@@ -427,7 +430,7 @@ pub(super) async fn dump_workflow_timeout_diagnostics(pool: &sqlx::PgPool, workf
         let terminal_handler_failure = rows.iter().find(|row| {
             row.target_service_name == TURN_WORKFLOW_NAME
                 && row.target_service_key.as_deref() == Some(workflow_id)
-                && row.status == "completed"
+                && row.status == lash_restate::RestateInvocationLifecycle::Completed
                 && row.completion_result.as_deref() == Some("failure")
         });
 
@@ -754,8 +757,10 @@ pub(super) async fn assert_no_problem_lash_restate_invocations(admin_url: &str) 
              FROM sys_invocation \
              WHERE ({service_filter}) \
                AND COALESCE(target_service_key, '') <> 'e2e-turn-break-glass' \
-               AND (status IN ('backing-off', 'failed') OR completion_result = 'failure' OR completion_failure IS NOT NULL) \
-             ORDER BY modified_at DESC"
+               AND (status IN ({}, {}) OR completion_result = 'failure' OR completion_failure IS NOT NULL) \
+             ORDER BY modified_at DESC",
+            lash_restate::RestateInvocationLifecycle::BackingOff.sql_literal(),
+            lash_restate::RestateInvocationLifecycle::Failed.sql_literal(),
         ))
         .await
         .context("query Restate problem Lash invocations")?;

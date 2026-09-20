@@ -96,7 +96,11 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
     )
     .await;
     assert!(
-        matches!(admitted_a.status.as_str(), "running" | "suspended"),
+        matches!(
+            admitted_a.status,
+            lash_restate::RestateInvocationLifecycle::Running
+                | lash_restate::RestateInvocationLifecycle::Suspended
+        ),
         "fixture A must be executing when its journal prefix is captured: {admitted_a:#?}"
     );
     let lash_drain = harness_a

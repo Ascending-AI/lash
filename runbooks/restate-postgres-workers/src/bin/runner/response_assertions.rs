@@ -485,10 +485,9 @@ pub(super) async fn wait_for_durable_wait_suspended(
             )
             .await
             .context("query durable wait invocation before peer resolution")?;
-        if last_status
-            .as_ref()
-            .is_some_and(|status| status.status == "suspended")
-        {
+        if last_status.as_ref().is_some_and(|status| {
+            status.status == lash_restate::RestateInvocationLifecycle::Suspended
+        }) {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
