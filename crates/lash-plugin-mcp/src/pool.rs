@@ -102,13 +102,63 @@ pub struct McpConnectionPool {
     lifecycle_observer: RwLock<Option<crate::service_lifecycle::LifecycleObserver>>,
 }
 
+/// Why an MCP server entry currently has no usable connection. The kind is
+/// recorded at write time so readers never re-parse prose to tell a real
+/// failure apart from a dispatch- or shutdown-path note.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum McpServerFault {
+    /// Connect, discovery, liveness, or disconnect failure reported by the
+    /// lifecycle actor.
+    Connection(String),
+    /// The reconnect-attempt budget was spent; carries the rendered summary
+    /// returned to tool callers.
+    ReconnectExhausted(String),
+    /// Synthesized on the dispatch path when no service is published but a
+    /// reconnect is in flight. Recorded so subsequent dispatches report the
+    /// same availability state instead of re-wrapping a fresh message.
+    DispatchUnavailable(String),
+    /// Teardown-path anomaly: a lifecycle-actor JoinError, a wedged actor, or
+    /// an unreaped stdio child.
+    Shutdown(String),
+}
+
+impl McpServerFault {
+    /// The rendered message carried by the fault.
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Connection(message)
+            | Self::ReconnectExhausted(message)
+            | Self::DispatchUnavailable(message)
+            | Self::Shutdown(message) => message,
+        }
+    }
+
+    fn into_message(self) -> String {
+        match self {
+            Self::Connection(message)
+            | Self::ReconnectExhausted(message)
+            | Self::DispatchUnavailable(message)
+            | Self::Shutdown(message) => message,
+        }
+    }
+}
+
+impl std::fmt::Display for McpServerFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
 /// Connection status of one configured server, for host/UI observability.
 #[derive(Clone, Debug)]
 pub struct McpServerStatus {
     pub server_name: String,
     pub connected: bool,
-    /// Most recent connection error; cleared when a connect succeeds.
-    pub last_error: Option<String>,
+    /// Most recent recorded fault — a connection failure, a reconnect
+    /// exhaustion summary, a dispatch-unavailability note, or a shutdown
+    /// anomaly; the variant says which. Cleared when a connect or tool call
+    /// succeeds.
+    pub last_error: Option<McpServerFault>,
     /// Number of tools imported from the server's last successful discovery.
     pub tool_count: usize,
     /// Whether the configured reconnect-attempt budget has been exhausted.
@@ -132,7 +182,7 @@ struct McpEntry {
     /// surface stays stable. Keys are the bounded, identity-suffixed model
     /// names (`mcp__<server>__<tool>_<digest>`).
     imported_tools: RwLock<BTreeMap<String, ImportedTool>>,
-    last_error: RwLock<Option<String>>,
+    last_error: RwLock<Option<McpServerFault>>,
     shutting_down: Arc<AtomicBool>,
     /// Applies randomized delay to the entry-owned reconnect ceiling. Kept as
     /// a seam so pacing tests can observe ceilings without wall-clock sleeps.
@@ -623,34 +673,34 @@ impl McpConnectionPool {
                         });
                     }
                     if entry.reconnect_exhausted.load(Ordering::SeqCst) {
-                        let last_error = entry.last_error.read_recover().clone();
+                        let message = match &*entry.last_error.read_recover() {
+                            Some(McpServerFault::ReconnectExhausted(summary)) => summary.clone(),
+                            _ => format!(
+                                "MCP server `{server_name}` reconnect attempts exhausted; no background recovery is active"
+                            ),
+                        };
                         return ToolOutcome::failure(ToolFailure {
                             class: ToolFailureClass::Unavailable,
                             code: "mcp_reconnect_exhausted".into(),
-                            message: last_error.unwrap_or_else(|| {
-                                format!(
-                                    "MCP server `{server_name}` reconnect attempts exhausted; no background recovery is active"
-                                )
-                            }),
+                            message,
                             source: ToolFailureSource::Plugin,
                             retry: ToolRetryStatus::Never,
                             raw: None,
                         });
                     }
-                    let previous_error = entry.last_error.read_recover().clone();
-                    let dispatch_error = match previous_error {
-                        Some(previous_error) if previous_error.contains("before tool dispatch") => {
-                            previous_error
-                        }
-                        Some(previous_error) => format!(
+                    let dispatch_error = match &*entry.last_error.read_recover() {
+                        Some(McpServerFault::DispatchUnavailable(note)) => note.clone(),
+                        Some(fault) => format!(
                             "MCP server `{server_name}` was disconnected before tool dispatch \
-                             (reconnecting in the background; last error: {previous_error})"
+                             (reconnecting in the background; last error: {})",
+                            fault.message()
                         ),
                         None => format!(
                             "MCP server `{server_name}` was disconnected before tool dispatch"
                         ),
                     };
-                    *entry.last_error.write_recover() = Some(dispatch_error.clone());
+                    *entry.last_error.write_recover() =
+                        Some(McpServerFault::DispatchUnavailable(dispatch_error.clone()));
                     let message = McpError::Protocol(dispatch_error);
                     return ToolOutcome::retryable_failure(
                         ToolFailureClass::Unavailable,
@@ -1237,7 +1287,7 @@ impl McpEntry {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 let reason = format!("MCP lifecycle actor terminated with JoinError: {error}");
-                *self.last_error.write_recover() = Some(reason.clone());
+                *self.last_error.write_recover() = Some(McpServerFault::Shutdown(reason.clone()));
                 tracing::error!(server = %self.server_name, reason = %reason, "MCP lifecycle actor failed during explicit shutdown");
             }
             Err(_) => {
@@ -1253,7 +1303,7 @@ impl McpEntry {
                         "MCP stdio child PID {pid} abandoned: lifecycle actor did not finish within the {shutdown_bound:?} per-entry total shutdown deadline"
                     )
                 };
-                *self.last_error.write_recover() = Some(reason.clone());
+                *self.last_error.write_recover() = Some(McpServerFault::Shutdown(reason.clone()));
                 tracing::error!(
                     server = %self.server_name,
                     pid = (pid != 0).then_some(pid),

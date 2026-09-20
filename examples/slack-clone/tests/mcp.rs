@@ -817,7 +817,10 @@ async fn the_configured_http_header_is_what_lets_the_transport_connect() {
     let refused = status_of(&runtime, "workspace_http_denied");
     assert!(!refused.connected);
     assert_eq!(refused.tool_count, 0);
-    let last_error = refused.last_error.unwrap_or_default();
+    let last_error = refused
+        .last_error
+        .map(|fault| fault.to_string())
+        .unwrap_or_default();
     assert!(
         last_error.contains("401") || last_error.to_lowercase().contains("unauthorized"),
         "the rejection must name the credential failure: {last_error}"

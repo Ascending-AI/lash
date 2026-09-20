@@ -40,7 +40,7 @@ pub use host::{
 pub use plugin::{
     McpDeferredToolProvider, McpPluginFactory, McpPluginFactoryBuilder, McpToolProvider,
 };
-pub use pool::{McpConnectionPool, McpServerStatus};
+pub use pool::{McpConnectionPool, McpServerFault, McpServerStatus};
 pub use rmcp::model::{
     CreateElicitationRequestParams, CreateElicitationResult, CreateMessageRequestParams,
     CreateMessageResult, ElicitationAction, ElicitationCapability, ErrorData as McpProtocolError,

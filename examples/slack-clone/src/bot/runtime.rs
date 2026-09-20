@@ -214,7 +214,7 @@ pub async fn build_core(
             status.server_name,
             status.connected,
             status.tool_count,
-            status.last_error.as_deref().unwrap_or("none")
+            status.last_error.as_ref().map_or("none", |f| f.message())
         );
     }
     let mut builder = LashCore::standard_builder(lash::TurnBudget::Unbounded)

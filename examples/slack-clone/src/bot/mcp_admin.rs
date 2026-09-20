@@ -100,7 +100,7 @@ impl ServerView {
             connected: status.connected,
             tool_count: status.tool_count,
             reconnect_exhausted: status.reconnect_exhausted,
-            last_error: status.last_error,
+            last_error: status.last_error.map(|fault| fault.to_string()),
             tools,
         }
     }

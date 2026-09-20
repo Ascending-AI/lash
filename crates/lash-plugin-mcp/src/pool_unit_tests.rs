@@ -1651,11 +1651,11 @@ async fn discovery_hang_surfaces_startup_timeout() {
     }
     assert!(entry.service_snapshot().is_none());
     assert!(
-        entry
-            .last_error
-            .read_recover()
-            .as_deref()
-            .is_some_and(|err| err.contains("timed out") || err.contains("timeout")),
+        matches!(
+            entry.last_error.read_recover().as_ref(),
+            Some(McpServerFault::Connection(err))
+                if err.contains("timed out") || err.contains("timeout")
+        ),
         "the failure is recorded for status reporting"
     );
 }
