@@ -1054,6 +1054,8 @@ mod attachments;
 mod effect_replay;
 #[path = "postgres/evidence_retention.rs"]
 mod evidence_retention;
+#[path = "postgres/pending_turn_inputs.rs"]
+mod pending_turn_inputs;
 mod preflight;
 #[path = "postgres/process_definitions.rs"]
 mod process_definitions;
@@ -1064,6 +1066,8 @@ mod process_lifecycle_sql;
 mod process_lifecycle_sql_tests;
 #[path = "postgres/process_registry.rs"]
 mod process_registry;
+#[path = "postgres/queued_work.rs"]
+mod queued_work;
 #[path = "postgres/release_stamp.rs"]
 mod release_stamp;
 #[path = "postgres/required_constraints.rs"]
@@ -1113,8 +1117,8 @@ pub use schema_shape::{
     SchemaProvisioning, SchemaReport, UniqueGuard,
 };
 use {
-    process_helpers::*, runtime_persistence::*, schema::*, session_factory::*, support::*,
-    turn_input_settlement::*,
+    pending_turn_inputs::*, process_helpers::*, queued_work::*, runtime_persistence::*, schema::*,
+    session_factory::*, support::*, turn_input_settlement::*,
 };
 
 /// Extracts the schema-gate knobs one open should use from a store config.

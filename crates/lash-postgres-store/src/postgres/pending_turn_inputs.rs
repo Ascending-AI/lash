@@ -1,11 +1,11 @@
 //! Pending turn-input row projection and turn-input claim leases.
 //!
-//! Moved verbatim out of `session_factory.rs` to keep both files under the
-//! production line budget; every item keeps its previous path through the
-//! parent's glob re-export.
+//! The durable representation of queued turn inputs, mirroring the SQLite
+//! backend's `pending_turn_inputs` module. Originated in `session_factory.rs`;
+//! every item keeps its previous path through the crate-root glob.
 
-use super::*;
 use crate::runtime_persistence::TURN_INPUT_CLAIM_RELEASE_ASSIGNMENTS;
+use crate::*;
 
 #[derive(Clone, Debug)]
 pub(crate) struct PendingTurnInputRow {
