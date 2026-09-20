@@ -76,12 +76,12 @@ pub(super) fn insert_process(
     );
     state.managed.insert(
         ProcessId::from(id.clone().to_string()),
-        ManagedProcessRecord {
+        Arc::new(ManagedProcessRecord {
             record: record.clone(),
             change_seq,
             events: Vec::new(),
             keyed_events: HashMap::new(),
-        },
+        }),
     );
     if let Some(target) = wake_session_id {
         state

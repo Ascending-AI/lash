@@ -209,11 +209,13 @@ impl TestLocalProcessRegistry {
     pub async fn replace_process_projection_for_testing(&self, record: ProcessRecord) {
         let mut state = self.state.lock().await;
         let process_id = record.id.clone();
-        state
-            .managed
-            .get_mut(&process_id)
-            .expect("replace projection for registered process")
-            .record = record;
+        Arc::make_mut(
+            state
+                .managed
+                .get_mut(&process_id)
+                .expect("replace projection for registered process"),
+        )
+        .record = record;
     }
 
     pub(super) async fn pause_append_after_target_snapshot(&self) {
