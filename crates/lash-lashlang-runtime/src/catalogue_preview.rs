@@ -12,7 +12,9 @@ use std::fmt::Write as _;
 use lash_core::{PromptContribution, ToolManifest};
 use serde_json::Value;
 
-use crate::{ResolvedToolBinding, TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding};
+use crate::{
+    ResolvedToolBinding, TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolBindingResolutionExt,
+};
 
 pub const DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT: usize = 100;
 pub const DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT: usize = 50;

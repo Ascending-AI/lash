@@ -1,70 +1,10 @@
 //! Shared implementation support for Lash tools.
 
-use lash_core::{ToolDefinition, ToolFailure, ToolOutcome};
+use lash_core::{ToolFailure, ToolOutcome};
 
 mod static_provider;
-#[cfg(feature = "lashlang")]
-pub use lash_lashlang_runtime::{TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding};
+pub use lash_core::{TYPESCRIPT_TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
 pub use static_provider::{StaticToolExecute, StaticToolProvider};
-
-/// Whether the resolved dependency graph installs Lashlang tool bindings.
-#[cfg(feature = "lashlang")]
-pub const LASHLANG_BINDINGS_ENABLED: bool = true;
-
-/// Whether the resolved dependency graph installs Lashlang tool bindings.
-#[cfg(not(feature = "lashlang"))]
-pub const LASHLANG_BINDINGS_ENABLED: bool = false;
-
-/// Canonical manifest key used by Lashlang tool bindings.
-#[cfg(not(feature = "lashlang"))]
-pub const TYPESCRIPT_TOOL_BINDING_KEY: &str = "typescript.tool";
-
-#[cfg(not(feature = "lashlang"))]
-#[derive(Clone, Debug, Default)]
-pub struct ToolBinding;
-
-#[cfg(not(feature = "lashlang"))]
-impl ToolBinding {
-    pub fn new(
-        module_path: impl IntoIterator<Item = impl Into<String>>,
-        operation: impl Into<String>,
-    ) -> Self {
-        let _ = module_path
-            .into_iter()
-            .map(Into::into)
-            .collect::<Vec<String>>();
-        let _ = operation.into();
-        Self
-    }
-
-    pub fn with_authority_type(self, authority_type: impl Into<String>) -> Self {
-        let _ = authority_type.into();
-        self
-    }
-
-    pub fn with_aliases(self, aliases: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        let _ = aliases.into_iter().map(Into::into).collect::<Vec<String>>();
-        self
-    }
-}
-
-pub trait ToolDefinitionBindingExt {
-    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self;
-}
-
-#[cfg(feature = "lashlang")]
-impl ToolDefinitionBindingExt for ToolDefinition {
-    fn with_tool_binding(self, tool_binding: ToolBinding) -> Self {
-        lash_lashlang_runtime::ToolDefinitionBindingExt::with_tool_binding(self, tool_binding)
-    }
-}
-
-#[cfg(not(feature = "lashlang"))]
-impl ToolDefinitionBindingExt for ToolDefinition {
-    fn with_tool_binding(self, _tool_binding: ToolBinding) -> Self {
-        self
-    }
-}
 
 pub fn invalid_tool_args(message: impl Into<String>) -> ToolOutcome {
     ToolOutcome::failure(ToolFailure::invalid_request("invalid_tool_args", message))

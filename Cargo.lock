@@ -2711,7 +2711,6 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core",
- "lash-internal-lashlang-runtime",
  "serde_json",
 ]
 

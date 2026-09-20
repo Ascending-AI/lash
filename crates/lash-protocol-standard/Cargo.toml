@@ -29,7 +29,6 @@ serde_json = { workspace = true }
 
 [features]
 default = []
-lashlang = ["lash-tool-support/lashlang"]
 
 [dev-dependencies]
 insta = "1"
