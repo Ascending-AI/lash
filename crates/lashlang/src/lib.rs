@@ -4,6 +4,7 @@ mod artifact;
 mod ast;
 mod builtins;
 mod compile;
+mod ecma_stdlib;
 mod identifier;
 mod identity;
 mod introspection;
@@ -44,6 +45,9 @@ pub fn builtin_names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
 pub use compile::{
     ModuleCompileDiagnostic, ModuleCompileError, ModuleCompileOutput, ModuleCompileRequest,
     compile_module,
+};
+pub use ecma_stdlib::{
+    INSTANCE_STDLIB_SIGNATURES, LiteralReceivers, STATIC_STDLIB_SIGNATURES, StdlibSignature,
 };
 pub use identity::{ProcessDefinitionIdentity, ProcessDefinitionIdentityError};
 pub use introspection::{
