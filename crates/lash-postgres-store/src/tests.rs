@@ -1407,3 +1407,88 @@ impl<S: tracing::Subscriber> Layer<S> for AttachmentWarnings {
         self.0.lock().unwrap().push(fields.0);
     }
 }
+
+/// FIG-3381: in production the settlement verdict runs first, and it — not the
+/// write's rows-affected — is what refuses a superseded claim.
+///
+/// The two paths are distinguishable in the error itself. The verdict reads
+/// the locked row, so its `TurnInputClaimSuperseded` names the claim that took
+/// the row. The write-only backstop has no row to read, so its refusal carries
+/// `None`. Asserting the populated field is therefore proof of ordering, not
+/// just of refusal: skip the verdict and this assertion fails while the typed
+/// error stays the same.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres settlement-order law: database URL is not set");
+        return;
+    };
+    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect settlement-order storage");
+    let session_id = SessionId::from(format!("postgres-settle-order:{}", uuid::Uuid::new_v4()));
+    let input_id = format!("input:{}", uuid::Uuid::new_v4());
+    let stale = lash_core::TurnInputCompletion {
+        session_id: session_id.clone(),
+        claim: Some(lash_core::TurnInputSettlementClaim {
+            claim_id: "claim-a".to_string(),
+            lease_token: "token-a".to_string(),
+        }),
+        data: lash_core::TurnInputCompletionData {
+            input_ids: vec![input_id.clone().into()],
+            applications: Vec::new(),
+        },
+    };
+    sqlx::query(
+        "INSERT INTO lash_pending_turn_inputs (
+            input_id, session_id, ingress_json, state, input_json, enqueued_at_ms,
+            claim_id, claim_owner_id, claim_owner_incarnation_id, claim_token,
+            claim_fencing_token, claim_session_lease_generation
+         )
+         VALUES ($1, $2, '{}', $3, '{}', 1, 'claim-b', 'owner-b', 'incarnation-b', 'token-b', 2, 9)",
+    )
+    .bind(&input_id)
+    .bind(session_id.as_str())
+    .bind(lash_core::TurnInputState::DeferredNextTurn.as_str())
+    .execute(storage.pool())
+    .await
+    .expect("insert superseded turn input");
+
+    let mut tx = storage
+        .pool()
+        .begin()
+        .await
+        .expect("begin settlement-order tx");
+    let error = ensure_turn_input_completion_tx(&mut tx, &stale)
+        .await
+        .expect_err("the verdict must refuse a superseded claim before any write");
+    tx.rollback().await.expect("roll back settlement-order tx");
+
+    let StoreError::TurnInputClaimSuperseded {
+        superseding_claim_id,
+        superseding_session_lease_generation,
+        ref row_id,
+        ..
+    } = error
+    else {
+        panic!("unexpected variant: {error:?}");
+    };
+    assert_eq!(
+        superseding_claim_id.as_deref(),
+        Some("claim-b"),
+        "the refusal must name the claim the locked read observed, which only the verdict can see"
+    );
+    assert_eq!(
+        superseding_session_lease_generation.as_deref().copied(),
+        Some(9),
+        "the refusal must carry the observed generation, which only the verdict can see"
+    );
+    assert_eq!(row_id.as_deref(), Some(input_id.as_str()));
+
+    sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE session_id = $1")
+        .bind(session_id.as_str())
+        .execute(storage.pool())
+        .await
+        .expect("clean settlement-order input");
+}

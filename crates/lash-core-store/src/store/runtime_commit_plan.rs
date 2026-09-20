@@ -444,16 +444,6 @@ impl<'a> RuntimeCommitPlan<'a> {
         self.old_leaf_node_id != self.committed_leaf_node_id
     }
 
-    /// Error prescribed when a conditional head write affected no row. The
-    /// write outcome is authoritative even if a diagnostic re-read happens to
-    /// observe the original revision again.
-    pub fn head_publication_conflict(&self, actual: u64) -> StoreError {
-        StoreError::HeadRevisionConflict {
-            expected: self.commit.expected_head_revision,
-            actual,
-        }
-    }
-
     /// Assemble canonical session-head metadata after checkpoint storage.
     #[expect(
         clippy::expect_used,

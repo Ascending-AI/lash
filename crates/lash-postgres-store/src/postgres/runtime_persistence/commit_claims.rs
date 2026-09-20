@@ -144,8 +144,24 @@ pub(crate) async fn complete_turn_input_claims_tx(
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-            if settlement.rows_affected() != 1 {
-                return Err(match completed.claim.as_ref() {
+            // Backstop: `ensure_turn_input_completion_tx` already took the
+            // verdict over this row under `FOR UPDATE` earlier in this same
+            // transaction, so the predicate cannot legitimately miss. A miss
+            // is recorded as evidence and then fails closed with the same
+            // supersession this site has always returned.
+            lash_core::store_backend_support::require_fenced_write_applied(
+                match completed.claim.as_ref() {
+                    Some(_) => {
+                        lash_core::store_backend_support::FencedWrite::TurnInputClaimSettlement
+                    }
+                    None => {
+                        lash_core::store_backend_support::FencedWrite::UnclaimedTurnInputSettlement
+                    }
+                },
+                crate::POSTGRES_BACKEND,
+                input_id.as_str(),
+                settlement.rows_affected(),
+                || match completed.claim.as_ref() {
                     Some(claim) => StoreError::TurnInputClaimSuperseded {
                         session_id: completed.session_id.clone(),
                         claim_id: claim.claim_id.clone(),
@@ -159,8 +175,8 @@ pub(crate) async fn complete_turn_input_claims_tx(
                         observed_state: None,
                         superseding_claim_id: None,
                     },
-                });
-            }
+                },
+            )?;
         }
     }
     Ok(())

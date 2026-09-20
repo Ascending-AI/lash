@@ -498,6 +498,13 @@ pub enum StoreError {
     )]
     SessionExecutionLeaseReleaseRefused { session_id: SessionId },
     #[error(
+        "session head publication for session `{session_id}` on backend `{backend}` read its head revision outside the backend's single-writer transaction"
+    )]
+    UnfencedHeadPublication {
+        session_id: SessionId,
+        backend: &'static str,
+    },
+    #[error(
         "{record_kind} schema_version {actual} is not supported by this binary (expected {expected})"
     )]
     UnsupportedRecordSchemaVersion {
@@ -729,6 +736,7 @@ impl StoreError {
             Self::SessionExecutionLeaseReleaseRefused { .. } => {
                 "SessionExecutionLeaseReleaseRefused"
             }
+            Self::UnfencedHeadPublication { .. } => "UnfencedHeadPublication",
             Self::UnsupportedRecordSchemaVersion { .. } => "UnsupportedRecordSchemaVersion",
             Self::MissingRecordSchemaVersion { .. } => "MissingRecordSchemaVersion",
             Self::InvalidRecordSchemaVersion { .. } => "InvalidRecordSchemaVersion",

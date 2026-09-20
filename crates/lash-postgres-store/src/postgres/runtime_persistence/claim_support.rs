@@ -827,6 +827,15 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     };
     let mut inputs = Vec::new();
     for ((row, mut input), sql_fencing_token) in selected.into_iter().zip(sql_fencing_tokens) {
+        // The candidate row was selected `FOR UPDATE SKIP LOCKED`, so it is
+        // locked to this transaction. The shared verdict decides; the
+        // read-side copy of this predicate stays because it is also the
+        // `ORDER BY … LIMIT` filter.
+        if !lash_core::store_backend_support::turn_input_claimability(row.claim_facts(), generation)
+            .is_claimable()
+        {
+            return Ok(ClaimTransactionOutcome::Rollback(None));
+        }
         let changed = sqlx::query(
             "UPDATE lash_pending_turn_inputs
              SET state = $3,
@@ -858,7 +867,17 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
-        if changed == 0 {
+        // Backstop: the generation predicate stays on the write, but the
+        // verdict above already authorized it over the locked row. A
+        // disagreement is recorded as evidence and then fails closed exactly
+        // as this site always did — the whole claim transaction rolls back and
+        // no claim is reported.
+        if !lash_core::store_backend_support::fenced_write_applied(
+            lash_core::store_backend_support::FencedWrite::TurnInputClaimAcquisition,
+            crate::POSTGRES_BACKEND,
+            row.input_id.as_str(),
+            changed,
+        ) {
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
         if state_after_claim == lash_core::TurnInputStateKind::Accepted

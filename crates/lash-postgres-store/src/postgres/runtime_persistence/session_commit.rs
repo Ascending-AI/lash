@@ -590,7 +590,30 @@ impl SessionCommitStore for PostgresSessionStore {
             .await
             .map_err(store_sqlx_error)?,
         };
-        let authoritative_revision = locked_revision.max(actual_revision);
+        // The head-CAS verdict, in shared code, over the two reads this
+        // transaction made: `existing` without a row lock (it serves early
+        // validation and receipt replay) and `locked_revision` under
+        // `FOR UPDATE`. The locked read is the authority. Both happen after
+        // the session-keyed advisory lock, so they agree; a disagreement means
+        // the head moved under commit authority and the caller must reload.
+        let authoritative_revision =
+            match lash_core::store_backend_support::head_publication_verdict(
+                actual_revision,
+                locked_revision,
+            ) {
+                lash_core::store_backend_support::HeadPublicationVerdict::Publish => {
+                    locked_revision
+                }
+                lash_core::store_backend_support::HeadPublicationVerdict::HeadMoved {
+                    observed_head_revision,
+                    ..
+                } => {
+                    return Err(StoreError::HeadRevisionConflict {
+                        expected: commit.expected_head_revision,
+                        actual: observed_head_revision,
+                    });
+                }
+            };
         let node_ids = commit
             .graph
             .nodes()
@@ -691,9 +714,12 @@ impl SessionCommitStore for PostgresSessionStore {
             })?;
         }
         let meta = plan.head_meta(checkpoint_ref.clone());
-        // Conditional publication is still required for concurrent first
-        // commits, where no head row existed to lock. Existing sessions already
-        // hold the row lock above; the revision predicate is defense in depth.
+        // The revision predicate stays on the upsert as the backstop, and it
+        // is the ONLY statement-level guard for a concurrent *first* commit,
+        // where the placeholder row above is created inside this transaction.
+        // Existing sessions already hold the row lock and the session-keyed
+        // advisory lock, so for them it can no longer disagree with the
+        // verdict.
         let head_write = sqlx::query(
             "INSERT INTO lash_sessions
              (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
@@ -724,11 +750,19 @@ impl SessionCommitStore for PostgresSessionStore {
             }
             Err(err) => return Err(store_sqlx_error(err)),
         };
-        if head_write.rows_affected() == 0 {
-            // A concurrent commit won the race: the head no longer matches the
-            // revision we read. Re-read the now-current revision for an accurate
-            // report, then drop `tx` (auto-rollback), discarding this attempt's
-            // node/usage writes; the caller reloads and retries.
+        // Backstop: the verdict above authorized exactly this publication over
+        // exactly this locked revision, so any other row count means the
+        // locked read and the upsert predicate disagree. Record that as
+        // evidence, then fail closed with the same `HeadRevisionConflict` this
+        // site has always returned, over a freshly read revision so the report
+        // is accurate. `tx` then drops (auto-rollback), discarding this
+        // attempt's node and usage writes; the caller reloads and retries.
+        if !lash_core::store_backend_support::fenced_write_applied(
+            lash_core::store_backend_support::FencedWrite::SessionHeadPublication,
+            crate::POSTGRES_BACKEND,
+            commit.session_id.as_str(),
+            head_write.rows_affected(),
+        ) {
             let actual_now = sqlx::query_scalar::<_, i64>(
                 "SELECT head_revision FROM lash_sessions WHERE session_id = $1",
             )
@@ -739,7 +773,10 @@ impl SessionCommitStore for PostgresSessionStore {
             .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
             .transpose()?
             .unwrap_or(plan.actual_head_revision());
-            return Err(plan.head_publication_conflict(actual_now));
+            return Err(StoreError::HeadRevisionConflict {
+                expected: commit.expected_head_revision,
+                actual: actual_now,
+            });
         }
         sqlx::query("UPDATE lash_session_meta SET last_commit_at_ms = $2 WHERE session_id = $1")
             .bind(commit.session_id.as_str())

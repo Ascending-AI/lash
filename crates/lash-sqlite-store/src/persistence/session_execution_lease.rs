@@ -156,39 +156,20 @@ impl SessionExecutionLeaseStore for Store {
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<SessionExecutionLease, StoreError> = (|| {
-                    let current = load_session_execution_lease_row_conn(tx, &fence.session_id)?;
-                    let Some(current) = current else {
-                        return Err(StoreError::SessionExecutionLeaseExpired {
-                            session_id: fence.session_id.clone(),
-                        });
-                    };
-                    if !current
-                        .owner
-                        .as_ref()
-                        .is_some_and(|owner| owner.same_incarnation(&fence.owner))
-                        || current.executor_id.as_deref() != Some(fence.executor_id.as_str())
-                        || current.lease_token.as_deref() != Some(fence.lease_token.as_str())
-                    {
-                        lash_core::store_backend_support::trace_session_execution_lease_refusal(
-                            lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
-                            "owner_or_token_mismatch",
-                            "sqlite_write_transaction",
-                            &fence,
-                            lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
-                                current.owner.as_ref(),
-                                current.executor_id.as_deref(),
-                                current.lease_token.as_deref(),
-                            ),
-                        );
-                        return Err(StoreError::SessionExecutionLeaseRenewalRefused {
-                            session_id: fence.session_id.clone(),
-                        });
-                    }
-                    if current.expires_at_ms <= now {
-                        return Err(StoreError::SessionExecutionLeaseExpired {
-                            session_id: fence.session_id.clone(),
-                        });
-                    }
+                    // Lock and read: the `BEGIN IMMEDIATE` write transaction is
+                    // SQLite's single-writer lock, so this row cannot move
+                    // before the renewal below.
+                    let observed = load_session_execution_lease_row_conn(tx, &fence.session_id)?;
+                    // The shared verdict is the decision. `now` is this store's
+                    // injected host clock, which is also what a simulation
+                    // steers.
+                    let current = lash_core::store_backend_support::require_renewable_session_execution_lease(
+                        observed.as_ref(),
+                        &fence,
+                        now,
+                        lash_core::store_backend_support::FenceTimeAuthority::EmbeddedHost,
+                        "sqlite_write_transaction",
+                    )?;
                     let expires_at = now.saturating_add(lease_ttl_ms);
                     let sql_expires_at = sql_counter_value(
                         "session_execution_lease_expires_at_ms",
@@ -218,32 +199,30 @@ impl SessionExecutionLeaseStore for Store {
                         ],
                     )
                     .map_err(sqlite_error)?;
-                    if renewed != 1 {
-                        lash_core::store_backend_support::trace_session_execution_lease_refusal(
-                            lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,
-                            "conditional_update_did_not_match",
-                            "sqlite_write_transaction",
-                            &fence,
-                            lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
-                                current.owner.as_ref(),
-                                current.executor_id.as_deref(),
-                                current.lease_token.as_deref(),
-                            ),
-                        );
-                        return Err(StoreError::SessionExecutionLeaseRenewalRefused {
+                    // Backstop: the five-column predicate above stays on the
+                    // statement, but it is no longer a second source of the
+                    // verdict. Under the write transaction it cannot disagree
+                    // with the locked read, so any other row count is a defect.
+                    lash_core::store_backend_support::require_fenced_write_applied(
+                        lash_core::store_backend_support::FencedWrite::SessionExecutionLeaseRenewal,
+                        SQLITE_BACKEND,
+                        fence.session_id.as_str(),
+                        u64::try_from(renewed).unwrap_or(u64::MAX),
+                        || StoreError::SessionExecutionLeaseRenewalRefused {
                             session_id: fence.session_id.clone(),
-                        });
-                    }
-                    Ok(SessionExecutionLease {
-                        session_id: fence.session_id,
-                        owner: fence.owner,
-                        executor_id: fence.executor_id,
-                        lease_token: fence.lease_token,
+                        },
+                    )?;
+                    let renewed_lease = SessionExecutionLease {
+                        session_id: fence.session_id.clone(),
+                        owner: fence.owner.clone(),
+                        executor_id: fence.executor_id.clone(),
+                        lease_token: fence.lease_token.clone(),
                         fencing_token: current.fencing_token,
                         claimed_at_epoch_ms: current.claimed_at_ms,
                         lease_term_ms: lease_ttl_ms,
                         expires_at_epoch_ms: expires_at,
-                    })
+                    };
+                    Ok(renewed_lease)
                 })();
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
@@ -262,28 +241,27 @@ impl SessionExecutionLeaseStore for Store {
         self.conn
             .write_flow(move |tx| {
                 let outcome = (|| {
-                    let current =
+                    // Lock and read inside the `BEGIN IMMEDIATE` write
+                    // transaction, then let the shared verdict decide.
+                    let observed =
                         load_session_execution_lease_row_conn(tx, &completion.session_id)?;
-                    if !release_session_execution_lease_conn(tx, &completion)? {
-                        lash_core::store_backend_support::trace_session_execution_lease_refusal(
-                            lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,
-                            "token_scoped_release_did_not_match",
-                            "sqlite_write_transaction",
-                            &completion,
-                            lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle(
-                                current.as_ref().and_then(|lease| lease.owner.as_ref()),
-                                current
-                                    .as_ref()
-                                    .and_then(|lease| lease.executor_id.as_deref()),
-                                current
-                                    .as_ref()
-                                    .and_then(|lease| lease.lease_token.as_deref()),
-                            ),
-                        );
-                        return Err(StoreError::SessionExecutionLeaseReleaseRefused {
+                    lash_core::store_backend_support::require_releasable_session_execution_lease(
+                        observed.as_ref(),
+                        &completion,
+                        "sqlite_write_transaction",
+                    )?;
+                    let released = release_session_execution_lease_conn(tx, &completion)?;
+                    // Backstop: the five-column predicate stays on the release
+                    // statement and must agree with the verdict.
+                    lash_core::store_backend_support::require_fenced_write_applied(
+                        lash_core::store_backend_support::FencedWrite::SessionExecutionLeaseRelease,
+                        SQLITE_BACKEND,
+                        completion.session_id.as_str(),
+                        u64::from(released),
+                        || StoreError::SessionExecutionLeaseReleaseRefused {
                             session_id: completion.session_id.clone(),
-                        });
-                    }
+                        },
+                    )?;
                     Ok(())
                 })();
                 match outcome {

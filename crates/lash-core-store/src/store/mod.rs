@@ -17,6 +17,9 @@ mod claim_settlement;
 pub mod commit_budget;
 mod commit_identity;
 mod error;
+pub mod fencing;
+#[cfg(test)]
+mod fencing_tests;
 mod fork_plan;
 mod graph_commit;
 mod lease_timings;
@@ -50,6 +53,19 @@ pub use commit_identity::{
     derive_history_node_id,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
+pub use fencing::{
+    EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority, EffectReplayLeaseFacts,
+    EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
+    FenceTimeAuthority, FencedWrite, HeadPublicationVerdict, ProcessLeaseAuthority,
+    ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts, TurnInputSettlementFacts,
+    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability,
+    effect_replay_lease_verdict, fenced_write_applied, head_publication_verdict,
+    process_lease_verdict, queued_work_batch_claimability, require_fenced_write_applied,
+    require_releasable_session_execution_lease, require_renewable_session_execution_lease,
+    require_settleable_queued_work, require_settleable_turn_input,
+    require_single_writer_head_publication, turn_input_claimability,
+    unclaimed_turn_input_is_settleable, wake_delivery_claim_verdict,
+};
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{

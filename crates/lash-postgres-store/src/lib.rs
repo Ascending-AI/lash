@@ -86,6 +86,13 @@ use sqlx::{Acquire, Executor, Postgres, Row};
 
 const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 
+/// Backend name this store reports in shared fencing diagnostics.
+///
+/// Every fenced write names its backend so
+/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core::StoreError::FencedWriteVerdictDisagreed)
+/// says which store's locked read and backstop predicate disagreed.
+pub(crate) const POSTGRES_BACKEND: &str = "postgres";
+
 async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Postgres>, StoreError> {
     #[cfg(feature = "perf-witness")]
     let perf_started_at = std::time::Instant::now();
