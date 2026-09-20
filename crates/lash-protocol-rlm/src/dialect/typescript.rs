@@ -1129,6 +1129,13 @@ mod tests {
         // collision matrix FIG-1443 fixed.
         hazards.extend(["then", "catch", "finally"]);
         hazards.extend(lash_typescript::accepted_instance_methods());
+        // Strict-mode-illegal *binding* names that are still legal member
+        // roots: `eval.op`/`arguments.op` lower and dispatch like any other
+        // tool path (the literal `undefined` does too, via RESERVED_WORDS).
+        // FIG-1483 records the decision to admit them — the catalog advertises
+        // the call path, which is exactly what the cell writes — so the sweep
+        // holds their admission rather than assuming a refusal.
+        hazards.extend(["eval", "arguments"]);
         // Roots the lowerer treats as ECMA global namespaces, so a tool module
         // can never be addressed under them.
         hazards.extend([
@@ -1226,6 +1233,15 @@ mod tests {
             assert!(
                 refused.iter().any(|path| path == expected),
                 "registration must refuse `{expected}`: {refused:?}"
+            );
+        }
+        // The strict-mode-illegal binding names stay admitted: they are legal
+        // member roots, the advertised form is the call path itself, and each
+        // dispatches below (FIG-1483).
+        for expected in ["undefined.op", "eval.op", "arguments.op"] {
+            assert!(
+                admitted.iter().any(|(.., path)| path == expected),
+                "registration must admit `{expected}`: {refused:?}"
             );
         }
         assert!(

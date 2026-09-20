@@ -464,6 +464,7 @@ impl Lowerer {
         if matches!(object, Expr::Ident(name, _) if name == "crypto")
             && method == "randomUUID"
             && !self.has_binding("crypto")
+            && !self.module_authority_roots.contains("crypto")
         {
             return Err(Diagnostic::refusal(
                 DiagnosticCode::MethodUnsupported,
@@ -616,8 +617,15 @@ impl Lowerer {
                 None,
             ));
         }
+        // A registered `console` module root takes authority over the
+        // observation shim, the same way a cell-local `console` binding does:
+        // without it the special case silently swallowed the host's binding
+        // (FIG-1483). The ECMA-global special cases stay root-blind on purpose
+        // — a host module named `Math` still loses to the stdlib surface,
+        // which is why RLM registration refuses those roots outright.
         if matches!(object, Expr::Ident(name, _) if name == "console")
             && matches!(method, "log" | "warn" | "error" | "info" | "debug")
+            && !self.module_authority_roots.contains("console")
         {
             if !self.has_binding("console") {
                 // The arguments reach the substrate untouched. Joining them
