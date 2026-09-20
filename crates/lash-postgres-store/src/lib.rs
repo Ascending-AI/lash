@@ -375,7 +375,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // table, where the payload is a snapshot and (request, input id) uniqueness
 // is structural (FIG-3263). Component-101 catalogs are rejected and
 // recreated.
-const SCHEMA_VERSION: i32 = 102;
+// Version 103 moves no shape: it is the store-version window's floor move
+// (FIG-2082), which retires every migration arm below component 101 so a
+// pre-cutover stamp has no applicable migration at open. Component-102 and
+// older catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 103;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
