@@ -42,6 +42,28 @@
 //! substring, which is what a regex would do to `await_event_waits` inside
 //! `await_event_waits_archive`.
 //!
+//! # The vocabulary axis
+//!
+//! Some predicates are neither dialect nor prose: they are *domain
+//! vocabulary*, generated from an enum so that adding a lifecycle variant is
+//! one edit rather than seventy-nine. A neutral statement names one as a
+//! token and the renderer expands it, once, at startup, from the
+//! [`Vocabulary`] the [`Dialect`] carries:
+//!
+//! ```text
+//! SELECT COUNT(*) FROM processes WHERE {{live_process_status(status)}}
+//! ```
+//!
+//! renders, on both backends, to `… WHERE status IN ('running', 'waiting')`.
+//! The expansions come from the **backend** crate, which owns the
+//! `lash-core` dependency this crate does not have, so the vocabulary still
+//! has exactly one source. An unknown term, a dialect with no vocabulary, or
+//! a column that is not a plain or qualified identifier is a startup refusal.
+//!
+//! A token names domain vocabulary only. It is not a template mechanism for
+//! dialect forks: a statement whose text differs between the backends is
+//! still two statements, two owners and a manifest entry each.
+//!
 //! # Adding a table
 //!
 //! 1. Add `mod <table>;` under its family with `TABLE`, its column lists and a
@@ -61,7 +83,7 @@ mod render;
 pub mod effect;
 pub mod wait;
 
-pub use render::{Dialect, Placeholder, RenderError, render};
+pub use render::{Dialect, Placeholder, RenderError, Vocabulary, VocabularyTerm, render};
 
 /// Every table name this crate owns.
 ///

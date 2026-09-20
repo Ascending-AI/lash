@@ -10,7 +10,12 @@
 #     below, or listed here for backends that do not declare it — which is how
 #     an operation that exists in one backend only gets named;
 #   * a projection of two or more columns over a converted table that is not
-#     one of the column-list constants the table module declares.
+#     one of the column-list constants the table module declares;
+#   * a statement that is SQL over another converted family's tables with no
+#     `[[cross_family]]` entry below naming them and why;
+#   * a statement that spells a lifecycle literal over a column the family
+#     declares as vocabulary-valued, instead of naming it as a
+#     `{{term(column)}}` token the renderer expands.
 #
 # `converted` is what makes the gate total for what is converted and silent
 # about what is not. FIG-3387 closes it over every family.
@@ -26,6 +31,41 @@ reason = """
 Deterministic-simulation harness: one TRUNCATE naming every table in the
 PostgreSQL schema to reset a replay database between runs. It belongs to no
 family and names all sixty tables, so it cannot be owned by one.
+"""
+
+# A path ending in `/` exempts a subtree.
+[[exempt]]
+path = "runbooks/restate-postgres-workers/"
+reason = """
+Out-of-runtime operational harness, the same class as the lash-sim replay
+harness above: the runbook workers assert against a provisioned schema from
+outside the runtime — version-bump probes, process assertions, worker
+environment checks — rather than persisting anything lash reads back. Its
+statements are observations of a database lash already wrote, so binding them
+to a family's owner module would make the runbook's evidence depend on the
+layout it is meant to check independently. No production runtime SQL is
+exempted here, and none may be added.
+"""
+
+# ---------------------------------------------------------------------------
+# Cross-family statements
+# ---------------------------------------------------------------------------
+#
+# One owner module, one declaration, and the other families' tables written
+# down. A sweep or a quiescence question that spans families is not a defect —
+# splitting it would open a window between the parts — but the other families'
+# owners must be able to find it, which is what these entries are for.
+
+[[cross_family]]
+statement = "effect_journal.scope_is_quiescent"
+owner = "crates/lash-store-sql/src/effect.rs"
+touches = ["await_event_waits"]
+reason = """
+Quiescence is one question over both families: an in-progress effect row, a
+group still short of a journaled child, or an unresolved promise all mean the
+scope is live. Asking it as three statements would let a child start between
+them, so the effect family owns the whole predicate and reads the wait
+family's table inside it.
 """
 
 [families.effect]

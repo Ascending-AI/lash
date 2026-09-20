@@ -2,12 +2,135 @@
 //!
 //! This is a tokenizer, not a regex. It walks the statement once, knows where
 //! a string literal, a quoted identifier and a comment begin and end, and
-//! rewrites only the tokens that are genuinely a placeholder or a table name.
-//! A regex over the same text rewrites a `?` inside `'why?'`, a `$1` inside a
-//! comment, and the `await_event_waits` inside `await_event_waits_archive`;
-//! each of those is a test in this module.
+//! rewrites only the tokens that are genuinely a placeholder, a table name or
+//! a vocabulary token. A regex over the same text rewrites a `?` inside
+//! `'why?'`, a `$1` inside a comment, and the `await_event_waits` inside
+//! `await_event_waits_archive`; each of those is a test in this module.
 
 use std::fmt;
+
+/// One term of the domain vocabulary a backend supplies at render time.
+///
+/// `expand` is the function that spells the term for one column — exactly the
+/// `lash_core::store_backend_support::*_predicate_sql` shape. The expansions
+/// live in the backend crate because this crate has no `lash-core` dependency
+/// and the vocabulary has exactly one source; see
+/// [`Vocabulary`] for how a backend registers them.
+#[derive(Clone, Copy)]
+pub struct VocabularyTerm {
+    name: &'static str,
+    expand: fn(&str) -> String,
+}
+
+impl VocabularyTerm {
+    /// Name one vocabulary term and the function that spells it.
+    #[must_use]
+    pub const fn new(name: &'static str, expand: fn(&str) -> String) -> Self {
+        Self { name, expand }
+    }
+
+    /// The term's name, as a neutral statement spells it.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+}
+
+impl fmt::Debug for VocabularyTerm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VocabularyTerm")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for VocabularyTerm {
+    /// Two terms are the same term when they answer to the same name: the
+    /// expansion is a function pointer, and comparing those says nothing
+    /// useful about whether two vocabularies agree.
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for VocabularyTerm {}
+
+/// The domain vocabulary a dialect renders with.
+///
+/// This is the third render axis, beside the placeholder style and the table
+/// prefix. A neutral statement names a vocabulary predicate as a token —
+/// `{{live_process_status(status)}}` — and the renderer replaces it, once, at
+/// startup, with whatever the supplied term spells for that column.
+///
+/// It is **not** a template mechanism for dialect forks. A term names domain
+/// vocabulary that both backends spell identically and that is generated from
+/// one source elsewhere; a statement whose text forks between the backends is
+/// still two statements with two owners and a manifest entry each
+/// (ADR 0098).
+///
+/// A backend registers its expansions once:
+///
+/// ```ignore
+/// use lash_store_sql::{Vocabulary, VocabularyTerm};
+/// use lash_core::store_backend_support as vocabulary;
+///
+/// const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
+///     VocabularyTerm::new(
+///         "live_process_status",
+///         vocabulary::live_process_status_predicate_sql,
+///     ),
+///     VocabularyTerm::new(
+///         "retired_process_status",
+///         vocabulary::retired_process_status_predicate_sql,
+///     ),
+/// ]);
+///
+/// let dialect = Dialect::postgres().with_vocabulary(PROCESS_LIFECYCLE);
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Vocabulary {
+    terms: &'static [VocabularyTerm],
+}
+
+impl Vocabulary {
+    /// No vocabulary at all: every token is a refusal.
+    ///
+    /// This is what a dialect carries until a backend attaches one, so a
+    /// statement that uses a token under a dialect nobody supplied fails at
+    /// startup naming the term rather than reaching a database.
+    pub const EMPTY: Self = Self { terms: &[] };
+
+    /// Register the terms a dialect may expand.
+    #[must_use]
+    pub const fn new(terms: &'static [VocabularyTerm]) -> Self {
+        Self { terms }
+    }
+
+    /// Whether this vocabulary supplies nothing.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.terms.is_empty()
+    }
+
+    /// Every registered term name, in declaration order.
+    #[must_use]
+    pub fn names(&self) -> Vec<&'static str> {
+        self.terms.iter().map(VocabularyTerm::name).collect()
+    }
+
+    fn expand(&self, name: &str, column: &str) -> Option<String> {
+        self.terms
+            .iter()
+            .find(|term| term.name == name)
+            .map(|term| (term.expand)(column))
+    }
+}
+
+impl fmt::Debug for Vocabulary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.names()).finish()
+    }
+}
 
 /// How a backend spells a bound parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,7 +142,8 @@ pub enum Placeholder {
 }
 
 /// Everything that differs between two backends' spelling of the same
-/// statement: how a parameter is written, and how a table is addressed.
+/// statement: how a parameter is written, how a table is addressed, and which
+/// domain vocabulary its tokens expand from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Dialect {
     placeholder: Placeholder,
@@ -31,6 +155,9 @@ pub struct Dialect {
     /// retention sweep, so the qualifier is a render parameter rather than a
     /// `format!` at every call site.
     schema: Option<&'static str>,
+    /// The terms `{{term(column)}}` tokens expand from. Empty until a backend
+    /// attaches one, because this crate has no source for the vocabulary.
+    vocabulary: Vocabulary,
 }
 
 impl Dialect {
@@ -41,6 +168,25 @@ impl Dialect {
             placeholder: Placeholder::Question,
             table_prefix: "",
             schema: Some(schema),
+            vocabulary: Vocabulary::EMPTY,
+        }
+    }
+
+    /// The SQLite dialect, addressing tables with no schema qualifier.
+    ///
+    /// The qualifier exists because the effect journal's tables are reached
+    /// through an `ATTACH`ed name as well as through `main`. A table family
+    /// that lives on one connection only — the process registry's own
+    /// database — is addressed the way it always has been, unqualified, so
+    /// that its rendered text is what its `INDEXED BY` plans were measured
+    /// against.
+    #[must_use]
+    pub const fn sqlite_unqualified() -> Self {
+        Self {
+            placeholder: Placeholder::Question,
+            table_prefix: "",
+            schema: None,
+            vocabulary: Vocabulary::EMPTY,
         }
     }
 
@@ -52,7 +198,20 @@ impl Dialect {
             placeholder: Placeholder::Dollar,
             table_prefix: "lash_",
             schema: None,
+            vocabulary: Vocabulary::EMPTY,
         }
+    }
+
+    /// Attach the vocabulary this dialect's tokens expand from.
+    ///
+    /// A family whose statements use vocabulary tokens attaches the backend's
+    /// vocabulary once, where it renders its statement set. A family that uses
+    /// no token needs none: a dialect with no vocabulary refuses every token
+    /// rather than rendering an empty predicate.
+    #[must_use]
+    pub const fn with_vocabulary(mut self, vocabulary: Vocabulary) -> Self {
+        self.vocabulary = vocabulary;
+        self
     }
 }
 
@@ -83,6 +242,36 @@ pub enum RenderError {
         /// Byte offset of the identifier.
         at: usize,
     },
+    /// A `{` or `}` that is not a well-formed `{{term(column)}}` token.
+    MalformedVocabularyToken {
+        /// Byte offset of the brace that opened the token.
+        at: usize,
+        /// What was wrong with it.
+        reason: &'static str,
+    },
+    /// A token whose column is neither a plain nor a qualified identifier.
+    VocabularyColumnNotIdentifier {
+        /// The text found where a column reference was expected.
+        column: String,
+        /// Byte offset of the token.
+        at: usize,
+    },
+    /// A token under a dialect that carries no vocabulary at all.
+    VocabularyNotSupplied {
+        /// The term the statement named.
+        name: String,
+        /// Byte offset of the token.
+        at: usize,
+    },
+    /// A token naming a term the supplied vocabulary does not define.
+    UnknownVocabularyTerm {
+        /// The term the statement named.
+        name: String,
+        /// Byte offset of the token.
+        at: usize,
+        /// The terms the dialect's vocabulary does define.
+        known: Vec<&'static str>,
+    },
 }
 
 impl fmt::Display for RenderError {
@@ -104,6 +293,27 @@ impl fmt::Display for RenderError {
                 "`{name}` at byte {at} is in a table position but is not a table \
                  `lash-store-sql` owns; add it to `TABLES` or spell the statement elsewhere"
             ),
+            Self::MalformedVocabularyToken { at, reason } => write!(
+                f,
+                "byte {at}: {reason}; a vocabulary token is spelled \
+                 `{{{{term(column)}}}}`"
+            ),
+            Self::VocabularyColumnNotIdentifier { column, at } => write!(
+                f,
+                "the vocabulary token at byte {at} carries `{column}` where a column reference \
+                 belongs; it must be a plain (`status`) or qualified (`p.status`) identifier"
+            ),
+            Self::VocabularyNotSupplied { name, at } => write!(
+                f,
+                "the vocabulary token `{name}` at byte {at} has no expansion: this dialect was \
+                 rendered without a vocabulary. The backend crate attaches one with \
+                 `Dialect::with_vocabulary`."
+            ),
+            Self::UnknownVocabularyTerm { name, at, known } => write!(
+                f,
+                "the vocabulary token `{name}` at byte {at} is not a term this dialect's \
+                 vocabulary defines; it defines {known:?}"
+            ),
         }
     }
 }
@@ -114,7 +324,9 @@ impl std::error::Error for RenderError {}
 ///
 /// `tables` is the set of table names that may appear; every occurrence of one
 /// as a whole token is rewritten, and a table position naming anything else is
-/// refused.
+/// refused. `{{term(column)}}` tokens expand from the vocabulary the dialect
+/// carries, once, here — a token inside a string literal or a comment is that
+/// literal's or comment's own text and survives verbatim.
 ///
 /// # Errors
 ///
@@ -190,6 +402,16 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
                 expect_table = None;
             }
             b'$' => return Err(RenderError::DollarPlaceholder { at: index }),
+            b'{' => {
+                index = expand_vocabulary_token(neutral, index, dialect.vocabulary, &mut out)?;
+                expect_table = None;
+            }
+            b'}' => {
+                return Err(RenderError::MalformedVocabularyToken {
+                    at: index,
+                    reason: "a `}` outside a vocabulary token",
+                });
+            }
             _ if is_identifier_start(byte) => {
                 let start = index;
                 let mut end = index;
@@ -256,6 +478,95 @@ fn table_position(word: &str) -> Option<TablePosition> {
         Some(TablePosition::Other)
     } else {
         None
+    }
+}
+
+/// Expand one `{{term(column)}}` token that opens at `open`.
+///
+/// The expansion is written out verbatim and is **not** rescanned: it is the
+/// vocabulary's own spelling of a predicate over a column, already complete,
+/// and rescanning it would put quoted lifecycle labels back through the
+/// placeholder and table passes for nothing.
+fn expand_vocabulary_token(
+    text: &str,
+    open: usize,
+    vocabulary: Vocabulary,
+    out: &mut String,
+) -> Result<usize, RenderError> {
+    if text.as_bytes().get(open + 1) != Some(&b'{') {
+        return Err(RenderError::MalformedVocabularyToken {
+            at: open,
+            reason: "a `{` that does not open a vocabulary token",
+        });
+    }
+    let body_start = open + 2;
+    let Some(offset) = text[body_start..].find("}}") else {
+        return Err(RenderError::Unterminated {
+            kind: "vocabulary token",
+            at: open,
+        });
+    };
+    let body = &text[body_start..body_start + offset];
+    let end = body_start + offset + 2;
+
+    let malformed = |reason| RenderError::MalformedVocabularyToken { at: open, reason };
+    let Some(paren) = body.find('(') else {
+        return Err(malformed(
+            "a vocabulary token names one column in parentheses",
+        ));
+    };
+    let name = body[..paren].trim();
+    let arguments = &body[paren + 1..];
+    let Some(close) = arguments.rfind(')') else {
+        return Err(malformed("a vocabulary token's column list is not closed"));
+    };
+    if !arguments[close + 1..].trim().is_empty() {
+        return Err(malformed(
+            "a vocabulary token ends at its closing parenthesis",
+        ));
+    }
+    if !is_plain_identifier(name) {
+        return Err(malformed("a vocabulary term is a plain identifier"));
+    }
+    let column = arguments[..close].trim();
+    if !is_column_reference(column) {
+        return Err(RenderError::VocabularyColumnNotIdentifier {
+            column: column.to_string(),
+            at: open,
+        });
+    }
+
+    let Some(expansion) = vocabulary.expand(name, column) else {
+        return Err(if vocabulary.is_empty() {
+            RenderError::VocabularyNotSupplied {
+                name: name.to_string(),
+                at: open,
+            }
+        } else {
+            RenderError::UnknownVocabularyTerm {
+                name: name.to_string(),
+                at: open,
+                known: vocabulary.names(),
+            }
+        });
+    };
+    out.push_str(&expansion);
+    Ok(end)
+}
+
+/// `status`: one unquoted SQL identifier.
+fn is_plain_identifier(text: &str) -> bool {
+    let mut bytes = text.bytes();
+    bytes.next().is_some_and(is_identifier_start) && bytes.all(is_identifier_byte)
+}
+
+/// `status` or `processes.status`: what the vocabulary helpers take.
+fn is_column_reference(text: &str) -> bool {
+    let mut parts = text.split('.');
+    let first = parts.next().is_some_and(is_plain_identifier);
+    match parts.next() {
+        None => first,
+        Some(second) => first && is_plain_identifier(second) && parts.next().is_none(),
     }
 }
 

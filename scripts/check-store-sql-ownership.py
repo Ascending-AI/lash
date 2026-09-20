@@ -30,6 +30,27 @@ What it refuses, for each converted family:
 5. **A stray column list.** A projection of two or more columns over a
    converted table that is not one of the `pub const … &str` column lists its
    table module declares.
+6. **An undeclared cross-family statement.** A statement that is SQL over a
+   converted table belonging to another family, with no `[[cross_family]]`
+   entry naming the tables it reaches and why. A sweep that spans families is
+   still owned by exactly one module; the entry is what makes the other
+   families' owners able to find it.
+7. **A spelled lifecycle literal.** A statement over a table whose columns
+   carry domain vocabulary (`[families.<name>.vocabulary_columns]`) may not
+   spell that vocabulary itself — `status IN ('running', …)`. It names the
+   predicate as a `{{term(column)}}` token and the renderer expands it from
+   the one generated source. This is FIG-2844's rule, held over the statement
+   text this gate parses, so the two gates agree rather than merely not
+   colliding.
+
+Rules 1 and 6 read a literal as SQL over a table only when the table stands in
+a *relation position* — after `FROM`, `INTO`, `UPDATE`, `JOIN`, `TABLE` or
+`TRUNCATE`. A statement keyword alone matches prose: `"api.sessions.select"`
+and a test name about merging wakes "across processes" are not queries.
+
+A vocabulary token is part of a statement's text like any other characters, so
+two statements that differ only in a token are two different statements and a
+duplicate of one is still a duplicate.
 
 Only the Python standard library is used, so this runs before any toolchain.
 Run it from anywhere; paths are resolved against the repository root.
@@ -47,10 +68,16 @@ import tomllib
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = Path("crates/lash-store-sql/dialect-only.toml")
 
-# A string literal is SQL over a table when it names the table as a whole token
-# and carries a statement keyword. `lash_` is PostgreSQL's table prefix, so a
-# literal naming the prefixed spelling is the same table.
-SQL_KEYWORDS = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "MERGE")
+# A string literal is SQL over a table when it carries a statement keyword AND
+# names the table where SQL puts a relation. `lash_` is PostgreSQL's table
+# prefix, so a literal naming the prefixed spelling is the same table.
+SQL_KEYWORDS = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "MERGE", "WITH")
+
+# The keywords a relation can follow. Requiring one is what separates a query
+# from prose that happens to contain a SQL word: `"api.sessions.select"`,
+# `"triggers.update"` and "must batch compatible wakes across processes" all
+# carry a keyword and a table name and none of them is a statement.
+TABLE_POSITION_KEYWORDS = ("FROM", "INTO", "UPDATE", "JOIN", "TABLE", "TRUNCATE")
 
 SET_HEADER = re.compile(
     r"statements!\s*\{(?P<body>)", re.MULTILINE
@@ -190,10 +217,54 @@ def names_table(text: str, table: str) -> bool:
 
 
 def is_sql_over(text: str, table: str) -> bool:
+    """Whether `text` is a SQL statement (or fragment) over `table`.
+
+    Two conditions, both required: the text carries a statement keyword, and
+    the table stands in a relation position. The second is the one that stops
+    the gate matching prose — a keyword on its own appears in tool names, route
+    paths and English sentences.
+    """
     if not names_table(text, table):
         return False
     upper = text.upper()
-    return any(re.search(rf"\b{keyword}\b", upper) for keyword in SQL_KEYWORDS)
+    if not any(re.search(rf"\b{keyword}\b", upper) for keyword in SQL_KEYWORDS):
+        return False
+    position = "|".join(TABLE_POSITION_KEYWORDS)
+    return (
+        re.search(rf"\b(?:{position})\s+(?:LASH_)?{re.escape(table.upper())}\b", upper) is not None
+    )
+
+
+def squeeze(text: str) -> str:
+    """Lowercase and drop every space, so a predicate cannot hide behind
+    casing or spacing. The same normalisation FIG-2844's gate applies."""
+    return "".join(character.lower() for character in text if not character.isspace())
+
+
+# Every `<column> <op> '<literal>` shape a spelled vocabulary predicate takes,
+# as (squeezed needle, readable spelling).
+VOCABULARY_LITERAL_SHAPES = (
+    ("in('", "IN ('…')"),
+    ("notin('", "NOT IN ('…')"),
+    ("='", "= '…'"),
+    ("<>'", "<> '…'"),
+)
+
+
+def spelled_vocabulary_literals(sql: str, column: str) -> list[str]:
+    """Every place `sql` compares `column` against a quoted literal.
+
+    A `{{term(column)}}` token is not such a comparison, which is the whole
+    point: the token is how a statement names the predicate without spelling
+    the vocabulary.
+    """
+    squeezed = squeeze(sql)
+    needle_column = squeeze(column)
+    found: list[str] = []
+    for operator, spelling in VOCABULARY_LITERAL_SHAPES:
+        if f"{needle_column}{operator}" in squeezed:
+            found.append(f"{column} {spelling}")
+    return found
 
 
 def parse_statement_sets(source: str, path: str) -> list[Declaration]:
@@ -289,8 +360,27 @@ def check(root: Path) -> list[str]:
     for path, reason in exempt.items():
         if not reason.strip():
             findings.refuse(f"{MANIFEST}: exemption for `{path}` carries no reason")
-        if not (root / path).is_file():
+        # A path ending in `/` exempts a subtree: an out-of-runtime harness is
+        # a whole crate, and naming its files one by one would make the list
+        # drift instead of the exemption being one decision.
+        target = root / path.rstrip("/")
+        if not (target.is_dir() if path.endswith("/") else target.is_file()):
             findings.refuse(f"{MANIFEST}: exempted path `{path}` does not exist")
+
+    def is_exempt(relative: str) -> bool:
+        return any(
+            relative.startswith(path) if path.endswith("/") else relative == path
+            for path in exempt
+        )
+
+    cross_family: dict[str, dict] = {}
+    for entry in manifest.get("cross_family", []):
+        name = entry["statement"]
+        if name in cross_family:
+            findings.refuse(f"{MANIFEST}: cross-family entry `{name}` is listed twice")
+        if not entry.get("reason", "").strip():
+            findings.refuse(f"{MANIFEST}: cross-family entry `{name}` carries no reason")
+        cross_family[name] = entry
 
     manifest_entries: dict[str, dict] = {}
     for entry in manifest.get("dialect_only", []):
@@ -312,6 +402,12 @@ def check(root: Path) -> list[str]:
     declared_texts: set[str] = set()
     owner_modules: set[str] = set()
     schema_modules: set[str] = set()
+    # Every declaration, with the family that declared it: the cross-family
+    # rule needs every family's tables known before it can say which of them a
+    # statement reaches beyond its own.
+    declarations_by_family: list[tuple[str, Declaration]] = []
+    # table -> the columns over it whose values are domain vocabulary.
+    vocabulary_columns: dict[str, list[str]] = {}
 
     for family in converted:
         if family not in families:
@@ -448,7 +544,18 @@ def check(root: Path) -> list[str]:
                             "with why it is narrow, or use an existing one."
                         )
 
+        # 7. Spelled vocabulary.
+        for table, columns in spec.get("vocabulary_columns", {}).items():
+            if table not in tables:
+                findings.refuse(
+                    f"{MANIFEST}: `{family}` declares vocabulary columns on `{table}`, which is "
+                    "not one of its tables"
+                )
+                continue
+            vocabulary_columns[table] = columns
+
         converted_tables.update((table, family) for table in tables)
+        declarations_by_family.extend((family, declaration) for declaration in all_declarations)
         for declaration in all_declarations:
             declared_texts.add(canonical(declaration.sql))
         owner_modules.update(shared_paths)
@@ -456,9 +563,62 @@ def check(root: Path) -> list[str]:
             owner_modules.update(paths)
         schema_modules.update(spec.get("schema", []))
 
+    # 6. Cross-family statements, once every family's tables are known.
+    claimed_cross_family: set[str] = set()
+    for family, declaration in declarations_by_family:
+        touched = sorted(
+            table
+            for table, owner in converted_tables.items()
+            if owner != family and is_sql_over(declaration.sql, table)
+        )
+        entry = cross_family.get(declaration.name)
+        if entry is not None:
+            claimed_cross_family.add(declaration.name)
+        if not touched:
+            if entry is not None:
+                findings.refuse(
+                    f"{MANIFEST}: `{declaration.name}` is listed as cross-family but reaches no "
+                    "converted table outside its own family. Delete the entry."
+                )
+            continue
+        if entry is None:
+            findings.refuse(
+                f"{declaration.path}:{declaration.line}: `{declaration.name}` is SQL over "
+                f"{touched}, which belong to other converted families, and is not declared in "
+                f"{MANIFEST}. A statement that spans families has one owner module and a "
+                "[[cross_family]] entry naming the tables it reaches and why."
+            )
+            continue
+        if entry["owner"] != declaration.path:
+            findings.refuse(
+                f"{MANIFEST}: `{declaration.name}` names owner `{entry['owner']}` but is declared "
+                f"in {declaration.path}."
+            )
+        if sorted(entry["touches"]) != touched:
+            findings.refuse(
+                f"{MANIFEST}: `{declaration.name}` touches {touched}, but the cross-family entry "
+                f"lists {sorted(entry['touches'])}."
+            )
+    for name in sorted(set(cross_family) - claimed_cross_family):
+        findings.refuse(f"{MANIFEST}: cross-family entry `{name}` names no declared statement")
+
+    # 7. A statement over a vocabulary-valued column may not spell it.
+    for _family, declaration in declarations_by_family:
+        for table, columns in vocabulary_columns.items():
+            if not is_sql_over(declaration.sql, table):
+                continue
+            for column in columns:
+                for spelling in spelled_vocabulary_literals(declaration.sql, column):
+                    findings.refuse(
+                        f"{declaration.path}:{declaration.line}: `{declaration.name}` spells "
+                        f"`{spelling}` over `{table}`. `{column}` carries domain vocabulary: name "
+                        "the predicate as a `{{term(column)}}` token and let the backend's "
+                        "vocabulary expand it, so one enum edit still reaches every statement."
+                    )
+
     # 1. Stray SQL, over every converted family at once.
     for relative in sorted(production_sources(root)):
-        if relative in schema_modules or relative in exempt:
+        if relative in schema_modules or is_exempt(relative):
             continue
         inside_owner = relative in owner_modules
         source = strip_cfg_test((root / relative).read_text(encoding="utf-8"))
