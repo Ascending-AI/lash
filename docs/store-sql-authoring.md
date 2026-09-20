@@ -85,7 +85,94 @@ and compare it the same way, that struct belongs here (see
 driver that consumes it, leave the type where the driver defines it and let this
 module own only the column order.
 
-## 3. Write each backend's dialect-only set
+## 3. Name domain vocabulary, never spell it
+
+Some predicates are neither dialect nor prose. `status IN ('running',
+'waiting')` is the *live process* partition, generated from `ProcessStatus` by
+`lash_core::store_backend_support` so that adding a variant is one edit rather
+than seventy-nine (FIG-2815, FIG-2844). A statement may not retype it — the
+`process_lifecycle_vocabulary` gate in `lash-sim` refuses that, and so does this
+layout's own gate for a column a family declares vocabulary-valued.
+
+So a neutral statement **names** the predicate, as a token:
+
+```rust
+lash_store_sql::statements! {
+    pub struct WorklistStatements @ "process_worklist" {
+        /// The live worklist's page, pinned to its partial index.
+        count_live = "SELECT COUNT(*) FROM processes INDEXED BY idx_processes_live_worklist
+     WHERE {{live_process_status(status)}}";
+    }
+}
+```
+
+`{{term(column)}}` is the whole grammar. `term` is a plain identifier; `column`
+is a plain (`status`) or qualified (`processes.status`) identifier, because
+that is what the vocabulary helpers take. Inner spacing is free. A token
+inside a string literal or a comment is that literal's or comment's own text
+and is left alone, exactly like a `?` inside `'why?'`.
+
+The expansions come from the **backend** crate, which has the `lash-core`
+dependency this crate deliberately does not (ADR 0098). Each backend registers
+them once, beside where it renders its statement set:
+
+```rust
+use lash_core::store_backend_support as vocabulary;
+use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
+
+const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
+    VocabularyTerm::new(
+        "live_process_status",
+        vocabulary::live_process_status_predicate_sql,
+    ),
+    VocabularyTerm::new(
+        "nonterminal_process_status",
+        vocabulary::nonterminal_process_status_predicate_sql,
+    ),
+]);
+
+static WORKLIST_SQL: LazyLock<WorklistStatements> = LazyLock::new(|| {
+    WorklistStatements::render(Dialect::postgres().with_vocabulary(PROCESS_LIFECYCLE))
+});
+```
+
+Term names are the same on both backends: the vocabulary is the domain's, not
+a dialect's. Expansion happens once, at startup, in the tokenizer; nothing is
+built per call. An unknown term, a dialect carrying no vocabulary, a malformed
+token and a column that is not an identifier are all startup refusals naming
+the term, not statements that reach a database.
+
+Two rules about what this is **not**:
+
+* **It is not a template mechanism for dialect forks.** A token names domain
+  vocabulary that both backends spell identically and that is generated from
+  one source. A statement whose text forks between backends is still two
+  statements, two owners and a manifest entry each. ADR 0098 rejects
+  templating at fork points, and this does not reopen it.
+* **It does not give the vocabulary a second source.** `lash-store-sql` has no
+  `lash-core` dependency and no copy of any label. It holds the token; the
+  enum still holds the words.
+
+Declare the vocabulary-valued columns in the family's manifest block, and the
+gate refuses a statement that spells the vocabulary instead of naming it:
+
+```toml
+[families.process.vocabulary_columns]
+processes = ["status"]
+process_wake_deliveries = ["state"]
+```
+
+**Partial indexes are why byte identity matters.** `idx_processes_live_worklist`
+is `ON processes(process_id) WHERE status IN ('running', 'waiting')`, and a
+planner uses a partial index only for a query whose predicate matches it. The
+token renders to exactly the schema's text — pinned per backend by
+`every_vocabulary_partial_index_predicate_is_what_a_token_renders` in
+`crates/lash-{sqlite,postgres}-store/src/process_lifecycle_sql_tests.rs`, which
+also pins that a real worklist statement renders to the bytes its `format!`
+site produces today. Any family whose statements pin a partial index adds its
+indexes to those tests.
+
+## 4. Write each backend's dialect-only set
 
 Same macro, same family prefix, in the backend's table module:
 
@@ -107,7 +194,7 @@ dialect-only names share one namespace, so a per-backend copy of a shared
 statement's name is a collision the gate reports as shadowing rather than a
 quiet override.
 
-## 4. Render once, at startup
+## 5. Render once, at startup
 
 PostgreSQL has one dialect, so one `LazyLock`:
 
@@ -139,7 +226,7 @@ statement's reported name for tracing and store metrics.
 first use, so the defect is a startup failure rather than a query that reaches a
 database.
 
-## 5. Move every call site, and delete what it replaced
+## 6. Move every call site, and delete what it replaced
 
 Wholehog: no forwarding helper, no dual path, no interim layout. A helper whose
 only job was to build the statement goes with it, and so do its tests. Tests
@@ -158,7 +245,7 @@ Two shapes worth knowing, both from the effect family:
   so the isolation is unchanged and the `OR`'s left-to-right short circuit
   becomes an early `return`.
 
-## 6. Manifest every fork
+## 7. Manifest every fork
 
 One `[[dialect_only]]` entry per dialect-only statement in
 `crates/lash-store-sql/dialect-only.toml`:
@@ -182,11 +269,45 @@ only" gets named.
 
 Then add the family to `converted` and give it a `[families.<name>]` block: its
 tables, its statement prefixes, its shared, sqlite and postgres owner modules,
-its schema artifacts, and a `table_modules` map. Until the family is in
-`converted` the gate is silent about it; once it is there the gate is total for
-it.
+its schema artifacts, a `table_modules` map, and `vocabulary_columns` if any of
+its columns carry domain vocabulary. Until the family is in `converted` the gate
+is silent about it; once it is there the gate is total for it.
 
-## 7. Prove it
+### Statements that span families
+
+Some statements are genuinely over more than one family: the quiescence read
+asks about effect rows, effect groups and promises in one breath, and
+PostgreSQL's session delete is one CTE over twelve tables across three
+families. Splitting them is not an option — the parts would race — so the rule
+is ownership, not containment. **One owner module, one declaration, and the
+other families' tables written down:**
+
+```toml
+[[cross_family]]
+statement = "effect_journal.scope_is_quiescent"
+owner = "crates/lash-store-sql/src/effect.rs"
+touches = ["await_event_waits"]
+reason = """
+Quiescence is one question over both families; asking it as three statements
+would let a child start between them.
+"""
+```
+
+`touches` is exactly the set of converted tables outside the owner's family
+that the statement is SQL over — the gate computes that set and compares, so
+an entry cannot drift from the statement. A statement that reaches another
+family with no entry is refused, and so is an entry for a statement that
+reaches nothing. When your family converts, a statement of *another* family
+that already reads your tables will appear here: that is where to look for it,
+rather than in your own modules.
+
+An `exempt` entry is not an alternative. It is for sources that are not
+production runtime SQL at all — the deterministic-simulation reset, the
+out-of-runtime runbook harness (`runbooks/restate-postgres-workers/`, a
+subtree exemption: a path ending in `/`) — and no production runtime statement
+may be parked there.
+
+## 8. Prove it
 
 ```
 kiln test //crates/lash-sqlite-store:all

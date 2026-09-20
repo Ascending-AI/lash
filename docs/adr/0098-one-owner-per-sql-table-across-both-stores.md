@@ -4,7 +4,8 @@
 
 Accepted. Ratified on FIG-3380, which converts the effect and wait families and
 builds the crate, the renderer, the manifest and the gate the rest of the arc
-(FIG-3379) uses.
+(FIG-3379) uses. Amended by FIG-3399, which adds the vocabulary render axis,
+cross-family ownership, and SQL structure to the gate's reading of a literal.
 
 ## Context
 
@@ -67,6 +68,32 @@ inside `await_event_waits_archive`. A regex gets all four of those wrong. It
 also refuses a table position naming a relation the crate does not own, so a
 statement that would run unprefixed against PostgreSQL fails at startup instead.
 
+**Domain vocabulary is a render axis, beside the placeholder style and the
+table prefix (FIG-3399).** Some predicates are neither dialect nor prose:
+`status IN ('running', 'waiting')` is the live-process partition, generated
+from `ProcessStatus` so that adding a variant is one edit and not seventy-nine
+(FIG-2815, FIG-2844). A neutral statement names such a predicate as a token,
+`{{live_process_status(status)}}`, and the renderer expands it once at
+startup. The expansions are supplied by the **backend** crate, which has the
+`lash-core` dependency this crate does not, so the vocabulary keeps exactly one
+source. An unknown term, a dialect with no vocabulary, or a column that is not
+a plain or qualified identifier is a startup refusal.
+
+This is not the templating rejected below. A token renders a domain constant
+the same way both backends render it, deterministically and identically — the
+same class as the table prefix — where templating at a fork point exists to
+make *different* texts look shared. The distinction is enforced, not asserted:
+tokens name vocabulary, a text that forks is still two statements with two
+owners and a manifest entry each, and the byte identity the mechanism depends
+on is pinned per backend against the schema's own partial indexes, which a
+planner only uses when the query's predicate matches them character for
+character.
+
+The alternative considered and rejected was to rewrite FIG-2844's gate from
+"no store source spells a lifecycle literal" to "every spelled list equals what
+the enum generates". That re-spells the vocabulary at about seventy-nine sites
+and lints that they agree, which is FIG-2815 inverted.
+
 No path builds a statement per call. Where SQLite reaches a table through more
 than one schema — the journal's own file as `main`, the same file `ATTACH`ed as
 `effect_journal` for the retention sweep, a bound process registry as
@@ -79,14 +106,35 @@ statement declared in one backend only is the same kind of entry, which is what
 makes "this operation exists on PostgreSQL and nowhere else" a fact somebody
 wrote down rather than one somebody has to notice.
 
+**A statement that spans families has one owner and says so (FIG-3399).** Some
+questions are genuinely over several families — quiescence reads effect rows,
+effect groups and promises in one breath; PostgreSQL's session delete is one
+CTE over twelve tables across three families — and splitting them would open
+the window they exist to close. Such a statement is declared once, in one owner
+module, with a `[[cross_family]]` entry naming the other families' tables it
+reaches and why. The gate computes that set from the statement text and
+compares, so the declaration cannot drift from the query, and a family's
+converters find the other families' statements over their tables in one list
+rather than by grepping.
+
 **A repo gate enforces all of it**, scoped by a `converted` list so it is total
 for the families that have moved and silent about the rest until FIG-3387 closes
 it. It refuses a production SQL literal over a converted table outside its owner
 modules, a duplicated statement text within one backend, a shared statement
 shadowed by a per-backend copy of its name, a dialect-only statement missing
-from the manifest or listed for a backend that does not declare it, and a
+from the manifest or listed for a backend that does not declare it, a
 projection of two or more columns that is not one of the column lists its table
-module declares.
+module declares, an undeclared cross-family statement, and a statement that
+spells a lifecycle literal over a column its family declares vocabulary-valued
+— which is how this gate and FIG-2844's come to agree rather than merely not
+collide.
+
+It reads a literal as SQL over a table only when the table stands in a relation
+position, after `FROM`, `INTO`, `UPDATE`, `JOIN`, `TABLE` or `TRUNCATE`. A
+statement keyword alone matched prose: a conformance test name about merging
+wakes "across processes", the tool name `triggers.update`, the route
+`/api/sessions/select`. Requiring structure is what lets the gate stay total
+for a family without an exemption list of sentences.
 
 **No schema, table name, durable encoding or version constant moves.** The
 `lash_` prefix on PostgreSQL stays and is a render parameter exactly like the
@@ -125,6 +173,10 @@ call sites picking their own columns.
 * **Templating or string surgery at a fork point**, including River-style
   runtime regex rewriting. This is the one mechanism that makes "similar"
   statements shareable, and it is the mechanism that makes a drift invisible.
+  The vocabulary tokens added by FIG-3399 are not a way back in: a term names
+  domain vocabulary that renders identically for both backends, never a
+  dialect difference, and the gate refuses a statement that spells the
+  vocabulary rather than naming it.
 
 Also not adopted, and worth naming because it was close: **`lash-store-sql` has
 no dependency on `lash-core`.** It is a leaf that owns SQL text, column lists
@@ -133,7 +185,9 @@ shared driver that consumes it (`StoredEffectRow`, `EffectGroupRecord`), the
 type stays with the driver and the column order that feeds it lives in the table
 module — one owner per fact, not a parallel struct. Where the row is pure SQL
 shape and both backends had privately declared a byte-identical copy of it
-(`WaitRow` and its identity comparison), the shared crate takes it.
+(`WaitRow` and its identity comparison), the shared crate takes it. The
+vocabulary axis keeps that line: the crate holds the token, the backend supplies
+the expansion, and the enum still holds the words.
 
 ## Consequences
 
