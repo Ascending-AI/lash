@@ -283,8 +283,16 @@ IDENTIFIER_RENAME_BASELINES = {
     #   FIG-3239: ResponseTextMeta.phase retyped Option<String> ->
     #     Option<ResponsePhase>; serde and the preimage emit the same two wire
     #     strings ('commentary'/'final_answer') at v4.
-    'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:89d1b1134c8191113dd4425a8e6e74d4a642b391118cf34106774a5260421dcb',
-    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:3b61169b1d807e9c468856385c2f3af0aca1f02c55bb37a043b0f0296fe0acf8',
+    #   FIG-3305: `Part` retyped from a flat struct of kind-tagged
+    #     `Option`s into an internally-tagged enum whose variants own only
+    #     their fields. The serde wire shape and the identity preimage
+    #     leaves are byte-identical for every representable part — the
+    #     corpus rows that moved did so only because the fixture packed
+    #     invalid kind/field pairings the type no longer holds — so
+    #     APPEND_REQUEST_IDENTITY_ENCODING_VERSION stays 4 and
+    #     SESSION_NODE_BODY_SCHEMA_VERSION stays 16.
+    'crates/lash-core-store/src/store/commit_identity.rs:APPEND_REQUEST_IDENTITY_ENCODING_VERSION': 'sha256:fbf343e99da3d0f156255adf90c62cf4e9fc594ed436f40f3ac60796e11ec139',
+    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:268e672e8c8ef1a603d3a8c2fd392f66411b6c8a9d769ceb7b9fd5873e9e0d97',
 
     # FIG-2784 pass 1 (#1502): `push_causal_ref` in commit_identity.rs gained a
     # two-line doc comment and `#[expect(clippy::expect_used, ...)]` under the
