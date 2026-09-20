@@ -153,10 +153,10 @@ class BazelTestContractTests(unittest.TestCase):
 
         dev_labels = set(generated_list("WORKSPACE_DEV_TEST_TARGETS"))
 
-        self.assertEqual(118, len(all_labels))
+        self.assertEqual(119, len(all_labels))
         self.assertEqual(101, len(bazel_labels))
         self.assertEqual(99, len(dev_labels))
-        self.assertEqual(16, len(cargo_labels))
+        self.assertEqual(17, len(cargo_labels))
         self.assertEqual(1, len(deferred_labels))
         self.assertEqual(
             {
@@ -212,7 +212,7 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertEqual(
             {
                 "cargo-frontend-assets": 4,
-                "cargo-service-gate": 11,
+                "cargo-service-gate": 12,
                 "cargo-trybuild": 1,
             },
             dict(exception_classes),
@@ -784,7 +784,7 @@ class BazelTestContractTests(unittest.TestCase):
             set(generated_list("WORKSPACE_COMPILE_TARGETS")) - build_scripts,
             clippy,
         )
-        self.assertEqual(188, len(clippy))
+        self.assertEqual(189, len(clippy))
         # The half that actually compiles `build.rs` is linted, not exempted.
         self.assertIn("//crates/lash-protocol-rlm:build_script_", clippy)
         self.assertTrue(
