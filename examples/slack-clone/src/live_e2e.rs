@@ -18,8 +18,8 @@ use lash::TurnInput;
 use lash::direct::ProviderRouteIdentity;
 use lash::provider::{LlmRequest, LlmResponse, Provider, ProviderFailureKind, ProviderOptions};
 use lash::tools::{
-    StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
-    ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
+    ToolDefinition, ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
