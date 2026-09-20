@@ -295,6 +295,7 @@ fn sqlite_table_columns(source: &str, table: &str) -> BTreeSet<String> {
         .0;
     body.lines()
         .filter_map(|line| {
+            let line = line.split_once("--").map_or(line, |(code, _)| code);
             let name = consume_identifier(line)?;
             (!matches!(
                 name.to_ascii_uppercase().as_str(),
