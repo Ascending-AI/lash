@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import pathlib
@@ -713,6 +714,26 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    version = {quote(version)},",
         ])
         chunks.append(macro + "(\n" + "\n".join(args) + "\n)\n\n")
+        if package["name"] == "lash-runtime" and name == "ui__test":
+            # The seal lane runs the Bazel-built ui binary directly, outside
+            # `bazel test`, so trybuild cannot see Cargo's fingerprint for it.
+            # trybuild resolves the fixture feature set from
+            # `<target>/debug/.fingerprint/*-<hash>/*.json`, where the hash is
+            # the suffix of the running binary's name; this file carries the
+            # same crate_features the harness was compiled with, so the staged
+            # fingerprint is a layout adaptation, never a second resolution.
+            fingerprint = json.dumps({
+                "features": json.dumps(target_features),
+            })
+            chunks.append(
+                "genrule(\n"
+                f"    name = {quote(name + '__cargo_fingerprint')},\n"
+                f"    outs = [{quote(name + '.cargo_fingerprint.json')}],\n"
+                "    cmd = \"echo \"\n"
+                f"        + {quote(base64.b64encode(fingerprint.encode()).decode())}\n"
+                "        + \" | base64 -d > $@\",\n"
+                ")\n\n"
+            )
         target_inventory = {
             "cargo": target["name"],
             "kind": kind,

@@ -258,6 +258,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch'
       || needs.plan.outputs.facade == 'true'
+    environment: build-cache
     env:
       # trybuild derives its fixture/output tree from Cargo's target directory.
       # The seal job has no shared writable output with any other CI job.
@@ -318,12 +319,45 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      # Every existing compile-fail/pass fixture remains in the ui binary.
-      # Keep workspace feature unification and the original cargo test command.
+      # The ui harness compiles under Bazel's shared remote cache, which keys
+      # on content rather than the merge-group SHA: the lash graph it depends
+      # on is usually already cached by the Bazel partition, so a warm run
+      # downloads the harness instead of paying Cargo ~2m40s to recompile it
+      # into target-seal. `ui__test` carries the same crate, the same unified
+      # feature resolution (the BUILD generator's `crate_features`), and the
+      # same compile-pass module fixtures as `cargo test --test ui`; the
+      # compile-fail fixtures still run through trybuild against the restored
+      # target-seal tree, with Cargo and rustc on PATH as before.
+      # `run-seal-harness.sh` stages the Cargo fingerprint layout trybuild
+      # reads the feature set from. Fork and Dependabot runs have no cache
+      # credentials, so they keep the Cargo command.
+      - name: Configure shared build cache
+        if: needs.plan.outputs.bazel_trusted == 'true'
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
       - name: Seal-test the API surface
         run: |
           # shellcheck disable=SC2086
-          cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
+          if [ "${{ needs.plan.outputs.bazel_trusted }}" = "true" ]; then
+            bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
+              ${BAZEL_SHARED_CACHE_FLAGS} \
+              --remote_download_outputs=toplevel \
+              //crates/lash:ui__test //crates/lash:ui__test__cargo_fingerprint
+            bash scripts/ci/run-seal-harness.sh
+          else
+            cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
+          fi
+
+      - name: Remove client credentials
+        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
       - name: Report cache disk capacity
         if: always()

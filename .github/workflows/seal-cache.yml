@@ -118,7 +118,8 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      # Byte-identical to ci.yml's `Seal-test the API surface` step. The saved
+      # Byte-identical to the Cargo leg of ci.yml's `Seal-test the API surface`
+      # step (the path untrusted events and this writer both take). The saved
       # tree is only worth restoring if it was produced by the same command:
       # a narrower build would leave the seal lane rebuilding what it missed.
       # The fixture set, feature unification and `--test ui` selection are the
