@@ -579,7 +579,10 @@ async fn the_ddl_artifact_is_idempotent() {
     let second = read_scratch_shape(&mut connection, &scratch).await;
     assert_eq!(first, second, "reapplying schema.sql must change nothing");
     let secret: Vec<u8> = sqlx::query_scalar(
-        "SELECT signing_secret FROM lash_await_event_meta WHERE singleton = TRUE",
+        crate::await_event::wait_sql()
+            .meta_postgres
+            .select_signing_secret
+            .sql(),
     )
     .fetch_one(&mut connection)
     .await

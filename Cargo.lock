@@ -2446,6 +2446,7 @@ dependencies = [
  "lash-internal-protocol-standard",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-store-sql",
  "lash-internal-subagents",
  "lash-runtime",
  "rmp-serde",
@@ -2690,6 +2691,7 @@ dependencies = [
  "lash-internal-lashlang",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-store-sql",
  "rmp-serde",
  "rusqlite",
  "serde",
@@ -2703,6 +2705,10 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
 ]
+
+[[package]]
+name = "lash-internal-store-sql"
+version = "0.0.0-dev"
 
 [[package]]
 name = "lash-internal-subagents"

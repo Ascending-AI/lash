@@ -2,8 +2,11 @@
 //! and the durable owner of deferred effect-scope retirement (ADR 0067).
 use crate::*;
 
-/// Schema name under which the bound effect journal is attached for a sweep.
-const EFFECT_JOURNAL_SCHEMA: &str = "effect_journal";
+use crate::await_event::wait_sql;
+use crate::scope_fence::Schema;
+
+/// The schema the bound effect journal is attached under for a sweep.
+const EFFECT_JOURNAL_SCHEMA: Schema = Schema::EffectJournal;
 
 /// The sweep's outcome, boxed on the failure side: `MaintenanceFailure`
 /// carries the partial report beside the stop, so the `Err` arm is several
@@ -40,7 +43,10 @@ pub(crate) async fn reclaim(
             .conn
             .call(move |connection| {
                 connection.execute(
-                    &format!("ATTACH DATABASE ?1 AS {EFFECT_JOURNAL_SCHEMA}"),
+                    // `ATTACH` names a schema rather than qualifying a table,
+                    // so the renderer has nothing to say about it; the name is
+                    // `Schema::EffectJournal.qualifier()`.
+                    "ATTACH DATABASE ?1 AS effect_journal",
                     params![path],
                 )
             })
@@ -157,22 +163,23 @@ fn retire_quiescent_operation_scopes(
 ) -> rusqlite::Result<(usize, Vec<String>)> {
     let mut scopes: Vec<lash_core::ExecutionScope> = Vec::new();
     {
-        let mut keyed = tx.prepare(&format!(
-            "SELECT scope_id FROM {EFFECT_JOURNAL_SCHEMA}.runtime_effect_replay
-             WHERE session_id IS NULL
-             UNION
-             SELECT scope_id FROM {EFFECT_JOURNAL_SCHEMA}.runtime_effect_group
-             WHERE session_id IS NULL"
-        ))?;
+        let mut keyed = tx.prepare(
+            effect_replay::effect_sql(EFFECT_JOURNAL_SCHEMA)
+                .journal
+                .select_session_free_scope_ids
+                .sql(),
+        )?;
         for key in keyed.query_map([], |row| row.get::<_, String>(0))? {
             if let Some(scope) = lash_core::ExecutionScope::from_journal_key(&key?) {
                 scopes.push(scope);
             }
         }
-        let mut waited = tx.prepare(&format!(
-            "SELECT DISTINCT scope_json FROM {EFFECT_JOURNAL_SCHEMA}.await_event_waits
-             WHERE session_id IS NULL"
-        ))?;
+        let mut waited = tx.prepare(
+            wait_sql(EFFECT_JOURNAL_SCHEMA)
+                .shared
+                .select_session_free_scope_json
+                .sql(),
+        )?;
         for scope_json in waited.query_map([], |row| row.get::<_, String>(0))? {
             if let Ok(scope) = serde_json::from_str::<lash_core::ExecutionScope>(&scope_json?) {
                 scopes.push(scope);

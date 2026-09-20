@@ -184,6 +184,9 @@ run_rust_source_guards() {
   python3 scripts/check-postgres-json-carrier-coverage.py
   python3 scripts/check-postgres-payload-shape-version.py
 
+  step "Store SQL ownership"
+  python3 scripts/check-store-sql-ownership.py
+
   step "Core/UI boundary guard"
   bash scripts/check-core-ui-boundary.sh
 

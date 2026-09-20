@@ -1,23 +1,26 @@
 //! SQLite storage atoms for durable AwaitEvent promises.
 //!
 //! The promise state machine lives in [`AwaitEventCoordinator`]; this module is
-//! only the SQLite half of its backend port. Every atom runs inside
-//! `SqliteConnection::write` (`BEGIN IMMEDIATE`) or an explicit read
-//! transaction, so the tombstone check, the identity comparison, and the write
-//! they guard cannot interleave with a competing writer.
+//! only the SQLite half of its backend port, and the SQLite owner of the wait
+//! family's three tables. Every atom runs inside `SqliteConnection::write`
+//! (`BEGIN IMMEDIATE`) or an explicit read transaction, so the tombstone check,
+//! the identity comparison, and the write they guard cannot interleave with a
+//! competing writer.
 
 use lash_sansio::SessionId;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use lash_core::facade_support::await_event_coordinator::{
     AwaitEventBackend, AwaitEventCoordinator, AwaitEventRowIdentity, AwaitEventVocabulary,
     PersistedPromise, RegisteredAwaitEvent, TerminalCas,
 };
 use lash_core::{RuntimeError, RuntimeErrorCode};
-use rusqlite::params;
+use lash_store_sql::wait::revoked_sessions::RevokedSessionStatements;
+use lash_store_sql::wait::waits::{WaitRow, WaitStatements};
+use rusqlite::{OptionalExtension, params};
 
 use crate::conn::SqliteConnection;
-use crate::scope_fence::{FenceLocations, RegistryAttachment};
+use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema};
 
 /// The SQLite promise coordinator: one shared state machine over
 /// [`SqliteAwaitEventBackend`].
@@ -30,6 +33,94 @@ const VOCABULARY: AwaitEventVocabulary = AwaitEventVocabulary {
     notify: RuntimeErrorCode::SqliteAwaitEventNotify,
     display_name: "SQLite",
 };
+
+lash_store_sql::statements! {
+    /// `await_event_waits` statements only SQLite issues.
+    pub(crate) struct WaitSqliteStatements @ "await_event_wait" {
+        /// Register a pending promise: `?1` key, `?2` scope JSON, `?3` wait
+        /// JSON, `?4` session, `?5` turn-control, `?6` now.
+        ///
+        /// No `ON CONFLICT`: the absence of the row was read under the same
+        /// `BEGIN IMMEDIATE` lock this insert commits under, so PostgreSQL's
+        /// conflict clause has nothing to catch here.
+        insert_pending = "INSERT INTO await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL)";
+
+        /// Register a promise that is already resolved, `?6` being the
+        /// terminal and `?7` the instant it settled. Forks for the same reason
+        /// [`WaitSqliteStatements::insert_pending`] does.
+        insert_resolved = "INSERT INTO await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)";
+
+        /// Settle the pending promise under key `?1` with terminal `?2` at
+        /// `?3`.
+        ///
+        /// FENCING (FIG-3381): the identity columns are absent from the
+        /// predicate because the row was read and compared inside this
+        /// transaction under the write lock. PostgreSQL cannot do that under
+        /// `READ COMMITTED` and carries the comparison in the statement. The
+        /// two semantics are deliberately left as they stand.
+        resolve_pending = "UPDATE await_event_waits
+             SET terminal_json = ?2, resolved_at_ms = ?3
+             WHERE key_id = ?1 AND terminal_json IS NULL";
+
+        /// Cancel session `?1`'s unresolved non-control promises with `?2` at
+        /// `?3`. SQLite stores `turn_control` as an integer, PostgreSQL as a
+        /// boolean.
+        cancel_session_promises = "UPDATE await_event_waits
+             SET terminal_json = ?2, resolved_at_ms = ?3
+             WHERE session_id = ?1
+               AND terminal_json IS NULL
+               AND turn_control = 0";
+    }
+}
+
+lash_store_sql::statements! {
+    /// `await_event_meta` statements only SQLite issues.
+    pub(crate) struct MetaSqliteStatements @ "await_event_meta" {
+        /// The promise signing secret. SQLite stores the singleton flag as an
+        /// integer, PostgreSQL as a boolean.
+        select_signing_secret = "SELECT signing_secret FROM await_event_meta WHERE singleton = 1";
+    }
+}
+
+/// Every wait-family statement, rendered for one schema.
+pub(crate) struct WaitSql {
+    /// `await_event_waits` statements both backends issue verbatim.
+    pub(crate) shared: WaitStatements,
+    /// `await_event_waits` statements only SQLite issues.
+    pub(crate) sqlite: WaitSqliteStatements,
+    /// `await_event_revoked_sessions` statements both backends issue verbatim.
+    pub(crate) revoked: RevokedSessionStatements,
+    /// `await_event_meta` statements only SQLite issues.
+    pub(crate) meta_sqlite: MetaSqliteStatements,
+}
+
+impl WaitSql {
+    fn render(schema: Schema) -> Self {
+        let dialect = schema.dialect();
+        Self {
+            shared: WaitStatements::render(dialect),
+            sqlite: WaitSqliteStatements::render(dialect),
+            revoked: RevokedSessionStatements::render(dialect),
+            meta_sqlite: MetaSqliteStatements::render(dialect),
+        }
+    }
+}
+
+static WAIT_SQL: LazyLock<[WaitSql; 3]> = LazyLock::new(|| Schema::ALL.map(WaitSql::render));
+
+/// The wait-family statements addressed through `schema`, rendered once at
+/// first use and never again.
+pub(crate) fn wait_sql(schema: Schema) -> &'static WaitSql {
+    &WAIT_SQL[schema.index()]
+}
 
 /// Build the SQLite await-event coordinator over `conn`.
 pub(crate) fn sqlite_await_events(
@@ -98,19 +189,14 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
-                let (fenced, stored) = select_fence_and_wait_row(tx, fences, &identity, &key_id)?;
-                if fenced {
+                if identity_is_fenced(tx, fences, &identity)? {
                     return Ok(false);
                 }
-                match stored {
-                    Some(row) => Ok(row.matches(&identity)),
+                match select_wait_row(tx, &key_id)? {
+                    Some(row) => Ok(matches_identity(&row, &identity)),
                     None => {
                         tx.execute(
-                            "INSERT INTO await_event_waits (
-                                key_id, scope_json, wait_json, session_id, turn_control,
-                                terminal_json, created_at_ms, resolved_at_ms
-                             )
-                             VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL)",
+                            wait_sql(Schema::Main).sqlite.insert_pending.sql(),
                             params![
                                 key_id.as_str(),
                                 identity.scope_json,
@@ -142,18 +228,14 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let fences = self.fence_locations().await?;
         self.conn
             .write(move |tx| {
-                let (fenced, stored) = select_fence_and_wait_row(tx, fences, &identity, &key_id)?;
-                if fenced {
+                if identity_is_fenced(tx, fences, &identity)? {
                     return Ok(TerminalCas::UnknownOrRevoked);
                 }
-                match stored {
+                let sql = wait_sql(Schema::Main);
+                match select_wait_row(tx, &key_id)? {
                     None => {
                         tx.execute(
-                            "INSERT INTO await_event_waits (
-                                key_id, scope_json, wait_json, session_id, turn_control,
-                                terminal_json, created_at_ms, resolved_at_ms
-                             )
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            sql.sqlite.insert_resolved.sql(),
                             params![
                                 key_id.as_str(),
                                 identity.scope_json,
@@ -162,19 +244,18 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
                                 identity.turn_control,
                                 proposed_json,
                                 now,
-                                now,
                             ],
                         )?;
                         Ok(TerminalCas::Stored)
                     }
-                    Some(row) if !row.matches(&identity) => Ok(TerminalCas::UnknownOrRevoked),
+                    Some(row) if !matches_identity(&row, &identity) => {
+                        Ok(TerminalCas::UnknownOrRevoked)
+                    }
                     Some(row) => match row.terminal_json {
                         Some(terminal_json) => Ok(TerminalCas::AlreadyResolved { terminal_json }),
                         None => {
                             let changed = tx.execute(
-                                "UPDATE await_event_waits
-                                 SET terminal_json = ?2, resolved_at_ms = ?3
-                                 WHERE key_id = ?1 AND terminal_json IS NULL",
+                                sql.sqlite.resolve_pending.sql(),
                                 params![key_id, proposed_json, now],
                             )?;
                             // Unreachable while the `BEGIN IMMEDIATE` write lock
@@ -203,7 +284,8 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         self.conn
             .call(move |connection| {
                 let tx = connection.transaction()?;
-                let (revoked, stored) = select_fence_and_wait_row(&tx, fences, &identity, &key_id)?;
+                let revoked = identity_is_fenced(&tx, fences, &identity)?;
+                let stored = select_wait_row(&tx, &key_id)?;
                 tx.commit()?;
                 if revoked {
                     return Ok(PersistedPromise::UnknownOrRevoked);
@@ -211,7 +293,7 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
                 let Some(stored) = stored else {
                     return Ok(PersistedPromise::Missing);
                 };
-                if !stored.matches(&identity) {
+                if !matches_identity(&stored, &identity) {
                     return Ok(PersistedPromise::UnknownOrRevoked);
                 }
                 Ok(stored
@@ -231,17 +313,8 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let session_id = SessionId::from(session_id.to_string());
         self.conn
             .call(move |connection| {
-                let mut statement = connection.prepare(
-                    "SELECT key_id, scope_json, wait_json, turn_control
-                     FROM await_event_waits
-                     WHERE session_id = ?1
-                       AND terminal_json IS NULL
-                       AND NOT EXISTS (
-                           SELECT 1 FROM await_event_revoked_sessions
-                           WHERE session_id = ?1
-                       )
-                     ORDER BY key_id",
-                )?;
+                let mut statement = connection
+                    .prepare(wait_sql(Schema::Main).shared.list_pending_for_session.sql())?;
                 statement
                     .query_map(params![session_id.as_str()], |row| {
                         Ok(RegisteredAwaitEvent {
@@ -266,14 +339,13 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let now = now_ms as i64;
         self.conn
             .write(move |tx| {
+                let sql = wait_sql(Schema::Main);
                 tx.execute(
-                    "INSERT INTO await_event_revoked_sessions (session_id, revoked_at_ms)
-                     VALUES (?1, ?2)
-                     ON CONFLICT(session_id) DO NOTHING",
+                    sql.revoked.insert_ignore.sql(),
                     params![session_id.as_str(), now],
                 )?;
                 tx.execute(
-                    "DELETE FROM await_event_waits WHERE session_id = ?1",
+                    sql.shared.delete_by_session.sql(),
                     params![session_id.as_str()],
                 )?;
                 Ok(())
@@ -294,11 +366,7 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         self.conn
             .write(move |tx| {
                 tx.execute(
-                    "UPDATE await_event_waits
-                     SET terminal_json = ?2, resolved_at_ms = ?3
-                     WHERE session_id = ?1
-                       AND terminal_json IS NULL
-                       AND turn_control = 0",
+                    wait_sql(Schema::Main).sqlite.cancel_session_promises.sql(),
                     params![session_id.as_str(), terminal_json, now],
                 )?;
                 Ok(())
@@ -308,82 +376,55 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
     }
 }
 
-struct WaitRow {
-    scope_json: String,
-    wait_json: String,
-    session_id: Option<SessionId>,
-    turn_control: bool,
-    terminal_json: Option<String>,
-}
-
-impl WaitRow {
-    fn matches(&self, identity: &AwaitEventRowIdentity) -> bool {
-        self.scope_json == identity.scope_json
-            && self.wait_json == identity.wait_json
-            && self.session_id == identity.session_id
-            && self.turn_control == identity.turn_control
-    }
+fn matches_identity(row: &WaitRow, identity: &AwaitEventRowIdentity) -> bool {
+    row.matches_identity(
+        &identity.scope_json,
+        &identity.wait_json,
+        identity.session_id.as_deref(),
+        identity.turn_control,
+    )
 }
 
 /// Which durable fence refuses `identity`: the owning session's revocation
-/// tombstone, or the scope's retirement tombstone. Session-free scopes have only
-/// the latter; session scopes are never scope-retired, so one predicate answers
-/// for either kind.
-fn fence_predicate(fences: FenceLocations, identity: &AwaitEventRowIdentity) -> String {
-    if identity.session_id.is_some() {
-        "EXISTS(SELECT 1 FROM await_event_revoked_sessions WHERE session_id = ?2)".to_string()
-    } else {
-        fences.fenced_predicate("?2")
-    }
-}
-
-/// The fence verdict for `identity` and the wait row stored under `key_id`, read
-/// as one statement.
-///
-/// Every caller needs both before it decides anything, and asking them
-/// separately cost a round trip per call for no extra isolation — both reads
-/// already happened inside one transaction. The fence is a scalar subquery over
-/// a one-row probe and the wait row is `LEFT JOIN`ed onto it, so a fenced key
-/// with no stored row and an unfenced key with one are the same single read.
-/// `scope_json` is `NOT NULL` in the table, so a NULL there is the join missing,
-/// not a row with empty columns.
-fn select_fence_and_wait_row(
+/// tombstone, or the scope's retirement tombstone. Session-free scopes have
+/// only the latter; session scopes are never scope-retired, so one of the two
+/// answers for either kind. Read inside the caller's transaction, which is the
+/// `BEGIN IMMEDIATE` write the fence's own writer takes.
+fn identity_is_fenced(
     connection: &rusqlite::Connection,
     fences: FenceLocations,
     identity: &AwaitEventRowIdentity,
-    key_id: &str,
-) -> rusqlite::Result<(bool, Option<WaitRow>)> {
-    let fence_subject = identity
-        .session_id
-        .as_deref()
-        .unwrap_or(identity.scope_id.as_str());
-    connection.query_row(
-        &format!(
-            "SELECT {},
-                    stored.scope_json, stored.wait_json, stored.session_id,
-                    stored.turn_control, stored.terminal_json
-             FROM (SELECT 1) AS probe
-             LEFT JOIN await_event_waits AS stored ON stored.key_id = ?1",
-            fence_predicate(fences, identity)
+) -> rusqlite::Result<bool> {
+    match identity.session_id.as_deref() {
+        Some(session_id) => connection.query_row(
+            wait_sql(Schema::Main).revoked.exists.sql(),
+            params![session_id],
+            |row| row.get(0),
         ),
-        params![key_id, fence_subject],
-        |row| {
-            let fenced: bool = row.get(0)?;
-            let Some(scope_json) = row.get::<_, Option<String>>(1)? else {
-                return Ok((fenced, None));
-            };
-            Ok((
-                fenced,
-                Some(WaitRow {
-                    scope_json,
-                    wait_json: row.get(2)?,
-                    session_id: row.get::<_, Option<String>>(3)?.map(SessionId::from),
-                    turn_control: row.get(4)?,
-                    terminal_json: row.get(5)?,
-                }),
-            ))
-        },
-    )
+        None => fences.is_fenced(connection, &identity.scope_id),
+    }
+}
+
+/// The row stored under `key_id`, if any.
+fn select_wait_row(
+    connection: &rusqlite::Connection,
+    key_id: &str,
+) -> rusqlite::Result<Option<WaitRow>> {
+    connection
+        .query_row(
+            wait_sql(Schema::Main).shared.select_by_key.sql(),
+            params![key_id],
+            |row| {
+                Ok(WaitRow {
+                    scope_json: row.get(0)?,
+                    wait_json: row.get(1)?,
+                    session_id: row.get(2)?,
+                    turn_control: row.get(3)?,
+                    terminal_json: row.get(4)?,
+                })
+            },
+        )
+        .optional()
 }
 
 fn session_is_revoked(
@@ -391,9 +432,7 @@ fn session_is_revoked(
     session_id: &SessionId,
 ) -> rusqlite::Result<bool> {
     connection.query_row(
-        "SELECT EXISTS(
-            SELECT 1 FROM await_event_revoked_sessions WHERE session_id = ?1
-         )",
+        wait_sql(Schema::Main).revoked.exists.sql(),
         params![session_id.as_str()],
         |row| row.get(0),
     )

@@ -14,6 +14,15 @@ use lash_core::{AwaitEventWaitIdentity, ExecutionScope};
 use lash_postgres_store::{
     PostgresEffectReplayOptions, PostgresRuntimeEffectController, PostgresStorage,
 };
+use lash_store_sql::wait::waits::WaitStatements;
+
+/// The one statement this helper issues, rendered once. The helper observes
+/// the durable row from outside the runtime, so it reads the same named
+/// statement the store does rather than a second spelling of it.
+static WAIT_COUNT_BY_KEY: std::sync::LazyLock<lash_store_sql::Rendered> =
+    std::sync::LazyLock::new(|| {
+        WaitStatements::render(lash_store_sql::Dialect::postgres()).count_by_key
+    });
 
 #[path = "../../../lash-core/tests/support/cold_process_effect_driver.rs"]
 mod cold_process_effect_driver;
@@ -79,11 +88,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
-            let registered: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM lash_await_event_waits WHERE key_id = $1")
-                    .bind(&key.key_id)
-                    .fetch_one(storage.pool())
-                    .await?;
+            let registered: i64 = sqlx::query_scalar(WAIT_COUNT_BY_KEY.sql())
+                .bind(&key.key_id)
+                .fetch_one(storage.pool())
+                .await?;
             if registered == 1 {
                 break Ok::<(), sqlx::Error>(());
             }
