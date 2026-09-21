@@ -461,6 +461,7 @@ jobs:
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_conformance_law_registration.py
+          python3 scripts/test_check_law_execution_receipts.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_gate_scope.py
           python3 scripts/test_toolchain_canary.py
@@ -740,8 +741,16 @@ jobs:
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
+            --remote_download_regex='.*test\.outputs.*' \
             --cache_test_results=yes --test_output=errors \
             -- //:workspace_tests -//:workspace_tail_tests
+
+      # FIG-3429 item 8: conformance laws leave an execution receipt in each
+      # target's undeclared outputs; this census fails on any registered law
+      # a ran target reported `ok` for without executing.
+      - name: Census law execution receipts
+        shell: bash
+        run: python3 scripts/check_law_execution_receipts.py --bazel-testlogs bazel-testlogs
 
       - name: Remove client credentials
         if: always()
@@ -794,8 +803,15 @@ jobs:
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
+            --remote_download_regex='.*test\.outputs.*' \
             --cache_test_results=yes --test_output=errors \
             //:workspace_tail_tests
+
+      # Same law-execution census as the main leg: whichever law-bearing
+      # targets the tail ran must have executed their full registered set.
+      - name: Census law execution receipts
+        shell: bash
+        run: python3 scripts/check_law_execution_receipts.py --bazel-testlogs bazel-testlogs
 
       - name: Remove client credentials
         if: always()
@@ -955,6 +971,12 @@ jobs:
               fi
               build_args=(--workspace "${excludes[@]}" --example sqlite-await-event-helper)
               nextest_args=(--workspace -E "${skip}")
+              # The execution-receipt census below claims exactly the crates
+              # whose conformance suites this run executes: the service tiers
+              # (postgres/s3) are excluded above and censused by their own
+              # jobs, and every other law-invoking crate runs here in full.
+              receipts_dir="$(mktemp -d)"
+              export LASH_LAW_RECEIPTS="${receipts_dir}/law-receipts.txt"
               ;;
             *)
               echo "invalid Bazel trust decision: ${BAZEL_TRUSTED}" >&2
@@ -966,6 +988,21 @@ jobs:
           # shellcheck disable=SC2086
           cargo nextest run --profile ci --locked ${LASH_CI_FEATURES} \
             --no-fail-fast "${nextest_args[@]}"
+          # FIG-3429 item 8: every law registered for a tier this leg runs
+          # must have left an execution receipt -- a fixture that self-skips
+          # reports `ok` for a law that never ran, which is exactly the hole
+          # this census closes. The trusted-event leg takes the same census
+          # through `bazel test` undeclared outputs instead (the bazel-tests
+          # jobs' census step).
+          if [ "${BAZEL_TRUSTED}" = false ]; then
+            python3 scripts/check_law_execution_receipts.py \
+              --crate crates/lash-conformance \
+              --crate crates/lash-sqlite-store \
+              --crate crates/lash \
+              --crate crates/lash-protocol-rlm \
+              --crate crates/lash-restate \
+              --receipts "${LASH_LAW_RECEIPTS}"
+          fi
 
       - name: Save workspace test build outputs
         if: success() && steps.workspace-test-cache.outputs.cache-hit != 'true'
