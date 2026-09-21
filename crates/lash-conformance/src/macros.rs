@@ -2072,8 +2072,8 @@ macro_rules! tool_child_invocation_tests {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
                 let (_guard, prefix, fixture) = $fixture;
-                let _ = $label;
                 $crate::registration_macro_support::$law(&fixture, prefix).await;
+                $crate::law_receipt::record(stringify!($law), $label);
             }
         )*
     };

@@ -104,6 +104,23 @@ lash_conformance::effect_group_host_tests!({
                 {f.name for f in files}, {"main.rs", "included.rs", "mod.rs"}
             )
 
+    def test_an_all_ignored_invocation_claims_nothing(self) -> None:
+        text = """\
+suite_a_tests!(
+    #[ignore = "requires an isolated server; run by `just e2e`"]
+    { fixture_a }
+);
+suite_b_tests!({ fixture_b });
+"""
+        self.assertEqual(MODULE.live_invoked_suites(text), {"suite_b_tests"})
+
+    def test_one_live_invocation_keeps_the_suite_claimed(self) -> None:
+        text = """\
+suite_a_tests!(#[ignore = "deferred"] { fixture_a });
+suite_a_tests!({ fixture_b });
+"""
+        self.assertEqual(MODULE.live_invoked_suites(text), {"suite_a_tests"})
+
 
 class ReceiptTests(unittest.TestCase):
     def test_receipt_lines_parse_law_and_label(self) -> None:
@@ -115,6 +132,28 @@ class ReceiptTests(unittest.TestCase):
             self.assertEqual(
                 MODULE.read_receipts([path]),
                 {("some_law", "label-a"), ("other_law", "label-b")},
+            )
+
+    def test_bazel_receipts_read_the_flat_test_outputs_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target_dir = Path(tmp) / "conformance__test"
+            (target_dir / "test.outputs").mkdir(parents=True)
+            (target_dir / "test.outputs" / "law-receipts.txt").write_text(
+                "some_law\tlabel-a\n", encoding="utf-8"
+            )
+            self.assertEqual(
+                MODULE.bazel_receipts(target_dir), {("some_law", "label-a")}
+            )
+
+    def test_bazel_receipts_read_the_nested_outputs_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target_dir = Path(tmp) / "conformance__test"
+            (target_dir / "test.outputs" / "outputs").mkdir(parents=True)
+            (target_dir / "test.outputs" / "outputs" / "law-receipts.txt").write_text(
+                "some_law\tlabel-a\n", encoding="utf-8"
+            )
+            self.assertEqual(
+                MODULE.bazel_receipts(target_dir), {("some_law", "label-a")}
             )
 
 

@@ -219,10 +219,33 @@ def invoked_suites(text: str) -> set[str]:
     )
 
 
+IGNORE_HEAD = re.compile(r"\s*\(\s*#\s*\[\s*ignore\b")
+
+
+def live_invoked_suites(text: str) -> set[str]:
+    """Invoked suites minus those whose every invocation is ``#[ignore]``d.
+
+    An ``#[ignore]`` attribute passed at the call site lands on every test the
+    suite generates: the laws stay registered but are deferred to the lane the
+    ignore reason names, so this file's target owes no receipt for them. A
+    suite invoked once ignored and once live still owes its receipts.
+    """
+    stripped = strip_comments(text)
+    defined = set(SUITE_DEFINE.findall(stripped))
+    live: dict[str, bool] = {}
+    for m in SUITE_CALL.finditer(stripped):
+        name = m.group(1)
+        if name in defined:
+            continue
+        ignored = bool(IGNORE_HEAD.match(stripped, m.end()))
+        live[name] = live.get(name, False) or not ignored
+    return {name for name, is_live in live.items() if is_live}
+
+
 def expected_for_files(files: list[Path], macros: dict[str, Macro]) -> set[tuple[str, str]]:
     expected: set[tuple[str, str]] = set()
     for path in files:
-        for suite in invoked_suites(path.read_text(encoding="utf-8")):
+        for suite in live_invoked_suites(path.read_text(encoding="utf-8")):
             expected |= suite_expected(macros, suite)
     return expected
 
@@ -278,11 +301,14 @@ def read_receipts(paths: list[Path]) -> set[tuple[str, str]]:
 
 def bazel_receipts(target_dir: Path) -> set[tuple[str, str]]:
     """Receipts a single Bazel test target left in its undeclared outputs."""
-    outputs = target_dir / "test.outputs" / "outputs"
+    outputs_dir = target_dir / "test.outputs"
     found: list[Path] = []
-    direct = outputs / RECEIPT_NAME
-    if direct.is_file():
-        found.append(direct)
+    for candidate in (
+        outputs_dir / RECEIPT_NAME,
+        outputs_dir / "outputs" / RECEIPT_NAME,
+    ):
+        if candidate.is_file():
+            found.append(candidate)
     for zip_path in target_dir.glob("test.outputs/*.zip"):
         with zipfile.ZipFile(zip_path) as zf:
             for member in zf.namelist():
