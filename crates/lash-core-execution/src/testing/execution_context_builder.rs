@@ -26,6 +26,16 @@ pub struct TestExecutionContextBuilder<'run> {
     effect_controller: TestEffectController<'run>,
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
     runtime_parent_invocation: Option<crate::RuntimeInvocation>,
+    /// Which cell of the turn this context executes.
+    ///
+    /// Production separates one cell from the next by the turn driver's
+    /// protocol iteration, which is part of every cell's effect replay key
+    /// (`runtime::causal::turn_effect_replay_key`). A fixture cannot invent
+    /// that number without asserting a shape production cannot produce, so it
+    /// states it: a fixture that runs two cells passes 0 and then 1, and a
+    /// fixture that redrives one cell reuses the invocation through
+    /// [`TestExecutionContextBuilder::runtime_parent_invocation`] instead.
+    protocol_iteration: usize,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     clock: Arc<dyn crate::Clock>,
     /// Protocol factories the session is built from. `None` takes the code
@@ -40,6 +50,9 @@ pub struct BuiltTestExecutionContext<'run> {
     pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     pub execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub runtime_parent_invocation: Option<crate::RuntimeInvocation>,
+    /// Which cell of the turn this context executes; see
+    /// [`TestExecutionContextBuilder::protocol_iteration`].
+    pub protocol_iteration: usize,
 }
 
 impl<'run> Default for TestExecutionContextBuilder<'run> {
@@ -69,6 +82,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             )),
             dispatch_parent_invocation: None,
             runtime_parent_invocation: None,
+            protocol_iteration: 0,
             attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
             clock: Arc::new(crate::SystemClock),
             plugin_factories: None,
@@ -158,6 +172,14 @@ impl<'run> TestExecutionContextBuilder<'run> {
         parent_invocation: crate::RuntimeInvocation,
     ) -> Self {
         self.runtime_parent_invocation = Some(parent_invocation);
+        self
+    }
+
+    /// Which cell of the turn this context executes, counting from 0.
+    ///
+    /// Only a fixture that executes more than one cell needs to say.
+    pub fn protocol_iteration(mut self, protocol_iteration: usize) -> Self {
+        self.protocol_iteration = protocol_iteration;
         self
     }
 
@@ -256,6 +278,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             process_env_store: self.process_env_store,
             execution_env_spec: self.execution_env_spec,
             runtime_parent_invocation: self.runtime_parent_invocation,
+            protocol_iteration: self.protocol_iteration,
         }
     }
 }
@@ -265,7 +288,7 @@ impl<'run> BuiltTestExecutionContext<'run> {
         let attachment_store = Arc::clone(&self.dispatch.attachment_store);
         let session_id = self.dispatch.session_id.clone();
         let mut context = crate::RuntimeExecutionContext::new(
-            session_id,
+            session_id.clone(),
             self.dispatch,
             self.process_env_store,
             attachment_store,
@@ -274,9 +297,36 @@ impl<'run> BuiltTestExecutionContext<'run> {
             crate::TurnContext::default(),
         )
         .with_execution_env_spec(self.execution_env_spec);
-        if let Some(parent_invocation) = self.runtime_parent_invocation {
-            context = context.with_parent_invocation(parent_invocation);
-        }
+        let parent_invocation = self
+            .runtime_parent_invocation
+            .unwrap_or_else(|| code_execution_invocation(&session_id, self.protocol_iteration));
+        context = context.with_parent_invocation(parent_invocation);
         context
     }
+}
+
+/// The code-execution effect the turn driver would have installed for this
+/// cell.
+///
+/// Production builds every cell's invocation through this same function
+/// (`turn_driver/lease.rs::turn_effect_invocation` →
+/// `runtime::causal::turn_effect_invocation`), so a fixture gets its cell key
+/// the way production mints one rather than by spelling a string. The protocol
+/// iteration is the only part a fixture supplies, because it is the only part
+/// that says *which* cell this is.
+fn code_execution_invocation(
+    session_id: &SessionId,
+    protocol_iteration: usize,
+) -> crate::RuntimeInvocation {
+    let turn_id = crate::TurnId::from("test-turn");
+    crate::runtime::causal::turn_effect_invocation(
+        &crate::ExecutionScope::turn(session_id.clone(), turn_id.clone()),
+        session_id,
+        &turn_id,
+        0,
+        protocol_iteration,
+        crate::sansio::EffectId(protocol_iteration as u64),
+        crate::RuntimeEffectKind::ExecCode,
+    )
+    .into_runtime_invocation()
 }
