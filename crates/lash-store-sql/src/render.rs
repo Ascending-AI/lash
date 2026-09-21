@@ -600,13 +600,18 @@ enum TablePosition {
 
 /// Whether `word` opens a table position, given the identifier before it.
 ///
-/// `previous` decides two cases: an upsert's `ON CONFLICT … DO UPDATE SET`
-/// writes `UPDATE` with no table after it, because the table is the one the
-/// insert already named. Every other `UPDATE` is a statement head and does
-/// take a table.
+/// `previous` decides the three cases where the keyword is not a statement
+/// head: an upsert's `ON CONFLICT … DO UPDATE SET`, whose table is the one the
+/// insert already named; a locking clause's `FOR UPDATE`, which is followed by
+/// `OF`, `SKIP`, `NOWAIT` or nothing at all; and the `FROM` inside the
+/// `IS [NOT] DISTINCT FROM` comparison operator, which is followed by whatever
+/// is being compared. Every other `UPDATE` heads a statement and every other
+/// `FROM` opens a relation list.
 fn table_position(word: &str, previous: Option<&str>) -> Option<TablePosition> {
     if word.eq_ignore_ascii_case("from") {
-        Some(TablePosition::From)
+        let comparison_operator =
+            previous.is_some_and(|before| before.eq_ignore_ascii_case("distinct"));
+        (!comparison_operator).then_some(TablePosition::From)
     } else if word.eq_ignore_ascii_case("update") {
         // `ON CONFLICT … DO UPDATE SET` writes the row the insert conflicted
         // with; `FOR UPDATE OF <alias>` names an alias. Neither takes a table.
