@@ -6,7 +6,13 @@ use super::*;
 /// host-reporting effect for tool calls refused before dispatch. Version 3
 /// removes the terminal-turn scheduling state; older checkpoints are not
 /// compatible because replaying them could re-enter the deleted extra turn.
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 4;
+/// Version 4 was the typed-failure-code representation audit. Version 5
+/// (FIG-3371) carries the streamed-block event vocabulary:
+/// `SessionStreamEvent` inside `Effect::Emit` gained `stream_block_started` /
+/// `stream_block_completed` and required `block` identities on text and
+/// reasoning deltas, so v4 checkpoints holding pending text effects cannot
+/// deserialize faithfully.
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 5;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1

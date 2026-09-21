@@ -854,6 +854,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 ));
             }
             push_opt(&mut attrs, attr::LASH_STREAM_ITEM_ID, &event.item_id);
+            push_opt(&mut attrs, attr::LASH_STREAM_BLOCK_ID, &event.block_id);
             if let Some(output_index) = event.output_index {
                 attrs.push(KeyValue::new(attr::LASH_STREAM_OUTPUT_INDEX, output_index));
             }

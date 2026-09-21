@@ -77,12 +77,15 @@ impl StreamBlock {
         if text.is_empty() && signature.is_empty() {
             return None;
         }
-        let replay = (!signature.is_empty()).then(|| ProviderReasoningReplay {
-            // The content block is the provider's reasoning item; indexing it
-            // lets the runtime fold the streamed block back into this part.
+        // The content block is the provider's reasoning item; indexing it
+        // lets the runtime fold the streamed block back into this part.
+        // Unsigned thinking still carries the item_id — without it the
+        // runtime's anonymous-republish branch would emit the part as a
+        // second, orphaned block.
+        let replay = Some(ProviderReasoningReplay {
             item_id: Some(format!("content_block:{index}")),
             encrypted_content: None,
-            signature: Some(signature.clone()),
+            signature: (!signature.is_empty()).then(|| signature.clone()),
             redacted,
             summary: Vec::new(),
             origin: None,
@@ -109,6 +112,10 @@ pub(crate) struct StreamState {
     pub(crate) stop_reason: Option<String>,
     pub(crate) message_started: bool,
     pub(crate) message_stopped: bool,
+    /// Stamped from `ProviderOptions::expose_thinking` at state construction
+    /// so the assembled `LlmResponse` carries the visibility policy forward
+    /// for the runtime's reasoning republication gate.
+    pub(crate) expose_thinking: bool,
 }
 
 /// Overlay the keys of `next` (a raw wire `usage` object) onto the captured
@@ -451,9 +458,17 @@ impl AnthropicProvider {
                         _ => {}
                     }
                     if let Some(part) = state.blocks.get(index).and_then(|block| {
-                        block
-                            .tool_call_part()
-                            .or_else(|| block.reasoning_part(index))
+                        block.tool_call_part().or_else(|| {
+                            // A hidden thinking part stays in `state.blocks`
+                            // for the durable response but never enters the
+                            // event stream — the runtime republishes unseen
+                            // reasoning parts to the host on arrival.
+                            if expose_thinking {
+                                block.reasoning_part(index)
+                            } else {
+                                None
+                            }
+                        })
                     }) {
                         tx.send(LlmStreamEvent::Part(part));
                     }

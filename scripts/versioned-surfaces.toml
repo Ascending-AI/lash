@@ -557,6 +557,19 @@ paths = [
 ]
 must_cover = ["TurnCheckpoint", "MachineState", "Effect"]
 
+# `Effect::Emit` carries `SessionStreamEvent`; the streamed-block vocabulary
+# (block identities on deltas, start/end pairing variants) is part of the
+# checkpoint's serialized reach even though the types live in other modules.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/session_model/mod.rs"]
+symbols = ["SessionStreamEvent"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/llm/types.rs"]
+symbols = ["StreamBlockIdentity", "StreamBlockKind"]
+
 [[surface]]
 constant = "CHECKPOINT_COMPONENT_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/checkpoint.rs"

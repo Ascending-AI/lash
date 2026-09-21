@@ -178,10 +178,12 @@ impl GoogleOAuthProvider {
                 execution_evidence,
                 generation_disposition,
                 response_metadata: response_metadata.into_metadata(),
+                expose_thinking: self.options.expose_thinking,
             });
         }
 
         let mut stream_state = GoogleStreamState::default();
+        stream_state.expose_thinking = self.options.expose_thinking;
         stream_state.execution_evidence =
             provider_request_id.map(|provider_request_id| ExecutionEvidence {
                 provider_request_id: Some(provider_request_id),
@@ -285,6 +287,7 @@ impl GoogleOAuthProvider {
                 execution_evidence: stream_state.execution_evidence.clone(),
                 generation_disposition,
                 response_metadata: response_metadata.metadata(),
+                expose_thinking: stream_state.expose_thinking,
             }
         };
         if let Err(error) = stream_result {
@@ -340,6 +343,7 @@ impl GoogleOAuthProvider {
             execution_evidence: stream_state.execution_evidence,
             generation_disposition,
             response_metadata: response_metadata.into_metadata(),
+            expose_thinking: stream_state.expose_thinking,
         })
     }
 

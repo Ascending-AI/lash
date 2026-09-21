@@ -424,6 +424,7 @@ fn jsonl_sink_creates_parent_directories() {
                 raw_text: Some("hello".to_string()),
                 visible_text: Some("hello".to_string()),
                 item_id: None,
+                block_id: None,
                 output_index: None,
                 call_id: None,
                 tool_name: None,

@@ -284,6 +284,7 @@ impl RuntimeTurnDriver<'_> {
         let mut stream_accumulator = LlmStreamAccumulator::default();
         let mut stream_evidence = crate::LlmStreamEvidence::default();
         let mut abort_requested = false;
+        let mut block_raw_text = std::collections::HashMap::new();
         let attempt_started_at = self.host.core.clock.timestamp_ms();
         let attempt_started = self.host.core.clock.now();
         let mut plugin_reasoning_blocks = 0u64;
@@ -304,6 +305,7 @@ impl RuntimeTurnDriver<'_> {
             assistant_prose_attempt_correlations: &mut assistant_prose_attempt_correlations,
             reasoning_attempt_correlations: &mut reasoning_attempt_correlations,
             abort_requested: &mut abort_requested,
+            block_raw_text: &mut block_raw_text,
         };
         let mut host_forwarder = ProviderHostForwarder::new(event_tx);
         let mut call_record = None;
@@ -810,6 +812,7 @@ impl RuntimeTurnDriver<'_> {
             raw_text: log.text.raw.map(str::to_string),
             visible_text: log.text.visible.map(str::to_string),
             item_id: log.item_id.map(str::to_string),
+            block_id: log.block_id.map(str::to_string),
             output_index: None,
             call_id: None,
             tool_name: None,
@@ -935,6 +938,11 @@ impl RuntimeTurnDriver<'_> {
             return Ok(());
         }
         *state.text_streamed = true;
+        state
+            .block_raw_text
+            .entry(block.id.clone())
+            .or_default()
+            .push_str(&text);
         let raw_text = self
             .host
             .core
@@ -960,7 +968,8 @@ impl RuntimeTurnDriver<'_> {
                     raw: raw_text.as_deref(),
                     visible: Some(&text),
                 },
-                item_id: block.item_id.as_deref().or(Some(block.id.as_str())),
+                item_id: block.item_id.as_deref(),
+                block_id: Some(block.id.as_str()),
                 usage: None,
                 tool_call: None,
             },
@@ -1095,10 +1104,10 @@ impl RuntimeTurnDriver<'_> {
                     .await?;
             }
             LlmStreamEvent::TextBlockEnd { block, text } => {
-                // The end event's text is authoritative for the block and
-                // repeats content already streamed as deltas, so it must NOT
-                // go through the plugin stream transform — a stateful chunk
-                // hook would see the same text twice.
+                // The end event's text is authoritative for the block. Only
+                // content beyond what streamed as deltas may go through the
+                // plugin stream transform — a stateful chunk hook must never
+                // see the same text twice.
                 let raw_text = self
                     .host
                     .core
@@ -1106,13 +1115,31 @@ impl RuntimeTurnDriver<'_> {
                     .trace_sink
                     .as_ref()
                     .map(|_| text.clone());
-                // Hosts seal with the post-transform total they accumulated
-                // from deltas; the accumulator records the provider's raw
-                // authoritative text for the block.
-                let sealed = state
-                    .stream_accumulator
-                    .block_text(&block)
-                    .unwrap_or_else(|| text.clone());
+                let raw_accumulated = state
+                    .block_raw_text
+                    .get(&block.id)
+                    .cloned()
+                    .unwrap_or_default();
+                let prefix_extension = text.starts_with(raw_accumulated.as_str());
+                if prefix_extension {
+                    // A completion that extends the streamed prefix forwards
+                    // only the unseen tail — covers zero-delta blocks and
+                    // non-streamed final-message reconciliation alike.
+                    let tail = text[raw_accumulated.len()..].to_string();
+                    self.emit_visible_assistant_text(forwarder, tail, &block, "delta", state)
+                        .await?;
+                }
+                // Prefix extensions seal with the post-transform total hosts
+                // accumulated from deltas; a non-prefix completion is a
+                // correction and seals with the provider's authoritative text.
+                let sealed = if prefix_extension {
+                    state
+                        .stream_accumulator
+                        .block_text(&block)
+                        .unwrap_or_else(|| text.clone())
+                } else {
+                    text.clone()
+                };
                 self.log_llm_stream_event(
                     state.debug,
                     LlmStreamEventLog {
@@ -1122,7 +1149,8 @@ impl RuntimeTurnDriver<'_> {
                             raw: raw_text.as_deref(),
                             visible: Some(&sealed),
                         },
-                        item_id: block.item_id.as_deref().or(Some(block.id.as_str())),
+                        item_id: block.item_id.as_deref(),
+                        block_id: Some(block.id.as_str()),
                         usage: None,
                         tool_call: None,
                     },
@@ -1173,7 +1201,8 @@ impl RuntimeTurnDriver<'_> {
                                 raw: None,
                                 visible: Some(&text),
                             },
-                            item_id: block.item_id.as_deref().or(Some(block.id.as_str())),
+                            item_id: block.item_id.as_deref(),
+                            block_id: Some(block.id.as_str()),
                             usage: None,
                             tool_call: None,
                         },
@@ -1204,7 +1233,8 @@ impl RuntimeTurnDriver<'_> {
                             raw: None,
                             visible: Some(&text),
                         },
-                        item_id: block.item_id.as_deref().or(Some(block.id.as_str())),
+                        item_id: block.item_id.as_deref(),
+                        block_id: Some(block.id.as_str()),
                         usage: None,
                         tool_call: None,
                     },
@@ -1240,6 +1270,7 @@ impl RuntimeTurnDriver<'_> {
                             visible: None,
                         },
                         item_id: item_id.as_deref(),
+                        block_id: None,
                         usage: None,
                         tool_call: None,
                     },
@@ -1270,6 +1301,7 @@ impl RuntimeTurnDriver<'_> {
                             visible: None,
                         },
                         item_id,
+                        block_id: None,
                         usage: None,
                         tool_call: Some(LlmDebugToolCall {
                             call_id: &call_id,
@@ -1305,6 +1337,7 @@ impl RuntimeTurnDriver<'_> {
                             visible: None,
                         },
                         item_id,
+                        block_id: None,
                         usage: None,
                         tool_call: None,
                     },
@@ -1356,6 +1389,7 @@ impl RuntimeTurnDriver<'_> {
                             visible: None,
                         },
                         item_id: None,
+                        block_id: None,
                         usage: Some(&usage),
                         tool_call: None,
                     },

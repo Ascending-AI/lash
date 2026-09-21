@@ -17,6 +17,7 @@ pub use config::{AnthropicProvider, DEFAULT_BASE_URL};
 
 #[cfg(test)]
 mod tests {
+    mod block_identity_tests;
     mod runtime_feedback;
     use runtime_feedback::request_with_instructions;
     mod epilogue;
@@ -250,50 +251,6 @@ mod tests {
                 "signature": "native-anthropic-signature"
             })
         );
-    }
-
-    #[tokio::test]
-    async fn streamed_reasoning_parts_are_stamped_at_the_anthropic_boundary() {
-        let body = concat!(
-            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n",
-            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n",
-            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"summary\"}}\n\n",
-            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"native-signature\"}}\n\n",
-            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
-            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
-            "data: {\"type\":\"message_stop\"}\n\n",
-        );
-        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let event_sink = Arc::clone(&events);
-        let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-        req.stream_events = Some(LlmEventSender::new(move |event| {
-            event_sink.lock_recover().push(event);
-        }));
-        let mut provider =
-            AnthropicProvider::new("key").with_transport(Arc::new(StaticSseTransport(body)));
-        let expected_route = provider.route_identity("claude-sonnet-4-6");
-
-        let response = provider
-            .complete(req)
-            .await
-            .expect("thinking stream completes");
-        let replay = match &response.parts[0] {
-            LlmOutputPart::Reasoning {
-                replay: Some(replay),
-                ..
-            } => replay,
-            other => panic!("expected reasoning replay, got {other:?}"),
-        };
-        assert_eq!(replay.origin.as_ref(), Some(&expected_route));
-        assert!(events.lock_recover().iter().any(|event| {
-            matches!(
-                event,
-                LlmStreamEvent::Part(LlmOutputPart::Reasoning {
-                    replay: Some(replay),
-                    ..
-                }) if replay.origin.as_ref() == Some(&expected_route)
-            )
-        }));
     }
 
     #[tokio::test]

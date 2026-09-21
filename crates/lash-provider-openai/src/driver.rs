@@ -684,6 +684,7 @@ fn complete_buffered_responses(
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder);
+    state.expose_thinking = provider.options.expose_thinking;
     let body_was_sse = text.trim_start().starts_with("data:") || text.contains("\ndata:");
     if body_was_sse {
         OpenAiCompatibleProvider::parse_sse_payload(&text, &mut state)?;
@@ -780,19 +781,33 @@ fn complete_buffered_responses(
                     }
                 }
             }
-            let full_text = state.full_text();
-            if !full_text.is_empty() {
-                let block = StreamBlockIdentity::new(format!("text:{next_ordinal}"), next_ordinal);
+            // Each visible message item is its own text block, mirroring the
+            // live SSE mint (`message:{item_id}` / `text:{ordinal}`).
+            for part in &parts {
+                let LlmOutputPart::Text {
+                    text,
+                    response_meta,
+                } = part
+                else {
+                    continue;
+                };
+                if text.is_empty() {
+                    continue;
+                }
+                let block = crate::responses_shared::text_part_block_identity(
+                    response_meta.as_ref().and_then(|meta| meta.id.as_deref()),
+                    &mut next_ordinal,
+                );
                 tx.send(LlmStreamEvent::TextBlockStart {
                     block: block.clone(),
                 });
                 tx.send(LlmStreamEvent::Delta {
                     block: block.clone(),
-                    text: full_text.clone(),
+                    text: text.clone(),
                 });
                 tx.send(LlmStreamEvent::TextBlockEnd {
                     block,
-                    text: full_text,
+                    text: text.clone(),
                 });
             }
         }
@@ -808,6 +823,7 @@ fn complete_buffered_responses(
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: state.expose_thinking,
     })
 }
 
@@ -820,6 +836,7 @@ fn complete_buffered_chat(
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
+    state.expose_thinking = provider.options.expose_thinking;
     let mut parsed_parts = None;
     if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
         OpenAiCompatibleProvider::parse_chat_sse_payload(&text, &mut state)?;
@@ -952,6 +969,7 @@ fn complete_buffered_chat(
         execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: state.expose_thinking,
     })
 }
 
@@ -1017,6 +1035,7 @@ async fn drive_streaming_responses(
         || ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder),
         |resume| resume.state,
     );
+    state.expose_thinking = provider.options.expose_thinking;
     let mut emitted_parts = Vec::new();
     let expose_thinking = provider.options.expose_thinking;
     let stream_result = drive_sse_response(
@@ -1085,7 +1104,20 @@ async fn drive_streaming_responses(
     )
     .await;
 
+    let seal_open_blocks = |state: &mut ResponsesStreamState| {
+        if let Some(tx) = &stream_events {
+            for event in state.finish_blocks() {
+                if !expose_thinking && is_reasoning_block_event(&event) {
+                    continue;
+                }
+                tx.send(event);
+            }
+        } else {
+            state.finish_blocks();
+        }
+    };
     if let Err(error) = stream_result {
+        seal_open_blocks(&mut state);
         return Err(responses_stream_failure(
             provider,
             request_key,
@@ -1100,6 +1132,7 @@ async fn drive_streaming_responses(
     if stream_termination == StreamTermination::RequireTerminalEvidence
         && !state.terminal_event_seen
     {
+        seal_open_blocks(&mut state);
         return Err(responses_stream_failure(
             provider,
             request_key,
@@ -1115,6 +1148,7 @@ async fn drive_streaming_responses(
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
         ));
     }
+    seal_open_blocks(&mut state);
 
     let parts = state.response_parts();
     let terminal_reason = state
@@ -1142,6 +1176,7 @@ async fn drive_streaming_responses(
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: state.expose_thinking,
     })
 }
 
@@ -1163,6 +1198,7 @@ async fn drive_streaming_chat(
         ..
     } = context;
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
+    state.expose_thinking = provider.options.expose_thinking;
     let expose_thinking = provider.options.expose_thinking;
     let stream_result = drive_sse_response(
         body,
@@ -1203,7 +1239,20 @@ async fn drive_streaming_chat(
     )
     .await;
 
+    let seal_open_blocks = |state: &mut ChatStreamState| {
+        if let Some(tx) = &stream_events {
+            for event in state.finish_blocks() {
+                if !expose_thinking && is_reasoning_block_event(&event) {
+                    continue;
+                }
+                tx.send(event);
+            }
+        } else {
+            state.finish_blocks();
+        }
+    };
     if let Err(error) = stream_result {
+        seal_open_blocks(&mut state);
         return Err(error.with_partial_response(chat_response_from_state(state, &url)));
     }
 
@@ -1214,6 +1263,7 @@ async fn drive_streaming_chat(
             .and_then(|evidence| evidence.provider_finish_reason.as_ref())
             .is_none()
     {
+        seal_open_blocks(&mut state);
         return Err(LlmTransportError::new("Stream ended without finish_reason")
             .with_kind(ProviderFailureKind::Stream)
             .with_adapter_code(TurnFailureCode::StreamEndedBeforeFinishReason)
@@ -1255,6 +1305,7 @@ async fn drive_streaming_chat(
         execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: state.expose_thinking,
     })
 }
 
@@ -1276,5 +1327,6 @@ fn chat_response_from_state(state: ChatStreamState, url: &str) -> LlmResponse {
         execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: state.expose_thinking,
     }
 }

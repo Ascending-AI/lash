@@ -110,7 +110,10 @@ pub use lashlang_graph::{
 /// Version 23 adds a closed [`ExecCodeFailureReason`] to `exec_code_failed` so
 /// the classification survives JSONL and OTel without string-matching the
 /// human-readable `error` text.
-pub const TRACE_SCHEMA_VERSION: u32 = 23;
+/// Version 24 (FIG-3371) adds `block_id` to [`TraceRuntimeStreamEvent`] so a
+/// provider item's sub-blocks — e.g. OpenAI `rs_*:summary:0` / `:summary:1` —
+/// stay distinguishable; `item_id` alone collapses them to the item.
+pub const TRACE_SCHEMA_VERSION: u32 = 24;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1108,6 +1111,11 @@ pub struct TraceRuntimeStreamEvent {
     pub visible_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<String>,
+    /// The streamed block's own identity. Several blocks can share one
+    /// `item_id` (OpenAI summary parts of one reasoning item), so block-level
+    /// granularity needs this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_index: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

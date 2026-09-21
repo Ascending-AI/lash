@@ -256,6 +256,7 @@ pub fn response_from_stream_state(
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
+        expose_thinking: state.expose_thinking,
     }
 }
 
@@ -340,6 +341,27 @@ pub fn has_structured_message_text(value: &Value) -> bool {
 
 pub fn response_parts_from_value(value: &Value) -> Vec<LlmOutputPart> {
     response_parts_from_value_with_decoder(value, &ToolArgumentDecoder::default())
+}
+
+/// The assistant-text block identity for one visible message item:
+/// `message:{item_id}` when the server named the item, else a deterministic
+/// per-response ordinal. Shared by the live SSE mint and the
+/// buffered/plain-JSON replay of a Responses payload so both lanes mint the
+/// same identity for the same item.
+pub fn text_part_block_identity(
+    item_id: Option<&str>,
+    next_ordinal: &mut u64,
+) -> StreamBlockIdentity {
+    let ordinal = *next_ordinal;
+    *next_ordinal += 1;
+    let item_id = item_id.filter(|id| !id.is_empty());
+    StreamBlockIdentity::new(
+        item_id
+            .map(|id| format!("message:{id}"))
+            .unwrap_or_else(|| format!("text:{ordinal}")),
+        ordinal,
+    )
+    .with_item_id(item_id.map(str::to_string))
 }
 
 pub fn response_parts_from_value_with_decoder(
@@ -484,6 +506,9 @@ pub struct ResponsesStreamState {
     pub(crate) next_block_ordinal: u64,
     /// Message-slot owner → the assistant-text block minted for that item.
     pub(crate) text_blocks: HashMap<usize, StreamBlockIdentity>,
+    /// Owners whose text block already sealed at `response.output_item.done`.
+    /// `finish_blocks` seals the rest at the terminal event.
+    pub(crate) sealed_text_owners: std::collections::HashSet<usize>,
     /// The reasoning summary part currently open for deltas, its
     /// `(item_id, summary_index)` key, and its accumulated text for the
     /// authoritative block end.
@@ -502,6 +527,10 @@ pub struct ResponsesStreamState {
     /// parser about a new event may make that classification more precise, but
     /// schema drift must never make a second generation look charge-safe.
     pub unrecognized_event_observed: bool,
+    /// Stamped from `ProviderOptions::expose_thinking` at state construction
+    /// so the assembled `LlmResponse` carries the visibility policy forward
+    /// for the runtime's reasoning republication gate.
+    pub expose_thinking: bool,
 }
 
 impl ResponsesStreamState {
@@ -780,6 +809,7 @@ impl ResponsesStreamState {
                     block,
                     text: authoritative,
                 });
+                self.sealed_text_owners.insert(owner);
             }
         }
         self.current_text_slot = None;
@@ -1221,6 +1251,40 @@ impl ResponsesStreamState {
     /// `ReasoningBlockEnd`) minted while folding the last SSE event.
     pub fn take_block_events(&mut self) -> Vec<LlmStreamEvent> {
         std::mem::take(&mut self.block_events)
+    }
+
+    /// Seal every block still open at a terminal boundary — normal
+    /// completion, `response.incomplete`, failure, or an abort. Every
+    /// `BlockStart` pairs with a `BlockEnd` carrying the text accumulated for
+    /// that block.
+    pub fn finish_blocks(&mut self) -> Vec<LlmStreamEvent> {
+        self.close_reasoning_block();
+        let mut open: Vec<(usize, StreamBlockIdentity)> = self
+            .text_blocks
+            .iter()
+            .filter(|(owner, _)| !self.sealed_text_owners.contains(owner))
+            .map(|(owner, block)| (*owner, block.clone()))
+            .collect();
+        open.sort_by_key(|(_, block)| block.ordinal);
+        for (owner, block) in open {
+            let text = self
+                .slot_owners
+                .get(owner)
+                .and_then(|slot| match slot {
+                    ResponsesPartSlot::Message(index) => self.parts.get(*index),
+                    _ => None,
+                })
+                .and_then(|part| match part {
+                    LlmOutputPart::Text { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            self.block_events
+                .push(LlmStreamEvent::TextBlockEnd { block, text });
+        }
+        self.sealed_text_owners
+            .extend(self.text_blocks.keys().copied());
+        self.take_block_events()
     }
 
     fn tool_call_slot(

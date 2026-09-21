@@ -999,3 +999,195 @@ async fn responses_resume_keeps_cumulative_usage_as_one_generation_bill() {
         "resume advances one cumulative usage snapshot instead of adding a second bill"
     );
 }
+
+const BUFFERED_RESPONSES_WITH_TWO_MESSAGE_ITEMS: &str = r#"{
+    "id":"resp_two_messages",
+    "status":"completed",
+    "output":[
+        {"type":"message","id":"msg_a","status":"completed","content":[{"type":"output_text","text":"first answer"}]},
+        {"type":"message","id":"msg_b","status":"completed","content":[{"type":"output_text","text":"second answer"}]}
+    ]
+}"#;
+
+/// Regression for FIG-3371 review: a buffered Responses payload projected
+/// `full_text()` into one synthetic `text:{ordinal}` block, erasing the
+/// per-item boundaries the live SSE lane emits. Each visible message item
+/// must open and seal its own `message:{item_id}` block.
+#[tokio::test]
+async fn buffered_responses_emits_each_message_item_as_its_own_block() {
+    let transport = Arc::new(ScriptedHttpTransport {
+        responses: std::sync::Mutex::new(VecDeque::from([(
+            200,
+            vec![("content-type".to_string(), "application/json".to_string())],
+            BUFFERED_RESPONSES_WITH_TWO_MESSAGE_ITEMS,
+        )])),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let mut provider = OpenAiProvider::new("key").with_transport(transport);
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    provider
+        .complete(streamed_request(Arc::clone(&events)))
+        .await
+        .expect("buffered responses body completes");
+
+    let events = events.lock_recover().clone();
+    let started = events
+        .iter()
+        .filter_map(|event| match event {
+            LlmStreamEvent::TextBlockStart { block } => Some(block.id.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let ended = events
+        .iter()
+        .filter_map(|event| match event {
+            LlmStreamEvent::TextBlockEnd { block, text } => Some((block.id.clone(), text.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(started, ["message:msg_a", "message:msg_b"]);
+    assert_eq!(
+        ended,
+        [
+            ("message:msg_a".to_string(), "first answer".to_string()),
+            ("message:msg_b".to_string(), "second answer".to_string()),
+        ]
+    );
+}
+
+/// Regression for FIG-3371 review: `response.completed` without the per-item
+/// `response.output_item.done` used to leave every open block unpaired.
+/// `finish_blocks` must seal them with the accumulated authoritative text.
+#[tokio::test]
+async fn completed_responses_stream_seals_every_open_block() {
+    let body = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_seal\"}}\n\n",
+        "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs_seal\",\"output_index\":0,\"summary_index\":0,\"delta\":\"open reasoning\"}\n\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"message\",\"id\":\"msg_seal\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"output_index\":1,\"item_id\":\"msg_seal\",\"delta\":\"open text\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_seal\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_seal\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"open reasoning\"}]},{\"type\":\"message\",\"id\":\"msg_seal\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"open text\"}]}]}}\n\n",
+    );
+    let mut provider = OpenAiProvider::new("key")
+        .with_options(ProviderOptions {
+            expose_thinking: true,
+            ..ProviderOptions::default()
+        })
+        .with_transport(single_stream_transport(body));
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    provider
+        .complete(streamed_request(Arc::clone(&events)))
+        .await
+        .expect("completed response");
+
+    let events = events.lock_recover().clone();
+    let reasoning_ends = events
+        .iter()
+        .filter(|event| matches!(event, LlmStreamEvent::ReasoningBlockEnd { .. }))
+        .count();
+    let text_ends = events
+        .iter()
+        .filter_map(|event| match event {
+            LlmStreamEvent::TextBlockEnd { block, text } => Some((block.id.clone(), text.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(reasoning_ends, 1, "the open reasoning block seals");
+    assert_eq!(
+        text_ends,
+        [("message:msg_seal".to_string(), "open text".to_string())],
+        "the open text block seals with its accumulated text"
+    );
+}
+
+/// Regression for FIG-3371 review: a mid-stream abort used to leave an open
+/// `ReasoningBlockStart` unpaired. The error path seals open blocks before
+/// surfacing the failure.
+#[tokio::test]
+async fn aborted_responses_stream_seals_the_open_reasoning_block() {
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let transport = AbortingSseTransport::new(vec![
+        sse_chunk(
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_abort"}}"#,
+        ),
+        sse_chunk(
+            r#"{"type":"response.reasoning_summary_text.delta","item_id":"rs_abort","output_index":0,"summary_index":0,"delta":"partial thought"}"#,
+        ),
+        ScriptedByteEvent::Abort(
+            LlmTransportError::new("Stream read failed: scripted disconnect")
+                .with_kind(ProviderFailureKind::Stream)
+                .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
+        ),
+    ]);
+    let mut provider = OpenAiProvider::new("key")
+        .with_options(ProviderOptions {
+            expose_thinking: true,
+            ..ProviderOptions::default()
+        })
+        .with_transport(transport);
+
+    provider
+        .complete(streamed_request(Arc::clone(&events)))
+        .await
+        .expect_err("the scripted abort fails the call");
+
+    let events = events.lock_recover().clone();
+    let starts = events
+        .iter()
+        .filter(|event| matches!(event, LlmStreamEvent::ReasoningBlockStart { .. }))
+        .count();
+    let ends = events
+        .iter()
+        .filter_map(|event| match event {
+            LlmStreamEvent::ReasoningBlockEnd { block, text } => {
+                Some((block.id.clone(), text.clone()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(starts, 1);
+    assert_eq!(ends.len(), 1, "the open reasoning block seals on abort");
+    assert_eq!(ends[0].1, "partial thought");
+}
+
+/// Same seal-on-abort contract for the chat completions lane.
+#[tokio::test]
+async fn aborted_chat_stream_seals_the_open_reasoning_block() {
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let transport = AbortingSseTransport::new(vec![
+        sse_chunk(r#"{"choices":[{"delta":{"reasoning_content":"partial thought"}}]}"#),
+        ScriptedByteEvent::Abort(
+            LlmTransportError::new("Stream read failed: scripted disconnect")
+                .with_kind(ProviderFailureKind::Stream)
+                .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
+        ),
+    ]);
+    let mut provider = openrouter_provider()
+        .with_options(ProviderOptions {
+            expose_thinking: true,
+            ..ProviderOptions::default()
+        })
+        .with_transport(transport);
+
+    provider
+        .complete(streamed_request(Arc::clone(&events)))
+        .await
+        .expect_err("the scripted abort fails the call");
+
+    let events = events.lock_recover().clone();
+    let starts = events
+        .iter()
+        .filter(|event| matches!(event, LlmStreamEvent::ReasoningBlockStart { .. }))
+        .count();
+    let ends = events
+        .iter()
+        .filter(|event| matches!(event, LlmStreamEvent::ReasoningBlockEnd { .. }))
+        .count();
+
+    assert_eq!(starts, 1);
+    assert_eq!(ends, 1, "the open reasoning block seals on abort");
+}

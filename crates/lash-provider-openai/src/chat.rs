@@ -837,6 +837,10 @@ pub(crate) struct ChatStreamState {
     pub(crate) normal_stop_seen: bool,
     pub(crate) execution_evidence: Option<ExecutionEvidence>,
     pub(crate) tool_argument_decoder: shared::ToolArgumentDecoder,
+    /// Stamped from `ProviderOptions::expose_thinking` at state construction
+    /// so the assembled `LlmResponse` carries the visibility policy forward
+    /// for the runtime's reasoning republication gate.
+    pub(crate) expose_thinking: bool,
 }
 
 impl ChatStreamState {

@@ -1897,6 +1897,12 @@ pub struct LlmResponse {
     /// one, so served-route provenance survives; lash never interprets it.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub response_metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Whether the caller asked the provider to surface reasoning. Providers
+    /// stamp this from `ProviderOptions::expose_thinking`; reasoning parts
+    /// stay in `parts` for multi-turn replay regardless, but the runtime only
+    /// republishes unstreamed reasoning blocks when this is set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub expose_thinking: bool,
 }
 
 impl LlmResponse {

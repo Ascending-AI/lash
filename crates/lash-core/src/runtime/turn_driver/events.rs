@@ -210,6 +210,12 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
                 .await;
             }
             LlmOutputPart::Reasoning { .. } => {
+                if !response.expose_thinking {
+                    // Hidden thinking stays in `parts` for multi-turn replay
+                    // but never reaches the host — same gate the provider
+                    // applied to its live block events.
+                    continue;
+                }
                 for (block, text) in
                     reasoning_publication.unpublished_blocks(part_index, part, &mut next_ordinal)
                 {

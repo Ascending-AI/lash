@@ -277,6 +277,7 @@ fn remote_llm_response_json_round_trips() {
             stop_sequences: RemoteGenerationOptionOutcome::NotRequested,
             cache: RemoteGenerationOptionOutcome::Applied,
         }),
+        expose_thinking: false,
     };
 
     response.validate().expect("valid response");

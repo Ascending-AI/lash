@@ -398,10 +398,19 @@ pub(crate) struct GoogleStreamState {
     /// native block notion, so blocks get deterministic per-response
     /// ordinals; the block id doubles as the part's reasoning `item_id`.
     open_reasoning_block: Option<StreamBlockIdentity>,
-    /// The single assistant-text block, minted lazily on the first visible
-    /// delta and sealed when the stream finishes.
+    /// The assistant-text block for the current contiguous run, minted lazily
+    /// on the first visible delta of the run and sealed at the next reasoning
+    /// or tool-call boundary. Text on both sides of a boundary never shares
+    /// one identity.
     pub text_block: Option<StreamBlockIdentity>,
+    /// Text accumulated by the open run only; `full` still holds the whole
+    /// visible response for the completed parts.
+    open_text_run: String,
     next_block_ordinal: u64,
+    /// Stamped from `ProviderOptions::expose_thinking` at state construction
+    /// so the assembled `LlmResponse` carries the visibility policy forward
+    /// for the runtime's reasoning republication gate.
+    pub expose_thinking: bool,
 }
 
 /// What one [`GoogleStreamState::push_event`] call produced: the event's own
@@ -464,6 +473,7 @@ impl GoogleStreamState {
         let mut saw_thought_in_event = false;
         for (piece, signature, is_thought) in GoogleOAuthProvider::text_parts_from_event(&event) {
             if is_thought {
+                self.close_text_run(&mut deltas.text_events);
                 let update = provider.push_reasoning_piece(
                     &mut self.output_parts,
                     &mut deltas.reasoning_deltas,
@@ -522,6 +532,7 @@ impl GoogleStreamState {
                 self.text_block = Some(block);
             }
             if let Some(block) = self.text_block.as_ref() {
+                self.open_text_run.push_str(&delta);
                 deltas.text_events.push(LlmStreamEvent::Delta {
                     block: block.clone(),
                     text: delta.clone(),
@@ -539,6 +550,7 @@ impl GoogleStreamState {
         let tool_calls = provider.tool_call_parts_from_event(&event, origin_model);
         if !tool_calls.is_empty() {
             self.close_reasoning_stream_part(&mut deltas.reasoning_events);
+            self.close_text_run(&mut deltas.text_events);
         }
         deltas.tool_calls_added = tool_calls.len();
         self.tool_call_parts.extend(tool_calls);
@@ -567,14 +579,24 @@ impl GoogleStreamState {
         events
     }
 
-    /// Seal the assistant-text block, if one was minted, with the full
-    /// accumulated visible text as its authoritative content.
-    pub(crate) fn seal_text_block(&mut self) -> Option<LlmStreamEvent> {
-        let block = self.text_block.take()?;
-        Some(LlmStreamEvent::TextBlockEnd {
+    /// Seal the open text run, if any, with only that run's text as the
+    /// block's authoritative content.
+    fn close_text_run(&mut self, events: &mut Vec<LlmStreamEvent>) {
+        let Some(block) = self.text_block.take() else {
+            return;
+        };
+        events.push(LlmStreamEvent::TextBlockEnd {
             block,
-            text: self.full.clone(),
-        })
+            text: std::mem::take(&mut self.open_text_run),
+        });
+    }
+
+    /// Seal the assistant-text block, if one was minted, with the open run's
+    /// accumulated text as its authoritative content.
+    pub(crate) fn seal_text_block(&mut self) -> Option<LlmStreamEvent> {
+        let mut events = Vec::new();
+        self.close_text_run(&mut events);
+        events.into_iter().next()
     }
 
     fn close_reasoning_stream_part(&mut self, events: &mut Vec<LlmStreamEvent>) {

@@ -3,11 +3,6 @@
 //! interrupted by reasoning or a tool call must close and re-open as a new
 //! block — never merge into one id.
 
-#![expect(
-    clippy::expect_used,
-    reason = "test target: the fixture runtime and scripted stream fail the test if they refuse"
-)]
-
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, Mutex};
 

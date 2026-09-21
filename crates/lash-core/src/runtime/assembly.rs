@@ -158,6 +158,9 @@ pub(super) struct LlmStreamEventLog<'a> {
     pub(super) event_type: &'a str,
     pub(super) text: LlmDebugText<'a>,
     pub(super) item_id: Option<&'a str>,
+    /// The streamed block's own identity — distinct blocks can share one
+    /// provider `item_id`, so traces need both to keep sub-blocks apart.
+    pub(super) block_id: Option<&'a str>,
     pub(super) usage: Option<&'a LlmUsage>,
     pub(super) tool_call: Option<LlmDebugToolCall<'a>>,
 }
@@ -185,6 +188,12 @@ pub(super) struct LlmStreamState<'a> {
     /// short-circuits the select loop, synthesizing a response from the
     /// already-streamed parts.
     pub(super) abort_requested: &'a mut bool,
+    /// Pre-transform text accumulated per streamed block id. The
+    /// authoritative `TextBlockEnd` payload is reconciled against this raw
+    /// accumulation: a prefix-extending completion forwards only the unseen
+    /// tail through the plugin transform, while a non-prefix correction seals
+    /// with the provider's text verbatim.
+    pub(super) block_raw_text: &'a mut std::collections::HashMap<String, String>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

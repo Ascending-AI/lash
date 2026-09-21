@@ -25,6 +25,9 @@ pub(super) fn synthesize_protocol_abort(
         execution_evidence: Some(execution_evidence.clone()),
         generation_disposition: stream_evidence.generation_disposition,
         response_metadata: stream_evidence.response_metadata.clone(),
+        // Runtime-synthesized abort: the provider policy is unknowable here,
+        // and streamed reasoning blocks already reached the host live.
+        expose_thinking: false,
     };
     stream_accumulator.apply_to_response(&mut response);
     // Usage observed before the abort is a fact; its absence is a typed hole
