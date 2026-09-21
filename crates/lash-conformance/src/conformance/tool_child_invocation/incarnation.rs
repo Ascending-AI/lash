@@ -69,9 +69,9 @@ fn process_leaf_request(
 /// The incarnation law's group: two deferred leaves — one resolved inside the
 /// crashed world so its settlement orders the crash boundary, one left parked
 /// as the survivor the foreign incarnation must refuse — an orchestrating
-/// child under the recorded pin, and a process-opener child that records no
-/// enclosing incarnation: the malformed probe the request's own validation
-/// must refuse.
+/// child under the recorded pin, and a plain leaf. The malformed probe cannot
+/// ride inside the group: a process opener with no enclosing incarnation is
+/// refused at envelope construction, which the law asserts directly instead.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -131,10 +131,12 @@ fn incarnation_group(
                 ToolChildCompletionRouting::Inline,
                 Some(recorded_ref.clone()),
             ),
-            // The malformed probe: a process opener with no enclosing
-            // incarnation recorded — the refusal is the request's own
-            // consistency check, not a routing fact.
-            child(2, LEAF_PLAIN, ToolChildCompletionRouting::Inline, None),
+            child(
+                2,
+                LEAF_PLAIN,
+                ToolChildCompletionRouting::Inline,
+                Some(recorded_ref.clone()),
+            ),
             child(3, LEAF_DEFERRED, routing, Some(recorded_ref.clone())),
         ],
         crate::GroupWakePolicy::All,
@@ -147,17 +149,19 @@ fn incarnation_group(
 /// opener is its name bound to **one** store-minted incarnation, so the
 /// same-name successor is a foreign opener, not a continuation.
 ///
-/// One group of three process-scoped children records `process(P)#7` as its
-/// opener: a deferred leaf (the durable survivor), an orchestrating child
-/// (whose durable-parent derivation must name the recorded incarnation),
-/// and a malformed child — a process opener that records no enclosing
-/// incarnation at all, refused at the boundary because the opener and its
-/// enclosing process are one fact.
+/// One group of four process-scoped children records `process(P)#7` as its
+/// opener: two deferred leaves (one resolved to order the crash boundary, one
+/// the durable survivor), an orchestrating child (whose durable-parent
+/// derivation must name the recorded incarnation), and a plain leaf. The
+/// malformed request — a process opener that records no enclosing incarnation
+/// — is asserted directly: the boundary refuses it at envelope construction,
+/// so no journal can hold it, because the opener and its enclosing process
+/// are one fact.
 ///
 /// On the durable tiers the group journals under `process(P)#7`, the worker
 /// dies, and a live `process(P)#9` proves it cannot drain the survivor. On
 /// every tier the orchestrating settlement names `P#7` and the malformed
-/// child settles as a `ToolChildRequestOpener` refusal.
+/// request is refused with `ToolChildRequestOpener`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -197,8 +201,55 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         })
     };
     let expected_parent = format!("{process_id}#7");
-    /// Asserts the orchestrating settlement's recorded incarnation and the
-    /// malformed child's typed refusal — identical on every tier.
+
+    // The malformed probe: a process opener that records no enclosing
+    // incarnation. `ToolChildRequest::validate` makes the opener and its
+    // enclosing process one fact, so the envelope constructor refuses the
+    // pair — the malformed request cannot be journaled at all, which is a
+    // stronger boundary than the settle-time refusal a group child could
+    // have shown.
+    let malformed = process_leaf_request(
+        &scope_p,
+        &session_id,
+        &format!("{group_key}-call-malformed"),
+        LEAF_PLAIN,
+        LEAF_PLAIN.trim_start_matches("tool:"),
+        catalog_admission(LEAF_PLAIN),
+        ToolChildCompletionRouting::Inline,
+        &env_ref,
+        &parent_invocation(&scope_p),
+        &recorded_ref,
+        None,
+        None,
+    );
+    let error = malformed
+        .validate()
+        .expect_err("a process opener without its enclosing incarnation is refused");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
+        "the opener and its enclosing process are one fact: {error}"
+    );
+    let error = crate::RuntimeEffectEnvelope::try_new(
+        crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(scope_p.clone(), format!("{group_key}:malformed"))
+                .expect("valid group-child address"),
+            crate::RuntimeAttribution::none(),
+            "effect",
+        ),
+        crate::RuntimeEffectCommand::ToolInvocation {
+            request: Box::new(malformed),
+        },
+    )
+    .expect_err("the boundary refuses the malformed pair at construction");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
+        "no journal can hold a request whose opener and enclosing process disagree: {error}"
+    );
+
+    /// Asserts the orchestrating settlement's recorded incarnation — identical
+    /// on every tier.
     fn assert_process_settlements(
         settlements: &mut [crate::GroupSettlement],
         expected_parent: &str,
@@ -234,18 +285,14 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
             serde_json::json!(true),
             "the orchestrating body ran its nested call: {output}"
         );
-        let malformed = settlements
+        let plain = settlements
             .iter()
             .find(|settlement| settlement.position == 2)
-            .expect("the malformed child settled");
-        let error = malformed
-            .outcome
-            .as_ref()
-            .expect_err("a process opener without its enclosing incarnation is refused");
-        assert_eq!(
-            error.code,
-            crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
-            "the opener and its enclosing process are one fact: {error}"
+            .expect("the plain leaf settled");
+        assert!(
+            plain.outcome.is_ok(),
+            "the plain leaf settles under the recorded incarnation: {:?}",
+            plain.outcome
         );
     }
 
