@@ -111,9 +111,25 @@ impl EffectGroupDispatch {
             };
         }
 
+        // Children are `call` children of this dispatcher, issued eagerly and
+        // awaited only after every one is recorded (ADR 0099 §2). Two
+        // properties follow, and neither is available from `.send()`:
+        //
+        // * the pinned VM's implicit cancellation tracks `call` children and
+        //   deliberately exempts one-way sends, so before this change it
+        //   covered *zero* group children;
+        // * the child's replay key is the idempotency key, so a redrive that
+        //   re-issues this dispatch attaches to the invocation the first
+        //   dispatch created rather than starting a fresh, unrelated one.
+        //
+        // Eager is load-bearing. `register_children` below is what resolves
+        // READY and releases the opener, so awaiting any child before that
+        // point would deadlock the open. Issue all, record all, register, then
+        // hold.
         let mut addresses = BTreeMap::new();
+        let mut children = Vec::with_capacity(request.children.len());
         for (position, envelope) in request.children.into_iter().enumerate() {
-            let handle = ctx
+            let call = ctx
                 .workflow_client::<EffectGroupDispatchClient>(request.group_key.clone())
                 .child(Json(EffectGroupChildRequest {
                     group_key: request.group_key.clone(),
@@ -121,9 +137,9 @@ impl EffectGroupDispatch {
                     position,
                     envelope,
                 }))
-                .send()
-                .await?;
-            let invocation_id = handle.invocation_id().to_owned();
+                .idempotency_key(request.shape.replay_key(position)?)
+                .call();
+            let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
             let Json(recorded) = ctx
                 .object_client::<EffectGroupIndexClient>(request.group_key.clone())
                 .record_dispatch(Json(EffectGroupRecordDispatchRequest {
@@ -145,6 +161,7 @@ impl EffectGroupDispatch {
                 }
             }
             addresses.insert(position, invocation_id);
+            children.push((position, call));
         }
         let Json(registered) = ctx
             .object_client::<EffectGroupIndexClient>(request.group_key.clone())
@@ -155,13 +172,41 @@ impl EffectGroupDispatch {
             EffectGroupRegisterResponse::Registered
             | EffectGroupRegisterResponse::AlreadyRegistered
             | EffectGroupRegisterResponse::AlreadyClosed
-            | EffectGroupRegisterResponse::Retired => Ok(Json(())),
-            other => Err(TerminalError::new(format!(
-                "register children protocol defect for {}: {other:?}",
-                request.group_key
-            ))
-            .into()),
+            | EffectGroupRegisterResponse::Retired => {}
+            other => {
+                return Err(TerminalError::new(format!(
+                    "register children protocol defect for {}: {other:?}",
+                    request.group_key
+                ))
+                .into());
+            }
         }
+
+        // Holding the calls is the tracking. A child's outcome is not read
+        // here and must not be: the child records its own settlement in the
+        // index before it returns, so this dispatcher has nothing to add and
+        // no authority to decide anything from what it sees.
+        //
+        // Failures are therefore absorbed rather than propagated, in a fixed
+        // position order so the journal is replay-stable. A child cancelled by
+        // `close` or `retire` completes its call with a terminal error, and a
+        // child that hit a protocol defect has already failed its own
+        // invocation; propagating either would fail this handler, and Restate
+        // would retry the whole dispatch forever against a group that is
+        // already correctly recorded. Worse, failing here would drop the
+        // remaining children's tracking, which is the one thing this loop
+        // exists to hold.
+        for (position, call) in children {
+            if let Err(error) = call.await {
+                tracing::debug!(
+                    group_key = %request.group_key,
+                    position,
+                    %error,
+                    "effect-group child call ended without a value; its settlement is the index's",
+                );
+            }
+        }
+        Ok(Json(()))
     }
 
     #[handler]

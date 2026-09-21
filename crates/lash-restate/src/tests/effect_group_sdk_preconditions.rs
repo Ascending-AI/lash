@@ -49,10 +49,63 @@ impl EffectGroupSdkTarget {
     }
 }
 
-struct EffectGroupSdkWitness;
+/// The two child invocation ids the coverage witness publishes before it
+/// blocks, so the test can cancel the parent and then ask Restate what
+/// happened to each child.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CoverageChildIds {
+    sent_id: String,
+    called_id: String,
+}
+
+#[derive(Default)]
+struct EffectGroupSdkWitness {
+    coverage_children: Arc<std::sync::Mutex<Option<CoverageChildIds>>>,
+}
 
 #[restate_sdk::service(name = "EffectGroupSdkWitness")]
 impl EffectGroupSdkWitness {
+    /// The precondition behind ADR 0099 §2's `.send()` → `.call()` cutover:
+    /// **implicit cancellation covers tracked `call` children and deliberately
+    /// exempts one-way sends.**
+    ///
+    /// Nothing in the repository proved this, and the whole reason group
+    /// children move to `call` is that under `.send()` implicit cancellation
+    /// covers *zero* of them. It is also the reason §4 insists engine
+    /// cancellation must never become the sole close protocol: this handler
+    /// shows the engine reaching a child without any Lash fence being
+    /// consulted, which is a capability to bound rather than to rely on.
+    ///
+    /// The handler issues one child each way against the same blocking target,
+    /// publishes both invocation ids in process, and then parks on the tracked
+    /// call. The test cancels *this* invocation and reads both children's
+    /// `sys_invocation` status.
+    #[handler(name = "cancellation_coverage")]
+    async fn cancellation_coverage(&self, ctx: Context<'_>) -> HandlerResult<()> {
+        let sent = ctx
+            .service_client::<EffectGroupSdkTargetClient>()
+            .block()
+            .send()
+            .await?;
+        let called = ctx
+            .service_client::<EffectGroupSdkTargetClient>()
+            .block()
+            .call();
+        let called_id = called.invocation_handle().await?.invocation_id().to_owned();
+        *self
+            .coverage_children
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(CoverageChildIds {
+            sent_id: sent.invocation_id().to_owned(),
+            called_id,
+        });
+        // Parking on the call is what makes it tracked. Absorb its outcome for
+        // the same reason the dispatcher does: the witness is the parent's
+        // cancellation, not the child's value.
+        let _ = called.await;
+        Ok(())
+    }
+
     #[handler(name = "same_key")]
     async fn same_key(
         &self,
@@ -184,9 +237,12 @@ fn live_effect_group_sdk_preconditions() {
         .build()
         .expect("build EG0 witness runtime")
         .block_on(async {
-            tokio::time::timeout(Duration::from_secs(30), run_live_witnesses())
+            // Raised from 30s with the cancellation-coverage witness, which
+            // waits on cancellation propagation and `sys_invocation`
+            // visibility rather than on a local handler returning.
+            tokio::time::timeout(Duration::from_secs(120), run_live_witnesses())
                 .await
-                .expect("EG0 witnesses exceeded their 30 second ceiling");
+                .expect("EG0 witnesses exceeded their 120 second ceiling");
         });
 }
 
@@ -199,13 +255,16 @@ async fn run_live_witnesses() {
         .expect("valid EG0_RESTATE_ENDPOINT_BIND");
     let endpoint_url = required_url("EG0_RESTATE_ENDPOINT_URL");
     let workflow_executions = Arc::new(AtomicUsize::new(0));
+    let coverage_children = Arc::new(std::sync::Mutex::new(None));
 
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
         .expect("bind EG0 Restate endpoint");
     let endpoint = Endpoint::builder()
         .bind(EffectGroupSdkTarget)
-        .bind(EffectGroupSdkWitness)
+        .bind(EffectGroupSdkWitness {
+            coverage_children: Arc::clone(&coverage_children),
+        })
         .bind(EffectGroupSdkWorkflow {
             executions: Arc::clone(&workflow_executions),
         })
@@ -275,8 +334,128 @@ async fn run_live_witnesses() {
         attach.cancelled_error_message
     );
 
+    witness_implicit_cancellation_covers_calls_not_sends(
+        &client,
+        &ingress_url,
+        &admin_url,
+        &coverage_children,
+    )
+    .await;
+
     let _ = shutdown_tx.send(());
     server.await.expect("EG0 endpoint server task");
+}
+
+/// Drives `cancellation_coverage` and reads the two children back out of
+/// `sys_invocation`.
+///
+/// Deadlines here are generous on purpose. The prelude banks that this box's
+/// Restate suites fail at whatever fixed wall-clock deadline they reach first
+/// under load, and cancellation propagation plus `sys_invocation` visibility
+/// are both asynchronous, so a tight bound would turn a scheduling delay into
+/// a false claim about SDK semantics.
+async fn witness_implicit_cancellation_covers_calls_not_sends(
+    client: &reqwest::Client,
+    ingress_url: &str,
+    admin_url: &str,
+    coverage_children: &Arc<std::sync::Mutex<Option<CoverageChildIds>>>,
+) {
+    use crate::{RestateAdminClient, RestateInvocationId};
+
+    let parent: SendResponse = post_empty(
+        client,
+        format!("{ingress_url}/{WITNESS_SERVICE}/cancellation_coverage/send"),
+    )
+    .await;
+
+    let children = poll_until(
+        Duration::from_secs(30),
+        "coverage children published",
+        || async {
+            coverage_children
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        },
+    )
+    .await;
+
+    let admin = RestateAdminClient::new(admin_url.to_string());
+    let sent_id = RestateInvocationId::new(children.sent_id.clone());
+    let called_id = RestateInvocationId::new(children.called_id.clone());
+    assert_ne!(
+        children.sent_id, children.called_id,
+        "the two children must be distinct invocations"
+    );
+
+    admin
+        .cancel_invocation(&RestateInvocationId::new(parent.invocation_id.clone()))
+        .await
+        .expect("cancel the coverage witness invocation");
+
+    // The tracked call must stop without anyone cancelling it directly.
+    let called_status = poll_until(
+        Duration::from_secs(30),
+        "the `call` child to stop being open after its caller was cancelled",
+        || closed_status(&admin, &called_id),
+    )
+    .await;
+
+    // The one-way send must be untouched by the same cancellation. Read it
+    // after the call has already closed, so this is not merely a race the
+    // poll above won by arriving first.
+    let sent_status = admin
+        .invocation_status(&sent_id)
+        .await
+        .expect("read the `send` child status")
+        .expect("the `send` child exists");
+    assert!(
+        sent_status.is_still_active(),
+        "implicit cancellation must exempt one-way sends, but the `send` child is {:?}; \
+         if this ever fails, ADR 0099 §2's reason for moving group children to `call` is wrong",
+        sent_status.status
+    );
+
+    println!(
+        "EG0_WITNESS implicit-cancellation-covers-calls-not-sends PASS parent={} called={} called_status={:?} sent={} sent_status={:?}",
+        parent.invocation_id,
+        children.called_id,
+        called_status,
+        children.sent_id,
+        sent_status.status
+    );
+
+    // The send child sleeps well past this suite; leave nothing running.
+    let _ = admin.kill_invocation_for_test_cleanup(&sent_id).await;
+    let _ = admin.kill_invocation_for_test_cleanup(&called_id).await;
+}
+
+/// The invocation's lifecycle once it is no longer open, or `None` while it is.
+async fn closed_status(
+    admin: &crate::RestateAdminClient,
+    id: &crate::RestateInvocationId,
+) -> Option<crate::RestateInvocationLifecycle> {
+    let status = admin.invocation_status(id).await.ok()??;
+    (!status.is_still_active()).then_some(status.status)
+}
+
+/// Polls `probe` until it yields a value or `budget` elapses.
+async fn poll_until<T, P, F>(budget: Duration, what: &str, mut probe: P) -> T
+where
+    P: FnMut() -> F,
+    F: std::future::Future<Output = Option<T>>,
+{
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        if let Some(value) = probe().await {
+            return value;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out after {budget:?} waiting for {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 fn required_url(name: &str) -> String {
