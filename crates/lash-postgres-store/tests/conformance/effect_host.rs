@@ -51,32 +51,48 @@ lash_conformance::tool_batch_parallelism_tests!({
     };
     reset(&storage).await;
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    let storage = Arc::new(storage);
     (
         database_lock,
         "postgres",
         host,
-        // The producers this crate reaches. `Promise.all` on the RLM bridge and
-        // the Lashlang aggregate on the process bridge register the same law
-        // from the crates that own them.
+        // Every producer this tier reaches: the turn's own parallel model tool
+        // calls, `Promise.all` on the RLM cell bridge, and the same aggregate
+        // on the process bridge.
         vec![
             lash_conformance::parallel_model_tool_calls_producer(),
-            lash_conformance::rlm_promise_all_producer(vec![Arc::new(
-                lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                    lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                        .channel(lash_protocol_rlm::RlmChannel::Cell)
-                        .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
-                            1_000_000,
-                        ))
-                        .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
-                        .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                        .build(),
-                    Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
-                )
-                .with_process_lifecycle(false),
-            )]),
+            lash_conformance::rlm_promise_all_producer(vec![rlm_factory(false)]),
+            lash_conformance::lashlang_process_aggregate_producer(
+                vec![
+                    rlm_factory(true),
+                    Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+                ],
+                Arc::new(move || {
+                    Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessRegistry>
+                }),
+            ),
         ],
     )
 });
+
+/// The RLM protocol plugin, and with it the Lashlang process engine it
+/// contributes. `process_lifecycle` is this deployment's honest answer to "can
+/// a cell start a process here", and it differs between the cell-bridge and
+/// process-bridge producers.
+fn rlm_factory(process_lifecycle: bool) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(
+        lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash_protocol_rlm::RlmChannel::Cell)
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
+            Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
+        )
+        .with_process_lifecycle(process_lifecycle),
+    )
+}
 
 lash_conformance::turn_work_driver_tests!({
     let Some((database_lock, storage)) = storage().await else {

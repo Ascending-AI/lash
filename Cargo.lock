@@ -2075,6 +2075,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "lash-internal-core",
+ "lash-internal-core-worker",
  "lash-internal-lashlang",
  "lash-internal-sansio",
  "pretty_assertions",

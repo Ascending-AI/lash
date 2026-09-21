@@ -22,6 +22,11 @@ lashlang = ["dep:lashlang"]
 [dependencies]
 lashlang = { workspace = true, features = ["testing"], optional = true }
 lash-core = { workspace = true, features = ["testing"] }
+# A batch issued from inside a process only reaches the leaves if something
+# drives the registry. The durable process worker is that something, and it is
+# the same one a deployment runs; the law stands one up for the producers that
+# need it (FIG-3400).
+lash-core-worker = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 async-trait.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
