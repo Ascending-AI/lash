@@ -1760,9 +1760,11 @@ fn the_selected_rejection_is_replay_deterministic() {
 // dialect (ADR 0096): aggregates now always select by settlement order.
 /// Settlement order is consumed inside a single `perform` and never persisted.
 /// Snapshot v7 is independently required by the substrate-minted error brands.
-/// The ABI is at v8 because ADR 0095's one handle kind changed the handle
-/// record and the pending-request keying, not because the aggregate rule moved:
-/// settlement order still never reaches the continuation format.
+/// The ABI is at v9 because a batch now carries its occurrence ordinal across
+/// the boundary (FIG-3394) -- and, before that, because ADR 0095's one handle
+/// kind changed the handle record and the pending-request keying. Neither is
+/// the aggregate rule moving: settlement order still never reaches the
+/// continuation format.
 #[test]
 fn settlement_order_does_not_reach_the_continuation_format() {
     assert_eq!(
@@ -1772,8 +1774,8 @@ fn settlement_order_does_not_reach_the_continuation_format() {
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v8",
-        "the compiled-batch selection rule moved the VM ABI"
+        "lashlang-vm-abi-v9",
+        "the batch occurrence ordinal moved the VM ABI"
     );
 }
 

@@ -38,9 +38,17 @@ use super::exceptions::PendingErrorOrigin;
 /// cross-check against the program's dialect and becomes only what it always
 /// described on the wire, whether this heap is a shared graph or a forest.
 ///
+/// v15 counts aggregates in `occurrence_counters`. The map's shape is
+/// unchanged, which is exactly why this is a version rather than a decode
+/// failure: a v14 continuation deserializes cleanly and then resumes with no
+/// count for the aggregates its own earlier segment already ran, so every
+/// batch it re-derives on replay carries an ordinal the journal never saw and
+/// misses the effect it is supposed to reuse. A counter's contents are part of
+/// this envelope's meaning even when its type is not.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 15;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 16;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).

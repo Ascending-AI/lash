@@ -386,14 +386,11 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
     for expected_summary in expected_summaries {
         let usage_before = session.usage_report().usage.usage.output_tokens;
         assert!(
-            session
-                .admin()
-                .state()
-                .compact_context(
-                    Some("keep the same administrative focus".to_string()),
-                    shared_scope.clone(),
-                )
-                .await?,
+            Box::pin(session.admin().state().compact_context(
+                Some("keep the same administrative focus".to_string()),
+                shared_scope.clone(),
+            ))
+            .await?,
             "each changed snapshot remains a valid administrative compaction request"
         );
         let view = session.read_view();
@@ -706,14 +703,11 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
     );
 
     assert!(
-        session
-            .admin()
-            .state()
-            .compact_context(
-                Some("retain the durable ancestry result".to_string()),
-                runtime_operation_scope(&core, "rolling-history-explicit-compaction"),
-            )
-            .await?,
+        Box::pin(session.admin().state().compact_context(
+            Some("retain the durable ancestry result".to_string()),
+            runtime_operation_scope(&core, "rolling-history-explicit-compaction"),
+        ))
+        .await?,
         "rolling-history compaction should open a summary frame after the threshold turn commits"
     );
     let (post_compaction_leaf, post_compaction_max_generation) =
@@ -851,11 +845,13 @@ async fn rolling_history_compaction_accepts_parent_turn_authority() -> Result<()
         .expect("SQLite host supplies an owned parent Turn scope");
 
     assert!(
-        session
-            .admin()
-            .state()
-            .compact_context(Some("retain both requests".to_string()), parent_scope)
-            .await?,
+        Box::pin(
+            session
+                .admin()
+                .state()
+                .compact_context(Some("retain both requests".to_string()), parent_scope)
+        )
+        .await?,
         "a validated runtime-internal child may preserve its parent Turn authority"
     );
     assert_eq!(session.read_view().messages().len(), 1);
@@ -912,11 +908,13 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
             .await?;
     }
     assert!(
-        session
-            .admin()
-            .state()
-            .compact_context(Some("first compaction".to_string()), shared_scope.clone(),)
-            .await?
+        Box::pin(
+            session
+                .admin()
+                .state()
+                .compact_context(Some("first compaction".to_string()), shared_scope.clone(),)
+        )
+        .await?
     );
 
     for (turn_id, text) in [
@@ -930,11 +928,13 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
             .await?;
     }
     assert!(
-        session
-            .admin()
-            .state()
-            .compact_context(Some("second compaction".to_string()), shared_scope)
-            .await?,
+        Box::pin(
+            session
+                .admin()
+                .state()
+                .compact_context(Some("second compaction".to_string()), shared_scope)
+        )
+        .await?,
         "a later physical parent must not replay the earlier compaction child"
     );
     assert_eq!(session.read_view().messages().len(), 1);
@@ -1821,12 +1821,14 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
     let message_count_before = session.read_view().messages().len();
 
     commit_failure.store(true, Ordering::SeqCst);
-    let err = session
-        .admin()
-        .state()
-        .compact_context(Some("summarize".to_string()), shared_scope.clone())
-        .await
-        .expect_err("the settlement commit failure must surface");
+    let err = Box::pin(
+        session
+            .admin()
+            .state()
+            .compact_context(Some("summarize".to_string()), shared_scope.clone()),
+    )
+    .await
+    .expect_err("the settlement commit failure must surface");
     assert!(
         err.to_string()
             .contains("injected compaction settlement commit failure"),
@@ -1862,11 +1864,13 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
     // reload discarded the uncommitted merge, so the settled ledger grows by
     // the summarizer's usage, not twice it.
     assert!(
-        session
-            .admin()
-            .state()
-            .compact_context(Some("summarize".to_string()), shared_scope)
-            .await?,
+        Box::pin(
+            session
+                .admin()
+                .state()
+                .compact_context(Some("summarize".to_string()), shared_scope)
+        )
+        .await?,
         "the retried compaction commits after the injected failure clears"
     );
     let view = session.read_view();

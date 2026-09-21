@@ -10,13 +10,29 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
     )]
     async fn run_process(
         &self,
-        registration: crate::ProcessRegistration,
+        admitted: crate::runtime::effect::AdmittedProcess,
         execution_context: crate::ProcessExecutionContext,
-        registry: Arc<dyn crate::ProcessRegistry>,
+        // Engine rows reach their registry through the process wiring the run
+        // context builds, so this impl reads it from `self` rather than from
+        // the argument the trait passes.
+        _registry: Arc<dyn crate::ProcessRegistry>,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: tokio_util::sync::CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        let crate::runtime::effect::AdmittedProcess {
+            registration,
+            incarnation,
+        } = admitted;
+        // Every arm below runs work this process opened, and `ExecutionScope`
+        // names only the reusable process name (ADR 0099 §1). Bind the admitted
+        // incarnation onto the controller once, here, rather than in each arm:
+        // a session-turn row's cells read it back through their
+        // `RuntimeExecutionContext`, an engine row reads it off its run context,
+        // and a tool-call row that ever grows a cell inherits it for free.
+        let scoped_effect_controller = scoped_effect_controller
+            .with_admitted_process(crate::ProcessRef::new(registration.id.clone(), incarnation))
+            .map_err(crate::ProcessInfraError::new)?;
         let input = Arc::clone(&registration.input);
         // Hybrid process model by design:
         // - ToolCall, SessionTurn, and External are kernel primitives because
@@ -67,8 +83,8 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                 };
                 let engine_context = self.process_engine_run_context(
                     registration,
+                    incarnation,
                     execution_context,
-                    registry,
                     scoped_effect_controller,
                     cancellation,
                     handover,
@@ -96,8 +112,8 @@ impl RuntimeSessionServices {
     fn process_engine_run_context<'run>(
         &self,
         registration: crate::ProcessRegistration,
+        incarnation: crate::ProcessIncarnation,
         execution_context: crate::ProcessExecutionContext,
-        _registry: Arc<dyn crate::ProcessRegistry>,
         scoped_effect_controller: crate::ScopedEffectController<'run>,
         cancellation: tokio_util::sync::CancellationToken,
         handover: Option<crate::SegmentHandover>,
@@ -195,6 +211,7 @@ impl RuntimeSessionServices {
         });
         Ok(crate::ProcessEngineRunContext::new(
             registration,
+            incarnation,
             execution_context,
             process_work,
             session_id,

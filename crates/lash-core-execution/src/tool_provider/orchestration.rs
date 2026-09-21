@@ -138,7 +138,7 @@ impl<'run> OrchestrationContext<'run> {
         // and leaves the order to the runtime seam that needs it.
         runtime
             .with_batch_parent_call_id(self.context.tool_call_id.clone())
-            .call_tool_batch(calls)
+            .call_tool_batch(calls, crate::session::ToolBatchOccurrence::Uncounted)
             .await
             .replies
     }

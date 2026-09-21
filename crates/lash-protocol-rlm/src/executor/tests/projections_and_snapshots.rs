@@ -714,9 +714,12 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
         // contribute the same fixed 63-byte cost to both.
         // The pinned sizes gained two bytes with the single-language cutover:
         // the checkpoint carries the engine id, and `typescript` is two bytes
-        // longer than the retired `lashlang`.
-        assert_eq!(initial_budget.checkpoint_bytes, 82_580);
-        assert_eq!(changed_budget.checkpoint_bytes, 14_098);
+        // longer than the retired `lashlang`. FIG-3394 added 278 bytes to both:
+        // the fixture now carries a production effect address, so the root
+        // persists the two deferred-resolution link identities it always
+        // persisted in production — once per checkpoint, not per component.
+        assert_eq!(initial_budget.checkpoint_bytes, 82_858);
+        assert_eq!(changed_budget.checkpoint_bytes, 14_376);
     });
 }
 
@@ -939,8 +942,11 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             measured.len()
         );
         assert_eq!(full_state_bytes, 136_711);
-        assert_eq!(minimum, 21_105);
-        assert_eq!(maximum, 21_107);
+        // FIG-3394: the per-commit floor grew by exactly the 278 bytes of the
+        // two deferred-resolution link identities the root now persists; the
+        // flat state, which carries no root, is unchanged.
+        assert_eq!(minimum, 21_383);
+        assert_eq!(maximum, 21_385);
     });
 }
 
@@ -1007,8 +1013,11 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             "FIG1195_FLAT_GROWTH_MID_SIZE full_state_bytes={full_state_bytes} min_commit_bytes={minimum} max_commit_bytes={maximum} turns={}",
             measured.len()
         );
-        assert_eq!(minimum, 94_352);
-        assert_eq!(maximum, 94_354);
+        // FIG-3394: same +278 as the single-binding case — the two
+        // deferred-resolution link identities ride in the root once, not per
+        // binding.
+        assert_eq!(minimum, 94_630);
+        assert_eq!(maximum, 94_632);
     });
 }
 

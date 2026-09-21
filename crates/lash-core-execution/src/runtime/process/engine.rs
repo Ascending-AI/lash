@@ -1,4 +1,5 @@
 use crate::ProcessId;
+use crate::ProcessIncarnation;
 use crate::SessionId;
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -303,6 +304,14 @@ impl ProcessEngineProcessContext {
 
 pub struct ProcessEngineRunContext<'run> {
     registration: ProcessRegistration,
+    /// The store-minted incarnation this run was admitted under.
+    ///
+    /// The registration carries the process *name*, which is reusable; the
+    /// opener an engine mints identities against is the name bound to one
+    /// incarnation (ADR 0099 §1). The worker reads it off the record its
+    /// authority CAS admitted, so it is the same incarnation the attachment
+    /// owner and the lease fence were bound from.
+    incarnation: ProcessIncarnation,
     execution_context: ProcessExecutionContext,
     processes: ProcessEngineProcessContext,
     session_id: SessionId,
@@ -327,6 +336,7 @@ impl<'run> ProcessEngineRunContext<'run> {
     )]
     pub fn new(
         registration: ProcessRegistration,
+        incarnation: ProcessIncarnation,
         execution_context: ProcessExecutionContext,
         process_work: crate::ProcessWorkWiring,
         session_id: SessionId,
@@ -360,6 +370,7 @@ impl<'run> ProcessEngineRunContext<'run> {
         );
         Self {
             registration,
+            incarnation,
             execution_context,
             processes,
             session_id,
@@ -381,6 +392,12 @@ impl<'run> ProcessEngineRunContext<'run> {
     /// process.
     pub fn registration(&self) -> &ProcessRegistration {
         &self.registration
+    }
+
+    /// The incarnation this run was admitted under, which together with the
+    /// registration's id is the logical opener (ADR 0099 §1).
+    pub fn incarnation(&self) -> ProcessIncarnation {
+        self.incarnation
     }
 
     /// Exposes execution context to protocol and process-engine implementors while running a

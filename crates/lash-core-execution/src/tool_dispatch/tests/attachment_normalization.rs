@@ -426,7 +426,9 @@ async fn after_tool_attachment_replacement_is_normalized_before_internal_recordi
     let call = prepared(&definition, "after-hook-internal-call");
     let tool_context = tool_context_for_prepared(&context, &call);
 
-    let outcome = execute_internal_process_tool(&context, call, tool_context).await;
+    // Boxed: the future carries the scoped controller, which now also carries
+    // the admitted incarnation (FIG-3394) — past the `large_futures` budget.
+    let outcome = Box::pin(execute_internal_process_tool(&context, call, tool_context)).await;
 
     assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
         .await;
@@ -572,7 +574,9 @@ async fn internal_process_tool_output_is_normalized_under_process_ownership() {
     let call = prepared(&definition, "internal-attachment-call");
     let tool_context = tool_context_for_prepared(&context, &call);
 
-    let outcome = execute_internal_process_tool(&context, call, tool_context).await;
+    // Boxed: the future carries the scoped controller, which now also carries
+    // the admitted incarnation (FIG-3394) — past the `large_futures` budget.
+    let outcome = Box::pin(execute_internal_process_tool(&context, call, tool_context)).await;
 
     assert_single_stored_attachment(&outcome.record.output);
     let entries = persistence.list_uncommitted(u64::MAX).await.unwrap();

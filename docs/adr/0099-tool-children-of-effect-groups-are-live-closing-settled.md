@@ -104,9 +104,28 @@ turn latency bound follows from the cancel grace.
 
 ### 1. Logical opener identity
 
-**An opener is `Turn(session_id, turn_id)` or `Process(ProcessRef {
-process_id, incarnation })`.** Its identity is stable across worker attempts and
-segments, and it changes on process re-registration. Group identity, retained
+**An opener is `Turn(session_id, turn_id)`, `QueueDrain(session_id, drain_id)`
+or `Process(ProcessRef { process_id, incarnation })`.** Its identity is stable
+across worker attempts and segments, and it changes on process re-registration.
+
+**A queued-work drain is an opener, not a turn's container.** `drain_id` and
+`turn_id` are two ways for a host to identify one physical unit — "keep
+`drain_id(...)` as the durable idempotency key for retried drains, or keep
+`turn_id(...)` as the host-minted physical turn identity"
+(`crates/lash/src/turn.rs`) — and `execution_scope` there resolves to
+`queue_drain_scope(session, drain_id)` when no turn id exists, so a queued
+turn runs its whole effect tree, cells included, under
+`ExecutionScope::QueueDrain`. A drain is durable and retry-stable for the same
+reason a turn is. One drain may run several queued turns, and the drain's
+opener lives until the drain ends rather than until its first turn does, so
+group identity, retained authority, cancellation and retirement bind the drain
+and not the turn inside it. Found by FIG-3394 when a cell of a queued turn was
+refused for naming no opener.
+
+**`SessionDelete` and `RuntimeOperation` scopes are not openers and run no
+cells.** A scope that is none of the three is refused with a typed error rather
+than given an invented identity: widening this set is an amendment to this
+section, which is how the drain arm arrived. Group identity, retained
 authority, cancellation, usage attribution and retirement all bind that exact
 opener. A retired or mismatched incarnation is refused, never rebound to the
 current process carrying the same name.
@@ -124,6 +143,25 @@ store-minted incarnation", and ADR 0094 renders a process Parent Scope as
 a process name can therefore alias a prior close, cancellation fence or group.
 **FIG-3394 binds the incarnation into the shared group and child identity;
 FIG-3396 validates it during recovery.**
+
+**A process-backed session turn runs its cells under the process opener.** A
+`ProcessInput::SessionTurn` row — what every `agents.spawn` child is — creates a
+child session and runs one turn of it under the *process's* scope:
+`SessionTurnRequest::new_process_backed`
+(`crates/lash-core-execution/src/plugin/runtime_host.rs`) refuses any other
+scope, and the managed turn that rescopes a turn scope passes a process scope
+through untouched (`crates/lash-core/src/runtime/session_manager/turns.rs`). So
+that child turn's cells are opened by the process and not by the child turn: a
+worker retry keeps the incarnation and reuses the journal, while a
+re-registration under the same name is a different opener. The incarnation
+reaches the cell because the process runner binds it onto the admitted
+controller — `ScopedEffectController::with_admitted_process`, from the record
+the authority CAS returned — and a process-scoped execution that carries no
+admitted incarnation is refused rather than opened on the reusable name. Found
+by FIG-3394, when refusing a process scope outright took every subagent cell's
+first tool call out: the child's `task.fail(...)` came back as "has no logical
+opener", its driver re-asked the provider to the cap, and the parent read
+`Stopped(MaxTurns)` instead of the child's own reason.
 
 **A dead worker is neither live-ended nor closed.** Recovery classifies an
 opener by the durable closing fact of §7, never by the liveness of a lease. The

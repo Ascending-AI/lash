@@ -62,7 +62,7 @@ pub use validation::{
     validate_replayed_effect_envelope,
 };
 
-pub use executor::{EffectControllerTaskRequest, ProcessRunner};
+pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner};
 pub use executor::{EffectTaskController, drive_effect_controller_task, effect_groups_unsupported};
 pub use executor::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use outcome::{

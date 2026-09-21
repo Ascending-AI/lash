@@ -330,3 +330,146 @@ fn only_finish_closes_a_typescript_cells_turn() {
         );
     });
 }
+
+fn echo_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:echo",
+        "echo",
+        "Echo the text back",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object" }),
+    )
+    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["echo"], "say"))
+}
+
+struct EchoToolProvider;
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for EchoToolProvider {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![echo_definition().manifest()]
+    }
+
+    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+        (id == &lash_core::ToolId::from("tool:echo")).then(|| echo_definition().manifest())
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "echo" || name == "tool:echo").then(|| Arc::new(echo_definition().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let text = call
+            .args
+            .get("text")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        lash_core::ToolAttemptOutcome::done_without_intents(lash_core::ToolOutcomeDone::ok(text))
+    }
+}
+
+/// Two identical aggregates raised from one cell must not share identities.
+///
+/// The aggregate sits in a function declaration, which is where an aggregate
+/// ordinarily sits once a cell factors its work into helpers, and which is the
+/// case the compiler describes with no execution site at all:
+/// `lashlang_execution_paths` walks `program.main`. With no site, every leaf
+/// used to fall back to its position inside the batch, so the second call of
+/// `pair` re-minted the first call's two identities and the batch re-minted the
+/// first batch's content hash — one effect replay key for two aggregates, and
+/// the second aggregate reading the first one's journalled outcome.
+///
+/// This is the defect FIG-3394 closes; it is red on the parent commit, where
+/// the four calls mint two distinct identities instead of four.
+#[test]
+fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
+    block_on(async {
+        let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            Arc::new(EchoToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
+        );
+        let mut state = RlmExecutionState::for_engine("typescript");
+        let response = execute_code_with_channel_and_bounds(
+            &mut state,
+            context,
+            ExecRequest {
+                language: "typescript".to_string(),
+                code: r#"
+                    async function pair() {
+                        return await Promise.all([
+                            echo.say({ text: "a" }),
+                            echo.say({ text: "b" })
+                        ]);
+                    }
+                    const first = await pair();
+                    const second = await pair();
+                    finish({ first, second });
+                "#
+                .to_string(),
+            },
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+            crate::plugin::RlmChannel::Cell,
+        )
+        .await;
+
+        assert_eq!(response.error, None);
+        assert_eq!(
+            response.terminal_finish,
+            Some(serde_json::json!({ "first": ["a", "b"], "second": ["a", "b"] }))
+        );
+
+        let call_ids = response
+            .calls
+            .iter()
+            .filter_map(|call| call.host_record.as_ref())
+            .filter_map(|record| record.call_id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(call_ids.len(), 4, "four leaves ran: {call_ids:?}");
+        let distinct = call_ids.iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            distinct.len(),
+            4,
+            "each leaf of each aggregate needs its own identity: {call_ids:?}"
+        );
+
+        // The leaf position within the batch separates the two leaves of one
+        // pass, and the site occurrence separates the two passes. Both halves
+        // are asserted so a future derivation cannot drop either and still
+        // pass on distinctness alone.
+        let first_pass = call_ids
+            .iter()
+            .filter(|id| id.ends_with(":child:0"))
+            .count();
+        let second_pass = call_ids
+            .iter()
+            .filter(|id| id.ends_with(":child:1"))
+            .count();
+        assert_eq!(
+            (first_pass, second_pass),
+            (2, 2),
+            "two leaf positions, reached twice: {call_ids:?}"
+        );
+        assert_eq!(
+            call_ids
+                .iter()
+                .filter(|id| id.contains(":1:child:"))
+                .count(),
+            2,
+            "the first pass carries occurrence 1: {call_ids:?}"
+        );
+        assert_eq!(
+            call_ids
+                .iter()
+                .filter(|id| id.contains(":2:child:"))
+                .count(),
+            2,
+            "the second pass carries occurrence 2: {call_ids:?}"
+        );
+    });
+}

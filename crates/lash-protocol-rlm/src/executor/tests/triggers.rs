@@ -707,9 +707,21 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         // moved with the dialect.
         let expected_key =
             "derived/v3/c8727a9bd798917885c10ca9e76bde549e48c950c36e8201c959c02d9f9c8af2";
+        // The fixture's production effect address gives the deferred-resolution
+        // journal its link identity, so the journaled resolution production
+        // always wrote is now the first envelope; the register is the second.
         let (effect_owner_scope, effect_subscription_key) = {
             let envelopes = controller.envelopes.lock_recover();
-            let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[0].command else {
+            let lash_core::RuntimeEffectCommand::LanguageRuntimeValue { operation } =
+                &envelopes[0].command
+            else {
+                panic!("expected the deferred tool resolution effect first")
+            };
+            assert_eq!(
+                operation,
+                "deferred_tool_resolution:v1:[\"timer.Schedule\",\"triggers.register\"]"
+            );
+            let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[1].command else {
                 panic!("expected trigger effect")
             };
             let lash_core::TriggerCommand::Register {

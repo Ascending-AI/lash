@@ -106,11 +106,14 @@ impl RuntimeSessionServices {
         if crate::tool_dispatch::resolve_internal_manifest_by_id(dispatch.as_ref(), &call.tool_id)
             .is_some()
         {
-            let outcome = crate::tool_dispatch::execute_internal_process_tool(
+            // Boxed because the scoped controller this future carries now also
+            // carries the incarnation its process was admitted under (FIG-3394),
+            // which took the inline future past the `large_futures` budget.
+            let outcome = Box::pin(crate::tool_dispatch::execute_internal_process_tool(
                 dispatch.as_ref(),
                 call,
                 tool_context,
-            )
+            ))
             .await;
             return Ok(outcome.record.output);
         }

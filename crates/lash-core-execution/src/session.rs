@@ -17,7 +17,9 @@ mod tool_execution;
 pub use execution_context::RuntimeExecutionContext;
 pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
 /// Runtime tool invocation requests and their collected replies.
-pub use tool_execution::{ToolBatchReplies, ToolInvocation, ToolInvocationReply};
+pub use tool_execution::{
+    ToolBatchOccurrence, ToolBatchReplies, ToolInvocation, ToolInvocationReply,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ToolCatalogCacheKey {

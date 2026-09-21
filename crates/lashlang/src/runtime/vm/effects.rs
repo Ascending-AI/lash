@@ -47,7 +47,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         instruction_ip: usize,
     ) -> Result<Option<VmOutcome>, RuntimeError> {
         let active = self.begin_lashlang_execution(instruction_ip);
-        let result = Box::pin(self.resolve_effect_inner(effect, active.as_ref())).await;
+        let result =
+            Box::pin(self.resolve_effect_inner(effect, active.as_ref(), instruction_ip)).await;
         match (&result, active.as_ref()) {
             (Ok(Some(VmOutcome::ProcessFailed(value))), Some(active)) => {
                 self.fail_lashlang_execution(active, value.to_string());
@@ -67,6 +68,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         effect: VmEffect,
         active: Option<&ActiveLashlangExecutionNode>,
+        instruction_ip: usize,
     ) -> Result<Option<VmOutcome>, RuntimeError> {
         match effect {
             VmEffect::ResourceCall { operation, argc } => {
@@ -115,7 +117,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.stack.push(value);
             }
             VmEffect::AwaitArray { settle } => {
-                self.await_pending_array(settle).await?;
+                self.await_pending_array(settle, instruction_ip).await?;
             }
             VmEffect::AwaitPending => {
                 let value = self.pop_stack()?;
@@ -134,7 +136,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             return Err(self.unsettleable_handle(&id));
                         }
                         self.stack.push(Value::List(vec![value].into()));
-                        self.await_pending_array(false).await?;
+                        self.await_pending_array(false, instruction_ip).await?;
                         let Value::List(values) = self.pop_stack()? else {
                             unreachable!()
                         };
@@ -148,10 +150,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
             VmEffect::ResourceOperationBatch(batch) => {
-                self.resolve_resource_operation_batch(batch).await?;
+                self.resolve_resource_operation_batch(batch, instruction_ip)
+                    .await?;
             }
             VmEffect::ResourceOperationListBatch(batch) => {
-                self.resolve_resource_operation_list_batch(batch).await?;
+                self.resolve_resource_operation_list_batch(batch, instruction_ip)
+                    .await?;
             }
             VmEffect::AwaitHandle => {
                 let handle = self.pop_stack()?;
@@ -233,7 +237,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(None)
     }
 
-    async fn resolve_resource_operation_batch(&mut self, batch: usize) -> Result<(), RuntimeError> {
+    async fn resolve_resource_operation_batch(
+        &mut self,
+        batch: usize,
+        instruction_ip: usize,
+    ) -> Result<(), RuntimeError> {
         let batch = &self.chunk.resource_operation_batches[batch];
         let start = self.stack_drain_start(batch.stack_value_count)?;
         let values = self.stack.drain(start..).collect::<Vec<_>>();
@@ -253,7 +261,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             aggregate_unwrap: batch.aggregate_unwrap,
             first_settled_rejection: batch.first_settled_rejection,
         };
-        self.resolve_batch_spec(&expanded, expanded_values).await
+        self.resolve_batch_spec(&expanded, expanded_values, instruction_ip)
+            .await
     }
 
     /// Settles one aggregate await as a single host batch.
@@ -267,6 +276,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
         values: Vec<Value>,
+        instruction_ip: usize,
     ) -> Result<(), RuntimeError> {
         // Element positions are the only ones that could have settled, so they
         // are the only ones where a handle is a mistake rather than data. A
@@ -284,7 +294,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let leaf_values = if batch.leaves.is_empty() {
             Vec::new()
         } else {
-            self.settle_tool_leaves(batch, &values).await?
+            self.settle_tool_leaves(batch, &values, instruction_ip)
+                .await?
         };
 
         let mut value = build_aggregate_await_shape(&batch.shape, &values, &leaf_values, self)?;
@@ -302,6 +313,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
         values: &[Value],
+        instruction_ip: usize,
     ) -> Result<Vec<Value>, RuntimeError> {
         let mut operations = Vec::with_capacity(batch.leaves.len());
         let mut active_nodes = Vec::with_capacity(batch.leaves.len());
@@ -329,9 +341,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
             active_nodes.push(active);
         }
 
+        let occurrence = self.next_aggregate_occurrence(instruction_ip);
         let settled = self
             .perform_resource_operation_batch(
                 operations,
+                occurrence,
                 &active_nodes,
                 batch.first_settled_rejection,
             )
@@ -353,6 +367,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     async fn resolve_resource_operation_list_batch(
         &mut self,
         batch: usize,
+        instruction_ip: usize,
     ) -> Result<(), RuntimeError> {
         let batch = &self.chunk.resource_operation_list_batches[batch];
         let Value::List(calls) = self.pop_stack()? else {
@@ -389,8 +404,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let leaf_values = if operations.is_empty() {
             Vec::new()
         } else {
+            let occurrence = self.next_aggregate_occurrence(instruction_ip);
             let settled = self
-                .perform_resource_operation_batch(operations, &active_nodes, false)
+                .perform_resource_operation_batch(operations, occurrence, &active_nodes, false)
                 .await?;
             self.settle_resource_operation_leaves(
                 std::iter::repeat_n((batch.unwrap, batch.source_span), calls.len()),
@@ -414,6 +430,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     async fn perform_resource_operation_batch(
         &mut self,
         operations: Vec<ResourceOperation>,
+        occurrence: u64,
         active_nodes: &[Option<ActiveLashlangExecutionNode>],
         first_settled_rejection: bool,
     ) -> Result<SettledResourceOperationBatch, RuntimeError> {
@@ -422,6 +439,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .host
             .perform(AbilityOp::ResourceOperationBatch(ResourceOperationBatch {
                 operations,
+                occurrence,
             }))
             .await;
         let result = match result {

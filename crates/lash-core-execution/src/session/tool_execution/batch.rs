@@ -296,12 +296,16 @@ impl RuntimeExecutionContext<'_> {
 
     /// Executes a source-ordered tool batch for code-executor implementors and returns replies in
     /// the same order even though individual calls may run concurrently.
-    pub async fn call_tool_batch(&self, calls: Vec<ToolInvocation>) -> ToolBatchReplies {
+    pub async fn call_tool_batch(
+        &self,
+        calls: Vec<ToolInvocation>,
+        occurrence: crate::session::ToolBatchOccurrence,
+    ) -> ToolBatchReplies {
         if calls.is_empty() {
             return ToolBatchReplies::default();
         }
 
-        let batch_id = deterministic_tool_invocation_batch_id(&calls);
+        let batch_id = deterministic_tool_invocation_batch_id(&calls, occurrence);
         let mut replies = vec![None; calls.len()];
         // A failed batch reports an empty settlement order by construction: downstream
         // settlement-selecting aggregates treat the order as evidence of what settled.
@@ -705,14 +709,17 @@ mod tests {
         let (context, orchestration_executions) = granted_call_context(event_tx);
 
         let replies = context
-            .call_tool_batch(vec![
-                ToolInvocation::new(
-                    "batch-granted",
-                    crate::ToolId::from("tool:granted_orchestration_probe"),
-                    serde_json::json!({}),
-                )
-                .with_execution_grant(granted_call()),
-            ])
+            .call_tool_batch(
+                vec![
+                    ToolInvocation::new(
+                        "batch-granted",
+                        crate::ToolId::from("tool:granted_orchestration_probe"),
+                        serde_json::json!({}),
+                    )
+                    .with_execution_grant(granted_call()),
+                ],
+                crate::session::ToolBatchOccurrence::Opener(1),
+            )
             .await;
 
         assert_eq!(
@@ -771,23 +778,26 @@ mod tests {
         .with_tracing(Some(tracing));
 
         context
-            .call_tool_batch(vec![
-                ToolInvocation::new(
-                    "missing-call-a",
-                    crate::ToolId::from("tool:missing-a"),
-                    serde_json::json!({}),
-                ),
-                ToolInvocation::new(
-                    "missing-call-b",
-                    crate::ToolId::from("tool:missing-b"),
-                    serde_json::json!({}),
-                ),
-                ToolInvocation::new(
-                    "invalid-prepared",
-                    crate::ToolId::from("tool:batch_failure"),
-                    serde_json::Value::Null,
-                ),
-            ])
+            .call_tool_batch(
+                vec![
+                    ToolInvocation::new(
+                        "missing-call-a",
+                        crate::ToolId::from("tool:missing-a"),
+                        serde_json::json!({}),
+                    ),
+                    ToolInvocation::new(
+                        "missing-call-b",
+                        crate::ToolId::from("tool:missing-b"),
+                        serde_json::json!({}),
+                    ),
+                    ToolInvocation::new(
+                        "invalid-prepared",
+                        crate::ToolId::from("tool:batch_failure"),
+                        serde_json::Value::Null,
+                    ),
+                ],
+                crate::session::ToolBatchOccurrence::Opener(1),
+            )
             .await;
 
         // A call that settles before provider dispatch is still a complete
@@ -1112,11 +1122,14 @@ mod tests {
         ));
         let context = batch_failure_context(Arc::clone(&controller));
         let replies = context
-            .call_tool_batch(vec![ToolInvocation::new(
-                "call",
-                crate::ToolId::from("tool:batch_failure"),
-                serde_json::json!({}),
-            )])
+            .call_tool_batch(
+                vec![ToolInvocation::new(
+                    "call",
+                    crate::ToolId::from("tool:batch_failure"),
+                    serde_json::json!({}),
+                )],
+                crate::session::ToolBatchOccurrence::Opener(1),
+            )
             .await;
 
         assert_eq!(
@@ -1145,11 +1158,14 @@ mod tests {
             BatchFailureResponse::MalformedSettlementOrder,
         )));
         let replies = context
-            .call_tool_batch(vec![ToolInvocation::new(
-                "call",
-                crate::ToolId::from("tool:batch_failure"),
-                serde_json::json!({}),
-            )])
+            .call_tool_batch(
+                vec![ToolInvocation::new(
+                    "call",
+                    crate::ToolId::from("tool:batch_failure"),
+                    serde_json::json!({}),
+                )],
+                crate::session::ToolBatchOccurrence::Opener(1),
+            )
             .await;
 
         assert!(!replies.replies[0].output.is_success());
@@ -1168,11 +1184,14 @@ mod tests {
             BatchFailureResponse::EffectDecodeError,
         )));
         let replies = context
-            .call_tool_batch(vec![ToolInvocation::new(
-                "call",
-                crate::ToolId::from("tool:batch_failure"),
-                serde_json::json!({}),
-            )])
+            .call_tool_batch(
+                vec![ToolInvocation::new(
+                    "call",
+                    crate::ToolId::from("tool:batch_failure"),
+                    serde_json::json!({}),
+                )],
+                crate::session::ToolBatchOccurrence::Opener(1),
+            )
             .await;
 
         assert!(!replies.replies[0].output.is_success());

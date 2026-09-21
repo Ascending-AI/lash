@@ -418,6 +418,22 @@ impl<'run> RuntimeExecutionContext<'run> {
             .to_string()
     }
 
+    /// The process incarnation this execution's scope was admitted under, when
+    /// it runs under one.
+    ///
+    /// A process-backed session turn — the shape every `agents.spawn` child
+    /// takes — runs under `ExecutionScope::Process`, which carries the reusable
+    /// process name and no incarnation. The process runner binds the admitted
+    /// incarnation onto the scoped controller, and this is where an execution
+    /// that must name its opener (ADR 0099 §1) reads it back.
+    pub fn admitted_process(&self) -> Option<crate::ProcessRef> {
+        self.dispatch
+            .effect_controller
+            .scoped()
+            .admitted_process()
+            .cloned()
+    }
+
     /// Returns the exact owner used to stage artifacts produced by this
     /// replayable execution.
     pub fn artifact_owner(&self) -> crate::ArtifactOwner {
