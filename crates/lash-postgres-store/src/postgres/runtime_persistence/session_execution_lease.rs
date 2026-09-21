@@ -41,14 +41,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
                 let sql_lease_term =
                     sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
                 let claimed_at = current.claimed_at_ms;
-                sqlx::query(
-                    "UPDATE lash_session_execution_leases
-                     SET lease_token = $2,
-                         lease_claimed_at_ms = $3,
-                         lease_expires_at_ms = $4,
-                         lease_term_ms = $5
-                     WHERE session_id = $1",
-                )
+                sqlx::query(crate::turn_ingress::turn_ingress_sql().leases.reenter.sql())
                 .bind(session_id.as_str())
                 .bind(lease_token)
                 .bind(claimed_at as i64)
@@ -161,16 +154,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         let sql_expires_at =
             sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
         let sql_lease_term = sql_counter_value("session_execution_lease_term_ms", lease_ttl_ms)?;
-        let renewed = sqlx::query(
-            "UPDATE lash_session_execution_leases
-             SET lease_expires_at_ms = $6,
-                 lease_term_ms = $7
-             WHERE session_id = $1
-               AND lease_owner_id = $2
-               AND lease_owner_incarnation_id = $3
-               AND lease_executor_id = $4
-               AND lease_token = $5",
-        )
+        let renewed = sqlx::query(crate::turn_ingress::turn_ingress_sql().leases.renew.sql())
         .bind(fence.session_id.as_str())
         .bind(&fence.owner.owner_id)
         .bind(&fence.owner.incarnation_id)

@@ -27,6 +27,7 @@ converted = [
     "process",
     "session_core",
     "trigger",
+    "turn_ingress",
     "wait",
 ]
 
@@ -508,6 +509,65 @@ shared = [
 sqlite = ["crates/lash-sqlite-store/src/session_sql.rs"]
 postgres = ["crates/lash-postgres-store/src/postgres/session_sql.rs"]
 # Provisioning, not persistence.
+[families.turn_ingress]
+tables = [
+    "pending_turn_inputs",
+    "queued_work_batches",
+    "queued_work_items",
+    "session_execution_leases",
+    "tool_intent_submissions",
+    "turn_cancel_requests",
+    "turn_cancel_closure_authorizations",
+    "turn_cancel_closure_participants",
+    "turn_cancel_retired_scopes",
+    "turn_cancellation_bindings",
+]
+statement_prefixes = [
+    "turn_ingress",
+    "pending_turn_input",
+    "queued_work_batch",
+    "queued_work_item",
+    "session_execution_lease",
+    "tool_intent_submission",
+    "turn_cancel_request",
+    "turn_cancel_closure_authorization",
+    "turn_cancel_closure_participant",
+    "turn_cancel_retired_scope",
+    "turn_cancellation_binding",
+]
+shared = [
+    "crates/lash-store-sql/src/turn_ingress.rs",
+    "crates/lash-store-sql/src/turn_ingress/cancel_requests.rs",
+    "crates/lash-store-sql/src/turn_ingress/cancellation_bindings.rs",
+    "crates/lash-store-sql/src/turn_ingress/closure_authorizations.rs",
+    "crates/lash-store-sql/src/turn_ingress/closure_participants.rs",
+    "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs",
+    "crates/lash-store-sql/src/turn_ingress/queued_batches.rs",
+    "crates/lash-store-sql/src/turn_ingress/queued_items.rs",
+    "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs",
+    "crates/lash-store-sql/src/turn_ingress/session_execution_leases.rs",
+    "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs",
+]
+# One owner module per group of forks, because the family is ten tables and a
+# single file would sit over the production file-size budget. The three
+# renderings each backend needs live in the family's root module: the session
+# catalog, the process registry's own database, and — on SQLite — every schema
+# an effect host has attached.
+sqlite = [
+    "crates/lash-sqlite-store/src/turn_ingress.rs",
+    "crates/lash-sqlite-store/src/turn_ingress/family.rs",
+    "crates/lash-sqlite-store/src/turn_ingress/pending_inputs.rs",
+    "crates/lash-sqlite-store/src/turn_ingress/queued_work.rs",
+    "crates/lash-sqlite-store/src/turn_ingress/turn_cancel.rs",
+]
+postgres = [
+    "crates/lash-postgres-store/src/postgres/turn_ingress.rs",
+    "crates/lash-postgres-store/src/postgres/turn_ingress/family.rs",
+    "crates/lash-postgres-store/src/postgres/turn_ingress/leases.rs",
+    "crates/lash-postgres-store/src/postgres/turn_ingress/pending_inputs.rs",
+    "crates/lash-postgres-store/src/postgres/turn_ingress/queued_work.rs",
+    "crates/lash-postgres-store/src/postgres/turn_ingress/turn_cancel.rs",
+]
 schema = [
     "crates/lash-sqlite-store/src/schema.rs",
     "crates/lash-sqlite-store/src/schema_fragments.rs",
@@ -537,6 +597,24 @@ deleted_sessions = "crates/lash-store-sql/src/session/deleted_sessions.rs"
 usage_deltas = "crates/lash-store-sql/src/session/usage_deltas.rs"
 release_stamp = "crates/lash-store-sql/src/session/release_stamp.rs"
 checkpoint_blob_refs = "crates/lash-store-sql/src/session/checkpoint_blob_refs.rs"
+[families.turn_ingress.table_modules]
+pending_turn_inputs = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
+queued_work_batches = "crates/lash-store-sql/src/turn_ingress/queued_batches.rs"
+queued_work_items = "crates/lash-store-sql/src/turn_ingress/queued_items.rs"
+session_execution_leases = "crates/lash-store-sql/src/turn_ingress/session_execution_leases.rs"
+tool_intent_submissions = "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs"
+turn_cancel_requests = "crates/lash-store-sql/src/turn_ingress/cancel_requests.rs"
+turn_cancel_closure_authorizations = "crates/lash-store-sql/src/turn_ingress/closure_authorizations.rs"
+turn_cancel_closure_participants = "crates/lash-store-sql/src/turn_ingress/closure_participants.rs"
+turn_cancel_retired_scopes = "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs"
+turn_cancellation_bindings = "crates/lash-store-sql/src/turn_ingress/cancellation_bindings.rs"
+
+# `state` is this family's lifecycle column. Its partitions are generated from
+# `TurnInputStateKind`, so a statement names one as a `{{term(column)}}` token
+# and never spells it: a spelled literal is how a new variant silently stops
+# being claimed while still being prunable.
+[families.turn_ingress.vocabulary_columns]
+pending_turn_inputs = ["state"]
 
 [families.wait]
 tables = ["await_event_waits", "await_event_meta", "await_event_revoked_sessions"]
@@ -2705,3 +2783,489 @@ PostgreSQL writes it through `ON CONFLICT`, and spells the conflict alias
 `EXCLUDED` where SQLite spells it `excluded`.
 """
 
+# turn-ingress family
+# ---------------------------------------------------------------------------
+#
+# Four fork classes account for almost all of these. PostgreSQL must take row
+# locks explicitly, because check-then-act on a row is not atomic under READ
+# COMMITTED, while every SQLite write path in this repository already holds the
+# database write lock from BEGIN IMMEDIATE. The two backends read JSON with
+# different operators. They bind a list differently — a JSON array unpacked
+# with json_each against a real array. And `turn_cancel_requests` has two
+# different durable shapes, which ADR 0098 freezes.
+
+[[dialect_only]]
+statement = "pending_turn_input.insert_new"
+backends = ["sqlite", "postgres"]
+kind = "generated key"
+reason = """
+enqueue_seq is an INTEGER PRIMARY KEY AUTOINCREMENT on SQLite and is never
+bound; PostgreSQL draws it from the column's sequence with an explicit nextval
+first, because its source-key path has to know the value it is about to write.
+The durable column is the same column either way.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.insert_or_adopt_existing"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+PostgreSQL cannot hold "read the absence, then insert" atomic under READ
+COMMITTED, so the conflict clause is what detects a concurrent submitter and
+the no-op DO UPDATE is what makes RETURNING hand back the existing row. SQLite
+reads the absence under the same write lock it inserts under
+(pending_turn_input.select_id_by_source_key) and has no counterpart.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.select_id_by_source_key"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = "The read half of the same fork as pending_turn_input.insert_or_adopt_existing."
+
+[[dialect_only]]
+statement = "pending_turn_input.select_by_id_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+A cancel that is about to write locks the row it read; the read-only
+observation of the same row uses the shared pending_turn_input.select_by_id.
+SQLite needs neither variant: it already holds the database write lock.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.select_by_source_key_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = "Same lock fork as pending_turn_input.select_by_id_for_update, keyed by source key."
+
+[[dialect_only]]
+statement = "pending_turn_input.settlement_facts"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = """
+The settlement verdict is taken over this row and must hold until the write
+that follows it in the same transaction. PostgreSQL takes the row lock; SQLite
+is already the only writer. The projection itself is one named column list,
+narrow because it avoids decoding the unbounded input_json on every settled
+input of every commit.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.select_suffix"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = "Same lock fork as pending_turn_input.settlement_facts, over a cancel's whole suffix."
+
+[[dialect_only]]
+statement = "pending_turn_input.select_active_turn_claims"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = """
+Same lock fork as pending_turn_input.settlement_facts. The projection is the
+named orphan-scan list: the scan reports turn ids and never needs input_json.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.select_active_turn_rows"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = "Same lock fork as pending_turn_input.settlement_facts, over the rows a repair rewrites."
+
+[[dialect_only]]
+statement = "pending_turn_input.select_pending_active"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = """
+Same lock fork as pending_turn_input.settlement_facts, over the rows an
+interrupted turn's commit re-defers.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.claim_candidates_next_turn"
+backends = ["sqlite", "postgres"]
+kind = "SKIP LOCKED"
+reason = """
+PostgreSQL takes FOR UPDATE SKIP LOCKED so a runner never queues behind another
+session's claim; SQLite is already the only writer. The generation half of the
+predicate stays on both because it is also the ORDER BY … LIMIT filter — the
+read side of the claim fence, which the shared verdict deliberately does not
+replace (FIG-3381).
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.claim_candidates_active_turn_after_work"
+backends = ["sqlite", "postgres"]
+kind = "SKIP LOCKED; JSON extraction"
+reason = """
+Same lock fork as pending_turn_input.claim_candidates_next_turn, plus the
+ingress JSON: SQLite calls json_extract where PostgreSQL casts to jsonb and
+uses ->>. One statement per checkpoint, chosen by an exhaustive match, because
+the admitted minimum-boundary set is what the checkpoint decides and a
+COALESCE(?N, …) or ?N IS NULL OR … over a bound boundary cannot seek
+idx_pending_turn_inputs_session. The boundary predicate is generated by
+admitted_min_boundary_sql and pinned to it by a test in each store.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.claim_candidates_active_turn_before_completion"
+backends = ["sqlite", "postgres"]
+kind = "SKIP LOCKED; JSON extraction"
+reason = "The other checkpoint of pending_turn_input.claim_candidates_active_turn_after_work."
+
+[[dialect_only]]
+statement = "pending_turn_input.abandon_claim"
+backends = ["sqlite", "postgres"]
+kind = "JSON extraction"
+reason = """
+An abandoned row is restored to the open spelling its own ingress_json carries,
+so a next-turn row goes back to deferred_next_turn and never to pending_active
+(FIG-1573). Reading that scope is the fork: json_extract against ->>.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.abandon_claims"
+backends = ["sqlite", "postgres"]
+kind = "list bind; JSON extraction"
+reason = """
+The batch form of pending_turn_input.abandon_claim. One statement, not a loop:
+a batch abandon is one caller giving up one set of rows. SQLite binds the
+(session_id, claim_id, claim_token) triples as one JSON array and unpacks it
+with json_each inside a row-value IN (SELECT …), which keeps
+idx_pending_turn_inputs_claim seekable; PostgreSQL binds three real arrays and
+joins unnest.
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.insert_new"
+backends = ["sqlite", "postgres"]
+kind = "generated key; RETURNING"
+reason = """
+Same generated-key fork as pending_turn_input.insert_new, and PostgreSQL
+returns the inserted id rather than reading the row back.
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.settlement_facts"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = "Same lock fork as pending_turn_input.settlement_facts, for the queued-work verdict."
+
+[[dialect_only]]
+statement = "queued_work_batch.select_cancelable"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = """
+Same lock fork as pending_turn_input.settlement_facts. What is being decided is
+whether a live claim holds the batch, which is a join against the lease row
+rather than a claim_token test (ADR 0029).
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.delete_cancelled"
+backends = ["sqlite", "postgres"]
+kind = "row lock carries the predicate"
+reason = """
+PostgreSQL's delete is keyed by id alone, because the row lock
+queued_work_batch.select_cancelable took is what holds the liveness decision.
+SQLite has no row lock to carry it, so it repeats the predicate and the write
+lock makes the pair atomic.
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.select_head_candidate"
+backends = ["sqlite", "postgres"]
+kind = "server clock"
+reason = """
+The ready cutoff is bound on both backends now, but PostgreSQL binds the
+transaction timestamp it sampled with postgres_transaction_epoch_ms and SQLite
+binds the host clock it shares with its runtime, so the two are different
+statements carrying the same shape. Declared for both so neither can quietly
+acquire the other's clock.
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.exists_deferred"
+backends = ["sqlite", "postgres"]
+kind = "server clock"
+reason = "Same clock fork as queued_work_batch.select_head_candidate."
+
+[[dialect_only]]
+statement = "queued_work_batch.claim_candidates_idle"
+backends = ["sqlite", "postgres"]
+kind = "SKIP LOCKED"
+reason = """
+PostgreSQL takes FOR UPDATE OF … SKIP LOCKED over the candidate rows; SQLite is
+already the only writer. Same clock fork as
+queued_work_batch.select_head_candidate. One statement per delivery boundary,
+chosen by an exhaustive match over the two-variant QueuedWorkClaimBoundary,
+because an optional boundary filter cannot use idx_queued_work_batches_ready.
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.claim_candidates_boundary"
+backends = ["sqlite", "postgres"]
+kind = "SKIP LOCKED; NULL comparison"
+reason = """
+The other boundary of queued_work_batch.claim_candidates_idle, plus one more
+fork: PostgreSQL compares a claimed head with IS DISTINCT FROM, which treats a
+NULL claim as unequal, where SQLite spells the same rule as an explicit
+IS NULL OR <>.
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.select_present_ids"
+backends = ["sqlite", "postgres"]
+kind = "list bind"
+reason = """
+SQLite binds a list as a JSON array and unpacks it with json_each; PostgreSQL
+binds a real array and compares with = ANY. Both seek, which
+a_json_array_list_bind_still_seeks_the_primary_key pins on the SQLite side.
+"""
+
+[[dialect_only]]
+statement = "queued_work_batch.select_by_ids"
+backends = ["sqlite", "postgres"]
+kind = "list bind"
+reason = "Same list-bind fork as queued_work_batch.select_present_ids."
+
+[[dialect_only]]
+statement = "queued_work_batch.select_by_claim_ids"
+backends = ["sqlite", "postgres"]
+kind = "list bind"
+reason = "Same list-bind fork as queued_work_batch.select_present_ids, keyed by claim id."
+
+[[dialect_only]]
+statement = "queued_work_batch.select_span"
+backends = ["sqlite", "postgres"]
+kind = "server clock"
+reason = "Same clock fork as queued_work_batch.select_head_candidate."
+
+[[dialect_only]]
+statement = "queued_work_batch.abandon_claims"
+backends = ["postgres"]
+kind = "bulk bind"
+reason = """
+PostgreSQL gives up a whole set of claims in one round trip by joining unnest
+over five parallel arrays. SQLite loops the shared single-row abandon_claim
+inside one BEGIN IMMEDIATE transaction, so the batch is atomic either way and
+only PostgreSQL saves round trips by writing it as one statement.
+"""
+
+[[dialect_only]]
+statement = "queued_work_item.list_by_batches"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite hydrates a whole claim's batches in one page, because under its write
+lock the run cannot change between reads. PostgreSQL hydrates per batch inside
+a REPEATABLE READ snapshot, which gives the same consistency, so it has no
+counterpart. The list bind is the usual json_each fork.
+"""
+
+[[dialect_only]]
+statement = "queued_work_item.delete_by_session"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+SQLite reclaims a deleted session's items through the foreign key's
+ON DELETE CASCADE. This schema's constraint is not declared cascading, so the
+sweep names the rows itself.
+"""
+
+[[dialect_only]]
+statement = "session_execution_lease.select_by_session_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+Every PostgreSQL mutation path locks the lease row: check-then-act on it is not
+atomic under READ COMMITTED, so two concurrent first claims could otherwise
+both observe no live lease and both win. SQLite serializes writers globally.
+The one read that must NOT take the lock — an operator's diagnostic poll — uses
+the shared unlocked statement, so watching a lane cannot delay it.
+"""
+
+[[dialect_only]]
+statement = "tool_intent_submission.insert_new"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+A replayed submission is the point of this ledger, so both backends keep the
+row that is already there; SQLite spells it INSERT OR IGNORE and PostgreSQL
+ON CONFLICT (replay_key) DO NOTHING.
+"""
+
+[[dialect_only]]
+statement = "tool_intent_submission.select_by_replay_key_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+Completing a submission is a read-then-write, so PostgreSQL locks the row.
+SQLite's counterpart is the shared unlocked read under its write lock.
+"""
+
+[[dialect_only]]
+statement = "turn_cancel_closure_authorization.select_by_turn"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = "Same lock fork as pending_turn_input.settlement_facts, over one turn's pinned closure."
+
+[[dialect_only]]
+statement = "turn_cancellation_binding.insert_new"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+PostgreSQL cannot hold "read the absence, then insert" atomic under READ
+COMMITTED, so it swallows the conflict and re-reads the row to compare it.
+SQLite reads the absence under the same write lock it inserts under, so a
+conflict there is a defect and the constraint error is kept rather than
+swallowed.
+"""
+
+[[dialect_only]]
+statement = "turn_cancellation_binding.select_by_session_for_update"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+The validation that may insert a binding serializes on this row; the reads that
+only compare an admitted binding use the shared unlocked statement.
+"""
+
+[[dialect_only]]
+statement = "turn_cancel_retired_scope.insert_new"
+backends = ["sqlite", "postgres"]
+kind = "ON CONFLICT"
+reason = """
+Retiring an already-retired scope is not an error on either backend; SQLite
+spells it INSERT OR IGNORE and PostgreSQL ON CONFLICT DO NOTHING.
+"""
+
+[[dialect_only]]
+statement = "turn_cancel_request.insert_first"
+backends = ["sqlite", "postgres"]
+kind = "durable shape"
+reason = """
+The two backends store a cancellation request in two different durable shapes,
+frozen by ADR 0098: SQLite keeps one record_json document beside its revision,
+PostgreSQL keeps typed columns with the affected-input receipts in
+lash_turn_cancel_affected_inputs. Every read and write of this table therefore
+forks. SQLite also keeps an OR IGNORE, because it has no row lock to prove the
+absence it read.
+"""
+
+[[dialect_only]]
+statement = "turn_cancel_request.upsert_record"
+backends = ["sqlite", "postgres"]
+kind = "durable shape"
+reason = "Same durable-shape fork as turn_cancel_request.insert_first."
+
+[[dialect_only]]
+statement = "turn_cancel_request.select_record"
+backends = ["sqlite"]
+kind = "durable shape"
+reason = """
+SQLite's record read: one document. PostgreSQL's counterpart is
+turn_cancel_request.select_request, which reads the typed columns.
+"""
+
+[[dialect_only]]
+statement = "turn_cancel_request.select_record_with_revision"
+backends = ["sqlite"]
+kind = "durable shape"
+reason = """
+SQLite's intent snapshot: the document and its revision. PostgreSQL's
+counterpart is turn_cancel_request.select_request_with_revision.
+"""
+
+[[dialect_only]]
+statement = "turn_cancel_request.update_record"
+backends = ["sqlite"]
+kind = "durable shape"
+reason = """
+SQLite appends an affected-input receipt by rewriting the document it lives in.
+PostgreSQL inserts a row into lash_turn_cancel_affected_inputs, a table this
+family does not own, so it has no counterpart here.
+"""
+
+[[dialect_only]]
+statement = "turn_cancel_request.select_request"
+backends = ["postgres"]
+kind = "durable shape"
+reason = "PostgreSQL's typed counterpart to turn_cancel_request.select_record."
+
+[[dialect_only]]
+statement = "turn_cancel_request.select_request_for_update"
+backends = ["postgres"]
+kind = "durable shape; FOR UPDATE"
+reason = """
+turn_cancel_request.select_request, locked: a record read that precedes a write
+serializes on this row.
+"""
+
+[[dialect_only]]
+statement = "turn_cancel_request.select_request_with_revision"
+backends = ["postgres"]
+kind = "durable shape"
+reason = "PostgreSQL's typed counterpart to turn_cancel_request.select_record_with_revision."
+
+[[dialect_only]]
+statement = "turn_cancel_request.select_request_with_revision_for_update"
+backends = ["postgres"]
+kind = "durable shape; FOR UPDATE"
+reason = "turn_cancel_request.select_request_with_revision, locked for a compare-and-swap."
+
+[[dialect_only]]
+statement = "turn_cancel_request.lock_request"
+backends = ["postgres"]
+kind = "FOR UPDATE"
+reason = """
+Concurrent appends to the affected-input receipts serialize on this row so
+their ordinals cannot collide. SQLite rewrites the one document under its write
+lock and needs no counterpart.
+"""
+
+[[dialect_only]]
+statement = "turn_ingress.checkpoint_work_pending_after_work"
+backends = ["sqlite", "postgres"]
+kind = "SKIP LOCKED; JSON extraction; server clock"
+reason = """
+The probe a checkpoint runs before opening a write transaction. It carries the
+delivery-boundary head the candidate scan uses, so it forks for every reason
+queued_work_batch.claim_candidates_boundary does, plus the ingress JSON fork.
+PostgreSQL's copy is the one statement in this family that still reads the
+server clock in its own text: the probe runs outside a transaction, so it
+cannot share a sampled transaction_timestamp() with a sibling statement, and
+reading the clock separately would cost the hottest checkpoint path a round
+trip. The bound override in front of it is NULL in a production build.
+"""
+
+[[dialect_only]]
+statement = "turn_ingress.checkpoint_work_pending_before_completion"
+backends = ["sqlite", "postgres"]
+kind = "SKIP LOCKED; JSON extraction; server clock"
+reason = "The other checkpoint of turn_ingress.checkpoint_work_pending_after_work."
+
+[[dialect_only]]
+statement = "turn_ingress.record_wake_fence_from_claim"
+backends = ["sqlite"]
+kind = "INSERT then SELECT in one statement"
+reason = """
+SQLite reads a settling batch's wake identity and raises the process's
+redelivery fence in one statement, under the write lock it already holds.
+PostgreSQL has to take the wake source's advisory lock between the read and the
+write, so it reads the two facts it needs — turn_ingress
+select_claimed_batch_source_key and select_claimed_batch_head_payload — and
+writes the fence separately.
+"""
+
+[[dialect_only]]
+statement = "turn_ingress.select_claimed_batch_source_key"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = "The read half of the same fork as turn_ingress.record_wake_fence_from_claim."
+
+[[dialect_only]]
+statement = "turn_ingress.select_claimed_batch_head_payload"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = "The other read half of the same fork as turn_ingress.record_wake_fence_from_claim."
