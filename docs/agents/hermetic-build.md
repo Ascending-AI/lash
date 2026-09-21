@@ -75,6 +75,24 @@ kiln test \
   //crates/lash-sqlite-store:integration__test
 ```
 
+Three `just` recipes compose those commands into the routine gates. `just
+floor` is the pre-push floor: the dev and feature-lane test and clippy
+partitions, `kiln fmt -- --check`, `git diff --check`, the repository-script
+gates CI runs as `Test repository scripts`
+(`scripts/ci/repository-gates.sh` extracts the command list from
+`.github/workflows/ci.yml` so the local run cannot drift), and the two
+version-bump checks, all run concurrently and reported as one PASS/FAIL
+table — run it on a committed head because `check_version_bumps.py` reads
+committed state. `just bump-check` narrows that to the store-bump gates: both
+version-bump checks, `scripts/check-store-sql-ownership.py`, the lash-sim
+`schema_congruence__test` target, and the lash-core-store unit target that
+holds the runtime-error classification exhaustiveness test. `just
+test-changed [base]` diffs against `<base>` (default `origin/main`), maps the
+changed files to their Bazel packages, queries the test targets in the
+reverse dependencies of those packages within `//crates/...`, and runs them
+through `kiln test`, falling back to `//:dev_tests` when the query selects
+nothing.
+
 These build and test commands select the shared Kiln execution pool by default.
 `scripts/hermetic-build.sh --shared build` makes that choice explicit. It uses
 the REAPI instance, endpoint and mutual-TLS client certificate `.kiln.bazelrc`

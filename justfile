@@ -322,6 +322,79 @@ battery-fast:
 seal:
   cargo test --workspace --locked --test ui
 
+# The pre-push floor over the Kiln fork: the dev and feature-lane test and
+# clippy partitions on the shared pool plus the quick script gates, all run
+# concurrently and reported as one table. Run it on a COMMITTED head —
+# check_version_bumps.py reads committed state, so work that exists only in
+# the worktree is invisible to that leg.
+floor:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{repo}}"
+  printf '%s\n' \
+    'kiln test //:dev_tests //:feature_lane_tests //:workspace_clippy //:feature_lane_clippy' \
+    'kiln fmt -- --check' \
+    'git diff --check' \
+    'scripts/ci/repository-gates.sh' \
+    'python3 scripts/check_version_bumps.py --base origin/main' \
+    'python3 scripts/check_version_bump_fixtures.py' \
+    | scripts/gate-table.sh
+
+# The store-bump gates only: both version-bump checks, the store SQL ownership
+# gate, the lash-sim schema congruence target, and the lash-core-store unit
+# target that holds the runtime-error classification exhaustiveness test.
+bump-check:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{repo}}"
+  printf '%s\n' \
+    'python3 scripts/check_version_bumps.py --base origin/main' \
+    'python3 scripts/check_version_bump_fixtures.py' \
+    'python3 scripts/check-store-sql-ownership.py' \
+    'kiln test //crates/lash-sim:schema_congruence__test' \
+    'kiln test //crates/lash-core-store:lash-core-store__unit_test' \
+    | scripts/gate-table.sh
+
+# Change-scoped Bazel tests: map the files changed since <base> onto their
+# Bazel packages, query for test targets in the reverse dependencies of those
+# packages within //crates/..., and run them through the shared pool. Prints
+# the label list it ran; falls back to //:dev_tests when the query selects
+# nothing.
+test-changed base='origin/main':
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{repo}}"
+  python3 tools/bazel/generate_build_files.py --check
+  declare -A packages=()
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    dir="$(dirname "$path")"
+    while [[ "$dir" != "." && ! -f "$dir/BUILD.bazel" ]]; do
+      dir="$(dirname "$dir")"
+    done
+    [[ "$dir" != "." ]] || continue
+    packages["//$dir"]=1
+  done < <(git diff --name-only "{{base}}"...HEAD)
+  if ((${#packages[@]} == 0)); then
+    echo "test-changed: no changed file maps to a Bazel package; falling back to //:dev_tests"
+    exec kiln test //:dev_tests
+  fi
+  set_expr="$(printf '%s:all ' "${!packages[@]}")"
+  # `manual`-tagged targets are opt-in gates (live Postgres, trybuild, …) that
+  # no wildcard partition runs; the rdeps set excludes them the same way
+  # `:all` expansion does.
+  mapfile -t labels < <(bazel query \
+    "kind(\"test\", rdeps(//crates/..., set(${set_expr% }))) \
+       - attr(tags, \"manual\", //crates/...)")
+  if ((${#labels[@]} == 0)); then
+    echo "test-changed: the rdeps query selected no test targets; falling back to //:dev_tests"
+    exec kiln test //:dev_tests
+  fi
+  printf 'test-changed: %s test label(s) from rdeps of %s package(s):\n' \
+    "${#labels[@]}" "${#packages[@]}"
+  printf '  %s\n' "${labels[@]}"
+  exec kiln test "${labels[@]}"
+
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
 store-contract-soak cases='256':
