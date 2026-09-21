@@ -730,7 +730,7 @@ fn message_tree_orders_siblings_by_graph_position_not_timestamp() {
         )
         .remove(0);
     graph.append_plugin("witness-plugin", serde_json::json!({"separates": true}));
-    graph = SessionGraph::from_nodes(graph.nodes.clone(), Some(parent))
+    graph = SessionGraph::from_shared_nodes(graph.nodes.clone(), Some(parent))
         .expect("reselect the shared parent as leaf");
     let younger_sibling = graph
         .append_node_drafts_at(
