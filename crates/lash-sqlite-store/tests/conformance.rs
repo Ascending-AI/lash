@@ -1604,6 +1604,24 @@ lash_conformance::effect_host_await_event_tests!({
     })
 });
 
+lash_conformance::tool_batch_parallelism_tests!({
+    let dir = tempfile::tempdir().expect("tempdir");
+    let host = Arc::new(
+        SqliteEffectHost::open(&dir.path().join("tool-batch-parallelism.db"))
+            .await
+            .expect("open the SQLite tool-batch parallelism effect host"),
+    ) as Arc<dyn EffectHost>;
+    (
+        dir,
+        "sqlite",
+        host,
+        // The producers this crate reaches. `Promise.all` on the RLM bridge and
+        // the Lashlang aggregate on the process bridge register the same law
+        // from the crates that own them.
+        vec![lash_conformance::parallel_model_tool_calls_producer()],
+    )
+});
+
 lash_conformance::signal_intent_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let effect_host = Arc::new(
