@@ -120,11 +120,25 @@ struct WaitControls {
     turn_cancel_scope: Option<crate::ExecutionScope>,
 }
 
+/// The process one run is admitted for.
+///
+/// The registration names a *reusable* process; the incarnation is the one the
+/// worker's authority CAS admitted. The logical opener is the pair and never
+/// the name alone (ADR 0099 §1), so they travel together: anything minted per
+/// opener — group and child identity, cancellation and close fences — binds
+/// both, and a re-registered name cannot reach its predecessor's work.
+#[derive(Clone, Debug)]
+pub struct AdmittedProcess {
+    pub registration: crate::ProcessRegistration,
+    pub incarnation: crate::ProcessIncarnation,
+}
+
 #[async_trait::async_trait]
 pub trait ProcessRunner: Send + Sync {
+    /// Runs one admitted process.
     async fn run_process(
         &self,
-        registration: crate::ProcessRegistration,
+        admitted: AdmittedProcess,
         execution_context: crate::ProcessExecutionContext,
         registry: Arc<dyn ProcessRegistry>,
         scoped_effect_controller: crate::ScopedEffectController<'_>,

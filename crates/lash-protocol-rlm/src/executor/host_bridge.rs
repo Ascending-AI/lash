@@ -12,7 +12,7 @@ use lash_core::{
     facade_support::TraceRecord, facade_support::TraceRuntimeSubject, facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
-    ExecutionCancellation, TraceLanguageChildExecution, TraceLanguageExecution,
+    ExecutionCancellation, LashlangHostError, TraceLanguageChildExecution, TraceLanguageExecution,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, lashlang_value_to_json,
     process_sleep, protocol_tool_output_to_lashlang_value, resolve_lashlang_module_operation,
 };
@@ -26,6 +26,9 @@ use crate::projection::{flow_to_json_value, format_output_value};
 
 pub(super) struct HostBridge<'run> {
     ctx: RuntimeExecutionContext<'run>,
+    /// The one derivation of leaf, child and group identities this tier mints,
+    /// shared with the process body bridge.
+    identities: lash_lashlang_runtime::LashlangHostIdentities,
     print_projector: std::sync::Arc<dyn ValueProjector>,
     observations: Mutex<Vec<Observation>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
@@ -62,7 +65,22 @@ type HostAbilityFuture<'a> =
 
 impl<'run> HostBridge<'run> {
     pub(super) fn new(config: HostBridgeConfig<'run>) -> Self {
+        // One scope for every identity this cell mints, resolved once: the
+        // effect address the cell runs under, or the session when it runs
+        // outside one.
+        let scope = config
+            .ctx
+            .parent_invocation()
+            .and_then(|invocation| {
+                invocation
+                    .effect_address()
+                    .map(lash_core::EffectAddress::graph_key)
+            })
+            .unwrap_or_else(|| config.ctx.session_id().to_string());
         Self {
+            identities: lash_lashlang_runtime::LashlangHostIdentities::new(
+                lash_lashlang_runtime::LashlangHostAuthority::Turn(scope),
+            ),
             ctx: config.ctx,
             print_projector: config.print_projector,
             observations: Mutex::new(Vec::new()),
@@ -155,36 +173,54 @@ impl<'run> HostBridge<'run> {
         self.ctx.is_cancelled()
     }
 
+    /// The identity of one leaf this cell calls, or of one child of an
+    /// aggregate when `leaf_index` names a position inside a batch.
+    ///
+    /// One derivation, one scope. It was two: the sited path scoped on the
+    /// effect address the cell runs under and the unsited one on the bare
+    /// session id, so the two cells of one session minted one identity for
+    /// their first unsited call.
     fn resource_tool_call_id(
         &self,
         host_operation: &str,
-        call_site: Option<&lashlang::LashlangExecutionCallSite>,
-        index: Option<usize>,
+        call_site: &lashlang::LashlangExecutionCallSite,
+        leaf_index: Option<usize>,
     ) -> String {
-        if let Some(call_site) = call_site {
-            let scope = self
-                .ctx
-                .parent_invocation()
-                .and_then(|invocation| {
-                    invocation
-                        .effect_address()
-                        .map(lash_core::EffectAddress::graph_key)
-                })
-                .unwrap_or_else(|| self.ctx.session_id().to_string());
-            let mut call_id = format!(
-                "lashlang:{scope}:resource:{host_operation}:{}:{}",
-                call_site.site.node_id, call_site.occurrence
-            );
-            if let Some(index) = index {
-                call_id.push_str(&format!(":child:{index}"));
-            }
-            return call_id;
+        match leaf_index {
+            Some(leaf_index) => self.identities.child(host_operation, call_site, leaf_index),
+            None => self.identities.leaf(host_operation, call_site),
         }
-        let index = index.unwrap_or(0);
-        format!(
-            "lashlang:{}:resource:{host_operation}:index:{index}",
-            self.ctx.session_id()
-        )
+    }
+
+    /// The call site a leaf must carry, or the refusal both bridges give.
+    ///
+    /// This tier used to fall back: an unsited scalar call took the host's
+    /// dispatch counter, and an unsited batch leaf took its position inside
+    /// the batch — which two identical aggregates share, so they minted one
+    /// set of identities twice. The fallback was never reachable. Every
+    /// production compile entrypoint for this bridge and for the process
+    /// bridge enables execution-site tracking (`compile_linked` and
+    /// `compile_module_artifact_process`, both through
+    /// `Compiler::compile_linked*`); `lashlang_execution_paths` walks
+    /// `program.main` through the total `Expr::children()` walk, which
+    /// descends into function literals, process literals, callbacks, `try`
+    /// bodies and comprehension clauses; a TypeScript `function` statement
+    /// lowers to a function *literal bound in main*, never to a
+    /// `Declaration::Function`; and `execution_site_descriptor` names every
+    /// `Expr::ReceiverCall`. A leaf without a site is therefore a defect
+    /// upstream of here, refused with the same typed error the process bridge
+    /// already used rather than given an invented identity.
+    fn require_call_site<'site>(
+        operation: &str,
+        host_operation: &str,
+        call_site: Option<&'site lashlang::LashlangExecutionCallSite>,
+    ) -> Result<&'site lashlang::LashlangExecutionCallSite, ExecutionHostError> {
+        call_site.ok_or_else(|| {
+            ExecutionHostError::from(LashlangHostError::OperationCallSiteMissing {
+                operation: operation.to_string(),
+                host_operation: host_operation.to_string(),
+            })
+        })
     }
 
     fn deferred_grant_for_tool_id(
@@ -296,12 +332,9 @@ impl HostBridge<'_> {
         call_site: Option<lashlang::LashlangExecutionCallSite>,
     ) -> Result<FlowValue, ExecutionHostError> {
         if lash_lashlang_runtime::is_typescript_runtime_receiver(&receiver) {
-            let fallback_index = call_site.is_none().then(|| self.next_index());
-            let effect_id = self.resource_tool_call_id(
-                "typescript.runtime",
-                call_site.as_ref(),
-                fallback_index,
-            );
+            let call_site =
+                Self::require_call_site(&operation, "typescript.runtime", call_site.as_ref())?;
+            let effect_id = self.resource_tool_call_id("typescript.runtime", call_site, None);
             return lash_lashlang_runtime::journaled_typescript_runtime_value(
                 &self.ctx, effect_id, &receiver, &operation, &args,
             )
@@ -330,11 +363,11 @@ impl HostBridge<'_> {
             .as_object_mut()
             .ok_or_else(|| ExecutionHostError::new("module operation payload must be an object"))?;
         let index = self.next_index();
-        let call_id = self.resource_tool_call_id(
-            &host_operation,
-            call_site.as_ref(),
-            call_site.is_none().then_some(index),
-        );
+        let call_id = {
+            let call_site =
+                Self::require_call_site(&operation, &host_operation, call_site.as_ref())?;
+            self.resource_tool_call_id(&host_operation, call_site, None)
+        };
         if let Some(trigger_operation) =
             lashlang::TriggerHostOperation::from_host_operation(&host_operation)
         {
@@ -411,6 +444,7 @@ impl HostBridge<'_> {
         &self,
         batch: lashlang::ResourceOperationBatch,
     ) -> lashlang::ResourceOperationBatchResult {
+        let occurrence = batch.occurrence;
         let mut results = vec![None; batch.operations.len()];
         let mut positions = Vec::new();
         let mut source_operations = Vec::new();
@@ -419,20 +453,29 @@ impl HostBridge<'_> {
 
         for (source_index, operation) in batch.operations.into_iter().enumerate() {
             if lash_lashlang_runtime::is_typescript_runtime_receiver(&operation.receiver) {
-                let effect_id = self.resource_tool_call_id(
+                let result = match Self::require_call_site(
+                    &operation.operation,
                     "typescript.runtime",
                     operation.call_site.as_ref(),
-                    Some(source_index),
-                );
-                let result = lash_lashlang_runtime::journaled_typescript_runtime_value(
-                    &self.ctx,
-                    effect_id,
-                    &operation.receiver,
-                    &operation.operation,
-                    &operation.args,
-                )
-                .await
-                .expect("TypeScript runtime receiver checked above");
+                ) {
+                    Ok(call_site) => {
+                        let effect_id = self.resource_tool_call_id(
+                            "typescript.runtime",
+                            call_site,
+                            Some(source_index),
+                        );
+                        lash_lashlang_runtime::journaled_typescript_runtime_value(
+                            &self.ctx,
+                            effect_id,
+                            &operation.receiver,
+                            &operation.operation,
+                            &operation.args,
+                        )
+                        .await
+                        .expect("TypeScript runtime receiver checked above")
+                    }
+                    Err(error) => Err(error),
+                };
                 results[source_index] =
                     Some(lashlang::ResourceOperationResult::from_result(result));
                 continue;
@@ -463,12 +506,16 @@ impl HostBridge<'_> {
                 payload.as_object_mut().ok_or_else(|| {
                     ExecutionHostError::new("module operation payload must be an object")
                 })?;
-                Ok::<_, ExecutionHostError>((
-                    host_operation,
-                    source_operation,
-                    payload,
-                    operation.call_site,
-                ))
+                // Required here, where the resolved host operation can name
+                // itself in the refusal, and before any dispatch: a leaf that
+                // cannot be identified must not run.
+                let call_site = Self::require_call_site(
+                    &operation.operation,
+                    &host_operation,
+                    operation.call_site.as_ref(),
+                )?
+                .clone();
+                Ok::<_, ExecutionHostError>((host_operation, source_operation, payload, call_site))
             }
             .await;
 
@@ -484,11 +531,8 @@ impl HostBridge<'_> {
             if let Some(trigger_operation) =
                 lashlang::TriggerHostOperation::from_host_operation(&host_operation)
             {
-                let call_id = self.resource_tool_call_id(
-                    &host_operation,
-                    call_site.as_ref(),
-                    Some(source_index),
-                );
+                let call_id =
+                    self.resource_tool_call_id(&host_operation, &call_site, Some(source_index));
                 let result = lash_lashlang_runtime::execute_trigger_operation(
                     &self.ctx,
                     self.artifact_store.as_ref(),
@@ -511,7 +555,7 @@ impl HostBridge<'_> {
             }
 
             let call_id =
-                self.resource_tool_call_id(&host_operation, call_site.as_ref(), Some(source_index));
+                self.resource_tool_call_id(&host_operation, &call_site, Some(source_index));
             let mut invocation = ToolInvocation::new(
                 call_id,
                 lash_core::ToolId::from(host_operation.as_str()),
@@ -525,12 +569,12 @@ impl HostBridge<'_> {
             {
                 invocation = invocation.with_execution_grant(grant);
             }
-            if let Some(call_site) = call_site.and_then(|call_site| {
-                self.lashlang_execution_trace
-                    .as_ref()
-                    .map(|trace| trace.tool_child_execution_trace_hook(call_site))
-            }) {
-                invocation = invocation.with_child_execution_trace_hook(call_site);
+            if let Some(hook) = self
+                .lashlang_execution_trace
+                .as_ref()
+                .map(|trace| trace.tool_child_execution_trace_hook(call_site))
+            {
+                invocation = invocation.with_child_execution_trace_hook(hook);
             }
             positions.push(source_index);
             source_operations.push(source_operation);
@@ -538,7 +582,13 @@ impl HostBridge<'_> {
             invocations.push(invocation);
         }
 
-        let batch = self.ctx.call_tool_batch(invocations).await;
+        let batch = self
+            .ctx
+            .call_tool_batch(
+                invocations,
+                lash_core::session::ToolBatchOccurrence::Opener(occurrence),
+            )
+            .await;
         for (((source_index, source_operation), execution_index), reply) in positions
             .iter()
             .copied()

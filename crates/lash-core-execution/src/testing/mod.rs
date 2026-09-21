@@ -1174,6 +1174,7 @@ pub fn process_engine_run_context_for_validation(
         ));
     crate::ProcessEngineRunContext::new(
         registration,
+        crate::ProcessIncarnation::from_registration_sequence(1),
         execution_context,
         process_work,
         SessionId::from("engine-validation-test"),

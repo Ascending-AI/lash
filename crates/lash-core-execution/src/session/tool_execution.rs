@@ -12,7 +12,49 @@ use lash_sansio::core_support::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-const TOOL_BATCH_FAMILY_VERSION: u8 = 1;
+/// v2 folds the opener's occurrence ordinal into the batch identity.
+///
+/// v1 hashed the calls and nothing else, so a batch *was* its content: two
+/// textually identical aggregates raised by one opener produced one identity,
+/// one effect replay key and one journalled outcome, and the second aggregate
+/// read the first one's result (ADR 0065, "Group identity carries an
+/// occurrence discriminator"). The ordinal is the discriminator content cannot
+/// supply, so it joins the hashed preimage rather than being appended to the
+/// rendered id: a batch identity is one hash of everything that makes the batch
+/// that batch.
+const TOOL_BATCH_FAMILY_VERSION: u8 = 2;
+
+/// How many times the opener has reached the aggregate this batch settles.
+///
+/// A batch's content is not its identity. The ordinal that separates two
+/// structurally identical batches is a fact only the opener holds, so it
+/// crosses the seam as an argument instead of being inferred here: the
+/// Lashlang hosts read it off the VM's occurrence counters, which ride the
+/// continuation, so the ordinal is stable across a replay and keeps counting
+/// across a park and a process segment handover.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolBatchOccurrence {
+    /// The ordinal the opener minted for this aggregate, counting from 1.
+    Opener(u64),
+    /// An opener that keeps no occurrence counter of its own: a provider or
+    /// orchestrating-tool body, which is ordinary host code rather than a
+    /// replayed program, so there is no deterministic count of how many times
+    /// it has reached this batch. Two structurally identical batches raised
+    /// from one such body still share an identity; that is a separate defect
+    /// from the one this ordinal closes, and naming it here keeps it visible
+    /// rather than hidden behind a zero.
+    Uncounted,
+}
+
+impl ToolBatchOccurrence {
+    fn identity_tag(self) -> u64 {
+        match self {
+            Self::Opener(ordinal) => ordinal,
+            // Distinct from every `Opener` ordinal, which counts from 1.
+            Self::Uncounted => 0,
+        }
+    }
+}
 
 enum ToolCallAuthorization {
     Catalog(crate::ToolId),
@@ -147,25 +189,73 @@ mod tests {
         )
     }
 
+    /// The v1 identity of `[invocation("a", 1), invocation("b", 2)]`, recorded
+    /// so it can be refused rather than re-derived. Every assertion below that
+    /// names it asserts it is *not* minted: an identity a v1 journal holds must
+    /// not be reachable from this build under any occurrence, or the two
+    /// generations would share a replay key and the second batch would read the
+    /// first one's journalled outcome.
+    const PREDECESSOR_BATCH_ID: &str =
+        "tool-batch:v1:blake3:4095297ab62f9013e4325b7345584d72ffae0c9f1b5882053c5895c438b74a90";
+
     #[test]
     fn deterministic_batch_identity_is_stable_and_content_addressed() {
         let calls = vec![invocation("a", 1), invocation("b", 2)];
-        let first = deterministic_tool_invocation_batch_id(&calls);
-        let retry = deterministic_tool_invocation_batch_id(&calls);
+        let first = deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1));
+        let retry = deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1));
         assert_eq!(first, retry);
         assert_eq!(
             first,
-            "tool-batch:v1:blake3:4095297ab62f9013e4325b7345584d72ffae0c9f1b5882053c5895c438b74a90"
+            "tool-batch:v2:blake3:2506ef842e2e5214ee5b3cbfce7596d3cf85f2f0dfd8560179f7b5f1b2c45639"
         );
         assert_eq!(
-            hex(&tool_invocation_batch_preimage(&calls)),
-            "6c6173682d737461626c652d6964656e746974790201000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d626174636800000000000000020000000000000001610000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a317d000000000000000001620000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a327d00"
+            hex(&tool_invocation_batch_preimage(
+                &calls,
+                ToolBatchOccurrence::Opener(1)
+            )),
+            "6c6173682d737461626c652d6964656e746974790202000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d6261746368000000000000000100000000000000020000000000000001610000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a317d000000000000000001620000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a327d00"
         );
 
         let changed_args = vec![invocation("a", 1), invocation("b", 3)];
         let reordered = vec![invocation("b", 2), invocation("a", 1)];
-        assert_ne!(first, deterministic_tool_invocation_batch_id(&changed_args));
-        assert_ne!(first, deterministic_tool_invocation_batch_id(&reordered));
+        assert_ne!(
+            first,
+            deterministic_tool_invocation_batch_id(&changed_args, ToolBatchOccurrence::Opener(1))
+        );
+        assert_ne!(
+            first,
+            deterministic_tool_invocation_batch_id(&reordered, ToolBatchOccurrence::Opener(1))
+        );
+    }
+
+    /// The defect this family version exists to close: identical content, one
+    /// opener, two reaches.
+    #[test]
+    fn one_opener_reaching_the_same_aggregate_twice_mints_two_identities() {
+        let calls = vec![invocation("a", 1), invocation("b", 2)];
+        let identities = (1..=3)
+            .map(|occurrence| {
+                deterministic_tool_invocation_batch_id(
+                    &calls,
+                    ToolBatchOccurrence::Opener(occurrence),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(
+            identities.len(),
+            3,
+            "the same calls reached three times must mint three batch identities"
+        );
+        assert!(
+            !identities.contains(PREDECESSOR_BATCH_ID),
+            "no occurrence may re-mint the v1 identity of the same calls"
+        );
+        assert_ne!(
+            deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Uncounted),
+            deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1)),
+            "an uncounted opener must not collide with a counted first reach"
+        );
     }
 
     #[test]
@@ -188,12 +278,15 @@ mod tests {
             .with_execution_grant(grant),
         ];
         assert_eq!(
-            hex(&tool_invocation_batch_preimage(&calls)),
-            "6c6173682d737461626c652d6964656e746974790201000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d62617463680000000000000001000000000000000a6772616e740063616c6c000000000000000c746f6f6c3a6772616e746564000000000000000e7b2276616c7565223a747275657d01000000000000000c746f6f6c3a6772616e74656401000000000000000c706c7567696e00726f75746500000000000000147b22726f757465223a5b22cebb222c302e305d7d"
+            hex(&tool_invocation_batch_preimage(
+                &calls,
+                ToolBatchOccurrence::Opener(1)
+            )),
+            "6c6173682d737461626c652d6964656e746974790202000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d626174636800000000000000010000000000000001000000000000000a6772616e740063616c6c000000000000000c746f6f6c3a6772616e746564000000000000000e7b2276616c7565223a747275657d01000000000000000c746f6f6c3a6772616e74656401000000000000000c706c7567696e00726f75746500000000000000147b22726f757465223a5b22cebb222c302e305d7d"
         );
         assert_eq!(
-            deterministic_tool_invocation_batch_id(&calls),
-            "tool-batch:v1:blake3:6219c874320cb3936055a22ada805a58699fd3023e950b079b254bb337f51b6f"
+            deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1)),
+            "tool-batch:v2:blake3:e945970a262115423bccbf2462bef53df3fd8301dc07122dd23a11a027b5552f"
         );
 
         let without_source =
@@ -214,8 +307,8 @@ mod tests {
             .with_execution_grant(without_source),
         ];
         assert_ne!(
-            deterministic_tool_invocation_batch_id(&calls),
-            deterministic_tool_invocation_batch_id(&without_source),
+            deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&without_source, ToolBatchOccurrence::Opener(1)),
             "grant source presence must occupy a distinct option arm"
         );
     }
@@ -339,11 +432,15 @@ fn cancelled_completed_tool_call(
 /// Grant presence uses the universal option tags 0/1. Grant manifest and
 /// contract fields outside the explicit execution-address allowlist are
 /// exhaustively ignored below. Retired tags remain burned.
-fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
+fn tool_invocation_batch_preimage(
+    calls: &[ToolInvocation],
+    occurrence: ToolBatchOccurrence,
+) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.tool-invocation-batch",
         TOOL_BATCH_FAMILY_VERSION,
     );
+    identity.u64(occurrence.identity_tag());
     identity.sequence(calls, |identity, call| {
         let ToolInvocation {
             id,
@@ -385,11 +482,14 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
     identity.finish()
 }
 
-fn deterministic_tool_invocation_batch_id(calls: &[ToolInvocation]) -> String {
+fn deterministic_tool_invocation_batch_id(
+    calls: &[ToolInvocation],
+    occurrence: ToolBatchOccurrence,
+) -> String {
     crate::stable_identity::rendered_hash(
         "tool-batch",
         TOOL_BATCH_FAMILY_VERSION,
-        &tool_invocation_batch_preimage(calls),
+        &tool_invocation_batch_preimage(calls, occurrence),
     )
 }
 

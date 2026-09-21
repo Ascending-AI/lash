@@ -42,6 +42,12 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 
 /// Version of the durable Lashlang segment-handover envelope.
 ///
+/// v12 carries VM continuation v16, which counts aggregates in the occurrence
+/// counters this envelope hands to the next segment. A segment parked by v11
+/// holds counts for execution sites only, so the batches it re-derives after
+/// handover would mint ordinals its own journal never recorded. The boundary is
+/// a version rather than a decode failure for the same reason v9's was: the
+/// bytes still parse.
 /// v11 drops `signal_send_sequence`: its only producer was deleted with the
 /// signal special forms (FIG-2999), and the ordinal had been round-tripping
 /// dead since, so the envelope was version-gating a field that carried no
@@ -65,7 +71,7 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 11;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 12;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -363,6 +369,10 @@ pub async fn run_lashlang_process(
         None => None,
     };
     let process_id = context.registration().id.clone();
+    // The opener, not the name: a process re-registered under the same name is
+    // a different opener and must never mint identities the predecessor used
+    // (ADR 0099 §1).
+    let opener = crate::LashlangHostAuthority::process(process_id.clone(), context.incarnation());
     let session_id = process_trace_session_id(&context.registration().provenance.originator);
     let lashlang_execution_trace = LashlangProcessExecutionTrace::new(
         engine.execution_sink.clone(),
@@ -409,6 +419,7 @@ pub async fn run_lashlang_process(
         artifact_store: engine.artifact_store(),
         processes,
         process_id: process_id.clone(),
+        identities: crate::LashlangHostIdentities::new(opener),
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         ordinals,
         child_max_attempts,
@@ -578,6 +589,11 @@ struct LashlangProcessHost<'run> {
     artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
     processes: lash_core::facade_support::ProcessEngineProcessContext,
     process_id: ProcessId,
+    /// The one derivation of leaf, child and group identities this tier mints,
+    /// shared with the RLM cell bridge. The authority is this process
+    /// incarnation, never a segment: a body that hands over keeps minting from
+    /// the scope its first segment used.
+    identities: crate::LashlangHostIdentities,
     lashlang_execution_trace: LashlangProcessExecutionTrace,
     /// The replay ordinals this segment is consuming: restored from the
     /// handover that resumed the run (or zeroed for a first segment) and
@@ -627,20 +643,20 @@ impl LashlangProcessHost<'_> {
         Ok(payload)
     }
 
+    /// This tier refuses a leaf with no call site (see
+    /// [`prepare_resource_invocation`]), so the position is always a site here.
     fn resource_tool_call_id(
         &self,
         host_operation: &str,
         call_site: &lashlang::LashlangExecutionCallSite,
         batch_index: Option<usize>,
     ) -> String {
-        let mut call_id = format!(
-            "lashlang:{}:resource:{}:{}:{}",
-            self.process_id, host_operation, call_site.site.node_id, call_site.occurrence
-        );
-        if let Some(batch_index) = batch_index {
-            call_id.push_str(&format!(":child:{batch_index}"));
+        match batch_index {
+            Some(batch_index) => self
+                .identities
+                .child(host_operation, call_site, batch_index),
+            None => self.identities.leaf(host_operation, call_site),
         }
-        call_id
     }
 
     fn prepare_resource_invocation(
@@ -763,6 +779,7 @@ impl LashlangProcessHost<'_> {
         &self,
         batch: lashlang::ResourceOperationBatch,
     ) -> lashlang::ResourceOperationBatchResult {
+        let occurrence = batch.occurrence;
         let mut results = vec![None; batch.operations.len()];
         let mut positions = Vec::new();
         let mut invocations = Vec::new();
@@ -824,7 +841,13 @@ impl LashlangProcessHost<'_> {
             }
         }
 
-        let batch = self.ctx.call_tool_batch(invocations).await;
+        let batch = self
+            .ctx
+            .call_tool_batch(
+                invocations,
+                lash_core::session::ToolBatchOccurrence::Opener(occurrence),
+            )
+            .await;
         for (index, reply) in positions.iter().copied().zip(batch.replies) {
             results[index] = Some(lashlang::ResourceOperationResult::from_result(
                 protocol_tool_reply_to_lashlang_value(reply, &self.cancellation),

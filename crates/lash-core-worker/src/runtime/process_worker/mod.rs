@@ -584,6 +584,7 @@ impl DurableProcessWorker {
             admitted.incarnation, attachment_owner.incarnation,
             "attachment owner must carry the incarnation the authority CAS admitted"
         );
+        let admitted_incarnation = admitted.incarnation;
         let execution_context =
             execution_context.with_execution_write_authority(execution_write_authority);
         let mut runtime = Box::pin(self.runtime_for_registration(&registration)).await?;
@@ -624,7 +625,13 @@ impl DurableProcessWorker {
         })?;
         manager
             .run_process(
-                registration,
+                // The opener is the name bound to the incarnation this run was
+                // admitted under, read off the record the authority CAS
+                // returned rather than re-read later (ADR 0099 §1).
+                crate::runtime::effect::AdmittedProcess {
+                    registration,
+                    incarnation: admitted_incarnation,
+                },
                 execution_context,
                 Arc::clone(self.config.process_registry()),
                 scoped_effect_controller,

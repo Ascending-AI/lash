@@ -124,6 +124,37 @@ fn unversioned_prior_shape_is_typed_rejection_with_cutover_remedy() {
     assert!(message.contains("recreate development/test stores"));
 }
 
+/// The predecessor fixture is refused twice over, and each fence is asserted on
+/// its own.
+///
+/// The fixture is a v11 envelope carrying a v10 VM continuation. Once the
+/// envelope generation moved (v12, FIG-3394), decoding it whole stops at the
+/// outer version and never reaches the continuation, so a single assertion
+/// would silently stop testing the inner fence it was written for. The fixture
+/// bytes are not edited to keep it reachable — they are a predecessor capture
+/// (`capture_vm_v10_segment_state_from_predecessor_writer`) and hand-editing
+/// them would make the evidence describe a shape no writer ever produced.
+/// Instead the *outer* refusal is asserted on the file as captured, and the
+/// inner one on the same file's `vm` node re-enveloped at the current
+/// generation, which is the only construction that can reach the continuation
+/// fence at all.
+#[test]
+fn the_v11_envelope_is_refused_by_the_current_envelope_version() {
+    let Err(error) = decode_lashlang_segment_state(VM_V10_SEGMENT_STATE) else {
+        panic!("a predecessor envelope must not decode");
+    };
+    assert!(
+        matches!(
+            &error,
+            LashlangSegmentStateError::VersionMismatch {
+                expected: LASHLANG_SEGMENT_STATE_VERSION,
+                found: 11,
+            }
+        ),
+        "unexpected error: {error}"
+    );
+}
+
 #[test]
 fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
     assert!(
@@ -132,10 +163,15 @@ fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
             .any(|window| window == b"projected_slots"),
         "the predecessor fixture must preserve the retired key"
     );
+    let mut wire: serde_json::Value =
+        serde_json::from_slice(VM_V10_SEGMENT_STATE).expect("the predecessor fixture is JSON");
+    wire["version"] = serde_json::json!(LASHLANG_SEGMENT_STATE_VERSION);
+    let re_enveloped = serde_json::to_vec(&wire).expect("re-envelope the predecessor continuation");
+
     let Err(LashlangSegmentStateError::FormatMismatch { details }) =
-        decode_lashlang_segment_state(VM_V10_SEGMENT_STATE)
+        decode_lashlang_segment_state(&re_enveloped)
     else {
-        panic!("the v10 VM continuation must be refused by the v11 decoder");
+        panic!("the v10 VM continuation must be refused by the current decoder");
     };
     assert!(
         details.contains("version 10"),

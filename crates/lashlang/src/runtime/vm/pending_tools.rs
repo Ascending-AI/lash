@@ -142,7 +142,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// `processes.await` is a tool that parks on it (ADR 0095) — which is what
     /// retired ADR 0087's second phase, where process leaves settled after the
     /// batch and a tool rejection therefore always won.
-    pub(super) async fn await_pending_array(&mut self, settle: bool) -> Result<(), RuntimeError> {
+    pub(super) async fn await_pending_array(
+        &mut self,
+        settle: bool,
+        instruction_ip: usize,
+    ) -> Result<(), RuntimeError> {
         use super::super::{CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf};
         let Value::List(items) = self.pop_stack()? else {
             return Err(RuntimeError::PendingTool {
@@ -217,7 +221,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             aggregate_unwrap: false,
             first_settled_rejection: !settle,
         };
-        self.resolve_batch_spec(&batch, values).await
+        self.resolve_batch_spec(&batch, values, instruction_ip)
+            .await
     }
 }
 
