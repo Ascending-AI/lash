@@ -398,7 +398,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // process rows, trigger targets, and effect payloads to the spawn-time
 // plugin-init cutover and drops `usage_source`. Component-105 catalogs are
 // rejected and recreated.
-const SCHEMA_VERSION: i32 = 107;
+// Version 108 (FIG-2362) types the journaled `exec_code` outcome failure:
+// `lash_runtime_effect_replay.outcome_json` now carries
+// `Err({reason, message})` instead of `Err("<string>")` so the closed reason
+// survives to the trace event on replay. No relation or column moves -- the
+// cutover is in the journaled outcome encoding -- so component-107 catalogs
+// are rejected and recreated rather than replayed under mixed spellings.
+const SCHEMA_VERSION: i32 = 108;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

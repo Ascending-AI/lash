@@ -1301,7 +1301,13 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// Version 26 (FIG-3376) moves the `SessionCreateRequest` carried in effect
 /// payloads to the spawn-time plugin-init cutover and drops `usage_source`;
 /// a pre-26 journal is rejected at open and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 27;
+/// Version 28 (FIG-2362) types the journaled `exec_code` outcome failure: the
+/// erased `Err(String)` becomes `Err(ExecCodeFailure { reason, message })` so
+/// the closed reason reaches the trace event on replay. The new decoder still
+/// accepts a bare string as `reason: "erased"`, but the written encoding moved,
+/// so a pre-28 journal is rejected at open and recreated rather than replayed
+/// under mixed spellings.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 28;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

@@ -84,16 +84,18 @@ const POST_FLOOR_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_affected_inputs"];
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
 ///
-/// Under the component-107 boundary the retained generation is 106, whose arm
-/// introduces `lash_runtime_effect_group_child` — the accepted membership of an
-/// effect group (ADR 0099 §3). A component-106 catalog therefore diverges from
-/// the current one by exactly that relation, and the refusal must name it.
+/// Under the component-108 boundary the retained generation is 107, whose
+/// predecessor arm (component 106 → 107) introduces
+/// `lash_runtime_effect_group_child` — the accepted membership of an effect
+/// group (ADR 0099 §3). Component 108 declares no migration arm, so the
+/// pre-cutover refusal is reject-and-recreate and this list is never emitted.
 const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_runtime_effect_group_child"];
 /// A creation-only generation expects the predecessor stamp over its current
 /// catalog to be classified as migration divergence. A destructive generation
 /// has no migration arm, so that same pre-cutover stamp is the ordinary
-/// reject-and-recreate boundary.
-const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::DivergentArtifacts;
+/// reject-and-recreate boundary. Component 108 is destructive (journaled
+/// outcome encoding, FIG-2362): the 107 stamp has no applicable migration.
+const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.

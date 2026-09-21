@@ -1,6 +1,37 @@
 use super::*;
 use lash::SessionId;
 
+/// Stable, namespaced terminal codes for workbench cron failures, following the
+/// extension-code discipline: the closed variant is the classification, the
+/// detail string is operator text, and the terminal message carries
+/// `code: detail` so journal and invocation records key on the code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CronTerminalCode {
+    /// A journaled cron disposition string did not decode to a known variant.
+    JournaledDisposition,
+    /// The stored cron expression or timezone could not calculate a fire time.
+    ScheduleCalculation,
+    /// A journaled RFC 3339 timestamp did not decode.
+    JournaledTimestamp,
+}
+
+impl CronTerminalCode {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::JournaledDisposition => "workbench_cron_invalid_journaled_disposition",
+            Self::ScheduleCalculation => "workbench_cron_invalid_schedule",
+            Self::JournaledTimestamp => "workbench_cron_invalid_journaled_timestamp",
+        }
+    }
+}
+
+pub(super) fn cron_terminal_error(
+    code: CronTerminalCode,
+    detail: impl Into<String>,
+) -> HandlerError {
+    TerminalError::new(format!("{}: {}", code.as_str(), detail.into())).into()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CronSessionDisposition {
     Live,
@@ -22,10 +53,10 @@ impl CronSessionDisposition {
             "live" => Ok(Self::Live),
             "retired" => Ok(Self::Retired),
             "unknown" => Ok(Self::Unknown),
-            _ => Err(TerminalError::new(format!(
-                "invalid journaled cron session disposition `{value}`"
-            ))
-            .into()),
+            _ => Err(cron_terminal_error(
+                CronTerminalCode::JournaledDisposition,
+                format!("invalid journaled cron session disposition `{value}`"),
+            )),
         }
     }
 }
@@ -51,10 +82,10 @@ impl CronRegistrationDisposition {
             "enabled" => Ok(Self::Enabled),
             "disabled" => Ok(Self::Disabled),
             "absent" => Ok(Self::Absent),
-            _ => Err(TerminalError::new(format!(
-                "invalid journaled cron registration disposition `{value}`"
-            ))
-            .into()),
+            _ => Err(cron_terminal_error(
+                CronTerminalCode::JournaledDisposition,
+                format!("invalid journaled cron registration disposition `{value}`"),
+            )),
         }
     }
 }

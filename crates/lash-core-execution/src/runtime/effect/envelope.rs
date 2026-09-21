@@ -973,7 +973,7 @@ pub enum RuntimeEffectOutcome {
         result: ProcessEffectOutcome,
     },
     ExecCode {
-        result: Box<Result<ExecResponse, String>>,
+        result: Box<Result<ExecResponse, crate::ExecCodeFailure>>,
     },
     /// The admitted Pending Turn Input row, journaled so replay returns the
     /// same acceptance identity the first execution minted.
@@ -1238,7 +1238,7 @@ impl RuntimeEffectOutcome {
 
     pub fn into_exec_code(
         self,
-    ) -> Result<Result<ExecResponse, String>, RuntimeEffectControllerError> {
+    ) -> Result<Result<ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError> {
         match self {
             Self::ExecCode { result } => Ok(*result),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
@@ -1600,6 +1600,28 @@ mod settlement_order_journal_tests {
             panic!("decoded the wrong outcome kind");
         };
         assert_eq!(settlement_order, vec![2, 0, 1]);
+    }
+
+    /// FIG-2362: a journal entry written before the exec-code failure was typed
+    /// journaled only the erased message string; it still decodes, under the
+    /// honest `erased` reason.
+    #[test]
+    fn a_legacy_erased_exec_code_failure_still_decodes() {
+        let legacy = serde_json::json!({
+            "type": "exec_code",
+            "result": { "Err": "code execution is not available in this session" },
+        });
+        let decoded = serde_json::from_value::<RuntimeEffectOutcome>(legacy)
+            .expect("legacy erased exec-code failure decodes");
+        let RuntimeEffectOutcome::ExecCode { result } = decoded else {
+            panic!("decoded the wrong outcome kind");
+        };
+        let failure = result.expect_err("the journaled failure survives");
+        assert_eq!(failure.reason, crate::ExecCodeFailureReason::Erased);
+        assert_eq!(
+            failure.message,
+            "code execution is not available in this session"
+        );
     }
 }
 

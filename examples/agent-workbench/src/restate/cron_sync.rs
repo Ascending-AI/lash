@@ -340,7 +340,7 @@ pub(super) async fn schedule_next(
     last_fired_at: Option<String>,
 ) -> HandlerResult<WorkbenchCronState> {
     let next = next_cron_time(&request.expr, request.tz.as_deref(), now)
-        .map_err(|err| HandlerError::from(TerminalError::new(err)))?;
+        .map_err(|err| cron_terminal_error(CronTerminalCode::ScheduleCalculation, err))?;
     let delay = next
         .signed_duration_since(now)
         .to_std()
@@ -377,7 +377,12 @@ pub(super) async fn journaled_now(
         .await?;
     DateTime::parse_from_rfc3339(&now)
         .map(|value| value.with_timezone(&Utc))
-        .map_err(|err| TerminalError::new(err.to_string()).into())
+        .map_err(|err| {
+            cron_terminal_error(
+                CronTerminalCode::JournaledTimestamp,
+                format!("invalid journaled cron timestamp `{now}`: {err}"),
+            )
+        })
 }
 
 pub(super) async fn journaled_workbench_trace(

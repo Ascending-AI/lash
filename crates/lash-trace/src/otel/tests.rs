@@ -35,6 +35,7 @@ fn typed_exec_diagnostics_preserve_the_otel_span_family() {
             tool_calls: Vec::new(),
         },
         TraceEvent::ExecCodeFailed {
+            reason: crate::ExecCodeFailureReason::RuntimeStopped,
             error: "boom".to_string(),
         },
         TraceEvent::ObservationProjection {
@@ -98,6 +99,33 @@ fn typed_exec_diagnostic_attributes_keep_the_protocol_otel_contract() {
     assert!(payload.contains(record.event.kind()));
     assert!(!payload.contains("tool_call_count"));
     assert!(!payload.contains("terminal_finish_present"));
+}
+
+/// FIG-2362: the closed failure reason survives into the OTel payload beside
+/// the human error text.
+#[test]
+fn exec_code_failed_otel_payload_carries_the_typed_reason() {
+    let record = TraceRecord::new(
+        TraceContext::default(),
+        TraceEvent::ExecCodeFailed {
+            reason: crate::ExecCodeFailureReason::ExecutorUnavailable,
+            error: "code execution is not available in this session".to_string(),
+        },
+    );
+    let attrs = event_attributes(
+        &record,
+        &OtelTraceOptions {
+            include_payload_json: true,
+            ..OtelTraceOptions::default()
+        },
+    );
+    let payload = attrs
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "lash.protocol.payload_json")
+        .map(|attribute| attribute.value.to_string())
+        .expect("missing OTel payload attribute");
+    assert!(payload.contains("\"reason\":\"executor_unavailable\""));
+    assert!(payload.contains("\"error\":\"code execution is not available in this session\""));
 }
 
 #[test]

@@ -1456,6 +1456,53 @@ fn cron_tick_basis_journal_round_trips_and_legacy_live_replays_as_a_bounded_tick
     assert!(CronTickBasis::from_journal_value("bogus:enabled").is_err());
 }
 
+/// FIG-2362: corrupt journaled dispositions terminate with a stable, namespaced
+/// code rather than prose alone.
+#[test]
+fn corrupt_journaled_cron_disposition_carries_a_typed_terminal_code() {
+    let session_error = CronSessionDisposition::from_journal_value("bogus")
+        .expect_err("unknown session disposition must fail");
+    let session_error: &dyn std::error::Error = session_error.as_ref();
+    let session_error = session_error.to_string();
+    assert!(
+        session_error.contains("workbench_cron_invalid_journaled_disposition"),
+        "terminal error must carry the typed code, got {session_error}"
+    );
+
+    let registration_error = CronRegistrationDisposition::from_journal_value("bogus")
+        .expect_err("unknown registration disposition must fail");
+    let registration_error: &dyn std::error::Error = registration_error.as_ref();
+    let registration_error = registration_error.to_string();
+    assert!(
+        registration_error.contains("workbench_cron_invalid_journaled_disposition"),
+        "terminal error must carry the typed code, got {registration_error}"
+    );
+
+    // Every code is a distinct namespaced string minted by the closed enum;
+    // the terminal message spells it `code: detail`.
+    for (code, expected) in [
+        (
+            CronTerminalCode::JournaledDisposition,
+            "workbench_cron_invalid_journaled_disposition",
+        ),
+        (
+            CronTerminalCode::ScheduleCalculation,
+            "workbench_cron_invalid_schedule",
+        ),
+        (
+            CronTerminalCode::JournaledTimestamp,
+            "workbench_cron_invalid_journaled_timestamp",
+        ),
+    ] {
+        let error = cron_terminal_error(code, "detail");
+        let error: &dyn std::error::Error = error.as_ref();
+        assert_eq!(
+            error.to_string(),
+            format!("Terminal error [500]: {expected}: detail")
+        );
+    }
+}
+
 #[tokio::test]
 async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a_tombstone() {
     let data_dir = tempfile::tempdir().expect("tempdir");

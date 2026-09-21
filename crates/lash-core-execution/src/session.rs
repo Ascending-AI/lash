@@ -163,6 +163,20 @@ impl From<lash_core_store::session_policy::ProviderPinMismatch> for SessionError
     }
 }
 
+impl SessionError {
+    /// The typed failure an `exec_code` effect journals: the closed
+    /// [`crate::ExecCodeFailureReason`] beside the human message, so trace and
+    /// replay analysis never has to parse the prose.
+    pub fn to_exec_code_failure(&self) -> crate::ExecCodeFailure {
+        let reason = match self {
+            Self::CodeExecutionUnavailable => crate::ExecCodeFailureReason::ExecutorUnavailable,
+            Self::CodeExecutionRuntimeStopped => crate::ExecCodeFailureReason::RuntimeStopped,
+            _ => crate::ExecCodeFailureReason::Session,
+        };
+        crate::ExecCodeFailure::new(reason, self.to_string())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ExecRequest {
     pub language: String,

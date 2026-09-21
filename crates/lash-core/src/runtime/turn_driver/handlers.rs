@@ -641,7 +641,7 @@ impl RuntimeTurnDriver<'_> {
                         output: String::new(),
                         error: Some(crate::CellFailure::new(
                             crate::CellFailureKind::Host,
-                            error.clone(),
+                            error.message.clone(),
                         )),
                         success: false,
                         duration_ms: self
@@ -715,7 +715,8 @@ impl RuntimeTurnDriver<'_> {
             self.emit_trace(
                 iteration,
                 lash_trace::TraceEvent::ExecCodeFailed {
-                    error: error.clone(),
+                    reason: error.reason,
+                    error: error.message.clone(),
                 },
             );
         }
@@ -761,7 +762,7 @@ impl RuntimeTurnDriver<'_> {
                 },
                 Err(error) => Response::ExecResult {
                     id,
-                    result: Err(error),
+                    result: Err(error.message),
                 },
             },
         )?;
