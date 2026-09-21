@@ -246,10 +246,15 @@ pub struct SessionNodeRecord {
 /// drops the dead `SessionStartPoint` variants, and removes the child-usage
 /// stream event: usage folds are gone and each session owns its own ledger.
 ///
+/// Version 18 (FIG-3371) gives streamed assistant-text and reasoning deltas a
+/// provider-minted `StreamBlockIdentity` and adds explicit block-start and
+/// block-completion stream events, removing the anonymous fallback
+/// correlation shape a generation-17 body could carry.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as an exact-generation fence rather
 /// than a counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 17;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 18;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {

@@ -231,8 +231,8 @@ impl GoogleOAuthProvider {
                             ..Default::default()
                         }));
                     }
-                    for delta in deltas.text_deltas {
-                        tx.send(LlmStreamEvent::Delta(delta));
+                    for event in deltas.text_events {
+                        tx.send(event);
                     }
                     for part in &stream_state.tool_call_parts[first_new_tool_call..] {
                         tx.send(LlmStreamEvent::Part(part.clone()));
@@ -244,11 +244,16 @@ impl GoogleOAuthProvider {
         .await;
 
         if stream_result.is_ok()
-            && self.options.expose_thinking
-            && let Some(event) = stream_state.flush_open_reasoning_part()
             && let Some(tx) = stream_events.as_ref()
         {
-            tx.send(event);
+            if self.options.expose_thinking {
+                for event in stream_state.flush_open_reasoning_part() {
+                    tx.send(event);
+                }
+            }
+            if let Some(event) = stream_state.seal_text_block() {
+                tx.send(event);
+            }
         }
 
         let partial_response = || {

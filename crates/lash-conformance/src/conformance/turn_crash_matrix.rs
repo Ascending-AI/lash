@@ -1078,9 +1078,10 @@ impl Provider for ScriptedProvider {
             }
         };
         if let Some(events) = &request.stream_events {
-            events.send(crate::llm::types::LlmStreamEvent::Delta(
-                "trace".to_string(),
-            ));
+            events.send(crate::llm::types::LlmStreamEvent::Delta {
+                block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "trace".to_string(),
+            });
         }
         let midpoint = TurnSeamOperation::Provider(midpoint);
         self.control.record(midpoint.clone());

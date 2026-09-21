@@ -437,6 +437,10 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
             Option<lash_sansio::llm::types::ProviderReplayMeta>,
         )> = Vec::new();
         let mut actions = Vec::new();
+        let text_block = lash_sansio::llm::types::StreamBlockIdentity::new(
+            format!("completed:{}:text", ctx.protocol_iteration()),
+            0,
+        );
 
         for part in parts {
             match part {
@@ -447,6 +451,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                         if !text_streamed {
                             actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {
                                 content: assistant_text[previous_len..].to_string(),
+                                block: text_block.clone(),
                             }));
                         }
                     }

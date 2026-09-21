@@ -1162,7 +1162,7 @@ fn output_limit_stops_as_incomplete_without_assistant_message() {
     );
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        Effect::Emit(SessionStreamEvent::TextDelta { content }) if content == "partial"
+        Effect::Emit(SessionStreamEvent::TextDelta { content, .. }) if content == "partial"
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,

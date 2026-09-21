@@ -301,7 +301,7 @@ pub mod direct {
         LlmEventSender, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
         NonNegativeFiniteF64, NonNegativeFiniteF64Error, ProviderFileScope,
         ProviderReasoningReplay, ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind,
-        ProviderRouteIdentity,
+        ProviderRouteIdentity, StreamBlockIdentity,
     };
     pub use lash_core::{
         facade_support::DirectCompletion, facade_support::DirectJsonSchema,

@@ -1049,7 +1049,10 @@ mod tests {
         let sender = llm_request
             .stream_events
             .expect("explicit direct stream sender must be preserved");
-        sender.send(LlmStreamEvent::Delta("delta".to_string()));
+        sender.send(LlmStreamEvent::Delta {
+            block: lash_sansio::llm::types::StreamBlockIdentity::new("text:0", 0),
+            text: "delta".to_string(),
+        });
         assert_eq!(captured_events.lock_recover().len(), 1);
 
         let streaming_provider = TestProvider::builder()

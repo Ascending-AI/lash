@@ -307,12 +307,26 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
             lash_core::TurnEvent::ModelRequestStarted { protocol_iteration } => {
                 Ok(Self::ModelRequestStarted { protocol_iteration })
             }
-            lash_core::TurnEvent::AssistantProseDelta { text } => Ok(Self::AssistantProseDelta {
+            lash_core::TurnEvent::AssistantProseDelta { text, block } => {
+                Ok(Self::AssistantProseDelta {
+                    text: text.to_string(),
+                    block,
+                })
+            }
+            lash_core::TurnEvent::ReasoningDelta { text, block } => Ok(Self::ReasoningDelta {
                 text: text.to_string(),
+                block,
             }),
-            lash_core::TurnEvent::ReasoningDelta { text } => Ok(Self::ReasoningDelta {
-                text: text.to_string(),
-            }),
+            lash_core::TurnEvent::StreamBlockStarted { kind, block } => {
+                Ok(Self::StreamBlockStarted { kind, block })
+            }
+            lash_core::TurnEvent::StreamBlockCompleted { kind, block, text } => {
+                Ok(Self::StreamBlockCompleted {
+                    kind,
+                    block,
+                    text: text.to_string(),
+                })
+            }
             lash_core::TurnEvent::ModelAttemptReset {
                 assistant_prose_correlation_ids,
                 reasoning_correlation_ids,

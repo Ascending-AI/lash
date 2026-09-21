@@ -68,7 +68,7 @@ impl StreamBlock {
         })
     }
 
-    fn reasoning_part(&self) -> Option<LlmOutputPart> {
+    fn reasoning_part(&self, index: usize) -> Option<LlmOutputPart> {
         let (text, signature, redacted) = match self {
             Self::Thinking { text, signature } => (text, signature, false),
             Self::RedactedThinking { text, signature } => (text, signature, true),
@@ -78,7 +78,9 @@ impl StreamBlock {
             return None;
         }
         let replay = (!signature.is_empty()).then(|| ProviderReasoningReplay {
-            item_id: None,
+            // The content block is the provider's reasoning item; indexing it
+            // lets the runtime fold the streamed block back into this part.
+            item_id: Some(format!("content_block:{index}")),
             encrypted_content: None,
             signature: Some(signature.clone()),
             redacted,
@@ -163,6 +165,13 @@ fn retry_verdict_for_error_event(event: &Value) -> TransportRetryVerdict {
 }
 
 impl AnthropicProvider {
+    /// Anthropic's native block identity is the content-block index; it is
+    /// both the block's id and the item id its replay material attaches to.
+    fn block_identity(index: usize, block_id: &str) -> StreamBlockIdentity {
+        StreamBlockIdentity::new(block_id.to_string(), index as u64)
+            .with_item_id(Some(block_id.to_string()))
+    }
+
     pub(crate) fn parse_usage(usage: &Value) -> LlmUsage {
         let input = usage
             .get("input_tokens")
@@ -262,6 +271,10 @@ impl AnthropicProvider {
                 while state.blocks.len() <= index {
                     state.blocks.push(StreamBlock::Unknown);
                 }
+                // Anthropic's native block identity is the content-block
+                // index; it is both the block id and the item the block's
+                // replay material belongs to.
+                let block_id = format!("content_block:{index}");
                 let block_meta = event.get("content_block").cloned().unwrap_or_default();
                 let block_type = block_meta
                     .get("type")
@@ -273,12 +286,24 @@ impl AnthropicProvider {
                         *slot = StreamBlock::Text {
                             text: String::new(),
                         };
+                        if let Some(tx) = stream_events {
+                            tx.send(LlmStreamEvent::TextBlockStart {
+                                block: Self::block_identity(index, &block_id),
+                            });
+                        }
                     }
                     "thinking" => {
                         *slot = StreamBlock::Thinking {
                             text: String::new(),
                             signature: String::new(),
                         };
+                        if let Some(tx) = stream_events
+                            && expose_thinking
+                        {
+                            tx.send(LlmStreamEvent::ReasoningBlockStart {
+                                block: Self::block_identity(index, &block_id),
+                            });
+                        }
                     }
                     "redacted_thinking" => {
                         *slot = StreamBlock::RedactedThinking {
@@ -289,6 +314,13 @@ impl AnthropicProvider {
                                 .unwrap_or("")
                                 .to_string(),
                         };
+                        if let Some(tx) = stream_events
+                            && expose_thinking
+                        {
+                            tx.send(LlmStreamEvent::ReasoningBlockStart {
+                                block: Self::block_identity(index, &block_id),
+                            });
+                        }
                     }
                     "tool_use" => {
                         *slot = StreamBlock::ToolUse {
@@ -325,7 +357,13 @@ impl AnthropicProvider {
                         if !piece.is_empty() {
                             text.push_str(piece);
                             if let Some(tx) = stream_events {
-                                tx.send(LlmStreamEvent::Delta(piece.to_string()));
+                                tx.send(LlmStreamEvent::Delta {
+                                    block: Self::block_identity(
+                                        index,
+                                        &format!("content_block:{index}"),
+                                    ),
+                                    text: piece.to_string(),
+                                });
                             }
                         }
                     }
@@ -340,7 +378,13 @@ impl AnthropicProvider {
                             if let Some(tx) = stream_events
                                 && expose_thinking
                             {
-                                tx.send(LlmStreamEvent::ReasoningDelta(piece.to_string()));
+                                tx.send(LlmStreamEvent::ReasoningDelta {
+                                    block: Self::block_identity(
+                                        index,
+                                        &format!("content_block:{index}"),
+                                    ),
+                                    text: piece.to_string(),
+                                });
                             }
                         }
                     }
@@ -386,13 +430,33 @@ impl AnthropicProvider {
             }
             "content_block_stop" => {
                 let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                if let Some(tx) = stream_events
-                    && let Some(part) = state
-                        .blocks
-                        .get(index)
-                        .and_then(|block| block.tool_call_part().or_else(|| block.reasoning_part()))
-                {
-                    tx.send(LlmStreamEvent::Part(part));
+                let block_id = format!("content_block:{index}");
+                if let Some(tx) = stream_events {
+                    match state.blocks.get(index) {
+                        Some(StreamBlock::Text { text }) => {
+                            tx.send(LlmStreamEvent::TextBlockEnd {
+                                block: Self::block_identity(index, &block_id),
+                                text: text.clone(),
+                            });
+                        }
+                        Some(
+                            StreamBlock::Thinking { text, .. }
+                            | StreamBlock::RedactedThinking { text, .. },
+                        ) if expose_thinking => {
+                            tx.send(LlmStreamEvent::ReasoningBlockEnd {
+                                block: Self::block_identity(index, &block_id),
+                                text: text.clone(),
+                            });
+                        }
+                        _ => {}
+                    }
+                    if let Some(part) = state.blocks.get(index).and_then(|block| {
+                        block
+                            .tool_call_part()
+                            .or_else(|| block.reasoning_part(index))
+                    }) {
+                        tx.send(LlmStreamEvent::Part(part));
+                    }
                 }
             }
             "message_delta" => {
@@ -467,7 +531,7 @@ impl AnthropicProvider {
     ) -> (Vec<LlmOutputPart>, LlmUsage, LlmTerminalReason) {
         let mut parts: Vec<LlmOutputPart> = Vec::new();
         let stop_reason = state.stop_reason.clone();
-        for block in state.blocks {
+        for (index, block) in state.blocks.into_iter().enumerate() {
             match block {
                 StreamBlock::Text { text } => {
                     if !text.is_empty() {
@@ -478,7 +542,7 @@ impl AnthropicProvider {
                     }
                 }
                 block @ (StreamBlock::Thinking { .. } | StreamBlock::RedactedThinking { .. }) => {
-                    if let Some(part) = block.reasoning_part() {
+                    if let Some(part) = block.reasoning_part(index) {
                         parts.push(part);
                     }
                 }

@@ -242,7 +242,10 @@ async fn tool_result_projector_only_changes_model_observation() {
 #[tokio::test]
 async fn completed_turns_are_persisted_for_custom_runtime_store() {
     let transport = mock_provider(vec![MockCall {
-        stream_events: vec![LlmStreamEvent::Delta("Stored answer".to_string())],
+        stream_events: vec![LlmStreamEvent::Delta {
+            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+            text: "Stored answer".to_string(),
+        }],
         response: Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {
                 text: "Stored answer".to_string(),
@@ -832,7 +835,10 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
 async fn completed_turns_are_persisted_in_session_graph() {
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
-            LlmStreamEvent::Delta("Stored answer".to_string()),
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "Stored answer".to_string(),
+            },
             LlmStreamEvent::Usage(LlmUsage {
                 input_tokens: 12,
                 output_tokens: 4,

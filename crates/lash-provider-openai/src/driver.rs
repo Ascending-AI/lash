@@ -684,7 +684,8 @@ fn complete_buffered_responses(
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder);
-    if text.trim_start().starts_with("data:") || text.contains("\ndata:") {
+    let body_was_sse = text.trim_start().starts_with("data:") || text.contains("\ndata:");
+    if body_was_sse {
         OpenAiCompatibleProvider::parse_sse_payload(&text, &mut state)?;
     } else {
         let value: Value = serde_json::from_str(&text).map_err(|e| {
@@ -741,19 +742,59 @@ fn complete_buffered_responses(
         if state.usage != LlmUsage::default() {
             tx.send(LlmStreamEvent::Usage(state.usage.clone()));
         }
-        if provider.options.expose_thinking {
-            for part in &parts {
-                if let LlmOutputPart::Reasoning { text, .. } = part
-                    && !text.is_empty()
-                {
-                    tx.send(LlmStreamEvent::ReasoningDelta(text.clone()));
-                    tx.send(LlmStreamEvent::Part(part.clone()));
+        if body_was_sse {
+            // The body was itself an SSE payload: the stream events were
+            // already minted while folding it.
+            for event in state.take_block_events() {
+                if !provider.options.expose_thinking && is_reasoning_block_event(&event) {
+                    continue;
+                }
+                tx.send(event);
+            }
+            if provider.options.expose_thinking {
+                for part in &parts {
+                    if matches!(part, LlmOutputPart::Reasoning { .. }) {
+                        tx.send(LlmStreamEvent::Part(part.clone()));
+                    }
                 }
             }
-        }
-        let full_text = state.full_text();
-        if !full_text.is_empty() {
-            tx.send(LlmStreamEvent::Delta(full_text));
+        } else {
+            let mut next_ordinal = 0u64;
+            if provider.options.expose_thinking {
+                for part in &parts {
+                    if let LlmOutputPart::Reasoning { .. } = part {
+                        for (block, text) in reasoning_part_block_texts(part, &mut next_ordinal) {
+                            if text.is_empty() {
+                                continue;
+                            }
+                            tx.send(LlmStreamEvent::ReasoningBlockStart {
+                                block: block.clone(),
+                            });
+                            tx.send(LlmStreamEvent::ReasoningDelta {
+                                block: block.clone(),
+                                text: text.clone(),
+                            });
+                            tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                        }
+                        tx.send(LlmStreamEvent::Part(part.clone()));
+                    }
+                }
+            }
+            let full_text = state.full_text();
+            if !full_text.is_empty() {
+                let block = StreamBlockIdentity::new(format!("text:{next_ordinal}"), next_ordinal);
+                tx.send(LlmStreamEvent::TextBlockStart {
+                    block: block.clone(),
+                });
+                tx.send(LlmStreamEvent::Delta {
+                    block: block.clone(),
+                    text: full_text.clone(),
+                });
+                tx.send(LlmStreamEvent::TextBlockEnd {
+                    block,
+                    text: full_text,
+                });
+            }
         }
     }
     Ok(LlmResponse {
@@ -805,6 +846,7 @@ fn complete_buffered_chat(
         parsed_parts = Some(parts);
         state.terminal_reason = terminal_reason;
     }
+    let body_was_sse = parsed_parts.is_none();
     let parts = parsed_parts.unwrap_or_else(|| state.parts());
     if stream_termination == Some(StreamTermination::RequireTerminalEvidence)
         && state
@@ -832,15 +874,58 @@ fn complete_buffered_chat(
         if state.usage != LlmUsage::default() {
             tx.send(LlmStreamEvent::Usage(state.usage.clone()));
         }
-        if !state.full_text.is_empty() {
-            tx.send(LlmStreamEvent::Delta(state.full_text.clone()));
-        }
-        if provider.options.expose_thinking {
-            for part in parts
-                .iter()
-                .filter(|part| matches!(part, LlmOutputPart::Reasoning { .. }))
-            {
-                tx.send(LlmStreamEvent::Part(part.clone()));
+        if body_was_sse {
+            // The body was itself an SSE payload: the stream events were
+            // already minted while folding it.
+            for event in state.finish_blocks() {
+                if !provider.options.expose_thinking && is_reasoning_block_event(&event) {
+                    continue;
+                }
+                tx.send(event);
+            }
+            if provider.options.expose_thinking {
+                for part in &parts {
+                    if matches!(part, LlmOutputPart::Reasoning { .. }) {
+                        tx.send(LlmStreamEvent::Part(part.clone()));
+                    }
+                }
+            }
+        } else {
+            let mut next_ordinal = 0u64;
+            if provider.options.expose_thinking {
+                for part in parts
+                    .iter()
+                    .filter(|part| matches!(part, LlmOutputPart::Reasoning { .. }))
+                {
+                    for (block, text) in reasoning_part_block_texts(part, &mut next_ordinal) {
+                        if text.is_empty() {
+                            continue;
+                        }
+                        tx.send(LlmStreamEvent::ReasoningBlockStart {
+                            block: block.clone(),
+                        });
+                        tx.send(LlmStreamEvent::ReasoningDelta {
+                            block: block.clone(),
+                            text: text.clone(),
+                        });
+                        tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                    }
+                    tx.send(LlmStreamEvent::Part(part.clone()));
+                }
+            }
+            if !state.full_text.is_empty() {
+                let block = StreamBlockIdentity::new(format!("text:{next_ordinal}"), next_ordinal);
+                tx.send(LlmStreamEvent::TextBlockStart {
+                    block: block.clone(),
+                });
+                tx.send(LlmStreamEvent::Delta {
+                    block: block.clone(),
+                    text: state.full_text.clone(),
+                });
+                tx.send(LlmStreamEvent::TextBlockEnd {
+                    block,
+                    text: state.full_text.clone(),
+                });
             }
         }
         for part in parts
@@ -978,16 +1063,14 @@ async fn drive_streaming_responses(
             }
             emit_stream_progress(
                 stream_events.as_ref(),
-                state.take_text_deltas(),
+                state
+                    .take_block_events()
+                    .into_iter()
+                    .filter(|event| expose_thinking || !is_reasoning_block_event(event)),
                 &state.usage,
                 &prev_usage,
             );
             if let Some(tx) = &stream_events {
-                for delta in state.take_reasoning_deltas() {
-                    if expose_thinking {
-                        tx.send(LlmStreamEvent::ReasoningDelta(delta));
-                    }
-                }
                 for part in emitted_parts.drain(..) {
                     if matches!(part, LlmOutputPart::Reasoning { .. }) && !expose_thinking {
                         continue;
@@ -996,7 +1079,6 @@ async fn drive_streaming_responses(
                 }
             } else {
                 emitted_parts.clear();
-                state.take_reasoning_deltas();
             }
             Ok(())
         },
@@ -1104,19 +1186,13 @@ async fn drive_streaming_chat(
             }
             emit_stream_progress(
                 stream_events.as_ref(),
-                state.take_text_deltas(),
+                state
+                    .take_block_events()
+                    .into_iter()
+                    .filter(|event| expose_thinking || !is_reasoning_block_event(event)),
                 &state.usage,
                 &prev_usage,
             );
-            if let Some(tx) = &stream_events {
-                for delta in state.take_reasoning_deltas() {
-                    if expose_thinking {
-                        tx.send(LlmStreamEvent::ReasoningDelta(delta));
-                    }
-                }
-            } else {
-                state.take_reasoning_deltas();
-            }
             if let Some(tx) = &stream_events {
                 for part in state.take_completed_tool_call_parts() {
                     tx.send(LlmStreamEvent::Part(part));
@@ -1151,6 +1227,12 @@ async fn drive_streaming_chat(
         ));
     }
     if let Some(tx) = &stream_events {
+        for event in state.finish_blocks() {
+            if !expose_thinking && is_reasoning_block_event(&event) {
+                continue;
+            }
+            tx.send(event);
+        }
         for part in state.take_remaining_tool_call_parts() {
             tx.send(LlmStreamEvent::Part(part));
         }

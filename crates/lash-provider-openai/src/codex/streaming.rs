@@ -20,7 +20,7 @@ use lash_core::llm::transport::{
 };
 use lash_core::llm::types::{
     ExecutionEvidence, LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence,
-    LlmTerminalReason, LlmUsage, ProviderRouteIdentity,
+    LlmTerminalReason, LlmUsage, ProviderRouteIdentity, StreamBlockIdentity,
 };
 use lash_core::provider::{LlmTimeouts, Provider, ProviderOptions, StreamTermination};
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
@@ -394,7 +394,9 @@ impl CodexProvider {
             }
             emit_stream_progress(
                 stream_events.as_ref(),
-                state.take_text_deltas(),
+                state.take_block_events().into_iter().filter(|event| {
+                    expose_thinking || !crate::support::is_reasoning_block_event(event)
+                }),
                 &state.usage,
                 &prev_usage,
             );
@@ -408,11 +410,6 @@ impl CodexProvider {
                 }));
             }
             if let Some(tx) = &stream_events {
-                for piece in state.take_reasoning_deltas() {
-                    if expose_thinking {
-                        tx.send(LlmStreamEvent::ReasoningDelta(piece));
-                    }
-                }
                 for part in emitted_parts {
                     if matches!(part, lash_core::llm::types::LlmOutputPart::Reasoning { .. })
                         && !expose_thinking
@@ -421,8 +418,6 @@ impl CodexProvider {
                     }
                     tx.send(LlmStreamEvent::Part(part));
                 }
-            } else {
-                state.take_reasoning_deltas();
             }
             if state.terminal_event_seen {
                 break;
@@ -863,6 +858,7 @@ impl Provider for CodexProvider {
                         ..Default::default()
                     };
                     shared::parse_sse_payload(PROVIDER, &text, &mut state)?;
+                    let block_events = state.take_block_events();
                     let mut response = shared::response_from_stream_state(
                         state,
                         request_body,
@@ -879,22 +875,24 @@ impl Provider for CodexProvider {
                         if response.usage != LlmUsage::default() {
                             tx.send(LlmStreamEvent::Usage(response.usage.clone()));
                         }
-                        for part in &response.parts {
-                            if let lash_core::llm::types::LlmOutputPart::Text { text, .. } = part
-                                && !text.is_empty()
+                        // The body was itself an SSE payload: the block events
+                        // were already minted while folding it.
+                        for event in block_events {
+                            if !provider.options.expose_thinking
+                                && crate::support::is_reasoning_block_event(&event)
                             {
-                                tx.send(LlmStreamEvent::Delta(text.clone()));
+                                continue;
                             }
+                            tx.send(event);
                         }
                         for part in &response.parts {
                             match part {
                                 lash_core::llm::types::LlmOutputPart::ToolCall { .. } => {
                                     tx.send(LlmStreamEvent::Part(part.clone()));
                                 }
-                                lash_core::llm::types::LlmOutputPart::Reasoning {
-                                    text, ..
-                                } if !text.is_empty() && provider.options.expose_thinking => {
-                                    tx.send(LlmStreamEvent::ReasoningDelta(text.clone()));
+                                lash_core::llm::types::LlmOutputPart::Reasoning { .. }
+                                    if provider.options.expose_thinking =>
+                                {
                                     tx.send(LlmStreamEvent::Part(part.clone()));
                                 }
                                 _ => {}
@@ -937,8 +935,46 @@ impl Provider for CodexProvider {
                     if usage != LlmUsage::default() {
                         tx.send(LlmStreamEvent::Usage(usage.clone()));
                     }
+                    let mut next_ordinal = 0u64;
+                    if provider.options.expose_thinking {
+                        for part in parts
+                            .iter()
+                            .filter(|part| {
+                                matches!(part, lash_core::llm::types::LlmOutputPart::Reasoning { .. })
+                            })
+                        {
+                            for (block, text) in
+                                crate::support::reasoning_part_block_texts(part, &mut next_ordinal)
+                            {
+                                if text.is_empty() {
+                                    continue;
+                                }
+                                tx.send(LlmStreamEvent::ReasoningBlockStart {
+                                    block: block.clone(),
+                                });
+                                tx.send(LlmStreamEvent::ReasoningDelta {
+                                    block: block.clone(),
+                                    text: text.clone(),
+                                });
+                                tx.send(LlmStreamEvent::ReasoningBlockEnd { block, text });
+                            }
+                            tx.send(LlmStreamEvent::Part(part.clone()));
+                        }
+                    }
                     if !content.is_empty() {
-                        tx.send(LlmStreamEvent::Delta(content.clone()));
+                        let block =
+                            StreamBlockIdentity::new(format!("text:{next_ordinal}"), next_ordinal);
+                        tx.send(LlmStreamEvent::TextBlockStart {
+                            block: block.clone(),
+                        });
+                        tx.send(LlmStreamEvent::Delta {
+                            block: block.clone(),
+                            text: content.clone(),
+                        });
+                        tx.send(LlmStreamEvent::TextBlockEnd {
+                            block,
+                            text: content.clone(),
+                        });
                     }
                 }
                 let terminal_reason = openai_terminal_reason_from_response_value(&value, &parts);
@@ -998,16 +1034,17 @@ impl Provider for CodexProvider {
                     }
                     emit_stream_progress(
                         stream_events.as_ref(),
-                        state.take_text_deltas(),
+                        state
+                            .take_block_events()
+                            .into_iter()
+                            .filter(|event| {
+                                expose_thinking
+                                    || !crate::support::is_reasoning_block_event(event)
+                            }),
                         &state.usage,
                         &prev_usage,
                     );
                     if let Some(tx) = &stream_events {
-                        for piece in state.take_reasoning_deltas() {
-                            if expose_thinking {
-                                tx.send(LlmStreamEvent::ReasoningDelta(piece));
-                            }
-                        }
                         for part in emitted_parts {
                             if matches!(
                                 part,
@@ -1063,7 +1100,7 @@ impl Provider for CodexProvider {
 
             if state.final_response.is_none()
                 && state.parts.is_empty()
-                && state.pending_text_deltas.is_empty()
+                && !state.streamed_item_content_received
             {
                 return Err(LlmTransportError::new(format!(
                     "Codex stream ended without SSE events (HTTP {}{})",

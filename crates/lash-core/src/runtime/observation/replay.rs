@@ -1190,7 +1190,10 @@ mod tests {
 
     fn activity(text: &str) -> SessionObservationEventPayload {
         SessionObservationEventPayload::TurnActivity(crate::TurnActivity::independent(
-            crate::TurnEvent::AssistantProseDelta { text: text.into() },
+            crate::TurnEvent::AssistantProseDelta {
+                text: text.into(),
+                block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
+            },
         ))
     }
 
@@ -1335,12 +1338,12 @@ mod tests {
         assert!(matches!(
             &events[0].payload,
             SessionObservationEventPayload::TurnActivity(activity)
-                if matches!(&activity.event, crate::TurnEvent::AssistantProseDelta { text } if text.as_ref() == "first")
+                if matches!(&activity.event, crate::TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == "first")
         ));
         assert!(matches!(
             &events[1].payload,
             SessionObservationEventPayload::TurnActivity(activity)
-                if matches!(&activity.event, crate::TurnEvent::AssistantProseDelta { text } if text.as_ref() == "second")
+                if matches!(&activity.event, crate::TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == "second")
         ));
     }
 
@@ -1386,7 +1389,9 @@ mod tests {
         assert_eq!(events.len(), 2);
         match &events[0].payload {
             SessionObservationEventPayload::TurnActivity(activity) => match &activity.event {
-                crate::TurnEvent::AssistantProseDelta { text } => assert_eq!(text.as_ref(), "a"),
+                crate::TurnEvent::AssistantProseDelta { text, .. } => {
+                    assert_eq!(text.as_ref(), "a")
+                }
                 _ => panic!("wrong event"),
             },
             _ => panic!("wrong payload"),
@@ -1510,7 +1515,9 @@ mod tests {
             .expect("live");
         match &second.payload {
             SessionObservationEventPayload::TurnActivity(activity) => match &activity.event {
-                crate::TurnEvent::AssistantProseDelta { text } => assert_eq!(text.as_ref(), "b"),
+                crate::TurnEvent::AssistantProseDelta { text, .. } => {
+                    assert_eq!(text.as_ref(), "b")
+                }
                 _ => panic!("wrong event"),
             },
             _ => panic!("wrong payload"),

@@ -119,7 +119,7 @@ async fn openai_chat_runtime_respects_expose_thinking() {
             .activities
             .iter()
             .filter_map(|activity| match &activity.event {
-                lash::TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+                lash::TurnEvent::ReasoningDelta { text, .. } => Some(text.as_ref()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -184,7 +184,7 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
         .activities
         .iter()
         .filter_map(|activity| match &activity.event {
-            lash::TurnEvent::ReasoningDelta { text } => Some(text.as_ref()),
+            lash::TurnEvent::ReasoningDelta { text, .. } => Some(text.as_ref()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -660,7 +660,7 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
     let deltas = events
         .iter()
         .filter_map(|event| match event {
-            LlmStreamEvent::Delta(delta) => Some(delta.as_str()),
+            LlmStreamEvent::Delta { text: delta, .. } => Some(delta.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>();

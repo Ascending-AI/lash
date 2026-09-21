@@ -1283,17 +1283,108 @@ pub fn provider_usage_has_quantities(usage: &serde_json::Value) -> bool {
     }
 }
 
+/// Which render lane a streamed output block belongs to.
+///
+/// A *block* is the unit a host renders: one OpenAI reasoning summary part,
+/// one Anthropic `thinking`/`text` content block, or one ordinal run of
+/// thought/text for providers with no native notion. Blocks name their owning
+/// reasoning item or message item when the provider has one; several blocks
+/// may share one item's replay material.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamBlockKind {
+    /// Visible assistant prose.
+    AssistantText,
+    /// Reasoning summary ("thinking") text, kept separate from assistant
+    /// response text.
+    Reasoning,
+}
+
+/// Provider-minted identity of one streamed output block.
+///
+/// Minted by the provider adapter from provider facts: OpenAI
+/// `(item_id, summary_index)`, Anthropic content-block index, or a
+/// deterministic per-attempt ordinal for providers with no native notion.
+/// The id is opaque to hosts; ordering comes from `ordinal`, never from
+/// parsing `id`. Live and replayed streams emit identical identities.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct StreamBlockIdentity {
+    /// Opaque provider-minted block key, stable within one response attempt.
+    pub id: String,
+    /// Per-attempt block ordinal assigned by the provider adapter.
+    pub ordinal: u64,
+    /// The reasoning or message item this block belongs to, when the provider
+    /// has one. N blocks may share one item's replay material.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
+}
+
+impl StreamBlockIdentity {
+    pub fn new(id: impl Into<String>, ordinal: u64) -> Self {
+        Self {
+            id: id.into(),
+            ordinal,
+            item_id: None,
+        }
+    }
+
+    pub fn with_item_id(mut self, item_id: Option<String>) -> Self {
+        self.item_id = item_id.filter(|id| !id.is_empty());
+        self
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum LlmStreamEvent {
     /// A retry is starting from the original request. Consumers must discard
-    /// attempt-local accumulated parts and usage before accepting new events.
+    /// attempt-local accumulated parts, blocks, and usage before accepting
+    /// new events.
     AttemptReset,
-    /// Append-only visible assistant text. Providers must send only the new
-    /// suffix here; completed/cumulative message text belongs in `Part(Text)`.
-    Delta(String),
-    /// Incremental reasoning-summary text, kept separate from assistant
-    /// response text in [`Self::Delta`].
-    ReasoningDelta(String),
+    /// A new assistant-text block opened in this attempt.
+    TextBlockStart {
+        block: StreamBlockIdentity,
+    },
+    /// Append-only visible assistant text within `block`. Providers must send
+    /// only the new suffix here; completed/cumulative message text belongs in
+    /// `Part(Text)`.
+    Delta {
+        block: StreamBlockIdentity,
+        text: String,
+    },
+    /// `block` closed. `text` is the block's authoritative text, so a consumer
+    /// can correct drift from accumulated deltas.
+    TextBlockEnd {
+        block: StreamBlockIdentity,
+        text: String,
+    },
+    /// A new reasoning block opened in this attempt.
+    ReasoningBlockStart {
+        block: StreamBlockIdentity,
+    },
+    /// Incremental reasoning-summary text within `block`, kept separate from
+    /// assistant response text in [`Self::Delta`].
+    ReasoningDelta {
+        block: StreamBlockIdentity,
+        text: String,
+    },
+    /// `block` closed. `text` is the block's authoritative text. A block with
+    /// zero deltas is valid (redacted thinking, signed-empty blocks).
+    ReasoningBlockEnd {
+        block: StreamBlockIdentity,
+        text: String,
+    },
     /// Structured provider output state. Text parts reconcile final response
     /// state and replay metadata; they are not live-visible text deltas.
     Part(LlmOutputPart),

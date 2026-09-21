@@ -229,8 +229,14 @@ async fn in_memory_append_receipt_rolls_back_failure_after_first_mutation() {
 async fn standard_runtime_assembles_stream_only_text_response() {
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
-            LlmStreamEvent::Delta("What time ".to_string()),
-            LlmStreamEvent::Delta("is it?".to_string()),
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "What time ".to_string(),
+            },
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "is it?".to_string(),
+            },
             LlmStreamEvent::Usage(LlmUsage {
                 input_tokens: 11,
                 output_tokens: 4,
@@ -305,7 +311,7 @@ async fn standard_runtime_assembles_stream_only_text_response() {
         .snapshot()
         .into_iter()
         .filter_map(|event| match event {
-            SessionStreamEvent::TextDelta { content } => Some(content),
+            SessionStreamEvent::TextDelta { content, .. } => Some(content),
             _ => None,
         })
         .collect();
@@ -318,8 +324,14 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
         "I’m continuing with a type-safety cleanup now: replace the remaining raw JSON paths.";
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
-            LlmStreamEvent::Delta("I’m continuing with a type-safety cleanup now: ".to_string()),
-            LlmStreamEvent::Delta("replace the remaining raw JSON paths.".to_string()),
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "I’m continuing with a type-safety cleanup now: ".to_string(),
+            },
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "replace the remaining raw JSON paths.".to_string(),
+            },
         ],
         response: Ok(LlmResponse::default()),
     }]);
@@ -370,7 +382,7 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
         .snapshot()
         .into_iter()
         .filter_map(|event| match event {
-            SessionStreamEvent::TextDelta { content } => Some(content),
+            SessionStreamEvent::TextDelta { content, .. } => Some(content),
             _ => None,
         })
         .collect();
@@ -381,7 +393,10 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
 async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
-            LlmStreamEvent::Delta("The sentence.".to_string()),
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "The sentence.".to_string(),
+            },
             LlmStreamEvent::Part(LlmOutputPart::Text {
                 text: "The sentence.".to_string(),
                 response_meta: None,
@@ -420,7 +435,7 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
         .snapshot()
         .into_iter()
         .filter_map(|event| match event {
-            SessionStreamEvent::TextDelta { content } => Some(content),
+            SessionStreamEvent::TextDelta { content, .. } => Some(content),
             _ => None,
         })
         .collect();
@@ -823,7 +838,7 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
         .snapshot()
         .into_iter()
         .filter_map(|event| match event {
-            SessionStreamEvent::TextDelta { content } => Some(content),
+            SessionStreamEvent::TextDelta { content, .. } => Some(content),
             _ => None,
         })
         .collect();
@@ -834,7 +849,10 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
 async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
-            LlmStreamEvent::Delta("Hi".to_string()),
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "Hi".to_string(),
+            },
             LlmStreamEvent::Usage(LlmUsage {
                 input_tokens: 9,
                 output_tokens: 3,
@@ -884,7 +902,10 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
 async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
-            LlmStreamEvent::Delta("Hi".to_string()),
+            LlmStreamEvent::Delta {
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                text: "Hi".to_string(),
+            },
             LlmStreamEvent::Usage(LlmUsage {
                 input_tokens: 9,
                 output_tokens: 3,

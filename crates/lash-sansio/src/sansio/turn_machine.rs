@@ -723,6 +723,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
         if !text_streamed && !visible_text.is_empty() {
             self.emit(SessionStreamEvent::TextDelta {
                 content: visible_text.clone(),
+                block: crate::llm::types::StreamBlockIdentity::new(
+                    format!("completed:{}:text", self.protocol_iteration),
+                    0,
+                ),
             });
         }
         self.emit(SessionStreamEvent::LlmResponse {

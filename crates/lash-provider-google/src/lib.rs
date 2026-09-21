@@ -543,7 +543,7 @@ mod tests {
         let exposed_deltas = exposed_events
             .iter()
             .filter_map(|event| match event {
-                LlmStreamEvent::ReasoningDelta(text) => Some(text.as_str()),
+                LlmStreamEvent::ReasoningDelta { text, .. } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -601,14 +601,14 @@ mod tests {
         assert!(!hidden.full_text().contains("carefully"));
         assert!(hidden_events.iter().all(|event| !matches!(
             event,
-            LlmStreamEvent::ReasoningDelta(_)
+            LlmStreamEvent::ReasoningDelta { .. }
                 | LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. })
         )));
         for events in [&exposed_events, &hidden_events] {
             assert!(events.iter().all(|event| {
                 !matches!(
                     event,
-                    LlmStreamEvent::Delta(text)
+                    LlmStreamEvent::Delta { text, .. }
                         if text.contains("plan é") || text.contains("carefully")
                 )
             }));
@@ -618,12 +618,25 @@ mod tests {
     #[tokio::test]
     async fn google_streaming_reasoning_matches_non_streaming_parts() {
         let wire_events = streaming_reasoning_events();
-        let (streaming, _) = streaming_reasoning_response(&wire_events, true).await;
+        let (mut streaming, _) = streaming_reasoning_response(&wire_events, true).await;
         let batch_value = batch_response_from_stream_events(&wire_events);
         let non_streaming = GoogleOAuthProvider::for_test()
             .response_parts_from_value(&batch_value, Some("gemini-test"));
         let non_streaming_terminal =
             GoogleOAuthProvider::terminal_reason_from_value(&batch_value, &non_streaming);
+
+        // Streaming stamps each reasoning part's replay `item_id` with the
+        // minted block id so the completed part folds back into its streamed
+        // block; non-streaming has no blocks, so normalize it out for parity.
+        for part in &mut streaming.parts {
+            if let LlmOutputPart::Reasoning {
+                replay: Some(replay),
+                ..
+            } = part
+            {
+                replay.item_id = None;
+            }
+        }
 
         assert_eq!(streaming.parts, non_streaming);
         assert_eq!(streaming.terminal_reason, non_streaming_terminal);
@@ -690,8 +703,8 @@ mod tests {
         let visible = events
             .iter()
             .filter_map(|event| match event {
-                LlmStreamEvent::ReasoningDelta(text) => Some(("reasoning", text.as_str())),
-                LlmStreamEvent::Delta(text) => Some(("text", text.as_str())),
+                LlmStreamEvent::ReasoningDelta { text, .. } => Some(("reasoning", text.as_str())),
+                LlmStreamEvent::Delta { text, .. } => Some(("text", text.as_str())),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -741,7 +754,7 @@ mod tests {
         let boundary_order = events
             .iter()
             .filter_map(|event| match event {
-                LlmStreamEvent::ReasoningDelta(_) => Some("reasoning_delta"),
+                LlmStreamEvent::ReasoningDelta { .. } => Some("reasoning_delta"),
                 LlmStreamEvent::Part(LlmOutputPart::Reasoning { .. }) => Some("reasoning_part"),
                 LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. }) => Some("tool_call"),
                 _ => None,

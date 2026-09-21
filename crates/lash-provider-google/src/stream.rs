@@ -232,8 +232,19 @@ impl GoogleOAuthProvider {
                 text.push_str(&delta);
                 reasoning_deltas.push(delta.clone());
             }
-            if existing_replay.is_none() && replay.is_some() {
-                *existing_replay = replay;
+            match (existing_replay.as_mut(), replay) {
+                (None, incoming) => *existing_replay = incoming,
+                (Some(existing), Some(incoming))
+                    if existing.signature.is_none() && incoming.signature.is_some() =>
+                {
+                    // The streamed block already stamped `item_id`; the
+                    // signature arrives with the continuing piece.
+                    existing.signature = incoming.signature;
+                    if existing.origin.is_none() {
+                        existing.origin = incoming.origin;
+                    }
+                }
+                _ => {}
             }
             return ReasoningPieceUpdate {
                 opened_part: None,
@@ -383,16 +394,26 @@ pub(crate) struct GoogleStreamState {
     pub tool_call_parts: Vec<LlmOutputPart>,
     pub finish_event: Option<Value>,
     open_reasoning_part: Option<usize>,
+    /// The reasoning block minted for the open output part. Gemini has no
+    /// native block notion, so blocks get deterministic per-response
+    /// ordinals; the block id doubles as the part's reasoning `item_id`.
+    open_reasoning_block: Option<StreamBlockIdentity>,
+    /// The single assistant-text block, minted lazily on the first visible
+    /// delta and sealed when the stream finishes.
+    pub text_block: Option<StreamBlockIdentity>,
+    next_block_ordinal: u64,
 }
 
 /// What one [`GoogleStreamState::push_event`] call produced: the event's own
-/// visible and reasoning deltas, the reasoning stream emissions (a `Part`
-/// close and `ReasoningDelta`s), and how many tool-call parts the event
-/// appended to the state's `tool_call_parts`.
+/// visible and reasoning deltas, the text stream emissions (a `TextBlockStart`
+/// and `Delta`s), the reasoning stream emissions (`ReasoningBlockStart`/`End`,
+/// `ReasoningDelta`s, and a `Part` close), and how many tool-call parts the
+/// event appended to the state's `tool_call_parts`.
 #[derive(Default)]
 pub(crate) struct EventDeltas {
     pub text_deltas: Vec<String>,
     pub reasoning_deltas: Vec<String>,
+    pub text_events: Vec<LlmStreamEvent>,
     pub reasoning_events: Vec<LlmStreamEvent>,
     pub tool_calls_added: usize,
 }
@@ -454,11 +475,35 @@ impl GoogleStreamState {
                 if let Some(opened_part) = update.opened_part {
                     self.close_reasoning_stream_part(&mut deltas.reasoning_events);
                     self.open_reasoning_part = Some(opened_part);
-                }
-                if let Some(delta) = update.delta {
+                    // The minted id is also the part's reasoning item_id so
+                    // the completed `Part` folds the streamed block back into
+                    // item granularity. Google replay rides on the
+                    // thoughtSignature; `item_id` is inert on the wire.
+                    let mut block = self.mint_block("reasoning");
+                    block.item_id = Some(block.id.clone());
+                    if let Some(LlmOutputPart::Reasoning { replay, .. }) =
+                        self.output_parts.get_mut(opened_part)
+                    {
+                        replay
+                            .get_or_insert_with(ProviderReasoningReplay::default)
+                            .item_id = block.item_id.clone();
+                    }
                     deltas
                         .reasoning_events
-                        .push(LlmStreamEvent::ReasoningDelta(delta));
+                        .push(LlmStreamEvent::ReasoningBlockStart {
+                            block: block.clone(),
+                        });
+                    self.open_reasoning_block = Some(block);
+                }
+                if let Some(delta) = update.delta
+                    && let Some(block) = self.open_reasoning_block.as_ref()
+                {
+                    deltas
+                        .reasoning_events
+                        .push(LlmStreamEvent::ReasoningDelta {
+                            block: block.clone(),
+                            text: delta,
+                        });
                 }
                 saw_thought_in_event = true;
                 continue;
@@ -469,6 +514,19 @@ impl GoogleStreamState {
             else {
                 continue;
             };
+            if self.text_block.is_none() {
+                let block = self.mint_block("text");
+                deltas.text_events.push(LlmStreamEvent::TextBlockStart {
+                    block: block.clone(),
+                });
+                self.text_block = Some(block);
+            }
+            if let Some(block) = self.text_block.as_ref() {
+                deltas.text_events.push(LlmStreamEvent::Delta {
+                    block: block.clone(),
+                    text: delta.clone(),
+                });
+            }
             self.output_parts.push(LlmOutputPart::Text {
                 text: delta,
                 response_meta: signature.map(|signature| ResponseTextMeta {
@@ -494,22 +552,43 @@ impl GoogleStreamState {
         Ok(deltas)
     }
 
-    /// Emit the still-open reasoning part as a `Part` event and clear it.
-    /// Stream finalization calls this once more so a part left open by the
-    /// last event reaches the host.
-    pub(crate) fn flush_open_reasoning_part(&mut self) -> Option<LlmStreamEvent> {
-        let index = self.open_reasoning_part.take()?;
-        match self.output_parts.get(index) {
-            Some(part @ LlmOutputPart::Reasoning { .. }) => {
-                Some(LlmStreamEvent::Part(part.clone()))
-            }
-            _ => None,
-        }
+    fn mint_block(&mut self, prefix: &str) -> StreamBlockIdentity {
+        let ordinal = self.next_block_ordinal;
+        self.next_block_ordinal += 1;
+        StreamBlockIdentity::new(format!("{prefix}:{ordinal}"), ordinal)
+    }
+
+    /// Emit the still-open reasoning block's `ReasoningBlockEnd` and its part
+    /// as a `Part` event, then clear both. Stream finalization calls this
+    /// once more so a block left open by the last event reaches the host.
+    pub(crate) fn flush_open_reasoning_part(&mut self) -> Vec<LlmStreamEvent> {
+        let mut events = Vec::new();
+        self.close_reasoning_stream_part(&mut events);
+        events
+    }
+
+    /// Seal the assistant-text block, if one was minted, with the full
+    /// accumulated visible text as its authoritative content.
+    pub(crate) fn seal_text_block(&mut self) -> Option<LlmStreamEvent> {
+        let block = self.text_block.take()?;
+        Some(LlmStreamEvent::TextBlockEnd {
+            block,
+            text: self.full.clone(),
+        })
     }
 
     fn close_reasoning_stream_part(&mut self, events: &mut Vec<LlmStreamEvent>) {
-        if let Some(event) = self.flush_open_reasoning_part() {
-            events.push(event);
+        let Some(index) = self.open_reasoning_part.take() else {
+            return;
+        };
+        if let Some(part @ LlmOutputPart::Reasoning { text, .. }) = self.output_parts.get(index) {
+            if let Some(block) = self.open_reasoning_block.take() {
+                events.push(LlmStreamEvent::ReasoningBlockEnd {
+                    block,
+                    text: text.clone(),
+                });
+            }
+            events.push(LlmStreamEvent::Part(part.clone()));
         }
     }
 

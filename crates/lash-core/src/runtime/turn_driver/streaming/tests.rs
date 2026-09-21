@@ -43,18 +43,18 @@ fn terminal_attempt_position_tracks_observed_stream_state() {
 
 fn projected_delta(event: &RuntimeStreamEvent) -> Option<(&'static str, &str)> {
     match event {
-        RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content }) => {
+        RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content, .. }) => {
             Some(("session_text", content))
         }
-        RuntimeStreamEvent::Session(SessionStreamEvent::ReasoningDelta { content }) => {
+        RuntimeStreamEvent::Session(SessionStreamEvent::ReasoningDelta { content, .. }) => {
             Some(("session_reasoning", content))
         }
         RuntimeStreamEvent::Turn(TurnActivity {
-            event: TurnEvent::AssistantProseDelta { text },
+            event: TurnEvent::AssistantProseDelta { text, .. },
             ..
         }) => Some(("turn_text", text.as_ref())),
         RuntimeStreamEvent::Turn(TurnActivity {
-            event: TurnEvent::ReasoningDelta { text },
+            event: TurnEvent::ReasoningDelta { text, .. },
             ..
         }) => Some(("turn_reasoning", text.as_ref())),
         _ => None,
@@ -63,10 +63,10 @@ fn projected_delta(event: &RuntimeStreamEvent) -> Option<(&'static str, &str)> {
 
 fn session_delta(event: &RuntimeStreamEvent) -> Option<(&'static str, &str)> {
     match event {
-        RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content }) => {
+        RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta { content, .. }) => {
             Some(("text", content))
         }
-        RuntimeStreamEvent::Session(SessionStreamEvent::ReasoningDelta { content }) => {
+        RuntimeStreamEvent::Session(SessionStreamEvent::ReasoningDelta { content, .. }) => {
             Some(("reasoning", content))
         }
         _ => None,
@@ -77,12 +77,12 @@ fn turn_delta(event: &RuntimeStreamEvent) -> Option<(&'static str, &str, &str)> 
     match event {
         RuntimeStreamEvent::Turn(TurnActivity {
             correlation_id,
-            event: TurnEvent::AssistantProseDelta { text },
+            event: TurnEvent::AssistantProseDelta { text, .. },
             ..
         }) => Some(("text", correlation_id.0.as_ref(), text.as_ref())),
         RuntimeStreamEvent::Turn(TurnActivity {
             correlation_id,
-            event: TurnEvent::ReasoningDelta { text },
+            event: TurnEvent::ReasoningDelta { text, .. },
             ..
         }) => Some(("reasoning", correlation_id.0.as_ref(), text.as_ref())),
         _ => None,
@@ -97,11 +97,11 @@ fn slow_host_does_not_stall_provider_drain() {
     let drained = AtomicUsize::new(0);
     let mut drain = Box::pin(async {
         let mut forwarder = ProviderHostForwarder::new(&host_tx);
-        while let Some(LlmStreamEvent::Delta(text)) = provider_rx.recv().await {
+        while let Some(LlmStreamEvent::Delta { text, .. }) = provider_rx.recv().await {
             drained.fetch_add(1, Ordering::Relaxed);
             forwarder.forward_delta(
                 ProviderDeltaClass::AssistantProse,
-                TurnActivityId::new("assistant"),
+                StreamBlockIdentity::new("assistant", 0),
                 text,
             );
         }
@@ -112,7 +112,10 @@ fn slow_host_does_not_stall_provider_drain() {
     let mut max_provider_queue = 0_usize;
     for sent in 0..DELTA_COUNT {
         provider_tx
-            .send(LlmStreamEvent::Delta("x".to_string()))
+            .send(LlmStreamEvent::Delta {
+                block: StreamBlockIdentity::new("text:0", 0),
+                text: "x".to_string(),
+            })
             .expect("provider queue remains open");
         assert_eq!(drain.as_mut().poll(&mut context), Poll::Pending);
         let occupancy = sent + 1 - drained.load(Ordering::Relaxed);
@@ -139,6 +142,7 @@ fn full_host_lane_does_not_construct_pending_payloads() {
     host_tx
         .try_send(RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta {
             content: "occupied".to_string(),
+            block: StreamBlockIdentity::new("text:0", 0),
         }))
         .expect("host lane starts full");
     let mut forwarder = ProviderHostForwarder::new(&host_tx);
@@ -146,7 +150,7 @@ fn full_host_lane_does_not_construct_pending_payloads() {
     for _ in 0..CHUNK_COUNT {
         forwarder.forward_delta(
             ProviderDeltaClass::AssistantProse,
-            TurnActivityId::new("assistant"),
+            StreamBlockIdentity::new("assistant", 0),
             "0123456789abcdef".to_string(),
         );
     }
@@ -165,7 +169,7 @@ fn cancelled_finish_drops_pending_deltas_without_waiting_for_host() {
     for _ in 0..1_024 {
         forwarder.forward_delta(
             ProviderDeltaClass::AssistantProse,
-            TurnActivityId::new("assistant"),
+            StreamBlockIdentity::new("assistant", 0),
             "pending".to_string(),
         );
     }
@@ -187,7 +191,7 @@ async fn cancelled_finish_keeps_forwarded_projection_lanes_even() {
     let mut forwarder = ProviderHostForwarder::new(&host_tx);
     forwarder.forward_delta(
         ProviderDeltaClass::AssistantProse,
-        TurnActivityId::new("assistant"),
+        StreamBlockIdentity::new("assistant", 0),
         "pending".to_string(),
     );
 
@@ -210,14 +214,14 @@ async fn fast_host_receives_every_delta_event_unchanged() {
     for chunk in ["alpha", "beta", "gamma"] {
         forwarder.forward_delta(
             ProviderDeltaClass::AssistantProse,
-            TurnActivityId::new("assistant"),
+            StreamBlockIdentity::new("assistant", 0),
             chunk.to_string(),
         );
     }
     for chunk in ["why", "therefore"] {
         forwarder.forward_delta(
             ProviderDeltaClass::Reasoning,
-            TurnActivityId::new("reasoning"),
+            StreamBlockIdentity::new("reasoning", 0),
             chunk.to_string(),
         );
     }
@@ -255,7 +259,11 @@ async fn interleaved_correlations_and_classes_remain_distinct_at_capacity_one() 
         (ProviderDeltaClass::AssistantProse, "A", "a2"),
         (ProviderDeltaClass::Reasoning, "A", "r"),
     ] {
-        forwarder.forward_delta(class, TurnActivityId::new(correlation), content.to_string());
+        forwarder.forward_delta(
+            class,
+            StreamBlockIdentity::new(correlation, 0),
+            content.to_string(),
+        );
     }
 
     let forwarding = forwarder.finish(false);
@@ -312,14 +320,14 @@ async fn slow_host_coalesces_losslessly_before_semantic_events() {
     for chunk in &chunks {
         forwarder.forward_delta(
             ProviderDeltaClass::AssistantProse,
-            TurnActivityId::new("assistant"),
+            StreamBlockIdentity::new("assistant", 0),
             chunk.clone(),
         );
     }
     for chunk in &reasoning_chunks {
         forwarder.forward_delta(
             ProviderDeltaClass::Reasoning,
-            TurnActivityId::new("reasoning"),
+            StreamBlockIdentity::new("reasoning", 0),
             chunk.clone(),
         );
     }

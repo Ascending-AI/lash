@@ -1328,7 +1328,7 @@ fn assistant_prose(events: &[TurnActivity]) -> String {
     events
         .iter()
         .filter_map(|activity| match &activity.event {
-            TurnEvent::AssistantProseDelta { text } => Some(text.as_ref()),
+            TurnEvent::AssistantProseDelta { text, .. } => Some(text.as_ref()),
             _ => None,
         })
         .collect()
@@ -1764,7 +1764,10 @@ fn mock_provider() -> ProviderHandle {
             let user_text = last_user_text(&request);
             let reply = format!("echo: {user_text}");
             if let Some(events) = request.stream_events.as_ref() {
-                events.send(LlmStreamEvent::Delta(reply.clone()));
+                events.send(LlmStreamEvent::Delta {
+                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                    text: reply.clone(),
+                });
             }
             Ok(LlmResponse {
                 parts: vec![LlmOutputPart::Text {

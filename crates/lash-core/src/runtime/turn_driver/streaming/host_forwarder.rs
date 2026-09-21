@@ -12,9 +12,17 @@ pub(super) enum ProviderDeltaClass {
 }
 
 impl ProviderDeltaClass {
+    fn block_kind(self) -> StreamBlockKind {
+        match self {
+            Self::AssistantProse => StreamBlockKind::AssistantText,
+            Self::Reasoning => StreamBlockKind::Reasoning,
+        }
+    }
+
     fn session_event(
         self,
         content: String,
+        block: StreamBlockIdentity,
         _payload_constructions: &mut PayloadConstructionCounter,
     ) -> SessionStreamEvent {
         #[cfg(test)]
@@ -22,14 +30,15 @@ impl ProviderDeltaClass {
             _payload_constructions.count += 1;
         }
         match self {
-            Self::AssistantProse => SessionStreamEvent::TextDelta { content },
-            Self::Reasoning => SessionStreamEvent::ReasoningDelta { content },
+            Self::AssistantProse => SessionStreamEvent::TextDelta { content, block },
+            Self::Reasoning => SessionStreamEvent::ReasoningDelta { content, block },
         }
     }
 
     fn turn_event(
         self,
         text: Arc<str>,
+        block: StreamBlockIdentity,
         _payload_constructions: &mut PayloadConstructionCounter,
     ) -> TurnEvent {
         #[cfg(test)]
@@ -37,8 +46,8 @@ impl ProviderDeltaClass {
             _payload_constructions.count += 1;
         }
         match self {
-            Self::AssistantProse => TurnEvent::AssistantProseDelta { text },
-            Self::Reasoning => TurnEvent::ReasoningDelta { text },
+            Self::AssistantProse => TurnEvent::AssistantProseDelta { text, block },
+            Self::Reasoning => TurnEvent::ReasoningDelta { text, block },
         }
     }
 }
@@ -51,23 +60,27 @@ struct PayloadConstructionCounter {
 #[derive(Debug)]
 struct PendingHostDelta {
     class: ProviderDeltaClass,
-    correlation_id: TurnActivityId,
+    block: StreamBlockIdentity,
     content: String,
     session_forwarded: bool,
 }
 
 impl PendingHostDelta {
-    fn new(class: ProviderDeltaClass, correlation_id: TurnActivityId, content: String) -> Self {
+    fn new(class: ProviderDeltaClass, block: StreamBlockIdentity, content: String) -> Self {
         Self {
             class,
-            correlation_id,
+            block,
             content,
             session_forwarded: false,
         }
     }
 
-    fn can_merge(&self, class: ProviderDeltaClass, correlation_id: &TurnActivityId) -> bool {
-        !self.session_forwarded && self.class == class && &self.correlation_id == correlation_id
+    fn can_merge(&self, class: ProviderDeltaClass, block: &StreamBlockIdentity) -> bool {
+        !self.session_forwarded && self.class == class && self.block.id == block.id
+    }
+
+    fn correlation_id(&self) -> TurnActivityId {
+        TurnActivityId::new(self.block.id.clone())
     }
 }
 
@@ -75,8 +88,9 @@ impl PendingHostDelta {
 ///
 /// Fast hosts receive the original session + turn projections event-for-event.
 /// Once the bounded host channel fills, only adjacent deltas for the same
-/// correlation merge. The queue has no hard cap: it retains exactly the
-/// unforwarded provider content until a reliable semantic flush catches up.
+/// provider-minted block merge — block boundaries are never crossed. The queue
+/// has no hard cap: it retains exactly the unforwarded provider content until
+/// a reliable semantic flush catches up.
 pub(super) struct ProviderHostForwarder<'a> {
     event_tx: &'a mpsc::Sender<RuntimeStreamEvent>,
     pending: VecDeque<PendingHostDelta>,
@@ -98,7 +112,7 @@ impl<'a> ProviderHostForwarder<'a> {
     pub(super) fn forward_delta(
         &mut self,
         class: ProviderDeltaClass,
-        correlation_id: TurnActivityId,
+        block: StreamBlockIdentity,
         content: String,
     ) {
         if content.is_empty() || self.event_tx.is_closed() {
@@ -107,14 +121,69 @@ impl<'a> ProviderHostForwarder<'a> {
 
         self.try_drain();
         if let Some(pending) = self.pending.back_mut()
-            && pending.can_merge(class, &correlation_id)
+            && pending.can_merge(class, &block)
         {
             pending.content.push_str(&content);
         } else {
             self.pending
-                .push_back(PendingHostDelta::new(class, correlation_id, content));
+                .push_back(PendingHostDelta::new(class, block, content));
         }
         self.try_drain();
+    }
+
+    /// A provider-minted block opened: flush any pending deltas, then emit the
+    /// boundary on both projections.
+    pub(super) async fn forward_block_start(
+        &mut self,
+        class: ProviderDeltaClass,
+        block: StreamBlockIdentity,
+    ) {
+        let kind = class.block_kind();
+        self.flush().await;
+        send_session_event(
+            self.event_tx,
+            SessionStreamEvent::StreamBlockStarted {
+                kind,
+                block: block.clone(),
+            },
+        )
+        .await;
+        send_turn_activity(
+            self.event_tx,
+            TurnActivityId::new(block.id.clone()),
+            TurnEvent::StreamBlockStarted { kind, block },
+        )
+        .await;
+    }
+
+    /// A provider-minted block closed; `text` is its authoritative text.
+    pub(super) async fn forward_block_end(
+        &mut self,
+        class: ProviderDeltaClass,
+        block: StreamBlockIdentity,
+        text: String,
+    ) {
+        let kind = class.block_kind();
+        self.flush().await;
+        send_session_event(
+            self.event_tx,
+            SessionStreamEvent::StreamBlockCompleted {
+                kind,
+                block: block.clone(),
+                content: text.clone(),
+            },
+        )
+        .await;
+        send_turn_activity(
+            self.event_tx,
+            TurnActivityId::new(block.id.clone()),
+            TurnEvent::StreamBlockCompleted {
+                kind,
+                block,
+                text: text.into(),
+            },
+        )
+        .await;
     }
 
     fn try_drain(&mut self) {
@@ -133,15 +202,17 @@ impl<'a> ProviderHostForwarder<'a> {
             if !pending.session_forwarded {
                 permit.send(RuntimeStreamEvent::Session(pending.class.session_event(
                     pending.content.clone(),
+                    pending.block.clone(),
                     &mut self.payload_constructions,
                 )));
                 pending.session_forwarded = true;
                 continue;
             }
             permit.send(RuntimeStreamEvent::Turn(TurnActivity::new(
-                pending.correlation_id.clone(),
+                pending.correlation_id(),
                 pending.class.turn_event(
                     Arc::from(pending.content.as_str()),
+                    pending.block.clone(),
                     &mut self.payload_constructions,
                 ),
             )));
@@ -165,11 +236,11 @@ impl<'a> ProviderHostForwarder<'a> {
     async fn flush(&mut self) {
         while let Some(pending) = self.pending.front() {
             if !pending.session_forwarded {
-                let event = RuntimeStreamEvent::Session(
-                    pending
-                        .class
-                        .session_event(pending.content.clone(), &mut self.payload_constructions),
-                );
+                let event = RuntimeStreamEvent::Session(pending.class.session_event(
+                    pending.content.clone(),
+                    pending.block.clone(),
+                    &mut self.payload_constructions,
+                ));
                 if self.event_tx.send(event).await.is_err() {
                     self.pending.clear();
                     return;
@@ -182,9 +253,10 @@ impl<'a> ProviderHostForwarder<'a> {
             }
 
             let activity = TurnActivity::new(
-                pending.correlation_id.clone(),
+                pending.correlation_id(),
                 pending.class.turn_event(
                     Arc::from(pending.content.as_str()),
+                    pending.block.clone(),
                     &mut self.payload_constructions,
                 ),
             );

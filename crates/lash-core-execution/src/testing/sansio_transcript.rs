@@ -175,6 +175,8 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
         }
         SessionStreamEvent::TextDelta { .. }
         | SessionStreamEvent::ReasoningDelta { .. }
+        | SessionStreamEvent::StreamBlockStarted { .. }
+        | SessionStreamEvent::StreamBlockCompleted { .. }
         | SessionStreamEvent::ToolCallStart { .. }
         | SessionStreamEvent::LlmRequest { .. }
         | SessionStreamEvent::LlmResponse { .. }

@@ -439,12 +439,37 @@ pub struct ErrorEnvelope {
 #[allow(clippy::large_enum_variant)]
 pub enum SessionStreamEvent {
     #[serde(rename = "text_delta")]
-    TextDelta { content: String },
+    TextDelta {
+        content: String,
+        /// Provider-minted identity of the assistant-text block this delta
+        /// belongs to.
+        block: crate::llm::types::StreamBlockIdentity,
+    },
     /// Streaming update for the model's reasoning summary ("thinking"), kept
     /// separate from assistant response text and never fed back to the model
     /// on subsequent turns.
     #[serde(rename = "reasoning_delta")]
-    ReasoningDelta { content: String },
+    ReasoningDelta {
+        content: String,
+        /// Provider-minted identity of the reasoning block this delta
+        /// belongs to.
+        block: crate::llm::types::StreamBlockIdentity,
+    },
+    /// A provider-minted assistant-text or reasoning block opened. Blocks are
+    /// the unit hosts render; merging adjacent blocks is the host's choice —
+    /// Lash injects no separators.
+    #[serde(rename = "stream_block_started")]
+    StreamBlockStarted {
+        kind: crate::llm::types::StreamBlockKind,
+        block: crate::llm::types::StreamBlockIdentity,
+    },
+    /// A streamed block closed; `content` is the block's authoritative text.
+    #[serde(rename = "stream_block_completed")]
+    StreamBlockCompleted {
+        kind: crate::llm::types::StreamBlockKind,
+        block: crate::llm::types::StreamBlockIdentity,
+        content: String,
+    },
     #[serde(rename = "tool_call")]
     ToolCall {
         #[serde(default, skip_serializing_if = "Option::is_none")]

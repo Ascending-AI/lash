@@ -576,7 +576,7 @@ impl ChannelTurnEvents {
 
     async fn handle(&self, activity: TurnActivity) {
         let event = &activity.event;
-        if let TurnEvent::AssistantProseDelta { text } = &event {
+        if let TurnEvent::AssistantProseDelta { text, .. } = &event {
             self.turn_state
                 .lock_recover()
                 .assistant_prose
@@ -586,7 +586,7 @@ impl ChannelTurnEvents {
         // Keep persisted message order tied to event start order. The browser
         // only renders completed code/tool rows, but reload should still
         // reconstruct "thinking -> cell -> tools -> assistant".
-        if let TurnEvent::ReasoningDelta { text } = &event {
+        if let TurnEvent::ReasoningDelta { text, .. } = &event {
             let update = {
                 let mut state = self.turn_state.lock_recover();
                 match state.reasoning.as_mut() {

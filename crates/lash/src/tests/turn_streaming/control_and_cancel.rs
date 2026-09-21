@@ -160,7 +160,7 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
     let prose = events
         .into_iter()
         .filter_map(|event| match event.event {
-            TurnEvent::AssistantProseDelta { text } => Some(text.to_string()),
+            TurnEvent::AssistantProseDelta { text, .. } => Some(text.to_string()),
             _ => None,
         })
         .collect::<String>();

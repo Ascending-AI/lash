@@ -452,6 +452,7 @@ fn live_replay_text_payload(text: impl Into<String>) -> SessionObservationEventP
     SessionObservationEventPayload::TurnActivity(lash_core::TurnActivity::independent(
         lash_core::TurnEvent::AssistantProseDelta {
             text: text.into().into(),
+            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
         },
     ))
 }

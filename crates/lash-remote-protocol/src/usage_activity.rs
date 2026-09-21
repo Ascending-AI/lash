@@ -1,6 +1,7 @@
 //! Token usage accounting and the streaming turn-activity event vocabulary.
 
 use lash_sansio::TurnId;
+use lash_sansio::llm::types::{StreamBlockIdentity, StreamBlockKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -130,8 +131,19 @@ pub enum RemoteTurnEvent {
     },
     AssistantProseDelta {
         text: String,
+        block: StreamBlockIdentity,
     },
     ReasoningDelta {
+        text: String,
+        block: StreamBlockIdentity,
+    },
+    StreamBlockStarted {
+        kind: StreamBlockKind,
+        block: StreamBlockIdentity,
+    },
+    StreamBlockCompleted {
+        kind: StreamBlockKind,
+        block: StreamBlockIdentity,
         text: String,
     },
     ModelAttemptReset {

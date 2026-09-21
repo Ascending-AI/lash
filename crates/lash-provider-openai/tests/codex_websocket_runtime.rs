@@ -94,7 +94,7 @@ async fn codex_websocket_facade_turn_streams_text_from_local_server() {
     let mut streamed = String::new();
     while let Some(activity) = stream.next_activity().await {
         let activity = activity.expect("turn activity");
-        if let TurnEvent::AssistantProseDelta { text } = activity.event {
+        if let TurnEvent::AssistantProseDelta { text, .. } = activity.event {
             streamed.push_str(&text);
         }
     }

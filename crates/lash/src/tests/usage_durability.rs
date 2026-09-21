@@ -59,9 +59,10 @@ fn aborting_provider(
                 let stream = request.stream_events.expect("stream events");
                 // Evidence is only admissible once the response is established,
                 // so the generation id rides the first delta, not before it.
-                stream.send(LlmStreamEvent::Delta(
-                    "<typescript>\nfinish(\"sealed\");\n</typescript>\n".to_string(),
-                ));
+                stream.send(LlmStreamEvent::Delta {
+                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                    text: "<typescript>\nfinish(\"sealed\");\n</typescript>\n".to_string(),
+                });
                 if let Some(generation_id) = generation_id {
                     stream.send(LlmStreamEvent::Evidence(
                         lash_core::llm::types::LlmStreamEvidence {
@@ -265,9 +266,10 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
                     let generation_id = generation_ids.lock_recover().pop_front().flatten();
                     async move {
                         let stream = request.stream_events.expect("stream events");
-                        stream.send(LlmStreamEvent::Delta(
-                            "<typescript>\nfinish(\"sealed\");\n</typescript>\n".to_string(),
-                        ));
+                        stream.send(LlmStreamEvent::Delta {
+                            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                            text: "<typescript>\nfinish(\"sealed\");\n</typescript>\n".to_string(),
+                        });
                         if let Some(generation_id) = generation_id {
                             stream.send(LlmStreamEvent::Evidence(
                                 lash_core::llm::types::LlmStreamEvidence {

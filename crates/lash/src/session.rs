@@ -1748,6 +1748,7 @@ mod reconcile_tests {
             correlation_id: lash_core::TurnActivityId::new("corr-1"),
             event: lash_core::TurnEvent::AssistantProseDelta {
                 text: "hello".into(),
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
             },
         };
         let activity2 = lash_core::TurnActivity {
@@ -1755,6 +1756,7 @@ mod reconcile_tests {
             correlation_id: lash_core::TurnActivityId::new("corr-2"),
             event: lash_core::TurnEvent::AssistantProseDelta {
                 text: "world".into(),
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
             },
         };
         for (revision, activity) in [(1, activity1), (2, activity2)] {

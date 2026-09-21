@@ -634,7 +634,10 @@ pub(super) fn rlm_final_value_provider() -> ProviderHandle {
                 LlmTransportError::new("rlm final-value proof requires provider streaming")
             })?;
             for chunk in CHUNKS {
-                stream.send(LlmStreamEvent::Delta((*chunk).to_string()));
+                stream.send(LlmStreamEvent::Delta {
+                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                    text: (*chunk).to_string(),
+                });
             }
             let response = text_llm_response(RAW_FINAL);
             if response.full_text() != RAW_FINAL || response_text_part(&response) != Some(RAW_FINAL)

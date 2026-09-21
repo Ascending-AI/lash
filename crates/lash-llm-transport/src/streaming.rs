@@ -293,7 +293,7 @@ where
 
 pub fn emit_stream_progress(
     tx: Option<&LlmEventSender>,
-    added_deltas: impl IntoIterator<Item = String>,
+    events: impl IntoIterator<Item = LlmStreamEvent>,
     usage: &LlmUsage,
     prev_usage: &LlmUsage,
 ) {
@@ -303,8 +303,8 @@ pub fn emit_stream_progress(
     if usage != prev_usage && usage != &LlmUsage::default() {
         tx.send(LlmStreamEvent::Usage(usage.clone()));
     }
-    for piece in added_deltas {
-        tx.send(LlmStreamEvent::Delta(piece));
+    for event in events {
+        tx.send(event);
     }
 }
 

@@ -208,7 +208,20 @@ pub use usage_activity::*;
 // tag, so its record is refused rather than defaulted, and it refuses a record
 // carrying the tag; peers must adopt 80. The label change only widens the
 // accepted set, so it rides this window rather than taking one of its own.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 82;
+// Window 81 (#1721) is the representation audit: typed failure codes,
+// transport enums, and single-source derivations replace ad-hoc spellings a
+// window-80 peer would write differently, so peers must adopt 81.
+// Window 82: FIG-3376 captures peer initialisation in the session create
+// request (a bounded `SessionPluginInit`) and drops child usage folding:
+// `usage_source` leaves `AgentFrameAssignment` and the child-usage event
+// vocabulary is gone. A window-81 peer writes fields window-82 refuses and
+// cannot send the init payload it requires, so peers must adopt 82.
+// Window 83: FIG-3371 gives streamed assistant-text and reasoning deltas an
+// explicit provider-minted block identity (`StreamBlockIdentity`) plus
+// block-start and block-completion events. A window-82 peer writes deltas
+// with no block field and cannot express the new event variants, so its
+// stream records are refused rather than defaulted; peers must adopt 83.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 83;
 
 /// One versioned remote-protocol message.
 ///

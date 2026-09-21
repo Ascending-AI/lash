@@ -1535,6 +1535,7 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
             correlation_id: lash_core::TurnActivityId::new("correlation-1"),
             event: lash_core::TurnEvent::AssistantProseDelta {
                 text: "hello".into(),
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
             },
         },
         lash_core::TurnActivity {
@@ -1542,6 +1543,7 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
             correlation_id: lash_core::TurnActivityId::new("correlation-2"),
             event: lash_core::TurnEvent::ReasoningDelta {
                 text: "checking".into(),
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
             },
         },
     ];
@@ -1634,6 +1636,7 @@ fn remote_turn_activity_sink_records_write_error_and_continues_with_later_events
             correlation_id: lash_core::TurnActivityId::new("correlation-1"),
             event: lash_core::TurnEvent::AssistantProseDelta {
                 text: "first".into(),
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
             },
         },
         lash_core::TurnActivity {
@@ -1641,6 +1644,7 @@ fn remote_turn_activity_sink_records_write_error_and_continues_with_later_events
             correlation_id: lash_core::TurnActivityId::new("correlation-2"),
             event: lash_core::TurnEvent::ReasoningDelta {
                 text: "second".into(),
+                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
             },
         },
     ];
@@ -1712,6 +1716,7 @@ fn remote_turn_activity_sink_records_flush_error() {
         correlation_id: lash_core::TurnActivityId::new("correlation-1"),
         event: lash_core::TurnEvent::AssistantProseDelta {
             text: "flush test".into(),
+            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
         },
     };
 
@@ -1815,6 +1820,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
     let activity =
         lash_core::TurnActivity::independent(lash_core::TurnEvent::AssistantProseDelta {
             text: "delta".into(),
+            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
         });
     let remote = RemoteSessionObservationEvent::from_core(
         7,

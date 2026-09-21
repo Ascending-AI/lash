@@ -5,6 +5,7 @@ fn assembler_ignores_streamed_text_without_durable_output() {
     let mut assembler = TurnAssembler::default();
     assembler.push(&SessionStreamEvent::TextDelta {
         content: "streamed but not committed".to_string(),
+        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
     });
     assembler.push(&SessionStreamEvent::Done);
 
@@ -31,6 +32,7 @@ fn cancelled_assembler_with_only_streamed_text_has_empty_assistant_output() {
     let mut assembler = TurnAssembler::default();
     assembler.push(&SessionStreamEvent::TextDelta {
         content: "partial answer".to_string(),
+        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
     });
 
     let out = assembler.finish(
@@ -260,6 +262,7 @@ fn assembler_prefers_state_output_when_streamed_text_is_a_truncated_prefix() {
     let mut assembler = TurnAssembler::default();
     assembler.push(&SessionStreamEvent::TextDelta {
         content: "You graduated with a degree in Business".to_string(),
+        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
     });
     assembler.push(&SessionStreamEvent::Done);
     let out = assembler.finish(
@@ -458,6 +461,7 @@ fn assembler_marks_missing_done_as_failure() {
     let mut assembler = TurnAssembler::default();
     assembler.push(&SessionStreamEvent::TextDelta {
         content: "partial".to_string(),
+        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
     });
     let out = assembler.finish(
         default_state().to_snapshot(),

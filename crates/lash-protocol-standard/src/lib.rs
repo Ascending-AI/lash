@@ -519,10 +519,15 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         let mut actions = Vec::new();
 
         if !text_streamed {
+            let text_block = lash_sansio::llm::types::StreamBlockIdentity::new(
+                format!("completed:{}:text", ctx.protocol_iteration()),
+                0,
+            );
             for part in &response.parts {
                 if let StandardResponsePart::Text { text, .. } = part {
                     actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {
                         content: text.clone(),
+                        block: text_block.clone(),
                     }));
                 }
             }
