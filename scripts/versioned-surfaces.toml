@@ -640,6 +640,28 @@ paths = ["crates/lash-sansio/src/identity.rs"]
 must_cover = ["string_identity!", "SessionId", "ProcessId", "TurnId", "InputId"]
 
 [[surface]]
+constant = "TOOL_CHILD_REBIND_VERSION"
+constant_path = "crates/lash-core-execution/src/tool_dispatch/context.rs"
+description = "the tool-child rebind checklist: every ToolDispatchContext field's recorded/lent/fresh ruling (ADR 0099 section 3)"
+
+# REBIND_FIELDS is the contract a tool-child driver answers to when it rebuilds
+# a lent opener context for a retained child. `ToolDispatchContext` is named
+# alongside the checklist itself because a field added to the struct IS a
+# checklist change — the meta-test in tool_dispatch/tests/rebind_checklist.rs
+# refuses the unruled field, and this guard makes the ruling's edit cost a
+# conscious version bump. `RebindDisposition` is named for the same reason the
+# FIG-3407 payloads were: it is the vocabulary a ruling is written in.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/tool_dispatch/context.rs"]
+symbols = [
+  "ToolDispatchContext",
+  "RebindField",
+  "RebindDisposition",
+  "REBIND_FIELDS",
+]
+
+[[surface]]
 constant = "PROCESS_TRANSFER_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/effect_identity.rs"
 description = "stable process-transfer set identity"
