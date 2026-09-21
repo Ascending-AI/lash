@@ -80,7 +80,6 @@ use std::sync::{Arc, Mutex};
 
 use lash_sansio::sync::MutexExt;
 
-use super::executor::RuntimeEffectControllerError;
 use crate::EffectOpener;
 
 /// The live tool-execution context one opener lends its group children.
@@ -225,22 +224,6 @@ impl LiveOpenerRegistry {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// The typed refusal for a child whose opener is live but whose context
-    /// cannot serve it.
-    ///
-    /// Distinct from the `None` above on purpose: "this host does not run that
-    /// opener" is routing, while "this host runs it and still cannot build the
-    /// child's context" is a defect the operator has to see.
-    pub(crate) fn context_unavailable(opener: &EffectOpener) -> RuntimeEffectControllerError {
-        RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-            format!(
-                "opener {} is live in this host but lent no usable tool-execution context",
-                opener.render()
-            ),
-        )
     }
 
     /// Removes `opener` only if it is still the registration `generation`

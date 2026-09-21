@@ -437,6 +437,26 @@ symbols = [
 ]
 
 [[surface]]
+constant = "TOOL_CHILD_CAPTURE_VERSION"
+constant_path = "crates/lash-core-execution/src/runtime/effect/tool_child_capture.rs"
+description = "facts a tool child of a durable effect group carries on its outcome (ADR 0099 sections 6 and 13)"
+
+# The capture is journaled inside a `ToolInvocation` outcome and read back by a
+# replay, so a field added, retired or retyped in either item changes what an
+# opener can reconstruct of what its child produced. Both items are named
+# because a `rust_items` guard projects only the declarations it lists and
+# nothing their payloads reach: `ToolChildCapture` carries `ToolChildUsageFact`
+# with no discriminant of its own, so a field added there would leave the
+# guard's signature byte-identical.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/effect/tool_child_capture.rs"]
+symbols = [
+  "ToolChildCapture",
+  "ToolChildUsageFact",
+]
+
+[[surface]]
 constant = "PROCESS_TRANSFER_FAMILY_VERSION"
 constant_path = "crates/lash-core-store/src/effect_identity.rs"
 description = "stable process-transfer set identity"

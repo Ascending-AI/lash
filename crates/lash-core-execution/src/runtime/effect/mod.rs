@@ -20,6 +20,12 @@ pub use tool_child::{
     TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting, ToolChildRequest,
     ToolChildScope,
 };
+mod tool_child_driver;
+pub use tool_child_driver::{ToolChildHost, opener_for_execution_scope};
+mod tool_child_capture;
+pub use tool_child_capture::{
+    TOOL_CHILD_CAPTURE_VERSION, ToolChildCapture, ToolChildUsageFact, ToolChildUsageLedger,
+};
 mod outcome;
 pub use lash_core_effect::promise_semantics;
 mod validation;
@@ -29,7 +35,7 @@ pub use envelope::{
     ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome,
     RuntimeInvocation, RuntimeLlmCallOutcome, SleepSpec, ToolAttemptEffectOutcome,
-    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
+    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch, ToolInvocationEffectOutcome,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{

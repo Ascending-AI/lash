@@ -146,6 +146,16 @@ impl ToolAttemptEffectIdentity {
         )
     }
 
+    /// The parent invocation this identity's attempts descend from.
+    ///
+    /// Public because a tool child of an effect group reconstructs its lineage
+    /// out of its *recorded* identity and has no caller to ask (ADR 0099 §3):
+    /// every arm holds the parent, which is why the retained request carries no
+    /// separate lineage field.
+    pub fn parent_invocation(&self) -> Option<&RuntimeInvocation> {
+        self.parent()
+    }
+
     fn parent(&self) -> Option<&RuntimeInvocation> {
         match self {
             Self::Scalar { parent } => parent.as_ref(),
@@ -328,12 +338,53 @@ impl IntentDrainCommitSignal {
     }
 }
 
+/// Where the authority to derive a completion key comes from for one
+/// coordinated invocation.
+///
+/// Every caller with a live admission in scope answers `None`: deferral is read
+/// from the live registry or provider, which is what admitted the call a moment
+/// ago. A **tool child of an effect group** answers `Some`, because ADR 0099 §3
+/// makes the *recorded* admission authoritative — "a reopen uses the recorded
+/// facts, not current session policy or fresh admission" — and the two live
+/// inputs completion-key preparation reads are deployment facts at recovery
+/// time, not admission facts.
+pub type RecordedCompletionRouting = Option<crate::runtime::ToolChildCompletionRouting>;
+
+/// Refuses a child whose recorded routing this deployment cannot honour.
+///
+/// The routing mismatch ADR 0099 §3 amendment 2 names: "The request records
+/// which of `inline`, `durable` or `process-lifetime` the child was admitted
+/// under, so a recovered child never derives a key nothing will resolve." A
+/// child admitted with a durable completion key that lands on a host issuing
+/// none would park on a key no resolver can reach, and a child admitted inline
+/// that suddenly acquires a key would defer where its opener expects a value.
+/// Both are refusals, never a repaired derivation.
+fn completion_routing_mismatch(
+    recorded: crate::runtime::ToolChildCompletionRouting,
+    observed: &str,
+    call: &PreparedToolCall,
+) -> crate::RuntimeEffectControllerError {
+    crate::RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting,
+        format!(
+            "tool child `{}` was admitted under {recorded:?} completion routing and this \
+             deployment answers {observed}; a recovered child is refused rather than run under \
+             a key its opener cannot resolve",
+            call.call_id
+        ),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn coordinate_tool_invocation<'run>(
     context: &ToolDispatchContext<'run>,
     call: PreparedToolCall,
     execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     retry_policy: ToolRetryPolicy,
+    // `None` for every caller that admitted this call live; `Some` only for a
+    // group child running from its retained request. See
+    // [`RecordedCompletionRouting`].
+    recorded_completion_routing: RecordedCompletionRouting,
     identity: ToolAttemptEffectIdentity,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
     // Owned for the whole coordination: the guard discharges its drain slot on
@@ -348,17 +399,52 @@ pub async fn coordinate_tool_invocation<'run>(
     let mut triggers = Vec::new();
     let mut attempts = Vec::new();
 
+    // Whether this attempt may defer is a recorded fact for a group child and a
+    // live one for everyone else. Read once, above the loop, because every
+    // attempt of one invocation is admitted under the same authority.
+    let may_defer = match recorded_completion_routing {
+        None => context.attempt_may_defer(&call.tool_id, execution_grant.as_deref()),
+        Some(crate::runtime::ToolChildCompletionRouting::Inline) => false,
+        Some(
+            crate::runtime::ToolChildCompletionRouting::Durable
+            | crate::runtime::ToolChildCompletionRouting::ProcessLifetime,
+        ) => true,
+    };
+
     for attempt in 1..=max_attempts {
-        let completion_key = match context
+        let prepared_key = context
             .effect_controller
             .controller()
             .prepare_completion_key(
                 context.effect_controller.scoped().execution_scope(),
                 crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
-                context.attempt_may_defer(&call.tool_id, execution_grant.as_deref()),
+                may_defer,
             )
-            .await
-        {
+            .await;
+        if let Some(recorded) = recorded_completion_routing {
+            let observed = match &prepared_key {
+                Ok(crate::CompletionKeyPreparation::Issued(_)) => "issued",
+                Ok(crate::CompletionKeyPreparation::NotNeeded) => "not-needed",
+                Ok(crate::CompletionKeyPreparation::Unsupported) => "unsupported",
+                Err(_) => "",
+            };
+            let honoured = match recorded {
+                crate::runtime::ToolChildCompletionRouting::Inline => observed == "not-needed",
+                crate::runtime::ToolChildCompletionRouting::Durable
+                | crate::runtime::ToolChildCompletionRouting::ProcessLifetime => {
+                    observed == "issued"
+                }
+            };
+            if !observed.is_empty() && !honoured {
+                return CoordinatedToolInvocation {
+                    launch: ToolCallLaunch::ControllerAborted(completion_routing_mismatch(
+                        recorded, observed, &call,
+                    )),
+                    triggers,
+                };
+            }
+        }
+        let completion_key = match prepared_key {
             Ok(crate::CompletionKeyPreparation::Issued(key)) => Some(key),
             Ok(crate::CompletionKeyPreparation::NotNeeded)
             | Ok(crate::CompletionKeyPreparation::Unsupported) => None,

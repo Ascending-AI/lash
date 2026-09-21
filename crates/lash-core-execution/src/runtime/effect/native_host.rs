@@ -29,6 +29,10 @@ pub struct NativeEffectHost {
     /// journal key: the in-process twin of a journal's `in_progress` rows and
     /// open group rows, which a quiescent-gated retirement must not cut under.
     live: Arc<ScopeLiveness>,
+    /// This host's one tool-child wiring, installed on first use
+    /// (ADR 0099 §2). Shared by every clone of the host, because the registry
+    /// a turn registers its opener in must be the one the resolver reads.
+    tool_children: Arc<std::sync::OnceLock<Arc<super::ToolChildHost>>>,
 }
 
 /// Admission bookkeeping shared by a host and every scoped controller it
@@ -108,6 +112,7 @@ impl NativeEffectHost {
                 false,
             )),
             live: Arc::new(ScopeLiveness::default()),
+            tool_children: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
@@ -132,6 +137,7 @@ impl Default for NativeEffectHost {
                 false,
             )),
             live: Arc::new(ScopeLiveness::default()),
+            tool_children: Arc::new(std::sync::OnceLock::new()),
         }
     }
 }
@@ -289,6 +295,21 @@ impl EffectHost for NativeEffectHost {
             self.fenced_controller(admitted.scope().clone()),
             admitted,
         )?))
+    }
+
+    fn install_tool_child_host(
+        &self,
+        candidate: Arc<super::ToolChildHost>,
+    ) -> Option<Arc<super::ToolChildHost>> {
+        let installed = self.tool_children.get_or_init(|| candidate);
+        // A resolver already registered by something else wins, and this host
+        // then routes no tool children: one host has one answer to what runs a
+        // grouped child, and quietly replacing that answer would make it depend
+        // on which runtime was built last.
+        self.controller
+            .register_group_executors(Arc::clone(installed) as Arc<dyn super::GroupExecutors>)
+            .ok()?;
+        Some(Arc::clone(installed))
     }
 
     /// The in-memory host keeps no effect journal, so no journal rows are ever

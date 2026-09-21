@@ -79,6 +79,30 @@ pub trait EffectHost: AwaitEventResolver {
         Ok(None)
     }
 
+    /// Installs — or returns the already-installed — tool-child wiring for this
+    /// host, and registers it as the host's group-executor resolver
+    /// (ADR 0099 §2, FIG-2266).
+    ///
+    /// **Get-or-init, not register.** One effect host can back several
+    /// runtimes, and there is exactly one live-opener registry per host: two
+    /// registries would mean a turn registering its opener in one while the
+    /// resolver consulted the other, and its children would never run. A
+    /// caller therefore hands in a candidate and uses whatever comes back.
+    ///
+    /// `None` means this host routes no tool children — either because it
+    /// implements no durable effect groups at all (the default here), or
+    /// because a different resolver is already registered, which the
+    /// conformance suites do deliberately. Neither is a failure: a host that
+    /// does not route tool children simply has none, and the group's own
+    /// refusal is what an operator sees if one is ever opened.
+    fn install_tool_child_host(
+        &self,
+        candidate: Arc<super::super::tool_child_driver::ToolChildHost>,
+    ) -> Option<Arc<super::super::tool_child_driver::ToolChildHost>> {
+        let _ = candidate;
+        None
+    }
+
     /// Projects this host to the resolver that owns its await-event registry.
     fn await_event_resolver(&self) -> &dyn AwaitEventResolver;
 
@@ -442,6 +466,29 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError>;
+
+    /// Register this controller's envelope-to-executor resolver, once.
+    ///
+    /// One controller has one answer to "what code runs this journaled grouped
+    /// child", so a second registration of a *different* resolver is refused
+    /// and re-registering the resolver already held is a no-op.
+    ///
+    /// Defaulted to the same `EffectGroupUnsupported` refusal the three group
+    /// methods give, and for the same reason: a controller with nowhere to put
+    /// a resolver is a controller that does no groups at all. It is defaulted
+    /// rather than required because — unlike the three methods above, whose
+    /// defaults FIG-2266 deleted — this is wiring a host performs *on* a
+    /// controller, and a controller that does no groups has a correct and
+    /// unambiguous answer to it.
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn super::super::group_drain::GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let _ = executors;
+        Err(super::effect_groups_unsupported(
+            "this runtime effect controller",
+        ))
+    }
 
     /// Await the next settlement in the group's durable settlement order.
     ///

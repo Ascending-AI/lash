@@ -1,12 +1,12 @@
 use super::execution_context::RuntimeExecutionContext;
 use crate::tool_dispatch::{
     ToolAttemptEffectIdentity, ToolCallLaunch, ToolDispatchOutcome, ToolPreparationOutcome,
-    coordinate_tool_invocation, finalize_tool_result_with_execution_context,
-    prepare_granted_tool_call_with_context, prepare_tool_call_with_context, schedule_tool_batch,
+    coordinate_tool_invocation, prepare_granted_tool_call_with_context,
+    prepare_tool_call_with_context, schedule_tool_batch,
 };
 use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
-    ToolFailure, ToolFailureClass, ToolOutcome, TurnActivityId, TurnEvent,
+    ToolFailure, ToolFailureClass, TurnActivityId, TurnEvent,
 };
 use lash_sansio::core_support::*;
 use std::collections::HashMap;
@@ -798,36 +798,16 @@ impl RuntimeExecutionContext<'_> {
         duration_ms: u64,
         attempts: Vec<lash_trace::TraceRetryAttempt>,
     ) -> ToolDispatchOutcome {
-        let output =
-            crate::tool_result::tool_output_from_completion_resolution(resolution, resolver);
-        let result = finalize_tool_result_with_execution_context(
-            self.dispatch.as_ref(),
-            &tool_name,
-            &args,
-            ToolOutcome::from_output(output),
-            duration_ms,
-        )
-        .await;
-        let mut outcome = crate::tool_dispatch::normalized_outcome(
+        crate::tool_dispatch::settle_completed_pending_tool_call(
             self.dispatch.as_ref(),
             tool_name,
             args,
-            result,
+            resolution,
+            resolver,
             duration_ms,
+            attempts,
         )
-        .await;
-        let mut attempts = attempts;
-        attempts.push(crate::trace::trace_tool_attempt(
-            attempts
-                .len()
-                .saturating_add(1)
-                .try_into()
-                .unwrap_or(u32::MAX),
-            &outcome.record,
-            None,
-        ));
-        outcome.attempts = attempts;
-        outcome
+        .await
     }
 
     async fn await_pending_tool_dispatch_outcome(
@@ -1187,6 +1167,7 @@ impl RuntimeExecutionContext<'_> {
                         *prepared,
                         execution_grant,
                         retry_policy,
+                        None,
                         ToolAttemptEffectIdentity::Scalar {
                             parent: parent_invocation.clone(),
                         },

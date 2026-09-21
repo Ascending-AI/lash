@@ -135,6 +135,7 @@ impl RuntimeSessionServices {
             call,
             None,
             retry_policy,
+            None,
             crate::tool_dispatch::ToolAttemptEffectIdentity::Process {
                 parent: await_parent_invocation.clone(),
                 process_id: registration.id.clone(),

@@ -317,6 +317,7 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
         prepared,
         execution_grant,
         retry_policy,
+        None,
         super::ToolAttemptEffectIdentity::Scalar {
             parent: context.parent_invocation.clone(),
         },

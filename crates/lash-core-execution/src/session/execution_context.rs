@@ -792,6 +792,15 @@ impl<'run> RuntimeExecutionContext<'run> {
             .and_then(|exec| exec.env_ref.clone())
     }
 
+    /// The tool-execution context this run lends its tool calls.
+    ///
+    /// Exposed so the turn path can publish it to the live-opener registry
+    /// (ADR 0099 §3): a tool child of a group this turn opens borrows the live
+    /// half of exactly this context.
+    pub fn dispatch(&self) -> &Arc<ToolDispatchContext<'run>> {
+        &self.dispatch
+    }
+
     /// The enclosing durable parent for a code-executor's child start.
     ///
     /// Derived through the one owner derivation — the admitted scope the

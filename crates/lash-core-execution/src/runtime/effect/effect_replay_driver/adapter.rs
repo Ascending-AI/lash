@@ -225,6 +225,24 @@ impl<T: StoreReplayHost> EffectHost for T {
         )?))
     }
 
+    /// One implementation for both SQL tiers, because both reach their group
+    /// seam through the same shared replay driver.
+    fn install_tool_child_host(
+        &self,
+        candidate: Arc<crate::runtime::effect::ToolChildHost>,
+    ) -> Option<Arc<crate::runtime::effect::ToolChildHost>> {
+        let installed = self
+            .replay_driver()
+            .tool_child_host()
+            .get_or_init(|| candidate);
+        self.replay_driver()
+            .register_group_executors(
+                Arc::clone(installed) as Arc<dyn crate::runtime::effect::GroupExecutors>
+            )
+            .ok()?;
+        Some(Arc::clone(installed))
+    }
+
     async fn prepare_tool_intent(
         &self,
         _sink: &dyn crate::ToolIntentOutcomeSink,

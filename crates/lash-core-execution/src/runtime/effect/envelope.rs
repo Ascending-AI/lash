@@ -20,6 +20,7 @@ use crate::{
 
 use super::executor::RuntimeEffectControllerError;
 use super::group::{EffectGroupMembership, GroupWakePolicy, LoserPolicy};
+use super::tool_child_capture::ToolChildCapture;
 
 /// Effect-specific header whose address is present by construction.
 ///
@@ -847,6 +848,25 @@ pub struct ToolAttemptEffectOutcome {
     pub triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
+/// What one tool child of a durable effect group settled on, unpacked.
+///
+/// The read side of
+/// [`RuntimeEffectOutcome::ToolInvocation`](RuntimeEffectOutcome::ToolInvocation),
+/// mirroring [`ToolAttemptEffectOutcome`] so a caller that already handles one
+/// tool outcome shape handles this one the same way.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolInvocationEffectOutcome {
+    /// The terminal the per-leaf coordinator produced for this child.
+    pub outcome: crate::tool_dispatch::ToolDispatchOutcome,
+    /// Trigger occurrences the child emitted, carried exactly as a
+    /// [`ToolAttempt`](RuntimeEffectOutcome::ToolAttempt) carries them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<ToolTriggerEffectOutcome>,
+    /// Possession, committed checkpoint messages and known usage
+    /// (ADR 0099 §6, §13).
+    pub capture: ToolChildCapture,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolBatchEffectOutcome {
     pub launches: Vec<ToolCallLaunch>,
@@ -961,6 +981,43 @@ pub enum RuntimeEffectOutcome {
         /// Input indices in the order the leaves settled. Required and never
         /// defaulted: see [`ToolBatchEffectOutcome::settlement_order`].
         settlement_order: Vec<usize>,
+    },
+    /// What one tool child of a durable effect group settled on
+    /// (ADR 0099 §2, §6, §13).
+    ///
+    /// The counterpart of
+    /// [`ToolInvocation`](RuntimeEffectCommand::ToolInvocation), and the reason
+    /// it is neither of the sibling tool outcomes.
+    /// [`ToolAttempt`](Self::ToolAttempt) is one attempt's atomic body, so it
+    /// cannot express a child that retried; [`ToolBatch`](Self::ToolBatch) is
+    /// the whole batch, which is the composition a group replaces.
+    ///
+    /// # Why the coordinator's own terminal, and not a projected one
+    ///
+    /// `outcome` is exactly what the per-leaf coordinator produced. A group
+    /// child holds no `RuntimeExecutionContext` — ADR 0099 §3 forbids carrying
+    /// one across the handler boundary — so it cannot run the session's
+    /// tool-result projector, and a `CompletedToolCall` projected here would
+    /// have to invent the `model_return` the projector owns. Journaling the
+    /// unprojected terminal keeps the projection with the opener that has the
+    /// projector, which is FIG-3397's integration.
+    ///
+    /// There is deliberately no pending arm. Deferred completion is
+    /// *coordination* and runs at handler level inside the driver (§2), so a
+    /// child that parked has already been awaited by the time this outcome
+    /// exists: a group child settles once, and a journaled "still pending" is a
+    /// state no reader of a settlement could act on.
+    ToolInvocation {
+        outcome: Box<crate::tool_dispatch::ToolDispatchOutcome>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        triggers: Vec<ToolTriggerEffectOutcome>,
+        /// The §6/§13 facts the child accumulated in its own address space.
+        ///
+        /// Skipped when empty, so a child that started no process, committed no
+        /// message and is not known to have spent anything writes the same
+        /// bytes it would have written before this field existed.
+        #[serde(default, skip_serializing_if = "ToolChildCapture::is_empty")]
+        capture: Box<ToolChildCapture>,
     },
     Trigger {
         result: Box<crate::TriggerEffectResult>,
@@ -1176,6 +1233,35 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// Unpacks a settled tool child of a durable effect group.
+    ///
+    /// Validates the capture rather than trusting it: a journal entry written
+    /// by a build whose capture format this build cannot read completely is
+    /// refused here, where the outcome is consumed, instead of being served to
+    /// an opener as a prefix of what its child actually produced.
+    pub fn into_tool_invocation_effect(
+        self,
+    ) -> Result<ToolInvocationEffectOutcome, RuntimeEffectControllerError> {
+        match self {
+            Self::ToolInvocation {
+                outcome,
+                triggers,
+                capture,
+            } => {
+                capture.validate()?;
+                Ok(ToolInvocationEffectOutcome {
+                    outcome: *outcome,
+                    triggers,
+                    capture: *capture,
+                })
+            }
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::ToolInvocation,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_tool_batch_effect(
         self,
     ) -> Result<ToolBatchEffectOutcome, RuntimeEffectControllerError> {
@@ -1323,6 +1409,7 @@ impl RuntimeEffectOutcome {
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,
+            Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
             Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,

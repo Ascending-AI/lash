@@ -255,6 +255,7 @@ impl RuntimeExecutionContext<'_> {
             child.call.clone(),
             execution_grant,
             retry_policy,
+            None,
             ToolAttemptEffectIdentity::Batch {
                 parent: parent_invocation.clone(),
                 replay_suffix: child.replay_suffix.clone(),

@@ -741,6 +741,7 @@ impl LashRuntime {
             turn_control: Arc::clone(&turn_control),
             observes_durable_cancel_after_llm,
             protocol_reply: Default::default(),
+            live_opener: std::sync::Mutex::new(None),
         });
         let protocol_run_offset = 0;
         self.mark_phase_begin(RuntimeTurnPhase::EffectLoop);

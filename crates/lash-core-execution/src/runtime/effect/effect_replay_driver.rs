@@ -1054,6 +1054,16 @@ pub struct StoreEffectReplayDriver<P, A> {
     /// not supporting effect groups — see
     /// [`register_group_executors`](StoreEffectReplayDriver::register_group_executors).
     group_executors: OnceLock<Arc<dyn GroupExecutors>>,
+    /// This driver's one tool-child wiring (ADR 0099 §2), shared by both SQL
+    /// tiers because both reach their group seam through this driver.
+    ///
+    /// Beside `group_executors` rather than inside it, because the two answer
+    /// different questions: that cell holds whatever resolver was registered,
+    /// and this one holds the live-opener registry a turn must register its
+    /// opener in. A get-or-init, so a host backing several runtimes hands them
+    /// all the same registry — two registries on one host would mean a turn
+    /// registering in one while the resolver read the other.
+    tool_children: OnceLock<Arc<super::ToolChildHost>>,
 }
 
 impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A> {
@@ -1087,9 +1097,17 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             lease_timings,
             groups: groups::DurableEffectGroups::default(),
             group_executors: OnceLock::new(),
+            tool_children: OnceLock::new(),
         }
     }
 
+    /// This driver's tool-child wiring cell. See the field.
+    pub fn tool_child_host(&self) -> &OnceLock<Arc<super::ToolChildHost>> {
+        &self.tool_children
+    }
+
+    /// Register this host's envelope→executor resolver, once.
+    ///
     /// One host has one answer to "what code runs this journaled grouped child",
     /// so this is set once and then read by the open, by a retry, and by the
     /// loser drain alike. A second registration of a *different* resolver is

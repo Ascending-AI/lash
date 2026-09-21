@@ -67,6 +67,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                 Arc::clone(&self.host.core.attachment_source_policy),
             )
             .map(|context| {
+                self.register_live_opener(context.dispatch());
                 context
                     .with_turn_cancel_scope(self.turn_cancel_scope())
                     .with_engine_child_max_attempts(
@@ -74,5 +75,41 @@ impl<'run> RuntimeTurnDriver<'run> {
                     )
                     .with_turn_phase_probe(self.turn_phase_probe.clone())
             })
+    }
+
+    /// Publishes this turn as a live opener, lending its tool-execution context
+    /// to the group children it opens (ADR 0099 §2, §3).
+    ///
+    /// Called from the one place that builds a turn's dispatch context, and
+    /// re-registered on every later one: a turn builds a fresh context per
+    /// phase, and a child must borrow the live half of the *current* one.
+    /// Re-registration supersedes rather than duplicates, and the registry's
+    /// generation guard keeps the superseded guard from evicting its
+    /// replacement.
+    ///
+    /// Three ways this registers nothing, all of them conservative — the child
+    /// stays accepted rather than running under a context that cannot serve it:
+    /// the deployment routes no tool children; the scope is not one an opener
+    /// is derived from (see
+    /// [`opener_for_execution_scope`](crate::facade_support::opener_for_execution_scope));
+    /// or the context cannot be taken to `'static`, which is the same condition
+    /// that would stop a borrowed child outliving the caller that opened it.
+    fn register_live_opener(
+        &self,
+        dispatch: &std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
+    ) {
+        let Some(tool_children) = self.host.core.control.tool_children.as_ref() else {
+            return;
+        };
+        let Some(opener) = crate::facade_support::opener_for_execution_scope(
+            self.scoped_effect_controller.execution_scope(),
+        ) else {
+            return;
+        };
+        let Some(context) = crate::facade_support::LiveOpenerContext::capture(dispatch.as_ref())
+        else {
+            return;
+        };
+        *self.live_opener.lock_recover() = Some(tool_children.openers().register(opener, context));
     }
 }

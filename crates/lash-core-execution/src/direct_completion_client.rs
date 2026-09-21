@@ -72,6 +72,17 @@ pub struct DirectCompletionClient<'run> {
     /// this client is captured by the deep tool-dispatch futures.
     parent_invocation: Option<Box<crate::RuntimeInvocation>>,
     inside_tool_attempt: bool,
+    /// The child-local usage accumulator a tool child of an effect group runs
+    /// under (ADR 0099 §13, FIG-2266).
+    ///
+    /// `None` everywhere else, which is every caller that is not a group
+    /// child: the opener's own ledger already attributes their spend and a
+    /// second reader would have nothing to say. When it is set, every nested
+    /// call made through this client is *also* named as that child's spend, so
+    /// a child whose address space is not its opener's can carry its usage on
+    /// its settlement instead of losing it. This never replaces the opener's
+    /// ledger and never changes what is merged into it.
+    child_usage: Option<crate::runtime::ToolChildUsageLedger>,
 }
 
 impl<'run> DirectCompletionClient<'run> {
@@ -88,6 +99,26 @@ impl<'run> DirectCompletionClient<'run> {
             }),
             parent_invocation: None,
             inside_tool_attempt: false,
+            child_usage: None,
+        }
+    }
+
+    /// Binds the child-local usage ledger one group child's spends are also
+    /// recorded into.
+    ///
+    /// Taken by value and returned, so the driver installs it on the clone it
+    /// rebinds for one child and the opener's own client is untouched.
+    #[must_use]
+    pub fn with_child_usage_ledger(mut self, ledger: crate::runtime::ToolChildUsageLedger) -> Self {
+        self.child_usage = Some(ledger);
+        self
+    }
+
+    /// Records one completed nested call against the child ledger, when this
+    /// client is a group child's.
+    fn record_child_usage(&self, call_record: &crate::LlmCallRecord, usage: &crate::TokenUsage) {
+        if let Some(ledger) = self.child_usage.as_ref() {
+            ledger.record(call_record, usage);
         }
     }
 
@@ -117,6 +148,7 @@ impl<'run> DirectCompletionClient<'run> {
             source,
             parent_invocation: self.parent_invocation.clone(),
             inside_tool_attempt: self.inside_tool_attempt,
+            child_usage: self.child_usage.clone(),
         })
     }
 
@@ -173,7 +205,7 @@ impl<'run> DirectCompletionClient<'run> {
     ) -> Result<crate::DirectCompletion, crate::PluginError> {
         match &self.source {
             DirectCompletionSource::Runtime(source) => {
-                source
+                let completion = source
                     .service
                     .complete(
                         request,
@@ -182,7 +214,9 @@ impl<'run> DirectCompletionClient<'run> {
                         source.turn_id.as_ref(),
                         position,
                     )
-                    .await
+                    .await?;
+                self.record_child_usage(&completion.llm_call, &completion.usage);
+                Ok(completion)
             }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::Unavailable(message) => {
@@ -227,7 +261,7 @@ impl<'run> DirectCompletionClient<'run> {
     ) -> Result<crate::DirectLlmCompletion, crate::PluginError> {
         match &self.source {
             DirectCompletionSource::Runtime(source) => {
-                source
+                let completion = source
                     .service
                     .complete_llm(
                         request,
@@ -237,7 +271,9 @@ impl<'run> DirectCompletionClient<'run> {
                         self.position(None),
                         caused_by,
                     )
-                    .await
+                    .await?;
+                self.record_child_usage(&completion.llm_call, &completion.usage);
+                Ok(completion)
             }
             #[cfg(any(test, feature = "testing"))]
             DirectCompletionSource::Unavailable(message) => {
@@ -258,6 +294,7 @@ impl<'run> DirectCompletionClient<'run> {
             source: DirectCompletionSource::Unavailable(message.into()),
             parent_invocation: None,
             inside_tool_attempt: false,
+            child_usage: None,
         }
     }
 
@@ -273,6 +310,7 @@ impl<'run> DirectCompletionClient<'run> {
             source: DirectCompletionSource::TestFn(Arc::new(invoke)),
             parent_invocation: None,
             inside_tool_attempt: false,
+            child_usage: None,
         }
     }
 
@@ -290,6 +328,7 @@ impl<'run> DirectCompletionClient<'run> {
             source: DirectCompletionSource::TestLlmFn(Arc::new(invoke)),
             parent_invocation: None,
             inside_tool_attempt: false,
+            child_usage: None,
         }
     }
 }

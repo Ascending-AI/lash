@@ -137,6 +137,20 @@ pub struct RuntimeControlConfig {
     /// config change re-registers the recorded value instead of conflicting.
     /// Defaults to [`DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS`].
     pub engine_child_max_attempts: std::num::NonZeroU32,
+    /// This deployment's tool-child wiring: the live-opener registry a turn or
+    /// process incarnation registers itself in, and the resolver that routes a
+    /// journaled tool child of an effect group to the handler-level driver
+    /// (ADR 0099 §2, FIG-2266).
+    ///
+    /// Default wiring, not an opt-in: it is installed on the effect host here,
+    /// so native, SQLite and PostgreSQL deployments all route first dispatch
+    /// and recovery through the one resolver without a caller-closure route.
+    ///
+    /// `None` when the host routes no tool children — it implements no durable
+    /// effect groups, or a different resolver is already registered on it,
+    /// which the conformance suites do deliberately. Openers are then not
+    /// registered either, so nothing is half-wired.
+    pub tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
 }
 
 #[derive(Clone)]
@@ -166,6 +180,11 @@ impl RuntimeHostConfig {
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
     ) -> Self {
+        let tool_children =
+            effect_host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(
+                &effect_host,
+                Arc::clone(&process_env_store),
+            ));
         Self {
             durability: RuntimeDurabilityConfig {
                 commit_budget,
@@ -196,6 +215,7 @@ impl RuntimeHostConfig {
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 tool_surface_open_mode: crate::ToolSurfaceOpenMode::default(),
                 engine_child_max_attempts: DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS,
+                tool_children,
             },
             tracing: RuntimeTracingConfig {
                 trace_sink: None,

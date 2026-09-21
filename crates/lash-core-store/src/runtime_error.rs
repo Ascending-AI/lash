@@ -276,6 +276,8 @@ pub enum RuntimeErrorCode {
     RuntimeEffectToolBatchCallReplay,
     RuntimeEffectToolBatchEmpty,
     RuntimeEffectToolBatchId,
+    RuntimeEffectToolChildCaptureVersion,
+    RuntimeEffectToolChildCompletionRouting,
     RuntimeEffectToolChildRequestAdmission,
     RuntimeEffectToolChildRequestCallId,
     RuntimeEffectToolChildRequestOpener,
@@ -577,6 +579,12 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectToolBatchCallReplay => "runtime_effect_tool_batch_call_replay",
             Self::RuntimeEffectToolBatchEmpty => "runtime_effect_tool_batch_empty",
             Self::RuntimeEffectToolBatchId => "runtime_effect_tool_batch_id",
+            Self::RuntimeEffectToolChildCaptureVersion => {
+                "runtime_effect_tool_child_capture_version"
+            }
+            Self::RuntimeEffectToolChildCompletionRouting => {
+                "runtime_effect_tool_child_completion_routing"
+            }
             Self::RuntimeEffectToolChildRequestAdmission => {
                 "runtime_effect_tool_child_request_admission"
             }
@@ -796,6 +804,8 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectToolBatchCallReplay
             | Self::RuntimeEffectToolBatchEmpty
             | Self::RuntimeEffectToolBatchId
+            | Self::RuntimeEffectToolChildCaptureVersion
+            | Self::RuntimeEffectToolChildCompletionRouting
             | Self::RuntimeEffectToolChildRequestAdmission
             | Self::RuntimeEffectToolChildRequestCallId
             | Self::RuntimeEffectToolChildRequestOpener
@@ -1225,6 +1235,12 @@ impl RuntimeErrorCode {
             "runtime_effect_tool_batch_call_replay" => Self::RuntimeEffectToolBatchCallReplay,
             "runtime_effect_tool_batch_empty" => Self::RuntimeEffectToolBatchEmpty,
             "runtime_effect_tool_batch_id" => Self::RuntimeEffectToolBatchId,
+            "runtime_effect_tool_child_capture_version" => {
+                Self::RuntimeEffectToolChildCaptureVersion
+            }
+            "runtime_effect_tool_child_completion_routing" => {
+                Self::RuntimeEffectToolChildCompletionRouting
+            }
             "runtime_effect_tool_child_request_admission" => {
                 Self::RuntimeEffectToolChildRequestAdmission
             }

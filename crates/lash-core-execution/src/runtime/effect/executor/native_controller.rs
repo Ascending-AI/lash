@@ -192,6 +192,20 @@ impl AwaitEventResolver for NativeRuntimeEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for NativeRuntimeEffectController {
+    /// Until this is called the controller refuses all three group methods with
+    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
+    /// because the `'static` executors a child needs in order to outlive its
+    /// caller have nowhere to come from. A second registration of a *different*
+    /// resolver is refused: one host has one answer to what runs a child, and
+    /// two would make the answer depend on when a path asked. Re-registering
+    /// the resolver already held is a no-op.
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.groups.register_executors(executors)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -290,20 +304,6 @@ impl NativeRuntimeEffectController {
             groups: Arc::new(NativeEffectGroups::default()),
             process_lifetime_completion_keys_enabled: false,
         }
-    }
-
-    /// Until this is called the controller refuses all three group methods with
-    /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported),
-    /// because the `'static` executors a child needs in order to outlive its
-    /// caller have nowhere to come from. A second
-    /// registration of a *different* resolver is refused: one host has one answer
-    /// to what runs a child, and two would make the answer depend on when a path
-    /// asked. Re-registering the resolver already held is a no-op.
-    pub fn register_group_executors(
-        &self,
-        executors: Arc<dyn GroupExecutors>,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.groups.register_executors(executors)
     }
 
     /// Opt into externally routable keys that remain valid only while this
