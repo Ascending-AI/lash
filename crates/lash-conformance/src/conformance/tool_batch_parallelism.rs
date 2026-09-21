@@ -54,7 +54,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::ToolDefinitionBindingExt as _;
 use lash_sansio::sync::MutexExt as _;
@@ -389,6 +389,12 @@ enum RendezvousEvent {
 struct RendezvousShared {
     started: Vec<String>,
     events: Vec<RendezvousEvent>,
+    /// Wall-clock stamps the law never reads. They exist for
+    /// [`measure_tool_batch`] (FIG-3398): the batch window is first-start to
+    /// last-answer, and stamping them inside this same critical section keeps
+    /// the measurement as untearable as the log.
+    started_at: Vec<Instant>,
+    answered_at: Vec<Instant>,
 }
 
 /// The rendezvous every leaf of one scenario shares.
@@ -417,12 +423,14 @@ impl Rendezvous {
     }
 
     fn record_started(&self, leaf: &str) {
+        let at = Instant::now();
         let started = {
             let mut shared = self.shared.lock_recover();
             shared.started.push(leaf.to_string());
             shared
                 .events
                 .push(RendezvousEvent::Started(leaf.to_string()));
+            shared.started_at.push(at);
             // The in-flight counters ride in the same critical section: a
             // waiter can only observe a complete `started` while holding this
             // lock, so the peak is unreachable mid-release.
@@ -434,11 +442,22 @@ impl Rendezvous {
     }
 
     fn record_answered(&self, leaf: &str) {
+        let at = Instant::now();
         let mut shared = self.shared.lock_recover();
         shared
             .events
             .push(RendezvousEvent::Answered(leaf.to_string()));
+        shared.answered_at.push(at);
         self.log.in_flight.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    /// First leaf start to last leaf answer — the batch's own window, excluding
+    /// the model round-trips that frame it. `None` when no leaf ran.
+    fn leaf_window(&self) -> Option<(Instant, Instant)> {
+        let shared = self.shared.lock_recover();
+        let first = shared.started_at.iter().copied().min()?;
+        let last = shared.answered_at.iter().copied().max()?;
+        Some((first, last))
     }
 
     fn missing(&self, required: &[String]) -> Vec<String> {
@@ -817,6 +836,42 @@ async fn run_scenario(
     gated: bool,
     dependencies: BTreeMap<String, Vec<String>>,
 ) -> ScenarioObservations {
+    // The two halves of the differential run the identical program, so they
+    // must not land on the identical durable session: a journalling tier would
+    // replay the first half's recorded outcomes and the second half would
+    // observe no leaves at all. The discriminator is the session, never the
+    // program.
+    let schedule = if gated { "gated" } else { "serial-safe" };
+    let session_id = lash_sansio::SessionId::from(format!(
+        "{prefix}-{}-{}-{schedule}",
+        producer.label, plan.scenario
+    ));
+    run_scenario_on_session(
+        session_id,
+        effect_host,
+        None,
+        producer,
+        plan,
+        gated,
+        dependencies,
+    )
+    .await
+}
+
+/// The `run_scenario` body with the session and turn controller chosen by the
+/// caller. A host whose `scoped()` already yields the right controller passes
+/// `None` and lets `drive_turn` scope it; a handler-bound tier — Restate,
+/// whose controller only exists inside the handler — scopes its controller to
+/// [`tool_batch_turn_id`] itself and hands it in (FIG-3398).
+async fn run_scenario_on_session(
+    session_id: lash_sansio::SessionId,
+    effect_host: Arc<dyn crate::EffectHost>,
+    turn_controller: Option<crate::ScopedEffectController<'_>>,
+    producer: &ToolBatchProducer,
+    plan: &ToolBatchPlan,
+    gated: bool,
+    dependencies: BTreeMap<String, Vec<String>>,
+) -> ScenarioObservations {
     let leaf_names = plan
         .leaves
         .iter()
@@ -854,16 +909,6 @@ async fn run_scenario(
         Arc::clone(&effect_host),
         Arc::clone(&relay_replies),
     ));
-    // The two halves of the differential run the identical program, so they
-    // must not land on the identical durable session: a journalling tier would
-    // replay the first half's recorded outcomes and the second half would
-    // observe no leaves at all. The discriminator is the session, never the
-    // program.
-    let schedule = if gated { "gated" } else { "serial-safe" };
-    let session_id = lash_sansio::SessionId::from(format!(
-        "{prefix}-{}-{}-{schedule}",
-        producer.label, plan.scenario
-    ));
     let world = ScenarioWorld {
         state,
         relay_replies,
@@ -873,11 +918,12 @@ async fn run_scenario(
         session_id,
         process_registry: producer.process_registry.as_ref().map(|make| make()),
     };
-    drive_turn(&world, producer, plan).await;
+    drive_turn(&world, producer, plan, turn_controller).await;
     ScenarioObservations {
         events: rendezvous.events(),
         peak_in_flight: rendezvous.peak_in_flight(),
         never_started: rendezvous.never_started(),
+        leaf_window: rendezvous.leaf_window(),
         relay_replies: world.relay_replies.lock_recover().clone(),
         model_calls: world.model_calls.load(Ordering::SeqCst),
     }
@@ -889,6 +935,9 @@ struct ScenarioObservations {
     events: Vec<RendezvousEvent>,
     peak_in_flight: usize,
     never_started: Vec<String>,
+    /// First leaf start to last leaf answer; `None` when no leaf ran. Read by
+    /// [`measure_tool_batch`], ignored by the law's assertions.
+    leaf_window: Option<(Instant, Instant)>,
     relay_replies: Vec<String>,
     model_calls: usize,
 }
@@ -931,11 +980,23 @@ impl ScenarioObservations {
     }
 }
 
+/// The turn id every scenario binds its turn scope to. It is a pure function
+/// of the session so a handler-bound tier can scope its own controller to the
+/// same turn before handing it to [`run_scenario_on_session`].
+pub fn tool_batch_turn_id(session_id: &lash_sansio::SessionId) -> lash_sansio::TurnId {
+    lash_sansio::TurnId::from(format!("{session_id}-turn"))
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn drive_turn(world: &ScenarioWorld, producer: &ToolBatchProducer, plan: &ToolBatchPlan) {
+async fn drive_turn(
+    world: &ScenarioWorld,
+    producer: &ToolBatchProducer,
+    plan: &ToolBatchPlan,
+    turn_controller: Option<crate::ScopedEffectController<'_>>,
+) {
     let mut script = (producer.script)(plan);
     script.push(crate::LlmResponse {
         parts: vec![crate::LlmOutputPart::Text {
@@ -1040,11 +1101,14 @@ async fn drive_turn(world: &ScenarioWorld, producer: &ToolBatchProducer, plan: &
     )
     .await
     .expect("build the tool-batch parallelism conformance runtime");
-    let turn_id = lash_sansio::TurnId::from(format!("{}-turn", world.session_id));
-    let turn_scope = world
-        .effect_host
-        .scoped(crate::ExecutionScope::turn(&world.session_id, &turn_id))
-        .expect("scope the tool-batch parallelism turn");
+    let turn_id = tool_batch_turn_id(&world.session_id);
+    let turn_scope = match turn_controller {
+        Some(scoped) => scoped,
+        None => world
+            .effect_host
+            .scoped(crate::ExecutionScope::turn(&world.session_id, &turn_id))
+            .expect("scope the tool-batch parallelism turn"),
+    };
     let mut input = crate::TurnInput::text("run the planned batch");
     input.trace_turn_id = Some(turn_id);
     // The worker is driven for as long as the turn runs. A process registered
@@ -1120,6 +1184,82 @@ fn plan(scenario: &str, routes: &[ToolBatchRoute], via: ToolBatchEntry) -> ToolB
 
 fn leaf_routes(width: usize) -> Vec<ToolBatchRoute> {
     vec![ToolBatchRoute::Leaf; width]
+}
+
+/// What one measured batch produced (FIG-3398's pre-cutover baseline).
+///
+/// The measurement shares the law's scenario machinery — the same producers,
+/// leaves and turn fixture — but runs the serial-safe schedule: leaves answer
+/// as soon as they run, so the window measures dispatch-to-settlement rather
+/// than the rendezvous the law needs.
+#[derive(Clone, Debug)]
+pub struct ToolBatchMeasurement {
+    /// The batch width that was issued.
+    pub width: usize,
+    /// Wall time of the whole scripted turn: model call, batch, and the
+    /// closing model call.
+    pub turn: Duration,
+    /// First leaf start to last leaf answer, when at least one leaf ran. On a
+    /// concurrent tier this approaches one leaf's latency; on a serial tier
+    /// it is the sum of the leaves.
+    pub leaf_window: Option<Duration>,
+    /// Leaves that reported started.
+    pub leaves_started: usize,
+    /// Leaves that produced an answer.
+    pub leaves_answered: usize,
+    /// Observed peak in-flight leaves — the concurrency the tier actually
+    /// reached (n on a concurrent tier, 1 on a serial one).
+    pub peak_in_flight: usize,
+    /// Model round-trips the turn took; sanity evidence that the batch ran
+    /// inside one scripted turn.
+    pub model_calls: usize,
+}
+
+/// Drives one width-`width` batch through `producer` on `effect_host` under
+/// `session_id` and measures it (FIG-3398 baseline).
+///
+/// The plan is the plain one: every leaf takes the catalogue route and the
+/// producer issues them directly, so the number measured is the batch itself,
+/// not a relay or a deferred settle. `turn_controller` is `None` on hosts
+/// whose `scoped()` yields the turn's controller; a handler-bound tier —
+/// Restate, whose controller exists only inside a handler — scopes its own
+/// controller to `ExecutionScope::turn(session_id, tool_batch_turn_id(..))`
+/// and passes it in.
+///
+/// Panics, as the law's fixture does, if the turn does not finish: a tier
+/// that cannot run the batch is a failed measurement, not a slow one.
+pub async fn measure_tool_batch(
+    session_id: lash_sansio::SessionId,
+    effect_host: Arc<dyn crate::EffectHost>,
+    turn_controller: Option<crate::ScopedEffectController<'_>>,
+    producer: &ToolBatchProducer,
+    width: usize,
+) -> ToolBatchMeasurement {
+    let scenario = format!("measure_w{width}");
+    let plan = plan(&scenario, &leaf_routes(width), ToolBatchEntry::Direct);
+    let started = Instant::now();
+    let observed = run_scenario_on_session(
+        session_id,
+        effect_host,
+        turn_controller,
+        producer,
+        &plan,
+        false,
+        BTreeMap::new(),
+    )
+    .await;
+    let turn = started.elapsed();
+    ToolBatchMeasurement {
+        width,
+        turn,
+        leaf_window: observed
+            .leaf_window
+            .map(|(first, last)| last.saturating_duration_since(first)),
+        leaves_started: observed.started().len(),
+        leaves_answered: observed.answered().len(),
+        peak_in_flight: observed.peak_in_flight,
+        model_calls: observed.model_calls,
+    }
 }
 
 /// The position of the first event matching `predicate`, or a failure naming
