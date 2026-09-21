@@ -1,6 +1,8 @@
 # 0073 — Gradual value types through to the workflow editor
 
-- Status: Proposed
+- Status: Accepted. Amended by [ADR 0100](0100-the-run-observation-contract.md),
+  which keeps facets derived and read-only while expression fields carry
+  authoritative IR.
 - Date: 2026-07-17
 - Deciders: Samuel Galanakis
 - Design map: Linear FIG-326 (wayfinder), decisions FIG-329…FIG-333, research FIG-327/FIG-328
