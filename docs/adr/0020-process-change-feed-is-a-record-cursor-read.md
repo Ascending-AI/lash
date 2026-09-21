@@ -6,7 +6,7 @@ every Runtime Process that changed since a watermark, including terminal transit
 `ProcessRegistry`: every process-row mutation (registration, event append, wait, status,
 terminal write) bumps a per-store monotonic change sequence, and a cursor-paged
 `processes_changed_since(cursor, limit)` read returns the changed `ProcessRecord`s in that
-order with the next cursor. Consumers needing event detail re-read `events_after` per changed
+order with the next cursor. Consumers needing event detail page through `event_page` per changed
 process.
 
 We chose a record-level cursor over a store-wide global event sequence: it keeps truth a state

@@ -3,6 +3,18 @@ use lash_core::{ProcessEventLog as _, ProcessObserverRegistry as _, SessionCommi
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
+fn complete_full_page<Full, Lite>(
+    outcome: lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage<Full, Lite>>,
+) -> Vec<Full> {
+    match outcome {
+        lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
+            events: lash_core::ProcessEventPageEvents::Full(events),
+            more: lash_core::ProcessEventPageMore::Complete,
+        }) => events,
+        _ => panic!("expected one complete full event page"),
+    }
+}
+
 struct NoopProcessWork;
 
 #[async_trait]
@@ -843,11 +855,18 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
         "cancel is a durable request; the runner owns terminalization"
     );
     assert!(
-        core.processes()
-            .events(&ProcessId::from("host-process"), 0)
-            .await?
-            .iter()
-            .any(|event| event.event_type == "process.cancel_requested"),
+        complete_full_page(
+            core.processes()
+                .events(
+                    &ProcessId::from("host-process"),
+                    std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
+                    lash_core::ProcessEventQueryMode::Full,
+                    None,
+                )
+                .await?
+        )
+        .iter()
+        .any(|event| event.event_type == "process.cancel_requested"),
         "the visible-process cancel appended its durable request"
     );
     Ok(())
@@ -913,13 +932,20 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         )
         .await?;
     assert!(
-        session
-            .admin()
-            .processes()
-            .events(&ProcessId::from("host-filter-signal"), 0)
-            .await?
-            .iter()
-            .any(|event| event.event_type == "signal.ready"),
+        complete_full_page(
+            session
+                .admin()
+                .processes()
+                .events(
+                    &ProcessId::from("host-filter-signal"),
+                    std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
+                    lash_core::ProcessEventQueryMode::Full,
+                    None,
+                )
+                .await?,
+        )
+        .iter()
+        .any(|event| event.event_type == "signal.ready"),
         "host events must expose the signal hidden from model tools"
     );
     session
@@ -931,13 +957,20 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         )
         .await?;
     assert!(
-        session
-            .admin()
-            .processes()
-            .events(&ProcessId::from("host-filter-cancel"), 0)
-            .await?
-            .iter()
-            .any(|event| event.event_type == "process.cancel_requested"),
+        complete_full_page(
+            session
+                .admin()
+                .processes()
+                .events(
+                    &ProcessId::from("host-filter-cancel"),
+                    std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
+                    lash_core::ProcessEventQueryMode::Full,
+                    None,
+                )
+                .await?
+        )
+        .iter()
+        .any(|event| event.event_type == "process.cancel_requested"),
         "host cancel must bypass the model-tool filter"
     );
     lash_core::testing::runbook_evidence::checkpoint(serde_json::json!({
@@ -1227,7 +1260,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                 .await?,
             "the returned live session must have its create observer edge"
         );
-        let create_events = registry.events_after(&create_process_id, 0).await?;
+        let create_events = registry.full_event_window(&create_process_id, 0).await?;
         assert!(create_events.iter().any(|event| {
             event.event_type == "process.observer_added"
                 && event.payload["by"]

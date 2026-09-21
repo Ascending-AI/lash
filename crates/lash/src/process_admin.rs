@@ -438,10 +438,12 @@ impl Processes {
     pub async fn events(
         &self,
         process_id: &ProcessId,
-        after_sequence: u64,
-    ) -> Result<Vec<lash_core::facade_support::ObservedProcessEvent>> {
+        limit: std::num::NonZeroUsize,
+        mode: lash_core::ProcessEventQueryMode,
+        continuation: Option<lash_core::ProcessEventPageToken>,
+    ) -> Result<lash_core::facade_support::ObservedProcessEventReadOutcome> {
         self.make_observer()?
-            .events_after(process_id, after_sequence)
+            .event_page(process_id, limit, mode, continuation)
             .await
             .map_err(Into::into)
     }

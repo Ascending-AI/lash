@@ -1179,7 +1179,7 @@ pub(crate) async fn cancel_work(
 /// the configured process-work port
 /// (ADR 0016) — the Restate ingress attach, never a store poll loop — and bounds
 /// the wait with `tokio::time::timeout` so a still-running or unknown-to-this-pod
-/// process cannot pin the request. On terminal it reconciles from `events_after`
+/// process cannot pin the request. On terminal it reconciles from paged events
 /// (ADR 0017): the durable log is the truth; the best-effort event sink is only
 /// freshness and may have dropped events.
 pub(crate) async fn await_work(
@@ -1203,19 +1203,40 @@ pub(crate) async fn await_work(
             )));
         }
     };
-    let events: Vec<WorkAwaitEvent> = state
-        .core
-        .processes()
-        .events(&process_id, 0)
-        .await
-        // Audited: process-event reads use the global registry and have no session tombstone contract.
-        .map_err(AppError::internal)?
-        .into_iter()
-        .map(|event| WorkAwaitEvent {
+    let mut events = Vec::new();
+    let mut continuation = None;
+    loop {
+        let event_outcome = state
+            .core
+            .processes()
+            .events(
+                &process_id,
+                std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN),
+                lash::process::ProcessEventQueryMode::Lite,
+                continuation,
+            )
+            .await
+            .map_err(AppError::internal)?;
+        let page = match event_outcome {
+            lash::process::ProcessEventReadOutcome::Retained(page) => page,
+            lash::process::ProcessEventReadOutcome::NoLongerRetained(retention) => {
+                return Err(AppError::internal(format!(
+                    "process event history is no longer retained: {retention:?}"
+                )));
+            }
+        };
+        let lash::process::ProcessEventPageEvents::Lite(page_events) = page.events else {
+            unreachable!("lite process event query returned a full page");
+        };
+        events.extend(page_events.into_iter().map(|event| WorkAwaitEvent {
             sequence: event.sequence,
             event_type: event.event_type,
-        })
-        .collect();
+        }));
+        continuation = match page.more {
+            lash::process::ProcessEventPageMore::Complete => break,
+            lash::process::ProcessEventPageMore::More { continuation } => Some(continuation),
+        };
+    }
     state.trace(
         "api.work.await",
         json!({

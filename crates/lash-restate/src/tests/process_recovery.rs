@@ -1494,7 +1494,7 @@ pub(super) async fn terminal_retry_returns_the_stored_outcome() {
     assert_eq!(replayed, stored);
     assert_eq!(
         registry
-            .events_after(&ProcessId::from("terminal-retry"), 0)
+            .full_event_window(&ProcessId::from("terminal-retry"), 0)
             .await
             .expect("terminal events")
             .into_iter()

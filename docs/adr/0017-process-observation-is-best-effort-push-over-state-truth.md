@@ -9,7 +9,7 @@ accepted
 Process event observation has two tiers with different guarantees, and hosts
 must not confuse them:
 
-- The durable event log (`ProcessRegistry::events_after`) is the **truth**. It
+- The durable event log (`ProcessRegistry::event_page`) is the **truth**. It
   is the complete, ordered, crash-durable record of a process's events.
 - A `ProcessEventSink` is **best-effort freshness**, never truth. When a host
   installs a sink, the `WatchedProcessRegistry` decorator calls `sink.emit(...)`
@@ -56,7 +56,7 @@ the public process facade fills that field after cross-store reconciliation.
 
 Hosts want prompt, low-latency visibility into a running process's events —
 render a live log, forward events to their own store — without polling
-`events_after` on a timer. A push feed serves that. But making the push feed a
+`event_page` on a timer. A push feed serves that. But making the push feed a
 source of truth would force it to carry buffering, retries, and crash-recovery
 guarantees, re-creating the durable log badly. The event log already *is* the
 durable record with those properties; the sink should be a cheap freshness
@@ -84,7 +84,7 @@ rather than silently inheriting a no-op.
 - `ProcessEventSink` is optional and absent by default; deployments that do not
   install one see no behavior change. The decorator still publishes in-process
   change ticks for the awaiter exactly as before, sink or no sink.
-- Sink consumers must treat a gap as expected and reconcile from `events_after`.
+- Sink consumers must treat a gap as expected and reconcile through `event_page`.
   A consumer that needs the terminal outcome awaits it via the work driver, not
   the sink.
 - `prune_terminal_processes` is a required `ProcessRegistry` method. New and

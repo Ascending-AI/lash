@@ -1211,19 +1211,42 @@ async fn agent_contract_process_event_facts(
 ) -> Result<Vec<Value>, FixedScriptRunnerError> {
     let mut events = Vec::new();
     for process in processes {
-        for event in core
-            .processes()
-            .events(&process.raw_process_id, 0)
-            .await
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-        {
-            let event_type = event.event_type;
-            events.push(json!({
-                "process_ref": process.process_ref.clone(),
-                "sequence": event.sequence,
-                "event_type": event_type,
-                "payload": normalize_contract_process_event_payload(&event_type, event.payload),
-            }));
+        let mut continuation = None;
+        loop {
+            let outcome = core
+                .processes()
+                .events(
+                    &process.raw_process_id,
+                    std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN),
+                    lash::process::ProcessEventQueryMode::Full,
+                    continuation,
+                )
+                .await
+                .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+            let page = match outcome {
+                lash::process::ProcessEventReadOutcome::Retained(page) => page,
+                lash::process::ProcessEventReadOutcome::NoLongerRetained(retention) => {
+                    return Err(FixedScriptRunnerError::Runtime(format!(
+                        "process event history is no longer retained: {retention:?}"
+                    )));
+                }
+            };
+            let lash::process::ProcessEventPageEvents::Full(page_events) = page.events else {
+                unreachable!("full process event query returned a lite page");
+            };
+            for event in page_events {
+                let event_type = event.event_type;
+                events.push(json!({
+                    "process_ref": process.process_ref.clone(),
+                    "sequence": event.sequence,
+                    "event_type": event_type,
+                    "payload": normalize_contract_process_event_payload(&event_type, event.payload),
+                }));
+            }
+            continuation = match page.more {
+                lash::process::ProcessEventPageMore::Complete => break,
+                lash::process::ProcessEventPageMore::More { continuation } => Some(continuation),
+            };
         }
     }
     events.sort_by(|left, right| {

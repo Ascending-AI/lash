@@ -4,7 +4,7 @@ use crate::runtime::process::ProcessWorkerFault;
 /// Host-facing, best-effort push of each appended process event.
 ///
 /// A sink is an optional freshness feed, **never a source of truth.** The
-/// durable event log ([`crate::ProcessRegistry::events_after`]) is the only
+/// durable event log ([`crate::ProcessRegistry::event_page`]) is the only
 /// complete record; a sink lets a host observe appends promptly without
 /// polling, but it makes no delivery promise.
 ///
@@ -15,7 +15,7 @@ use crate::runtime::process::ProcessWorkerFault;
 ///   after a successful `append_event`, in that pod's per-process append order.
 ///   There is no buffering, no retry, and no delivery guarantee across pod
 ///   crashes or restarts: an event that was appended durably may never reach
-///   the sink. Consumers that need completeness reconcile from `events_after`.
+///   the sink. Consumers that need completeness reconcile through `event_page`.
 /// - **Worker faults ride the same surface.** A drive of pending processes
 ///   *admits* rows and returns; a fault that strands an admitted row afterwards
 ///   arrives through [`emit_worker_fault`](Self::emit_worker_fault). That method

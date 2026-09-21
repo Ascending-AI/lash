@@ -165,7 +165,7 @@ key is a conflict. Normal process-event sequence allocation and transactional
 projection remain in
 `crates/lash-core-execution/src/runtime/process/validation.rs`. Process-event
 pages use the exact process-and-incarnation read already exposed as
-`ProcessRegistry::events_after_ref` in
+`ProcessRegistry::event_page_ref` in
 `crates/lash-core-execution/src/runtime/process/registry_concerns.rs`.
 
 ### R5: attempt is telemetry identity only

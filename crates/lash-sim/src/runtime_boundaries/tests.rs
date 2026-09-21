@@ -679,7 +679,7 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
             terminal
         );
         let terminal_events = registry
-            .events_after(&process_id, 0)
+            .full_event_window(&process_id, 0)
             .await
             .expect("terminal events")
             .into_iter()

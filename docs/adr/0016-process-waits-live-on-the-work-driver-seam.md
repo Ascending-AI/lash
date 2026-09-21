@@ -17,7 +17,7 @@ Process waits live above storage:
 - `ProcessWorkDriver` is the process execution and coordination seam. Process
   commands route terminal waits through the driver when one is installed.
 - `ProcessAwaiter` is the core fallback for local and store-only deployments:
-  it performs point reads (`get_process`, `events_after`) and uses a
+  it performs point reads (`get_process`, `event_page`) and uses a
   `ProcessChangeHub` when the registry is wrapped in-process, with bounded
   exponential backoff when another process may be mutating the store.
 - `ProcessAttach` lets an external execution backend own a terminal await. The

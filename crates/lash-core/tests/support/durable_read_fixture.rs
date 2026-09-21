@@ -1327,7 +1327,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     let process_events = handles
         .processes
-        .events_after(&ProcessId::from(PROCESS_ID), 0)
+        .full_event_window(&ProcessId::from(PROCESS_ID), 0)
         .await
         .expect("durable fixture drift: waiting-process event read failed");
     assert_eq!(process_events.len(), 2);
@@ -1430,7 +1430,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     let wake_events = handles
         .processes
-        .events_after(&ProcessId::from(WAKE_PROCESS_ID), 0)
+        .full_event_window(&ProcessId::from(WAKE_PROCESS_ID), 0)
         .await
         .expect("durable fixture drift: wake-process event read failed");
     assert_eq!(wake_events.len(), 1);

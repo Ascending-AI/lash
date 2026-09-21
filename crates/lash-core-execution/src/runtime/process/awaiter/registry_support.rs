@@ -28,15 +28,43 @@ impl WatchedProcessRegistry {
             })
     }
 
-    pub(super) async fn emit_events_after(&self, process_id: &ProcessId, cursor: Option<u64>) {
+    pub(super) async fn emit_event_pages_since(&self, process_id: &ProcessId, cursor: Option<u64>) {
         let (Some(sink), Some(cursor)) = (self.sink.as_ref(), cursor) else {
             return;
         };
-        let Ok(events) = self.inner.events_after(process_id, cursor).await else {
+        let Ok(process_ref) = self.inner.resolve_process_ref(process_id).await else {
             return;
         };
-        for event in events {
-            sink.emit(&event).await;
+        let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
+        let mut continuation = Some(crate::ProcessEventPageToken::new(
+            process_ref.process_id.clone(),
+            process_ref.incarnation,
+            cursor,
+            crate::ProcessEventQueryMode::Full,
+        ));
+        loop {
+            let Ok(crate::ProcessEventReadOutcome::Retained(page)) = self
+                .inner
+                .event_page(
+                    process_id,
+                    limit,
+                    crate::ProcessEventQueryMode::Full,
+                    continuation,
+                )
+                .await
+            else {
+                return;
+            };
+            let crate::ProcessEventPageEvents::Full(events) = page.events else {
+                return;
+            };
+            for event in events {
+                sink.emit(&event).await;
+            }
+            continuation = match page.more {
+                crate::ProcessEventPageMore::Complete => return,
+                crate::ProcessEventPageMore::More { continuation } => Some(continuation),
+            };
         }
     }
 }

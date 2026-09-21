@@ -110,6 +110,45 @@ async fn superseded_await_receipt_is_refused_instead_of_returning_the_successor_
     );
 }
 
+#[tokio::test]
+async fn superseded_event_await_is_refused_instead_of_polling_the_successor() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let old = registry
+        .register_process(registration(&ProcessId::from("reused-event-await")))
+        .await
+        .expect("register old incarnation");
+    let old_ref = crate::ProcessRef::from_record(&old);
+    registry
+        .complete_process(
+            &old.id,
+            success(serde_json::json!("old")),
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete old incarnation");
+    registry
+        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune old incarnation");
+    registry
+        .register_process(registration(&ProcessId::from("reused-event-await")))
+        .await
+        .expect("register successor incarnation");
+    let awaiter = NativeProcessAwaiter::for_registry(registry);
+
+    let result = awaiter
+        .await_event_ref(&old_ref, "process.completed", 0)
+        .await;
+
+    assert!(
+        matches!(
+            result,
+            Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+        ),
+        "old event await must refuse the successor, got {result:?}"
+    );
+}
+
 /// ADR 0016 pins the default awaiter cadence while allowing native deployments
 /// to tune both bounds through `WorkCadencePolicy`.
 #[test]
@@ -856,11 +895,11 @@ impl ProcessEventSink for LossySink {
 }
 
 /// Sim-style sink loss: a sink that drops a fraction of emits still leaves
-/// the durable log complete. Reconciling from `events_after` at terminal
+/// the durable log complete. Reconciling through `event_page` at terminal
 /// recovers every event the push feed missed — ADR 0017's "push loss never
 /// loses truth".
 #[tokio::test]
-async fn lossy_sink_still_reconciles_complete_log_from_events_after() {
+async fn lossy_sink_still_reconciles_complete_log_from_event_pages() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = LossySink::default();
     let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
@@ -905,7 +944,7 @@ async fn lossy_sink_still_reconciles_complete_log_from_events_after() {
         "the sink observed fewer events than were appended"
     );
     let reconciled = registry
-        .events_after(&ProcessId::from("proc"), 0)
+        .full_event_window(&ProcessId::from("proc"), 0)
         .await
         .expect("events")
         .into_iter()
@@ -915,7 +954,7 @@ async fn lossy_sink_still_reconciles_complete_log_from_events_after() {
     assert_eq!(
         reconciled.len(),
         EVENTS as usize,
-        "events_after reconciles the complete non-terminal log despite push loss"
+        "paged reads reconcile the complete non-terminal log despite push loss"
     );
     assert!(
         reconciled.windows(2).all(|events| events[0] < events[1]),

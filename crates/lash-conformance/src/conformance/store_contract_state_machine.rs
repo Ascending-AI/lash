@@ -1392,7 +1392,7 @@ async fn registry_snapshot(
     id: &ProcessId,
 ) -> serde_json::Value {
     let record = registry.get_process(id).await.ok().flatten();
-    let events = registry.events_after(id, 0).await.unwrap_or_default();
+    let events = registry.full_event_window(id, 0).await.unwrap_or_default();
     let observers = registry.observers_for_process(id).await.unwrap_or_default();
     serde_json::json!({"record": record, "events": events, "observers": observers})
 }
@@ -1419,13 +1419,13 @@ async fn assert_fold_law(
             .map_err(|error| format!("live modeled process `{id}` became unavailable: {error}"))?
             .ok_or_else(|| format!("live modeled process `{id}` disappeared"))?;
         let events = registry
-            .events_after(&id, 0)
+            .full_event_window(&id, 0)
             .await
             .map_err(|error| error.to_string())?;
         let folded = fold_process_record(base, &events).map_err(|error| error.to_string())?;
         if folded != stored {
             return Err(format!(
-                "stored record for `{id}` differs from fold_process_record(events_after(0))"
+                "stored record for `{id}` differs from folding its retained event history"
             ));
         }
     }
@@ -1465,7 +1465,7 @@ async fn assert_replay_key_idempotency(
     );
     prop_assert_eq!(
         registry
-            .events_after(&id, 0)
+            .full_event_window(&id, 0)
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
             .len(),
@@ -1484,7 +1484,7 @@ async fn assert_replay_key_idempotency(
     );
     prop_assert_eq!(
         registry
-            .events_after(&id, 0)
+            .full_event_window(&id, 0)
             .await
             .map_err(|error| TestCaseError::fail(error.to_string()))?
             .len(),
@@ -2276,7 +2276,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
             TestCaseError::fail("Prune/re-register registry state: fresh live record was absent")
         })?;
     let fresh_events = registry
-        .events_after(&id, 0)
+        .full_event_window(&id, 0)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(

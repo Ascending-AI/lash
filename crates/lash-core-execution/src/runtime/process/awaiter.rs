@@ -100,7 +100,9 @@ delegate_process_registrar!(
         let sink_cursor = watched.sink_cursor(process_id).await;
         let record = forwarded.await?;
         watched.hub.notify(process_id);
-        watched.emit_events_after(process_id, sink_cursor).await;
+        watched
+            .emit_event_pages_since(process_id, sink_cursor)
+            .await;
         Ok(record)
     }
 );
@@ -118,7 +120,9 @@ delegate_process_event_log!(
         let sink_cursor = watched.sink_cursor(process_id).await;
         let result = forwarded.await?;
         watched.hub.notify(process_id);
-        watched.emit_events_after(process_id, sink_cursor).await;
+        watched
+            .emit_event_pages_since(process_id, sink_cursor)
+            .await;
         Ok(result)
     }
 );
@@ -134,7 +138,9 @@ delegate_process_lifecycle!(
         let sink_cursor = watched.sink_cursor(process_id).await;
         let result = forwarded.await?;
         watched.hub.notify(process_id);
-        watched.emit_events_after(process_id, sink_cursor).await;
+        watched
+            .emit_event_pages_since(process_id, sink_cursor)
+            .await;
         Ok(result)
     }
 );

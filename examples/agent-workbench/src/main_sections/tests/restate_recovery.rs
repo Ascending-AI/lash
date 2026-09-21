@@ -9,6 +9,18 @@ mod closure_lifecycle;
 #[path = "restate_recovery/immutable_deployment.rs"]
 mod immutable_deployment;
 
+fn complete_full_process_event_page(
+    outcome: lash::process::ObservedProcessEventReadOutcome,
+) -> Vec<lash::process::ObservedProcessEvent> {
+    match outcome {
+        lash::process::ProcessEventReadOutcome::Retained(lash::process::ProcessEventPage {
+            events: lash::process::ProcessEventPageEvents::Full(events),
+            more: lash::process::ProcessEventPageMore::Complete,
+        }) => events,
+        _ => panic!("expected one complete full process-event page"),
+    }
+}
+
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_process_llm_query_with_typed_output_succeeds() {
@@ -1155,12 +1167,19 @@ finish(await handle);
         !immediately_after_delete.terminal(),
         "session revocation must leave the independently sleeping process live"
     );
-    let immediate_events = harness
-        .state
-        .process_observer
-        .events_after(&process_id.clone(), 0)
-        .await
-        .expect("read process events immediately after session revocation");
+    let immediate_events = complete_full_process_event_page(
+        harness
+            .state
+            .process_observer
+            .event_page(
+                &process_id.clone(),
+                std::num::NonZeroUsize::new(4_096).expect("non-zero test page size"),
+                lash::process::ProcessEventQueryMode::Full,
+                None,
+            )
+            .await
+            .expect("read process events immediately after session revocation"),
+    );
     assert!(
         !immediate_events
             .iter()
@@ -1211,12 +1230,19 @@ finish(await handle);
         ),
         "session revocation changed the process terminal: {process_terminal:#?}"
     );
-    let events = harness
-        .state
-        .process_observer
-        .events_after(&process_id, 0)
-        .await
-        .expect("read surviving process events");
+    let events = complete_full_process_event_page(
+        harness
+            .state
+            .process_observer
+            .event_page(
+                &process_id,
+                std::num::NonZeroUsize::new(4_096).expect("non-zero test page size"),
+                lash::process::ProcessEventQueryMode::Full,
+                None,
+            )
+            .await
+            .expect("read surviving process events"),
+    );
     assert!(
         !events
             .iter()
@@ -1486,11 +1512,18 @@ async fn wait_for_process_event(
 ) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        let events = state
-            .process_observer
-            .events_after(process_id, 0)
-            .await
-            .expect("read process events");
+        let events = complete_full_process_event_page(
+            state
+                .process_observer
+                .event_page(
+                    process_id,
+                    std::num::NonZeroUsize::new(4_096).expect("non-zero test page size"),
+                    lash::process::ProcessEventQueryMode::Full,
+                    None,
+                )
+                .await
+                .expect("read process events"),
+        );
         if events.iter().any(|event| event.event_type == event_type) {
             return;
         }

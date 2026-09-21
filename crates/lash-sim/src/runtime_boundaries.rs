@@ -1314,7 +1314,7 @@ impl RuntimeBoundaryHarness {
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("replay process B output: {err}")))?;
         let events = registry
-            .events_after(&process_id, 0)
+            .full_event_window(&process_id, 0)
             .await
             .map_err(|err| RuntimeBoundaryError::new(format!("read process events: {err}")))?;
         let terminal_event_count = events
@@ -1503,7 +1503,7 @@ async fn terminal_writer(
     process_id: &ProcessId,
 ) -> Result<Option<String>, RuntimeBoundaryError> {
     let events = registry
-        .events_after(process_id, 0)
+        .full_event_window(process_id, 0)
         .await
         .map_err(|err| RuntimeBoundaryError::new(format!("read process events: {err}")))?;
     Ok(terminal_writer_from_events(&events))

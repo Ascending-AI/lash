@@ -10,7 +10,7 @@ use super::super::process::ProcessChangeHub;
 
 /// Native waiter for process terminal state and events (ADR 0016).
 ///
-/// It performs narrow point reads (`get_process`, `events_after`) and wakes
+/// It performs narrow point reads (`get_process`, `event_page`) and wakes
 /// promptly from the composition-owned change hub. Callers still bound every
 /// wait with their cancellation select or [`tokio::time::timeout`].
 #[derive(Clone)]
@@ -193,12 +193,63 @@ impl NativeProcessAwaiter {
         event_type: &str,
         after_sequence: u64,
     ) -> Result<Option<ProcessEvent>, PluginError> {
-        Ok(self
-            .registry
-            .events_after_ref(process_ref, after_sequence)
-            .await?
-            .into_iter()
-            .find(|event| event.event_type == event_type))
+        let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
+        let mut continuation = Some(crate::ProcessEventPageToken::new(
+            process_ref.process_id.clone(),
+            process_ref.incarnation,
+            after_sequence,
+            crate::ProcessEventQueryMode::Full,
+        ));
+        loop {
+            let outcome = self
+                .registry
+                .event_page_ref(
+                    process_ref,
+                    limit,
+                    crate::ProcessEventQueryMode::Full,
+                    continuation,
+                )
+                .await?;
+            let page = match outcome {
+                crate::ProcessEventReadOutcome::Retained(page) => page,
+                crate::ProcessEventReadOutcome::NoLongerRetained(
+                    crate::ProcessEventHistoryRetention::Pruned {
+                        terminal_label,
+                        pruned_at_ms,
+                    },
+                ) => {
+                    return Err(PluginError::ProcessNoLongerRetained {
+                        terminal_label,
+                        pruned_at_ms,
+                    });
+                }
+                crate::ProcessEventReadOutcome::NoLongerRetained(
+                    crate::ProcessEventHistoryRetention::Retired {
+                        requested_incarnation,
+                        current_incarnation,
+                    },
+                ) => {
+                    return Err(PluginError::ProcessIncarnationSuperseded {
+                        process_id: process_ref.process_id.clone(),
+                        requested_incarnation,
+                        current_incarnation,
+                    });
+                }
+            };
+            let crate::ProcessEventPageEvents::Full(events) = page.events else {
+                unreachable!("full process event query returned a lite page");
+            };
+            if let Some(event) = events
+                .into_iter()
+                .find(|event| event.event_type == event_type)
+            {
+                return Ok(Some(event));
+            }
+            continuation = match page.more {
+                crate::ProcessEventPageMore::Complete => return Ok(None),
+                crate::ProcessEventPageMore::More { continuation } => Some(continuation),
+            };
+        }
     }
 }
 

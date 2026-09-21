@@ -221,7 +221,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         .await
         .context("list new-target receiver rows")?;
     let audit_present = registry
-        .events_after(&ProcessId::from(RETARGET_PROCESS_ID), 0)
+        .full_event_window(&ProcessId::from(RETARGET_PROCESS_ID), 0)
         .await
         .context("read retarget audit events")?
         .iter()

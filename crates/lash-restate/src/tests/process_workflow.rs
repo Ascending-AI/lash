@@ -51,7 +51,7 @@ pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
     assert_eq!(next_cursor, cursor);
     assert!(
         registry
-            .events_after(&ProcessId::from("segment-invariant"), 0)
+            .full_event_window(&ProcessId::from("segment-invariant"), 0)
             .await
             .expect("events")
             .is_empty()
@@ -1382,7 +1382,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         .expect("cancel through reopened process workflow");
     assert!(
         registry_b
-            .events_after(&ProcessId::from("recover-cancel"), 0)
+            .full_event_window(&ProcessId::from("recover-cancel"), 0)
             .await
             .expect("events after cancel")
             .iter()

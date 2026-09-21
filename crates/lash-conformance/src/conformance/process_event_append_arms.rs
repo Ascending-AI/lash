@@ -215,7 +215,7 @@ async fn append_arm_footprint(
     target_session_id: &SessionId,
 ) -> (usize, Option<u64>) {
     let events = registry
-        .events_after(process_id, 0)
+        .full_event_window(process_id, 0)
         .await
         .expect("read append-arm event rows")
         .len();
@@ -235,7 +235,7 @@ async fn terminal_sequence(
     process_id: &ProcessId,
 ) -> u64 {
     registry
-        .events_after(process_id, 0)
+        .full_event_window(process_id, 0)
         .await
         .expect("read append-arm event rows")
         .last()

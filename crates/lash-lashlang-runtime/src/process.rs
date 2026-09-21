@@ -998,18 +998,40 @@ impl LashlangProcessHost<'_> {
             return Ok(since_ms);
         }
 
-        for event in self.processes.events_after(0).await?.into_iter().rev() {
-            if event.event_type != "process.waiting" {
-                continue;
-            }
-            let Some(wait_value) = event.payload.get("wait") else {
-                continue;
+        let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
+        let mut continuation = None;
+        let mut matched_since_ms = None;
+        loop {
+            let outcome = self
+                .processes
+                .event_page(limit, lash_core::ProcessEventQueryMode::Full, continuation)
+                .await?;
+            let lash_core::ProcessEventReadOutcome::Retained(page) = outcome else {
+                break;
             };
-            if let Ok(wait) = serde_json::from_value::<lash_core::WaitState>(wait_value.clone())
-                && wait.key() == key
-            {
-                return Ok(wait.since_ms);
+            let lash_core::ProcessEventPageEvents::Full(events) = page.events else {
+                unreachable!("full process event query returned a lite page");
+            };
+            for event in events {
+                if event.event_type != "process.waiting" {
+                    continue;
+                }
+                let Some(wait_value) = event.payload.get("wait") else {
+                    continue;
+                };
+                if let Ok(wait) = serde_json::from_value::<lash_core::WaitState>(wait_value.clone())
+                    && wait.key() == key
+                {
+                    matched_since_ms = Some(wait.since_ms);
+                }
             }
+            continuation = match page.more {
+                lash_core::ProcessEventPageMore::Complete => break,
+                lash_core::ProcessEventPageMore::More { continuation } => Some(continuation),
+            };
+        }
+        if let Some(since_ms) = matched_since_ms {
+            return Ok(since_ms);
         }
         Ok(lash_core::facade_support::current_epoch_ms())
     }

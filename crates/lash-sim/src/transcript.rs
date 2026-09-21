@@ -551,7 +551,7 @@ mod tests {
             "a retarget must settle its stale wake delivery as retargeted"
         );
         let retarget_event = registry
-            .events_after(&ProcessId::from(process_id), 0)
+            .full_event_window(&ProcessId::from(process_id), 0)
             .await
             .expect("read process audit events")
             .into_iter()

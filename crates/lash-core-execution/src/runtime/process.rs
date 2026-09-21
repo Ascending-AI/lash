@@ -49,8 +49,11 @@ pub use engine::{
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
     ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSemantics,
-    ProcessTerminalSpec, ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec,
+    ProcessEventHistoryRetention, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
+    ProcessEventPageMore, ProcessEventPageToken, ProcessEventPageTokenStoreExt,
+    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemantics,
+    ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSemantics, ProcessTerminalSpec,
+    ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec,
     process_signal_await_key, process_signal_event_type, process_signal_name_from_event_type,
     process_signal_wait_key, terminal_append_request, terminal_event_type_name,
     validate_process_signal_name,
@@ -80,8 +83,9 @@ pub use model::{
     publish_process_execution_env, settle_started_process_execution_env,
 };
 pub use observation::{
-    ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState,
-    ProcessWorkObserver, ProcessWorkSnapshot,
+    ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
+    ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState, ProcessWorkObserver,
+    ProcessWorkSnapshot,
 };
 pub use observer_intent::{
     SessionObserverIntentSource, reconcile_session_process_observer_intents,

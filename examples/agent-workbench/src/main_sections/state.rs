@@ -1097,7 +1097,7 @@ impl WorkerFaultNotice {
 /// each appended process event to a channel (ADR 0017). `emit` runs inline on
 /// the registry append path, so it must return fast: it does no I/O, only a
 /// non-blocking `try_send`. Dropping on a full channel is intentional — the
-/// durable event log (`events_after`) is the reconcile source, not this feed.
+/// durable paged event log is the reconcile source, not this feed.
 ///
 /// The same sink carries the durable-process worker's typed faults, which have
 /// no durable log to reconcile from: dropping one loses the only report that a

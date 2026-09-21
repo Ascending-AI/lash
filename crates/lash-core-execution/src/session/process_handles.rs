@@ -930,7 +930,7 @@ mod tests {
         assert_eq!(record.tool, "signal_process");
         let events = host
             .process_registry
-            .events_after(&ProcessId::from("target-process"), 0)
+            .full_event_window(&ProcessId::from("target-process"), 0)
             .await
             .expect("list events");
         assert!(

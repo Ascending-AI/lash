@@ -92,7 +92,7 @@ mod tests {
             .expect("complete rollback process");
         let events_before = serde_json::to_value(
             registry
-                .events_after(&process_id, 0)
+                .full_event_window(&process_id, 0)
                 .await
                 .expect("read events before divergent prune"),
         )
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(
                 registry
-                    .events_after(&process_id, 0)
+                    .full_event_window(&process_id, 0)
                     .await
                     .expect("read events after divergent prune"),
             )

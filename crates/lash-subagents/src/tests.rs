@@ -728,7 +728,7 @@ try {
     );
 
     // 3. The terminal process event.
-    let events = lash_core::ProcessEventLog::events_after(
+    let events = lash_core::ProcessEventLog::full_event_window(
         probe.process_registry.as_ref(),
         &child.process_id,
         0,
@@ -1400,7 +1400,7 @@ impl SeedProbe {
             process.id
         );
 
-        let events = lash_core::ProcessEventLog::events_after(
+        let events = lash_core::ProcessEventLog::full_event_window(
             self.process_registry.as_ref(),
             &process.id,
             0,

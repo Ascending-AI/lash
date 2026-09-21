@@ -462,7 +462,7 @@ async fn emitted_event_count(
     event_type: &str,
 ) -> Result<usize> {
     Ok(registry
-        .events_after(&ProcessId::from(PROCESS), 0)
+        .full_event_window(&ProcessId::from(PROCESS), 0)
         .await?
         .iter()
         .filter(|event| event.event_type == event_type)

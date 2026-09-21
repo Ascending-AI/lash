@@ -673,7 +673,7 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         lash_core::Resolution::Ok(serde_json::json!({"kind": "signal"}))
     );
     let events = registry
-        .events_after(&ProcessId::from("runtime-scenario-intent-target"), 0)
+        .full_event_window(&ProcessId::from("runtime-scenario-intent-target"), 0)
         .await
         .expect("read literal intent target events");
     assert_eq!(
