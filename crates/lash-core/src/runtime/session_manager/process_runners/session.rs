@@ -294,7 +294,7 @@ fn process_turn_failure_raw(
     if let Some(issue) = issue {
         raw.insert("kind".to_string(), issue.kind.as_str().into());
         if let Some(code) = issue.code.as_ref() {
-            raw.insert("code".to_string(), code.as_str().into());
+            raw.insert("code".to_string(), code.namespaced().into());
         }
         if let Some(retryable) = issue.retryable {
             raw.insert("retryable".to_string(), retryable.into());

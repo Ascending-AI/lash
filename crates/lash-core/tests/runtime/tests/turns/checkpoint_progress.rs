@@ -551,7 +551,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
             .with_retry_verdict(
                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
             )
-            .with_provider_code("http_500")),
+            .with_code(FailureCode::provider("http_500"))),
         },
         MockCall {
             stream_events: Vec::new(),
@@ -561,7 +561,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
             .with_retry_verdict(
                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
             )
-            .with_provider_code("http_500")),
+            .with_code(FailureCode::provider("http_500"))),
         },
         MockCall {
             stream_events: Vec::new(),
@@ -571,7 +571,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
             .with_retry_verdict(
                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
             )
-            .with_provider_code("http_500")),
+            .with_code(FailureCode::provider("http_500"))),
         },
         MockCall {
             stream_events: Vec::new(),
@@ -581,7 +581,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
             .with_retry_verdict(
                 lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
             )
-            .with_provider_code("http_500")),
+            .with_code(FailureCode::provider("http_500"))),
         },
     ]);
     let mut runtime = runtime_with_plugins(Vec::new(), transport).await;
@@ -643,7 +643,7 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
         response: Err(
             lash_core::llm::transport::LlmTransportError::new("bad request")
                 .with_http_status(400)
-                .with_provider_code("400"),
+                .with_code(FailureCode::provider("400")),
         ),
     }]);
     let mut runtime = runtime_with_plugins(Vec::new(), transport).await;
@@ -682,12 +682,7 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
         issue.provider_failure_kind,
         Some(lash_core::ProviderFailureKind::Validation)
     );
-    assert_eq!(
-        issue.code,
-        Some(lash_core::TurnFailureCode::Other(
-            "provider:400".to_string()
-        ))
-    );
+    assert_eq!(issue.code, Some(lash_core::FailureCode::provider("400")));
     assert_eq!(turn.llm_calls.len(), 1);
     assert_eq!(turn.llm_calls[0].attempts.len(), 1);
 }

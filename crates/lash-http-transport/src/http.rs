@@ -441,7 +441,7 @@ where
             LlmTransportError::new(timeout_message)
                 .with_kind(ProviderFailureKind::Timeout)
                 .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-                .with_adapter_code(TurnFailureCode::Timeout)
+                .with_lash_code(TurnFailureCode::Timeout)
         })?,
         None => future.await,
     }
@@ -499,10 +499,7 @@ mod tests {
 
         let err = result.expect_err("expected timeout");
         assert_eq!(err.message, "request timed out");
-        assert_eq!(
-            err.code,
-            Some(FailureCode::Adapter(TurnFailureCode::Timeout))
-        );
+        assert_eq!(err.code, Some(FailureCode::lash(TurnFailureCode::Timeout)));
         assert_eq!(err.retry_verdict, TransportRetryVerdict::RetryableTransient);
     }
 

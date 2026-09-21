@@ -480,12 +480,10 @@ pub(super) async fn prove_openai_compatible_response_start_timeout()
         .expect_err("response-start timeout script should fail");
     require(
         err.kind == ProviderFailureKind::Timeout
-            && matches!(
-                err.code,
-                Some(lash_sansio::FailureCode::Adapter(
-                    lash_sansio::TurnFailureCode::Timeout
+            && err.code
+                == Some(lash_sansio::FailureCode::lash(
+                    lash_sansio::TurnFailureCode::Timeout,
                 ))
-            )
             && err.is_retryable()
             && err.http_status.is_none(),
         "OpenAI-compatible response-start timeout did not match production timeout envelope",
@@ -524,12 +522,10 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
     let partial_response_events = committed_events.len() - evidence_events;
     require(
         err.kind == ProviderFailureKind::Timeout
-            && matches!(
-                err.code,
-                Some(lash_sansio::FailureCode::Adapter(
-                    lash_sansio::TurnFailureCode::Timeout
+            && err.code
+                == Some(lash_sansio::FailureCode::lash(
+                    lash_sansio::TurnFailureCode::Timeout,
                 ))
-            )
             && err.is_retryable()
             && err.http_status.is_none(),
         "OpenAI-compatible stream chunk timeout did not match production timeout envelope",

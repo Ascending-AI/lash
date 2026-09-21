@@ -2,7 +2,7 @@ pub mod failure;
 pub mod message;
 pub mod prompt;
 
-pub use failure::{FailureCode, TurnFailureCode, TurnFailureKind};
+pub use failure::{FailureCode, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind};
 pub use message::{
     BaseRenderCache, InvalidPartCombination, Message, MessageRole, MessageSequence, Part,
     PartAttachment, PartKind, RenderedPrompt, append_rendered_prompt,
@@ -404,10 +404,13 @@ pub struct ErrorEnvelope {
     /// the field carried when it was a bare `String`, and an unrecognized
     /// spelling decodes as [`TurnFailureKind::Unknown`] rather than failing.
     pub kind: TurnFailureKind,
-    /// Typed failure code within `kind`, with the same wire spelling and the
-    /// same forward-compatible decode as `kind`.
+    /// Namespaced failure code: `lash:` codes are this workspace's
+    /// [`TurnFailureCode`] vocabulary, everything else is a foreign spelling
+    /// carried verbatim and never reinterpreted. A bare spelling decodes as
+    /// the pre-cutover form — `lash` when it parses as a `TurnFailureCode`
+    /// arm, `provider` otherwise — so old snapshots keep decoding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<TurnFailureCode>,
+    pub code: Option<FailureCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<crate::llm::types::LlmTerminalReason>,
     pub user_message: String,
@@ -699,7 +702,7 @@ impl TurnCancellationEvidence {
 
 pub fn make_error_envelope(
     kind: TurnFailureKind,
-    code: Option<TurnFailureCode>,
+    code: Option<FailureCode>,
     terminal_reason: Option<crate::llm::types::LlmTerminalReason>,
     user_message: impl Into<String>,
     raw: Option<String>,
@@ -718,7 +721,7 @@ pub fn make_error_envelope(
 
 pub fn make_error_event(
     kind: TurnFailureKind,
-    code: Option<TurnFailureCode>,
+    code: Option<FailureCode>,
     user_message: impl Into<String>,
     raw: Option<String>,
 ) -> SessionStreamEvent {
@@ -779,8 +782,8 @@ pub fn model_tool_specs(tools: &[ToolDefinition]) -> Vec<LlmToolSpec> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ErrorEnvelope, NoProgressBudget, SessionStreamEvent, TokenUsage, TurnBudget,
-        TurnFailureCode, TurnFailureKind, TurnOutcome,
+        ErrorEnvelope, FailureCode, Namespace, NoProgressBudget, SessionStreamEvent, TokenUsage,
+        TurnBudget, TurnFailureKind, TurnOutcome,
     };
     use crate::llm::types::{LlmTerminalReason, ProviderFailureKind};
 
@@ -897,10 +900,7 @@ mod tests {
         }"#;
         let envelope: ErrorEnvelope = serde_json::from_str(legacy).expect("legacy envelope");
         assert_eq!(envelope.kind, TurnFailureKind::LlmProvider);
-        assert_eq!(
-            envelope.code,
-            Some(TurnFailureCode::Other("429".to_string()))
-        );
+        assert_eq!(envelope.code, Some(FailureCode::provider("429")));
         assert_eq!(envelope.retryable, None);
         assert_eq!(envelope.provider_failure_kind, None);
 
@@ -926,7 +926,7 @@ mod tests {
     fn error_envelope_roundtrips_retryability_fields() {
         let envelope = ErrorEnvelope {
             kind: TurnFailureKind::LlmProvider,
-            code: Some(TurnFailureCode::Other("429".to_string())),
+            code: Some(FailureCode::provider("429")),
             terminal_reason: Some(LlmTerminalReason::ProviderError),
             user_message: "LLM error: rate limited".to_string(),
             raw: None,
@@ -948,7 +948,13 @@ mod tests {
     fn error_envelope_omits_unset_retryability_fields_on_the_wire() {
         let envelope = ErrorEnvelope {
             kind: TurnFailureKind::Plugin,
-            code: Some(TurnFailureCode::Other("plugin_abort".to_string())),
+            code: Some(
+                FailureCode::foreign(
+                    Namespace::host("my_plugin").expect("valid plugin namespace"),
+                    "plugin_abort",
+                )
+                .expect("a validated host namespace is foreign-mintable"),
+            ),
             terminal_reason: None,
             user_message: "stopped".to_string(),
             raw: None,
@@ -959,6 +965,13 @@ mod tests {
         let object = json.as_object().expect("object");
         assert!(!object.contains_key("retryable"));
         assert!(!object.contains_key("provider_failure_kind"));
+
+        // A host-authored code round-trips with its namespace intact and is
+        // never recolored into Lash vocabulary.
+        assert_eq!(json["code"], serde_json::json!("my_plugin:plugin_abort"));
+        let decoded: ErrorEnvelope = serde_json::from_value(json).expect("decode envelope");
+        assert_eq!(decoded.code, envelope.code);
+        assert_eq!(decoded.code.as_ref().and_then(|c| c.turn_code()), None);
     }
 
     #[test]

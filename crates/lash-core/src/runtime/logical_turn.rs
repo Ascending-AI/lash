@@ -225,7 +225,7 @@ impl LashRuntime {
             .expect("a follow-on failure requires an earlier committed turn")
             .errors
             .push(super::turn_loop::post_commit_delivery_issue(
-                crate::TurnFailureCode::Other(err.code.as_str().to_string()),
+                crate::FailureCode::from(&err.code),
                 err.message,
             ));
     }

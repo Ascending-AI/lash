@@ -87,7 +87,7 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
     turn.errors = vec![crate::TurnIssue {
         severity: crate::TurnIssueSeverity::Blocking,
         kind: crate::TurnFailureKind::LlmProvider,
-        code: Some(crate::TurnFailureCode::ContextOverflow),
+        code: Some(crate::TurnFailureCode::ContextOverflow.into()),
         terminal_reason: None,
         message: "the request exceeded the model's context window".to_string(),
         raw: None,
@@ -108,7 +108,7 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
         .map(crate::ToolValue::to_json_value)
         .expect("typed diagnostics ride `raw`");
     assert_eq!(raw["kind"], serde_json::json!("llm_provider"));
-    assert_eq!(raw["code"], serde_json::json!("context_overflow"));
+    assert_eq!(raw["code"], serde_json::json!("lash:context_overflow"));
     assert_eq!(raw["retryable"], serde_json::json!(false));
 }
 

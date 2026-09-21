@@ -551,7 +551,7 @@ async fn run_matrix_row(
             assert_eq!(error.error.kind, ProviderFailureKind::Stream, "{dialect}");
             assert_eq!(
                 error.error.code.as_ref().map(|code| code.to_string()),
-                Some("adapter:stream_evidence_identity_conflict".to_string()),
+                Some("lash:stream_evidence_identity_conflict".to_string()),
                 "{dialect}"
             );
             assert_eq!(error.call_record.attempts.len(), 1, "{dialect}");

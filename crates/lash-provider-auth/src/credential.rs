@@ -53,7 +53,7 @@ impl CredentialError {
         let (code, failure_kind, retry_verdict) = self.kind.transport_classification();
         LlmTransportError::new(self.to_string())
             .with_kind(failure_kind)
-            .with_adapter_code(code)
+            .with_lash_code(code)
             .with_retry_verdict(retry_verdict)
     }
 }
@@ -398,7 +398,7 @@ mod tests {
             assert!(transport.retry_verdict_is_classified());
             assert_eq!(
                 transport.code.as_ref().map(|code| code.to_string()),
-                Some(format!("adapter:{code}"))
+                Some(format!("lash:{code}"))
             );
             assert_eq!(transport.message, message);
         }

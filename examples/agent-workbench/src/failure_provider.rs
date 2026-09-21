@@ -9,8 +9,8 @@ use lash::direct::{
     LlmOutputPart, LlmStreamEvent, LlmUsage, ProviderReasoningReplay, ProviderRouteIdentity,
 };
 use lash::provider::{
-    GenerationRetryGuarantee, LlmContentBlock, LlmMessage, LlmRequest, LlmResponse, LlmRole,
-    LlmTransportError, Provider, ProviderComponents, ProviderFailureKind, ProviderHandle,
+    FailureCode, GenerationRetryGuarantee, LlmContentBlock, LlmMessage, LlmRequest, LlmResponse,
+    LlmRole, LlmTransportError, Provider, ProviderComponents, ProviderFailureKind, ProviderHandle,
     ProviderOptions, ProviderReliability, TransportRetryVerdict,
 };
 
@@ -293,7 +293,7 @@ impl Provider for DevFailureProvider {
                 Err(
                     LlmTransportError::new("development provider rejected credentials mid-turn")
                         .with_http_status(401)
-                        .with_provider_code("dev_auth_rejected"),
+                        .with_code(FailureCode::provider("dev_auth_rejected")),
                 )
             }
             DevProviderScenario::AuthFailureOnce => {
@@ -309,7 +309,7 @@ impl Provider for DevFailureProvider {
                     LlmTransportError::new("development provider rate limit; retry is safe")
                         .with_http_status(429)
                         .with_retry_verdict(retry_verdict)
-                        .with_provider_code("dev_rate_limited"),
+                        .with_code(FailureCode::provider("dev_rate_limited")),
                 )
             }
             DevProviderScenario::RateLimitOnce => Ok(streamed_response(
@@ -322,7 +322,7 @@ impl Provider for DevFailureProvider {
                 Err(
                     LlmTransportError::new("development provider interrupted after paid output")
                         .with_kind(ProviderFailureKind::Stream)
-                        .with_provider_code("dev_paid_output_interrupted")
+                        .with_code(FailureCode::provider("dev_paid_output_interrupted"))
                         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                         .with_output_started(true)
                         .with_partial_response(LlmResponse {
@@ -357,7 +357,7 @@ impl Provider for DevFailureProvider {
                 Err(
                     LlmTransportError::new("FIG-1350 deterministic retry boundary")
                         .with_kind(ProviderFailureKind::Stream)
-                        .with_provider_code("fig1350_retry_reset")
+                        .with_code(FailureCode::provider("fig1350_retry_reset"))
                         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                         .with_output_started(true)
                         .with_partial_response(LlmResponse {

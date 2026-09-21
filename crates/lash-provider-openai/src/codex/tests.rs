@@ -1881,7 +1881,7 @@ async fn codex_websocket_output_started_error_stops_provider_handle_retry() {
     let failure = result.expect_err("output-started WebSocket failure must stop the ladder");
     assert_eq!(
         failure.code.as_ref().map(|code| code.to_string()),
-        Some("refusal:unsafe_retry_after_output_started".to_string())
+        Some("lash:unsafe_retry_after_output_started".to_string())
     );
     assert!(!failure.is_retryable());
     assert_eq!(http.captured_len(), 0);
@@ -1933,7 +1933,7 @@ async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
     let failure = result.expect_err("output-started WebSocket failure must stop the ladder");
     assert_eq!(
         failure.code.as_ref().map(|code| code.to_string()),
-        Some("refusal:unsafe_retry_after_output_started".to_string())
+        Some("lash:unsafe_retry_after_output_started".to_string())
     );
     assert!(!failure.is_retryable());
     assert_eq!(http.captured_len(), 0);
@@ -1961,7 +1961,7 @@ async fn codex_websocket_clean_eof_requires_terminal_event_unless_explicitly_tol
 
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:websocket_closed_before_completed".to_string())
+        Some("lash:websocket_closed_before_completed".to_string())
     );
     let partial = error.partial_response.as_deref().expect("partial response");
     assert_eq!(partial.full_text(), "partial");

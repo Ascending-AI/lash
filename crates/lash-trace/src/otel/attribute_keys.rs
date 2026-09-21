@@ -42,6 +42,7 @@ pub(super) const LASH_EFFECT_ENVELOPE_DIVERGENT_PATHS_JSON: &str =
 pub(super) const LASH_EFFECT_ENVELOPE_RECONSTRUCTED_HASH: &str =
     "lash.effect_envelope.reconstructed_hash";
 pub(super) const LASH_EFFECT_ENVELOPE_RECORDED_HASH: &str = "lash.effect_envelope.recorded_hash";
+pub(super) const LASH_ERROR_CODE: &str = "lash.error.code";
 pub(super) const LASH_ERROR_RAW: &str = "lash.error.raw";
 pub(super) const LASH_ERROR_RETRYABLE: &str = "lash.error.retryable";
 pub(super) const LASH_LANGUAGE_EXECUTION_BRANCH: &str = "lash.language_execution.branch";

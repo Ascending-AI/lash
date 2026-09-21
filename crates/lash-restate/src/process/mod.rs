@@ -178,7 +178,7 @@ pub(crate) fn restate_process_terminal_output(
         Resolution::Err(err) => Ok(ProcessAwaitOutput::from_tool_output(
             lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
                 lash_core::ToolFailureClass::Execution,
-                err.code,
+                err.code.namespaced(),
                 err.message,
             )),
         )),

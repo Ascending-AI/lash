@@ -86,7 +86,7 @@ mod tests {
         assert_eq!(error.kind, lash_core::ProviderFailureKind::Timeout);
         assert_eq!(
             error.code.as_ref().map(|code| code.to_string()),
-            Some("adapter:timeout".to_string())
+            Some("lash:timeout".to_string())
         );
         assert_eq!(error.message, "response start timed out");
         assert!(error.is_retryable());

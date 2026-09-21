@@ -148,6 +148,11 @@ pub enum LogEvent {
         retryable: bool,
         raw: Option<String>,
         code: Option<crate::session_model::FailureCode>,
+        /// The transport's failure classification. `ProviderFailureKind::Unknown`
+        /// means the failure carried no provider kind; the trace projection
+        /// renders it as an absent kind.
+        #[serde(default)]
+        kind: crate::llm::types::ProviderFailureKind,
         terminal_reason: LlmTerminalReason,
     },
 }
@@ -287,8 +292,10 @@ pub struct LlmCallError {
     /// carry `ProviderFailureKind::Unknown`; missing or future kinds are refused.
     pub kind: crate::llm::types::ProviderFailureKind,
     pub raw: Option<String>,
-    /// Namespaced failure code: `provider` spellings are provider-owned, while
-    /// `adapter` and `refusal` spellings are Lash-authored.
+    /// Namespaced failure code: `provider` spellings are provider-owned,
+    /// `lash` spellings are Lash-authored (pre-cutover `adapter`/`refusal`
+    /// namespaces decode as Lash vocabulary), and every other namespace is a
+    /// foreign-owned pair carried verbatim.
     pub code: Option<crate::session_model::FailureCode>,
     pub terminal_reason: LlmTerminalReason,
     pub request_body: Option<String>,

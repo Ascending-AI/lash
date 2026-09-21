@@ -87,7 +87,7 @@ fn unsupported_image_mime_is_rejected_at_request_boundary() {
     assert_eq!(err.kind, lash_core::ProviderFailureKind::Validation);
     assert_eq!(
         err.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:unsupported_attachment_capability".to_string())
+        Some("lash:unsupported_attachment_capability".to_string())
     );
     assert!(err.message.contains("Anthropic"));
     assert!(err.message.contains("image/bmp"));

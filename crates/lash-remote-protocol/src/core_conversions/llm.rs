@@ -775,9 +775,7 @@ impl From<core_llm::NormalizedError> for RemoteNormalizedError {
     fn from(value: core_llm::NormalizedError) -> Self {
         let core_llm::NormalizedError {
             class,
-            provider_code,
-            adapter_code,
-            refusal_code,
+            code,
             http_status,
             provider_request_id,
             retry_after,
@@ -785,9 +783,7 @@ impl From<core_llm::NormalizedError> for RemoteNormalizedError {
         } = value;
         Self {
             class,
-            provider_code,
-            adapter_code,
-            refusal_code,
+            code,
             http_status,
             provider_request_id,
             retry_after_ms: retry_after

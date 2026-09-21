@@ -391,10 +391,7 @@ pub(super) async fn fig1123_committed_frame_handoff_survives_before_inline_claim
         TurnOutcome::AgentFrameSwitch { .. }
     ));
     assert!(first.errors.iter().any(|issue| {
-        issue.code
-            == Some(lash_core::TurnFailureCode::Other(
-                "store_commit_failed".to_string(),
-            ))
+        issue.code == Some(lash_core::TurnFailureCode::from_wire("store_commit_failed").into())
             && issue.retryable == Some(false)
     }));
     assert!(matches!(
@@ -1010,11 +1007,12 @@ pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue()
         .iter()
         .find(|issue| {
             issue.code
-                == Some(lash_core::TurnFailureCode::Other(
-                    lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
-                        .as_str()
-                        .to_string(),
-                ))
+                == Some(
+                    lash_core::TurnFailureCode::from_wire(
+                        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost.as_str(),
+                    )
+                    .into(),
+                )
         })
         .unwrap_or_else(|| {
             panic!(
@@ -1231,11 +1229,12 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
         .iter()
         .find(|issue| {
             issue.code
-                == Some(lash_core::TurnFailureCode::Other(
-                    lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
-                        .as_str()
-                        .to_string(),
-                ))
+                == Some(
+                    lash_core::TurnFailureCode::from_wire(
+                        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost.as_str(),
+                    )
+                    .into(),
+                )
         })
         .unwrap_or_else(|| {
             panic!(
@@ -1387,11 +1386,12 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
         .iter()
         .find(|issue| {
             issue.code
-                == Some(lash_core::TurnFailureCode::Other(
-                    lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
-                        .as_str()
-                        .to_string(),
-                ))
+                == Some(
+                    lash_core::TurnFailureCode::from_wire(
+                        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost.as_str(),
+                    )
+                    .into(),
+                )
         })
         .unwrap_or_else(|| {
             panic!(
@@ -1648,11 +1648,12 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
         .iter()
         .find(|issue| {
             issue.code
-                == Some(lash_core::TurnFailureCode::Other(
-                    lash_core::RuntimeErrorCode::SessionExecutionLeaseLost
-                        .as_str()
-                        .to_string(),
-                ))
+                == Some(
+                    lash_core::TurnFailureCode::from_wire(
+                        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost.as_str(),
+                    )
+                    .into(),
+                )
         })
         .expect("the committed frame reports the follow-on lease loss");
     assert_eq!(issue.retryable, Some(false));
@@ -1879,9 +1880,7 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
     ));
     assert!(committed.errors.iter().any(|issue| {
         issue.code
-            == Some(lash_core::TurnFailureCode::Other(
-                "execution_state_capture_failed".to_string(),
-            ))
+            == Some(lash_core::TurnFailureCode::from_wire("execution_state_capture_failed").into())
             && issue.retryable == Some(false)
     }));
     assert_eq!(

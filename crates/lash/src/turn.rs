@@ -20,6 +20,8 @@ use lash_core::facade_support::{
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
 /// Typed turn-failure vocabulary carried on [`TurnIssue`] and on session error
 /// envelopes. A host branches on these instead of matching the display string.
+/// The namespaced [`FailureCode`](crate::provider::FailureCode) on `code`
+/// fields lives in [`crate::provider`].
 pub use lash_core::{TurnFailureCode, TurnFailureKind};
 
 pub(crate) mod queued_drain;

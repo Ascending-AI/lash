@@ -981,7 +981,7 @@ impl HttpTransport for CeilingCancelWatchTransport {
         Err(
             LlmTransportError::new("cancel watch attach ceiling elapsed")
                 .with_kind(lash_core::ProviderFailureKind::Timeout)
-                .with_adapter_code(TurnFailureCode::Timeout)
+                .with_lash_code(TurnFailureCode::Timeout)
                 .with_retry_verdict(
                     lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
                 ),

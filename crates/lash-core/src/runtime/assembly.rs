@@ -1028,7 +1028,7 @@ impl TurnAssembler {
                     issues.push(TurnIssue {
                         severity: crate::runtime::TurnIssueSeverity::Blocking,
                         kind: crate::TurnFailureKind::Runtime,
-                        code: Some(crate::TurnFailureCode::SessionGraphScope),
+                        code: Some(crate::TurnFailureCode::SessionGraphScope.into()),
                         terminal_reason: None,
                         message: error.to_string(),
                         raw: None,
@@ -1042,7 +1042,7 @@ impl TurnAssembler {
                 issues.push(TurnIssue {
                     severity: crate::runtime::TurnIssueSeverity::Advisory,
                     kind: crate::TurnFailureKind::Runtime,
-                    code: Some(crate::TurnFailureCode::AssistantOutputRecoveredFromState),
+                    code: Some(crate::TurnFailureCode::AssistantOutputRecoveredFromState.into()),
                     terminal_reason: None,
                     message: "assistant output was recovered from persisted messages because no explicit assistant output was assembled".to_string(),
                     raw: None,
@@ -1069,7 +1069,7 @@ impl TurnAssembler {
             issues.push(TurnIssue {
                 severity: crate::runtime::TurnIssueSeverity::Blocking,
                 kind: crate::TurnFailureKind::Runtime,
-                code: Some(crate::TurnFailureCode::MissingDone),
+                code: Some(crate::TurnFailureCode::MissingDone.into()),
                 terminal_reason: None,
                 message: "turn stream ended without a Done event".to_string(),
                 raw: None,

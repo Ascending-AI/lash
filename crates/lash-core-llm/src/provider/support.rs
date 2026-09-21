@@ -14,7 +14,7 @@ pub(super) use crate::llm::types::{
     LlmRequest, LlmResponse, LlmTerminalReason, NormalizedError, ProtocolPosition,
     ProviderReplayOriginConflict, ProviderRouteIdentity, RetryDecision,
 };
-pub(super) use lash_sansio::session_model::{FailureCode, TurnFailureCode};
+pub(super) use lash_sansio::session_model::{FailureCode, Namespace, TurnFailureCode};
 
 #[cfg(test)]
 pub(super) use super::handle::*;

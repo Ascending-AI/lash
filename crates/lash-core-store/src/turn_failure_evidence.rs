@@ -130,7 +130,7 @@ impl TurnFailureEvidence {
                 code: error
                     .code
                     .clone()
-                    .unwrap_or(lash_sansio::session_model::FailureCode::Refusal(
+                    .unwrap_or(lash_sansio::session_model::FailureCode::lash(
                         lash_sansio::session_model::TurnFailureCode::ChargeSafetyRetryDenied,
                     ))
                     .to_string(),

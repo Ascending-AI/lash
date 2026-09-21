@@ -206,7 +206,11 @@ impl OracleTheatre {
 
     fn rejection(id: &str) -> lash_core::Resolution {
         lash_core::Resolution::Err(crate::ExternalCompletionError::new(
-            "oracle_step_failed",
+            crate::provider::FailureCode::foreign(
+                crate::provider::Namespace::host("oracle").expect("valid namespace"),
+                "oracle_step_failed",
+            )
+            .expect("a validated host namespace is foreign-mintable"),
             format!("step {id} rejected"),
         ))
     }

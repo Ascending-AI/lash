@@ -978,8 +978,11 @@ impl<'run> RuntimeExecutionContext<'run> {
             .await?;
         match outcome.into_await_event()? {
             crate::Resolution::Ok(value) => Ok(value),
-            crate::Resolution::Err(err) => Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::from_wire_code(&err.code),
+            crate::Resolution::Err(err) => Err(crate::RuntimeEffectControllerError::foreign(
+                // A host's completion code is host-authored vocabulary: it
+                // lands in `ForeignCode` verbatim (namespace included) and is
+                // never re-parsed into a Lash `RuntimeErrorCode` arm.
+                err.code.namespaced(),
                 err.message,
             )),
             crate::Resolution::Timeout => Err(crate::RuntimeEffectControllerError::new(

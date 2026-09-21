@@ -1624,7 +1624,7 @@ pub(super) async fn turn_driver_rejects_unsupported_effort_before_provider_call(
         .expect("llm_provider issue");
     assert_eq!(
         issue.code,
-        Some(lash_core::TurnFailureCode::UnsupportedEffort)
+        Some(lash_core::TurnFailureCode::UnsupportedEffort.into())
     );
     assert!(issue.message.contains("Unsupported effort `turbo`"));
 }

@@ -179,10 +179,10 @@ async fn controller_rejection_fails_turn_explicitly() {
     ));
     assert!(turn.errors.iter().any(|issue| {
         issue.kind == lash_core::TurnFailureKind::RuntimeEffectController
-            && issue.code
-                == Some(lash_core::TurnFailureCode::Other(
-                    "test_controller_rejected".to_string(),
-                ))
+            && issue
+                .code
+                .as_ref()
+                .is_some_and(|code| code.namespaced() == "foreign:test_controller_rejected")
     }));
 }
 
@@ -218,10 +218,8 @@ async fn wrong_controller_outcome_fails_turn_explicitly() {
     ));
     assert!(turn.errors.iter().any(|issue| {
         issue.kind == lash_core::TurnFailureKind::RuntimeEffectController
-            && issue.code
-                == Some(lash_core::TurnFailureCode::Other(
-                    "runtime_effect_wrong_outcome".to_string(),
-                ))
+            && issue.code.as_ref().map(|code| code.namespaced())
+                == Some("lash:runtime_effect_wrong_outcome".to_string())
     }));
 }
 

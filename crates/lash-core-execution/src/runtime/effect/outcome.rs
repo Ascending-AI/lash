@@ -82,7 +82,12 @@ pub struct LlmTraceFailure {
     message: String,
     retryable: bool,
     terminal_reason: crate::LlmTerminalReason,
-    code: Option<String>,
+    /// The transport's failure classification — what OTel `error.type`
+    /// projects. `ProviderFailureKind::Unknown` projects as `_OTHER`.
+    kind: crate::ProviderFailureKind,
+    /// The namespaced failure code. OTel `lash.error.code` projects the
+    /// spelling alone; the namespace travels beside it.
+    code: Option<crate::FailureCode>,
     raw: Option<String>,
 }
 
@@ -92,10 +97,10 @@ impl LlmTraceFailure {
             message,
             retryable: false,
             terminal_reason: crate::LlmTerminalReason::ProviderError,
-            code: Some(
-                crate::FailureCode::Adapter(crate::TurnFailureCode::InvalidStructuredOutput)
-                    .to_string(),
-            ),
+            kind: crate::ProviderFailureKind::Unknown,
+            code: Some(crate::FailureCode::lash(
+                crate::TurnFailureCode::InvalidStructuredOutput,
+            )),
             raw: None,
         }
     }
@@ -107,7 +112,8 @@ impl From<&LlmTransportError> for LlmTraceFailure {
             message: err.message.clone(),
             retryable: err.is_retryable(),
             terminal_reason: err.terminal_reason,
-            code: err.code.as_ref().map(|code| code.to_string()),
+            kind: err.kind,
+            code: err.code.clone(),
             raw: err.raw.as_deref().cloned(),
         }
     }
@@ -119,7 +125,8 @@ impl From<&LlmCallError> for LlmTraceFailure {
             message: err.message.clone(),
             retryable: err.retryable,
             terminal_reason: err.terminal_reason,
-            code: err.code.as_ref().map(|code| code.to_string()),
+            kind: err.kind,
+            code: err.code.clone(),
             raw: err.raw.clone(),
         }
     }
@@ -144,7 +151,16 @@ pub fn emit_llm_trace_failed(
                 message: failure.message,
                 retryable: failure.retryable,
                 terminal_reason: Some(failure.terminal_reason.code().to_string()),
-                code: failure.code,
+                failure_kind: (failure.kind != crate::ProviderFailureKind::Unknown)
+                    .then(|| failure.kind.code().to_string()),
+                code: failure
+                    .code
+                    .as_ref()
+                    .map(|code| code.spelling().to_string()),
+                code_namespace: failure
+                    .code
+                    .as_ref()
+                    .map(|code| code.namespace().as_str().to_string()),
                 raw: failure.raw,
             },
             stream_summary,

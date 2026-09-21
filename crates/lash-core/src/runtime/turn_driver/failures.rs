@@ -7,7 +7,7 @@ impl RuntimeTurnDriver<'_> {
     ) {
         machine.fail_turn(make_error_event(
             crate::TurnFailureKind::RuntimeEffectController,
-            Some(crate::TurnFailureCode::Other(err.code.as_str().to_string())),
+            Some(crate::FailureCode::from(&err.code)),
             err.message,
             None,
         ));

@@ -90,7 +90,7 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
 
     assert!(turn.errors.iter().any(|issue| {
         issue.kind == lash_core::TurnFailureKind::Plugin
-            && issue.code == Some(lash_core::TurnFailureCode::LifecycleHookFailed)
+            && issue.code == Some(lash_core::TurnFailureCode::LifecycleHookFailed.into())
             && issue.retryable == Some(false)
             && issue.message.contains("explicit replay keys")
     }));

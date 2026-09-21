@@ -43,7 +43,7 @@ async fn fig1123_unsupported_retention_is_refused_before_network() {
     assert_eq!(error.kind, ProviderFailureKind::Unsupported);
     assert_eq!(
         error.code.as_ref().map(|code| code.to_string()),
-        Some("adapter:unsupported_reasoning_retention".to_string())
+        Some("lash:unsupported_reasoning_retention".to_string())
     );
     assert!(!error.is_retryable());
     assert!(transport.requests.lock_recover().is_empty());

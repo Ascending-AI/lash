@@ -13,7 +13,11 @@ use super::*;
 /// reasoning deltas, so v4 checkpoints holding pending text effects cannot
 /// deserialize faithfully.
 /// Version 6 carries parts-only plugin messages and removes part lifecycle fields.
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 6;
+/// Version 7 (FIG-3435) renames failure codes by
+/// author: workspace-authored codes serialize as `lash:<spelling>` where
+/// earlier checkpoints wrote `adapter:`/`refusal:`, and a v6 reader would
+/// recolor a `lash:` code as provider vocabulary rather than refuse it.
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 7;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1

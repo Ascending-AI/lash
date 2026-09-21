@@ -258,10 +258,18 @@ pub struct SessionNodeRecord {
 /// block-completion stream events, removing the anonymous fallback
 /// correlation shape a generation-17 body could carry.
 ///
+/// Version 20 (FIG-3435) names failure codes by authoring namespace.
+/// `NormalizedError` replaces its `provider_code`/`adapter_code`/`refusal_code`
+/// columns with one namespaced `code` (`<namespace>:<spelling>`), and
+/// workspace-authored codes elsewhere in the body move from `adapter:`/`refusal:`
+/// to `lash:`. A v19 reader would silently drop the renamed columns and recolor
+/// `lash:` codes as provider spellings, so the fence rejects both directions
+/// rather than degrade the record.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as an exact-generation fence rather
 /// than a counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 19;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 20;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {

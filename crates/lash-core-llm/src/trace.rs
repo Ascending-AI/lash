@@ -174,7 +174,7 @@ fn trace_llm_attempt_reason(attempt: &crate::AttemptRecord) -> Option<String> {
         if let Some(status) = error.http_status {
             qualifiers.push(format!("http {status}"));
         }
-        if let Some(code) = error.provider_code.as_deref() {
+        if let Some(code) = &error.code {
             qualifiers.push(format!("code {code}"));
         }
         if !qualifiers.is_empty() {

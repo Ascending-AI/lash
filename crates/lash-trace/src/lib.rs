@@ -114,7 +114,11 @@ pub use lashlang_graph::{
 /// provider item's sub-blocks — e.g. OpenAI `rs_*:summary:0` / `:summary:1` —
 /// stay distinguishable; `item_id` alone collapses them to the item.
 /// Version 25 uses generic compaction and prompt-view event names.
-pub const TRACE_SCHEMA_VERSION: u32 = 25;
+/// Version 26 (FIG-3435) splits `TraceError.code` into the spelling plus a
+/// `code_namespace` and adds `failure_kind`: `code` now carries the
+/// failure code's spelling alone, never the namespaced form, and the kind
+/// carries the failure classification OTel `error.type` projects.
+pub const TRACE_SCHEMA_VERSION: u32 = 26;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1570,8 +1574,18 @@ pub struct TraceError {
     pub retryable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_reason: Option<String>,
+    /// The transport's failure classification (`timeout`, `auth`, …), when
+    /// the failure carried a known one. OTel `error.type` projects this —
+    /// an absent or unrecognized kind projects `_OTHER`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_kind: Option<String>,
+    /// The failure code's spelling within its namespace — never the
+    /// namespaced form. OTel `lash.error.code` projects this verbatim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+    /// The namespace owning `code`'s spelling, when a code is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_namespace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
 }

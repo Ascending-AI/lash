@@ -137,7 +137,7 @@ fn trace_outcome(outcome: &TurnOutcome) -> lash_trace::TraceTurnOutcome {
 }
 
 pub(super) fn post_commit_delivery_issue(
-    code: crate::TurnFailureCode,
+    code: crate::FailureCode,
     message: impl Into<String>,
 ) -> TurnIssue {
     TurnIssue {
@@ -443,7 +443,7 @@ enum TerminalActivityTarget<'a> {
 /// Typed diagnostic emitted immediately ahead of a terminal `TurnOutcome`.
 struct TerminalDiagnostic<'a> {
     kind: TerminalDiagnosticKind,
-    code: Option<crate::TurnFailureCode>,
+    code: Option<crate::FailureCode>,
     message: String,
     retryable: Option<bool>,
     activity: TerminalActivityTarget<'a>,
