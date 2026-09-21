@@ -153,10 +153,23 @@ impl LashlangHostIdentities {
         &self.opener
     }
 
+    /// The opener scope, canonically encoded.
+    ///
+    /// Every component is length-prefixed — the opener through
+    /// [`EffectOpener::identity_encoding`], the cell's execution key here — so
+    /// two different `(opener, execution)` pairs can never mint one scope. The
+    /// diagnostic [`EffectOpener::render`] is not usable for this: its
+    /// `:`-joined free-form components let `Turn("a:b", "c")` and
+    /// `Turn("a", "b:c")` mint the same identity.
     fn scope(&self) -> String {
         match &self.execution {
-            Some(execution) => format!("{}:{execution}", self.opener.render()),
-            None => self.opener.render(),
+            Some(execution) => format!(
+                "{}:{}:{}",
+                self.opener.identity_encoding(),
+                execution.len(),
+                execution
+            ),
+            None => self.opener.identity_encoding(),
         }
     }
 
@@ -173,11 +186,15 @@ impl LashlangHostIdentities {
     /// leaf's position inside its batch — could not tell two identical
     /// aggregates apart.
     pub fn leaf(&self, host_operation: &str, call_site: &LashlangExecutionCallSite) -> String {
+        let node_id = &call_site.site.node_id;
         format!(
-            "lashlang:{}:resource:{host_operation}:{}:{}",
+            "lashlang:{}:resource:{}:{}:{}:{}:{}",
             self.scope(),
-            call_site.site.node_id,
-            call_site.occurrence
+            host_operation.len(),
+            host_operation,
+            node_id.len(),
+            node_id,
+            call_site.occurrence,
         )
     }
 
@@ -203,7 +220,7 @@ impl LashlangHostIdentities {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::ProcessIncarnation;
+    use lash_core::{ProcessId, ProcessIncarnation, SessionId};
     use lashlang::{LashlangExecutionSite, WorkflowExecutionSite};
 
     fn call_site(node_id: &str, occurrence: u64) -> LashlangExecutionCallSite {
@@ -358,7 +375,7 @@ mod tests {
         assert!(
             first
                 .leaf("tool:send", &site)
-                .contains("process:worker:incarnation:1"),
+                .contains("process:6:worker:incarnation:1"),
             "the incarnation is bound, not merely mixed in"
         );
     }
@@ -467,6 +484,138 @@ mod tests {
             cell_opener_for_scope(&ExecutionScope::turn("session-1", "drain-3"), None)
                 .expect("a turn is an opener"),
             "a drain is not a turn that happens to spell its id"
+        );
+    }
+
+    /// The defect the canonical encoding exists for: `:`-joined free-form
+    /// components are not injective.
+    ///
+    /// `SessionId` and `TurnId` accept arbitrary strings, so two different
+    /// tagged tuples spell one `:`-joined rendering — `Turn("a:b", "c")` and
+    /// `Turn("a", "b:c")` both rendered `turn:a:b:c` and minted the same leaf
+    /// identity. Typed equality on the opener never protected the derived
+    /// string. `render()` keeps its readable, ambiguous shape — it is the
+    /// diagnostic — while `scope`/`leaf`/`child` mint from the
+    /// length-prefixed encoding.
+    #[test]
+    fn delimiter_bearing_turn_components_mint_distinct_identities() {
+        let site = call_site("resource_operation:aaaa", 1);
+        let split_early =
+            LashlangHostIdentities::cell(EffectOpener::turn("a:b", "c"), "exec-code:1");
+        let split_late =
+            LashlangHostIdentities::cell(EffectOpener::turn("a", "b:c"), "exec-code:1");
+
+        assert_eq!(
+            split_early.opener().render(),
+            split_late.opener().render(),
+            "the diagnostic rendering may stay ambiguous; the identity must not"
+        );
+        assert_ne!(
+            split_early.leaf("tool:send", &site),
+            split_late.leaf("tool:send", &site),
+            "two splits of `a:b:c` are different openers and must mint different leaves"
+        );
+        assert_ne!(
+            split_early.child("tool:send", &site, 0),
+            split_late.child("tool:send", &site, 0),
+            "two splits of `a:b:c` are different openers and must mint different children"
+        );
+    }
+
+    /// The drain arm had the same collision: `QueueDrain("a:b", "c")` and
+    /// `QueueDrain("a", "b:c")` both rendered `drain:a:b:c`.
+    #[test]
+    fn delimiter_bearing_drain_components_mint_distinct_identities() {
+        let site = call_site("resource_operation:aaaa", 1);
+        let split_early =
+            LashlangHostIdentities::cell(EffectOpener::queue_drain("a:b", "c"), "exec-code:1");
+        let split_late =
+            LashlangHostIdentities::cell(EffectOpener::queue_drain("a", "b:c"), "exec-code:1");
+
+        assert_ne!(
+            split_early.leaf("tool:send", &site),
+            split_late.leaf("tool:send", &site),
+            "two splits of `a:b:c` are different drains and must mint different leaves"
+        );
+        assert_ne!(
+            split_early.child("tool:send", &site, 0),
+            split_late.child("tool:send", &site, 0),
+            "two splits of `a:b:c` are different drains and must mint different children"
+        );
+    }
+
+    /// A session id that itself carries `:` — the shape every spawned child's
+    /// session takes (`session:subagent:{call_id}`,
+    /// `crates/lash-subagents/src/rlm.rs`) — round-trips through the typed
+    /// opener untouched and mints an identity that cannot alias a different
+    /// split of the same bytes.
+    #[test]
+    fn a_delimiter_bearing_session_id_round_trips() {
+        let spawned_session = "session:subagent:lashlang:turn:1:x:1:y";
+        let scope = ExecutionScope::turn(spawned_session, "turn-1");
+        let opener = cell_opener_for_scope(&scope, None).expect("a turn is an opener");
+
+        assert_eq!(
+            opener.session_id().map(SessionId::as_str),
+            Some(spawned_session),
+            "the session id round-trips through the typed opener untouched"
+        );
+
+        let site = call_site("resource_operation:aaaa", 1);
+        let leaf = LashlangHostIdentities::cell(opener, "exec-code:1").leaf("tool:send", &site);
+        assert!(
+            leaf.contains("38:session:subagent:lashlang:turn:1:x:1:y"),
+            "the canonical encoding length-prefixes the session id, keeping its `:` bytes inside one component: {leaf}"
+        );
+        assert_ne!(
+            leaf,
+            LashlangHostIdentities::cell(
+                EffectOpener::turn("session:subagent:lashlang:turn:1:x:1", "y:turn-1"),
+                "exec-code:1",
+            )
+            .leaf("tool:send", &site),
+            "the same bytes split across the session/turn boundary are a different opener"
+        );
+    }
+
+    /// The real embedding chain, two process ids deep.
+    ///
+    /// A minted call id becomes the child's whole `ProcessId`
+    /// (`process:subagent:{call_id}`), which becomes the child's opener under
+    /// `ExecutionScope::Process`, whose own minted call id becomes the
+    /// grandchild's `ProcessId` in turn. Every link must pass
+    /// `invalid_process_key_reason` — the canonical encoding may carry `:` but
+    /// never `#`, which is refused inside a process id.
+    #[test]
+    fn a_call_id_nested_two_process_ids_deep_is_admitted() {
+        let site = call_site("resource_operation:aaaa", 1);
+        let parent_leaf =
+            LashlangHostIdentities::cell(EffectOpener::turn("session-1", "turn-7"), "exec-code:1")
+                .leaf("tool:spawn_agent", &site);
+
+        let child_process_id = ProcessId::from(format!("process:subagent:{parent_leaf}"));
+        assert_eq!(
+            lash_core::store::process_key::invalid_process_key_reason(child_process_id.as_str()),
+            None,
+            "a minted call id embedded in a child process id must be registrable"
+        );
+
+        let child_opener = cell_opener_for_scope(
+            &ExecutionScope::process(child_process_id.clone()),
+            Some(&process_ref(child_process_id.as_str(), 4)),
+        )
+        .expect("the spawned child process is an opener");
+        let grandchild_leaf = LashlangHostIdentities::cell(child_opener, "exec-code:1")
+            .leaf("tool:spawn_agent", &site);
+        let grandchild_process_id = ProcessId::from(format!("process:subagent:{grandchild_leaf}"));
+
+        assert_eq!(
+            lash_core::store::process_key::invalid_process_key_reason(
+                grandchild_process_id.as_str()
+            ),
+            None,
+            "a call id nested two process ids deep must still be registrable: \
+             {grandchild_process_id}"
         );
     }
 

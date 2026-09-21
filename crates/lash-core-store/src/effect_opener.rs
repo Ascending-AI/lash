@@ -31,10 +31,15 @@
 //! is the aliasing §1 refuses. Serialized here with an explicit `kind` tag, and
 //! compared as a value rather than as text, that collision is unrepresentable.
 //!
-//! [`render`](EffectOpener::render) exists for the places that genuinely need
-//! one string (a key preimage, a diagnostic) and is tagged for the same reason.
-//! It is a projection *of* the identity, never the identity itself: nothing
-//! parses it back.
+//! Two projections of the value exist, and they are not interchangeable.
+//! [`render`](EffectOpener::render) is the *diagnostic* one — readable, and
+//! deliberately free-form: its `:`-joined components mean
+//! `Turn("a:b", "c")` and `Turn("a", "b:c")` render to the same text.
+//! [`identity_encoding`](EffectOpener::identity_encoding) is the *canonical*
+//! one — every component length-prefixed, so distinct openers always encode
+//! distinctly. Anything a key preimage or an embedded id consumes must take
+//! the encoding; the rendering is for humans. Neither is the identity itself:
+//! nothing parses either back.
 
 use serde::{Deserialize, Serialize};
 
@@ -131,11 +136,16 @@ impl EffectOpener {
         }
     }
 
-    /// A kind-tagged rendering, for a key preimage or a diagnostic.
+    /// A kind-tagged rendering, for diagnostics.
     ///
     /// Tagged because the arms can otherwise spell each other (see the module
-    /// documentation). Nothing parses this back into an `EffectOpener`; the
-    /// value is the identity and this is a projection of it.
+    /// documentation), but *not* component-framed: the components inside an
+    /// arm are joined with `:` and are themselves free-form, so
+    /// `Turn("a:b", "c")` and `Turn("a", "b:c")` render identically. That is
+    /// fine for a diagnostic and fatal for a key preimage — anything minted
+    /// must use [`identity_encoding`](EffectOpener::identity_encoding), which
+    /// carries unambiguous component boundaries. Nothing parses either
+    /// projection back into an `EffectOpener`; the value is the identity.
     ///
     /// # Why the separator is `:` and not `#`
     ///
@@ -168,6 +178,61 @@ impl EffectOpener {
                 "process:{}:incarnation:{}",
                 process_ref.process_id, process_ref.incarnation
             ),
+        }
+    }
+
+    /// The canonical encoding of this opener, for key preimages and embedded
+    /// ids.
+    ///
+    /// Unlike [`render`](EffectOpener::render) — the diagnostic projection,
+    /// which may stay ambiguous — every component is emitted as its decimal
+    /// byte length, a `:`, and then its bytes, so two different openers can
+    /// never mint one encoding. `Turn("a:b", "c")` encodes `turn:3:a:b:1:c`
+    /// while `Turn("a", "b:c")` encodes `turn:1:a:3:b:c`: the `:`s inside a
+    /// component are data, never a boundary. This is the discipline
+    /// `IdentityEncoder::string` applies to binary durable preimages
+    /// (`crates/lash-core-ids/src/stable_identity.rs`), rendered as text so
+    /// the minted identity stays readable.
+    ///
+    /// The encoding introduces only digits and `:` — never `#` or `/` — so an
+    /// identity built on it remains embeddable in a `SessionId`/`ProcessId`
+    /// (the separator note on [`EffectOpener::render`] covers why that
+    /// matters).
+    #[must_use]
+    pub fn identity_encoding(&self) -> String {
+        fn push_component(encoding: &mut String, component: &str) {
+            encoding.push_str(&component.len().to_string());
+            encoding.push(':');
+            encoding.push_str(component);
+        }
+        match self {
+            Self::Turn {
+                session_id,
+                turn_id,
+            } => {
+                let mut encoding = String::from("turn:");
+                push_component(&mut encoding, session_id.as_str());
+                encoding.push(':');
+                push_component(&mut encoding, turn_id.as_str());
+                encoding
+            }
+            Self::QueueDrain {
+                session_id,
+                drain_id,
+            } => {
+                let mut encoding = String::from("drain:");
+                push_component(&mut encoding, session_id.as_str());
+                encoding.push(':');
+                push_component(&mut encoding, drain_id);
+                encoding
+            }
+            Self::Process { process_ref } => {
+                let mut encoding = String::from("process:");
+                push_component(&mut encoding, process_ref.process_id.as_str());
+                encoding.push_str(":incarnation:");
+                encoding.push_str(&process_ref.incarnation.to_string());
+                encoding
+            }
         }
     }
 }
@@ -220,16 +285,75 @@ mod tests {
             EffectOpener::queue_drain("session-1", "drain-3"),
             process_opener("indexer", 3),
         ] {
-            let rendered = opener.render();
-            assert!(
-                !rendered.contains('#'),
-                "`#` is refused inside a process id: {rendered}"
+            for projection in [opener.render(), opener.identity_encoding()] {
+                assert!(
+                    !projection.contains('#'),
+                    "`#` is refused inside a process id: {projection}"
+                );
+                assert!(
+                    !projection.contains('/'),
+                    "`/` splits a stored turn parent scope: {projection}"
+                );
+            }
+        }
+    }
+
+    /// The collision the canonical encoding exists to close.
+    ///
+    /// `SessionId`, `TurnId` and drain ids accept arbitrary strings, so the
+    /// `:`-joined rendering of `Turn("a:b", "c")` and `Turn("a", "b:c")` is
+    /// the same text — `turn:a:b:c`. That is acceptable for the diagnostic
+    /// projection; the canonical encoding length-prefixes every component, so
+    /// the two encode as `turn:3:a:b:1:c` and `turn:1:a:3:b:c` and any
+    /// identity derived from them stays distinct.
+    #[test]
+    fn delimiter_bearing_components_render_equal_but_encode_distinctly() {
+        for (early, late) in [
+            (
+                EffectOpener::turn("a:b", "c"),
+                EffectOpener::turn("a", "b:c"),
+            ),
+            (
+                EffectOpener::queue_drain("a:b", "c"),
+                EffectOpener::queue_drain("a", "b:c"),
+            ),
+        ] {
+            assert_eq!(
+                early.render(),
+                late.render(),
+                "the diagnostic rendering is free-form and may collide"
             );
-            assert!(
-                !rendered.contains('/'),
-                "`/` splits a stored turn parent scope: {rendered}"
+            assert_ne!(
+                early.identity_encoding(),
+                late.identity_encoding(),
+                "the canonical encoding must keep the component boundary exact"
             );
         }
+        assert_eq!(
+            EffectOpener::turn("a:b", "c").identity_encoding(),
+            "turn:3:a:b:1:c"
+        );
+        assert_eq!(
+            EffectOpener::turn("a", "b:c").identity_encoding(),
+            "turn:1:a:3:b:c"
+        );
+        assert_eq!(
+            process_opener("indexer", 3).identity_encoding(),
+            "process:7:indexer:incarnation:3"
+        );
+    }
+
+    /// An empty component is encodable too: `0:` marks its boundary exactly.
+    #[test]
+    fn an_empty_component_encodes_unambiguously() {
+        assert_eq!(
+            EffectOpener::turn("", "t").identity_encoding(),
+            "turn:0::1:t"
+        );
+        assert_ne!(
+            EffectOpener::turn("", ":t").identity_encoding(),
+            EffectOpener::turn(":", "t").identity_encoding()
+        );
     }
 
     /// A drain is its own opener, distinct from any turn it runs.

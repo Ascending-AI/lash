@@ -1068,19 +1068,24 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // Re-pinned once more under FIG-3394 when the fixture began naming the
         // cell it executes: the opener is now the admitted turn address
         // (`test-session:turn-7`) rather than a fixture-spelled effect key.
+        // Re-pinned once more under FIG-3394 when the opener's identity
+        // encoding became canonical: every component is length-prefixed
+        // (`turn:12:test-session:6:turn-7`) so delimiter-bearing ids cannot
+        // collide, which changes the call id and the frame key derived from
+        // it.
         // What the pair asserts is unchanged: the two sides are still equal,
         // which is the trace-sink independence this test exists for; only the
         // derivation both sides share moved.
         assert_eq!(
             without_trace.call_id.as_deref(),
             Some(
-                "lashlang:turn:test-session:turn-7:exec-code:3:resource:tool:continue_as:resource_operation:e5d8677e32201f4992b63760:1"
+                "lashlang:turn:12:test-session:6:turn-7:11:exec-code:3:resource:16:tool:continue_as:43:resource_operation:e5d8677e32201f4992b63760:1"
             )
         );
         assert_eq!(
             with_trace.call_id.as_deref(),
             Some(
-                "lashlang:turn:test-session:turn-7:exec-code:3:resource:tool:continue_as:resource_operation:e5d8677e32201f4992b63760:1"
+                "lashlang:turn:12:test-session:6:turn-7:11:exec-code:3:resource:16:tool:continue_as:43:resource_operation:e5d8677e32201f4992b63760:1"
             )
         );
 
@@ -1094,11 +1099,11 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         };
         assert_eq!(
             without_trace_key.as_str(),
-            "frame-key/v2/1d66c15c4eac2e28bd1aa0e63f8c9fe1539366e1384edf4b2287afb1104a1359"
+            "frame-key/v2/288912bdc05f6baa573f2aaec7e929c7d20f0a03dbe1b6e6b9822bacf7996c48"
         );
         assert_eq!(
             with_trace_key.as_str(),
-            "frame-key/v2/1d66c15c4eac2e28bd1aa0e63f8c9fe1539366e1384edf4b2287afb1104a1359"
+            "frame-key/v2/288912bdc05f6baa573f2aaec7e929c7d20f0a03dbe1b6e6b9822bacf7996c48"
         );
     });
 }
