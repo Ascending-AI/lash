@@ -1,7 +1,6 @@
 use super::*;
 
 impl<M: TurnProtocol> TurnMachine<M> {
-    /// Create a new machine in `PrepareIteration` state.
     pub fn new(
         config: TurnMachineConfig<M>,
         messages: Vec<Message>,
@@ -71,7 +70,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         })
     }
 
-    /// Whether the machine has finished.
     pub fn is_done(&self) -> bool {
         matches!(self.state, MachineState::Finished)
     }

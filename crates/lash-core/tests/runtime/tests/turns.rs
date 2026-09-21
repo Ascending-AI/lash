@@ -267,8 +267,6 @@ impl lash_core::plugin::CodeExecutorPlugin for FailingCaptureExecutor {
         )))
     }
 
-    /// Reports the same obstacle the capture itself would hit, and stages
-    /// nothing — the runtime uses this to fail a turn before its provider call.
     async fn probe_execution_state_capture(
         &self,
         _ctx: lash_core::plugin::ProtocolSessionContext<'_>,

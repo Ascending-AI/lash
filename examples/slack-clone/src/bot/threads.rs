@@ -29,16 +29,12 @@ pub(crate) const THREAD_ROOT_SEED_PREFIX: &str =
 const ROOT_ADMISSION_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const ROOT_ADMISSION_MAX_BACKOFF: Duration = Duration::from_secs(8);
 
-/// Test-only record of what the root-admission wait actually did.
-///
-/// Tests that pin a fail-fast path need the fact "the root wait budget was not
-/// spent". Wall-clock time is a poor proxy for it: on a loaded runner a
-/// scheduling stall is indistinguishable from a real wait, so a tight
-/// `tokio::time::timeout` around the call reddens for the one reason the test
-/// does not care about. These counters make the fact directly observable —
-/// `probes` counts loop turns that found no authoritative root, and `budget`
-/// accumulates the wait each turn asked for (the requested nap, never the
-/// observed elapsed time, so runner load cannot inflate it).
+/// Wall-clock time is a poor proxy for it: on a loaded runner a scheduling stall is
+/// indistinguishable from a real wait, so a tight `tokio::time::timeout` around the call
+/// reddens for the one reason the test does not care about.
+/// These counters make the fact directly observable — `probes` counts loop turns that found no
+/// authoritative root, and `budget` accumulates the wait each turn asked for (the requested
+/// nap, never the observed elapsed time, so runner load cannot inflate it).
 #[cfg(test)]
 #[derive(Default)]
 pub struct RootWaitObserver {
@@ -62,7 +58,6 @@ impl RootWaitObserver {
         );
     }
 
-    /// Resolve the next time the wait loop sees a missing root.
     pub async fn missing_root(&self) {
         self.missing_root_observed.notified().await;
     }
@@ -102,8 +97,6 @@ enum RootRoute {
     PermanentlyUnavailable,
 }
 
-/// Open an existing thread fork or create it at the honest channel boundary.
-///
 /// A missing authoritative root boundary is polled with bounded exponential
 /// backoff. It is never replaced with the channel's current leaf: that leaf may
 /// already include messages and turns posted after the thread root.

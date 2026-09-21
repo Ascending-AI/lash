@@ -42,8 +42,6 @@ pub fn module(declarations: Vec<Declaration>, expressions: Vec<Expr>) -> Program
     }
 }
 
-/// Attaches an explicit source-span table to a built program.
-///
 /// Each entry is `(path, start, end)`: `path` is the child-index route from
 /// `program.main` to the expression the span covers, in `Expr::children()`
 /// order (`[0]` is the first top-level expression, `[0, 1]` its second child),
@@ -70,8 +68,6 @@ pub fn with_source_spans(mut program: Program, entries: &[(&[u32], usize, usize)
     program
 }
 
-/// Attaches per-top-level-expression spans a linker diagnostic reads.
-///
 /// Addressed as `AstPath::main([i])`, in order. See `with_source_spans` for
 /// why these tables are stated rather than parsed.
 pub fn with_expression_spans(mut program: Program, spans: &[(usize, usize)]) -> Program {
@@ -89,8 +85,6 @@ pub fn with_expression_spans(mut program: Program, spans: &[(usize, usize)]) -> 
     program
 }
 
-/// Attaches per-declaration spans a linker diagnostic reads.
-///
 /// Addressed as `AstPath::declaration(i, [])`, in declaration order. See
 /// `with_source_spans` for why these tables are stated rather than parsed.
 pub fn with_declaration_spans(mut program: Program, spans: &[(usize, usize)]) -> Program {

@@ -275,9 +275,8 @@ impl DirectCompletionCapability {
         } else {
             None
         };
-        // Allocate the sequential fallback before request preparation performs
-        // any await. Concurrent callers must provide explicit replay keys;
-        // this ordinal represents sequential program order only.
+        // Concurrent callers must provide explicit replay keys; this ordinal represents
+        // sequential program order only.
         let replay_ordinal = if context.position == DirectExecutionPosition::ToolAttempt
             || replay.as_ref().is_some_and(|replay| !replay.key.is_empty())
         {

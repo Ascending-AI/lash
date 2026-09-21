@@ -111,7 +111,6 @@ impl ScriptedProviderBuilder {
         self
     }
 
-    /// Records every close the host performs on this provider.
     pub fn on_close<F>(mut self, on_close: F) -> Self
     where
         F: Fn() + Send + Sync + 'static,

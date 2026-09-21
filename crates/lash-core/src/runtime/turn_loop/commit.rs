@@ -868,8 +868,6 @@ impl LashRuntime {
         .await
     }
 
-    /// Record that this turn scope has ended.
-    ///
     /// The ledger row is the whole parent-end fact: the work it names — the
     /// query for this turn's `Cancel` children and their cancels — is the
     /// process worker's sweep. The row is written here, immediately after the

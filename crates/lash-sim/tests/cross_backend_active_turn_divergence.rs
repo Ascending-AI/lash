@@ -1,11 +1,9 @@
 //! DISCRIMINATOR (scratch) for the cross-backend SQLite active-turn divergence.
 //!
-//! Builds TWO real `lash::LashCore`s identical except the session store
-//! factory (in-memory vs lash-sqlite-store) and drives the SAME operation
-//! sequence on both over the production transport seam with an UN-GATED
-//! `ScriptedLlmHttpTransport` (no `ScriptedTransportSchedule` / no per-event
-//! Notify gating — that gating is the harness artifact under test). Compares
-//! committed assistant message + cumulative provider exchange count per turn.
+//! Builds TWO real `lash::LashCore`s identical except the session store factory (in-memory vs
+//! lash-sqlite-store) and drives the SAME operation sequence on both over the production
+//! transport seam with an UN-GATED `ScriptedLlmHttpTransport` (no `ScriptedTransportSchedule`
+//! / no per-event Notify gating — that gating is the harness artifact under test).
 
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;

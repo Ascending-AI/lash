@@ -4,8 +4,6 @@ pub use lash_core_store::runtime_error::{
     RuntimeError, RuntimeErrorCause, RuntimeErrorCode, runtime_error_from_store_commit,
 };
 
-/// Wrap a store commit failure for the session-facing API.
-///
 /// The typed arm is not a convenience list: every variant here is one a host is
 /// expected to *match on* rather than log. `HeadRevisionConflict` in particular
 /// is the concurrent-append outcome the host is told to refresh and retry from,

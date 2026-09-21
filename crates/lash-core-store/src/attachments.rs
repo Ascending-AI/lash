@@ -221,8 +221,6 @@ pub trait AttachmentStore: Send + Sync {
         AttachmentStorePersistence::Ephemeral
     }
 
-    /// Store bytes and return their content-addressed reference.
-    ///
     /// Repeating a `put` for bytes already held must refresh the freshness
     /// signal returned by [`Self::head`] when the backend exposes one. The GC
     /// relies on that restamp to distinguish a newly referenced blob from the
@@ -239,10 +237,10 @@ pub trait AttachmentStore: Send + Sync {
     /// guard before deriving any path or key from `id`.
     async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError>;
 
-    /// Remove one blob. Idempotent: deleting an absent blob is a no-op. This is
-    /// the primitive mark-and-sweep GC uses to reclaim unreferenced content;
-    /// per-session lifecycle is expressed by dropping manifest refs, never by
-    /// calling this directly for a live session.
+    /// Idempotent: deleting an absent blob is a no-op.
+    /// This is the primitive mark-and-sweep GC uses to reclaim unreferenced content;
+    /// per-session lifecycle is expressed by dropping manifest refs, never by calling this
+    /// directly for a live session.
     ///
     /// Namespaced-storage implementors must apply the trait-level id-shape
     /// guard before deriving any path or key from `id`.
@@ -299,8 +297,8 @@ pub trait AttachmentStore: Send + Sync {
 /// assertion.
 #[async_trait::async_trait]
 pub trait AttachmentRootSet: Send + Sync {
-    /// Whether this authority can prove process-owner death. Authorities without
-    /// a wired process registry conservatively retain process-owned intents.
+    /// Authorities without a wired process registry conservatively retain process-owned
+    /// intents.
     fn can_prove_process_owner_death(&self) -> bool {
         false
     }
@@ -333,9 +331,6 @@ pub trait AttachmentRootSet: Send + Sync {
         })
     }
 
-    /// Whether a single id currently has a live root under the same age plus
-    /// owner-reachability rule as [`Self::live_attachment_refs`].
-    ///
     /// Targeted counterpart to [`Self::live_attachment_refs`] for the GC lever's
     /// delete-time root re-check (see [`reclaim_unreferenced_attachments`]): the
     /// full root set is snapshotted once, but a candidate blob can be re-referenced
@@ -501,9 +496,6 @@ pub trait AttachmentRootSet: Send + Sync {
         })
     }
 
-    /// Record that an armed physical delete succeeded: the condemnation row is
-    /// deleted and the digest returns to `Free`.
-    ///
     /// No byte-absence fact is retained, and none is needed: the condemnation
     /// already cleared every manifest row for the digest, so adoption finds no
     /// upload evidence and refuses with
@@ -635,10 +627,6 @@ pub struct AttachmentReclamationPolicy {
     pub empty_root_set: EmptyRootSetPolicy,
 }
 
-/// Mark-and-sweep GC for attachment blobs — the host-invocable counterpart to
-/// [`StoreMaintenance::gc_unreachable`](crate::StoreMaintenance::gc_unreachable)
-/// for attachment payloads.
-///
 /// Enumerates every blob in `backend`, computes the live root set from
 /// `root_set` (committed refs plus intents whose durable owners can still
 /// commit), and deletes every blob no session references. The policy's
@@ -995,7 +983,6 @@ where
                 report,
             ));
         }
-        // (d) Delete.
         let deleted = backend.delete(&blob.id).await;
         match deleted {
             Ok(()) => {
@@ -1058,9 +1045,8 @@ where
     }
 }
 
-/// Whether a blob modified at `last_modified_epoch_ms` is within the write grace
-/// window relative to `now`. A backend that cannot report a modification time
-/// (`None`) is treated as past the window, matching [`StoredBlobRef`].
+/// A backend that cannot report a modification time (`None`) is treated as past the window,
+/// matching [`StoredBlobRef`].
 fn within_grace(last_modified_epoch_ms: Option<u64>, now: u64, grace_period_ms: u64) -> bool {
     last_modified_epoch_ms.is_some_and(|modified| now.saturating_sub(modified) < grace_period_ms)
 }
@@ -1301,8 +1287,6 @@ impl SessionAttachmentStore {
         &self.session_id
     }
 
-    /// Configure the host-selected maximum bytes accepted by one put.
-    ///
     /// `None` preserves unbounded attachment puts. `Some(max_bytes)` rejects a
     /// larger `put` with [`AttachmentStoreError::SizeLimitExceeded`] before
     /// recording a manifest intent or calling the backend.
@@ -1311,8 +1295,6 @@ impl SessionAttachmentStore {
         self
     }
 
-    /// Return the host-selected attachment byte limit.
-    ///
     /// `None` means attachment puts are unbounded.
     pub fn max_attachment_bytes(&self) -> Option<u64> {
         self.max_attachment_bytes
@@ -1525,15 +1507,13 @@ impl SessionAttachmentStore {
         Ok(reference)
     }
 
-    /// Resolve by content address, including references inherited through a fork.
     /// FIG-653: hosts own read authorization; an absent backend id is NotFound.
     pub async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
         self.backend.get(id).await
     }
 
     pub async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
-        // Drop this session's manifest ref. Backend bytes stay put; they are
-        // reclaimed by GC once no session references them.
+        // Backend bytes stay put; they are reclaimed by GC once no session references them.
         self.manifest
             .forget(&self.session_id, id)
             .await

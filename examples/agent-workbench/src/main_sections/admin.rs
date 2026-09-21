@@ -84,8 +84,6 @@ pub(crate) struct ReclaimTriggerOccurrencesRequest {
     pub(crate) cutoff_epoch_ms: u64,
 }
 
-/// Run the deployment-wide trigger-occurrence maintenance lever explicitly.
-///
 /// Like receipt pruning, this is an operator-composed request with no UI and no
 /// schedule. The complete typed report is returned so a caller can distinguish
 /// reclaimed rows, live fan-out, grace deferral, and a concurrent reinspection
@@ -265,10 +263,8 @@ pub(crate) struct SessionVacuumReport {
 pub(crate) struct AttachmentReclamationSummary {
     pub(crate) scanned_blob_count: usize,
     pub(crate) reclaimed_count: usize,
-    /// Number of blobs whose destructive step failed.
     pub(crate) failed_count: usize,
     pub(crate) failed_ids: Vec<String>,
-    /// Number of condemnations deferred for a later pass.
     pub(crate) condemn_deferred_count: usize,
     pub(crate) condemn_deferred_ids: Vec<String>,
     pub(crate) deleted_while_referenced: Vec<String>,
@@ -437,8 +433,6 @@ pub(crate) async fn run_store_maintenance(
     }))
 }
 
-/// Record what this pass destroyed, on the success and failure paths alike.
-///
 /// `outcome` is passed rather than inferred, so a reader is never left guessing
 /// whether a short `vacuumed` list means "that is all that was asked for" or
 /// "the rest never ran" -- and so the distinction cannot quietly decay into a
@@ -567,8 +561,6 @@ pub(crate) fn attachment_reclamation_policy(
     }
 }
 
-/// Run one mark-and-sweep pass and project its report.
-///
 /// The root authority, the backend and the policy are all parameters rather
 /// than things this function reaches for: which authority marks the live set is
 /// the entire safety argument, so it is stated by the caller and readable in

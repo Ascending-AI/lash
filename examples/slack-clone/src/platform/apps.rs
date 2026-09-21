@@ -60,8 +60,6 @@ pub fn set_request_url(connection: &Connection, app_id: &str, request_url: &str)
     Ok(())
 }
 
-/// Queue an event for delivery.
-///
 /// `event_id` is unique, so a caller that retries the enqueue itself cannot
 /// double-deliver: the second insert is ignored and the existing row keeps its
 /// attempt history.
@@ -79,8 +77,6 @@ pub fn enqueue_event(
     Ok(())
 }
 
-/// Read up to `limit` events whose next attempt is due.
-///
 /// **This reads; it does not claim.** The statement is a plain `SELECT` — no row
 /// is marked, leased or reserved, so two readers would both see the same event
 /// and both deliver it.
@@ -122,8 +118,6 @@ pub fn due_events(connection: &Connection, limit: usize) -> Result<Vec<OutboxRow
     Ok(rows)
 }
 
-/// Mark an event delivered.
-///
 /// Guarded on the row still being pending: a second dispatcher that lost the
 /// race must not stamp `delivered_at` onto a row the winner already settled.
 pub fn mark_delivered(connection: &Connection, id: i64) -> Result<()> {
@@ -136,8 +130,6 @@ pub fn mark_delivered(connection: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Record a failed attempt, scheduling the next one or abandoning the event.
-///
 /// Guarded on the row still being pending, so a second dispatcher that lost the
 /// race cannot stamp `abandoned_at` onto a row the winner already settled. When
 /// the row is already terminal the recorded attempt count is read back instead.
@@ -191,7 +183,6 @@ pub struct DeliveryStats {
     pub abandoned: u32,
 }
 
-/// Read the delivery counters.
 pub fn delivery_stats(connection: &Connection) -> Result<DeliveryStats> {
     Ok(connection.query_row(
         "SELECT

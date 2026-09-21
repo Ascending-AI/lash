@@ -58,9 +58,9 @@ pub(crate) struct TypeAnnotationField {
     pub(crate) ty: TypeAnnotation,
 }
 
-/// Records an annotation. Total by construction: anything outside the durable
-/// subset becomes [`TypeShape::Unsupported`] rather than an error, because a
-/// non-process function may legally carry it.
+/// Total by construction: anything outside the durable subset becomes
+/// [`TypeShape::Unsupported`] rather than an error, because a non-process function may legally
+/// carry it.
 pub(crate) fn convert_type(ty: &swc::TsType) -> TypeAnnotation {
     let span = source_span(swc_common::Spanned::span(ty));
     let shape = match ty {

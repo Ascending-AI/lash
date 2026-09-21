@@ -77,8 +77,8 @@ async fn read_user_version(path: &Path) -> Result<Option<i64>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    // Read-only or not at all. A failed read-only open is an undecided
-    // database, never a reason to reach for a connection that can write.
+    // A failed read-only open is an undecided database, never a reason to reach for a
+    // connection that can write.
     let conn = SqliteConnection::open_readonly(path)
         .await
         .map_err(|err| err.to_string())?;
@@ -158,10 +158,7 @@ pub struct SqliteStorePreflight {
 }
 
 impl SqliteStorePreflight {
-    /// Build a preflight over the session-store root a
-    /// [`SqliteSessionStoreFactory`](crate::SqliteSessionStoreFactory) would be
-    /// constructed from. The durable-core database is derived from it the same
-    /// way the factory derives it.
+    /// The durable-core database is derived from it the same way the factory derives it.
     pub fn for_session_store_root(root: impl Into<PathBuf>) -> Self {
         Self {
             durable_core: root.into().join(crate::DURABLE_CORE_DB_FILE),

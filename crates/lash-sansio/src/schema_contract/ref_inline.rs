@@ -1,8 +1,7 @@
 //! Strict-dialect `$ref` inlining for the OpenAI schema projector.
 //!
-//! Split out of `schema_contract.rs`. The projector calls
-//! [`inline_ref_with_siblings`] at the head of every node it visits, for the
-//! profiles that require strict objects.
+//! The projector calls [`inline_ref_with_siblings`] at the head of every node it visits, for
+//! the profiles that require strict objects.
 
 use serde_json::Value;
 

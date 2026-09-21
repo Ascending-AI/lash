@@ -263,7 +263,6 @@ impl LeaseOwnerIdentity {
         Self::opaque(format!("restate:{process_id}"), execution_id)
     }
 
-    /// Return the Restate execution id when this owner belongs to `process_id`.
     pub fn restate_process_execution_id(&self, process_id: &ProcessId) -> Option<&str> {
         let expected = Self::restate_process_execution(process_id, &self.incarnation_id);
         self.same_incarnation(&expected)
@@ -286,7 +285,6 @@ pub struct SessionExecutionLease {
     pub lease_token: String,
     pub fencing_token: u64,
     pub claimed_at_epoch_ms: u64,
-    /// Store-authored duration installed by the most recent claim, reentry, or renewal.
     pub lease_term_ms: u64,
     pub expires_at_epoch_ms: u64,
 }
@@ -299,7 +297,6 @@ pub struct SessionExecutionLease {
 /// Callers can therefore compare the two without mixing host and store clocks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionExecutionLeaseObservation {
-    /// Store-clock instant paired with the row read.
     pub observed_at_epoch_ms: u64,
     /// Held lease facts, or `None` for an absent, unleased, or released row.
     pub lease: Option<SessionExecutionLease>,
@@ -563,8 +560,7 @@ impl SessionExecutionLeaseClaimOutcome {
         self.acquisition().map(|acquisition| acquisition.lease)
     }
 
-    /// Returns the granted claim with its displacement evidence intact. Callers
-    /// that report takeovers must use this rather than [`Self::acquired`].
+    /// Callers that report takeovers must use this rather than [`Self::acquired`].
     pub fn acquisition(self) -> Option<SessionExecutionLeaseAcquisition> {
         match self {
             Self::Acquired(acquisition) => Some(acquisition),

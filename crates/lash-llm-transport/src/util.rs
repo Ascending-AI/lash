@@ -8,8 +8,6 @@ use lash_sansio::llm::types::{
 };
 use serde_json::Value;
 
-/// Forward a raw provider event to the trace sink, deriving an event name from
-/// the JSON `type` (or `event`) field when present.
 pub fn emit_provider_trace(tx: Option<&LlmProviderTraceSender>, provider: &'static str, raw: &str) {
     let Some(tx) = tx else {
         return;
@@ -64,9 +62,9 @@ pub fn parse_i64(value: Option<&Value>) -> i64 {
     }
 }
 
-/// Extract a human-readable error detail from a provider error body. Prefers
-/// the `error.message` field of a JSON body; otherwise falls back to the first
-/// 200 characters of the raw text. Returns `None` for empty bodies.
+/// Extract a human-readable error detail from a provider error body.
+/// Prefers the `error.message` field of a JSON body; otherwise falls back to the first 200
+/// characters of the raw text.
 pub fn extract_error_detail(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -83,9 +81,6 @@ pub fn extract_error_detail(raw: &str) -> Option<String> {
     Some(trimmed.chars().take(200).collect())
 }
 
-/// Report whether explicit prompt-cache breakpoints in `request` were honored
-/// by the adapter's request builder.
-///
 /// `cache_control_emitted` must come from the code path that wrote the
 /// provider-specific cache directive. Inspecting the completed JSON body is
 /// insufficient because host-owned tool schemas can contain identical keys.

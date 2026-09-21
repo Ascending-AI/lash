@@ -498,9 +498,8 @@ impl ModelStore {
     }
 
     /// Summarize checkpoint evidence using the same session-model boundary as
-    /// `apply_observed_boundary`: generated suspend fixtures are real runtime
-    /// turns but intentionally not abstract sessions. Writes for those known
-    /// fixtures are excluded; every other unknown session is an error.
+    /// `apply_observed_boundary`: generated suspend fixtures are real runtime turns but
+    /// intentionally not abstract sessions.
     pub fn summarize_with_trace_checkpoint_writes(
         self,
         events: &[crate::scheduler::DeliveredBoundary],

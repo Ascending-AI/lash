@@ -46,7 +46,7 @@ impl<'scope> ProcessOpScope<'scope> {
     }
 
     /// Exposes agent frame id to store and durable-substrate implementors while persisting and
-    /// coordinating durable process execution. Returns `None` when no agent frame id is present.
+    /// coordinating durable process execution.
     pub fn agent_frame_id(&self) -> Option<&crate::FrameNodeId> {
         self.agent_frame_id.as_ref()
     }

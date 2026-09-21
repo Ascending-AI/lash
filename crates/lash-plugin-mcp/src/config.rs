@@ -216,7 +216,6 @@ pub struct McpCallPolicy {
         skip_serializing_if = "is_default_timeout_disconnect_policy"
     )]
     pub timeout_disconnect_policy: TimeoutDisconnectPolicy,
-    /// Maximum wait for a liveness-probe answer, in milliseconds.
     #[serde(
         default = "default_liveness_probe_timeout_ms",
         skip_serializing_if = "is_default_liveness_probe_timeout_ms"
@@ -325,7 +324,6 @@ pub struct McpServerConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "transport", rename_all = "snake_case")]
 pub enum McpTransport {
-    /// Spawn a child process and speak JSON-RPC over stdio.
     Stdio(McpStdioTransport),
     /// Newer MCP spec HTTP/JSON streaming transport.
     StreamableHttp(McpStreamableHttpTransport),
@@ -354,7 +352,6 @@ impl McpStdioTransport {
         }
     }
 
-    /// Set environment variables for the stdio child process.
     pub fn with_env<K, V>(mut self, env: impl IntoIterator<Item = (K, V)>) -> Self
     where
         K: Into<String>,
@@ -367,7 +364,6 @@ impl McpStdioTransport {
         self
     }
 
-    /// Set the working directory for the stdio child process.
     pub fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
         self.cwd = Some(cwd.into());
         self
@@ -395,8 +391,6 @@ impl McpStreamableHttpTransport {
         }
     }
 
-    /// Set static HTTP headers for the transport.
-    ///
     /// These values are reused unchanged on reconnect. This is suitable for
     /// fixed API keys and host-managed tokens, but it does not enable OAuth or
     /// token refresh; rmcp's `auth` feature is not enabled by this crate.
@@ -497,12 +491,10 @@ impl McpServerConfig {
         &self.call_policy
     }
 
-    /// Return the graceful-close and forced-reap timing for this server.
     pub fn shutdown_policy(&self) -> &McpShutdownPolicy {
         &self.shutdown_policy
     }
 
-    /// Set the graceful-close and forced-reap timing for this server.
     pub fn with_shutdown_policy(mut self, shutdown_policy: McpShutdownPolicy) -> Self {
         self.shutdown_policy = shutdown_policy;
         self

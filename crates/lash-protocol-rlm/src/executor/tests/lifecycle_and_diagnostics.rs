@@ -1131,8 +1131,6 @@ pub(super) async fn execute_test_code(
     state
 }
 
-/// Executes a statement-per-line program, splitting it across cells.
-///
 /// The TypeScript frontend caps a single cell at 64 KiB of source, which the
 /// state-growth fixtures below deliberately exceed: they seed dozens of
 /// multi-kilobyte bindings before measuring what one later assignment costs.

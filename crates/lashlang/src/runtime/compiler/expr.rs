@@ -28,8 +28,6 @@ impl Compiler {
         });
     }
 
-    /// Emits a call to a declared `fn`.
-    ///
     /// The callee is materialized at the call site as a capture-free closure
     /// over the chunk function, and the call then runs through the ordinary
     /// `Call` path. Reusing that path rather than adding a call opcode is the
@@ -626,9 +624,7 @@ impl Compiler {
             })
     }
 
-    /// Records the chain every instruction from here on expects, which is the
-    /// chain the instruction just emitted leaves installed. Call it after
-    /// emitting any instruction that pushes or pops a handler, and after the
+    /// Call it after emitting any instruction that pushes or pops a handler, and after the
     /// jump that ends a scope-exit edge, where the lexical chain resumes.
     fn record_handler_chain_breakpoint(&mut self) {
         self.record_handler_chain_digest(
@@ -817,8 +813,6 @@ impl Compiler {
         self.clear_const_slots();
     }
 
-    /// Emits the instructions a jump edge owes the exception scopes it leaves.
-    ///
     /// `break` and `continue` are abrupt completions: per ECMA-262 they run
     /// every pending `finally` between the jump and its target loop, innermost
     /// first, and every handler they cross has to come off the VM's handler

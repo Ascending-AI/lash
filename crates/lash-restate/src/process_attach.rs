@@ -32,7 +32,6 @@ use crate::durable_wait::{
 };
 use crate::process::{LashProcessWorkflowClient, RestateProcessAwaitRequest};
 
-/// Arm the terminal of one process incarnation as the resolver of one wait.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RestateProcessAttachRequest {
     /// The exact incarnation whose terminal resolves the wait. A later
@@ -50,8 +49,6 @@ pub(crate) fn process_attach_workflow_key(key: &AwaitEventKey) -> String {
     RestateDurableWaitAddress::for_key(key).workflow_key
 }
 
-/// Waits out one process terminal on behalf of a parked call.
-///
 /// Bind [`LashProcessAttachImpl::serve`] on every endpoint that binds
 /// [`LashProcessWorkflow`](crate::process::LashProcessWorkflow) and the
 /// durable-wait services: a deployment that arms process terminals without it

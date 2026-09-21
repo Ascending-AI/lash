@@ -116,9 +116,7 @@ struct Witness {
     seek_columns: &'static [&'static str],
 }
 
-/// Just the `Index Cond:` lines of `plan`: what the index positions on, as
-/// opposed to what it filters after positioning. An unsargable comparison
-/// contributes nothing here and everything to `Filter:`.
+/// An unsargable comparison contributes nothing here and everything to `Filter:`.
 fn index_conditions(plan: &str) -> String {
     plan.lines()
         .filter(|line| line.trim_start().starts_with("Index Cond:"))

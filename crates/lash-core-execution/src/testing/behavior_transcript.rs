@@ -58,14 +58,13 @@
 //!
 //! # Why there are no sequence numbers and no clock
 //!
-//! Order is carried by line position. A global sequence column renumbers the
-//! whole tail whenever one event is inserted, which turns a one-line behavior
-//! change into a whole-artifact diff — the opposite of "stable under irrelevant
-//! change". For the same reason nothing here can render a wall-clock time, an
-//! elapsed duration, or a raw identifier: durations are not offered at all, and
-//! identifiers only enter through [`Attr::id`], which replaces them with a
-//! first-mention alias (`process-001`). Free text goes through a scrubber that
-//! collapses whitespace, masks UUID- and hash-shaped substrings, and truncates.
+//! Order is carried by line position.
+//! A global sequence column renumbers the whole tail whenever one event is inserted, which
+//! turns a one-line behavior change into a whole-artifact diff — the opposite of "stable under
+//! irrelevant change".
+//! For the same reason nothing here can render a wall-clock time, an elapsed duration, or a
+//! raw identifier: durations are not offered at all, and identifiers only enter through
+//! [`Attr::id`], which replaces them with a first-mention alias (`process-001`).
 //!
 //! # Review budget
 //!
@@ -230,7 +229,6 @@ impl Kind {
 /// minted.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum IdKind {
-    /// A session.
     Session,
     /// A runtime process.
     Process,
@@ -242,7 +240,6 @@ pub enum IdKind {
     Key,
     /// A durable effect.
     Effect,
-    /// An attachment.
     Attachment,
     /// A worker / lease owner.
     Worker,
@@ -320,7 +317,6 @@ pub struct Attr {
 }
 
 impl Attr {
-    /// Free text: whitespace-collapsed, identifier-masked, truncated, quoted.
     pub fn text(key: &'static str, value: impl AsRef<str>) -> Self {
         Self {
             key,
@@ -506,7 +502,6 @@ impl Component {
         }
     }
 
-    /// Render the typed state accepted by a boundary commit.
     pub fn stored_json(name: impl Into<String>, value: serde_json::Value) -> Self {
         Self {
             name: name.into(),
@@ -535,9 +530,6 @@ impl Component {
 }
 
 /// One transcript line.
-///
-/// Renders as a single line, plus the mandatory typed [`Usage`] line and one
-/// indented line per [`Component`] for a [`Kind::Commit`] entry.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Entry {
     actor: Actor,
@@ -653,24 +645,19 @@ impl Transcript {
         self
     }
 
-    /// Record one line.
     pub fn record(&mut self, entry: Entry) -> &mut Self {
         self.entries.push(entry);
         self
     }
 
-    /// Number of recorded entries (not rendered lines).
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Whether anything has been recorded.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// Render the reviewable text.
-    ///
     /// # Panics
     ///
     /// When the rendering exceeds the review budget, or when nothing was

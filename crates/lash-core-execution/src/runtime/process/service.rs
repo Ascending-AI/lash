@@ -146,9 +146,6 @@ pub trait ProcessService: Send + Sync {
         self.await_process(&process_ref.process_id, scope).await
     }
 
-    /// Arm the terminal of `process_ref` as the resolver of `key` and return
-    /// without waiting for it.
-    ///
     /// The default refuses: a service that cannot observe process terminals
     /// must not silently accept responsibility for a wait it will never
     /// resolve, which would hang the parked call forever.

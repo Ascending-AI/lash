@@ -60,13 +60,15 @@ fn trigger_subscription_address_preimage(
 
 /// Permanent trigger-definition tag registry.
 ///
-/// Owners: 1 session, 2 host, 3 platform. Actors: 1 host, 2 session. Process
-/// inputs: 1 tool call, 2 engine, 3 session turn, 4 external. Tool output
-/// contracts: 1 static, 2 from-input-schema. Input bindings: 1 event, 2 fixed.
-/// Arbitrary JSON and schemas are each one canonical opaque bytes leaf. Value
-/// selectors: 1 payload, 2 pointer, 3 const, 4 template,
-/// 5 present. Process statuses: 1 running, 2 waiting, 3 completed, 4 failed,
-/// 5 cancelled, 6 abandoned, 7 caller departed. Retired tags remain burned.
+/// Owners: 1 session, 2 host, 3 platform.
+/// Actors: 1 host, 2 session.
+/// Process inputs: 1 tool call, 2 engine, 3 session turn, 4 external.
+/// Tool output contracts: 1 static, 2 from-input-schema.
+/// Arbitrary JSON and schemas are each one canonical opaque bytes leaf.
+/// Value selectors: 1 payload, 2 pointer, 3 const, 4 template, 5 present.
+/// Process statuses: 1 running, 2 waiting, 3 completed, 4 failed, 5 cancelled, 6 abandoned, 7
+/// caller departed.
+/// Retired tags remain burned.
 fn trigger_subscription_definition_preimage(
     owner_scope: &TriggerOwnerScope,
     draft: &TriggerSubscriptionDraft,
@@ -203,8 +205,8 @@ pub(super) fn project_trigger_draft(
 
 /// Projects the admitted source contract and provider route.
 ///
-/// Route tags: 1 resident, 2 provider. The opaque route is one canonical
-/// payload leaf; the configuration contract is one canonical schema leaf.
+/// The opaque route is one canonical payload leaf; the configuration contract is one canonical
+/// schema leaf.
 /// Retired tags remain burned.
 pub(super) fn project_trigger_source_capture(
     identity: &mut crate::stable_identity::IdentityEncoder,
@@ -466,8 +468,6 @@ impl TriggerRouter {
         }
     }
 
-    /// Bind the host component that reinstalls a captured provider route before
-    /// an unrecorded delivery executes.
     pub fn with_route_restorer(mut self, restorer: Arc<dyn TriggerRouteRestorer>) -> Self {
         self.route_restorer = Some(restorer);
         self
@@ -479,8 +479,6 @@ impl TriggerRouter {
         self.process_engines.as_ref()
     }
 
-    /// Bind the exact artifact stores used by the runtime that will execute
-    /// trigger-started processes.
     pub fn with_process_artifacts(
         mut self,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,

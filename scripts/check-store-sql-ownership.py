@@ -773,7 +773,7 @@ def check(root: Path) -> list[str]:
             f"{MANIFEST}: cross-family entry `{name}` names no declared statement in `{owner}`"
         )
 
-    # 7b. A statement nobody issues.
+    # A statement nobody issues.
     #
     # A field is read as `.<name>`, so one occurrence anywhere outside the
     # declaration is enough. The rule is deliberately generous — it refuses
@@ -808,11 +808,10 @@ def check(root: Path) -> list[str]:
                         "vocabulary expand it, so one enum edit still reaches every statement."
                     )
 
-    # 1, 1b and 1c. One pass over every production source: the repository-wide
-    # rule that no file outside a family's owners spells SQL over its tables,
-    # and — inside the two store crates — the total rule that every SQL literal
-    # has a declared home at all.
-    # text -> where it was first seen, per store crate's connection modules.
+    # One pass over every production source: the repository-wide rule that no file outside a
+    # family's owners spells SQL over its tables, and — inside the two store crates — the total
+    # rule that every SQL literal has a declared home at all. text -> where it was first seen,
+    # per store crate's connection modules.
     connection_texts: dict[str, dict[str, str]] = {crate: {} for crate in STORE_CRATES}
     for relative in sorted(production_sources(root)):
         if relative in schema_modules or is_exempt(relative):

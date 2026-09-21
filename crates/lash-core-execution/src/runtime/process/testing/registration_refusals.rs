@@ -93,9 +93,6 @@ fn session_turn_input(definition_key: &str) -> ProcessInput {
     }
 }
 
-/// Builds every registration that violates exactly `rule` and nothing checked
-/// before it — one per input arm the rule can be reached from.
-///
 /// The match is exhaustive on purpose: adding a rule to
 /// [`ProcessRegistrationRefusal`] stops this function compiling until the shape
 /// is spelled here, and both validators then see it.

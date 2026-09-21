@@ -1129,7 +1129,6 @@ impl<B: Body + Unpin> Body for FusedBody<B> {
 enum InputAfterLastResponse {
     /// Keep it open; the handler is expected to finish on its own.
     Open,
-    /// Close it; the handler is expected to suspend.
     Closed,
 }
 

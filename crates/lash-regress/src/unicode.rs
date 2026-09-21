@@ -138,8 +138,6 @@ impl FoldRange {
     }
 }
 
-/// Implements the `Canonicalize` method from the [spec].
-///
 /// [spec]: https://tc39.es/ecma262/#sec-runtime-semantics-canonicalize-ch
 pub(crate) fn fold_code_point(cu: u32, unicode: bool) -> u32 {
     if unicode {
@@ -198,7 +196,6 @@ fn uppercase(cu: u32) -> u32 {
     if let Ok(index) = searched {
         let fr: &FoldRange = if cfg!(feature = "prohibit-unsafe") {
             // SAFETY: a successful binary search returns an index into
-            // `TO_UPPERCASE`.
             #[expect(
                 unsafe_code,
                 reason = "binary_search returned an in-bounds TO_UPPERCASE index"
@@ -215,7 +212,6 @@ fn uppercase(cu: u32) -> u32 {
     }
 }
 
-// Add all folded characters in the given interval to the given code point set.
 // This skips characters which fold to themselves.
 fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
     let overlaps = FOLDS.equal_range_by(|tr| {
@@ -232,7 +228,6 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
             fr.transformed_from().overlaps(iv),
             "Interval does not overlap transform"
         );
-        // Find the (inclusive) range of our interval that this transform covers.
         let first_trans = core::cmp::max(fr.first(), iv.first);
         let last_trans = core::cmp::min(fr.last(), iv.last);
 
@@ -424,9 +419,8 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    // Map from folded char to the chars that folded to it.
-    // If an entry is missing, it means either nothing folds to the char,
-    // or it folds exclusively to itself; this can be determined by comparing
+    // If an entry is missing, it means either nothing folds to the char, or it folds
+    // exclusively to itself; this can be determined by comparing
     // the char to its fold.
     fn get_unfold_map() -> HashMap<u32, Vec<u32>> {
         let mut unfold_map: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -543,7 +537,6 @@ mod tests {
             let mut expected = CodePointSet::default();
             let mut from = first;
             for &last in &locs[idx..] {
-                // Add both folded and unfolded characters to expected.
                 for c in from..=last {
                     let fc = fold(c);
                     if let Some(unfolded) = unfold_map.get(&fc) {

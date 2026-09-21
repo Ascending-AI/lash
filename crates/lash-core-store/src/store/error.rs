@@ -275,7 +275,6 @@ pub enum StoreError {
         session_id: SessionId,
         /// Canonical operation storage key of the corrupt receipt.
         operation_key: String,
-        /// Count stored with the first attempt.
         stored: u64,
         /// Count carried by the retry.
         attempted: u64,

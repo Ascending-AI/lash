@@ -17,12 +17,12 @@ import { parseLiteral, isSimpleReference } from './fields.js';
 
 // --- nesting builder -------------------------------------------------------
 
-// Build the ordered, nested step tree from a document. Node order IS the
-// document's source order (roots + each group's `nodeIds`), so no layout is
-// needed — we just walk it. Returns `{ processes, main }`, each an array of
-// step entries. A container/process entry carries `groups`, one per child slot,
-// each with a plain-language `header` (null when the steps sit directly under
-// the container's own label, e.g. an `if`'s `then`) and its own nested `steps`.
+// Build the ordered, nested step tree from a document.
+// Node order IS the document's source order (roots + each group's `nodeIds`), so no layout is
+// needed — we just walk it.
+// A container/process entry carries `groups`, one per child slot, each with a plain-language
+// `header` (null when the steps sit directly under the container's own label, e.g. an `if`'s
+// `then`) and its own nested `steps`.
 export function buildSteps(doc) {
   const nodeMap = new Map((doc?.nodes ?? []).map((n) => [n.id, n]));
   const inputsByTarget = new Map();
@@ -67,16 +67,14 @@ export function buildSteps(doc) {
   };
 }
 
-// Decide how a whole document PRESENTS as a step flow. A workflow that is a
-// single process with no top-level statements reads best as a flat Trigger→
-// Action stack: we surface that lone process's body directly as the primary
-// flow (no "Background tasks" wrapper, no process card — its @label title is
-// already shown in the workflow selector, so we never repeat it as a card).
-// Any other shape (multiple processes, or a top-level `main` alongside one or
-// more processes) keeps the grouped presentation. PURE: consumes buildSteps,
-// chooses a layout, and — when flattened — carries the owning process's insert
-// target so the rail "+" lands inside its body. Returns
-// `{ flat, flowName, steps, insertTarget, processes, main }`.
+// A workflow that is a single process with no top-level statements reads best as a flat
+// Trigger→ Action stack: we surface that lone process's body directly as the primary flow (no
+// "Background tasks" wrapper, no process card — its @label title is already shown in the
+// workflow selector, so we never repeat it as a card).
+// Any other shape (multiple processes, or a top-level `main` alongside one or more processes)
+// keeps the grouped presentation.
+// PURE: consumes buildSteps, chooses a layout, and — when flattened — carries the owning
+// process's insert target so the rail "+" lands inside its body.
 export function presentSteps(doc) {
   const tree = buildSteps(doc);
   if (tree.processes.length === 1 && tree.main.length === 0) {
@@ -137,15 +135,11 @@ export function groupHeader(subkind, slot) {
 
 // --- plain-language labels -------------------------------------------------
 
-// Describe one node as a plain-language row label. Returns a framework-free
-// descriptor the renderer turns into a row: `category` drives which value slots
-// the row shows; `lead` is the human lead-in; `name` is the highlighted subject
-// (a saved name, a target, a task/process name, an action title); `glyph` is a
-// small mark. NEVER leaks "expression/SSA/state_update/comprehension/await".
+// NEVER leaks "expression/SSA/state_update/comprehension/await".
 // Display side-effects that are UI feedback, not user-meaningful workflow steps.
-// They stay visible (nothing is hidden) but render muted so they don't compete
-// with real actions in the checklist. `show_message` is NOT here — it's the
-// user-facing output and stays prominent.
+// They stay visible (nothing is hidden) but render muted so they don't compete with real
+// actions in the checklist.
+// `show_message` is NOT here — it's the user-facing output and stays prominent.
 const DISPLAY_FEEDBACK = new Set(['set_status', 'set_progress', 'set_light', 'highlight']);
 
 export function stepLabel(node, catalog = []) {
@@ -235,10 +229,11 @@ function effectLabel(node) {
   }
 }
 
-// Find the catalog entry that owns a call node. A direct id match wins. The
-// graph contract otherwise stores the receiver operation's final segment, so
-// duplicate names such as Slack's and GitHub's `recent` are disambiguated by
-// the host-owned argument schema (`channel` versus `repo`). No source parsing.
+// A direct id match wins.
+// The graph contract otherwise stores the receiver operation's final segment, so duplicate
+// names such as Slack's and GitHub's `recent` are disambiguated by the host-owned argument
+// schema (`channel` versus `repo`).
+// No source parsing.
 export function operationCatalogEntry(node, catalog = []) {
   const d = node?.data ?? {};
   const operation = String(d.operation ?? '');
@@ -344,11 +339,10 @@ export function humanizeIdent(ident) {
 
 // --- value classification (token vs typed-in) ------------------------------
 
-// Decide how a single value string should read on a row. A value that is
-// exactly an in-scope variable (a value produced by an earlier step) becomes a
-// colored TOKEN chip carrying its type; a bare literal becomes plain STATIC
-// text (humanized); anything compound stays an EXPRESSION pill. Consumes the
-// facet `availableVars` — never re-parses Lashlang beyond the trivial literal
+// A value that is exactly an in-scope variable (a value produced by an earlier step) becomes a
+// colored TOKEN chip carrying its type; a bare literal becomes plain STATIC text (humanized);
+// anything compound stays an EXPRESSION pill.
+// Consumes the facet `availableVars` — never re-parses Lashlang beyond the trivial literal
 // shapes lib/fields.js already recognizes.
 export function describeValue(text, availableVars = []) {
   const raw = text ?? '';
@@ -388,13 +382,12 @@ export function humanizeLiteral(lit) {
 
 // --- collapsed-card summary ------------------------------------------------
 
-// A one-line, plain-language gist of a step's key configuration, shown on a
-// COLLAPSED action/effect card so a reader understands what it does without
-// expanding it (the main density fix). Consumes the node's typed `data.fields`
-// (host-owned) and NEVER re-parses Lashlang — an expression-valued arg is shown
-// as its stored text. Returns '' when there is nothing worth summarizing (the
-// card then reads from its title alone). Caps at the first three set fields so a
-// wide action stays a single calm line.
+// A one-line, plain-language gist of a step's key configuration, shown on a COLLAPSED
+// action/effect card so a reader understands what it does without expanding it (the main
+// density fix).
+// Consumes the node's typed `data.fields` (host-owned) and NEVER re-parses Lashlang — an
+// expression-valued arg is shown as its stored text.
+// Caps at the first three set fields so a wide action stays a single calm line.
 export function stepSummary(node) {
   const d = node?.data ?? {};
   if (d.kind !== 'call' && d.kind !== 'effect') return '';

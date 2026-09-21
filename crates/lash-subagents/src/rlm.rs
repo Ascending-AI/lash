@@ -299,8 +299,7 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
 }
 
 impl RlmSubagentToolsProvider {
-    /// Build the leaf-only provider for `submit_error`. `spawn_agent` is
-    /// registered separately in the orchestrating lane.
+    /// `spawn_agent` is registered separately in the orchestrating lane.
     pub(crate) fn into_leaf_provider(self) -> StaticToolProvider<Self> {
         let definitions = self.leaf_tool_definitions();
         StaticToolProvider::new(definitions, self)
@@ -340,8 +339,6 @@ finish {{ first: await first, second: await second }}"#
             format!(
                 r#"typed = await agents.spawn({{ task: "Find the longest line in src/main.rs"{capability_arg}, output: {{ line: "str", length: "int" }} }})?"#
             ),
-            // Record shorthand uses string descriptors for every field,
-            // including list fields.
             format!(
                 r#"queries = await agents.spawn({{ task: "Generate two focused web search queries"{capability_arg}, output: {{ queries: "list[str]" }} }})?"#
             ),

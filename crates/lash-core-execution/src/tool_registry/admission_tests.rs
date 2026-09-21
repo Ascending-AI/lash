@@ -313,9 +313,8 @@ impl ToolProvider for RoutedProvider {
     }
 }
 
-/// Execute a leaf call through the registry's single execution seam, resolving
-/// the pinned manifest by id first. The projection asserts the outcome carries
-/// no declared intents before unwrapping the completed result.
+/// The projection asserts the outcome carries no declared intents before unwrapping the
+/// completed result.
 async fn execute_leaf_by_id(
     registry: &ToolRegistry,
     tool_id: &ToolId,

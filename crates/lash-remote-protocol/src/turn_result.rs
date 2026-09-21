@@ -39,12 +39,10 @@ pub struct RemoteTurnReport {
 }
 
 impl RemoteTurnReport {
-    /// Computes the terminal status from the outcome's single source of truth.
     pub fn status(&self) -> RemoteTurnStatus {
         RemoteTurnStatus::from(&self.outcome)
     }
 
-    /// Encodes one report inside the shared remote-protocol envelope.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
     }

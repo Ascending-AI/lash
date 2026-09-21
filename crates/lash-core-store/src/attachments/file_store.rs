@@ -490,9 +490,8 @@ mod tests {
         assert!(listed.contains(&first.id));
     }
 
-    // Runs the backend-agnostic `AttachmentStore` conformance suite against
-    // the file-backed implementation. The same suite runs against the
-    // in-memory store, so both backends are held to one contract.
+    // The same suite runs against the in-memory store, so both backends are held to one
+    // contract.
 
     /// The escape canary: a traversal id never reaches the store because it
     /// never becomes an `AttachmentId` in the first place. The canary file

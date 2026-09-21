@@ -9,8 +9,6 @@ use crate::{LASH_TYPE_KEY, runtime::SchemaScalarKind};
 // design (FIG-1878): the importer widens to Any at the cap, this parser errors.
 const MAX_SCHEMA_DEPTH: usize = 32;
 
-/// Parse a tool's output-schema witness into the JSON Schema it describes.
-///
 /// Accepts either record shorthand (field name to scalar/list descriptor) or
 /// the `$lash_type` wrapper produced by a Lashlang `Type { ... }` literal.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -46,7 +44,6 @@ pub enum OutputSchemaError {
     /// A `$lash_type` object declares an unsupported JSON Schema type.
     #[error("unsupported Type schema kind `{kind}`")]
     UnsupportedTypeSchema { kind: String },
-    /// A shorthand field descriptor names an unknown scalar type.
     #[error("unknown scalar type `{kind}`")]
     UnknownScalar { kind: String },
 }

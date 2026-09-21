@@ -123,7 +123,6 @@ impl LlmTransportError {
         self
     }
 
-    /// Whether the driver explicitly supplied the typed transport verdict.
     pub fn retry_verdict_is_classified(&self) -> bool {
         self.retry_verdict_classified
     }

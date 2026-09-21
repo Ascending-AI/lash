@@ -82,8 +82,6 @@ impl Session {
         }
     }
 
-    /// Runs one cell and returns its outcome, whatever it is.
-    ///
     /// A cell that fails is a normal outcome here: the no-poisoning law is
     /// about what the *next* cell sees, so a scenario has to be able to run a
     /// failing cell without the harness deciding that is a test failure.
@@ -203,10 +201,9 @@ impl Session {
 
     /// The size of the session's persisted execution state, in bytes.
     ///
-    /// The leak regression is stated over this rather than over heap internals
-    /// on purpose: an unbounded heap that never reaches the wire costs a host
-    /// nothing, and a bounded heap that writes an unbounded snapshot costs it
-    /// everything. This is the number that gets stored per turn.
+    /// The leak regression is stated over this rather than over heap internals on purpose: an
+    /// unbounded heap that never reaches the wire costs a host nothing, and a bounded heap
+    /// that writes an unbounded snapshot costs it everything.
     pub(crate) fn persisted_bytes(&self) -> usize {
         let hydrated = self.persisted_state();
         hydrated.root.len() + hydrated.components.values().map(|v| v.len()).sum::<usize>()

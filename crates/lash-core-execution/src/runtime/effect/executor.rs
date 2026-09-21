@@ -136,7 +136,6 @@ pub struct AdmittedProcess {
 
 #[async_trait::async_trait]
 pub trait ProcessRunner: Send + Sync {
-    /// Runs one admitted process.
     async fn run_process(
         &self,
         admitted: AdmittedProcess,
@@ -365,7 +364,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the cancellable native sleep path using the system clock.
     pub fn sleep(cancellation: CancellationToken) -> Self {
         Self::sleep_with_clock(cancellation, Arc::new(crate::SystemClock))
     }
@@ -542,8 +540,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
-    /// Removes and returns the process outcome observer.
-    ///
     /// This is public for **effect-host implementors** that transfer local
     /// execution into a durable controller while preserving the conformance
     /// fault seam.
@@ -591,8 +587,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Binds a trigger store for effect-host implementors executing trigger effects natively without
-    /// bypassing the runtime-effect envelope.
     pub fn triggers(store: Arc<dyn crate::TriggerStore>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(
@@ -619,8 +613,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Build a local executor for Lash's own conformance helpers.
-    ///
     /// This is deliberately hidden from the published default documentation;
     /// it is not an integrator seam for fabricating runtime effect outcomes.
     pub fn testing<F, Fut>(run: F) -> Self

@@ -58,7 +58,6 @@ pub struct QueuedDrainRequest<'a> {
 }
 
 impl<'a> QueuedDrainRequest<'a> {
-    /// Builds the request Lash hands to the configured drain policy.
     pub fn new(
         candidates: &'a [QueuedDrainCandidate],
         available_tokens: usize,
@@ -151,8 +150,6 @@ pub trait QueuedDrainPolicy: std::fmt::Debug + Send + Sync {
     /// Stable identifier recorded in drain traces, e.g. `"one_at_a_time"`.
     fn name(&self) -> &str;
 
-    /// Chooses how many leading candidates drain on this wake.
-    ///
     /// Called only when more than one row is eligible, and the returned count
     /// is clamped into `1..=candidates.len()`: a policy can neither starve its
     /// own queue nor reach past the rows Lash offered.
@@ -190,7 +187,6 @@ pub enum DrainMode {
 }
 
 impl DrainMode {
-    /// Returns the stable trace spelling for this mode.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::OneAtATime => "one_at_a_time",
@@ -211,12 +207,10 @@ pub struct DrainModePolicy {
 }
 
 impl DrainModePolicy {
-    /// Builds the default policy in the named mode.
     pub const fn new(mode: DrainMode) -> Self {
         Self { mode }
     }
 
-    /// Returns the configured mode.
     pub const fn mode(self) -> DrainMode {
         self.mode
     }
@@ -235,8 +229,6 @@ impl QueuedDrainPolicy for DrainModePolicy {
     }
 }
 
-/// Returns the one shared [`DrainModePolicy`] instance for `mode`.
-///
 /// Every shipped mode resolves to a process-wide singleton so that two
 /// configurations naming the same mode hold the *same* policy, which is what
 /// lets configuration equality compare policies by identity without lying about

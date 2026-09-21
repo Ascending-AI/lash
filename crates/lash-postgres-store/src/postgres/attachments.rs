@@ -255,9 +255,8 @@ pub(crate) async fn list_attachment_condemnations(
     Ok(condemnations)
 }
 
-/// Clear an abandoned restoring writer under explicit host quiescence.
-/// Retire `Condemned` only when its associated intent became committed,
-/// otherwise preserve it after removing that unstamped intent.
+/// Retire `Condemned` only when its associated intent became committed, otherwise preserve it
+/// after removing that unstamped intent.
 pub(crate) async fn recover_abandoned_attachment_write(
     pool: &PgPool,
     attachment_id: &str,

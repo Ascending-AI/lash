@@ -1,4 +1,3 @@
-//! Store construction helpers shared by kernel tests and certification fixtures.
 use crate::*;
 use std::sync::Arc;
 pub fn durable_turn_scope(

@@ -279,8 +279,6 @@ impl TriggerOccurrenceRequest {
         self
     }
 
-    /// Marks this request as a non-fired audit outcome. Stores persist it on
-    /// the occurrence surface without reserving deliveries.
     pub fn with_outcome(mut self, outcome: TriggerOccurrenceOutcome) -> Self {
         self.outcome = outcome;
         self
@@ -317,8 +315,6 @@ pub struct TriggerOccurrenceFilter {
 }
 
 impl TriggerOccurrenceFilter {
-    /// Applies every populated occurrence filter conjunctively for trigger-store and conformance
-    /// implementors; occurrence time uses a half-open `[start, end)` range.
     pub fn matches(&self, record: &TriggerOccurrenceRecord) -> bool {
         self.source_type
             .as_deref()
@@ -613,9 +609,6 @@ pub struct TriggerSubscriptionDraft {
 }
 
 impl TriggerSubscriptionDraft {
-    /// Constructs process-targeted subscription state for trigger-store and process-engine
-    /// implementors with empty source metadata, schema, event types, and bindings, while inheriting
-    /// the identity label.
     pub fn for_process(
         subscription_key: impl Into<String>,
         env_ref: crate::ProcessExecutionEnvRef,
@@ -645,22 +638,16 @@ impl TriggerSubscriptionDraft {
         }
     }
 
-    /// Sets the name carried by a `TriggerSubscriptionDraft` for store and process-engine
-    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
     }
 
-    /// Sets the source carried by a `TriggerSubscriptionDraft` for store and process-engine
-    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_source(mut self, source: serde_json::Value) -> Self {
         self.source = source;
         self
     }
 
-    /// Sets the payload schema carried by a `TriggerSubscriptionDraft` for store and process-engine
-    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_payload_schema(mut self, payload_schema: crate::LashSchema) -> Self {
         self.payload_schema = payload_schema;
         self
@@ -674,15 +661,11 @@ impl TriggerSubscriptionDraft {
         self
     }
 
-    /// Sets the wake target carried by a `TriggerSubscriptionDraft` for store and process-engine
-    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_wake_target(mut self, wake_target: crate::SessionScope) -> Self {
         self.wake_target = Some(wake_target);
         self
     }
 
-    /// Sets the event types carried by a `TriggerSubscriptionDraft` for store and process-engine
-    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_event_types(
         mut self,
         event_types: impl IntoIterator<Item = crate::ProcessEventType>,
@@ -691,8 +674,6 @@ impl TriggerSubscriptionDraft {
         self
     }
 
-    /// Sets the input template carried by a `TriggerSubscriptionDraft` for store and process-engine
-    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_input_template(
         mut self,
         input_template: BTreeMap<String, TriggerInputBinding>,
@@ -701,8 +682,6 @@ impl TriggerSubscriptionDraft {
         self
     }
 
-    /// Sets the target label carried by a `TriggerSubscriptionDraft` for store and process-engine
-    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn with_target_label(mut self, target_label: impl Into<String>) -> Self {
         self.target_label = Some(target_label.into());
         self
@@ -786,8 +765,6 @@ pub enum TriggerOwnerScope {
 }
 
 impl TriggerOwnerScope {
-    /// Constructs a `TriggerOwnerScope` using session semantics for store and process-engine
-    /// implementors while persisting trigger subscriptions, occurrences, and deliveries.
     pub fn session(session_id: impl Into<SessionId>) -> Self {
         Self::Session {
             session_id: session_id.into(),
@@ -816,8 +793,6 @@ impl TriggerOwnerScope {
         }
     }
 
-    /// Exposes the owning session to trigger-store implementors only for session scope, returning
-    /// `None` for host and platform ownership.
     pub fn session_id(&self) -> Option<&SessionId> {
         match self {
             Self::Session { session_id } => Some(session_id),
@@ -875,7 +850,6 @@ pub enum TriggerSubscriptionLifecycle {
 }
 
 impl TriggerSubscriptionLifecycle {
-    /// Whether the router may deliver an occurrence to a record in this state.
     pub fn routable(&self) -> bool {
         matches!(self, Self::Enabled)
     }
@@ -990,8 +964,6 @@ pub struct TriggerSubscriptionRecord {
 }
 
 impl TriggerSubscriptionRecord {
-    /// Whether the router may deliver an occurrence to this subscription.
-    ///
     /// The single liveness predicate: before FIG-1951 the same
     /// `enabled && !tombstoned` conjunction was spelled once in the router and
     /// once in each store's SQL.
@@ -1019,8 +991,6 @@ impl TriggerSubscriptionRecord {
         self.owner_scope.namespace()
     }
 
-    /// Exposes the registrant session to trigger-store implementors only for session-owned records,
-    /// returning `None` for host and platform ownership.
     pub fn registrant_session_id(&self) -> Option<&SessionId> {
         self.owner_scope.session_id()
     }
@@ -1258,16 +1228,14 @@ impl TriggerMutationReceipt {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum TriggerCommand {
-    /// Create the subscription for `draft.subscription_key`. An identical
-    /// definition is idempotent; a changed one conflicts instead of upserting.
+    /// An identical definition is idempotent; a changed one conflicts instead of upserting.
     Register {
         owner_scope: TriggerOwnerScope,
         actor: crate::ProcessOriginator,
         draft: TriggerSubscriptionDraft,
     },
-    /// Read the owner scope's live subscription records. This is the supported
-    /// lookup by key, name, source, or enablement, and the read that supplies
-    /// `expected_revision` to every mutation below.
+    /// This is the supported lookup by key, name, source, or enablement, and the read that
+    /// supplies `expected_revision` to every mutation below.
     List {
         owner_scope: TriggerOwnerScope,
         filter: TriggerSubscriptionFilter,
@@ -1338,8 +1306,6 @@ impl TriggerCommand {
         }
     }
 
-    /// Exposes the single targeted subscription key to trigger-store implementors for register and
-    /// point mutations, returning `None` for list and multi-key prune commands.
     pub fn subscription_key(&self) -> Option<&str> {
         match self {
             Self::Register { draft, .. } => Some(&draft.subscription_key),
@@ -1738,8 +1704,6 @@ pub struct TriggerRetentionReconciliationReport {
 pub struct TriggerOccurrenceReclamationReport {
     /// Occurrences observed across the completely enumerated scope.
     pub inspected_occurrence_count: usize,
-    /// Armed occurrences physically deleted, with their deliveries removed by
-    /// the existing cascade (normally zero deliveries remain at this point).
     pub reclaimed_occurrence_count: usize,
     /// Occurrences whose delivery fan-out is still live and therefore has not
     /// armed reclaim eligibility. Non-fired audit rows are never counted here:
@@ -1750,7 +1714,6 @@ pub struct TriggerOccurrenceReclamationReport {
     /// incomplete; only [`TriggerStore::prune_non_fired_occurrences`] reclaims
     /// them.
     pub audit_retained_count: usize,
-    /// Armed occurrences whose eligibility time is newer than the host cutoff.
     pub grace_deferred_count: usize,
     /// Eligible occurrences whose per-row delete no longer matched after the
     /// scope snapshot. A concurrent maintenance pass may already have removed
@@ -1902,8 +1865,6 @@ pub trait TriggerStore: Send + Sync {
 
     /// Store implementors apply one trigger-retention decision atomically.
     ///
-    /// Deletes exact delivery observations, then empty-fan-out occurrences and
-    /// delivery-free subscriptions and receipts for `deleted_session_ids`.
     /// Host and platform subscription fences are never selected.
     async fn reconcile_trigger_retention(
         &self,

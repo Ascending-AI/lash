@@ -52,8 +52,7 @@ where
     )
 }
 
-/// Waits (wall-clock bounded) until the gate holds a registration. The process
-/// site registers only after the process workflow call has been recorded, which
+/// The process site registers only after the process workflow call has been recorded, which
 /// takes more scheduler passes than a fixed yield budget allows.
 async fn await_gate_registration(gate: &TestTurnCancelGate) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);

@@ -35,7 +35,6 @@ pub struct WorkerSlotPermit {
 }
 
 impl WorkerSlotPermit {
-    /// Wrap a host-owned RAII token as a worker slot permit.
     pub fn new<T>(guard: T) -> Self
     where
         T: Any + Send + Sync,
@@ -58,7 +57,6 @@ impl WorkerSlotPermit {
 /// its running latch is reset so a later drive can recover.
 #[async_trait::async_trait]
 pub trait WorkerSlotSupplier: Send + Sync {
-    /// Wait until one slot for `kind` can be reserved.
     async fn reserve_slot(&self, kind: WorkerSlotKind) -> WorkerSlotPermit;
 
     /// Reserve one slot without waiting, or leave the work queued.

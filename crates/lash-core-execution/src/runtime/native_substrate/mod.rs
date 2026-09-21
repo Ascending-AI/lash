@@ -24,8 +24,7 @@ pub trait QueuedWorkSubstrate: Send + Sync {
     /// Contentless and coalesced by the implementation.
     fn notify_session_work(&self, target: SessionWorkTarget, reason: &str);
 
-    /// Run one pass that claims and submits ready queued work. Idempotency
-    /// belongs to the store scheduler, not to a same-process memory guard.
+    /// Idempotency belongs to the store scheduler, not to a same-process memory guard.
     async fn drain_session_work(
         &self,
         target: SessionWorkTarget,
@@ -44,8 +43,6 @@ pub trait ProcessWorkSubstrate: Send + Sync {
         reason: &str,
     ) -> Result<ProcessAdmissionReport, PluginError>;
 
-    /// Wait for one pinned process incarnation to reach a terminal state.
-    ///
     /// There is no polling fallback and no "attach if provided". [`ProcessTerminalWait::Reattach`]
     /// is recoverable: the port bounded one transport attachment while the
     /// durable wait stayed live, so the caller re-enters with the same explicit
@@ -118,8 +115,6 @@ impl ProcessWorkWiring {
         }
     }
 
-    /// Apply the validated native polling cadence to process-event waits.
-    ///
     /// Use the same [`WorkCadencePolicy`] passed to native process, queued-work,
     /// and wake-delivery drivers so an externally supplied process port does
     /// not leave the event awaiter on hidden hardcoded pacing.
@@ -167,7 +162,6 @@ impl ProcessWorkWiring {
 pub struct NoQueuedWork;
 
 impl NoQueuedWork {
-    /// Construct a disabled queued-work port.
     pub fn new() -> Self {
         Self
     }

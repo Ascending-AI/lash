@@ -316,10 +316,9 @@ fn instance_method_inventory_matches_the_lowerer() {
         .map(str::to_string)
         .collect::<std::collections::BTreeSet<_>>();
 
-    // Set equality in both directions. Documented-implies-accepted alone
-    // leaves the direction that actually drifted — the allowlist growing while
-    // the register stands still — unchecked, which is how the register came to
-    // be nine methods behind.
+    // Documented-implies-accepted alone leaves the direction that actually drifted — the
+    // allowlist growing while the register stands still — unchecked, which is how the register
+    // came to be nine methods behind.
     let accepted = lash_typescript::accepted_instance_methods()
         .iter()
         .map(|method| (*method).to_string())

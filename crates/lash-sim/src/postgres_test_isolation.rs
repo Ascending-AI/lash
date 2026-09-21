@@ -9,9 +9,6 @@
 
 use lash_postgres_store::testing::IsolatedDatabase;
 
-/// Creates a database exclusive to the calling test, or `None` when Postgres is
-/// not configured.
-///
 /// # Panics
 ///
 /// Panics when `LASH_REQUIRE_POSTGRES=1` and no database URL is configured, so

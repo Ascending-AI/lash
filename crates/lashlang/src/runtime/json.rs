@@ -275,8 +275,6 @@ pub(crate) fn append_direct_json(output: &mut String, value: &Value) {
     );
 }
 
-/// Writes the runtime JSON rendering of `value`.
-///
 /// Fallible because a container can hold a projection: a placeholder that lost
 /// its binding refuses rather than being written as `null` (FIG-2865).
 #[expect(

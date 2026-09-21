@@ -111,9 +111,8 @@ impl<K: Ord, W, E: Default> Default for CoalescingSchedulerState<K, W, E> {
 }
 
 impl<K: Ord + Clone, W, E: CoalescingExtra> CoalescingSchedulerState<K, W, E> {
-    /// Queue `work` under `key`, or coalesce it onto the key's retained rerun
-    /// when the key is already scheduled. Returns true when the key was newly
-    /// scheduled.
+    /// Queue `work` under `key`, or coalesce it onto the key's retained rerun when the key is
+    /// already scheduled.
     pub fn admit(&mut self, key: K, work: W, merge: impl FnOnce(&mut W, W)) -> bool {
         match self.entries.entry(key.clone()) {
             std::collections::btree_map::Entry::Vacant(slot) => {
@@ -135,7 +134,6 @@ impl<K: Ord + Clone, W, E: CoalescingExtra> CoalescingSchedulerState<K, W, E> {
         }
     }
 
-    /// Pop the next queued key and mark its attempt running.
     pub fn pop_next(&mut self) -> Option<W> {
         loop {
             let key = self.queue.pop_front()?;
@@ -191,7 +189,6 @@ impl<K: Ord + Clone, W, E: CoalescingExtra> CoalescingSchedulerState<K, W, E> {
         }
     }
 
-    /// Whether the dispatcher latch is held.
     pub fn dispatcher_running(&self) -> bool {
         self.dispatcher_running
     }
@@ -263,9 +260,8 @@ pub trait CoalescingSchedulerHandle: Send + Sync + 'static {
     }
 }
 
-/// Clears the single-dispatcher latch if the dispatcher task unwinds or ends
-/// without disarming. Without this guard one panic permanently leaves queued
-/// work with no task allowed to drain it.
+/// Without this guard one panic permanently leaves queued work with no task allowed to drain
+/// it.
 pub struct CoalescingDispatcherGuard<S: CoalescingSchedulerHandle> {
     scheduler: Arc<S>,
     armed: bool,

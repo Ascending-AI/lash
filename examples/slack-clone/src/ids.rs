@@ -15,15 +15,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// alphabet is faithful as long as the prefix and length are.
 const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-/// Length of the random part of an id. Slack ids are typically 9-11 characters
-/// after the prefix; the platform mints a fixed 9.
+/// Slack ids are typically 9-11 characters after the prefix; the platform mints a fixed 9.
 const ID_BODY_LEN: usize = 9;
 
 /// Mints prefixed, Slack-shaped ids.
 ///
-/// Sequential rather than random: a monotonic counter mixed into the encoded
-/// body keeps ids unique within a run, and the seed keeps them unique across
-/// runs. Tests construct one with a fixed seed to get a stable id sequence.
+/// Sequential rather than random: a monotonic counter mixed into the encoded body keeps ids
+/// unique within a run, and the seed keeps them unique across runs.
 #[derive(Debug)]
 pub struct IdMinter {
     counter: AtomicU64,

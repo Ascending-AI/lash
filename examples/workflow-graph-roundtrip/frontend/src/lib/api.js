@@ -15,8 +15,7 @@ export async function fetchWorkflows() {
   return res.json();
 }
 
-// Reset the current workflow to a built-in example. Returns its WorkflowDocument
-// (same shape as GET /workflow), advancing the version. Discards any draft.
+// Discards any draft.
 export async function selectWorkflow(id) {
   const res = await fetch('/workflow/select', {
     method: 'POST',
@@ -78,14 +77,12 @@ export async function fetchOperations() {
   }
 }
 
-// Validate one editable text fragment against the lens. `kind` is
-// `expression` | `assignment_target` | `identifier`. Returns `{ ok:true }` or
-// `{ ok:false, error:{ code, message } }`. A missing endpoint (older backend)
-// or any transport failure resolves to `{ ok:true, unsupported:true }` so the
-// UI degrades to "no inline verdict" rather than showing false errors.
-// `availableVars` is the scope the fragment is typed in: TypeScript rejects a
-// fragment that reads a name it cannot see, so the field sends the names the
-// node was projected with.
+// `kind` is `expression` | `assignment_target` | `identifier`.
+// A missing endpoint (older backend) or any transport failure resolves to `{ ok:true,
+// unsupported:true }` so the UI degrades to "no inline verdict" rather than showing false
+// errors.
+// `availableVars` is the scope the fragment is typed in: TypeScript rejects a fragment that
+// reads a name it cannot see, so the field sends the names the node was projected with.
 export async function validateFragment(kind, text, availableVars = []) {
   try {
     const res = await fetch('/validate', {
@@ -133,8 +130,8 @@ export async function projectSource(source) {
   return { ok: false, status: res.status, error };
 }
 
-// Opens POST /run and yields parsed run-event payloads as they stream in.
-// Each call is a brand-new run/invocation. `signal` aborts it (a new Play).
+// Each call is a brand-new run/invocation.
+// `signal` aborts it (a new Play).
 export async function* runWorkflow(signal) {
   const res = await fetch('/run', { method: 'POST', signal });
   if (!res.ok) {

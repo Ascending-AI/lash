@@ -19,14 +19,12 @@ export class History {
   index = $state(-1);
   size = $state(0);
 
-  // Start a fresh timeline from `doc` (a new baseline; clears redo history).
   reset(doc) {
     this.#stack = doc ? [clone(doc)] : [];
     this.index = this.#stack.length - 1;
     this.size = this.#stack.length;
   }
 
-  // Record `doc` as the newest state, discarding any redo tail.
   commit(doc) {
     if (!doc) return;
     if (this.index < this.#stack.length - 1) {

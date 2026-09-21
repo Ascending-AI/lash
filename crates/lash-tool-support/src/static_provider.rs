@@ -20,18 +20,13 @@ use lash_core::{
 
 /// Per-call execution behavior for a [`StaticToolProvider`].
 ///
-/// Implement this on the struct that owns the tool's runtime state (HTTP
-/// clients, shared mutable state, configuration flags, ...). The provider's
-/// manifests and contracts come from the [`ToolDefinition`]s passed to
+/// The provider's manifests and contracts come from the [`ToolDefinition`]s passed to
 /// [`StaticToolProvider::new`]; this trait supplies only the dynamic behavior.
 #[async_trait::async_trait]
 pub trait StaticToolExecute: Send + Sync + 'static {
-    /// Execute a resolved tool call. Dispatch on `call.name()` when serving
-    /// more than one tool.
+    /// Dispatch on `call.name()` when serving more than one tool.
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome;
 
-    /// Declare that a tool may return `Pending` from its recorded attempt.
-    ///
     /// A recorded attempt reads its completion key from the sealed
     /// `AttemptContext`, and the runtime only pre-derives that key for a tool
     /// that declares it here. Defaults to `false`: a tool that parks without
@@ -66,8 +61,6 @@ pub struct StaticToolProvider<E: StaticToolExecute> {
 }
 
 impl<E: StaticToolExecute> StaticToolProvider<E> {
-    /// Build a provider from a fixed set of definitions and an executor.
-    ///
     /// Manifests and contracts are derived once, here, and reused for the life
     /// of the provider.
     pub fn new(definitions: Vec<ToolDefinition>, executor: E) -> Self {

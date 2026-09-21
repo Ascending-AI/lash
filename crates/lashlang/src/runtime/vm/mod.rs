@@ -74,10 +74,9 @@ use super::{
 pub(crate) struct SlotState {
     values: Vec<Option<Value>>,
     extras: Record,
-    /// Whether `extras` has been imported into the heap. Written once, when
-    /// the VM is built or restored, and read by `heapify_vm_state` — it lives
-    /// here so the flag always describes the record it travels with, and the
-    /// frame swap carries it for free.
+    /// Written once, when the VM is built or restored, and read by `heapify_vm_state` — it
+    /// lives here so the flag always describes the record it travels with, and the frame swap
+    /// carries it for free.
     extras_heapified: bool,
 }
 

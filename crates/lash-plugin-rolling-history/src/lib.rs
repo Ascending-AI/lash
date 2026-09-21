@@ -161,9 +161,8 @@ pub(crate) fn latest_user_index(messages: &[Message]) -> Option<usize> {
         .rposition(|message| matches!(message.role, MessageRole::User))
 }
 
-/// Walk backwards from the end keeping ~`COMPACTION_KEEP_RECENT_TOKENS` worth of messages.
 /// Returns the index of the first message in the "keep" region — everything before it gets
-/// summarized.  The cut always lands on a user-message boundary so we never split a turn.
+/// The cut always lands on a user-message boundary so we never split a turn.
 pub(crate) fn find_compaction_cut_point(messages: &[Message], prefix_len: usize) -> usize {
     let start = messages[prefix_len..]
         .iter()

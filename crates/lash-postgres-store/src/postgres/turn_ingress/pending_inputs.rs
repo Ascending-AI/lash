@@ -23,8 +23,6 @@ lash_store_sql::statements! {
                  'enqueue_seq'
              ))";
 
-        /// Enqueue input `?2` for session `?3` at sequence `?1`.
-        ///
         /// PostgreSQL draws `enqueue_seq` from the column's sequence before the
         /// insert so the source-key path knows the value it is about to write;
         /// SQLite lets the row allocate its own.

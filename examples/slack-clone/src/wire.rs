@@ -41,7 +41,6 @@ pub struct ApiErrorBody {
 }
 
 impl ApiErrorBody {
-    /// Build the body for a bare error code.
     pub fn new(error: impl Into<String>) -> Self {
         Self {
             ok: false,
@@ -73,7 +72,6 @@ pub mod cursor {
     /// Cursor kind for `users.list`.
     pub const USER: &str = "user";
 
-    /// Encode `"<kind>:<value>"`.
     pub fn encode(kind: &str, value: &str) -> String {
         BASE64.encode(format!("{kind}:{value}"))
     }
@@ -90,13 +88,11 @@ pub mod cursor {
         (found == kind).then(|| value.to_string())
     }
 
-    /// Encode a message-timestamp cursor. Slack strips the decimal point here,
-    /// so the cursor body is raw epoch microseconds.
+    /// Slack strips the decimal point here, so the cursor body is raw epoch microseconds.
     pub fn encode_ts(ts: Ts) -> String {
         encode(NEXT_TS, &ts.micros().to_string())
     }
 
-    /// Decode a message-timestamp cursor back to a [`Ts`].
     pub fn decode_ts(cursor: &str) -> Option<Ts> {
         decode(NEXT_TS, cursor)?.parse().ok().map(Ts::from_micros)
     }

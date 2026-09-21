@@ -21,7 +21,6 @@ pub struct ProcessTriggerRetentionHandles {
     pub sessions: Arc<dyn crate::SessionStoreFactory>,
 }
 
-/// Run the process/trigger retention laws against one backend.
 pub async fn process_trigger_retention<F, Fut>(make: F)
 where
     F: Fn() -> Fut,

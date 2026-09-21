@@ -75,7 +75,6 @@ pub(in crate::runtime) struct TurnGraphAppendDraft {
 }
 
 impl TurnGraphAppendDraft {
-    /// Opens a draft against the resident state a physical turn starts from.
     pub(in crate::runtime) fn from_resident_state(
         state: &RuntimeSessionState,
         clock: Arc<dyn crate::Clock>,

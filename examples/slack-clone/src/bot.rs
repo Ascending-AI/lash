@@ -60,7 +60,6 @@ pub struct BotConfig {
 }
 
 impl BotConfig {
-    /// Read configuration from the environment, applying defaults.
     pub fn from_env() -> Result<Self> {
         let addr: SocketAddr = std::env::var("SLACK_CLONE_BOT_ADDR")
             .unwrap_or_else(|_| "127.0.0.1:3041".to_string())
@@ -237,8 +236,6 @@ fn configured_provider() -> Result<(lash::provider::ProviderHandle, lash::ModelS
     }
 }
 
-/// Complete the bot host's post-intake Lash shutdown sequence.
-///
 /// The HTTP server has stopped accepting events before the production exit
 /// path calls this helper. Keeping the sequence public lets the integration
 /// suite call and verify the same lifecycle path directly.
@@ -251,7 +248,6 @@ pub async fn shutdown_core(core: &lash::LashCore) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the app's identity, waiting for the platform to come up.
 async fn resolve_identity(api: &SlackApi) -> Result<BotIdentity> {
     let mut last_error = None;
     for attempt in 0..30 {
@@ -282,8 +278,6 @@ async fn resolve_identity(api: &SlackApi) -> Result<BotIdentity> {
     }
 }
 
-/// Register the Events API request URL with the platform.
-///
 /// On real Slack this is a click in the app-configuration UI, which triggers the
 /// `url_verification` challenge. The platform exposes it as an endpoint so the
 /// example can be started by a script; the handshake it performs is the same one.
@@ -316,7 +310,6 @@ async fn register(api: &SlackApi, config: &BotConfig, request_url: &str) -> Resu
         .context("register the Events API request url")
 }
 
-/// Resolve on Ctrl-C or SIGTERM.
 async fn shutdown_signal() {
     let interrupt = async {
         let _ = tokio::signal::ctrl_c().await;

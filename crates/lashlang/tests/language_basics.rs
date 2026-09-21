@@ -1,14 +1,11 @@
 // The value model and the numeric helpers, authored in TypeScript.
 //
-// This file used to be the retired dialect's lexer and parser suite: comment
-// forms, statement separators, raw and triple-quoted string literals, tuple
-// literals, `else if` chains, bare expression statements. ADR 0096 makes
-// TypeScript the sole authored dialect, and the TypeScript front-end brings its
+// ADR 0096 makes TypeScript the sole authored dialect, and the TypeScript front-end brings its
 // own grammar, lexing and rejection suites
 // (`crates/lash-typescript/tests/{grammar_coverage,ecma_regressions,rejections,
-// test262_conformance}.rs`), so those rows are not re-spelled here — a
-// TypeScript program cannot express the syntax they pinned, and re-authoring
-// them would duplicate the front-end's own coverage.
+// test262_conformance}.rs`), so those rows are not re-spelled here — a TypeScript program
+// cannot express the syntax they pinned, and re-authoring them would duplicate the front-end's
+// own coverage.
 //
 // What remains are the facts that outlive the surface: the VM keeps string
 // content byte-exact, the numeric helpers round the way the IR says they do,

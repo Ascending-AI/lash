@@ -5,7 +5,6 @@ use super::ContentHash;
 /// Longest decimal rendering of a `u64`.
 const DECIMAL_CAPACITY: usize = 20;
 
-/// Renders `value` in decimal into `buffer` and returns the digits.
 fn decimal(value: u64, buffer: &mut [u8; DECIMAL_CAPACITY]) -> &[u8] {
     let mut index = DECIMAL_CAPACITY;
     let mut remaining = value;
@@ -20,8 +19,6 @@ fn decimal(value: u64, buffer: &mut [u8; DECIMAL_CAPACITY]) -> &[u8] {
     &buffer[index..]
 }
 
-/// Writes the atom stream one content hash is taken over.
-///
 /// The atoms stream straight into the hasher. Collecting them into a `Vec<u8>`
 /// first, and rendering every length prefix and integer through `to_string()`,
 /// cost hundreds of allocations and two copies of the program's hash input per
@@ -93,7 +90,6 @@ impl HashWriter {
         self.hasher.update(b";");
     }
 
-    /// Writes a bare decimal integer, with no atom framing of its own.
     fn integer(&mut self, value: u64) {
         let mut buffer = [0u8; DECIMAL_CAPACITY];
         self.hasher.update(decimal(value, &mut buffer));

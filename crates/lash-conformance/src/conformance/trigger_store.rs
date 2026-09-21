@@ -70,7 +70,6 @@ pub fn trigger_subscription_owner_filter_is_pushed_down(
     }
 }
 
-/// Arms a backend failure on the delete of one exact occurrence.
 #[async_trait::async_trait]
 pub trait TriggerOccurrenceRetentionFaultInjector: Send + Sync {
     async fn fail_occurrence_delete(&self, occurrence_id: &str);

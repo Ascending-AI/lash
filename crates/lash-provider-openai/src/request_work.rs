@@ -5,9 +5,8 @@ use std::io::{self, Write};
 
 mod raw_budget;
 
-// 64 KiB of source JSON (or resolved bytes) is enough to warrant a blocking
-// task. The bounded sizing pass stops at this limit; small requests avoid the
-// scheduling hop. Count JSON too so large text/tool schemas also leave Tokio.
+// 64 KiB of source JSON (or resolved bytes) is enough to warrant a blocking task.
+// The bounded sizing pass stops at this limit; small requests avoid the scheduling hop.
 const BLOCKING_THRESHOLD: usize = 64 * 1024;
 const EXCERPT_BYTES: usize = 4096;
 
@@ -54,9 +53,8 @@ impl Write for SizeProbe {
 }
 
 pub(crate) fn needs_blocking(request: &crate::support::LlmRequest) -> bool {
-    // Traverse raw lengths before JSON's escaping scanner can touch a large
-    // string. The traversal charges every node and stops at the same budget,
-    // including for many empty fields or large byte sequences.
+    // The traversal charges every node and stops at the same budget, including for many empty
+    // fields or large byte sequences.
     if !raw_budget::RawBudget::fits(request, BLOCKING_THRESHOLD) {
         return true;
     }

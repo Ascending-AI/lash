@@ -30,8 +30,6 @@ impl ManagedSessionCapability {
         .await
     }
 
-    /// Initialize a brand-new session and run its first turn as one operation.
-    ///
     /// This is the process-origin initialization port (FIG-3377): the only
     /// caller is `run_process_session_turn`, which hands over the durable
     /// `SessionCreateRequest` recorded on the process row, the process's own
@@ -775,9 +773,7 @@ async fn run_managed_session_turn(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     sink: ChannelEventSink,
 ) -> Result<AssembledTurn, crate::PluginError> {
-    // This mutex is the managed runtime's single-writer boundary. Hold it for
-    // the complete turn and publish from the guarded post-turn state before
-    // releasing it, exactly as the former native path did.
+    // This mutex is the managed runtime's single-writer boundary.
     let mut runtime_guard = runtime.runtime.lock().await;
     let scoped_effect_controller = match scoped_effect_controller.execution_scope() {
         crate::ExecutionScope::Turn { turn_id, .. } => scoped_effect_controller
@@ -912,14 +908,11 @@ mod tests {
             Some(stale.registration),
             "the denied foreign registration must leave the live entry untouched"
         );
-        // Step 3.
         lock_turns(&turns).remove("turn");
-        // Step 4.
         let successor =
             ManagedTurnLease::register(&turns, &SessionId::from("session"), &TurnId::from("turn"))
                 .expect("re-register");
 
-        // Step 5.
         drop(stale);
 
         assert_eq!(

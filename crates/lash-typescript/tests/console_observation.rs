@@ -30,7 +30,6 @@ impl ExecutionHost for PrintHost {
     }
 }
 
-/// Runs `source` and returns every printed observation line.
 fn printed(source: &str) -> Vec<String> {
     let program = lash_typescript::compile(source).expect("TypeScript should compile");
     let host = PrintHost::default();
@@ -55,7 +54,6 @@ impl ExecutionHost for RawPrintHost {
     }
 }
 
-/// Runs `source` and returns the values `print` received, unrendered.
 fn printed_values(source: &str) -> Vec<Value> {
     let program = lash_typescript::compile(source).expect("TypeScript should compile");
     let host = RawPrintHost::default();

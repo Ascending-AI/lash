@@ -169,10 +169,8 @@ pub struct ToolBatchProducer {
     /// The provider script that issues `plan` as one batch. The law appends the
     /// terminal text response, so a script that ends after the batch is enough.
     pub script: ToolBatchScript,
-    /// Whether this surface reaches the orchestrating relay, and through it the
-    /// granted, orchestrating and deferred routes. Every surface that can name
-    /// a tool can; the flag exists for surfaces whose front door is a fixed
-    /// shape (a bare aggregate over catalogue leaves).
+    /// Every surface that can name a tool can; the flag exists for surfaces whose front door
+    /// is a fixed shape (a bare aggregate over catalogue leaves).
     pub reaches_relay: bool,
     /// Present only when the producer's batch is issued from inside a process.
     ///
@@ -514,7 +512,6 @@ impl Rendezvous {
 /// The per-scenario state the leaf provider and the relay tool share.
 #[derive(Debug)]
 struct ScenarioState {
-    /// The rendezvous for the scenario currently running.
     rendezvous: std::sync::Mutex<Arc<Rendezvous>>,
     /// Which leaves each leaf must wait for. An empty entry means "all of
     /// them"; a non-empty one is the reverse-dependency case.
@@ -827,8 +824,6 @@ struct ScenarioWorld {
     process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
 }
 
-/// Builds a runtime over `effect_host` with the producer's factories plus the
-/// law's leaves, runs one turn, and returns the scenario's observations.
 async fn run_scenario(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -1207,9 +1202,7 @@ pub struct ToolBatchMeasurement {
     /// concurrent tier this approaches one leaf's latency; on a serial tier
     /// it is the sum of the leaves.
     pub leaf_window: Option<Duration>,
-    /// Leaves that reported started.
     pub leaves_started: usize,
-    /// Leaves that produced an answer.
     pub leaves_answered: usize,
     /// Observed peak in-flight leaves — the concurrency the tier actually
     /// reached (n on a concurrent tier, 1 on a serial one).

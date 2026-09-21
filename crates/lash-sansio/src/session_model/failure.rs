@@ -184,8 +184,7 @@ pub enum TurnFailureCode {
     /// The provider response body could not be read.
     BodyReadFailed,
 
-    // ─── runtime ─────────────────────────────────────────────────────────
-    /// A token-usage counter overflowed while accumulating turn usage.
+    /// / A token-usage counter overflowed while accumulating turn usage.
     TokenUsageOverflow,
     /// Refreshing the live execution environment failed.
     ReconfigureFailed,
@@ -193,8 +192,7 @@ pub enum TurnFailureCode {
     SessionGraphScope,
     /// The turn stream ended without a `Done` event.
     MissingDone,
-    /// Assistant output was recovered from persisted messages because none
-    /// was assembled. Advisory.
+    /// Assistant output was recovered from persisted messages because none was assembled.
     AssistantOutputRecoveredFromState,
     /// Turn input failed normalization.
     InvalidTurnInput,
@@ -475,7 +473,6 @@ pub enum FailureCode {
     /// driving the provider exchange.
     Adapter(TurnFailureCode),
     /// A code Lash charge-safety or retry policy authored while refusing the
-    /// call.
     Refusal(TurnFailureCode),
 }
 

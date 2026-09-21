@@ -50,8 +50,7 @@ fn workspace_crates_dir() -> PathBuf {
         .to_path_buf()
 }
 
-/// Test sources may pin the previous spellings: that is how byte identity is
-/// proved. Production statements may not.
+/// Production statements may not.
 fn is_test_path(relative: &str) -> bool {
     relative.split('/').any(|segment| {
         segment == "tests"

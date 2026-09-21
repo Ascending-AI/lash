@@ -28,7 +28,6 @@ use lash_store_sql::session::{
 lash_store_sql::statements! {
     /// `session_meta` statements only PostgreSQL issues.
     pub(crate) struct SessionMetaPostgresStatements @ "session_meta" {
-        /// Record the identity row of a session, keeping an existing one.
         insert = "INSERT INTO session_meta
              (session_id, session_state_version, relation_kind, parent_session_id,
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
@@ -41,7 +40,6 @@ lash_store_sql::statements! {
                      ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL)
              ON CONFLICT (session_id) DO NOTHING";
 
-        /// Record the identity row of a session, replacing the relation.
         upsert = "INSERT INTO session_meta
              (session_id, session_state_version, relation_kind, parent_session_id,
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
@@ -101,16 +99,12 @@ lash_store_sql::statements! {
         /// concurrent admission cannot move it inside this transaction.
         select_state_version_for_update = "SELECT session_state_version FROM session_meta WHERE session_id = ?1 FOR UPDATE";
 
-        /// Whether `?1` is materialized at all, as identity or as a head.
         exists_materialized = "SELECT EXISTS(
                  SELECT 1 FROM sessions WHERE session_id = ?1
                  UNION ALL
                  SELECT 1 FROM session_meta WHERE session_id = ?1
              )";
 
-        /// Whether `?1` is materialized, and whether it has been deleted, as
-        /// one read.
-        ///
         /// The fork's unlocked fast path: two questions in one round trip, so
         /// an already-materialized target or a permanent tombstone is refused
         /// before any advisory lock is taken. Both are re-asked under the lock
@@ -228,12 +222,10 @@ lash_store_sql::statements! {
                 leaf_node_id = EXCLUDED.leaf_node_id
              WHERE sessions.head_revision = ?6";
 
-        /// Create a forked session's head at revision zero.
         insert_fork = "INSERT INTO sessions
              (session_id, head_revision, head_json, checkpoint_ref, leaf_node_id)
              VALUES (?1, 0, ?2, ?3, ?4)";
 
-        /// Remove `?1`'s head at delete time.
         delete_by_session = "DELETE FROM sessions WHERE session_id = ?1";
 
         /// What session deletion needs from `?1`'s head before removing it.
@@ -535,7 +527,6 @@ lash_store_sql::statements! {
                     SELECT 1 FROM node_anchors WHERE node_id = ?1
                 )";
 
-        /// Tombstone `?1`.
         retire = "UPDATE graph_nodes SET tombstoned = TRUE WHERE node_id = ?1";
 
         /// Which of the node ids in `?1` already have a row.
@@ -585,7 +576,6 @@ lash_store_sql::statements! {
                )
              ORDER BY node.session_id, node.generation DESC";
 
-        /// Drop session `?1`'s tombstoned rows: the per-session vacuum.
         delete_tombstoned_for_session = "DELETE FROM graph_nodes WHERE session_id = ?1 AND tombstoned = TRUE";
 
         /// Drop every tombstoned row owned by session `?1` or by a session
@@ -618,8 +608,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `usage_deltas` statements only PostgreSQL issues.
     pub(crate) struct UsageDeltaPostgresStatements @ "usage_delta" {
-        /// Append one ledger entry, keeping an existing row for the same
-        /// identity.
         insert = "INSERT INTO usage_deltas (
                     session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
@@ -631,13 +619,10 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `deleted_sessions` statements only PostgreSQL issues.
     pub(crate) struct DeletedSessionPostgresStatements @ "deleted_session" {
-        /// Whether `?1` has been deleted.
         exists = "SELECT EXISTS(
                 SELECT 1 FROM deleted_sessions WHERE session_id = ?1
              )";
 
-        /// Record `?1`'s permanent identity evidence from its metadata row
-        /// and the head revision it reached.
         insert_from_meta = "INSERT INTO deleted_sessions
              (session_id, created_at_ms, last_commit_at_ms, head_revision,
               relation_kind, parent_session_id)
@@ -649,17 +634,12 @@ lash_store_sql::statements! {
              WHERE meta.session_id = ?1
              ON CONFLICT (session_id) DO NOTHING";
 
-        /// Record `?1`'s permanent identity evidence when it has a head but no
-        /// metadata row.
         insert_root = "INSERT INTO deleted_sessions
              (session_id, created_at_ms, last_commit_at_ms, head_revision,
               relation_kind, parent_session_id)
              VALUES (?1, 0, NULL, 0, 'root', NULL)
              ON CONFLICT (session_id) DO NOTHING";
 
-        /// Record permanent identity evidence for every materialized session
-        /// in `?1`, as one statement.
-        ///
         /// The batch shape the process prune uses. A process-owned id may have
         /// a head and no metadata row, so the evidence is `COALESCE`d against
         /// the target list rather than against the metadata row, and the
@@ -736,8 +716,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `release_stamp` statements. All of them fork; see the SQLite twin.
     pub(crate) struct ReleaseStampStatements @ "release_stamp" {
-        /// Whether this connection may write the stamp at all.
-        ///
         /// A host-provisioned deployment can admit a role holding nothing but
         /// `SELECT`, and that is a published property of that mode rather than
         /// an accident. The privilege is asked for with a catalog read instead
@@ -762,8 +740,6 @@ lash_store_sql::statements! {
         /// The writing release alone.
         select_release = "SELECT release_version FROM release_stamp WHERE singleton = TRUE";
 
-        /// Write the stamp, advancing an existing row.
-        ///
         /// `written_at_epoch_ms` is the PostgreSQL server's clock, not the
         /// opening host's: two hosts opening one database would otherwise
         /// stamp it from two unrelated clocks.
@@ -784,9 +760,6 @@ lash_store_sql::statements! {
     /// process-prune cascade, which removes a batch of sessions' rows from
     /// every table a session owns, in one statement.
     pub(crate) struct SessionCoreStatements @ "session_core" {
-        /// Delete every row the sessions in `?1` own, across every table that
-        /// owns session-scoped rows, and report how many were removed.
-        ///
         /// One statement rather than twelve, and that is the point: the parts
         /// would race. The prune has already taken each session's advisory
         /// lock, but a delete split across twelve statements leaves eleven

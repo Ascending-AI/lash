@@ -180,7 +180,6 @@ async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
     let initial = session.admin().tools().state().await?;
     assert!(initial.get(&app_tool).expect("app tool").is_member());
 
-    // Remove from the catalog (non-membership).
     let generation = session
         .admin()
         .tools()

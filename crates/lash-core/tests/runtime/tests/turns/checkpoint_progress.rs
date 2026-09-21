@@ -2288,9 +2288,8 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
 
 #[tokio::test]
 pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled() {
-    // Commit admission is process-wide and keyed by session id. Keep this
-    // cancellation rendezvous out of the shared `root` lane so unrelated
-    // libtest cases cannot make its final commit contend with their turn.
+    // Keep this cancellation rendezvous out of the shared `root` lane so unrelated libtest
+    // cases cannot make its final commit contend with their turn.
     const SESSION_ID: &str = "process-wake-cancelled";
 
     let requests = Arc::new(Mutex::new(Vec::new()));

@@ -1,8 +1,6 @@
 use super::*;
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
-    /// Builds a VM from authored globals for an externally driven execution.
-    ///
     /// Restored closure metadata is checked against `program` before the state
     /// is removed from its owner.
     pub fn from_state(
@@ -28,7 +26,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         Ok(vm)
     }
 
-    /// Emits the accumulated profile after an externally driven VM finishes.
     pub fn flush_profile(&mut self, program: &CompiledProgram, host: &H) {
         if host.profile_execution() {
             let mut profile = self.take_profile();

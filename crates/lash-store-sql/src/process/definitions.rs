@@ -28,9 +28,8 @@ crate::statements! {
         select_for_cas = "SELECT revision, fingerprint, record_json FROM process_definitions
              WHERE owner_scope = ?1 AND name = ?2";
 
-        /// Register a fresh definition: `?1` id, `?2` owner scope, `?3` name,
-        /// `?4` fingerprint, `?5` now, `?6` record. Revision and change
-        /// sequence start at one, and a fresh row is enabled and untombstoned.
+        /// Revision and change sequence start at one, and a fresh row is enabled and
+        /// untombstoned.
         insert_first_revision = "INSERT INTO process_definitions
              (definition_id, owner_scope, name, revision, fingerprint,
               lifecycle, deleted_at_ms, change_seq, created_at_ms,

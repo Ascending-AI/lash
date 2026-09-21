@@ -799,8 +799,6 @@ impl SessionNodeRecord {
         }
     }
 
-    /// Encode only immutable node content for `node_json`.
-    ///
     /// Identity and graph structure are columns so SQL can index, join, and
     /// re-derive reachability without parsing an opaque JSON blob. The body
     /// states its own node-body generation so a reader never has to infer the
@@ -926,8 +924,6 @@ impl SessionGraph {
         self.append_message_batch_at(appendable_messages, timestamp);
     }
 
-    /// Builds and structurally validates a graph from node data.
-    ///
     /// Graph integrity follows the same pair-assertion rule as durable state: validate before
     /// writing and validate again after reading. Store implementations must map an error returned
     /// here while decoding durable rows to their typed stored-data-corruption variant. A supplied
@@ -988,8 +984,7 @@ impl SessionGraph {
         Self::from_validated_nodes(nodes, leaf_node_id)
     }
 
-    /// Strong count of the shared graph-data allocation. Tests use it to
-    /// prove how many holders pin this graph version.
+    /// Strong count of the shared graph-data allocation.
     #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
     pub fn data_strong_count(&self) -> usize {
@@ -1171,8 +1166,6 @@ impl SessionGraph {
             .expect("session graph cache was initialized"))
     }
 
-    /// Returns the cache for a graph that passed construction-time validation.
-    ///
     /// The panic is a last-resort invariant for defects introduced by later in-memory mutation;
     /// durable rows are rejected by [`Self::from_nodes`] before they can reach this reader.
     fn cache(&self) -> &SessionGraphCache {
@@ -1258,8 +1251,6 @@ impl SessionGraph {
             .collect())
     }
 
-    /// Reads either the whole active history or one explicitly requested frame.
-    ///
     /// `None` is the only unscoped representation. A requested frame must name
     /// a `FrameOpen` node on the active path.
     pub fn read_model(
@@ -1462,8 +1453,6 @@ impl SessionGraph {
         Ok(())
     }
 
-    /// Tests branch liveness for store and protocol implementors against the current leaf ancestry.
-    ///
     /// The panic is a last-resort invariant for post-construction mutation defects. Durable data
     /// is validated by [`Self::from_nodes`] before a resident graph is returned.
     pub fn active_path_contains(&self, node_id: &str) -> bool {
@@ -1482,8 +1471,6 @@ impl SessionGraph {
         Ok(cache.active_path_indices.contains(node_index))
     }
 
-    /// Return a resident graph containing only the current ancestry path.
-    ///
     /// This is a memory-residency trim. It does not create a durable fork or
     /// move a persisted session head. The caller must have validated the source graph.
     pub fn trim_to_active_path(&self) -> SessionGraph {
@@ -1512,8 +1499,6 @@ impl SessionGraph {
         )
     }
 
-    /// Looks up any resident node by ID for store and protocol implementors, including nodes
-    /// outside the active path; an unknown ID returns `None`.
     pub fn find_node(&self, node_id: &str) -> Option<&SessionNodeRecord> {
         self.cache()
             .by_id
@@ -1567,8 +1552,6 @@ impl SessionGraph {
         Ok(())
     }
 
-    /// Builds a `SessionGraph` from active read state data for store, effect-host, and protocol
-    /// implementors while materializing, executing, or persisting a session turn.
     #[expect(
         clippy::expect_used,
         reason = "frame resolution can only fail for a scoped rewrite, and this one passes `None` as the frame"
@@ -1581,9 +1564,6 @@ impl SessionGraph {
         graph
     }
 
-    /// Exposes message tree to store, effect-host, and protocol implementors while materializing,
-    /// executing, or persisting a session turn.
-    ///
     /// Sibling order is the graph's own node order — the durable generation
     /// order for store-loaded graphs and append order otherwise. Timestamps
     /// are informational only and never reorder siblings.

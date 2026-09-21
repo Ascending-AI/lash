@@ -65,7 +65,6 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         "an uncommitted intent is a root: the condemn CAS must refuse"
     );
 
-    // Drop the root and the digest becomes condemnable — once.
     crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
         .await
         .expect("forget the ref");

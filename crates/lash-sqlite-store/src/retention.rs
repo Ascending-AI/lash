@@ -236,8 +236,6 @@ fn retire_quiescent_operation_scopes(
 }
 
 impl SqliteSessionStoreFactory {
-    /// Open the existing catalog with the factory connection and registry options
-    /// for a host-invoked maintenance operation.
     pub(crate) async fn open_catalog_for_maintenance(
         &self,
         operation: &str,

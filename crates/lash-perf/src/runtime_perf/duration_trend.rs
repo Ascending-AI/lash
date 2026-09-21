@@ -16,10 +16,9 @@
 //! runs. Nothing here can fail a run — the signal is advisory by construction,
 //! which is what keeps it from re-litigating FIG-1385.
 //!
-//! Records also carry duration-valued whole-scenario scheduler observations
-//! (`process.cpu_ms` and, where available, `runtime.worker_busy_ms`). They use
-//! the same advisory series logic. Ratios, worker counts, queue depths, and
-//! park counts do not fit this duration contract and are not trended here.
+//! They use the same advisory series logic.
+//! Ratios, worker counts, queue depths, and park counts do not fit this duration contract and
+//! are not trended here.
 //!
 //! # What this signal does not see
 //!
@@ -222,8 +221,6 @@ fn selector_matches(selector: Option<&str>, value: &str) -> bool {
     selector.is_none_or(|selector| selector == value)
 }
 
-/// Parse and validate a marker file.
-///
 /// Validation is part of parsing rather than a separate gate because an
 /// invalid marker is indistinguishable from an absent one at read time, and an
 /// acknowledgement that silently did not apply is worse than no file at all.
@@ -507,8 +504,6 @@ pub(crate) fn records_for_run(
         .collect()
 }
 
-/// Append records to the history file, creating it (and its parent) if needed.
-///
 /// Append-only within a run: a run adds its own observations and never rewrites
 /// another run's, so a partial write cannot corrupt earlier history.
 ///
@@ -535,8 +530,6 @@ pub(crate) fn append_records(path: &Path, records: &[DurationHistoryRecord]) -> 
     Ok(())
 }
 
-/// Read a JSONL history strictly: any unparseable line is an error.
-///
 /// This is the human-facing read, used by the standalone `duration-trend`
 /// command. Someone who points the tool at a file wants to be told the file is
 /// broken, not handed a quietly shortened series.
@@ -560,8 +553,6 @@ pub(crate) fn load_history(path: &Path) -> anyhow::Result<Vec<DurationHistoryRec
     Ok(loaded.records)
 }
 
-/// Read a JSONL history leniently: unparseable lines are dropped and counted.
-///
 /// This is the CI read. A history is a cache artifact spanning schema changes,
 /// truncated writes and the occasional hand edit; one bad line must cost one
 /// observation, not the entire signal. `record_and_render` rewrites the file
@@ -597,8 +588,6 @@ pub(crate) fn load_history_lenient(path: &Path) -> anyhow::Result<LoadedHistory>
             Err(error) => skipped.push(format!("line {line_number}: {error}")),
         }
     }
-    // Appends from separate runs can land out of order; the series is defined
-    // by observation time, not by who won the write.
     records.sort_by(|left, right| left.recorded_at.cmp(&right.recorded_at));
     Ok(LoadedHistory {
         records,
@@ -814,7 +803,6 @@ fn comparison_window(
     }
 }
 
-/// The verdict for the newest observation of one chronological series.
 pub(crate) fn verdict(series: &[f64]) -> DriftVerdict {
     let Some(current_index) = series.len().checked_sub(1) else {
         return DriftVerdict::InsufficientData { runs: 0 };
@@ -982,9 +970,7 @@ fn render_accepted_level_shifts(rows: &[DurationTrendRow]) -> String {
     out
 }
 
-/// Print the drifting rows loudly, and as GitHub annotations when running
-/// under Actions. Deliberately returns nothing: no caller can turn drift into
-/// an exit code.
+/// Deliberately returns nothing: no caller can turn drift into an exit code.
 pub(crate) fn report_drift(rows: &[DurationTrendRow]) {
     let drifting = rows
         .iter()
@@ -1030,13 +1016,12 @@ pub(crate) fn report_drift(rows: &[DurationTrendRow]) {
 /// Append this run's observations, then print the trend table and any drift
 /// warning.
 ///
-/// Returns nothing on purpose. The history lives in a CI cache the perf run
-/// does not own, and an unwritable cache entry is an infrastructure fact, not
-/// a statement about the code under test — turning it into a red main would
-/// make this advisory signal gate the build by the back door. It is still
-/// never a silent all-clear: the failure is named on stderr in place of the
-/// table, and the standalone `duration-trend` command exits non-zero on the
-/// same input so a human can see it deliberately.
+/// The history lives in a CI cache the perf run does not own, and an unwritable cache entry is
+/// an infrastructure fact, not a statement about the code under test — turning it into a red
+/// main would make this advisory signal gate the build by the back door.
+/// It is still never a silent all-clear: the failure is named on stderr in place of the table,
+/// and the standalone `duration-trend` command exits non-zero on the same input so a human can
+/// see it deliberately.
 pub(crate) fn record_and_report(
     path: &Path,
     profile: &str,

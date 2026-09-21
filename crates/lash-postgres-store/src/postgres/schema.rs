@@ -1013,8 +1013,6 @@ async fn verify_within_repeatable_read(
     Ok(report)
 }
 
-/// Emits the schema gate's decision basis.
-///
 /// A gate that can deny ships the inputs it consulted, not just its verdict
 /// (`docs/agents/way-of-working.md`): the stamped and expected versions, both
 /// policy knobs, and the finding counts per class, so a refused open can be

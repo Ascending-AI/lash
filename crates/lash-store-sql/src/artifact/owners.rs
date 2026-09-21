@@ -23,14 +23,12 @@ pub const TRANSFER_SELECT_COLUMNS: &str = "namespace, artifact_ref, ?3, ?4";
 crate::statements! {
     /// `artifact_owners` statements both backends issue verbatim.
     pub struct OwnerStatements @ "artifact_owner" {
-        /// Record the owner edge `?3`/`?4` over artifact `?1`/`?2`. Owning an
-        /// artifact twice is the same fact as owning it once.
+        /// Owning an artifact twice is the same fact as owning it once.
         insert_edge = "INSERT INTO artifact_owners
              (namespace, artifact_ref, owner_kind, owner_id)
              VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT DO NOTHING";
 
-        /// Whether `?3`/`?4` owns artifact `?1`/`?2`.
         select_edge_exists = "SELECT EXISTS (
                  SELECT 1 FROM artifact_owners
                  WHERE namespace = ?1 AND artifact_ref = ?2

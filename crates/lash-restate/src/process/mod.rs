@@ -51,9 +51,8 @@ fn restate_now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Completion authority for a row the Restate workflow ran itself. Restate's
-/// single-writer discipline is per-`process_id` workflow-key coalescing, not a
-/// Lash lease (ADR 0027); the workflow key is that `process_id`.
+/// Restate's single-writer discipline is per-`process_id` workflow-key coalescing, not a Lash
+/// lease (ADR 0027); the workflow key is that `process_id`.
 pub(crate) fn workflow_key_authority(process_id: &ProcessId) -> ProcessCompletionAuthority {
     ProcessCompletionAuthority::WorkflowKey {
         workflow_key: process_id.to_string(),
@@ -108,10 +107,10 @@ fn terminal_process_output(error: PluginError) -> ProcessAwaitOutput {
     ))
 }
 
-/// Maps an ingress submit failure for `LashProcessWorkflow/run`. A 404 here is
-/// a deployment that never bound the process workflow, not a busy engine:
-/// terminal by construction, because retrying cannot make an unbound service
-/// appear (FIG-1579). Every other failure stays in the retryable ingress class.
+/// A 404 here is a deployment that never bound the process workflow, not a busy engine:
+/// terminal by construction, because retrying cannot make an unbound service appear
+/// (FIG-1579).
+/// Every other failure stays in the retryable ingress class.
 pub(crate) fn process_ingress_submit_error(
     process_id: &ProcessId,
     err: crate::RestateHttpError,
@@ -358,8 +357,6 @@ pub struct RestateProcessIngressRunner {
 }
 
 impl RestateProcessIngressRunner {
-    /// Build an ingress-client run handle over the given ingress base URL and
-    /// process registry.
     pub fn new(
         connection: impl Into<RestateConnection>,
         registry: Arc<dyn ProcessRegistry>,
@@ -373,8 +370,6 @@ impl RestateProcessIngressRunner {
         }
     }
 
-    /// Report this handle's worker faults to `sink`.
-    ///
     /// `RestateProcessDeployment::new_with_sink` installs the host's sink here,
     /// because a per-row deferral only reaches a host that reads the report —
     /// and every in-tree caller of `claim_and_run_pending` discards it. The
@@ -764,10 +759,6 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
 }
 
 /// Bundled Restate process deployment wiring for a Lash core.
-///
-/// Construct this once per deployment, pass [`process_work`](Self::process_work)
-/// into `LashCoreBuilder::process_work`, and bind
-/// [`workflow`](Self::workflow) on the Restate endpoint.
 pub struct RestateProcessDeployment {
     #[cfg(test)]
     process_work: Arc<RestateProcessIngressRunner>,

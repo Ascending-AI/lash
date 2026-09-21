@@ -10,8 +10,6 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
-/// Number of named Layer-A vector groups executed by
-/// [`effect_host_await_events_cold_instance`].
 pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 10;
 
 #[expect(

@@ -319,7 +319,6 @@ impl NodeName {
         }
     }
 
-    /// Build the wire name from a projected node's name facts.
     pub fn projected(
         name_source: WorkflowNodeNameSource,
         title: String,

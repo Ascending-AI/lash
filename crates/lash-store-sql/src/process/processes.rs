@@ -43,7 +43,6 @@ crate::statements! {
         /// The stored record for `?1`.
         select_record_json_by_id = "SELECT record_json FROM processes WHERE process_id = ?1";
 
-        /// Whether `?1` is registered, without reading any of its row.
         exists_by_id = "SELECT EXISTS(SELECT 1 FROM processes WHERE process_id = ?1)";
 
         /// The session `?1`'s wakes are delivered to, if any.
@@ -52,14 +51,8 @@ crate::statements! {
         /// Retarget `?1`'s wake session to `?2`.
         set_wake_session_id = "UPDATE processes SET wake_session_id = ?2 WHERE process_id = ?1";
 
-        /// Drop every wake subscription aimed at session `?1`, which is going
-        /// away.
         clear_wake_session_for_session = "UPDATE processes SET wake_session_id = NULL WHERE wake_session_id = ?1";
 
-        /// Write back the columns a process event can move: `?1` process,
-        /// `?2` updated-at, `?3` change sequence, `?4` status, `?5` last event
-        /// sequence, `?6` cancel-requested-at, `?7` record.
-        ///
         /// The identity columns are absent because none of them is mutable:
         /// a re-registration writes a new row rather than rewriting this one.
         update_mutable_columns = "UPDATE processes

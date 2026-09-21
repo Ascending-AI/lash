@@ -67,7 +67,6 @@ pub const TRANSPORT_PROVIDER_MUTATIONS: &[&str] = &[
     "retryable_server_error_sequence",
 ];
 
-/// Whether a mutation class is one of the transport/HTTP perturbation classes.
 pub fn is_transport_provider_mutation(mutation: &str) -> bool {
     TRANSPORT_PROVIDER_MUTATIONS.contains(&mutation)
 }

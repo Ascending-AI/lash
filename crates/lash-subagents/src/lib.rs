@@ -18,8 +18,6 @@ use lash_core::{
 
 pub use rlm::spawn_agent_tool_definition;
 
-/// Builds the session-scoped plugin that authors built-in subagent requests.
-///
 /// # Child tool access
 ///
 /// Built-in capabilities start child requests with this factory's configured
@@ -75,9 +73,6 @@ impl SubagentsPluginFactory {
         self
     }
 
-    /// Sets the access input copied into child requests made by built-in
-    /// capabilities.
-    ///
     /// This value is factory configuration, not automatic inheritance from the
     /// parent session. See [`SubagentsPluginFactory`] for the host-factory recipe
     /// that copies [`PluginSessionContext::tool_access`] when that is desired.

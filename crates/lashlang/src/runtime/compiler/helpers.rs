@@ -15,11 +15,8 @@ pub(super) fn expr_supports_forced_effect_site(expr: &Expr) -> bool {
         )
 }
 
-/// Maps a builtin name to the [`IntrinsicOp`] the VM dispatches on, threading
-/// `argc` into the arity-carrying ops. Returns `None` for names that are not
 /// builtins (the caller decides whether that is an `Unknown` op or a const-fold
-/// miss). This is the single name -> op authority shared by `resolve_intrinsic`
-/// and the const folder.
+/// This is the single name -> op authority shared by `resolve_intrinsic` and the const folder.
 pub(super) fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<IntrinsicOp> {
     Some(match name {
         "len" => IntrinsicOp::Len,
@@ -380,9 +377,8 @@ pub(super) fn is_terminal_expr(expr: &Expr) -> bool {
     }
 }
 
-/// Returns an `Arc`-shared schema for a scalar. All sites referencing `str`
-/// point at the same `Arc<Record>`, so emitting a Type literal with N string
-/// fields allocates one record, not N.
+/// All sites referencing `str` point at the same `Arc<Record>`, so emitting a Type literal
+/// with N string fields allocates one record, not N.
 pub(super) fn interned_scalar_schema(kind: Option<SchemaScalarKind>) -> Value {
     static CACHE: OnceLock<[Value; 8]> = OnceLock::new();
     let cache = CACHE.get_or_init(|| {

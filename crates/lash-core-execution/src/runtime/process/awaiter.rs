@@ -65,8 +65,6 @@ impl WatchedRegistry {
     }
 }
 
-/// Wrap `inner` in a change-publishing registry decorator with no event sink.
-///
 /// The decorated handle publishes change ticks to the returned
 /// [`ProcessChangeHub`]. Use [`watch_process_registry_with_sink`] to also feed a
 /// host-facing [`ProcessEventSink`].
@@ -74,9 +72,6 @@ pub fn watch_process_registry(inner: Arc<dyn ProcessRegistry>) -> WatchedRegistr
     watch_process_registry_with_sink(inner, None)
 }
 
-/// Wrap `inner` in a change-publishing registry decorator, optionally
-/// installing a [`ProcessEventSink`] that receives every appended event.
-///
 /// The sink is best-effort freshness, not truth — see [`ProcessEventSink`].
 pub fn watch_process_registry_with_sink(
     inner: Arc<dyn ProcessRegistry>,

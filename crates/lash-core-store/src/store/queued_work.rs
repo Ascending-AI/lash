@@ -309,7 +309,6 @@ pub enum ClaimIdDialect {
     PerformanceTurnInput,
 }
 
-/// Builds a claim id without changing the chosen dialect's exact spelling.
 pub fn derive_claim_id(dialect: ClaimIdDialect, enqueue_seq: u64, fencing_token: u64) -> String {
     let prefix = match dialect {
         ClaimIdDialect::QueuedWork => "qwc",
@@ -340,8 +339,6 @@ pub struct ClaimCandidate {
     /// Durable token paired with `prior_claim_id` by the queued-work claim
     /// correlation invariant.
     pub prior_claim_token: Option<String>,
-    /// Whether this row is exactly one `ApplyConfigPatch` command and can
-    /// therefore share a drain commit with adjacent config patches.
     pub config_patch_command: bool,
     pub delivery_policy: DeliveryPolicy,
     pub kind: QueuedWorkKind,
@@ -405,14 +402,10 @@ pub fn claim_scan_limit(max_batches: usize) -> i64 {
         + 32
 }
 
-/// Maximum number of adjacent config commands one session-command claim may
-/// coalesce. A longer FIFO prefix remains queued and drains through later
-/// commits; bounding this claim also bounds every SQL candidate scan that
-/// feeds it.
+/// A longer FIFO prefix remains queued and drains through later commits; bounding this claim
+/// also bounds every SQL candidate scan that feeds it.
 pub const MAX_SESSION_COMMAND_BATCHES_PER_CLAIM: usize = 64;
 
-/// Select a leading session-command claim.
-///
 /// Non-config commands remain exclusive. A leading `ApplyConfigPatch` extends
 /// through the complete adjacent config-patch prefix so one drain can apply N
 /// ordered patches in one head commit while completing all N batches.
@@ -436,8 +429,6 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
         .count()
 }
 
-/// Select the turn-work `candidates` that a single claim may take.
-///
 /// Fresh claims return a leading prefix. Interrupted claims return every
 /// candidate carrying the head row's prior claim identity, including rows
 /// separated by newly ready unrelated work.
@@ -703,8 +694,6 @@ fn refuse(
     TurnWorkClaimSelection::Refused { reason: refusal }
 }
 
-/// Select the number of rows from a physically contiguous candidate set.
-///
 /// SQL automatic claims pre-filter interrupted rows by the head claim ID, and
 /// exact-ID claims construct a contiguous candidate slice. In-memory automatic
 /// claims use [`select_turn_work_claim_indices`] directly so identity gaps are
@@ -769,8 +758,6 @@ pub fn select_exact_turn_work_claim_prefix(
     select_turn_work_claim_prefix(candidates, boundary, &policy, now_epoch_ms)
 }
 
-/// Resolve an exact-ID selection against interrupted predecessor identities.
-///
 /// `candidate_batch_claims` must contain every requested ready row plus every
 /// member of each interrupted claim touched by the request, in durable enqueue
 /// order. Every touched interrupted identity is validated before one is
@@ -949,8 +936,6 @@ impl WorkClaimLease {
 
 const QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION: u8 = 3;
 
-/// Derives the opaque ownership token shared by queued-work and turn-input claims.
-///
 /// Strings are length-framed because session and owner identities are opaque UTF-8;
 /// the timestamp is fixed-width. Persisted tokens remain opaque at validation
 /// boundaries: release, settlement, and recovery compare the carried token with

@@ -638,11 +638,10 @@ fn array_like_lengths_under_the_limit_are_node_exact() {
 
 /// Deleting a property keeps the survivors in their order.
 ///
-/// Records stored their properties in a vector and removed with `swap_remove`,
-/// which backfills the vacated slot from the end. Property order is observable
-/// in ECMA — `Object.keys`, `JSON.stringify`, spread — so that rotated the last
-/// key to the front. `{ a, ...rest }` lowers to copy-then-delete, which made
-/// every object rest over three or more surviving keys come out scrambled.
+/// Property order is observable in ECMA — `Object.keys`, `JSON.stringify`, spread — so that
+/// rotated the last key to the front.
+/// `{ a, ...rest }` lowers to copy-then-delete, which made every object rest over three or
+/// more surviving keys come out scrambled.
 #[test]
 fn property_removal_preserves_the_surviving_order() {
     for (source, expected) in [

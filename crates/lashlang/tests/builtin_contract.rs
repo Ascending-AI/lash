@@ -190,8 +190,6 @@ async fn trim_strips_surrounding_whitespace() {
     );
 }
 
-// ── Searching ─────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "current_thread")]
 async fn starts_with_ends_with_and_contains_test_membership() {
     assert_eq!(
@@ -278,8 +276,6 @@ async fn json_parse_reads_a_json_document_into_values() {
     assert_eq!(record["a"], Value::Number(1.0));
 }
 
-// ── Templating ────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "current_thread")]
 async fn format_fills_auto_numbered_indexed_and_escaped_placeholders() {
     assert_eq!(
@@ -320,8 +316,6 @@ async fn format_fills_auto_numbered_indexed_and_escaped_placeholders() {
         )
     );
 }
-
-// ── Validation ────────────────────────────────────────────────────────
 
 fn type_literal(fields: Vec<(&str, TypeExpr)>) -> Expr {
     Expr::TypeLiteral(Box::new(TypeExpr::Object(
@@ -441,8 +435,6 @@ async fn integer_division_helpers_support_chunk_math() {
         Value::Number(-4.0)
     );
 }
-
-// ── Shaping ───────────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "current_thread")]
 async fn shaping_builtins_order_reduce_and_rewrite_collections() {

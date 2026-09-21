@@ -18,7 +18,6 @@ where
 {
 }
 
-/// Choose the preferred position type with this alias.
 #[cfg(feature = "index-positions")]
 pub type DefPosition<'a> = IndexPosition<'a>;
 

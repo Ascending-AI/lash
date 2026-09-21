@@ -93,9 +93,7 @@ impl QueuedLaneGiveUp {
 /// What the drain does with one observed busy holder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueuedLaneWaitStep {
-    /// Sleep this long, then re-claim.
     Wait { slice_ms: u64 },
-    /// Stop waiting and report the typed retryable error.
     GiveUp(QueuedLaneGiveUp),
 }
 

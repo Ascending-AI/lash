@@ -1424,9 +1424,8 @@ pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<boo
     Ok(count > 0)
 }
 
-/// Build the error message for an unsupported on-disk schema. The expected and
-/// found `PRAGMA user_version` values are reported accurately. Every database
-/// kind belongs to the one trust domain described by ADR 0049, so a refusal
+/// The expected and found `PRAGMA user_version` values are reported accurately.
+/// Every database kind belongs to the one trust domain described by ADR 0049, so a refusal
 /// must prescribe one coordinated reset rather than an independent wipe.
 ///
 /// `writing_release` names the lash release that wrote the store when the

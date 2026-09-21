@@ -194,9 +194,8 @@ impl QueuedWorkStore for Store {
                     }
                 })(
                 );
-                // Lower a `StoreError` into the rollback arm so the closure body
-                // can keep using `?` while still propagating the error to the
-                // caller. Encode it as a `Result` carried out of the flow.
+                // Lower a `StoreError` into the rollback arm so the closure body can keep
+                // using `?` while still propagating the error to the caller.
                 match outcome {
                     Ok(TxOutcome::Commit(value)) => Ok(TxOutcome::Commit(Ok(value))),
                     Ok(TxOutcome::Rollback(value)) => Ok(TxOutcome::Rollback(Ok(value))),

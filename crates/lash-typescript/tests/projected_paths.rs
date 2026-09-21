@@ -15,11 +15,8 @@
 //!   `text?.length` — which lowers through an optional-chain temporary, and
 //!   temporaries materialize — returned 5 (FIG-1482).
 //!
-//! The rule pinned here: a projected binding is nullish, reads fields, and
-//! indexes exactly as the value behind it does, and the projected route agrees
-//! with the materializing one. Reads through a *custom* (host-descriptor)
-//! projection stay lazy — the descriptor answers the field, nothing is dragged
-//! across — which the last test pins.
+//! The rule pinned here: a projected binding is nullish, reads fields, and indexes exactly as
+//! the value behind it does, and the projected route agrees with the materializing one.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -368,7 +365,6 @@ fn asked(view: &Arc<RecordingView>) -> Vec<String> {
         .clone()
 }
 
-/// Runs `source` against a session carrying `view`, returning the finished value.
 async fn finished_with_view(source: &str, view: &Arc<RecordingView>) -> Value {
     let outcome = execute_with_view(source, Some(view.clone()))
         .await

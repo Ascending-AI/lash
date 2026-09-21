@@ -215,8 +215,6 @@ impl Wake for RelayedWaker {
     }
 }
 
-/// Poll a run closure's future under a waker that relays its wakes past the
-/// guard's tracker (see [`ClosureWakeRelay`]).
 pub(crate) struct RelayedWakeFuture<F> {
     future: Pin<Box<F>>,
     relay: Arc<ClosureWakeRelay>,
@@ -418,8 +416,6 @@ fn erase_gate_wait<'run, T>(
     Box::pin(wait)
 }
 
-/// Wait for the first of the guarded wait and a gate awakeable to complete.
-///
 /// This is the SDK's `select!` without its consuming semantics: the macro
 /// awaits the winner and drops the loser, but a deferred wake must keep the
 /// guarded wait alive and await it afterwards. The VM's first-completed await
@@ -738,7 +734,6 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         Box::pin(async { Ok(true) })
     }
 
-    /// Clear the record [`scope_effect_begin`](Self::scope_effect_begin) made.
     fn scope_effect_end<'run>(
         &'run self,
         _index_key: String,
@@ -972,10 +967,9 @@ macro_rules! impl_restate_controller_context {
                             tokio::pin!(timer);
                             tokio::pin!(cancelled);
                             return std::future::poll_fn(|cx| {
-                                // Poll the timer first on every cycle. A
-                                // recorded suspension fuses the timer and wins
-                                // immediately; HandlerStateAwareFuture must
-                                // consume it before cancellation is polled.
+                                // A recorded suspension fuses the timer and wins immediately;
+                                // HandlerStateAwareFuture must consume it before cancellation
+                                // is polled.
                                 match timer.as_mut().poll(cx) {
                                     Poll::Ready(result) => Poll::Ready(
                                         result.map(RestateTurnCancelRaceOutcome::Completed),

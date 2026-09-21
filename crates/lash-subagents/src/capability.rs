@@ -73,8 +73,6 @@ impl SubagentSpawnContext<'_> {
             .resolve_against(&self.parent_snapshot.policy)
     }
 
-    /// Builds the standard RLM child request used by built-in capabilities.
-    ///
     /// Policy is resolved against the parent snapshot, while tool access is
     /// copied from [`Self::base_tool_access`]. The latter is factory input and
     /// is not derived from the parent's effective tool catalog.
@@ -297,12 +295,10 @@ impl CapabilityRegistry {
     }
 }
 
-/// Build the default `explore` / `peer` registry. `tier_models` supplies
-/// optional explicit model overrides keyed by tier name; absent tiers fall
-/// back to the provider's default agent model and then to the parent
-/// session's model. The built-in `explore` tier uses
-/// [`default_explore_plugin_source`] while `peer` forks the current session's
-/// plugin instances.
+/// `tier_models` supplies optional explicit model overrides keyed by tier name; absent tiers
+/// fall back to the provider's default agent model and then to the parent session's model.
+/// The built-in `explore` tier uses [`default_explore_plugin_source`] while `peer` forks the
+/// current session's plugin instances.
 ///
 /// The `explore` tier is read-only and cannot recurse: investigative
 /// subagents that scan, summarise, or verify without mutating state. The

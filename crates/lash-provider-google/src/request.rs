@@ -255,9 +255,6 @@ impl GoogleOAuthProvider {
                 continue;
             }
 
-            // Merge with previous same-role turn so text + images + tool
-            // calls land as a single `contents` entry (matches the old
-            // behavior expected by Gemini clients).
             if let Some(prev) = out.last_mut()
                 && prev.get("role").and_then(|r| r.as_str()) == Some(role)
                 && prev.get("parts").is_some_and(|p| p.is_array())

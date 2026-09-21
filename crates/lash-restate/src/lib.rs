@@ -1,11 +1,8 @@
 //! Restate durable execution adapter for Lash runtime effects.
 //!
-//! The primary entrypoint is [`RestateRuntimeEffectController`]. Construct it inside
-//! a Restate service, object, or workflow handler, derive a stable
-//! [`ScopedEffectController`](lash_core::ScopedEffectController) from an
-//! [`ExecutionScope`](lash_core::ExecutionScope), and run Lash through the scoped API.
-//! Restate recovery is handler replay with the same scope id and request data,
-//! not Lash checkpoint reload.
+//! The primary entrypoint is [`RestateRuntimeEffectController`].
+//! Restate recovery is handler replay with the same scope id and request data, not Lash
+//! checkpoint reload.
 //!
 //! ```rust,ignore
 //! use lash_core::TurnId;

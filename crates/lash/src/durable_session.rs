@@ -73,7 +73,6 @@ use tokio::sync::OnceCell;
 /// How this handle obtains the session's store.
 #[derive(Clone)]
 enum DurableAcquisition {
-    /// Resolve through the catalog's non-creating seam.
     Catalog(Arc<dyn SessionStoreFactory>),
     /// A host-supplied exact store; existence is still proven before use.
     Exact(Arc<dyn RuntimePersistence>),
@@ -127,8 +126,6 @@ impl DurableSession {
         }
     }
 
-    /// Build the handle an open session exposes, from its Session Binding.
-    ///
     /// The binding's store and ports are reused as-is: an exact binding never
     /// manufactures a catalog, so catalog-only reads stay optional here with
     /// the same typed error a root opened with an explicit store already
@@ -211,8 +208,7 @@ impl DurableSession {
         }
     }
 
-    /// Resolve the store without turning absence into an error. Used only by
-    /// the settled reads, whose job is to report absence.
+    /// Used only by the settled reads, whose job is to report absence.
     async fn store_if_present(&self) -> Result<Option<&Arc<dyn RuntimePersistence>>> {
         match self.store().await {
             Ok(store) => Ok(Some(store)),
@@ -241,8 +237,6 @@ impl DurableSession {
         }
     }
 
-    /// Returns every open turn input and its factual read-time claim status.
-    ///
     /// A held input remains present with the exact expiry of the matching live
     /// session-execution lease. That status does not prove the holder is alive;
     /// resubmitting while it is held creates another admission unless the host
@@ -422,7 +416,6 @@ impl EnqueueTurnBuilder {
         self
     }
 
-    /// Sets how the enqueued input enters the turn pipeline.
     pub fn ingress(mut self, ingress: TurnInputIngress) -> Self {
         self.ingress = ingress;
         self

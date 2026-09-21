@@ -82,7 +82,6 @@ fn positions(expr: &LashExpr, path: &mut Vec<u32>, out: &mut Vec<PositionedNode>
     nodes
 }
 
-/// Resolves `notes` against the finished `main` block.
 pub(super) fn source_spans(main: &LashExpr, notes: &[SpanNote]) -> BTreeMap<AstPath, Span> {
     let mut nodes = Vec::new();
     positions(main, &mut Vec::new(), &mut nodes);

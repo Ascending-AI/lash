@@ -226,7 +226,6 @@ struct Prng(u64);
 
 impl Prng {
     fn next(&mut self) -> u64 {
-        // SplitMix64.
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -243,7 +242,6 @@ impl Prng {
 /// the separators and terminals that release or end a run. A random sequence
 /// over this alphabet is exactly the input class the budget has to survive.
 const FUZZ_ALPHABET: &[&str] = &[
-    // prefix
     "!",
     "~",
     "-",
@@ -260,7 +258,6 @@ const FUZZ_ALPHABET: &[&str] = &[
     "readonly ",
     "infer ",
     "unique ",
-    // infix
     "+",
     "===",
     "&&",
@@ -277,7 +274,6 @@ const FUZZ_ALPHABET: &[&str] = &[
     " satisfies number",
     " in ",
     " instanceof ",
-    // postfix
     "(1)",
     "[0]",
     ".a",
@@ -286,7 +282,6 @@ const FUZZ_ALPHABET: &[&str] = &[
     "?.[0]",
     "`x`",
     "!",
-    // delimiter
     "(",
     ")",
     "[",

@@ -1945,8 +1945,6 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
 
 /// Runs the hazard shape on one host: a recorded attempt whose body emits a
 /// nested journal command through the *same* controller.
-///
-/// Returns how many times each body actually executed.
 async fn run_attempt_with_nested_command(host: &PostgresEffectHost) -> (usize, usize, String) {
     let scoped = host
         .scoped(lash_core::AdmittedScope::turn(SESSION, TURN))

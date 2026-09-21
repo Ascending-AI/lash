@@ -635,12 +635,9 @@ mod tests {
         })
     }
 
-    /// A kind mismatch is unrepresentable because `PluginOperationSpec` has no
-    /// kind to contradict: the stored discriminant comes from whichever
-    /// registration constructor wrapped the handler, and nowhere else. This
-    /// asserts that stamping for all three constructors -- changing or
-    /// dropping any one of the three `PluginOperationDef::from_spec` kinds
-    /// turns this test red.
+    /// A kind mismatch is unrepresentable because `PluginOperationSpec` has no kind to
+    /// contradict: the stored discriminant comes from whichever registration constructor
+    /// wrapped the handler, and nowhere else.
     #[tokio::test]
     async fn plugin_operation_registration_stamps_kind_from_its_constructor() {
         let query = PluginOperationRegistration::query(

@@ -45,7 +45,6 @@ pub enum ProcessDefinitionLifecycle {
 }
 
 impl ProcessDefinitionLifecycle {
-    /// Whether a name lookup resolves this slot for a consumer.
     pub fn resolvable(&self) -> bool {
         !matches!(self, Self::Tombstoned { .. })
     }
@@ -163,9 +162,7 @@ impl ProcessDefinitionRegistration {
 /// The durable home for named process definitions (FIG-2995).
 ///
 /// Store and durable-substrate implementors provide this trait, shaped like
-/// [`crate::TriggerStore`] but with the registry's lifecycle column. Store
-/// tables and record JSON are private to Lash; consumers resolve through the
-/// intent surfaces.
+/// [`crate::TriggerStore`] but with the registry's lifecycle column.
 #[async_trait::async_trait]
 pub trait ProcessDefinitionRegistry: Send + Sync {
     /// Write one named registration under the owner scope, with the caller's
@@ -212,8 +209,6 @@ pub fn validate_process_definition_name(name: &str) -> Result<(), crate::PluginE
     Ok(())
 }
 
-/// Resolve a name once, at intent execution, into the pinned reference.
-///
 /// The registry answer is dropped on the floor if the name is fenced or
 /// unregistered: the caller refuses the intent, and a name is never carried
 /// into a durable record.
@@ -250,7 +245,6 @@ impl Default for InMemoryProcessDefinitionRegistry {
 }
 
 impl InMemoryProcessDefinitionRegistry {
-    /// Builds an in-memory registry on the runtime's injected clock.
     pub fn with_clock(clock: std::sync::Arc<dyn crate::Clock>) -> Self {
         Self {
             clock,

@@ -911,9 +911,8 @@ async fn run_button_trigger(
         "event",
         "button trigger occurrence emitted",
     );
-    // Trigger occurrence dispatch is the end of this client-initiated request.
-    // Clear the UI's busy state when this request owns it, but do not clear a
-    // foreground turn's busy state during a mid-turn occurrence.
+    // Clear the UI's busy state when this request owns it, but do not clear a foreground
+    // turn's busy state during a mid-turn occurrence.
     state.publish_trigger_dispatch_done(&request.session_id, &request.operation_id);
     Ok(())
 }
@@ -965,9 +964,8 @@ async fn run_mail_received(
         "event",
         "mail received trigger occurrence queued",
     );
-    // Trigger occurrence dispatch is the end of this client-initiated request.
-    // Clear the UI's busy state when this request owns it, but do not clear a
-    // foreground turn's busy state during a mid-turn occurrence.
+    // Clear the UI's busy state when this request owns it, but do not clear a foreground
+    // turn's busy state during a mid-turn occurrence.
     state.publish_trigger_dispatch_done(&request.session_id, &request.operation_id);
     Ok(())
 }

@@ -391,9 +391,7 @@ async fn unstressed_result(program: Program) -> Result<Value, RuntimeError> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn stress_collection_survives_a_general_concat() {
-    // The reported repro: the concat's isolation allocates while `x` is live
-    // only from a slot.
-    // `x = [1]` / `z = [2]` / `y = [9]` / `y = y + z` / `finish [x, y, z]`
+    // The reported repro: the concat's isolation allocates while `x` is live only from a slot.
     let program = || {
         builders::program(vec![
             builders::assign("x", builders::list(vec![builders::num(1.0)])),

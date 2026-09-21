@@ -11,6 +11,5 @@ pub trait PluginBinding: Send + Sync + 'static {
     const ID: &'static str;
     /// Session-scoped configuration used to construct the plugin.
     type SessionConfig: Clone + Send + Sync + 'static;
-    /// Creates the plugin factory for this binding configuration.
     fn factory(config: &Self::SessionConfig) -> Arc<dyn PluginFactory>;
 }

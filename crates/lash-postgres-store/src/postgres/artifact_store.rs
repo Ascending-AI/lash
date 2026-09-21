@@ -9,9 +9,8 @@ use crate::*;
 lash_store_sql::statements! {
     /// `lash_artifact_owners` statements only PostgreSQL issues.
     pub(crate) struct OwnerPostgresStatements @ "artifact_owner" {
-        /// Drop artifact `?1`/`?2`'s inline bytes once its last owner edge is
-        /// gone. Only PostgreSQL has them: SQLite reaches its bytes through
-        /// the `artifact_refs` pointer table and reclaims a blob instead.
+        /// Only PostgreSQL has them: SQLite reaches its bytes through the `artifact_refs`
+        /// pointer table and reclaims a blob instead.
         delete_unowned_artifact = "DELETE FROM lashlang_artifacts AS artifact
              WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2
                AND NOT EXISTS (
@@ -67,7 +66,6 @@ lash_store_sql::statements! {
         select_bytes = "SELECT artifact_bytes FROM lashlang_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2";
 
-        /// Whether artifact `?1`/`?2` exists, without carrying its bytes back.
         exists = "SELECT EXISTS (
                  SELECT 1 FROM lashlang_artifacts
                  WHERE namespace = ?1 AND artifact_ref = ?2

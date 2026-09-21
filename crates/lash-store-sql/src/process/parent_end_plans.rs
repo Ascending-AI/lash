@@ -34,7 +34,6 @@ crate::statements! {
              VALUES (?1, ?2, ?3)
              ON CONFLICT (parent_kind, parent_id) DO NOTHING";
 
-        /// Whether scope `?1` / `?2` has a plan at all.
         exists = "SELECT 1 FROM parent_end_plans WHERE parent_kind = ?1 AND parent_id = ?2";
 
         /// The oldest `?1` plans that are still unsettled.

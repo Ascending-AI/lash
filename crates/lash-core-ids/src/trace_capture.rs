@@ -133,7 +133,6 @@ impl<S: tracing::Subscriber> Layer<S> for EventCapture {
     }
 }
 
-/// Run `body` with a capture layer installed as the thread-local dispatcher.
 pub fn capturing_sync<F, T>(body: F) -> (T, EventCapture)
 where
     F: FnOnce() -> T,
@@ -146,8 +145,6 @@ where
     (value, capture)
 }
 
-/// Run `body` with a capture layer installed as the thread-local dispatcher.
-///
 /// `#[tokio::test]` builds a current-thread runtime, so tasks polled on this
 /// thread emit through the same capture layer.
 pub async fn capturing<F, Fut, T>(body: F) -> (T, EventCapture)

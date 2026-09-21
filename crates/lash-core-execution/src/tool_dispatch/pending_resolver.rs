@@ -17,8 +17,6 @@
 //! [`ResolveOutcome::AlreadyResolved`](crate::ResolveOutcome::AlreadyResolved) —
 //! makes the repetition harmless.
 
-/// Arms the resolver `pending` named, if it named one.
-///
 /// A call with no resolver is left exactly as it was: nothing is armed and the
 /// caller parks on a key only an external actor can resolve. A failure to arm
 /// is returned rather than swallowed — parking on a wait whose resolver was

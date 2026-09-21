@@ -56,9 +56,7 @@ turn_cancel_law! {
          accepted policy, durably and across reopen",
 }
 
-/// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
-/// suite against the backend produced by `make`. `make` must return a fresh,
-/// empty factory on each call.
+/// `make` must return a fresh, empty factory on each call.
 ///
 /// `backend` names the implementation under test; it only appears in
 /// diagnostics for cases a backend cannot express.
@@ -1012,8 +1010,6 @@ pub async fn attachment_reference_lifecycle(factory: Arc<dyn crate::SessionStore
     .await;
 }
 
-/// Run [`attachment_reference_lifecycle`] against a concrete flat byte backend,
-/// combining manifest reference tracking with the shared physical layout.
 #[expect(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -2392,7 +2388,6 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
         },
     )
     .await;
-    // Commit the ref for committed_id.
     crate::AttachmentManifest::commit_refs(
         &*store,
         &request.session_id,
@@ -2417,7 +2412,6 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
         crate::AttachmentWriteFence::Granted(_)
     ));
 
-    // Test with cutoffs that exceed i64::MAX (e.g., u64::MAX, (i64::MAX as u64) + 1).
     for large_cutoff in [u64::MAX, (i64::MAX as u64) + 1] {
         // 1. list_uncommitted must find all uncommitted intents whose intent_at_epoch_ms <= large_cutoff
         let uncommitted = crate::AttachmentManifest::list_uncommitted(&*store, large_cutoff)

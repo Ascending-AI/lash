@@ -33,8 +33,6 @@ fn store_error(err: impl std::fmt::Display) -> crate::RuntimeError {
     crate::RuntimeError::new(crate::RuntimeErrorCode::StoreCommitFailed, err.to_string())
 }
 
-/// Store-backed queue and read operations for one session.
-///
 /// The handle owns no store: every operation takes the acquired store so the
 /// catalog-acquired handle (which resolves its store lazily through a
 /// non-creating seam) and the binding-derived handle (which already holds its
@@ -67,8 +65,6 @@ impl DurableSessionOps {
         &self.session_id
     }
 
-    /// Read the committed-head revision for the next published queue event.
-    ///
     /// A head that cannot be read is not an error for a best-effort
     /// publication; it degrades to [`EMPTY_HEAD_REVISION`], which mints a
     /// cursor a reconnect resolves through gap recovery rather than losing the

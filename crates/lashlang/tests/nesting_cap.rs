@@ -214,7 +214,6 @@ fn loop_control_outside_a_loop_is_a_typed_error_not_a_panic() {
     assert!(error.to_string().contains("outside a loop"), "{error}");
 }
 
-/// The same for a `continue` at the top level of a program.
 #[test]
 fn a_bare_continue_at_the_program_root_is_a_typed_error() {
     use lashlang::{Expr, Program};

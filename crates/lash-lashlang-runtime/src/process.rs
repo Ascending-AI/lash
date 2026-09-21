@@ -149,8 +149,6 @@ struct LashlangSegmentState {
     child_max_attempts: std::num::NonZeroU32,
 }
 
-/// Resolves the attempt bound this segment stamps onto the children it starts.
-///
 /// A segment that resumes carries the bound its first segment recorded, so a
 /// redrive after the host's default changes re-registers every child with the
 /// value already hashed into its registration fingerprint rather than
@@ -1164,8 +1162,8 @@ impl LashlangProcessExecutionTrace {
                 ),
             },
             // `emit_finished` fires after an actual execution, whose outcome is
-            // Success/Failure/Cancelled — abandonment is written out-of-band by the
-            // sweep, never returned by a run. Map it defensively to Failed.
+            // Success/Failure/Cancelled — abandonment is written out-of-band by the sweep,
+            // never returned by a run.
             lash_core::ProcessAwaitOutput::Abandoned { .. } => (
                 TraceLanguageExecutionStatus::Failed,
                 Some("process abandoned".to_string()),
@@ -1342,7 +1340,6 @@ fn trace_lashlang_process_map(
     TraceLanguageExecutionMap { nodes, edges }
 }
 
-/// Builds the trace runtime's read-only foreground skeleton from the workflow graph.
 pub fn trace_lashlang_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLanguageExecutionMap {
     let graph =
         lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir);

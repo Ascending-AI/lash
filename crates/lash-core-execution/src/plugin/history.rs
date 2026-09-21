@@ -1,7 +1,6 @@
 //! Prompt-view transforms and explicit context compaction plugin contracts.
 //!
-//! Split out of `plugin/mod.rs` purely for file size. All types keep
-//! their original module path via `pub use` in `plugin/mod.rs`.
+//! All types keep their original module path via `pub use` in `plugin/mod.rs`.
 
 pub use lash_core_store::session_read_view::SessionReadView;
 
@@ -100,7 +99,6 @@ pub trait TurnContextTransform: Send + Sync {
     ) -> Result<crate::session_model::context::PreparedContext, ContextError>;
 }
 
-/// Produces seed nodes for an explicit compaction Agent Frame.
 #[async_trait::async_trait]
 pub trait ContextCompactor: Send + Sync {
     fn id(&self) -> &'static str;

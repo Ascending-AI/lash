@@ -560,7 +560,6 @@ async fn projected_list_len_and_index_are_lazy() {
     let list = TestProjectedValue::new(vec![Value::String("first".into()), Value::Number(2.0)]);
     let projected = projected_list_bindings("history", Arc::clone(&list));
 
-    // finish { n: len(history), first: history[0], missing: history[9] }
     let (value, _) = exec_with_projected(
         builders::program(vec![builders::finish(builders::record(vec![
             (
@@ -648,7 +647,6 @@ async fn projected_children_can_be_lazy_inside_ordinary_records() {
         ProjectedValue::scalar("rules", Value::Record(Arc::new(record))),
     );
 
-    // finish { title: rules.title, first_body_item: rules.body[0] }
     let (value, _) = exec_with_projected(
         builders::program(vec![builders::finish(builders::record(vec![
             ("title", builders::field(builders::var("rules"), "title")),
@@ -682,8 +680,6 @@ async fn print_projected_leaves_projection_to_host_and_finish_materializes() {
     let list = TestProjectedValue::new(vec![Value::String("entry".into())]);
     let projected = projected_list_bindings("history", Arc::clone(&list));
 
-    // print history
-    // finish history
     let (value, _) = exec_with_projected(
         builders::program(vec![
             builders::print(builders::var("history")),
@@ -844,7 +840,6 @@ async fn flat_search_match_projected_text_separates_slice_snapshot_and_stringify
     assert_eq!(text.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(text.materialize_count.load(Ordering::SeqCst), 0);
 
-    // finish to_string(m.text)
     let program = builders::program(vec![builders::finish(builders::builtin(
         "to_string",
         vec![builders::field(builders::var("m"), "text")],
@@ -1078,7 +1073,6 @@ async fn projected_values_match_normal_values_for_ranges_validation_and_iteratio
 
 #[tokio::test(flavor = "current_thread")]
 async fn projected_empty_rejects_scalar_like_normal_empty() {
-    // finish empty(n)
     let empty_n = || {
         builders::program(vec![builders::finish(builders::builtin(
             "empty",
@@ -1495,7 +1489,6 @@ async fn projected_host_descriptors_can_override_all_lazy_receiver_operations() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn image_values_expose_read_only_metadata_fields() {
-    // finish [img.id, img.label, img.size, img.width, img.height, img.missing]
     let value = exec_with_global(
         "img",
         test_image(),
@@ -1545,7 +1538,6 @@ async fn image_values_serialize_as_descriptors() {
         r#"{"height":480,"id":"img-1","mime":"image/png","label":"chart.png","size":1234,"type":"image","width":640}"#
     );
     assert_eq!(
-        // finish img
         exec_with_global(
             "img",
             image.clone(),
@@ -1577,7 +1569,6 @@ async fn image_values_are_immutable_and_len_is_unsupported() {
     .expect_err("image field assignment should fail");
     assert_eq!(err, RuntimeError::ImmutableImageFields);
 
-    // finish len(img)
     let err = exec_with_global(
         "img",
         test_image(),

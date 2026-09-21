@@ -260,8 +260,6 @@ fn the_abort_corpus_survives_without_the_preflight() {
     }
 }
 
-/// The same for the fuzzer's generated sources: with the preflight disabled,
-/// none of them may reach the end of the stack either.
 #[test]
 fn fuzzed_sources_survive_without_the_preflight() {
     const CHILD_ENV: &str = "LASH_TS_NO_PREFLIGHT_FUZZ_CHILD";

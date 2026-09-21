@@ -137,14 +137,12 @@ fn grant_probe_dispatch(
     (exact_dispatch_context(provider), grant)
 }
 
-/// Builds a prepared granted call. `tool_name` is the name the provider stamped
-/// on the prepared call, which may differ from the grant's tool name.
+/// `tool_name` is the name the provider stamped on the prepared call, which may differ from
+/// the grant's tool name.
 fn grant_prepared_call(tool_name: &str) -> crate::PreparedToolCall {
     grant_prepared_call_with_id("tool:grant_probe", tool_name)
 }
 
-/// Builds a prepared granted call with an explicit tool id, so a test can hand
-/// dispatch a call whose identifier disagrees with the grant's manifest.
 fn grant_prepared_call_with_id(tool_id: &str, tool_name: &str) -> crate::PreparedToolCall {
     crate::PreparedToolCall::from_parts(
         "grant-call",

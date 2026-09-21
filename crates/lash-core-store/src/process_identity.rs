@@ -22,12 +22,10 @@ use std::fmt;
 #[serde(transparent)]
 pub struct ProcessIncarnation(u64);
 impl ProcessIncarnation {
-    /// Wrap the registration change sequence allocated by a process store.
     pub fn from_registration_sequence(sequence: u64) -> Self {
         Self(sequence)
     }
 
-    /// Expose the registration change sequence to process-store implementors.
     pub fn registration_sequence(self) -> u64 {
         self.0
     }
@@ -62,8 +60,6 @@ impl ProcessRef {
         Self::new(record.process_id().clone(), record.process_incarnation())
     }
 
-    /// Read the identity out of a cell-visible handle value.
-    ///
     /// Delegates to the one handle parser (FIG-2996 part 1) rather than reading
     /// the encoding again: tools that take a process handle as an argument
     /// parse it here, so a handle argument and a handle the runtime minted are
@@ -129,7 +125,6 @@ impl ProcessExecutionEnvSpec {
         serde_json::to_vec(self)
     }
 
-    /// Deserializes a stored execution environment for process-engine implementors and returns malformed payloads as plugin errors.
     pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
         serde_json::from_slice(bytes)
     }
@@ -402,7 +397,6 @@ macro_rules! lifecycle_vocabulary {
             /// Every variant, in declaration order.
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
 
-            /// Returns the stable spelling persisted by stores.
             pub fn $encoder(&self) -> &'static str {
                 match self {
                     $(Self::$variant => $wire),+
@@ -415,7 +409,6 @@ macro_rules! lifecycle_vocabulary {
             /// Every variant, in declaration order.
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
 
-            /// Returns the stable spelling persisted by stores.
             pub fn $encoder(self) -> &'static str {
                 match self {
                     $(Self::$variant => $wire),+

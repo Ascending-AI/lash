@@ -105,8 +105,8 @@ impl ResponsePhase {
         }
     }
 
-    /// Decodes a provider wire spelling. An unrecognized phase is not a phase
-    /// the kernel interprets, so it decodes to `None` rather than guessing.
+    /// An unrecognized phase is not a phase the kernel interprets, so it decodes to `None`
+    /// rather than guessing.
     pub fn from_provider_wire(phase: &str) -> Option<Self> {
         match phase {
             "commentary" => Some(Self::Commentary),
@@ -466,13 +466,11 @@ impl LlmMessage {
         }
     }
 
-    /// Mark this message as the first message of a genuine user segment.
     pub fn with_user_segment_start(mut self) -> Self {
         self.starts_user_segment = true;
         self
     }
 
-    /// True if every block is a `Text` whose content is whitespace-only.
     pub fn is_blank(&self) -> bool {
         self.blocks.iter().all(|b| match b {
             LlmContentBlock::Text { text, .. } => text.trim().is_empty(),
@@ -715,8 +713,8 @@ impl From<NonNegativeFiniteF64> for serde_json::Number {
 impl TryFrom<serde_json::Number> for NonNegativeFiniteF64 {
     type Error = NonNegativeFiniteF64Error;
 
-    /// Validates the number in place. The accepted `Number` is carried through
-    /// unchanged, so no decode re-spells or rounds what the sender wrote.
+    /// The accepted `Number` is carried through unchanged, so no decode re-spells or rounds
+    /// what the sender wrote.
     fn try_from(value: serde_json::Number) -> Result<Self, Self::Error> {
         let as_f64 = value.as_f64().ok_or_else(|| NonNegativeFiniteF64Error {
             message: format!("{value} is not representable as a finite number"),
@@ -866,7 +864,6 @@ pub enum GenerationOptionOutcome {
 }
 
 impl GenerationOptionOutcome {
-    /// Report an option the wire carries whenever it is requested.
     pub fn applied(requested: bool) -> Self {
         if requested {
             Self::Applied
@@ -1269,9 +1266,8 @@ impl LlmUsage {
     }
 }
 
-/// Whether an opaque provider usage payload contains at least one numeric
-/// quantity. Empty metadata objects and non-numeric labels are not usage
-/// evidence, while an explicit numeric zero is.
+/// Empty metadata objects and non-numeric labels are not usage evidence, while an explicit
+/// numeric zero is.
 pub fn provider_usage_has_quantities(usage: &serde_json::Value) -> bool {
     match usage {
         serde_json::Value::Number(_) => true,
@@ -1356,9 +1352,8 @@ pub enum LlmStreamEvent {
     TextBlockStart {
         block: StreamBlockIdentity,
     },
-    /// Append-only visible assistant text within `block`. Providers must send
-    /// only the new suffix here; completed/cumulative message text belongs in
-    /// `Part(Text)`.
+    /// Providers must send only the new suffix here; completed/cumulative message text belongs
+    /// in `Part(Text)`.
     Delta {
         block: StreamBlockIdentity,
         text: String,
@@ -1473,8 +1468,6 @@ pub struct LlmProviderTraceEvent {
 const PROVIDER_REQUEST_EVENT_PREFIX: &str = "\0lash.provider_request:";
 
 impl LlmProviderTraceEvent {
-    /// Construct an internal trace message for an outbound provider request.
-    ///
     /// Request traces share the provider trace channel with response events,
     /// while the reserved event-name prefix lets the runtime persist them as
     /// a distinct durable trace event without wrapping or changing `raw`.
@@ -1773,8 +1766,6 @@ pub enum ChargeSafetyDecision {
     },
 }
 
-/// Whether an attempt's `usage` is provider-reported fact or a typed hole.
-///
 /// ADR 0031: absence means unreported and an explicit zero is information.
 /// The disposition makes the reason for an absence part of the sealed record,
 /// so a host summing cost can tell "the provider reported nothing" from "the

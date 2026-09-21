@@ -20,7 +20,6 @@ use std::sync::Arc;
 use super::heap::{Heap, HeapObject};
 use super::{ProjectedBindings, Record, Value};
 
-/// Refreshes every placeholder reachable from `value`, in place.
 pub(crate) fn refresh_value(value: &mut Value, bindings: &ProjectedBindings) {
     match value {
         Value::Projected(projected) => {

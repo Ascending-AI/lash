@@ -45,18 +45,15 @@ fn bracket_as_ascii(bc: &BracketContents) -> Option<AsciiBitmap> {
 struct Emitter {
     result: CompiledRegex,
 
-    // Number of loops seen so far.
     next_loop_id: LoopID,
 
     // List of group names, in order, with empties for unnamed groups.
     group_names: Vec<Box<str>>,
 
-    // Whether the current node is within a lookbehind.
     in_lookbehind: bool,
 }
 
 impl Emitter {
-    /// Emit a ByteSet instruction.
     /// We awkwardly optimize it like so.
     #[expect(
         clippy::unwrap_used,
@@ -74,7 +71,7 @@ impl Emitter {
         self.emit_insn(insn);
     }
 
-    // Emit a nonempty byte sequence instruction. The sequence must be at most MAX_BYTE_SEQ_LENGTH bytes.
+    // The sequence must be at most MAX_BYTE_SEQ_LENGTH bytes.
     #[expect(
         clippy::unwrap_used,
         reason = "the match on seq.len() above already fixes the length to the arm's width, so try_into cannot fail"
@@ -108,13 +105,10 @@ impl Emitter {
         self.emit_insn(insn);
     }
 
-    /// Emit an instruction.
-    /// Return the "instruction" as an index.
     fn emit_insn(&mut self, insn: Insn) {
         self.result.insns.push(insn);
     }
 
-    /// Get an instruction at a given index.
     fn get_insn(&mut self, idx: u32) -> &mut Insn {
         &mut self.result.insns[idx as usize]
     }
@@ -130,7 +124,6 @@ impl Emitter {
         ret
     }
 
-    /// Emit instructions corresponding to a given node.
     fn emit_node(&mut self, node: &Node) {
         enum Emitter<'a> {
             Node(&'a Node),
@@ -281,7 +274,6 @@ impl Emitter {
                             exit: 0,
                         }));
                         self.result.loops += 1;
-                        // Emit a sequence of ResetCaptureGroup for any contained groups.
                         for gid in enclosed_groups.start..enclosed_groups.end {
                             self.emit_insn(Insn::ResetCaptureGroup(gid))
                         }

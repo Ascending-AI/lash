@@ -267,9 +267,8 @@ pub(crate) fn submit_error_tool_result(args: &Value) -> ToolOutcome {
     ToolOutcome::ok(args.clone()).with_control(lash_core::ToolControl::Fail { failure })
 }
 
-/// Render the spawned subagent's tool authority as a prompt note. Under the
-/// flat catalog, tool-list notes are ordinary prompt contributions authored by
-/// the host, not a catalog property.
+/// Under the flat catalog, tool-list notes are ordinary prompt contributions authored by the
+/// host, not a catalog property.
 pub(crate) fn subagent_capability_note(authority: &SubagentSessionContext) -> String {
     format!(
         "Subagent capability: {}. Depth: {}/{}.",
@@ -303,9 +302,8 @@ pub(crate) fn task_result_value(turn: &AssembledTurn) -> Result<Value, String> {
     Ok(value)
 }
 
-/// Apply the same JSON Schema semantics as the child's in-turn `finish`
-/// validator. This backstop runs after the child session has closed, so a
-/// mismatch is returned to the parent instead of asking the child to repair.
+/// This backstop runs after the child session has closed, so a mismatch is returned to the
+/// parent instead of asking the child to repair.
 pub(crate) fn validate_task_result(value: &Value, schema: &Value) -> Result<(), String> {
     let compiled = jsonschema::JSONSchema::compile(schema)
         .map_err(|err| format!("required output schema is invalid: {err}"))?;
@@ -318,8 +316,6 @@ pub(crate) fn validate_task_result(value: &Value, schema: &Value) -> Result<(), 
     Ok(())
 }
 
-/// Wrap an `Ok`/`Err` result as a `ToolOutcome`. Used by both providers'
-/// `execute` so error encoding stays identical.
 pub(crate) fn finalise_tool_result(result: Result<Value, String>) -> ToolOutcome {
     match result {
         Ok(value) => ToolOutcome::ok(value),

@@ -535,7 +535,6 @@ macro_rules! store_maintenance_tests {
     };
 }
 
-/// Register the maintenance failure law for backends with a real injector.
 #[macro_export]
 macro_rules! store_maintenance_fault_tests {
     ($fixture:block) => {
@@ -677,7 +676,6 @@ macro_rules! effect_group_cancelled_child_terminal_tests {
     };
 }
 
-/// Register the deployment-level effect-host scope laws.
 #[macro_export]
 macro_rules! effect_host_tests {
     ($fixture:block) => {
@@ -697,7 +695,6 @@ macro_rules! effect_host_tests {
     };
 }
 
-/// Register the warm-instance AwaitEvent host laws.
 #[macro_export]
 macro_rules! effect_host_await_event_tests {
     ($fixture:block) => {
@@ -717,7 +714,6 @@ macro_rules! effect_host_await_event_tests {
     };
 }
 
-/// Register the cold-instance AwaitEvent host laws.
 #[macro_export]
 macro_rules! effect_host_cold_await_event_tests {
     ($fixture:block) => {
@@ -757,7 +753,6 @@ macro_rules! attachment_condemnation_recovery_tests {
     };
 }
 
-/// Register the portable attachment-root adoption laws.
 #[macro_export]
 macro_rules! attachment_adoption_tests {
     ($fixture:block) => {
@@ -801,7 +796,6 @@ macro_rules! lineage_tests {
     };
 }
 
-/// Register the process change-feed compaction-horizon law.
 #[macro_export]
 macro_rules! process_change_horizon_tests {
     ($fixture:block) => {
@@ -841,7 +835,6 @@ macro_rules! process_projection_repair_tests {
     };
 }
 
-/// Register the terminal-evidence retention law.
 #[macro_export]
 macro_rules! retention_tests {
     ($fixture:block) => {
@@ -881,7 +874,6 @@ macro_rules! observer_intent_tests {
     };
 }
 
-/// Register the process-continuation store law.
 #[macro_export]
 macro_rules! process_continuation_store_tests {
     ($fixture:block) => {
@@ -901,7 +893,6 @@ macro_rules! process_continuation_store_tests {
     };
 }
 
-/// Register the process-trigger retention law.
 #[macro_export]
 macro_rules! process_trigger_retention_tests {
     ($fixture:block) => {
@@ -941,7 +932,6 @@ macro_rules! store_contract_state_machine_tests {
     };
 }
 
-/// Register the runtime-persistence state-machine law.
 #[macro_export]
 macro_rules! runtime_persistence_state_machine_tests {
     ($fixture:block) => {
@@ -961,7 +951,6 @@ macro_rules! runtime_persistence_state_machine_tests {
     };
 }
 
-/// Register the session-graph state-machine law.
 #[macro_export]
 macro_rules! session_graph_state_machine_tests {
     ($fixture:block) => {
@@ -981,7 +970,6 @@ macro_rules! session_graph_state_machine_tests {
     };
 }
 
-/// Register the session-delete blob-reclamation law.
 #[macro_export]
 macro_rules! session_delete_blob_reclaim_tests {
     ($fixture:block) => {
@@ -1041,7 +1029,6 @@ macro_rules! tool_access_persistence_tests {
     };
 }
 
-/// Register the plain trigger-store laws.
 #[macro_export]
 macro_rules! trigger_store_tests {
     ($fixture:block) => {
@@ -1294,7 +1281,6 @@ macro_rules! process_prune_reclaim_tests {
     };
 }
 
-/// Register the plain attachment-store laws.
 #[macro_export]
 macro_rules! attachment_store_tests {
     ($fixture:block) => {
@@ -1334,7 +1320,6 @@ macro_rules! attachment_store_reopenable_tests {
     };
 }
 
-/// Register the plain process-execution-env store laws.
 #[macro_export]
 macro_rules! process_execution_env_store_tests {
     ($fixture:block) => {
@@ -1450,7 +1435,6 @@ macro_rules! graph_integrity_tests {
     };
 }
 
-/// Register the SQL signed-counter write-domain law.
 #[macro_export]
 macro_rules! signed_counter_write_domain_tests {
     ($fixture:block) => {
@@ -1470,7 +1454,6 @@ macro_rules! signed_counter_write_domain_tests {
     };
 }
 
-/// Register the session-store factory laws.
 #[macro_export]
 macro_rules! session_store_factory_tests {
     ($fixture:block) => {
@@ -1514,7 +1497,6 @@ macro_rules! session_store_factory_tests {
     };
 }
 
-/// Register fresh-session admission laws.
 #[macro_export]
 macro_rules! fresh_session_admission_tests {
     ($fixture:block) => {
@@ -1571,7 +1553,6 @@ macro_rules! session_read_view_tests {
     };
 }
 
-/// Register session-store cleanup after process pruning.
 #[macro_export]
 macro_rules! process_prune_session_store_tests {
     ($fixture:block) => {
@@ -1666,7 +1647,6 @@ macro_rules! checkpoint_component_reopen_tests {
     };
 }
 
-/// Register session-graph append branch-liveness conformance.
 #[macro_export]
 macro_rules! session_graph_append_tests {
     ($fixture:block) => {
@@ -1686,7 +1666,6 @@ macro_rules! session_graph_append_tests {
     };
 }
 
-/// Register injected-clock runtime-persistence conformance.
 #[macro_export]
 macro_rules! runtime_persistence_clock_tests {
     ($fixture:block) => {
@@ -1707,7 +1686,6 @@ macro_rules! runtime_persistence_clock_tests {
     };
 }
 
-/// Register the turn-work driver laws.
 #[macro_export]
 macro_rules! turn_work_driver_tests {
     ($fixture:block) => {
@@ -1866,7 +1844,6 @@ macro_rules! attachment_owner_cold_replay_tests {
     };
 }
 
-/// Register degraded attachment-owner proof conformance.
 #[macro_export]
 macro_rules! attachment_owner_degraded_tests {
     ($fixture:block) => {
@@ -1886,7 +1863,6 @@ macro_rules! attachment_owner_degraded_tests {
     };
 }
 
-/// Register SQL effect-group drain conformance.
 #[macro_export]
 macro_rules! store_effect_group_drain_tests {
     ($fixture:block) => {
@@ -1906,7 +1882,6 @@ macro_rules! store_effect_group_drain_tests {
     };
 }
 
-/// Register public signal-intent wake conformance.
 #[macro_export]
 macro_rules! signal_intent_tests {
     ($fixture:block) => {
@@ -1986,7 +1961,6 @@ macro_rules! effect_group_runtime_retirement_tests {
     };
 }
 
-/// Register quiescence-gated effect-group retirement.
 #[macro_export]
 macro_rules! effect_group_quiescent_retirement_tests {
     ($fixture:block) => {
@@ -2007,8 +1981,7 @@ macro_rules! effect_group_quiescent_retirement_tests {
     };
 }
 
-/// Register append receipts read across a switched active branch. The fixture
-/// supplies a store plus the backend's own "make this node the session head"
+/// The fixture supplies a store plus the backend's own "make this node the session head"
 /// mutation, applied outside the runtime.
 #[macro_export]
 macro_rules! append_head_switch_tests {
@@ -2051,7 +2024,6 @@ macro_rules! append_tombstone_tests {
     };
 }
 
-/// Register append receipts that need only a store.
 #[macro_export]
 macro_rules! append_receipt_envelope_tests {
     ($fixture:block) => {
@@ -2071,8 +2043,6 @@ macro_rules! append_receipt_envelope_tests {
     };
 }
 
-/// Register targeted runtime-persistence laws that exercise a backend's
-/// concrete store directly in addition to its full runtime catalogue.
 #[macro_export]
 macro_rules! runtime_persistence_targeted_tests {
     ($fixture:block) => {
@@ -2122,9 +2092,8 @@ macro_rules! runtime_persistence_targeted_tests {
     };
 }
 
-/// Register receipt-rewriting append conformance. The fixture supplies a store
-/// plus the backend's own persisted-receipt rewrite, applied outside the
-/// runtime.
+/// The fixture supplies a store plus the backend's own persisted-receipt rewrite, applied
+/// outside the runtime.
 #[macro_export]
 macro_rules! append_receipt_rewrite_tests {
     ($fixture:block) => {
@@ -2186,8 +2155,7 @@ macro_rules! append_usage_cancellation_tests {
     };
 }
 
-/// Register unbound-session read resolution. The fixture supplies the
-/// backend's per-admission-axis handle factory.
+/// The fixture supplies the backend's per-admission-axis handle factory.
 #[macro_export]
 macro_rules! unbound_session_read_tests {
     ($fixture:block) => {
@@ -2249,8 +2217,7 @@ macro_rules! checkpoint_claim_probe_tests {
     };
 }
 
-/// Register queued-lane resolver policy laws. The fixture supplies the
-/// engine-paced and deployment-host resolver factories.
+/// The fixture supplies the engine-paced and deployment-host resolver factories.
 #[macro_export]
 macro_rules! durable_queued_drain_wait_resolver_tests {
     ($fixture:block) => {
@@ -2289,8 +2256,7 @@ macro_rules! __effect_host_await_event_witness_register {
     };
 }
 
-/// Register warm and cold await-event witnesses. The fixture supplies the
-/// backend's host maker plus its own post-condition witness.
+/// The fixture supplies the backend's host maker plus its own post-condition witness.
 #[macro_export]
 macro_rules! effect_host_await_event_witness_tests {
     ($fixture:block) => {

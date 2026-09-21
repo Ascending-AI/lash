@@ -76,8 +76,6 @@ fn reopen_seed_operation(
 }
 
 impl LashRuntime {
-    /// Apply a mid-run configuration change; see [`SessionConfigPatch`] for
-    /// what each field leaves alone and what it replaces.
     pub async fn update_session_config(
         &mut self,
         patch: SessionConfigPatch,

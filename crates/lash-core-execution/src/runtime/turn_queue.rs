@@ -36,8 +36,6 @@ pub struct QueuedWorkBatchingConfig {
 }
 
 impl PartialEq for QueuedWorkBatchingConfig {
-    /// Compares the scalar bounds and the *resolved* drain policy by identity.
-    ///
     /// Resolving first keeps the shipped modes honest: an unset policy and an
     /// explicit [`with_drain_mode`](Self::with_drain_mode) naming the same mode
     /// share one instance and compare equal. Two separately constructed *custom*
@@ -66,9 +64,6 @@ impl QueuedWorkBatchingConfig {
     /// [`Self::with_max_pending_age`].
     pub const DEFAULT_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(30);
 
-    /// Construct batching policy with an explicit non-zero model-action
-    /// reserve and defaulted row-count and pending-age bounds.
-    ///
     /// These bounds apply to fresh claims. Redriving an interrupted claim keeps
     /// its already-journaled composition intact.
     ///
@@ -101,8 +96,6 @@ impl QueuedWorkBatchingConfig {
         self
     }
 
-    /// Installs a fully custom [`QueuedDrainPolicy`](crate::QueuedDrainPolicy).
-    ///
     /// This is the escape hatch for hosts wanting selection Lash deliberately
     /// does not ship, such as window-fitted prefix selection.
     pub fn with_drain_policy(
@@ -113,8 +106,6 @@ impl QueuedWorkBatchingConfig {
         self
     }
 
-    /// Returns the configured drain policy, or the Lash default when the host
-    /// selected none.
     pub fn drain_policy(&self) -> std::sync::Arc<dyn crate::QueuedDrainPolicy> {
         self.drain_policy
             .clone()
@@ -151,9 +142,6 @@ impl QueuedWorkBatchingConfig {
         self
     }
 
-    /// Returns the context capacity reserved for the model action after Lash
-    /// renders the queued-work prefix.
-    ///
     /// Since FIG-1313 no shipped drain policy spends this budget: the two
     /// default modes do no token arithmetic. It is handed to the configured
     /// [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) as

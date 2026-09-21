@@ -232,7 +232,6 @@ pub fn cold_process_durable_recovery_expectation(scenario: &str) -> String {
         .summary()
 }
 
-/// Return the stable execution scope used by a level-2 helper scenario.
 pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
     let identity = ReferenceIdentity::for_scenario(scenario);
     crate::ExecutionScope::turn(identity.session_id, identity.turn_id)

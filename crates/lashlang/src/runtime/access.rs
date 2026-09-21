@@ -72,7 +72,6 @@ pub fn parse_handle_record(record: &Record) -> Option<lash_sansio::handle::Handl
     lash_sansio::handle::parse_handle(kind.as_str(), id.as_str())
 }
 
-/// Returns whether a record is handled by the process-await path.
 pub fn is_process_handle(record: &Record) -> bool {
     matches!(
         parse_handle_record(record)
@@ -82,8 +81,7 @@ pub fn is_process_handle(record: &Record) -> bool {
     )
 }
 
-/// Returns whether a record is a pending-tool handle, whichever execution
-/// minted it. Which execution it belongs to is the VM's check, not this one.
+/// Which execution it belongs to is the VM's check, not this one.
 fn is_tool_handle_record(record: &Record) -> bool {
     matches!(
         parse_handle_record(record)
@@ -93,8 +91,6 @@ fn is_tool_handle_record(record: &Record) -> bool {
     )
 }
 
-/// Whether a materialized value carries a pending-tool handle at any depth.
-///
 /// Used where a handle must not travel: into a tool argument (the host would
 /// receive the marker record and perform the call), or out through the
 /// session globals (a later execution would present a stale handle as live).

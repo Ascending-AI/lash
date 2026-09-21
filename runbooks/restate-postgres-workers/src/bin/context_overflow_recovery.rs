@@ -70,9 +70,7 @@ async fn main() -> Result<()> {
     )
     .await?;
     emit(&overflow);
-    // Arm 2: the provider only *fails*, and lash's own classifier
-    // (`is_context_overflow_text`) is what names the overflow. This is the path
-    // a real provider takes, and the one that used to collapse into
+    // This is the path a real provider takes, and the one that used to collapse into
     // `ProviderError` no matter how well it had been classified.
     let classified = overflow_and_recovery(
         &run_id,
@@ -106,10 +104,10 @@ fn durable_messages(view: &lash_core::SessionReadView) -> Vec<lash_core::Message
 
 /// Phases 1-3: overflow, host recovery, continued session.
 ///
-/// Runs for either overflow arm. The two differ only in how the provider states
-/// the overflow -- a terminal reason on an accepted response, or a failure whose
-/// text lash classifies itself -- and the point of running both is that the
-/// outcome, the recovery and the continued session must be identical either way.
+/// The two differ only in how the provider states the overflow -- a terminal reason on an
+/// accepted response, or a failure whose text lash classifies itself -- and the point of
+/// running both is that the outcome, the recovery and the continued session must be identical
+/// either way.
 async fn overflow_and_recovery(
     run_id: &str,
     script: Script,

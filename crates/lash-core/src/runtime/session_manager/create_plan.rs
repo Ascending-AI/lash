@@ -99,9 +99,6 @@ async fn resolve_start_state(
     Ok(state)
 }
 
-/// Resolve the new session's policy, honoring the provider pin recorded on the
-/// state this session starts from.
-///
 /// The recorded provider id is a durable fact (ADR 0066), so a create request
 /// that carries no policy inherits it and a request whose policy names a
 /// *different* provider is refused with

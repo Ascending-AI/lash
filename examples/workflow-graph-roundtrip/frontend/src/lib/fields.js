@@ -98,10 +98,8 @@ export function stripOuterParens(text) {
   return t;
 }
 
-// Parse a single top-level `lhs <op> rhs` comparison for the builder. Returns
-// null when the text is not a simple comparison (the field then stays raw). The
-// condition is unwrapped first so a lens-emitted `(x < 2)` reads as lhs=`x`,
-// rhs=`2` rather than the bogus `(x` / `2)` a naive split would yield.
+// The condition is unwrapped first so a lens-emitted `(x < 2)` reads as lhs=`x`, rhs=`2`
+// rather than the bogus `(x` / `2)` a naive split would yield.
 export function parseComparison(text) {
   const source = stripOuterParens(text ?? '');
   const m = /^\s*([^<>=!]+?)\s*(<=|>=|==|!=|<|>)\s*(.+?)\s*$/.exec(source);
@@ -169,8 +167,6 @@ export function operandType(value, vars = []) {
   return parseLiteral(value).type;
 }
 
-// Split a comma-separated fragment at top level (respecting quotes + brackets).
-// Returns null on unbalanced input.
 function splitTopLevel(source) {
   const out = [];
   let depth = 0;
@@ -206,9 +202,6 @@ function splitTopLevel(source) {
   return out;
 }
 
-// Parse a `[a, b, c]` list of scalar literals for the list builder. Returns
-// `{ items: [{type,value}] }`, or null when the text is not a flat scalar list
-// (nested lists / expressions stay on the raw editor).
 export function parseList(text) {
   const t = (text ?? '').trim();
   if (!t.startsWith('[') || !t.endsWith(']')) return null;

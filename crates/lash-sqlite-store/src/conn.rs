@@ -127,13 +127,12 @@ impl Default for SqliteConnectionPolicy {
     }
 }
 
-/// Install the feature-gated SQL statement witness on a freshly opened
-/// connection. SQLite's `SQLITE_TRACE_PROFILE` callback fires once per
-/// completed statement, so this is the crate's single chokepoint for
-/// statement-shape counters: no porter module carries instrumentation of its
-/// own. Only the statement is recorded, not the duration the callback also
-/// carries — that clock is quantised to whole milliseconds. The callback and
-/// its registration compile out entirely unless `perf-witness` is enabled.
+/// SQLite's `SQLITE_TRACE_PROFILE` callback fires once per completed statement, so this is the
+/// crate's single chokepoint for statement-shape counters: no porter module carries
+/// instrumentation of its own.
+/// Only the statement is recorded, not the duration the callback also carries — that clock is
+/// quantised to whole milliseconds.
+/// The callback and its registration compile out entirely unless `perf-witness` is enabled.
 #[cfg_attr(not(feature = "perf-witness"), expect(unused_variables))]
 fn install_perf_statement_witness(connection: &Connection) {
     #[cfg(feature = "perf-witness")]
@@ -263,8 +262,7 @@ impl SqliteConnection {
         })
     }
 
-    /// Open a private in-memory database (used by `Store::memory` and the test
-    /// suites). WAL is skipped because `:memory:` does not support it.
+    /// WAL is skipped because `:memory:` does not support it.
     pub(crate) async fn open_in_memory() -> tokio_rusqlite::Result<Self> {
         Self::open_in_memory_with_policy(SqliteConnectionPolicy::default()).await
     }
@@ -290,8 +288,7 @@ impl SqliteConnection {
         })
     }
 
-    /// Open a file-backed database read-only. Used by the export/resume call
-    /// sites that must never mutate the source database.
+    /// Used by the export/resume call sites that must never mutate the source database.
     pub(crate) async fn open_readonly(path: &std::path::Path) -> tokio_rusqlite::Result<Self> {
         let path = path
             .to_str()
@@ -322,9 +319,8 @@ impl SqliteConnection {
         })
     }
 
-    /// Run `f` against the raw `rusqlite::Connection` on its own thread. The
-    /// closure returns `rusqlite::Result<T>`; this method flattens
-    /// tokio-rusqlite's wrapper so callers handle a single `rusqlite::Error`.
+    /// The closure returns `rusqlite::Result<T>`; this method flattens tokio-rusqlite's
+    /// wrapper so callers handle a single `rusqlite::Error`.
     /// Use for single statements, read queries, and `execute_batch`.
     pub(crate) async fn call<T, F>(&self, f: F) -> rusqlite::Result<T>
     where

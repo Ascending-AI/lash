@@ -41,7 +41,6 @@ fn registration_with_events(process_id: &ProcessId, event_types: &[&str]) -> Pro
         .with_extra_event_types(event_types.iter().map(|name| plain_event_type(name)))
 }
 
-/// Records `(event_type, sequence)` in emit order for sink assertions.
 #[derive(Clone, Default)]
 struct CollectingSink {
     events: Arc<Mutex<Vec<(String, u64)>>>,
@@ -839,8 +838,6 @@ async fn concurrent_waiters_all_resolve_with_identical_output_on_completion() {
     }
 }
 
-/// Records seen vs. dropped emit sequences, dropping even sequences to model
-/// best-effort push loss.
 #[derive(Clone, Default)]
 struct LossySink {
     seen: Arc<Mutex<Vec<u64>>>,

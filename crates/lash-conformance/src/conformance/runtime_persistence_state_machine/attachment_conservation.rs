@@ -24,8 +24,6 @@ pub struct RuntimePersistenceStateMachineHandles {
 }
 
 impl RuntimePersistenceStateMachineHandles {
-    /// Create the state machine's primary session through the same factory that
-    /// supplies its attachment root-set oracle.
     pub async fn create(
         session_factory: Arc<dyn crate::SessionStoreFactory>,
         process_owner_liveness_wired: bool,

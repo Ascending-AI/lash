@@ -264,8 +264,8 @@ pub(crate) async fn complete(
         .unwrap_or(compat.stream_termination);
     let request_id = req.scope.request_id.clone();
     let blocking = needs_blocking(&req);
-    // Clone only request-building configuration, never a retained resume state
-    // or the request's resolved attachment buffers. Move the request to work.
+    // Clone only request-building configuration, never a retained resume state or the
+    // request's resolved attachment buffers.
     let builder = OpenAiCompatibleProvider {
         api_key: String::new().into(),
         base_url: provider.base_url.clone(),

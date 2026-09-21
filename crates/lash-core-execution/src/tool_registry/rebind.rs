@@ -52,9 +52,7 @@ pub(super) fn export_tool_state_entries(surface: &ToolSurface) -> BTreeMap<ToolI
         .collect()
 }
 
-/// Whether a surface and a persisted entry set agree on the fields
-/// `export_tool_state_entries` compares. Used instead of materializing the
-/// export when only the difference matters.
+/// Used instead of materializing the export when only the difference matters.
 pub(super) fn surface_matches_state_entries(
     surface: &ToolSurface,
     entries: &BTreeMap<ToolId, ToolStateEntry>,
@@ -70,8 +68,7 @@ pub(super) fn surface_matches_state_entries(
         })
 }
 
-/// Whether two surfaces agree on the fields `export_tool_state_entries`
-/// exposes. The binding is registry-internal and intentionally excluded.
+/// The binding is registry-internal and intentionally excluded.
 pub(super) fn surfaces_publicly_equal(left: &ToolSurface, right: &ToolSurface) -> bool {
     left.by_id.len() == right.by_id.len()
         && left.by_id.iter().all(|(id, entry)| {

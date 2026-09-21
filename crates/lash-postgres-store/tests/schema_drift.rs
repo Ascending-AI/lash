@@ -1145,8 +1145,8 @@ async fn a_seed_row_under_the_wrong_key_is_rejected() {
     assert_mutation_is_rejected(
         // Drop the CHECK by discovery rather than by name: its name is
         // auto-generated, and a host port that omits it would not reproduce it
-        // anyway. CHECK constraints are deliberately outside the verified scope,
-        // which is precisely why the seed check cannot lean on this one.
+        // CHECK constraints are deliberately outside the verified scope, which is precisely
+        // why the seed check cannot lean on this one.
         "DO $$
          DECLARE constraint_name text;
          BEGIN
@@ -1492,7 +1492,6 @@ async fn the_schema_gate_emits_its_decision_basis() {
     let capture = installed_capture();
     let scratch = ScratchSchema::provision(&database_url).await;
 
-    // (a) admitted.
     scratch
         .open_host_provisioned(SchemaCheck::Enforce)
         .await

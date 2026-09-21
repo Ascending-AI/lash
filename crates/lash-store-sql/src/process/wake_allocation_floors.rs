@@ -18,7 +18,6 @@ crate::statements! {
         select_floor = "SELECT allocation_floor FROM wake_allocation_floors
                      WHERE target_session_id = ?1 AND process_id = ?2";
 
-        /// Drop every floor aimed at session `?1`, which is going away.
         delete_by_session = "DELETE FROM wake_allocation_floors WHERE target_session_id = ?1";
     }
 }

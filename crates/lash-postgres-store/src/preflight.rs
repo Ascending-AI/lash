@@ -52,9 +52,6 @@ const REDACTED_PLACEHOLDER: &str = "postgres";
 
 /// A read-only handle over a PostgreSQL deployment, built from raw connection
 /// configuration rather than from a wired store.
-///
-/// Hold one only for as long as the probe takes: it exists to answer a boot-time
-/// question, not to become a second pool alongside the runtime's.
 #[derive(Clone, Debug)]
 pub struct PostgresStorePreflight {
     pool: PgPool,
@@ -63,8 +60,6 @@ pub struct PostgresStorePreflight {
 }
 
 impl PostgresStorePreflight {
-    /// Build a preflight over a database URL, without dialling it.
-    ///
     /// Construction validates the URL and sizes a pool for one probe — a couple
     /// of connections and a short acquire timeout, so a probe against an
     /// unreachable or saturated server fails fast instead of stalling the boot

@@ -80,8 +80,6 @@ lash_store_sql::statements! {
              FROM runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2";
 
-        /// Insert a fresh claim.
-        ///
         /// No `ON CONFLICT`: the row was read as absent under the same
         /// `BEGIN IMMEDIATE` lock, so a conflict is a defect and the
         /// constraint error is the right report.
@@ -137,8 +135,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `runtime_effect_group` statements only SQLite issues.
     pub(crate) struct GroupSqliteStatements @ "effect_group" {
-        /// Record a group, keeping any existing row.
-        ///
         /// SQLite reads the durable row back with
         /// [`GroupStatements::select_by_key`] unconditionally; PostgreSQL
         /// carries a `RETURNING` clause so the read-back only costs a second
@@ -474,8 +470,6 @@ impl SqliteEffectHost {
         self.inner.start_replay();
     }
 
-    /// Register the resolver that says how a grouped child is run.
-    ///
     /// This is the host's one wiring seam: it is supplied here — by the host
     /// that owns those runners — rather than discovered from whatever session is
     /// in scope, and every path resolves through it, the open of a group, a
@@ -811,9 +805,6 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .map_err(effect_sqlite_error)
     }
 
-    /// Writes the terminal and, for a grouped child, allocates its settlement
-    /// rank — in the normative order (N1).
-    ///
     /// The fenced `UPDATE` runs first and `RETURNING group_key` is what makes
     /// "bump only on rowcount 1" structural rather than remembered: no row
     /// returned is no bump, and the group bumped is the one the child's own row
@@ -1008,10 +999,6 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .map_err(effect_sqlite_error)
     }
 
-    /// Reads the group's children that hold no rank: the complement of
-    /// [`read_group_settlement`](Self::read_group_settlement)'s
-    /// `settlement_seq IS NOT NULL`.
-    ///
     /// Served by `idx_runtime_effect_replay_group_unsettled`, whose predicate is
     /// exactly this filter. The rank read's unique backstop indexes the opposite
     /// half, so without a complementary index this read scans the whole effect
@@ -1398,10 +1385,9 @@ pub(crate) fn scope_has_turn_cancel_closure_participant(
     )
 }
 
-/// Scope-exact retirement (N4) of one non-session scope whose fence shares
-/// the journal's file: the permanent fence first, then the scope's effect
-/// rows, group rows, and promise rows, all in the caller's transaction.
-/// Returns the effect rows deleted.
+/// Scope-exact retirement (N4) of one non-session scope whose fence shares the journal's file:
+/// the permanent fence first, then the scope's effect rows, group rows, and promise rows, all
+/// in the caller's transaction.
 pub(crate) fn retire_scope_rows(
     tx: &rusqlite::Transaction<'_>,
     schema: Schema,
@@ -1427,8 +1413,8 @@ pub(crate) fn insert_scope_fence(
     Ok(())
 }
 
-/// Delete the effect rows, group rows, and promise rows of one scope from
-/// `schema`'s journal tables. Returns the effect rows deleted.
+/// Delete the effect rows, group rows, and promise rows of one scope from `schema`'s journal
+/// tables.
 pub(crate) fn delete_scope_rows(
     tx: &rusqlite::Transaction<'_>,
     schema: Schema,

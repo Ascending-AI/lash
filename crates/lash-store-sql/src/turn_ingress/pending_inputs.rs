@@ -63,7 +63,6 @@ crate::statements! {
     /// `every_release_statement_clears_the_whole_claim_identity` in this
     /// crate's suite holds them to it.
     pub struct PendingInputStatements @ "pending_turn_input" {
-        /// Input `?2` of session `?1`.
         select_by_id = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
@@ -194,7 +193,6 @@ crate::statements! {
         delete_terminal = "DELETE FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{terminal_turn_input_state(state)}}";
 
-        /// Delete every input of session `?1`, on session deletion.
         delete_by_session = "DELETE FROM pending_turn_inputs WHERE session_id = ?1";
     }
 }

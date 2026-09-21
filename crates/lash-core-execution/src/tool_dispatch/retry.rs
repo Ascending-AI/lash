@@ -21,8 +21,6 @@ pub(crate) fn resolve_retry_policy(
         .unwrap_or(ToolRetryPolicy::Never)
 }
 
-/// Runs one numbered attempt of a leaf tool under its resolved authority.
-///
 /// The retry context is stamped with the authority's manifest name, so a
 /// granted attempt reports the granted tool the same way a catalog attempt
 /// reports its catalog member.

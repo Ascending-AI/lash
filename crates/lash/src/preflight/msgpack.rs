@@ -30,7 +30,6 @@
 /// undecodable one.
 const MAX_DEPTH: usize = 64;
 
-/// Read one byte-length prefix of `len` bytes as a big-endian integer.
 fn take<'a>(data: &'a [u8], offset: &mut usize, len: usize) -> Option<&'a [u8]> {
     let end = offset.checked_add(len)?;
     let value = data.get(*offset..end)?;
@@ -64,7 +63,6 @@ enum Header {
     Empty,
 }
 
-/// Read one value's header, leaving `offset` positioned at its body.
 fn header(data: &[u8], offset: &mut usize) -> Option<Header> {
     let marker = take_u8(data, offset)?;
     Some(match marker {
@@ -138,7 +136,6 @@ fn skip(data: &[u8], offset: &mut usize, depth: usize) -> Option<()> {
     }
 }
 
-/// Read a string value's bytes, or `None` when the value is not a string.
 fn read_str<'a>(data: &'a [u8], offset: &mut usize) -> Option<&'a str> {
     let marker = *data.get(*offset)?;
     if !matches!(marker, 0xa0..=0xbf | 0xd9 | 0xda | 0xdb) {
@@ -378,11 +375,11 @@ mod tests {
         // deleted. Here the nested value sits in front of the field being read,
         // so reaching `version` means skipping past the bound.
         let mut bytes = vec![0x82u8]; // two-entry map
-        bytes.push(0xa4); // "deep"
+        bytes.push(0xa4);
         bytes.extend_from_slice(b"deep");
         bytes.extend(std::iter::repeat_n(0x91u8, MAX_DEPTH * 2)); // nested arrays
         bytes.push(0xc0); // the innermost nil
-        bytes.push(0xa7); // "version"
+        bytes.push(0xa7);
         bytes.extend_from_slice(b"version");
         bytes.push(0x07);
 

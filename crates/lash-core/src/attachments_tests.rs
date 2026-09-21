@@ -1156,7 +1156,6 @@ async fn unfenced_root_authority_reports_best_effort_and_detects_the_window_loss
 type WindowHook =
     Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
 
-/// Join handle for a facade `put` started from inside a sweep window.
 type WindowWriterHandle = tokio::task::JoinHandle<Result<AttachmentRef, String>>;
 /// Slot a window hook drops its writer's handle into for the test to await.
 type WindowWriterSlot = Arc<Mutex<Option<WindowWriterHandle>>>;

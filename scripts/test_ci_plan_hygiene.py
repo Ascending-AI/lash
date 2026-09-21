@@ -77,7 +77,6 @@ class HygieneTests(unittest.TestCase):
         for job in ("diff-hygiene", "secret-scan"):
             section = workflow.split(f"  {job}:\n", 1)[1]
             checkout = section.split("        run: |\n", 1)[1].split("\n      - name:", 1)[0]
-            # Execute the workflow's actual fetch/checkout code against a local remote.
             checkout = "\n".join(line[10:] for line in checkout.splitlines())
             checkout = checkout[checkout.index("git fetch"):]
             # `github_sha` is what the event puts in GITHUB_SHA; on pull_request
@@ -314,8 +313,6 @@ class HygieneTests(unittest.TestCase):
                     text=True, capture_output=True,
                 )
                 self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-                # Merges in the range force a complete graph, so main's own
-                # commits are excluded again.
                 self.assertEqual(pr_head, git("rev-parse", "HEAD").stdout.strip())
                 base = git("merge-base", main_tip, "HEAD").stdout.strip()
                 self.assertEqual(main_tip, base)

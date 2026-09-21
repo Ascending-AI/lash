@@ -57,8 +57,6 @@ pub(crate) fn configure_workbench_plugins(
     plugins.push(mcp);
 }
 
-/// Build the workbench's web-search MCP plugin.
-///
 /// Construction is deliberately infallible for an unreachable server: only a
 /// configuration error fails, while a down server stays registered and
 /// reconnects in the background.

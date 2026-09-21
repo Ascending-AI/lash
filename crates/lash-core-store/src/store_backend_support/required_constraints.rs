@@ -1,8 +1,7 @@
 //! Shared expected definitions and comparison support for named SQL `CHECK`s.
 //!
-//! Store adapters use this module for explicit read-only inspection. The
-//! source-congruence gate imports the same registry, so the expected
-//! expressions have one owner.
+//! The source-congruence gate imports the same registry, so the expected expressions have one
+//! owner.
 
 use std::collections::BTreeMap;
 
@@ -747,7 +746,6 @@ pub struct InspectedConstraint {
     pub enforced: bool,
 }
 
-/// Compare live checks with the registry's rendering for one backend.
 pub fn compare_required_constraints(
     backend: &'static str,
     expected: &[RenderedConstraint],

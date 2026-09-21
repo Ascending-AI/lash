@@ -4,7 +4,6 @@ use std::future::Future;
 
 use tracing::Instrument as _;
 
-/// Spawn a Tokio task as a child of the current tracing span.
 #[allow(
     clippy::disallowed_methods,
     reason = "this is the single guarded entry point for Tokio task spawning"

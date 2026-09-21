@@ -168,14 +168,10 @@ impl RuntimeObservation {
         self.process_scope().id()
     }
 
-    /// Build the execution scope for a turn in this session from the
-    /// published identity.
     pub fn turn_scope(&self, turn_id: impl Into<TurnId>) -> crate::ExecutionScope {
         crate::ExecutionScope::turn(self.session_id.as_ref(), turn_id)
     }
 
-    /// Build the execution scope for a queued-work drain in this session
-    /// from the published identity.
     pub fn queue_drain_scope(&self, drain_id: impl Into<String>) -> crate::ExecutionScope {
         crate::ExecutionScope::queue_drain(self.session_id.as_ref(), drain_id)
     }

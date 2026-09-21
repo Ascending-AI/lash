@@ -127,10 +127,8 @@ impl ToolRegistrations<'_> {
         self.reg.add_tool_provider(provider)
     }
 
-    /// Register an explicit internal owner-bound process tool definition.
-    /// Internal tools execute through
-    /// [`crate::InternalProcessToolImplementation`] outside the leaf
-    /// `ToolAttempt` frame.
+    /// Internal tools execute through [`crate::InternalProcessToolImplementation`] outside the
+    /// leaf `ToolAttempt` frame.
     pub fn internal(self, definition: crate::InternalProcessToolDef) -> Result<(), PluginError> {
         self.reg.add_internal_tool(definition)
     }
@@ -214,8 +212,8 @@ impl OutputRegistrations<'_> {
         self.reg.add_assistant_stream_hook(hook);
     }
 
-    /// Registers an assistant-response hook. The hook must be idempotent: see
-    /// [`AssistantResponseHook`] for the at-least-once contract it runs under.
+    /// The hook must be idempotent: see [`AssistantResponseHook`] for the at-least-once
+    /// contract it runs under.
     pub fn response(self, hook: AssistantResponseHook) {
         self.reg.add_assistant_response_hook(hook);
     }
@@ -445,7 +443,7 @@ pub struct ContextRegistrations<'a> {
 }
 
 impl ContextRegistrations<'_> {
-    /// Register a per-turn context transform. Higher priority runs first.
+    /// Higher priority runs first.
     pub fn prepare_turn(self, priority: i32, transform: Arc<dyn TurnContextTransform>) {
         push_prioritized_registered_hook(
             &mut self.reg.contributions.turn_context_transforms,
@@ -455,7 +453,7 @@ impl ContextRegistrations<'_> {
         );
     }
 
-    /// Register an explicit compaction provider. Higher priority runs first.
+    /// Higher priority runs first.
     pub fn compact(self, priority: i32, compactor: Arc<dyn ContextCompactor>) {
         push_prioritized_registered_hook(
             &mut self.reg.contributions.context_compactors,

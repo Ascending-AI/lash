@@ -129,7 +129,6 @@ struct OracleTheatre {
     settled: StdMutex<Vec<String>>,
     /// Completed tool calls of any tool, which the shape cases count.
     completed_calls: AtomicUsize,
-    /// Completion keys published by leaves dispatched with `defer: true`.
     keys: StdMutex<HashMap<String, lash_core::AwaitEventKey>>,
     latches: StdMutex<HashMap<String, Arc<tokio::sync::watch::Sender<bool>>>>,
 }
@@ -171,7 +170,6 @@ impl OracleTheatre {
         );
     }
 
-    /// Releases a leaf that was dispatched with `hold: true`.
     fn release(&self, id: &str) {
         self.raise(&format!("release:{id}"));
     }
@@ -181,8 +179,7 @@ impl OracleTheatre {
         self.raise(&format!("key:{id}"));
     }
 
-    /// Settles a leaf that was dispatched with `defer: true`, from outside the
-    /// batch. Returns once the runtime has accepted the completion.
+    /// Settles a leaf that was dispatched with `defer: true`, from outside the batch.
     async fn settle_deferred(
         &self,
         core: &LashCore,
@@ -277,7 +274,6 @@ struct StepArgs {
     /// Block inside the attempt until the test releases this leaf by name.
     #[serde(default)]
     hold: bool,
-    /// Declare a tool intent alongside the reply.
     #[serde(default)]
     intent: bool,
     /// Fail in `prepare_tool_call`, before the batch dispatches anything.
@@ -586,7 +582,6 @@ async fn drive_cells(
     })
 }
 
-/// Runs one cell to completion and reports what the host was asked to do.
 async fn run_cell(tier: &JournaledTier, session_id: &str, cell: &str) -> Result<OracleRun> {
     run_cells(tier, session_id, vec![typescript_block(cell)]).await
 }

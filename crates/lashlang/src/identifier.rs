@@ -16,8 +16,6 @@ const RESERVED_PARAMETER_NAMES: &[&str] = &[
     "true", "false", "null",
 ];
 
-/// Whether `name` is a plain ASCII identifier — a leading letter or underscore,
-/// then letters, digits or underscores — that is not a reserved name.
 pub(crate) fn is_process_parameter_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {

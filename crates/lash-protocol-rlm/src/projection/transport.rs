@@ -379,8 +379,6 @@ pub(crate) fn json_to_flow_value(value: Value) -> FlowValue {
     }
 }
 
-/// Resolves every projected reference held in the session's globals.
-///
 /// Result of restoring process-local projected host references.
 pub(crate) struct ProjectedGlobalRehydration {
     pub(crate) degraded_bindings: Vec<lash_core::DegradedBinding>,

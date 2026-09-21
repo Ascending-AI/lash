@@ -26,8 +26,6 @@ fn process_error_binding() -> String {
     format!("{GENERATED_BINDING_PREFIX}{PROCESS_ERROR_SUFFIX}")
 }
 
-/// Wraps an authored `run` closure as a process body.
-///
 /// `run(...args)` finishes the process with the closure's value, and anything
 /// it throws fails the process instead of escaping as a runtime error.
 pub(crate) fn process_run_wrapper(closure: Expr, call_args: Vec<Expr>) -> Expr {
@@ -116,7 +114,6 @@ fn _wrapped_run_body_path(wrapper: &Expr) -> Option<(Vec<u32>, &Expr)> {
     Some((path, run_body))
 }
 
-/// Appends the position of `child` among `parent`'s children to `path`.
 fn step(parent: &Expr, child: &Expr, path: &mut Vec<u32>) -> Option<()> {
     let index = child_index(parent, child)?;
     path.push(index);

@@ -74,7 +74,6 @@ pub(crate) fn table_exists(conn: &Connection) -> rusqlite::Result<bool> {
     Ok(count > 0)
 }
 
-/// Read the stamp from an open connection, read-only.
 pub(crate) fn read(conn: &Connection) -> rusqlite::Result<StoreReleaseState> {
     if !table_exists(conn)? {
         return Ok(StoreReleaseState::Unstamped);

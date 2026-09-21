@@ -208,8 +208,8 @@ impl PluginSession {
         self.tool_access.read_recover().clone()
     }
 
-    /// Replaces resident tool authority after the corresponding durable state
-    /// has been adopted. Returns whether the live value changed.
+    /// Replaces resident tool authority after the corresponding durable state has been
+    /// adopted.
     pub fn replace_tool_access(&self, access: SessionToolAccess) -> bool {
         let mut current = self.tool_access.write_recover();
         if *current == access {
@@ -296,8 +296,6 @@ impl PluginSession {
             .collect()
     }
 
-    /// Whether any plugin registered an assistant-response hook.
-    ///
     /// With none registered the runtime skips phase 2 of the staged LLM-call
     /// effect boundary entirely, so a hook-free session journals exactly one
     /// entry per call as before.

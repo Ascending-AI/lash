@@ -145,8 +145,6 @@ fn literal_receiver_kind(expr: &Expr) -> Option<LiteralReceivers> {
     }
 }
 
-/// Whether a literal receiver carries `method`.
-///
 /// Projected off the receiver-kind column of
 /// [`crate::signatures::INSTANCE_STDLIB_SIGNATURES`], so the per-shape answer
 /// and the advertised signature cannot disagree the way they did before

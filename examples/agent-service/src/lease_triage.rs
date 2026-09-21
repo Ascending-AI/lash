@@ -145,7 +145,6 @@ impl LeaseTriageReport {
         }
     }
 
-    /// Read the lane and classify it in one step.
     pub(crate) async fn read(core: &LashCore, session_id: &SessionId) -> lash::Result<Self> {
         let diagnostics = core.session_lease_diagnostics(session_id).await?;
         Ok(Self::classify(session_id, diagnostics.as_ref()))

@@ -138,7 +138,6 @@ pub struct ProcessLifecyclePolicy {
 }
 
 impl ProcessLifecyclePolicy {
-    /// Declare the parent and its end action for a process start.
     pub fn new(parent: ParentScope, on_parent_end: OnParentEnd) -> Self {
         Self {
             parent,
@@ -161,9 +160,8 @@ pub struct ProcessStartDeclaration {
     pub input: ProcessInput,
     pub disposition: RecoveryContract,
     pub lifecycle: ProcessLifecyclePolicy,
-    /// Maximum execution attempts. `None` delegates pacing indefinitely to the
-    /// engine; deterministic failures then require host cancellation or
-    /// abandonment to resolve awaiters.
+    /// `None` delegates pacing indefinitely to the engine; deterministic failures then require
+    /// host cancellation or abandonment to resolve awaiters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -217,31 +215,26 @@ impl ProcessStartDeclaration {
         )
     }
 
-    /// Sets the env spec carried by this declaration.
     pub fn with_env_spec(mut self, env_spec: super::ProcessExecutionEnvSpec) -> Self {
         self.env_spec = Some(env_spec);
         self
     }
 
-    /// Sets the max attempts carried by this declaration.
     pub fn with_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
         self.max_attempts = max_attempts;
         self
     }
 
-    /// Sets the declared identity carried by this declaration.
     pub fn with_declared_identity(mut self, declared: super::DeclaredProcessIdentity) -> Self {
         self.identity = Some(declared);
         self
     }
 
-    /// Sets the wake session id carried by this declaration.
     pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
         self.wake_session_id = wake_session_id;
         self
     }
 
-    /// Sets the observers carried by this declaration.
     pub fn with_observers(
         mut self,
         observers: impl IntoIterator<Item = impl Into<SessionId>>,
@@ -250,7 +243,6 @@ impl ProcessStartDeclaration {
         self
     }
 
-    /// Sets the event types carried by this declaration.
     pub fn with_event_types(
         mut self,
         event_types: impl IntoIterator<Item = ProcessEventType>,
@@ -268,8 +260,6 @@ impl ProcessStartDeclaration {
         self
     }
 
-    /// Bind this declaration to the id derived from the declaring attempt.
-    ///
     /// The only way a declaration becomes a request: every realization route
     /// passes `ProcessId::from_intent_identity(identity)` here, so the id the
     /// attempt returned and the id the executor starts are the same value by
@@ -298,9 +288,8 @@ pub struct ProcessStartRequest {
     pub input: ProcessInput,
     pub disposition: RecoveryContract,
     pub lifecycle: ProcessLifecyclePolicy,
-    /// Maximum execution attempts. `None` delegates pacing indefinitely to the
-    /// engine; deterministic failures then require host cancellation or
-    /// abandonment to resolve awaiters.
+    /// `None` delegates pacing indefinitely to the engine; deterministic failures then require
+    /// host cancellation or abandonment to resolve awaiters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -372,8 +361,7 @@ impl ProcessStartRequest {
         self
     }
 
-    /// Declares the visible kind and label of this start. A request never
-    /// pins a definition reference: only the engine registry can, and only
+    /// A request never pins a definition reference: only the engine registry can, and only
     /// after resolving it against the engine's stored artifact.
     pub fn with_declared_identity(mut self, declared: super::DeclaredProcessIdentity) -> Self {
         self.identity = Some(declared);

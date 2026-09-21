@@ -34,8 +34,6 @@ pub const SETTLEMENT_COLUMNS: &str = "turn_id, result_json";
 crate::statements! {
     /// `runtime_turn_commits` statements both backends issue verbatim.
     pub struct TurnCommitStatements @ "turn_commit" {
-        /// Whether session `?1` has a receipt for operation key `?2`.
-        ///
         /// One name for what were six verbatim copies: the committed-turn
         /// query, the commit path's own replay probe, the closure
         /// settlement's "already final" fence, the queued-work completion
@@ -45,8 +43,6 @@ crate::statements! {
                  WHERE session_id = ?1 AND turn_id = ?2
              )";
 
-        /// Whether any session has a receipt for operation key `?1`.
-        ///
         /// The retention sweep asks it of a session-free runtime-operation
         /// scope, which has no session id to key by.
         exists_for_operation = "SELECT EXISTS(SELECT 1 FROM runtime_turn_commits WHERE turn_id = ?1)";
@@ -73,15 +69,12 @@ crate::statements! {
         /// Every receipt session `?1` recorded.
         select_all_for_session = "SELECT turn_id, result_json FROM runtime_turn_commits WHERE session_id = ?1";
 
-        /// Record the receipt of a committed operation.
         insert = "INSERT INTO runtime_turn_commits (
                 session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
 
-        /// Record the session-command completion marker for one queued batch.
-        ///
         /// The three append-identity columns are `NULL` by construction: a
         /// marker is not an append request, so it has no request hash, no node
         /// count and no identity encoding.

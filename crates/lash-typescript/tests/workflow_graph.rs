@@ -1079,9 +1079,6 @@ fn a_label_comment_changes_no_lowered_program() {
     }
 }
 
-/// Drops every label the AST carries — the `LabelAnnotated` wrapper and a
-/// process declaration's own title — so two programs can be compared on what
-/// they *do*.
 fn strip_labels(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(mut object) => {

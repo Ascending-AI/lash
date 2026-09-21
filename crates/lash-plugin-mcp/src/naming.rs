@@ -92,8 +92,6 @@ fn digest_base32(digest: [u8; DIGEST_BYTES]) -> String {
     encoded
 }
 
-/// Build a provider-safe model name and Lashlang binding for one raw MCP tool.
-///
 /// The always-present 128-bit suffix hashes the complete durable tool id. The
 /// readable server/tool prefix is ASCII-normalized and truncated so the final
 /// name never exceeds 64 bytes. No catalog membership or ordering participates

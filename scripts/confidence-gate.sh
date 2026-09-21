@@ -293,8 +293,7 @@ derive_mutation_jobs() {
     cpu_count=1
   fi
 
-  # Leave at least two logical CPUs per cargo-mutants job. More than four
-  # concurrent Rust builds increases disk/memory pressure without improving
+  # More than four concurrent Rust builds increases disk/memory pressure without improving
   # useful throughput on the CI and development machines this lane targets.
   local jobs=$(((cpu_count + 1) / 2))
   if ((jobs > 4)); then
@@ -392,8 +391,8 @@ start_gate_postgres() {
 
 assert_no_panics_in_artifacts() {
   # cargo-mutants writes each mutant's run logs under `mutants.out/log/`; a
-  # caught mutant is *expected* to panic, so those logs are evidence of the
-  # lane working, not evidence of a defect. Scan every other artifact.
+  # caught mutant is *expected* to panic, so those logs are evidence of the lane working, not
+  # evidence of a defect.
   if [ -d "$out_dir" ] && grep -RFn --include='*.log' --exclude-dir='mutants.out' 'panicked at' "$out_dir" >&2; then
     echo "panic gate: FAILED (a Rust panic marker found in confidence artifacts)" >&2
     return 1

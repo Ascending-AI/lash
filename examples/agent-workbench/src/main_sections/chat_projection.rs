@@ -245,10 +245,8 @@ pub(crate) fn is_durable_internal_rlm_message(message: &lash::messages::Message)
     )
 }
 
-/// Whether this plugin-authored RLM message could be a turn's committed reply:
-/// an assistant message carrying visible prose. The protocol's system copies —
-/// finish reminders, retry copy, cell diagnostics — never can be, and its
-/// reasoning-only messages carry nothing for a chat row to say.
+/// The protocol's system copies — finish reminders, retry copy, cell diagnostics — never can
+/// be, and its reasoning-only messages carry nothing for a chat row to say.
 pub(crate) fn is_rlm_assistant_prose_message(message: &lash::messages::Message) -> bool {
     is_durable_internal_rlm_message(message)
         && lash::message_role(message) == "assistant"
@@ -498,8 +496,6 @@ pub(crate) struct ChatProjection {
     pub(crate) transcript: Vec<TranscriptRow>,
 }
 
-/// Builds the two public chat projections from one set of replacement,
-/// historical-row and stable-id deduplication rules.
 pub(crate) fn project_chat(
     read_view: &lash::persistence::SessionReadView,
     active_turn: Option<&ActiveTurn>,
@@ -674,12 +670,9 @@ fn anchor_insertion_index(messages: &[ChatMessage], anchor_id: &str) -> Option<u
     Some(index)
 }
 
-/// Insert each product-log row at the point in the committed transcript it was
-/// pushed at, leaving every other row where the committed projection put it.
-/// Rows with no anchor were pushed before any committed row and lead the
-/// transcript; rows whose anchor this projection no longer renders keep the old
-/// position at the end, which is still the newest position the snapshot can
-/// honestly claim for them.
+/// Rows with no anchor were pushed before any committed row and lead the transcript; rows
+/// whose anchor this projection no longer renders keep the old position at the end, which is
+/// still the newest position the snapshot can honestly claim for them.
 fn splice_anchored_product_rows(
     messages: &mut Vec<ChatMessage>,
     transcript: &mut Vec<TranscriptRow>,

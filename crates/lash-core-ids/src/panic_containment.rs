@@ -5,9 +5,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static LOUD: AtomicBool = AtomicBool::new(false);
 
-/// Enables or disables loud containment for this process, returning the
-/// previous setting.
-///
 /// Production hosts leave this disabled so host panics become typed failures.
 /// Test harnesses, simulators, and confidence binaries enable it at startup so
 /// the same typed mapping remains visible while the panic still reaches the
@@ -16,7 +13,6 @@ pub fn set_loud(loud: bool) -> bool {
     LOUD.swap(loud, Ordering::SeqCst)
 }
 
-/// Returns whether contained host panics are currently re-raised.
 pub fn is_loud() -> bool {
     LOUD.load(Ordering::SeqCst)
 }

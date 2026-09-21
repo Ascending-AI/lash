@@ -54,8 +54,6 @@ pub struct RuntimeEnvironment {
     // (FIG-2995). Defaults to the in-memory registry at build time.
     pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
 
-    // Store factory used by managed child sessions created from runtimes
-    // built with this environment.
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
 
     pub(crate) work: RuntimeWork,
@@ -83,10 +81,9 @@ impl RuntimeEnvironment {
         Arc::clone(self.work.queued_arc())
     }
 
-    /// Construct an environment builder seeded with an in-memory host using
-    /// `commit_budget`. A later
-    /// [`with_runtime_host_config`](RuntimeEnvironmentBuilder::with_runtime_host_config)
-    /// call replaces that host config wholesale, including its commit budget.
+    /// A later
+    /// [`with_runtime_host_config`](RuntimeEnvironmentBuilder::with_runtime_host_config) call
+    /// replaces that host config wholesale, including its commit budget.
     pub fn builder(
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
@@ -119,7 +116,6 @@ pub struct RuntimeEnvironmentBuilder {
 }
 
 impl RuntimeEnvironmentBuilder {
-    /// Construct an environment builder with an explicit commit budget.
     fn new(
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
@@ -145,10 +141,8 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    /// Configure the registry-only state used when a host will resolve native
-    /// process work lazily. A later [`Self::with_process_work`] replaces it with
-    /// the full wiring, and vice versa: the work wiring is one owner, so setting
-    /// both is last-write-wins rather than a panic.
+    /// A later [`Self::with_process_work`] replaces it with the full wiring, and vice versa:
+    /// the work wiring is one owner, so setting both is last-write-wins rather than a panic.
     pub fn with_process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
         self.env.work = self.env.work.with_process_registry(process_registry);
         self
@@ -175,10 +169,10 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    /// Set the host's process work driver. Every `RuntimeHost` built from this
-    /// environment carries it, so process starts can directly drive pending
-    /// work. This replaces a registry-only state configured by
-    /// [`Self::with_process_registry`]; the wiring carries its own registry.
+    /// Every `RuntimeHost` built from this environment carries it, so process starts can
+    /// directly drive pending work.
+    /// This replaces a registry-only state configured by [`Self::with_process_registry`]; the
+    /// wiring carries its own registry.
     pub fn with_process_work(mut self, wiring: ProcessWorkWiring) -> Self {
         self.env.work = self.env.work.with_process_wiring(wiring);
         self
@@ -263,16 +257,13 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    /// Choose what an open does when a persisted tool id no registered source
-    /// resolves. See [`crate::ToolSourcePolicy`]; the default is `Tolerate`.
+    /// See [`crate::ToolSourcePolicy`]; the default is `Tolerate`.
     pub fn with_tool_source_policy(mut self, policy: crate::ToolSourcePolicy) -> Self {
         self.env.core.control.tool_source_policy = policy;
         self
     }
 
-    /// Choose what an open does with the persisted tool surface. See
-    /// [`crate::ToolSurfaceOpenMode`]; the default is `Reconcile`. Set
-    /// `PreservePersisted` for an open that will not run a turn.
+    /// See [`crate::ToolSurfaceOpenMode`]; the default is `Reconcile`.
     pub fn with_tool_surface_open_mode(mut self, mode: crate::ToolSurfaceOpenMode) -> Self {
         self.env.core.control.tool_surface_open_mode = mode;
         self

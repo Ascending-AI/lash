@@ -276,10 +276,7 @@ pub(crate) fn restate_await_event_turn_cancel_wait_request(
 }
 /// Lash [`RuntimeEffectController`] and [`EffectHost`] backed by a Restate handler context.
 ///
-/// This type is intentionally handler-scoped. Create one inside the Restate
-/// handler that owns the Lash operation, then pass
-/// [`RestateRuntimeEffectController::scoped_effect_controller`] to Lash's
-/// scoped API with a stable [`ExecutionScope`].
+/// This type is intentionally handler-scoped.
 pub struct RestateRuntimeEffectController<'ctx, C> {
     context: C,
     authority_id: RestateAuthorityId,

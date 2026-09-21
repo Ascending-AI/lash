@@ -728,7 +728,6 @@ async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
         .expect("delete");
     factory.unpin(&leaf).await.expect("unpin");
 
-    // Open an unbound store handle over the catalog path
     let unbound = Store::open(&factory.catalog_path())
         .await
         .expect("open unbound store");

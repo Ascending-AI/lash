@@ -23,12 +23,9 @@ crate::statements! {
         insert = "INSERT INTO process_observers (session_id, process_id, process_incarnation)
                              VALUES (?1, ?2, ?3)";
 
-        /// Drop session `?1`'s observation of incarnation `?2` / `?3`.
         delete = "DELETE FROM process_observers
                              WHERE session_id = ?1 AND process_id = ?2 AND process_incarnation = ?3";
 
-        /// Drop every observation session `?1` holds: the session is going
-        /// away.
         delete_by_session = "DELETE FROM process_observers WHERE session_id = ?1";
     }
 }

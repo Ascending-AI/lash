@@ -32,7 +32,6 @@ pub struct ResponseMetadataCapture {
 }
 
 impl ResponseMetadataCapture {
-    /// Start a capture from the shared provider options and response headers.
     pub fn from_response(options: &ProviderOptions, response_headers: &[(String, String)]) -> Self {
         let mut capture = Self {
             headers: options
@@ -47,14 +46,10 @@ impl ResponseMetadataCapture {
         capture
     }
 
-    /// Whether either host-configured allowlist asks the transport to inspect
-    /// the response.
     pub fn is_active(&self) -> bool {
         !self.headers.is_empty() || !self.body_paths.is_empty()
     }
 
-    /// Whether one raw payload is worth decoding.
-    ///
     /// An allowlist makes every payload worth decoding. Without one, only a
     /// payload that mentions the gateway `meta` field is: the substring test
     /// keeps the unconfigured streaming path to one scan per event instead of
@@ -146,7 +141,6 @@ impl ResponseMetadataCapture {
         self.captured.clone()
     }
 
-    /// Finish capture and return the response metadata map.
     pub fn into_metadata(self) -> BTreeMap<String, Value> {
         self.captured
     }

@@ -15,30 +15,25 @@
 //! mismatch is a forward-only reject-and-recreate boundary and therefore fails this
 //! test instead of skipping it.
 //!
-//! The fixture format has its own declaration,
-//! `DURABLE_READ_FIXTURE_SCHEMA_VERSION`, the constant below.
-//! `scripts/versioned-surfaces.toml` registers that constant with a whole-file
-//! guard over `fixtures/durable-read/*`, so any change to a file in that tree makes
-//! `scripts/check_version_bumps.py` require the declaration to be strictly greater
-//! than its merge-base value in the same diff. That check runs in CI only, not
-//! pre-commit, because it compares against a merge base. Store schema versions
-//! remain the authority for whether an old store may be opened.
+//! The fixture format has its own declaration, `DURABLE_READ_FIXTURE_SCHEMA_VERSION`, the
+//! constant below.
+//! `scripts/versioned-surfaces.toml` registers that constant with a whole-file guard over
+//! `fixtures/durable-read/*`, so any change to a file in that tree makes
+//! `scripts/check_version_bumps.py` require the declaration to be strictly greater than its
+//! merge-base value in the same diff.
+//! That check runs in CI only, not pre-commit, because it compares against a merge base.
 //!
 //! ## Two laws: read-back and write shape
 //!
-//! Read-back (`*_durable_fixture_reads_with_identical_semantics`) decodes the
-//! committed artifact and asserts the meaning recovered from it. It is blind by
-//! construction to a change in what this build *writes*: a payload field that is
-//! defaulted on read and skipped when absent lets the committed bytes decode,
-//! re-encode, and re-hash exactly as the previous writer wrote them, so the receipt
-//! still replays and every semantic assertion still holds.
+//! It is blind by construction to a change in what this build *writes*: a payload field that
+//! is defaulted on read and skipped when absent lets the committed bytes decode, re-encode,
+//! and re-hash exactly as the previous writer wrote them, so the receipt still replays and
+//! every semantic assertion still holds.
 //!
-//! Write shape (`*_durable_fixture_expectations_match_what_this_build_writes`)
-//! closes that gap. It re-seeds a throwaway store with the current code and requires
-//! the committed `expected.json` to equal what the seed produces, naming the drifted
-//! JSON paths on failure. Content-addressed identities — process-env refs, node ids,
-//! turn-commit hashes — move with the payload shape, so this law catches shape
-//! changes the read-back cannot see.
+//! It re-seeds a throwaway store with the current code and requires the committed
+//! `expected.json` to equal what the seed produces, naming the drifted JSON paths on failure.
+//! Content-addressed identities — process-env refs, node ids, turn-commit hashes — move with
+//! the payload shape, so this law catches shape changes the read-back cannot see.
 //!
 //! The schema-declaration gate is a third, weaker thing: it fires only once a
 //! fixture artifact is already in the diff, so it cannot see a shape change that
@@ -213,8 +208,6 @@
 //!   cargo test -p lash-internal-postgres-store --test durable_read_fixture \
 //!   regenerate_postgres_durable_fixture -- --ignored --exact
 //! ```
-//!
-//! Read back without regenerating:
 //!
 //! ```text
 //! cargo test -p lash-internal-sqlite-store --test durable_read_fixture

@@ -6,11 +6,10 @@ pub const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 300_000;
 pub const DEFAULT_CHUNK_TIMEOUT_MS: u64 = 120_000;
 pub const DEFAULT_THROTTLE_WAIT_BUDGET_MS: u64 = 90_000;
 
-/// Minimum provider-stated wait eligible for attempt-free throttle deference.
-/// A shorter `Retry-After` (including a past HTTP-date) consumes the ordinary
-/// retry ladder and uses its backoff instead of spinning the courtesy loop.
-/// A delay above [`retry_after_cap_ms`] fails immediately; a zero cap therefore
-/// refuses every positive server-stated delay.
+/// A shorter `Retry-After` (including a past HTTP-date) consumes the ordinary retry ladder and
+/// uses its backoff instead of spinning the courtesy loop.
+/// A delay above [`retry_after_cap_ms`] fails immediately; a zero cap therefore refuses every
+/// positive server-stated delay.
 ///
 /// [`retry_after_cap_ms`]: ProviderRetryPolicy::retry_after_cap_ms
 pub(crate) const MIN_FREE_THROTTLE_WAIT: Duration = Duration::from_secs(1);
@@ -23,8 +22,7 @@ pub(crate) const MAX_COURTESY_THROTTLE_CALLS: usize = 8;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LlmTimeouts {
     pub request_timeout: Option<Duration>,
-    /// Maximum wait for a streaming response to start. The whole-request
-    /// timeout still wins when it is shorter.
+    /// The whole-request timeout still wins when it is shorter.
     pub response_start_timeout: Duration,
     pub chunk_timeout: Duration,
 }
@@ -159,8 +157,7 @@ pub struct ProviderOptions {
     /// `None` (or `0`) applies the transport default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sse_event_bytes: Option<u64>,
-    /// Maximum raw bytes accepted across one SSE response. `None` (or `0`)
-    /// applies the transport default.
+    /// `None` (or `0`) applies the transport default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sse_total_bytes: Option<u64>,
 }
@@ -302,9 +299,8 @@ impl ProviderReliability {
         self
     }
 
-    /// Sets the streaming response-start bound in milliseconds. `None` (or
-    /// `0`) restores the legacy derived bound; this does not change the
-    /// inter-chunk timeout after the response starts.
+    /// `None` (or `0`) restores the legacy derived bound; this does not change the inter-chunk
+    /// timeout after the response starts.
     pub fn response_start_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         self.response_start_timeout = timeout_ms;
         self

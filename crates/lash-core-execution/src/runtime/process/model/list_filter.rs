@@ -23,7 +23,6 @@ pub enum ProcessOriginatorFilter {
 }
 
 impl ProcessOriginatorFilter {
-    /// Selects every process one session started, in any agent frame.
     pub fn session(session_id: impl Into<SessionId>) -> Self {
         Self::Session(SessionScope::new(session_id))
     }
@@ -44,7 +43,6 @@ impl ProcessOriginatorFilter {
         }
     }
 
-    /// Whether one recorded originator is selected.
     pub fn matches(&self, originator: &ProcessOriginator) -> bool {
         match (self, originator) {
             (Self::Host { scope }, ProcessOriginator::Host { scope: recorded }) => {
@@ -180,10 +178,6 @@ impl ProcessListFilter {
         self.status.list_mode()
     }
 
-    /// Applies every populated process filter conjunctively for store and conformance implementors;
-    /// the creation-time bounds form a half-open `[start, end)` range, while
-    /// `retired_since_ms` preserves every live row and bounds retired rows by
-    /// their inclusive update timestamp.
     pub fn matches_record(&self, record: &ProcessRecord) -> bool {
         self.status.matches(record.status)
             && self.definition.as_ref().is_none_or(|definition| {

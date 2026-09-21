@@ -212,11 +212,11 @@ pub enum OracleSlot<'a> {
 }
 
 impl OracleSlot<'_> {
-    /// Whether this slot reports under `oracle_id`. Every generated-workload
-    /// oracle has a fixed id: a battery entry declares the constant it reports
-    /// under, and a scenario-contract entry derives its id from the static
-    /// contract. Answering the question directly keeps a caller that asks it
-    /// once per slot per candidate — the minimizer — from allocating the id.
+    /// Every generated-workload oracle has a fixed id: a battery entry declares the constant
+    /// it reports under, and a scenario-contract entry derives its id from the static
+    /// contract.
+    /// Answering the question directly keeps a caller that asks it once per slot per candidate
+    /// — the minimizer — from allocating the id.
     pub fn declares_oracle_id(&self, oracle_id: &str) -> bool {
         match self {
             Self::Battery(declared) => *declared == oracle_id,
@@ -238,9 +238,6 @@ impl OracleSlot<'_> {
     }
 }
 
-/// Walk the generated-workload oracle battery in evaluation order, handing each
-/// verdict to `visit` and stopping as soon as it returns `false`.
-///
 /// [`generated_trace_oracles`] is this walk collected into a vector, so the two
 /// cannot drift: one ordering, one membership. `skip` is consulted BEFORE a
 /// slot is evaluated and a skipped slot costs nothing — the minimizer uses it

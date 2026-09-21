@@ -73,8 +73,6 @@ const UNDEFINED_TABLE: &str = "42P01";
 //   `pending` when a claim lapses. Anything else has already left the queue,
 //   and putting it on a drain list would be reporting work that is done.
 
-/// Read one page of one surface.
-///
 /// The entry point [`crate::PostgresStorePreflight`] delegates to; every branch
 /// returns a page, and `Err` is reserved for a server that could not answer at
 /// all.
@@ -344,11 +342,9 @@ async fn scan_session_execution_state(
         Err(error) => return finish(snapshot, read_failure(scan.surface, error)).await,
     };
 
-    // Resolve each session to the component ref its manifest names, dropping the
-    // sessions that name none. A manifest blob that is itself absent drops out
-    // here too: the dangling root is already a `Missing` item on the
-    // `SessionCheckpoint` surface, and reporting it a second time as an absent
-    // execution state would claim a component the store never said existed.
+    // A manifest blob that is itself absent drops out here too: the dangling root is already a
+    // `Missing` item on the `SessionCheckpoint` surface, and reporting it a second time as an
+    // absent execution state would claim a component the store never said existed.
     let mut resolved: Vec<(String, String)> = Vec::with_capacity(sessions.len());
     for session in &sessions {
         let Some(manifest) = manifests.get(session.checkpoint_ref.as_str()) else {
@@ -401,9 +397,6 @@ async fn scan_session_execution_state(
     finish(snapshot, Ok(scanned(items, next))).await
 }
 
-/// Read the execution-state component's blob reference out of a manifest,
-/// without judging the manifest.
-///
 /// **Why not the crate's `decode_versioned_msgpack_record`.** That helper
 /// validates the record's schema version and fails when it disagrees with this
 /// build — which is precisely the condition a preflight exists to *describe*. A
@@ -605,8 +598,6 @@ fn segment_cursor(process_id: &ProcessId, segment_ordinal: i64) -> String {
     format!("{process_id}:{segment_ordinal:020}")
 }
 
-/// Split a parked-segment cursor back into the columns it was minted from.
-///
 /// Split at the **last** separator: a process id may itself contain one, while
 /// the fixed-width decimal ordinal never can, so the last separator is always
 /// the one this function put there.

@@ -10,9 +10,6 @@
 lash_store_sql::statements! {
     /// `queued_work_batches` statements only SQLite issues.
     pub(crate) struct QueuedBatchSqliteStatements @ "queued_work_batch" {
-        /// Enqueue batch `?1` for session `?2`, keeping an existing batch
-        /// under the same source key.
-        ///
         /// `enqueue_seq` is this table's `INTEGER PRIMARY KEY AUTOINCREMENT`
         /// and is never bound; PostgreSQL draws it from the column's sequence
         /// first, and returns the inserted id rather than reading it back.

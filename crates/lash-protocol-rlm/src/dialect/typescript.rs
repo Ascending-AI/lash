@@ -283,8 +283,6 @@ impl TypescriptDialect {
     }
 }
 
-/// Whether the rendered catalogue carries the process control surface.
-///
 /// The process operations are leaf tools now (FIG-2999): nothing in the
 /// dialect gates them, so their availability is read off the catalogue the
 /// host actually rendered rather than off an ability flag.
@@ -1286,7 +1284,6 @@ mod tests {
         }
     }
 
-    /// Read each method signature from the actual catalogue text.
     fn tool_declarations(section: &str) -> Vec<String> {
         section
             .split_once("### Tools")

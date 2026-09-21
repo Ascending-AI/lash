@@ -415,9 +415,8 @@ impl ActiveTurns {
             })
     }
 
-    /// Mark `session_id` as retiring, so no new turn claims its slot while the
-    /// delete runs. Idempotent: a session already retiring or retired keeps its
-    /// mark, and the return value says whether this call placed one.
+    /// Idempotent: a session already retiring or retired keeps its mark, and the return value
+    /// says whether this call placed one.
     pub(crate) fn begin_retirement(&self, session_id: &SessionId) -> bool {
         let mut ledger = self.inner.lock_recover();
         if ledger.retirements.contains_key(session_id) {

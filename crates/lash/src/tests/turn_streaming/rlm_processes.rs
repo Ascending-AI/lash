@@ -1307,9 +1307,6 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
     Ok(())
 }
 
-/// Runs one TypeScript cell that starts processes and filters `processes.list`
-/// by a definition value, returning the cell's final value.
-///
 /// The first started run blocks in `app_lookup` until the turn releases it, so
 /// the `processes.list` calls in the cell observe live runs.
 #[cfg(feature = "rlm")]

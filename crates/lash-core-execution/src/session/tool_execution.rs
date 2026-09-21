@@ -1269,8 +1269,6 @@ impl RuntimeExecutionContext<'_> {
         .await
     }
 
-    /// Executes one explicitly granted, potentially out-of-catalog tool for code-executor
-    /// implementors.
     pub async fn call_tool_with_execution_grant(
         &self,
         call_id: String,
@@ -1291,8 +1289,6 @@ impl RuntimeExecutionContext<'_> {
         reply.with_record(executed.record)
     }
 
-    /// Executes one explicitly granted tool for code-executor implementors and reports nested child
-    /// execution through the supplied trace hook.
     pub async fn call_tool_with_execution_grant_and_child_execution_trace_hook(
         &self,
         call_id: String,

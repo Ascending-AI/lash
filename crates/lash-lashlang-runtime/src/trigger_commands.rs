@@ -8,8 +8,6 @@ use crate::{
     lashlang_process_signal_event_types, lashlang_type_expr_schema,
 };
 
-/// Executes one Lashlang trigger host operation through the runtime's typed trigger command path.
-///
 /// Foreground code and durable processes share this adapter so trigger operations never depend on
 /// tool-catalog membership and keep one implementation of the trigger mutation contract.
 pub async fn execute_trigger_operation(

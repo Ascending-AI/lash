@@ -72,7 +72,6 @@ pub struct ChargeSafetyRefusalEvidence {
     pub protocol_position: crate::ProtocolPosition,
     /// One-based unsafe retry number from FIG-2144's typed decision.
     pub attempt_number: u8,
-    /// Total transport attempts sealed on the logical LLM call.
     pub attempt_count: u32,
 }
 

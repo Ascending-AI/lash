@@ -42,9 +42,6 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Test sources may pin the spelling: that is how the key's byte identity is
-/// proved, and a pinned expectation is the opposite of a second minting site.
-///
 /// Only real test roots are exempt: a `tests/` or `benches/` directory, and the
 /// `tests.rs` / `*_tests.rs` files that hold `#[cfg(test)]` module bodies. A
 /// `testing/` directory is *not* exempt — `lash-core/src/testing` ships behind

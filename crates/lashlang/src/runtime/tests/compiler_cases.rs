@@ -868,7 +868,6 @@ async fn reusable_execution_scratch_preserves_results_across_runs() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn continuation_and_undefined_variable_are_reported() {
-    // `x = 1`
     let outcome = exec_outcome(builders::program(vec![builders::assign(
         "x",
         builders::num(1.0),
@@ -881,7 +880,6 @@ async fn continuation_and_undefined_variable_are_reported() {
     // refusal of the retired dialect's parser; `Expr::Finish` always carries a
     // value, so the AST cannot express the rejected program.
 
-    // `finish x`
     let err = exec(finish_program(builders::var("x")))
         .await
         .expect_err("undefined variable should fail");
@@ -1180,7 +1178,6 @@ async fn result_unwrap_reports_failed_and_malformed_wrappers() {
         }
     );
 
-    // `finish 1?`
     let err = exec(finish_program(builders::unwrap(builders::num(1.0))))
         .await
         .expect_err("non-wrapper should fail");

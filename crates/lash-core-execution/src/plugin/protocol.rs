@@ -3,9 +3,6 @@
 //! Protocol plugins register their implementations here; the runtime narrows
 //! what a protocol plugin can poke at so external crates don't need direct access to
 //! `Session` / `LashRuntime` internals.
-//!
-//! Split out of `plugin/mod.rs` for file size; `pub use` there keeps
-//! the outer module path.
 
 pub use lash_core_store::execution_state::{
     ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState, PluginOptions,
@@ -218,21 +215,17 @@ impl<'a> ProtocolRuntimeContext<'a> {
         *self.options = options;
     }
 
-    /// Record the durable protocol turn options this materialization resolved,
-    /// mirrored to **every** agent frame. Apply-at-open semantics: the last
-    /// applied value is recorded on the session and all frames.
+    /// Record the durable protocol turn options this materialization resolved, mirrored to
+    /// **every** agent frame.
     pub fn set_protocol_turn_options_all_frames(&mut self, options: crate::ProtocolTurnOptions) {
         *self.options = options;
     }
 }
 
-/// Read-only descriptor of a session materialization handed to
-/// [`ProtocolSessionPlugin::configure_runtime_on_materialize`].
 pub struct ProtocolSessionMaterialization<'a> {
     /// Plugin-keyed options that reached this materialization: builder options
     /// for a root/builder open, request options for a child create.
     pub plugin_options: &'a PluginOptions,
-    /// Whether this materialization is a root session (no parent).
     pub is_root_session: bool,
 }
 
@@ -288,8 +281,6 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(())
     }
 
-    /// Complete live execution state, with every leaf body present.
-    ///
     /// [`CodeExecutorPlugin::snapshot_execution_state`] is a checkpoint delta:
     /// it reports unchanged leaves as body-free references, and the runtime
     /// releases their resident bodies once the durable refs are authoritative.
@@ -346,8 +337,6 @@ pub trait AssistantProseProjectorPlugin: Send + Sync {
 /// crates own the concrete prompt policy and output parser. Plugin stack
 /// construction must install exactly one implementation.
 pub trait ProtocolDriverPlugin: Send + Sync {
-    /// Build the `TurnDriverPreamble` (driver handle + prompt text + tool
-    /// surface metadata) for a turn.
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble;
 }
 

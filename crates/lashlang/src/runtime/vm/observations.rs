@@ -45,8 +45,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         Some(self.begin_lashlang_execution_site(site))
     }
 
-    /// The ordinal for the aggregate whose instruction sits at `instruction_ip`.
-    ///
     /// Aggregates are counted in the same map as execution sites, under a key
     /// no site can mint: node ids are `{kind}:{24 hex}` and this key is not.
     /// That map is what rides the VM continuation, so the count survives a park

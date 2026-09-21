@@ -330,8 +330,8 @@ async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
     Ok(())
 }
 
-/// One real turn against the store under test: the provider is deterministic, the
-/// commit is not. Returns the turn id whose commit row proves the turn landed.
+/// One real turn against the store under test: the provider is deterministic, the commit is
+/// not.
 async fn commit_one_turn(
     storage: &PostgresStorage,
     session_id: &SessionId,

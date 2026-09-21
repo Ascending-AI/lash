@@ -25,15 +25,12 @@ crate::statements! {
              FROM trigger_mutation_receipts
              WHERE operation_id = ?1";
 
-        /// Record what operation `?1` decided.
         insert = "INSERT INTO trigger_mutation_receipts (
                 operation_id, owner_kind, owner_id,
                 request_fingerprint, result_json, created_at_ms
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 
-        /// Drop host- and platform-owned receipts older than `?1`.
-        ///
         /// Session-owned receipts are deliberately absent: they are reclaimed
         /// by the session's own retention pass, which has to see that no
         /// delivery still blocks the session first.

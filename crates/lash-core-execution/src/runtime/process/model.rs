@@ -41,7 +41,6 @@ impl ProcessChangeCursor {
         Self(0)
     }
 
-    /// Wraps an opaque backend change-feed sequence for process-store implementors without promising cross-backend comparability.
     pub fn from_store_sequence(sequence: u64) -> Self {
         Self(sequence)
     }
@@ -164,7 +163,6 @@ impl ProcessInput {
         }
     }
 
-    /// Exposes engine-specific kind to store and process-engine implementors, returning `None` for runtime-owned process primitives.
     pub fn engine_specific_kind(&self) -> Option<&str> {
         match self {
             Self::Engine { kind, .. } => Some(kind.as_str()),
@@ -825,8 +823,6 @@ impl ProcessOriginator {
 }
 
 impl SessionScope {
-    /// Constructs a `SessionScope` for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
     pub fn new(session_id: impl Into<SessionId>) -> Self {
         Self {
             session_id: session_id.into(),
@@ -846,8 +842,6 @@ impl SessionScope {
         }
     }
 
-    /// Exposes id to store, effect-host, and protocol implementors while materializing, executing,
-    /// or persisting a session turn.
     pub fn id(&self) -> SessionScopeId {
         match self.agent_frame_id.as_deref() {
             Some(frame_id) => {
@@ -1114,7 +1108,6 @@ pub enum ProcessRegistrationDisposition {
 pub struct ProcessRegistrationOutcome {
     /// The registered record, newly created or already recorded.
     pub record: ProcessRecord,
-    /// Whether this call created the record.
     pub disposition: ProcessRegistrationDisposition,
 }
 
@@ -1135,7 +1128,6 @@ impl ProcessRegistrationOutcome {
         }
     }
 
-    /// Whether this call created the record.
     pub fn is_created(&self) -> bool {
         self.disposition == ProcessRegistrationDisposition::Created
     }
@@ -1180,8 +1172,6 @@ pub struct DeclaredProcessIdentity {
 }
 
 impl DeclaredProcessIdentity {
-    /// Constructs a `DeclaredProcessIdentity` for protocol and host implementors starting a
-    /// process whose input core owns outright.
     pub fn new(kind: impl Into<ProcessEngineKind>) -> Self {
         Self {
             kind: kind.into(),
@@ -1189,7 +1179,6 @@ impl DeclaredProcessIdentity {
         }
     }
 
-    /// Constructs a labelled `DeclaredProcessIdentity`.
     pub fn labelled(kind: impl Into<ProcessEngineKind>, label: Option<impl Into<String>>) -> Self {
         Self {
             kind: kind.into(),
@@ -1288,8 +1277,6 @@ impl ProcessIdentity {
         }
     }
 
-    /// Constructs the identity of an engine start that pins a definition reference.
-    ///
     /// The engine kind is taken from the reference, so the two can never drift.
     pub fn for_definition(
         reference: ProcessDefinitionRef,
@@ -1302,9 +1289,6 @@ impl ProcessIdentity {
         }
     }
 
-    /// Derives stable kind and label for process-engine implementors from the executable input
-    /// without executing it.
-    ///
     /// An engine input derives only its kind here: its label and definition
     /// reference come from the engine registry's admission, which is the only
     /// authority over an opaque engine payload.
@@ -1360,8 +1344,6 @@ impl ProcessExternalRef {
         self.segment_ordinal.unwrap_or(0)
     }
 
-    /// Whether this reference supersedes `existing` under the compare-and-set
-    /// rule: only a strictly later segment displaces a recorded owner.
     pub fn supersedes(&self, existing: &Self) -> bool {
         self.segment_ordinal() > existing.segment_ordinal()
     }
@@ -1505,18 +1487,15 @@ impl Default for ProcessStatusFilter {
 }
 
 impl ProcessStatusFilter {
-    /// Selects precisely the supplied statuses; an empty set matches no rows.
     pub fn any_of(statuses: impl IntoIterator<Item = ProcessStatus>) -> Self {
         Self::In(statuses.into_iter().collect())
     }
-    /// Returns the selected storage labels; absence means all statuses.
     pub fn labels(&self) -> Option<Vec<&'static str>> {
         match self {
             Self::Any => None,
             Self::In(statuses) => Some(statuses.iter().map(ProcessStatus::label).collect()),
         }
     }
-    /// Decodes the closed set shape, with absence selecting running processes.
     pub fn decode(value: Option<&serde_json::Value>) -> Result<Self, String> {
         value
             .map(|value| {
@@ -1534,7 +1513,6 @@ impl ProcessStatusFilter {
             Self::In(_) | Self::Any => ProcessListMode::All,
         }
     }
-    /// Tests any-of membership in the selected status set.
     pub fn matches(&self, status: ProcessStatus) -> bool {
         match self {
             Self::Any => true,
@@ -1555,7 +1533,6 @@ pub enum ProcessListMode {
 }
 
 impl ProcessListMode {
-    /// Exposes the stable snake-case list mode for process-store implementors.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Live => "live",

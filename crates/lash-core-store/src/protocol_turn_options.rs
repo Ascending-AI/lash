@@ -38,16 +38,12 @@ impl Default for ProtocolTurnOptions {
     }
 }
 impl ProtocolTurnOptions {
-    /// Constructs schema-current empty object options for protocol implementors materializing a
-    /// turn with no protocol-specific overrides.
     pub fn empty() -> Self {
         Self {
             payload: serde_json::Value::Object(serde_json::Map::new()),
         }
     }
 
-    /// Wraps an arbitrary JSON payload at the current schema version for protocol implementors
-    /// materializing turn-specific state.
     pub fn from_payload(payload: serde_json::Value) -> Self {
         Self { payload }
     }
@@ -73,7 +69,6 @@ impl ProtocolTurnOptions {
     }
 }
 impl ProtocolTurnOptions {
-    /// Deserializes typed protocol options payload for protocol implementors.
     pub fn decode<T>(&self) -> Result<T, ProtocolTurnOptionsError>
     where
         T: serde::de::DeserializeOwned,

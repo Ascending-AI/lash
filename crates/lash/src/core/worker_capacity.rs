@@ -1,16 +1,14 @@
 use super::*;
 
 impl LashCoreBuilder {
-    /// Set the number of processes each default native worker may execute at
-    /// once. A running process releases its slot while parked and reacquires it
-    /// before resuming. Invalid values are reported by [`Self::build`].
+    /// A running process releases its slot while parked and reacquires it before resuming.
+    /// Invalid values are reported by [`Self::build`].
     pub fn process_execution_concurrency(mut self, concurrency: usize) -> Self {
         self.process_execution_concurrency = Some(concurrency);
         self
     }
 
-    /// Set the number of queued-work notifications the default native driver
-    /// may execute at once. Invalid values are reported by [`Self::build`].
+    /// Invalid values are reported by [`Self::build`].
     pub fn queued_work_execution_concurrency(mut self, concurrency: usize) -> Self {
         self.queued_work_execution_concurrency = Some(concurrency);
         self

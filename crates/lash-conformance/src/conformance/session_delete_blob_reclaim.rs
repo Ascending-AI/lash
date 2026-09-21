@@ -18,8 +18,6 @@ pub trait SessionDeleteBlobProbe: Send + Sync {
     /// this probe operation for their backend.
     async fn blob_exists(&self, blob_ref: &crate::BlobRef) -> bool;
 
-    /// Make the next deletion of a reclaimable session-owned blob fail.
-    ///
     /// Integrator class (ADR 0051): **conformance-suite embedders** implement
     /// this fault injection at their backend's delete boundary.
     async fn fail_next_blob_delete(&self);
@@ -145,9 +143,8 @@ fn encoded_checkpoint_manifest(manifest: &crate::SessionCheckpoint) -> Vec<u8> {
     rmp_serde::to_vec_named(manifest).expect("encode checkpoint manifest for content alias")
 }
 
-/// Commit two roots A and B where A names B's exact root bytes as one opaque
-/// component. The nonce makes B sort before A, reproducing the restrictive-FK
-/// delete order that matters to a multi-root reclaim batch.
+/// The nonce makes B sort before A, reproducing the restrictive-FK delete order that matters
+/// to a multi-root reclaim batch.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

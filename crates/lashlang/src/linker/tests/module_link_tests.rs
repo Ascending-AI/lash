@@ -140,7 +140,6 @@ fn linked_module_accepts_restate_board_process_with_imported_schemas() {
 
 #[test]
 fn linked_module_accepts_top_level_sleep() {
-    // sleep for 1
     let program = builders::program(vec![builders::sleep_for(builders::num(1.0))]);
 
     LinkedModule::link(program, full_host_environment()).expect("top-level sleep should link");
@@ -379,7 +378,6 @@ fn linked_module_infers_process_output_and_validates_return_annotations() {
 
 #[test]
 fn linked_module_hash_ignores_unused_host_abilities() {
-    // finish 1
     let program = builders::program(vec![builders::finish(builders::num(1.0))]);
     let minimal = LinkedModule::link(
         program.clone(),

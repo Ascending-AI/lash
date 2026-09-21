@@ -36,7 +36,6 @@ pub struct FenceIntegrityHandles {
     pub injector: Arc<dyn FenceIntegrityInjector>,
 }
 
-/// Run the shared signed-domain, per-row-successor, and no-mutation laws.
 pub async fn fence_integrity_conformance<Make, Fut>(make: Make)
 where
     Make: Fn(&'static str) -> Fut,

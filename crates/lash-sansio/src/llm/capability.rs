@@ -248,7 +248,6 @@ pub struct ReasoningCapability {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReasoningSelection {
-    /// Leave reasoning configuration entirely to the provider.
     #[default]
     ProviderDefault,
     /// Explicitly disable reasoning using the model capability's disable encoding.
@@ -341,8 +340,7 @@ impl ModelCapability {
             && self.reasoning_retention.is_default()
     }
 
-    /// Validate retention against both the host-supplied model facts and the
-    /// adapter's protocol primitive. No cross-unit approximation is allowed.
+    /// No cross-unit approximation is allowed.
     pub fn validate_reasoning_retention(
         &self,
         model: &str,
@@ -421,9 +419,8 @@ impl ModelCapability {
         self.sampling == SamplingCapability::Configurable
     }
 
-    /// Resolve a requested effort to its canonical form: alias-map first
-    /// (input lowercased/trimmed), then direct membership in `efforts`.
-    /// Returns `None` when the request maps to nothing this model exposes.
+    /// Resolve a requested effort to its canonical form: alias-map first (input
+    /// lowercased/trimmed), then direct membership in `efforts`.
     pub fn resolve_effort(&self, requested: &str) -> Option<String> {
         let reasoning = self.reasoning.as_ref()?;
         let key = requested.trim().to_lowercase();
@@ -606,7 +603,6 @@ mod tests {
         assert_eq!(cap.resolve_effort("MINIMAL").as_deref(), Some("low"));
         // direct membership
         assert_eq!(cap.resolve_effort("high").as_deref(), Some("high"));
-        // neither
         assert_eq!(cap.resolve_effort("turbo"), None);
     }
 

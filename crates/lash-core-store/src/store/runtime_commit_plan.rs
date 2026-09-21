@@ -41,8 +41,7 @@ pub struct FreshRuntimeCommitFacts {
     pub actual_head_revision: u64,
     /// Leaf published by the existing head, when one exists.
     pub published_leaf: PublishedLeafFacts,
-    /// Whether the requested append ancestor is on the active path. Backends
-    /// may pass `true` when the request has no ancestor fence.
+    /// Backends may pass `true` when the request has no ancestor fence.
     pub requested_ancestor_is_active: bool,
     /// Incoming node ids already occupied in durable history, including
     /// tombstoned rows.
@@ -182,9 +181,8 @@ impl RuntimeCommitPlanner {
         &self.operation_key
     }
 
-    /// Validate the session carried by an existing head. Backends call this
-    /// immediately after reading the head and before creating session metadata,
-    /// preserving the binding fence ahead of receipt replay.
+    /// Backends call this immediately after reading the head and before creating session
+    /// metadata, preserving the binding fence ahead of receipt replay.
     pub fn validate_session_binding(
         &self,
         bound_session_id: Option<&SessionId>,
@@ -439,7 +437,6 @@ impl<'a> RuntimeCommitPlan<'a> {
         self.old_leaf_node_id.as_deref()
     }
 
-    /// Whether head publication selects a leaf different from the prior head.
     pub fn head_changed(&self) -> bool {
         self.old_leaf_node_id != self.committed_leaf_node_id
     }

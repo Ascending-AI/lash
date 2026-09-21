@@ -147,7 +147,6 @@ enum EffectReplayBackend {
 /// [`RuntimeEffectController`]: super::executor::RuntimeEffectController
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectReplayCapabilities {
-    /// Whether this backend issues completion keys to external routers.
     pub completion_keys: CompletionKeys,
     /// How a `ToolBatch` envelope reaches this backend's journal on a redrive.
     pub tool_batch_redrive: ToolBatchRedrive,
@@ -192,12 +191,11 @@ pub enum ToolBatchRedrive {
 /// What a caller of the shared claim loop wants a live competing claim to mean.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BusyPolicy {
-    /// Wait the competing claim out. What an effect's own caller wants: it
-    /// needs this outcome, and the other executor is producing it.
+    /// What an effect's own caller wants: it needs this outcome, and the other executor is
+    /// producing it.
     Queue,
-    /// Report the busy claim and hand the decision back. What the drain wants:
-    /// it has a queue, and a child someone else owns right now is the one it
-    /// should move past rather than sleep against.
+    /// What the drain wants: it has a queue, and a child someone else owns right now is the
+    /// one it should move past rather than sleep against.
     Yield,
 }
 
@@ -427,7 +425,6 @@ pub enum EffectClaimDecision {
     /// token, expiry and due time from the request and this stamp, then report
     /// [`EffectClaimObservation::Claimed`].
     TakeOver(EffectLeaseStamp),
-    /// Write nothing; report this observation to the driver.
     Report(EffectClaimObservation),
 }
 
@@ -488,9 +485,7 @@ pub enum EffectRowDefect {
     UnexpectedPayloads {
         /// The recognized status column.
         status: EffectRowStatus,
-        /// Whether `outcome_json` was non-`NULL`.
         outcome_json_present: bool,
-        /// Whether `error_json` was non-`NULL`.
         error_json_present: bool,
     },
     /// `status` holds a value no version of this runtime writes.
@@ -859,8 +854,6 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         membership: &[AcceptedGroupChild],
     ) -> Result<EffectGroupRecord, RuntimeEffectControllerError>;
 
-    /// Read back the accepted membership of `group_key`, in child order.
-    ///
     /// The read half of [`open_group`](Self::open_group)'s membership write,
     /// and the reason §3's retention is worth anything: a host that reopens a
     /// journaled group rebuilds its children from this rather than from
@@ -872,9 +865,6 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         group_key: &str,
     ) -> Result<Vec<AcceptedGroupChild>, RuntimeEffectControllerError>;
 
-    /// Read the group row under `group_key`, or `None` when no group is
-    /// recorded there.
-    ///
     /// The read half of [`open_group`](Self::open_group), for the one reader
     /// that must not write: the group drain takes its queue from the journal
     /// rather than from a caller, and the disposition it applies is the one the
@@ -902,8 +892,6 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         rank: usize,
     ) -> Result<Option<StoredGroupSettlement>, RuntimeEffectControllerError>;
 
-    /// Read every child of `group_key` that holds no settlement rank.
-    ///
     /// The exact complement of [`read_group_settlement`](Self::read_group_settlement):
     /// that read filters `settlement_seq IS NOT NULL`, this one
     /// `settlement_seq IS NULL`. Both predicates over one table, so a child is
@@ -921,9 +909,8 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
 
     /// Extend the lease by `lease_ttl_ms`, guarded by `fence`.
     ///
-    /// Same guard as [`finalize`](EffectReplayRowStore::finalize); the new
-    /// expiry is the substrate's lease clock plus `lease_ttl_ms`. Report
-    /// `false` when the guarded write matched no row.
+    /// Same guard as [`finalize`](EffectReplayRowStore::finalize); the new expiry is the
+    /// substrate's lease clock plus `lease_ttl_ms`.
     async fn renew(
         &self,
         fence: &EffectLeaseFence,
@@ -1070,8 +1057,6 @@ pub struct StoreEffectReplayDriver<P, A> {
 }
 
 impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A> {
-    /// Build a driver over `row_store`.
-    ///
     /// `clock` is the driver's *sleep* clock: it times `Sleep` effects, the
     /// busy-retry backoff, and the lease renewal interval, and it never stamps
     /// a row or decides a lease — the substrate's own lease clock does that
@@ -1105,8 +1090,6 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         }
     }
 
-    /// Register this host's envelope→executor resolver, once.
-    ///
     /// One host has one answer to "what code runs this journaled grouped child",
     /// so this is set once and then read by the open, by a retry, and by the
     /// loser drain alike. A second registration of a *different* resolver is
@@ -1210,7 +1193,6 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         self.await_events.resolve(key, resolution).await
     }
 
-    /// Read a promise's terminal without registering a waiter.
     pub async fn peek_await_event(
         &self,
         key: &AwaitEventKey,
@@ -1218,7 +1200,6 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         self.await_events.peek(key).await
     }
 
-    /// Wait for a promise's terminal on this host's clock.
     pub async fn await_await_event(
         &self,
         key: &AwaitEventKey,

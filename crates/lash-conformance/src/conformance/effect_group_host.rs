@@ -1826,10 +1826,6 @@ pub async fn a_second_host_instance_reads_the_ranks_the_first_recorded<F: Fn() -
         .expect("the first host's close is idempotent");
 }
 
-// =============================================================================
-// Fixtures
-// =============================================================================
-
 const RUN: LoserPolicy = LoserPolicy::RunToCompletion;
 
 /// Hang detector for the entire conformance law, not a latency expectation.
@@ -1976,10 +1972,6 @@ impl StagedGroupExecutors {
     }
 
     /// Stages one child's executor.
-    ///
-    /// Split out so a law can stage *some* of a group's children and leave the
-    /// rest unroutable, which is how a routing miss is expressed through this
-    /// seam: an unstaged child is a child this host has no runner for.
     pub(crate) fn stage_one(
         &self,
         child: &RuntimeEffectEnvelope,

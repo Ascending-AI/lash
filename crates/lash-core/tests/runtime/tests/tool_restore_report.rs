@@ -201,10 +201,8 @@ fn both_tools() -> Arc<dyn lash_core::ToolProvider> {
 /// The FIG-3353 sequence, end to end: a commit taken while every tool is
 /// orphaned does not persist them as non-members for good.
 ///
-/// open with source → open on a core without it (Tolerate) → commit →
-/// open with the source again. Between the grantless commit and the final
-/// reopen the durable snapshot is read *without a runtime*, because that is
-/// the only reading that shows what was actually written.
+/// Between the grantless commit and the final reopen the durable snapshot is read *without a
+/// runtime*, because that is the only reading that shows what was actually written.
 #[tokio::test]
 async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
     let session_id = SessionId::from("fig3367-sequence");
@@ -560,9 +558,7 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
 /// `PreservePersisted` open — the row survives and the tool surface is
 /// untouched.
 ///
-/// open with source → open without source under `PreservePersisted` →
-/// `enqueue_turn_input` → open with the source again. The pending row is
-/// durable, the catalog generation and curation never moved, and both tools
+/// The pending row is durable, the catalog generation and curation never moved, and both tools
 /// are catalog members on the third open.
 #[tokio::test]
 async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {

@@ -41,8 +41,6 @@ pub(crate) async fn list_sessions(
     }))
 }
 
-/// Add a session.
-///
 /// The roster row is written before the session is opened, because the row is
 /// what the selector lists.
 ///
@@ -95,8 +93,6 @@ pub(crate) async fn create_session(
     }))
 }
 
-/// Make a rostered session the one a query-less call resolves to.
-///
 /// Only a session on the roster can be selected: selection is what a reload,
 /// a restart, and `<data-dir>/session-id` all agree on, and pointing that at a
 /// session nothing knows about would leave the selector unable to name it.

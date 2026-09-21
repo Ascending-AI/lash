@@ -286,8 +286,6 @@ fn check_process_type(ty: &TypeExpr) -> Result<(), InvalidAst> {
     }
 }
 
-/// Walks one function body, tracking whether a loop encloses each node.
-///
 /// Loop bodies are the only place `break` and `continue` are legal, and a
 /// nested `Expr::Function` starts a fresh body: the compiler saves and restores
 /// its loop contexts across one, so an enclosing loop outside the function does
@@ -296,7 +294,6 @@ fn check_loop_control(root: &Expr) -> Result<(), InvalidAst> {
     check_loop_control_inner(root, false)
 }
 
-/// Walks a declared function's body, which is itself a function body.
 fn check_function_loop_control(root: &Expr) -> Result<(), InvalidAst> {
     check_loop_control_inner(root, true)
 }
@@ -563,7 +560,6 @@ pub enum Expr {
     /// linker's expected-type hook lifts it to a hoisted [`ProcessDecl`], and a
     /// literal whose slot is not a process is a type error.
     ProcessLiteral(Box<ProcessLiteralExpr>),
-    /// Calls a user-defined function value.
     Call {
         function: Box<Expr>,
         args: Vec<Expr>,
@@ -705,8 +701,6 @@ pub enum ListComprehensionClause {
 }
 
 impl Expr {
-    /// Yields every direct child expression of `self` in evaluation order.
-    ///
     /// This is the single structural-traversal primitive: any pass that only
     /// needs to recurse into the sub-expressions of a node (without caring
     /// about the node's own kind) can fold over `children()` instead of
@@ -829,9 +823,6 @@ impl Expr {
         }
     }
 
-    /// Yields every direct child expression of `self` in evaluation order, by
-    /// mutable reference.
-    ///
     /// The mutable twin of [`Expr::children`]: same nodes, same order. A pass
     /// that rewrites sub-expressions in place — the workflow lens splicing a
     /// rendered process body back into the literal it was lifted from, for
@@ -1272,7 +1263,6 @@ pub enum TypeExpr {
 pub struct UnionMembers(Vec<TypeExpr>);
 
 impl UnionMembers {
-    /// Wraps `members` when it holds at least two type expressions.
     pub fn new(members: Vec<TypeExpr>) -> Option<Self> {
         (members.len() >= 2).then_some(Self(members))
     }
@@ -1301,8 +1291,7 @@ impl UnionMembers {
         }
     }
 
-    /// Maps each member. The result still holds at least two because the
-    /// map preserves member count.
+    /// The result still holds at least two because the map preserves member count.
     pub fn map(&self, f: impl Fn(&TypeExpr) -> TypeExpr) -> Self {
         Self(self.0.iter().map(f).collect())
     }
@@ -1359,11 +1348,9 @@ impl<'de> Deserialize<'de> for UnionMembers {
 }
 
 impl TypeExpr {
-    /// Builds a union from member candidates: nested unions flatten and
-    /// duplicates drop. With fewer than two distinct members remaining
-    /// this collapses — one member to itself, none to `Null`, the empty
-    /// union (domains that widen instead, like the JSON-Schema importer,
-    /// keep their own policy).
+    /// With fewer than two distinct members remaining this collapses — one member to itself,
+    /// none to `Null`, the empty union (domains that widen instead, like the JSON-Schema
+    /// importer, keep their own policy).
     pub fn union(members: Vec<TypeExpr>) -> TypeExpr {
         match UnionMembers::deduplicated(members) {
             Ok(members) => TypeExpr::Union(members),
@@ -1380,7 +1367,6 @@ pub struct ProcessSignature {
 }
 
 impl ProcessSignature {
-    /// Builds a signature after validating source-level parameter names and uniqueness.
     pub fn try_new(
         params: Vec<ProcessParam>,
         output: TypeExpr,
@@ -1392,9 +1378,6 @@ impl ProcessSignature {
         })
     }
 
-    /// Applies the same parameter rules as [`ProcessSignature::try_new`] without
-    /// building the signature.
-    ///
     /// AST validation only wants the verdict, and cloning the parameter list to
     /// get it is one of the costs publish-time verification pays per process
     /// (FIG-3088). A parameter list is short, so the uniqueness scan is linear
@@ -1419,17 +1402,14 @@ impl ProcessSignature {
         Ok(())
     }
 
-    /// Returns parameters in invocation order.
     pub fn params(&self) -> &[ProcessParam] {
         &self.params
     }
 
-    /// Returns the process result type.
     pub fn output(&self) -> &TypeExpr {
         &self.output
     }
 
-    /// Returns the derived number of invocation parameters.
     pub fn arity(&self) -> usize {
         self.params.len()
     }
@@ -1461,7 +1441,6 @@ impl ProcessType {
         Self(ProcessTypeKind::Known(signature))
     }
 
-    /// Describes a process callable whose host schema makes no signature claim.
     pub fn unknown() -> Self {
         Self(ProcessTypeKind::Unknown)
     }

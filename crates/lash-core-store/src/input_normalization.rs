@@ -1,5 +1,3 @@
-//! Input normalization and message-delta utilities used by the runtime.
-//!
 //! These helpers resolve turn input against the attachment store, so they live
 //! beside the durable attachment layer they call.
 

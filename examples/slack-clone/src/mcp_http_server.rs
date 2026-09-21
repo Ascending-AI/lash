@@ -134,7 +134,6 @@ impl WorkspaceHttpMcpServer {
 
 #[tool_router(router = tool_router)]
 impl WorkspaceHttpMcpServer {
-    /// Return the workspace badge as a binary blob resource.
     #[tool(
         name = "workspace_badge",
         description = "Return the workspace badge as a binary resource blob"
@@ -160,7 +159,6 @@ impl WorkspaceHttpMcpServer {
         ]))
     }
 
-    /// Report the roots-change notifications this server has received.
     #[tool(
         name = "roots_change_report",
         description = "Report how many host roots-changed notifications this server received and the roots it last read"
@@ -290,8 +288,6 @@ fn base64_standard(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-/// Build the server's HTTP router: bearer auth in front of the MCP endpoint.
-///
 /// The auth layer is the reason this example can prove
 /// [`McpServerConfig::with_headers`](lash_plugin_mcp::McpServerConfig::with_headers)
 /// does something: a host that omits or misspells the header never completes the

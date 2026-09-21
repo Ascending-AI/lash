@@ -45,8 +45,6 @@ fn finished(outcome: ExecutionOutcome) -> Value {
     }
 }
 
-/// Runs `cell` against `state` and returns the value it finishes with.
-///
 /// The probes are built from the IR rather than authored: what they pin is the
 /// heap's behaviour under aliasing and snapshotting, which is a property of the
 /// IR and not of any dialect (ADR 0096). The program each one replaces is kept
@@ -317,7 +315,6 @@ async fn accumulated_rows_aliased_to_a_second_root_round_trip() {
     )
     .await;
     let mut restored = round_trip(&state);
-    // finish [acc, b]
     let value = run(
         &mut restored,
         a::program(vec![a::finish(a::list(vec![a::var("acc"), a::var("b")]))]),

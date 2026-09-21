@@ -220,7 +220,6 @@ pub struct RuntimeInvocation {
     pub replay: Option<RuntimeReplay>,
 }
 impl RuntimeInvocation {
-    /// Constructs the general causal-fact projection of an effect invocation.
     pub fn effect(
         address: EffectAddress,
         attribution: RuntimeAttribution,
@@ -238,15 +237,11 @@ impl RuntimeInvocation {
         }
     }
 
-    /// Sets the caused by carried by a `RuntimeInvocation` for store, effect-host, and protocol
-    /// implementors while materializing, executing, or persisting a session turn.
     pub fn with_caused_by(mut self, caused_by: Option<CausalRef>) -> Self {
         self.caused_by = caused_by;
         self
     }
 
-    /// Exposes the effect ID to effect-host implementors only for effect subjects, returning `None`
-    /// for process, trigger, and session-node subjects.
     pub fn effect_id(&self) -> Option<&str> {
         match &self.subject {
             RuntimeSubject::Effect { effect_id, .. } => Some(effect_id),
@@ -254,7 +249,6 @@ impl RuntimeInvocation {
         }
     }
 
-    /// Exposes the admitted address only for effect subjects.
     pub fn effect_address(&self) -> Option<&EffectAddress> {
         match &self.subject {
             RuntimeSubject::Effect { address, .. } => Some(address),

@@ -1566,7 +1566,6 @@ pub(super) async fn restate_registration_conflict_refuses_without_cancelling_the
     );
 }
 
-/// Builds the start envelope the three start-failure regressions share.
 fn start_recovery_effect(
     process_id: &ProcessId,
     spec: &lash_core::ProcessExecutionEnvSpec,

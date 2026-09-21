@@ -9,7 +9,7 @@ use crate::{SchemaContract, SchemaProjectionOverride};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolRetryPolicy {
-    /// Never retry automatically. This is the default for every tool.
+    /// Never retry automatically.
     #[default]
     Never,
     /// Retry only failures that explicitly report a safe retry disposition.
@@ -269,7 +269,6 @@ fn is_inline(value: &bool) -> bool {
 /// [`ToolContract`].
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ToolManifest {
-    /// Render directly when the host declares a discovery layer.
     #[serde(default = "inline_default", skip_serializing_if = "is_inline")]
     pub inline: bool,
     pub id: ToolId,
@@ -781,18 +780,17 @@ impl ToolDefinition {
         ToolContract::default_input_schema()
     }
 
-    /// Tool identity. Read very widely, so exposed as a thin accessor over the
-    /// composed [`ToolManifest`].
+    /// Tool identity.
     pub fn id(&self) -> &ToolId {
         &self.manifest.id
     }
 
-    /// Tool name. Read very widely, so exposed as a thin accessor.
+    /// Tool name.
     pub fn name(&self) -> &str {
         &self.manifest.name
     }
 
-    /// Tool description. Read very widely, so exposed as a thin accessor.
+    /// Tool description.
     pub fn description(&self) -> &str {
         &self.manifest.description
     }
@@ -993,7 +991,6 @@ impl LashSchema {
         Self::new(serde_json::Value::Object(schema))
     }
 
-    /// Validate a value against this schema.
     #[cfg(feature = "schema-validation")]
     pub fn validate(&self, value: &serde_json::Value) -> Result<(), String> {
         schema_validation::validate_schema(&self.schema, value)

@@ -64,10 +64,8 @@ pub struct GeneratedWorkload {
 }
 
 impl GeneratedWorkload {
-    /// Declare the observation counts this workload commits to producing, read
-    /// straight off the generated plan. Oracles evaluating universally
-    /// quantified laws compare their observations against these counts so an
-    /// absent observation class fails instead of passing vacuously.
+    /// Oracles evaluating universally quantified laws compare their observations against these
+    /// counts so an absent observation class fails instead of passing vacuously.
     pub fn expectations(&self) -> WorkloadExpectations {
         WorkloadExpectations::new(
             self.sessions

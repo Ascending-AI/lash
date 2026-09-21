@@ -60,8 +60,6 @@ pub const FRAME_BODY_COLUMNS: &str = "parent_node_id, node_json";
 crate::statements! {
     /// `graph_nodes` statements both backends issue verbatim.
     pub struct GraphNodeStatements @ "graph_node" {
-        /// Append one node of a commit's graph.
-        ///
         /// SQLite additionally declares a batch form over `json_each`; this
         /// single-row statement is what both backends issue per node, and what
         /// SQLite replays the batch through when a constraint violation has to

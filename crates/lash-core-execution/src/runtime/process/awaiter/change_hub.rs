@@ -15,8 +15,8 @@ impl ProcessChangeHub {
         Self::default()
     }
 
-    /// Subscribe before reading a process row. The receiver carries only a
-    /// version counter; waiters always re-read the registry after a bump.
+    /// The receiver carries only a version counter; waiters always re-read the registry after
+    /// a bump.
     pub fn subscribe(&self, process_id: &ProcessId) -> watch::Receiver<u64> {
         let mut guard = self.inner.lock_recover();
         guard

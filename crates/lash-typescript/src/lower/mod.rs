@@ -326,8 +326,6 @@ impl Lowerer {
         Ok(())
     }
 
-    /// Attaches a statement's `@label` to what the statement lowered to.
-    ///
     /// The label rides on the first lowered expression, which is the node the
     /// graph shows: a lifted process literal is named off its own hoisted
     /// declaration, not off the binding that starts it.
@@ -1281,7 +1279,6 @@ fn reject_mutual_recursion(
         return Ok(());
     };
 
-    // Report the cycle with the names the author wrote, not the mangled ones.
     let source_names = statements
         .iter()
         .filter_map(|statement| match statement {

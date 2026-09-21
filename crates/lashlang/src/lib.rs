@@ -161,9 +161,7 @@ pub fn format_link_diagnostic(source: &str, error: &LinkError) -> String {
     )
 }
 
-/// Renders `message` against the submitted `source`: the offending line, a
-/// caret underline under `span`, and each hint on its own `hint:` line. A
-/// `None` span renders the message and hints alone.
+/// A `None` span renders the message and hints alone.
 ///
 /// Both dialects render through here — TypeScript's `format_diagnostic` is a
 /// thin caller — so a session reads both dialects' failures with the same
@@ -366,7 +364,6 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn execute_reports_runtime_errors() {
-        // finish missing
         let compiled = compile_ast(&b::program(vec![b::finish(b::var("missing"))]))
             .expect("the program should compile");
         let mut state = State::new();
@@ -437,7 +434,6 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn compile_prewarm_and_environment_scratch_execution_work_together() {
         prewarm();
-        // finish 7
         let compiled = compile_ast(&b::program(vec![b::finish(b::num(7.0))]))
             .expect("the program should compile");
         let mut state = State::new();
@@ -736,7 +732,6 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn execute_allows_finish_null() {
-        // finish null
         let compiled = compile_ast(&b::program(vec![b::finish(b::null())]))
             .expect("the program should compile");
         let mut state = State::new();

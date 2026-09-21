@@ -65,8 +65,6 @@ impl Capability for BoundaryValidationCapability {
         &self,
         mut ctx: SubagentSpawnContext<'_>,
     ) -> Result<lash_core::SessionCreateRequest, String> {
-        // Leave this test child's finish untyped so its invalid value reaches
-        // the parent's independent result-boundary validation.
         ctx.output_schema = None;
         ctx.rlm_request(
             self.name(),

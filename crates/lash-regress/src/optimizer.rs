@@ -19,7 +19,6 @@ pub enum PassAction {
     // Notes that we modified the node in-place.
     Modified,
 
-    // Remove the given node outright, effectively replacing it with empty.
     Remove,
 
     /// Replace the given node with a new Node.
@@ -34,7 +33,6 @@ where
     // The function.
     func: &'a mut F,
 
-    // Whether this pass has changed anything.
     changed: bool,
 
     // If the regex is in unicode mode.
@@ -87,8 +85,6 @@ where
     }
 }
 
-/// Run a "pass" on a regex, which is a function that takes a Node and maybe
-/// returns a new node. \return true if something changed, false if nothing did.
 fn run_pass<F>(r: &mut Regex, func: &mut F) -> bool
 where
     F: FnMut(&mut Node, &Walk) -> PassAction,
@@ -100,7 +96,6 @@ where
 
 // Here are some optimizations we support.
 
-// Remove empty Nodes.
 #[expect(
     clippy::unwrap_used,
     reason = "the match on nodes.len() above establishes exactly one node before popping it"
@@ -180,7 +175,6 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
     }
 }
 
-/// Check if a node contains any capture groups (direct or nested)
 fn contains_capture_groups(node: &Node) -> bool {
     match node {
         Node::CaptureGroup { .. } => true,
@@ -247,7 +241,6 @@ fn propagate_early_fails(n: &mut Node, _w: &Walk) -> PassAction {
     }
 }
 
-// Remove excess cats.
 #[expect(
     clippy::unwrap_used,
     reason = "the len() == 1 branch above establishes the single node before popping it"
@@ -367,7 +360,6 @@ fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
             quant.max = quant.max.map(|v| v - quant.min);
             quant.min = 0;
             if quant.max != Some(0) {
-                // Move the loop to the end of unrolled.
                 let mut loop_node = Node::Empty;
                 core::mem::swap(&mut loop_node, n);
                 unrolled.push(loop_node);
@@ -441,7 +433,6 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
             PassAction::Replace(Node::ByteSet(chars.iter().map(|&c| c as u8).collect()))
         }
         Node::Cat(nodes) => {
-            // Find and merge adjacent ByteSeq.
             let mut modified = false;
             for idx in 1..nodes.len() {
                 let (prev_slice, curr_slice) = nodes.split_at_mut(idx);
@@ -480,11 +471,9 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
 /// Try to reduce a bracket to something simpler.
 fn try_reduce_bracket(bc: &BracketContents) -> Option<Node> {
     if bc.invert {
-        // Give up.
         return None;
     }
 
-    // Count the number of code points.
     let mut cps_count = 0;
     for iv in bc.cps.intervals() {
         cps_count += iv.count_codepoints();

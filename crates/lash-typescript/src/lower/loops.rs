@@ -212,7 +212,6 @@ fn expression_root_binding(expr: &Expr) -> Option<&str> {
     }
 }
 
-/// Whether an expression mentions `binding` anywhere.
 fn mentions_binding(expr: &Expr, binding: &str) -> bool {
     matches!(expr, Expr::Ident(name, _) if name == binding)
         || matches!(expr, Expr::Assign { target, .. } | Expr::Update { target, .. }
@@ -289,8 +288,6 @@ fn pattern_any(pattern: &Pattern, predicate: &mut impl FnMut(&Pattern) -> bool) 
     }
 }
 
-/// Whether a `for…of` body can reach the iterable it is walking.
-///
 /// The v1 iterator snapshots the iterable, so mutating it mid-loop would change
 /// what the loop is walking. Only shapes that can actually reach it are
 /// rejected: an assignment whose target roots at the iterable, a method call on
@@ -319,8 +316,6 @@ pub(super) fn body_may_mutate_iterable(iterable: &Expr, body: &Stmt) -> Option<S
     None
 }
 
-/// Whether the body stores the iterable under another name — a `const alias =
-/// urls`, or boxing it in a structure the loop can reach later.
 fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
     stmt.descendants().find_map(|stmt| match stmt {
         Stmt::ForOf { iterable, .. } if names_iterable_directly(iterable, binding) => {
@@ -483,7 +478,6 @@ fn pattern_may_mutate_binding(pattern: &Pattern, binding: &str) -> bool {
     )
 }
 
-/// Walk every sub-expression, outermost first.
 fn visit_expressions<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
     visit(expr);
     for child in expr.children() {

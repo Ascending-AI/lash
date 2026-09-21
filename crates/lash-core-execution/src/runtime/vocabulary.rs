@@ -200,8 +200,6 @@ pub struct TurnActivity {
 }
 
 impl TurnActivity {
-    /// Constructs a `TurnActivity` for store, effect-host, and protocol implementors while
-    /// materializing, executing, or persisting a session turn.
     pub fn new(correlation_id: TurnActivityId, event: TurnEvent) -> Self {
         Self {
             id: TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
@@ -210,8 +208,6 @@ impl TurnActivity {
         }
     }
 
-    /// Constructs an activity with a fresh stable ID for protocol implementors representing work
-    /// that has no parent activity.
     pub fn independent(event: TurnEvent) -> Self {
         let correlation_id = TurnActivityId::new(uuid::Uuid::new_v4().to_string());
         Self::new(correlation_id, event)
@@ -316,8 +312,7 @@ pub enum TurnEvent {
         /// inside one. `None` when the call did not run inside a code block.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
-        /// Call id of the parent batch tool call, when this call is a child of
-        /// a `batch` dispatch. `None` for top-level tool calls.
+        /// `None` for top-level tool calls.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_call_id: Option<String>,
     },
@@ -332,8 +327,7 @@ pub enum TurnEvent {
         /// inside one. `None` when the call did not run inside a code block.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
-        /// Call id of the parent batch tool call, when this call is a child of
-        /// a `batch` dispatch. `None` for top-level tool calls.
+        /// `None` for top-level tool calls.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_call_id: Option<String>,
     },
@@ -383,8 +377,6 @@ pub trait TurnActivitySink: Send + Sync {
 
     async fn emit(&self, activity: TurnActivity);
 
-    /// Emit activity with the identity of the physical turn that produced it.
-    ///
     /// Sinks that only consume turn-local activity can keep implementing
     /// [`emit`](Self::emit). Observation sinks override this method to carry
     /// turn identity on their enclosing event without adding it to
@@ -557,8 +549,6 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         ))
     }
 
-    /// Report whether the permanent host-facing session tombstone exists.
-    ///
     /// Required, with no default. This answer decides whether a resume returns
     /// the caller's conversation or a brand-new empty one under a dead id, so
     /// an inherited `false` is a factory claiming "no session was ever deleted
@@ -633,9 +623,7 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         })
     }
 
-    /// Add a new session-head root at a retained point without writing graph
-    /// nodes. Returns [`crate::StoreError::ForkPointNotRetained`] for the
-    /// ordinary case where a past turn was not pinned before its head moved.
+    /// Add a new session-head root at a retained point without writing graph nodes.
     async fn fork_at(
         &self,
         request: &ForkSessionRequest,

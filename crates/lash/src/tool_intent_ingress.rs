@@ -42,7 +42,6 @@ impl<'de> serde::Deserialize<'de> for ToolIntentIngressKey {
 }
 
 impl ToolIntentIngressKey {
-    /// Derive the only valid key for an identity quadruple.
     pub fn derive(
         session_id: impl AsRef<str>,
         execution_scope_id: impl AsRef<str>,
@@ -72,7 +71,6 @@ impl ToolIntentIngressKey {
         }
     }
 
-    /// Read the validated identity fields carried by this key.
     pub fn identity(&self) -> &lash_core::ToolIntentIdentity {
         &self.identity
     }
@@ -830,9 +828,6 @@ impl ToolIntentIngress {
         Ok(((kind, value), replayed))
     }
 
-    /// Bind a controller-owned `CancelProcess` identity to the target it first
-    /// named.
-    ///
     /// The other four shapes carry their content into the durable key they
     /// land on — a registration fingerprint, an event replay key, an
     /// occurrence idempotency key — so a re-used identity carrying different
@@ -1218,8 +1213,6 @@ impl ToolIntentIngress {
         Ok(registration_result)
     }
 
-    /// Emit one recorded trigger declaration through the same router the
-    /// runtime intent executor uses.
     async fn emit_recorded_trigger(
         &self,
         request: lash_core::TriggerOccurrenceRequest,
@@ -1257,9 +1250,7 @@ impl ToolIntentIngress {
             .map_err(Into::into)
     }
 
-    /// Run the engine's pure admission gate over a host-submitted start using
-    /// the exact execution environment recorded on the request. The gate may
-    /// use that immutable environment to derive identity, but cannot inspect a
+    /// The gate may use that immutable environment to derive identity, but cannot inspect a
     /// live catalog or artifact store, so replaying the same intent is safe.
     async fn admit_engine_start(
         &self,

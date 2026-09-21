@@ -169,8 +169,6 @@ impl ParameterDoc {
         }
     }
 
-    /// Emit the doc as a `serde_json::Value` keyed by `name_key` (`"name"` for
-    /// parameters, `"path"` for return fields).
     fn into_value_with_key(self, name_key: &str) -> serde_json::Value {
         let mut out = serde_json::Map::new();
         out.insert(name_key.to_string(), serde_json::json!(self.name));

@@ -49,9 +49,6 @@ impl TriggerGrant {
         self
     }
 
-    /// Set the stable provider identity when a host implements the batch
-    /// resolver directly. [`DeferredTriggerProviderRegistry`] sets this from
-    /// [`DeferredTriggerProvider::id`] automatically.
     pub fn with_provider_id(mut self, provider_id: impl Into<String>) -> Self {
         self.provider_id = provider_id.into();
         self
@@ -136,8 +133,7 @@ impl DeferredTriggerResolver for DeferredTriggerProviderRegistry {
 
 pub type SharedDeferredTriggerResolver = Arc<dyn DeferredTriggerResolver>;
 
-/// Trigger outcomes for the active admitted `ExecCode` link. This remains a
-/// distinct durable record from tool outcomes, even when both use the same
+/// This remains a distinct durable record from tool outcomes, even when both use the same
 /// effect address.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DeferredTriggerResolutionRecord {

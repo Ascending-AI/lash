@@ -31,9 +31,7 @@ impl RuntimeTurnDriver<'_> {
         );
     }
 
-    /// Build the per-tool trace handle threaded into a code/tool execution
-    /// context so tool trace events are emitted from the shared seam. `None`
-    /// when the host installed no trace sink, keeping emission a no-op.
+    /// `None` when the host installed no trace sink, keeping emission a no-op.
     pub(super) fn execution_tracing(
         &self,
         protocol_iteration: usize,

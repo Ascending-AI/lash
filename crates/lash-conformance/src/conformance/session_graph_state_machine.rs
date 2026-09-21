@@ -177,7 +177,6 @@ impl Counter for RunShapeCounter {
 type RunShape = run_shape::RunShape<RunShapeCounter>;
 type RunShapeTotals = run_shape::RunShapeTotals<RunShapeCounter>;
 
-/// Run generated session-graph laws with shrinking and counterexample capture.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

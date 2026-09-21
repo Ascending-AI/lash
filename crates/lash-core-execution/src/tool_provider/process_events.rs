@@ -81,8 +81,6 @@ pub struct ToolProcessEventClient {
 }
 
 impl ToolProcessEventClient {
-    /// Wait for a later event of the requested type on the current process.
-    ///
     /// # Integrator class
     ///
     /// Durable-process tool implementors use this capability to await

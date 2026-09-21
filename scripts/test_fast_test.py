@@ -130,9 +130,8 @@ class ClassifierTest(unittest.TestCase):
         self.assertEqual(verdict, "FULL the changed-crate set is empty")
 
     def test_a_moved_files_source_and_destination_both_select(self) -> None:
-        # The classifier half of the cross-crate rename hazard: given both ends
-        # of a move it must select both crates. Whether git *reports* both ends
-        # is pinned by CrossCrateRenameTest below.
+        # The classifier half of the cross-crate rename hazard: given both ends of a move it
+        # must select both crates.
         self.assertEqual(
             classify(
                 "crates/lash-trace/fixtures/moved.txt",

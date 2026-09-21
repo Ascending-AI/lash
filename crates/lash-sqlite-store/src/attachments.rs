@@ -79,16 +79,12 @@ lash_store_sql::statements! {
         select_deleting = "SELECT 1 FROM attachment_condemnations
              WHERE attachment_id = ?1 AND phase = 'deleting'";
 
-        /// Whether `?1` is condemned at all.
-        ///
         /// SQLite alone asks this: it reads the absence and inserts under one
         /// `BEGIN IMMEDIATE` lock, so the read is the contention check.
         /// PostgreSQL cannot hold that across statements and detects a peer
         /// sweeper through the insert's `ON CONFLICT` instead.
         select_exists = "SELECT 1 FROM attachment_condemnations WHERE attachment_id = ?1";
 
-        /// Condemn `?1`.
-        ///
         /// No `ON CONFLICT`: the absence of the row was read under the same
         /// write lock this insert commits under, so a conflict here is a
         /// defect and the constraint error is kept rather than swallowed.
@@ -390,8 +386,7 @@ impl Store {
         })
     }
 
-    /// Return an abandoned sweep's un-tokened `Condemned` or `Deleting` digest
-    /// to `Free`. A stale sweep cannot clear a restoring writer's token.
+    /// A stale sweep cannot clear a restoring writer's token.
     pub(crate) async fn release_attachment_condemnation(
         &self,
         attachment_id: &AttachmentId,
@@ -409,9 +404,8 @@ impl Store {
         Ok(())
     }
 
-    /// Clear an abandoned restoring writer under explicit host quiescence.
-    /// Retire `Condemned` only when its associated intent became committed,
-    /// otherwise preserve it after removing that unstamped intent.
+    /// Retire `Condemned` only when its associated intent became committed, otherwise preserve
+    /// it after removing that unstamped intent.
     pub(crate) async fn recover_abandoned_attachment_write(
         &self,
         attachment_id: &AttachmentId,

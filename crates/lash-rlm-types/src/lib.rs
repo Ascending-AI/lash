@@ -40,8 +40,8 @@ pub enum CellOutcome<E> {
 
 impl<E> CellOutcome<E> {
     /// Fold an `error` / `terminal value` pair into the single outcome it
-    /// describes. A pair carrying both resolves to the failure: a finished
-    /// cell must not silently discard its error.
+    /// A pair carrying both resolves to the failure: a finished cell must not silently discard
+    /// its error.
     pub fn from_parts(error: Option<E>, terminal: Option<serde_json::Value>) -> Self {
         match (error, terminal) {
             (Some(error), _) => Self::Failed(error),
@@ -58,7 +58,6 @@ impl<E> CellOutcome<E> {
         }
     }
 
-    /// Whether the cell failed.
     pub fn is_failed(&self) -> bool {
         matches!(self, Self::Failed(_))
     }
@@ -80,7 +79,6 @@ impl<E> CellOutcome<E> {
         }
     }
 
-    /// Convert the error representation, keeping the variant.
     pub fn map_error<F>(self, op: impl FnOnce(E) -> F) -> CellOutcome<F> {
         match self {
             Self::Running => CellOutcome::Running,
@@ -162,7 +160,6 @@ fn is_zero(value: &usize) -> bool {
 }
 
 impl RlmTrajectoryEntry {
-    /// Total characters across every `print`/output entry, summed.
     pub fn output_chars(&self) -> usize {
         self.output.iter().map(|s| s.chars().count()).sum()
     }
@@ -248,8 +245,6 @@ pub enum RlmHistoryItem {
 }
 
 impl RlmHistoryItem {
-    /// Build the model-visible step from its persisted protocol entry.
-    ///
     /// The image representations intentionally remain distinct: persisted
     /// entries retain attachment references, while history items expose the
     /// compact image metadata used by the model.
@@ -614,7 +609,6 @@ impl RlmSessionConfig {
         self
     }
 
-    /// Whether this states nothing at all.
     pub fn is_empty(&self) -> bool {
         self.final_answer_format.is_none() && self.termination.is_none()
     }

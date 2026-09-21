@@ -12,8 +12,7 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
-/// Run the full [`LiveReplayStore`] conformance suite against the backend
-/// produced by `make`. `make` must return a fresh, empty store on each call.
+/// `make` must return a fresh, empty store on each call.
 ///
 /// This suite covers the non-durable live observation contract used for host
 /// reconnects: cursors track per-session live positions, replay returns only
@@ -36,8 +35,6 @@ where
     replay_cut_and_live_registration_are_linearizable(&make).await;
 }
 
-/// Run the capacity-trim portion of the [`LiveReplayStore`] conformance suite.
-///
 /// Together with [`live_replay_store_ttl_trim`], this states the store-owned
 /// portion of `capacity_and_age_trim_force_snapshot`.
 ///
@@ -120,8 +117,6 @@ where
     );
 }
 
-/// Run the TTL-trim portion of the [`LiveReplayStore`] conformance suite.
-///
 /// Together with [`live_replay_store_capacity_trim`], this states the
 /// store-owned portion of `capacity_and_age_trim_force_snapshot`.
 ///

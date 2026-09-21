@@ -326,8 +326,6 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
     }
 }
 
-/// Whether a process name is the lens's derived identity for a lifted literal.
-///
 /// A lifted process has no module declaration of its own, so nothing about it
 /// is authored under this name.
 pub(super) fn is_lifted_process(name: &str) -> bool {

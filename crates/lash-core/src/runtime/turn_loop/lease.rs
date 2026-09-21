@@ -571,14 +571,13 @@ impl LashRuntime {
     /// Nothing else can: the rows are addressed only by the dead turn's id, and
     /// no later turn will ever carry that id again.
     ///
-    /// Runs under the authority the dying turn itself held. A turn that held no
-    /// lane cannot repair anything here, and a turn whose lane has already been
-    /// taken over must not: the new holder resumes this same turn id and
-    /// delivers those rows itself. Both cases fall through to the drain backstop
-    /// ([`crate::OrphanedTurnInputScope::LaneGeneration`]) for rows no live
-    /// generation claims - an accepted row still claimed at the live generation
-    /// stays put until that generation is superseded, which is exactly the row
-    /// the resuming holder owns.
+    /// A turn that held no lane cannot repair anything here, and a turn whose lane has already
+    /// been taken over must not: the new holder resumes this same turn id and delivers those
+    /// rows itself.
+    /// Both cases fall through to the drain backstop
+    /// ([`crate::OrphanedTurnInputScope::LaneGeneration`]) for rows no live generation claims -
+    /// an accepted row still claimed at the live generation stays put until that generation is
+    /// superseded, which is exactly the row the resuming holder owns.
     ///
     /// Best-effort by construction - the turn is already failing and this repair
     /// must not replace its error.

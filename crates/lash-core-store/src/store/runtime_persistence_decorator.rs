@@ -96,7 +96,6 @@ macro_rules! persistence_operations {
     };
 }
 
-/// Generate the decorator trait: one defaulted forwarder per operation.
 macro_rules! emit_decorator_trait {
     ($(
         $component:ident {
@@ -139,8 +138,6 @@ macro_rules! emit_decorator_trait {
     };
 }
 
-/// Generate one blanket component-trait implementation per group, each
-/// forwarding to the decorator trait's method of the same name.
 macro_rules! emit_component_impls {
     ($(
         $component:ident {

@@ -171,8 +171,6 @@ pub trait AwaitEventResolver: Send + Sync {
         Ok(ResolveOutcome::UnknownOrRevoked)
     }
 
-    /// Read a keyed promise without waiting for or resolving it.
-    ///
     /// Turn owners use this as a synchronous start gate before beginning a
     /// new effect. Durable owners must perform that read through their
     /// handler-scoped, replay-aware controller: its result affects subsequent

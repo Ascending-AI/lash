@@ -66,8 +66,6 @@ struct ActiveSpan<S: Span> {
 }
 
 impl OtelTraceSink<global::BoxedTracer> {
-    /// Build a sink from the process-global OpenTelemetry tracer provider.
-    ///
     /// This keeps exporter/provider setup with the embedding host while giving
     /// Lash a ready-to-install `TraceSink`.
     pub fn from_global_provider() -> Self {

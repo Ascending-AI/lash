@@ -99,12 +99,10 @@ pub enum PendingResolver {
 /// any process event the runtime announces when the call parks.
 ///
 /// Defaults to no deadline, [`TimeoutBehavior::ErrorAsResult`],
-/// [`CancelHint::CancelExternalWork`], and no announcement. Build one with
-/// [`PendingCompletion::new`] and the `with_*` adjusters.
+/// [`CancelHint::CancelExternalWork`], and no announcement.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PendingCompletion {
-    /// Maximum time to wait for the deferred outcome. `None` waits indefinitely (until
-    /// the turn or process is otherwise cancelled).
+    /// `None` waits indefinitely (until the turn or process is otherwise cancelled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline: Option<std::time::Duration>,
     /// What the runtime does when `deadline` elapses without a resolution.
@@ -156,8 +154,6 @@ impl PendingCompletion {
         self
     }
 
-    /// Declares the process event the runtime appends when this call parks.
-    ///
     /// Use it to announce the durable wait — typically the await key an
     /// external resolver delivers against — from a recorded attempt that
     /// cannot append process events itself. The runtime performs the append
@@ -168,9 +164,6 @@ impl PendingCompletion {
         self
     }
 
-    /// Declares the runtime-owned fact that resolves this wait, making the
-    /// runtime — not the tool — responsible for arming the resolver.
-    ///
     /// Use it when the outcome is a fact the runtime can already observe
     /// durably (a process terminal), rather than one an external actor
     /// delivers. The tool still takes its completion key first: the key is what
@@ -180,7 +173,6 @@ impl PendingCompletion {
         self
     }
 
-    /// Declares that the terminal of `process_ref` resolves this wait.
     pub fn resolved_by_process_terminal(self, process_ref: crate::ProcessRef) -> Self {
         self.resolved_by(PendingResolver::ProcessTerminal { process_ref })
     }

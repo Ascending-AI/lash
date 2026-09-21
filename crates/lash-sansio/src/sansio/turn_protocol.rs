@@ -173,17 +173,14 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
         id: EffectId,
         update_machine_config: bool,
     },
-    /// Start an LLM call.
     LlmCall {
         id: EffectId,
         request: Arc<LlmRequest>,
     },
-    /// Execute one or more driver-scheduled tool calls.
     ToolCalls {
         id: EffectId,
         calls: Vec<PendingToolCall>,
     },
-    /// Execute a protocol-owned code block.
     ExecCode {
         id: EffectId,
         language: String,
@@ -195,8 +192,9 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
         checkpoint: CheckpointKind,
     },
     /// Host-implemented fire-and-forget logging.
-    Log { event: LogEvent },
-    /// Fire-and-forget event (no response needed).
+    Log {
+        event: LogEvent,
+    },
     Emit(SessionStreamEvent),
     /// Prompt-history progress that may be durably persisted by the host.
     ///
@@ -219,7 +217,9 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
     /// The host emits the shared tool lifecycle pair for these calls. Turn
     /// accounting is emitted separately by the machine immediately after this
     /// effect, preserving `Started` before the accounting completion record.
-    ReportToolCalls { completed: Vec<CompletedToolCall> },
+    ReportToolCalls {
+        completed: Vec<CompletedToolCall>,
+    },
 }
 
 impl<M: TurnProtocol> Clone for Effect<M> {

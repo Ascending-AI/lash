@@ -3,8 +3,6 @@
     reason = "Restate SDK 0.11 retains the trait service API used by protocol fixtures"
 )]
 
-//! Tests for the Restate adapter (extracted from lib.rs).
-//!
 //! The obsolete FIG-1127 nested-command refusal fixture was removed with the
 //! journal-capable leaf surface. Current intent and process-replay laws cover
 //! Restate at its sanctioned seams.

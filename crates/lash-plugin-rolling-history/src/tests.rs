@@ -294,8 +294,6 @@ fn llm_completion(text: &str) -> lash_core::plugin::DirectLlmCompletion {
     }
 }
 
-/// Records every raw `LlmRequest` the compaction seam issues so a test can
-/// pin the provider-visible request and prove no child session exists.
 struct RecordingLlmCompletions {
     requests: Mutex<Vec<lash_core::LlmRequest>>,
     summary: String,

@@ -19,11 +19,8 @@ crate::statements! {
         select_for_session = "SELECT process_index, process_id FROM session_meta_fork_inheritance_processes
              WHERE session_id = ?1 ORDER BY process_index";
 
-        /// Record inherited process `?2` of session `?1`.
         insert = "INSERT INTO session_meta_fork_inheritance_processes (session_id, process_index, process_id) VALUES (?1, ?2, ?3)";
 
-        /// Drop session `?1`'s inherited processes, before a metadata write
-        /// rewrites them and at delete time.
         delete_by_session =
             "DELETE FROM session_meta_fork_inheritance_processes WHERE session_id = ?1";
     }

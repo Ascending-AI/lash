@@ -28,9 +28,8 @@ pub fn bind_store_turn_control_authority(
     }))
 }
 
-/// Routes only Lash's reserved turn-control promises to the session store.
-/// All effect execution and ordinary await-event operations stay on the
-/// configured Native host.
+/// All effect execution and ordinary await-event operations stay on the configured Native
+/// host.
 struct StoreDelegatedTurnControlHost {
     owner: Arc<dyn EffectHost>,
     authority: crate::TurnCancellationAuthority,

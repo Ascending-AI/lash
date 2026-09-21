@@ -187,7 +187,6 @@ impl RuntimeCommit {
         )
     }
 
-    /// Build a test commit with explicit host-owned byte and node limits.
     #[track_caller]
     #[expect(
         clippy::expect_used,
@@ -222,7 +221,6 @@ impl RuntimeCommit {
         .expect("test commit must be hashable")
     }
 
-    /// Build a test commit with a fixed operation identity.
     #[expect(
         clippy::expect_used,
         reason = "test-only constructor: node-id derivation failing here is a broken fixture, which must abort the test"
@@ -323,10 +321,9 @@ impl RuntimeCommit {
 
 /// Durable identity for one usage row submitted through a runtime commit.
 ///
-/// The operation key, ordinal, payload-encoding version, and payload hash are
-/// assigned before the first commit attempt and must be reused byte-for-byte
-/// until a commit containing the row has a confirmed outcome. Stores enforce
-/// uniqueness per session over all four fields.
+/// The operation key, ordinal, payload-encoding version, and payload hash are assigned before
+/// the first commit attempt and must be reused byte-for-byte until a commit containing the row
+/// has a confirmed outcome.
 ///
 /// `payload_hash` is lowercase hexadecimal BLAKE3 of Lash's hand-written,
 /// domain-prefixed, length-framed projection of [`crate::TokenLedgerEntry`] and
@@ -655,8 +652,6 @@ pub struct RuntimeCommitReceipt {
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub committed_leaf_node_id: Option<crate::NodeId>,
-    /// Store-realized timestamps for nodes appended by this operation.
-    ///
     /// Node timestamps are clock-derived and excluded from commit intent, so a
     /// receipt replay must return the first attempt's values for the resident
     /// graph to converge with durable history.
@@ -771,8 +766,6 @@ impl SemanticBoundaryOperation {
         }
     }
 
-    /// Resolve the typed operation family from a stored operation key.
-    ///
     /// Returns `None` for every key outside the adopted set; callers refuse
     /// the identity rather than guessing a family.
     pub fn from_operation_key(key: &str) -> Option<Self> {

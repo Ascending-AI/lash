@@ -322,18 +322,6 @@ fn missing_witness_uses_default_schema_and_static_tools_are_unchanged() {
 
 #[test]
 fn shaping_builtins_link_valid_shapes_and_reject_every_known_wrong_shape() {
-    // finish {
-    //   sorted: sort([2, 1]),
-    //   sorted_by: sort_by([{ rank: 2 }, { rank: 1 }], "rank"),
-    //   total: sum([1, 2]),
-    //   least: min([1, 2]),
-    //   greatest: max([1, 2]),
-    //   rewritten: replace("aba", "a", "x"),
-    //   lower: lower("ABC"),
-    //   upper: upper("abc"),
-    //   unique: unique([1, 1]),
-    //   reversed: reverse([1, 2])
-    // }
     let ranked = |rank: f64| builders::record(vec![("rank", builders::num(rank))]);
     let one_two = || builders::list(vec![builders::num(1.0), builders::num(2.0)]);
     let valid = builders::program(vec![builders::finish(builders::record(vec![

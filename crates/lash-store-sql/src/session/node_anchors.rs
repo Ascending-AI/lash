@@ -44,7 +44,6 @@ crate::statements! {
         insert = "INSERT INTO node_anchors (node_id, checkpoint_ref, source_session_id)
              VALUES (?1, ?2, ?3)";
 
-        /// Unpin `?1`.
         delete_by_node = "DELETE FROM node_anchors WHERE node_id = ?1";
     }
 }

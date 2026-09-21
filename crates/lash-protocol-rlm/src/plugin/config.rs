@@ -73,7 +73,6 @@ pub struct RlmProtocolPluginConfigBuilder<
 }
 
 impl<I, W, M, C> RlmProtocolPluginConfigBuilder<I, W, M, C> {
-    /// Set the transport used for model-authored programs.
     pub fn channel(
         self,
         channel: super::RlmChannel,
@@ -86,7 +85,6 @@ impl<I, W, M, C> RlmProtocolPluginConfigBuilder<I, W, M, C> {
         }
     }
 
-    /// Set how many VM instructions an execution may run for.
     pub fn instruction_limit(
         self,
         instruction_limit: InstructionBound,
@@ -99,7 +97,6 @@ impl<I, W, M, C> RlmProtocolPluginConfigBuilder<I, W, M, C> {
         }
     }
 
-    /// Set how much active execution time an execution may consume.
     pub fn wall_clock(
         self,
         wall_clock: WallClockBound,
@@ -112,7 +109,6 @@ impl<I, W, M, C> RlmProtocolPluginConfigBuilder<I, W, M, C> {
         }
     }
 
-    /// Set how many live logical heap bytes an execution may hold.
     pub fn memory_limit(
         self,
         memory_limit: MemoryBound,
@@ -129,7 +125,7 @@ impl<I, W, M, C> RlmProtocolPluginConfigBuilder<I, W, M, C> {
 impl
     RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBound, super::RlmChannel>
 {
-    /// Finish the config. Available only once all three bounds are chosen.
+    /// Available only once all three bounds are chosen.
     pub fn build(self) -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig {
             discovery: None,
@@ -152,9 +148,8 @@ impl RlmProtocolPluginConfig {
         self
     }
 
-    /// Start configuring an RLM protocol plugin. Every execution bound is
-    /// named and separately typed; there is no positional constructor to get
-    /// them in the wrong order.
+    /// Every execution bound is named and separately typed; there is no positional constructor
+    /// to get them in the wrong order.
     pub fn builder() -> RlmProtocolPluginConfigBuilder {
         RlmProtocolPluginConfigBuilder {
             instruction_limit: UnsetBound,

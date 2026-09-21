@@ -250,7 +250,6 @@ fn refuse(message: impl std::fmt::Display) -> ToolAttemptOutcome {
     done_without_intents(ToolOutcome::err_fmt(format_args!("{message}")))
 }
 
-/// Declares the start and answers with the id the declaration derives.
 pub async fn execute_process_start_tool_call(
     context: &AttemptContext<'_>,
     args: &Value,
@@ -371,7 +370,6 @@ fn unrealized_start_handle(process_id: &ProcessId) -> Value {
     handle
 }
 
-/// Declares the signal against the process the handle names.
 pub fn execute_process_signal_tool_call(
     context: &AttemptContext<'_>,
     args: &Value,
@@ -411,7 +409,6 @@ pub fn execute_process_signal_tool_call(
 /// The event type a progress emission appends under.
 const PROCESS_PROGRESS_EVENT_TYPE: &str = "process.yield";
 
-/// Declares the append against the process this call runs inside.
 pub fn execute_process_emit_tool_call(
     context: &AttemptContext<'_>,
     args: &Value,
@@ -443,8 +440,6 @@ pub fn execute_process_emit_tool_call(
     )
 }
 
-/// Declares the registration.
-///
 /// The declaration carries the claimed name to the registry (FIG-2995):
 /// realization resolves the definition once, pins the returned reference into
 /// the durable row, and refuses with the shared typed

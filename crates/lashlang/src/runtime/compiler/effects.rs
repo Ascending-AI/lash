@@ -904,8 +904,6 @@ fn aggregate_await_leaf_count(expr: &Expr) -> Option<usize> {
     }
 }
 
-/// Builds the VM literal a process reference evaluates to.
-///
 /// This is the cell-side half of the one definition codec: converted to JSON it
 /// must equal
 /// [`ProcessDefinitionIdentity::to_process_value`](crate::ProcessDefinitionIdentity::to_process_value)

@@ -301,7 +301,6 @@ fn union_field_assignments_update_matching_members_and_reject_unknown_fields() {
 
 #[test]
 fn binary_operators_reject_known_category_errors_but_admit_unknown_maps() {
-    // finish {} + 1
     let known = builders::program(vec![builders::finish(builders::binary(
         builders::record(Vec::new()),
         BinaryOp::Add,
@@ -391,7 +390,6 @@ fn equality_accepts_a_compatible_union_member_but_rejects_known_category_mismatc
     LinkedModule::link(union, full_host_environment())
         .expect("equality should accept a category-compatible union member");
 
-    // finish {} == 1
     let incompatible = builders::program(vec![builders::finish(builders::binary(
         builders::record(Vec::new()),
         BinaryOp::Equal,

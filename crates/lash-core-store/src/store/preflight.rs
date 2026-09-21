@@ -114,8 +114,6 @@ impl StoreSchemaVerdict {
         matches!(self, StoreSchemaVerdict::Mismatch { .. })
     }
 
-    /// Whether the probe could not decide this database either way.
-    ///
     /// The counterpart to [`StoreSchemaVerdict::refuses_open`], and the reason
     /// there is no single "is it fine?" boolean: a caller that only asked about
     /// refusals would read an undecided database as a pass and boot on evidence
@@ -205,8 +203,6 @@ impl StoreReleaseStamp {
             .join(";")
     }
 
-    /// Read back [`StoreReleaseStamp::encode_schema_versions`].
-    ///
     /// `None` for text this build cannot read, which a caller reports as
     /// [`StoreReleaseState::Unreadable`] rather than as an empty tuple: a
     /// stamp nobody could parse is not a stamp that recorded nothing.
@@ -514,8 +510,6 @@ impl DurableSurface {
         }
     }
 
-    /// Whether reading this surface costs a per-session blob walk.
-    ///
     /// The split is what makes a summary mode honest rather than arbitrary: the
     /// cheap surfaces are bounded by the process registry, the deep ones are
     /// bounded by the session count and each costs at least one blob read per
@@ -565,9 +559,9 @@ pub struct DurableItem {
     pub process_id: Option<ProcessId>,
     /// The session this payload belongs to, when it belongs to one.
     pub session_id: Option<SessionId>,
-    /// The store's own status word for the owner, e.g. `waiting`. Reported
-    /// verbatim so an operator reads the store's vocabulary rather than a
-    /// translation of it.
+    /// The store's own status word for the owner, e.g.
+    /// Reported verbatim so an operator reads the store's vocabulary rather than a translation
+    /// of it.
     pub status: Option<String>,
     /// The store's record for the item's owner, when the surface has one.
     ///
@@ -587,7 +581,6 @@ pub struct DurableScanPage {
     pub items: Vec<DurableItem>,
     /// The cursor to resume after, or `None` when the surface is exhausted.
     pub next: Option<String>,
-    /// Whether the surface was walked at all.
     pub coverage: ScanCoverage,
 }
 
@@ -659,8 +652,6 @@ pub trait StorePreflight: Send + Sync {
     /// Which deployment this handle reads, for the report header.
     fn backend(&self) -> StoreBackend;
 
-    /// Read every schema-carrying database's recorded version.
-    ///
     /// Implementations must not take a write lock, create a database, apply
     /// DDL, or stamp a version — a probe that provisions the thing it was
     /// asked about has answered a different question. Failing to *read* is

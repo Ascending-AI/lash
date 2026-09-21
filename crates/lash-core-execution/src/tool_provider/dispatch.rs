@@ -8,8 +8,6 @@ pub struct ToolDispatchClient<'run> {
 }
 
 impl<'run> ToolDispatchClient<'run> {
-    /// Resolve the callable manifest for a tool name in the current runtime.
-    ///
     /// # Integrator class
     ///
     /// Tool implementors inspect this manifest before composing nested tool

@@ -61,8 +61,6 @@ pub enum ToolIntentPreparation {
     },
 }
 
-/// Whether a runtime-effect failure should end the controller invocation or
-/// be recorded as an ordinary failed turn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeEffectFailureDisposition {
     AbortInvocation,

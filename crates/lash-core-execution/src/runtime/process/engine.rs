@@ -36,7 +36,6 @@ pub struct PersistedSegmentHandover {
 }
 
 impl PersistedSegmentHandover {
-    /// Returns the program identity carried by the engine-owned handover.
     pub fn program_hash(&self) -> &str {
         &self.handover.program_hash
     }
@@ -50,8 +49,6 @@ pub enum ProcessRunOutcome {
 }
 
 impl ProcessRunOutcome {
-    /// Report whether a process-engine invocation reached a terminal value.
-    ///
     /// This is an **integrator class 3: process-engine implementor** seam.
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Terminal { .. })
@@ -423,14 +420,14 @@ impl<'run> ProcessEngineRunContext<'run> {
         Arc::clone(&self.plugins)
     }
 
-    /// Exposes store to protocol and process-engine implementors while running a durable process.
-    /// Returns `None` when no store is present.
+    /// Exposes store to protocol and process-engine implementors while running a durable
+    /// process.
     pub fn store(&self) -> Option<Arc<dyn crate::RuntimePersistence>> {
         self.store.clone()
     }
 
-    /// Exposes session store factory to protocol and process-engine implementors while running a
-    /// durable process. Returns `None` when no session store factory is present.
+    /// Exposes session store factory to protocol and process-engine implementors while running
+    /// a durable process.
     pub fn session_store_factory(&self) -> Option<Arc<dyn crate::SessionStoreFactory>> {
         self.session_store_factory.clone()
     }
@@ -478,8 +475,6 @@ impl<'run> ProcessEngineRunContext<'run> {
         self.turn_phase_probe.clone()
     }
 
-    /// Exposes the tool catalog captured with this process execution's resident routes.
-    ///
     /// Process-engine implementors must pass this `Arc` (or an `Arc::clone` of it) to
     /// [`Self::into_runtime_context`].
     pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
@@ -538,10 +533,8 @@ pub async fn settle_started_process_engine_artifacts(
 #[async_trait::async_trait]
 /// Deployment extension point for non-kernel process runtimes.
 ///
-/// Core built-ins (`ToolCall`, `SessionTurn`, and `External`) are intentionally
-/// not registered here; they are kernel primitives with direct orchestration
-/// support. Implement `ProcessEngine` for process kinds stored as
-/// [`ProcessInput::Engine`](super::model::ProcessInput::Engine).
+/// Core built-ins (`ToolCall`, `SessionTurn`, and `External`) are intentionally not registered
+/// here; they are kernel primitives with direct orchestration support.
 pub trait ProcessEngine: Send + Sync {
     fn kind(&self) -> &'static str;
 
@@ -650,8 +643,6 @@ impl AdmittedProcessIdentity {
         }
     }
 
-    /// Build an admitted identity without an engine, for tests and conformance
-    /// suites that write process rows directly to a store.
     #[cfg(any(test, feature = "testing"))]
     pub fn for_testing(identity: ProcessIdentity) -> Self {
         Self {
@@ -670,7 +661,6 @@ impl AdmittedProcessIdentity {
         &self.signals
     }
 
-    /// Split the admitted identity from the resolved signal event types.
     pub fn into_parts(self) -> (ProcessIdentity, Vec<ProcessEventType>) {
         (self.identity, self.signals)
     }
@@ -816,10 +806,9 @@ impl ProcessEngineRegistry {
             .await
     }
 
-    /// Register an engine, rejecting a duplicate
-    /// [`ProcessEngine::kind`]. This is the single enforcement point for unique
-    /// engine kinds across everything registered on a runtime host, whether the
-    /// engine was wired directly or contributed through the plugin contract.
+    /// This is the single enforcement point for unique engine kinds across everything
+    /// registered on a runtime host, whether the engine was wired directly or contributed
+    /// through the plugin contract.
     pub(crate) fn try_with_engine(
         self,
         registration: ProcessEngineRegistration,
@@ -901,8 +890,6 @@ impl ProcessEngineRegistry {
         ))
     }
 
-    /// Resolve one definition reference against the engine that owns it,
-    /// refusing a claimed signature the engine's artifact disagrees with.
     pub async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,

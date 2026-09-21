@@ -246,7 +246,6 @@ mod tests {
     #[test]
     fn function_opcodes_keep_closure_references_inside_the_vm() {
         use crate::runtime::Instruction as I;
-        // finish 0
         let program = crate::compile_ast(&crate::testing::ast_builders::program(vec![
             crate::testing::ast_builders::finish(crate::testing::ast_builders::num(0.0)),
         ]))

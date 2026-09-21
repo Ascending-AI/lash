@@ -260,8 +260,6 @@ impl ChannelBot {
         DEFERRED_RETRY_DEADLINE.saturating_sub(self.thread_root_wait_budget())
     }
 
-    /// Whether an envelope's `token` is the one this bot expects.
-    ///
     /// Exposed so the HTTP layer can reject a forged request before spawning any
     /// work for it.
     pub fn accepts_token(&self, token: &str) -> bool {
@@ -294,8 +292,6 @@ impl ChannelBot {
         Ok(())
     }
 
-    /// Finish anything a previous process left half-done.
-    ///
     /// Called once at boot from [`super::run`], just before the Events API
     /// request URL is registered. The endpoint is technically already listening —
     /// a platform that verified the URL on an earlier boot may be redelivering
@@ -447,8 +443,6 @@ impl ChannelBot {
         }
     }
 
-    /// Handle one Events API delivery.
-    ///
     /// `retry_num` is the value of `x-slack-retry-num`, recorded for observation
     /// only: correctness must not depend on it, because the first delivery and
     /// the third carry the same `event_id` and must be treated identically.
@@ -870,10 +864,9 @@ impl ChannelBot {
             }
         };
         if !queue_was_exhausted {
-            // Retryable. The ledger row is deliberately left at its current
-            // non-terminal stage: terminalizing here is what made an interrupted
-            // mention permanently unanswered, because no redelivery and no later
-            // boot ever revisits a terminal row.
+            // The ledger row is deliberately left at its current non-terminal stage:
+            // terminalizing here is what made an interrupted mention permanently unanswered,
+            // because no redelivery and no later boot ever revisits a terminal row.
             Self::log_drain_deferral(record, reason);
             return Ok(Disposition::Deferred {
                 event_id: record.event_id.clone(),
@@ -917,16 +910,15 @@ impl ChannelBot {
         );
     }
 
-    /// Record the reply debt, post it, and mark the event replied.
     async fn owe_and_post(
         &self,
         record: &EventRecord,
         reply: String,
         source: ReplySource,
     ) -> Result<Disposition> {
-        // Record the debt before incurring it. A failed post, an unreachable
-        // platform or a crash now all leave a row that says exactly what is owed
-        // and to whom — which is what makes recovery a read rather than a guess.
+        // A failed post, an unreachable platform or a crash now all leave a row that says
+        // exactly what is owed and to whom — which is what makes recovery a read rather than a
+        // guess.
         if !self
             .ledger
             .advance(
@@ -1045,7 +1037,6 @@ impl ChannelBot {
         Ok(())
     }
 
-    /// Report what the ledger now says, for the case where a compare-and-set lost.
     async fn observed_elsewhere(&self, record: &EventRecord) -> Result<Disposition> {
         let current = self.ledger.get(record.event_id.clone()).await?;
         Ok(Disposition::Duplicate {
@@ -1085,7 +1076,6 @@ impl ChannelBot {
         Ok(session)
     }
 
-    /// Decide what an event means to this bot.
     fn classify(&self, event: &Event) -> (&'static str, Intent) {
         match event {
             Event::AppMention(_) => (KIND_APP_MENTION, Intent::Mention),
@@ -1116,7 +1106,6 @@ impl ChannelBot {
         }
     }
 
-    /// Render an event as the line the model should see.
     async fn compose(&self, envelope: &EventCallback) -> String {
         let author = match envelope.event.user() {
             Some(user_id) => self.display_name(user_id).await,
@@ -1226,9 +1215,6 @@ impl Drop for SessionLockLease {
     }
 }
 
-/// Read the assistant answer for the turn that consumed `input_id` out of the
-/// session's committed transcript.
-///
 /// Used when a queued drain returns nothing because a previous process already
 /// ran the turn and died before its reply was recorded. Correlation is by the
 /// typed provenance Lash publishes on committed messages
@@ -1284,10 +1270,7 @@ fn reply_from_transcript(session: &LashSession, input_id: &str) -> Option<String
 /// What the bot should do with an event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Intent {
-    /// Answer it.
     Mention,
-    /// Remember it.
     Ambient,
-    /// Neither.
     Ignore(EventReason),
 }

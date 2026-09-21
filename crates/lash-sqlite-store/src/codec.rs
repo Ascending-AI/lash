@@ -79,8 +79,8 @@ pub(crate) fn decode_artifact_blob(bytes: &[u8]) -> Result<Vec<u8>, StoreError> 
     }
 }
 
-/// Read the session head meta off a raw connection. Synchronous because it runs
-/// inside a `conn.call`/`conn.write` closure on the connection thread.
+/// Synchronous because it runs inside a `conn.call`/`conn.write` closure on the connection
+/// thread.
 pub(crate) fn try_load_session_head_meta_from_conn(
     conn: &Connection,
     session_id: &SessionId,

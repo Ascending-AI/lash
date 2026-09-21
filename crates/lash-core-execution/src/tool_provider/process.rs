@@ -24,13 +24,11 @@ impl<'run> InternalProcessContext<'run> {
         Self { context }
     }
 
-    /// Construct the runtime-only context in an integrator test.
     #[cfg(any(test, feature = "testing"))]
     pub fn __for_testing(context: &super::ToolContext<'run>) -> Self {
         Self::new(context.clone())
     }
 
-    /// Read the session that owns this internal process body.
     pub fn session_id(&self) -> &str {
         self.context.session_id()
     }
@@ -56,8 +54,6 @@ impl<'run> InternalProcessContext<'run> {
     }
 }
 
-/// Inputs handed to an internal owner-bound process tool.
-///
 /// The immutable manifest couples stable ID and provider-facing name. Runtime
 /// dispatch constructs this view only for explicit internal registrations.
 pub struct InternalProcessToolCall<'a> {
@@ -67,8 +63,7 @@ pub struct InternalProcessToolCall<'a> {
 }
 
 impl<'a> InternalProcessToolCall<'a> {
-    /// Construct the call view over one pinned manifest. Only the runtime
-    /// dispatcher builds these; the manifest is the coupling between stable
+    /// Only the runtime dispatcher builds these; the manifest is the coupling between stable
     /// ID and provider-facing name.
     pub fn new(
         manifest: &'a ToolManifest,
@@ -112,7 +107,6 @@ pub trait InternalProcessToolImplementation: Send + Sync + 'static {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
-    /// Run the internal body to completion and return its terminal output.
     async fn execute(&self, call: InternalProcessToolCall<'_>) -> ToolOutcomeDone;
 }
 
@@ -235,15 +229,13 @@ impl InternalProcessAdmin<'_> {
     /// Arm the caller-departure audit for an Externally-Owned row this body
     /// just registered but has not yet resolved (FIG-1383).
     ///
-    /// A detached launch registers its durable audit row *before* the host
-    /// side effect, so the row can outlive the caller: cancellation between
-    /// the two drops this body's future while the blocking launch continues.
-    /// Holding the returned value across that window closes it — dropping it
-    /// still armed durably marks the row
-    /// [`ProcessStatus::CallerDeparted`](crate::ProcessStatus::CallerDeparted)
-    /// instead of leaving it forever indistinguishable from a launch still in
-    /// flight. Call [`ExternalLaunchAudit::resolved`] once an outcome has been
-    /// recorded.
+    /// A detached launch registers its durable audit row *before* the host side effect, so the
+    /// row can outlive the caller: cancellation between the two drops this body's future while
+    /// the blocking launch continues.
+    /// Holding the returned value across that window closes it — dropping it still armed
+    /// durably marks the row
+    /// [`ProcessStatus::CallerDeparted`](crate::ProcessStatus::CallerDeparted) instead of
+    /// leaving it forever indistinguishable from a launch still in flight.
     ///
     /// This is ADR 0051's protocol and process-engine implementor class.
     pub fn external_launch_audit(&self, process_id: &ProcessId) -> ExternalLaunchAudit {

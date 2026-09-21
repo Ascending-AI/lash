@@ -19,9 +19,6 @@ impl RuntimeExecutionContext<'_> {
         Self::process_handle_json(process_ref)
     }
 
-    /// Encodes the one process handle for code-executor implementors returning a
-    /// process reference through JSON.
-    ///
     /// The incarnation rides inside the id rather than beside it, so a handle
     /// cannot name an incarnation it was not taken against, and the coordinator
     /// no longer has to back-fill one onto a handle a plugin returned.

@@ -10,9 +10,7 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
-    /// The caller holds the factory write transaction. Validate the whole batch
-    /// for upload evidence before mutating anything, so a batch containing one
-    /// unknown digest adopts none of it.
+    /// The caller holds the factory write transaction.
     pub(super) fn commit_attachment_refs_in_memory(
         &self,
         session_id: &SessionId,
@@ -96,8 +94,7 @@ impl InMemorySessionStore {
         }
     }
 
-    /// Insert or refresh one manifest intent row under a fresh attempt
-    /// identity. The caller holds the store's write transaction.
+    /// The caller holds the store's write transaction.
     ///
     /// The new attempt has proven nothing, so it carries no upload stamp; any
     /// stamp or commitment already on the row is evidence a previous attempt

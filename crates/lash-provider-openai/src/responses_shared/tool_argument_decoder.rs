@@ -10,8 +10,6 @@ use serde_json::Value;
 
 use super::projection_error;
 
-/// Decodes completed provider tool-call arguments using only omission paths
-/// recorded by this request's schema projection.
 #[derive(Clone, Debug, Default)]
 pub struct ToolArgumentDecoder {
     omission_paths_by_tool: HashMap<String, Vec<OmissionNullPath>>,

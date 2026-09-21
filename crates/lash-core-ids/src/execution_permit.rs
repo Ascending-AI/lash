@@ -344,7 +344,6 @@ mod loom_tests {
         loom::model(|| {
             let supplier = Arc::new(LoomSupplier::new(1));
             let permit = loom_permit(&supplier);
-            // Enter the released state without touching the supplier.
             permit.held.lock_recover().take();
 
             let other = Arc::clone(&permit);

@@ -101,7 +101,6 @@ impl RecoverableChatSnapshot {
     }
 }
 
-/// Update yielded by [`RecoverableChatSubscription`].
 #[derive(Clone, Debug)]
 pub enum RecoverableChatUpdate {
     /// A provisional or lifecycle observation with stable redelivery identity.

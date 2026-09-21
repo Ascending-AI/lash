@@ -30,8 +30,6 @@ impl ProcessDefinitionIdentity {
         }
     }
 
-    /// Decodes the one marked encoding of a Lashlang process definition value.
-    ///
     /// [`Self::to_process_value`] and this decoder are the only codec for that
     /// value: the record a cell holds for `p`, the `definition` a started
     /// process stores in its `ProcessIdentity`, and the `definition` filter
@@ -61,8 +59,6 @@ impl ProcessDefinitionIdentity {
         })
     }
 
-    /// Encodes this identity as the marked Lashlang process definition value.
-    ///
     /// The `$lash_process` marker distinguishes it from an ordinary record; see
     /// [`Self::from_process_value`] for the codec contract.
     pub fn to_process_value(&self) -> serde_json::Value {
@@ -109,7 +105,6 @@ impl ProcessDefinitionIdentity {
             .is_some_and(|export_name| export_name == self.process_name)
     }
 
-    /// Resolves this immutable identity to the complete signature stored by its artifact.
     pub fn resolve_process_type(
         &self,
         artifact: &ModuleArtifact,

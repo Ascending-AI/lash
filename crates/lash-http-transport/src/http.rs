@@ -174,23 +174,19 @@ impl fmt::Debug for HttpResponseBody {
 /// Host-owned connection and pooling policy for the shared reqwest client
 /// builder.
 ///
-/// The defaults preserve the existing shared builder's ten-second connect
-/// timeout and sixty-second TCP keepalive while making reqwest's current
-/// ninety-second pool idle timeout and unlimited per-host idle pool explicit.
-/// Build a client with `http_client_builder_with` when a deployment needs
-/// different transport bounds, proxy routing, or additional trust roots.
+/// The defaults preserve the existing shared builder's ten-second connect timeout and
+/// sixty-second TCP keepalive while making reqwest's current ninety-second pool idle timeout
+/// and unlimited per-host idle pool explicit.
 #[derive(Clone)]
 pub struct HttpTransportPolicy {
-    /// Maximum time allowed for establishing a TCP connection. Defaults to ten
-    /// seconds; lower it for fail-fast deployments or raise it for networks
+    /// Defaults to ten seconds; lower it for fail-fast deployments or raise it for networks
     /// with predictably slower connection setup.
     pub connect_timeout: Duration,
     /// TCP keepalive interval for an otherwise idle connection. Defaults to 60
     /// seconds; change it to stay below a deployment's load-balancer or NAT
     /// idle expiry when pooled connections must remain reusable.
     pub tcp_keepalive: Duration,
-    /// Maximum time a connection may remain idle in the pool. Defaults to 90
-    /// seconds, matching reqwest's current client-builder default; lower it to
+    /// Defaults to 90 seconds, matching reqwest's current client-builder default; lower it to
     /// release idle sockets sooner or raise it to favor connection reuse.
     pub pool_idle_timeout: Duration,
     /// Maximum number of idle connections retained for one host. Defaults to
@@ -395,8 +391,6 @@ pub fn http_client_builder() -> reqwest::ClientBuilder {
     http_client_builder_with(&HttpTransportPolicy::default())
 }
 
-/// Build a reqwest client builder with shared transport safeguards and the
-/// host-supplied connection, pooling, proxy, and trust-root policy.
 pub fn http_client_builder_with(policy: &HttpTransportPolicy) -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(policy.connect_timeout)

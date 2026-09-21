@@ -13,7 +13,6 @@ use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
 use pretty_assertions::assert_eq;
 
-/// Run the session-graph append branch-liveness suite against `factory`.
 pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::SessionStoreFactory>) {
     Box::pin(session_graph_append_tolerates_an_advanced_head(&factory)).await;
     Box::pin(session_graph_service_append_tolerates_an_advanced_head(

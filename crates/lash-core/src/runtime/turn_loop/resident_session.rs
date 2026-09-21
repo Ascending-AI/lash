@@ -156,9 +156,9 @@ pub struct ResidentSessionContinuity {
     validity: ResidentSessionState,
     /// Set only after this handle itself has attempted a durable graph load.
     graph_loaded_from_store: bool,
-    /// Set by a successful borrowed nested commit. The lane remains continuous,
-    /// but the durable head may have advanced outside this runtime's resident
-    /// state, so the next physical turn must reload deliberately before planning.
+    /// The lane remains continuous, but the durable head may have advanced outside this
+    /// runtime's resident state, so the next physical turn must reload deliberately before
+    /// planning.
     graph_head_stale: Arc<AtomicBool>,
     /// Lease-guard identity retained across a successful physical-turn commit.
     /// A match proves no release/reacquisition boundary occurred before the

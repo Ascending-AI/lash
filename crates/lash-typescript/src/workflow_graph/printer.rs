@@ -890,8 +890,6 @@ pub(super) fn statement_block_contents(expression: &Expr) -> &[Expr] {
     }
 }
 
-/// Whether a block's last element is the lowerer's completion value.
-///
 /// `Undefined` is the unit completion the lowerer appends to every statement
 /// block; inside the wrapper the completion is the block's own value, which is
 /// unobservable in statement position and re-synthesised on the way back down.
@@ -1059,7 +1057,6 @@ pub(super) fn for_of_sugar<'a>(
     Some((target.root.as_str(), source, rest))
 }
 
-/// Drop the lowerer's trailing unit completion value from a function body.
 fn strip_completion_value(body: &Expr) -> &Expr {
     let Expr::Block(statements) = body else {
         return body;

@@ -367,8 +367,6 @@ pub enum ToolValue {
 }
 
 impl ToolValue {
-    /// Wraps foreign JSON as one opaque tool-value arm.
-    ///
     /// The JSON is never scanned for Lash's reserved tags. Serializing this arm
     /// nests the whole value beneath its own tag so foreign objects cannot be
     /// mistaken for typed attachments.
@@ -759,12 +757,10 @@ impl ToolFailure {
         }
     }
 
-    /// Constructs a non-retryable invalid-request failure reported by a tool.
     pub fn invalid_request(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self::tool(ToolFailureClass::InvalidRequest, code, message)
     }
 
-    /// Constructs a non-retryable filesystem or transport I/O failure reported by a tool.
     pub fn io(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self::tool(ToolFailureClass::Io, code, message)
     }

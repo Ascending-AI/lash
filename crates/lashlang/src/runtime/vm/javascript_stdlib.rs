@@ -238,8 +238,6 @@ pub(super) fn replace_all_string(
     Ok(output)
 }
 
-/// Append `replacement` to `output`, expanding the `$`-tokens ECMA defines for
-/// a match of `needle` sitting between `prefix` and `suffix`.
 pub(super) fn expand_replacement_tokens(
     output: &mut String,
     replacement: &str,

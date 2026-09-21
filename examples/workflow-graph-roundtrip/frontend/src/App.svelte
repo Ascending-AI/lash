@@ -77,8 +77,8 @@
   let catalog = $state([]);
   let selectedId = $state('onboarding');
   let switching = $state(false);
-  // Whether the backend serves POST /project (text→graph). Probed once at load
-  // so the Power source pane offers live editing only when it will actually work.
+  // Probed once at load so the Power source pane offers live editing only when it will
+  // actually work.
   let projectSupported = $state(false);
 
   const legend = Object.entries(NODE_KINDS);
@@ -129,7 +129,6 @@
     rebuild();
   }
 
-  // Insert a node from an operation-catalog entry at the end of a container slot.
   function onAddNode(ownerId, slot, operation) {
     addNodeToDoc(draftDoc, { ownerId, slot }, operation, ops.entries ?? []);
     dirty = true;
@@ -139,10 +138,9 @@
     rebuild();
   }
 
-  // Insert a node at a specific position in a scope — the Steps view's rail "+".
   // Reuses the existing add flow (append into the target group, honouring the
-  // trailing-terminal barrier), then reorders the new node to `index` so it
-  // lands exactly where the "+" sat between two cards.
+  // trailing-terminal barrier), then reorders the new node to `index` so it lands exactly
+  // where the "+" sat between two cards.
   function onInsert(target, index, operation) {
     const id = addNodeToDoc(draftDoc, target, operation, ops.entries ?? []);
     if (id && Number.isFinite(index)) reorderNodeInDoc(draftDoc, id, index);
@@ -174,8 +172,7 @@
     }
   }
 
-  // Move a node into another scope (container slot or top-level) via the node's
-  // "move into" menu. Snap it out of any dragged position so it lays out cleanly.
+  // Snap it out of any dragged position so it lays out cleanly.
   function onMoveTo(id, dest) {
     if (moveNodeToGroup(draftDoc, id, dest)) {
       clearPosition(id);
@@ -244,9 +241,8 @@
     }
   }
 
-  // A stable signature of the graph's SHAPE (kinds + nesting + slot structure),
-  // independent of the node ids that every Save remints. Used to decide whether
-  // a Save actually reshaped the graph or just relabeled it.
+  // A stable signature of the graph's SHAPE (kinds + nesting + slot structure), independent of
+  // the node ids that every Save remints.
   function shapeSignature(doc) {
     if (!doc) return '';
     const byId = new Map((doc.nodes ?? []).map((n) => [n.id, n]));
@@ -301,9 +297,8 @@
 
   async function onSave() {
     if (!draftDoc) return;
-    // Save-time rejection: a definite type-error diagnostic blocks Save. Only
-    // real (host-derived) diagnostics block; unknowns never do. The draft is
-    // kept so the user can fix the flagged node and try again.
+    // Only real (host-derived) diagnostics block; unknowns never do.
+    // The draft is kept so the user can fix the flagged node and try again.
     if (blockingDiags.length) {
       saveOk = null;
       saveError = null;

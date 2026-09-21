@@ -47,7 +47,6 @@ pub(crate) struct ClosureReach {
 }
 
 impl ClosureReach {
-    /// Whether `value` reaches a closure anywhere in its object graph.
     pub(crate) fn covers(&self, value: &Value) -> bool {
         if self.reached.is_empty() {
             return false;

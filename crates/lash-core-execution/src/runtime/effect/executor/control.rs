@@ -37,7 +37,6 @@ pub trait EffectHost: AwaitEventResolver {
     /// turn-control promises. Implementors must preserve it across client or
     /// handler recreation for as long as issued keys remain recoverable.
     fn turn_control_binding_id(&self) -> String;
-    /// Declares the owner of reserved turn-control promises for this host.
     fn turn_control_authority_owner(&self) -> TurnControlAuthorityOwner {
         TurnControlAuthorityOwner::EffectHost
     }
@@ -326,9 +325,8 @@ impl TurnCancelClosureOwnerBinding {
 /// Boundary for nondeterministic runtime work.
 #[async_trait::async_trait]
 pub trait RuntimeEffectController: AwaitEventResolver {
-    /// Whether an engine owns pacing for commits made by this controller.
-    /// Store-backed replay controllers leave this false: durable journal
-    /// participation alone does not imply engine-owned backpressure.
+    /// Store-backed replay controllers leave this false: durable journal participation alone
+    /// does not imply engine-owned backpressure.
     fn owns_commit_backpressure(&self) -> bool {
         false
     }
@@ -354,9 +352,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         None
     }
 
-    /// Whether this controller can safely accept overlapping `execute_effect`
-    /// calls from one runtime coordinator.
-    ///
     /// Local and store-backed controllers can usually fan out independent
     /// effects. Some workflow substrates expose a single ordered journal
     /// context where native operations must be awaited immediately before the
@@ -422,9 +417,9 @@ pub trait RuntimeEffectController: AwaitEventResolver {
     /// [`effect_groups_unsupported`](super::effect_groups_unsupported). Such a
     /// refusal journals nothing.
     ///
-    /// That refusal is now the *only* way a host says "no groups here". There
-    /// was a `supports_effect_groups()` flag beside these three methods and a
-    /// conformance law binding the two together; FIG-2266 deleted it. A boolean
+    /// That refusal is now the *only* way a host says "no groups here".
+    /// There was a `supports_effect_groups()` flag beside these three methods and a
+    /// conformance law binding the two together; FIG-2266 deleted it.
     /// added no safety — a host can lie in a flag exactly as easily as in a
     /// method — and it could not see engine-side deployment facts anyway, so a
     /// missing service registration surfaced as a true answer to the wrong

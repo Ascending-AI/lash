@@ -119,8 +119,6 @@ impl MailWorld {
         Self::default()
     }
 
-    /// Add an account from a human-entered name. Returns the created summary or
-    /// a human-readable error (empty/duplicate/invalid name).
     pub(crate) fn add_account(&self, name: &str) -> Result<AccountSummary, String> {
         let display_name = name.trim().to_string();
         if display_name.is_empty() {
@@ -151,9 +149,6 @@ impl MailWorld {
             .collect()
     }
 
-    /// Remove an account and its messages. Returns an error if unknown.
-    /// Drop every account and inbox: the workbench reset wipes the mail
-    /// world along with the chat session.
     pub(crate) fn clear(&self) {
         self.inner.write_recover().clear();
         self.sent_by_replay_key.lock_recover().clear();
@@ -199,7 +194,6 @@ impl MailWorld {
         Ok(messages)
     }
 
-    /// Remove a single message by id.
     pub(crate) fn remove_message(&self, slug: &str, id: &str) -> Result<(), String> {
         let mut accounts = self.inner.write_recover();
         let account = find_mut(&mut accounts, slug)?;
@@ -243,8 +237,6 @@ impl MailWorld {
         Ok(delivered)
     }
 
-    /// Commit one send and declare the `mail.received` emission it owes.
-    ///
     /// The receipt and the declaration are produced together: there is no
     /// point between them at which the row is durable and the emission is
     /// merely hoped for. The caller returns both in one attempt outcome and
@@ -320,8 +312,7 @@ fn non_empty(value: &str) -> Option<&str> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
-/// Turn a human account name into a Lashlang module-path segment
-/// (`[a-z][a-z0-9_]*`). Returns `None` if nothing usable remains.
+/// Turn a human account name into a Lashlang module-path segment (`[a-z][a-z0-9_]*`).
 pub(crate) fn slugify(name: &str) -> Option<String> {
     let mut slug = String::new();
     let mut last_underscore = false;
@@ -418,7 +409,6 @@ impl MockMailProvider {
         Self { world }
     }
 
-    /// Build the live tool definitions from the current account set.
     fn definitions(&self) -> Vec<ToolDefinition> {
         let summaries = self.world.account_summaries();
         let mut defs = Vec::with_capacity(summaries.len() * MAIL_OPERATIONS.len());
@@ -434,11 +424,10 @@ impl MockMailProvider {
         defs
     }
 
-    /// Resolve a tool name back to (slug, operation) by parsing it. Only used
-    /// to route execution; resolution (`tool_manifests`/`resolve_contract`)
-    /// covers live accounts exclusively. A persisted session that references
-    /// a removed account's tools restores anyway — lash-core orphans them
-    /// as non-members and rebinds when the account is re-added.
+    /// Only used to route execution; resolution (`tool_manifests`/`resolve_contract`) covers
+    /// live accounts exclusively.
+    /// A persisted session that references a removed account's tools restores anyway —
+    /// lash-core orphans them as non-members and rebinds when the account is re-added.
     fn route(&self, name: &str) -> Option<(String, &'static str)> {
         let rest = name.strip_prefix("inbox__")?;
         for operation in MAIL_OPERATIONS {
@@ -479,8 +468,6 @@ impl ToolProvider for MockMailProvider {
                 .into();
         };
         if operation != "send" {
-            // Reads own no declaration; they are pure attempt bodies and run
-            // against the same sealed attempt context.
             let result = match operation {
                 "list" => self.world.op_list(&slug, call.args),
                 "delete" => self.world.op_delete(&slug, call.args),

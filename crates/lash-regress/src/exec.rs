@@ -66,7 +66,6 @@ pub trait Executor<'r, 't>: MatchProducer {
     /// The ASCII variant.
     type AsAscii: Executor<'r, 't>;
 
-    /// Construct a new Executor.
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self;
 }
 

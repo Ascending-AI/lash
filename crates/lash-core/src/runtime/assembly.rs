@@ -182,11 +182,8 @@ pub(super) struct LlmStreamState<'a> {
     pub(super) reasoning_publication: &'a mut ReasoningPublicationState,
     pub(super) assistant_prose_attempt_correlations: &'a mut Vec<crate::TurnActivityId>,
     pub(super) reasoning_attempt_correlations: &'a mut Vec<crate::TurnActivityId>,
-    /// Set to `true` by `forward_provider_stream_event` when a plugin
-    /// stream hook has raised `AssistantStreamTransform.abort_stream`.
-    /// The LLM runner checks this after each stream event and
-    /// short-circuits the select loop, synthesizing a response from the
-    /// already-streamed parts.
+    /// The LLM runner checks this after each stream event and short-circuits the select loop,
+    /// synthesizing a response from the already-streamed parts.
     pub(super) abort_requested: &'a mut bool,
     /// Pre-transform text accumulated per streamed block id. The
     /// authoritative `TextBlockEnd` payload is reconciled against this raw

@@ -706,9 +706,8 @@ impl SqliteSessionStoreFactory {
         }
     }
 
-    /// Construct a factory with explicit process-owner liveness wiring for
-    /// attachment GC. This is the warning-free durable constructor when the
-    /// deployment uses a Lash SQLite process registry.
+    /// This is the warning-free durable constructor when the deployment uses a Lash SQLite
+    /// process registry.
     pub fn new_with_process_registry(
         root: impl Into<PathBuf>,
         process_registry_path: impl Into<PathBuf>,
@@ -751,8 +750,6 @@ impl SqliteSessionStoreFactory {
         self
     }
 
-    /// Install a per-factory substrate fault injector for simulation/tests.
-    ///
     /// The method and backing field do not exist without the `testing` feature.
     #[cfg(feature = "testing")]
     pub fn with_fault_injector(mut self, injector: testing::SqliteFaultInjector) -> Self {

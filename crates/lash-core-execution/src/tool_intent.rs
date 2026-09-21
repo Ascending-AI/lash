@@ -15,14 +15,10 @@ use serde::{Deserialize, Serialize};
 /// declaration replay key.
 /// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_PROTOCOL_V3: u16 = 3;
-/// Maximum declarations accepted from one recorded attempt.
-/// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_COUNT: usize = 32;
 /// Maximum canonical JSON bytes accepted from one recorded intent batch.
 /// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_CANONICAL_BYTES: usize = 64 * 1024;
-/// Maximum declarations of any one kind accepted from one recorded attempt.
-/// **Integrator class 3: protocol and process-engine implementors.**
 pub const TOOL_INTENT_MAX_PER_KIND: usize = 16;
 
 /// Recorded declarations returned by a leaf tool attempt.
@@ -42,7 +38,6 @@ impl Default for ToolIntents {
 }
 
 impl ToolIntents {
-    /// Construct a version-3 declaration batch for protocol and process-engine implementors.
     pub fn v3(intents: Vec<ToolIntent>) -> Self {
         Self {
             protocol_version: TOOL_INTENT_PROTOCOL_V3,
@@ -50,8 +45,6 @@ impl ToolIntents {
         }
     }
 
-    /// Test whether a declaration batch is empty before protocol admission.
-    ///
     /// This is an **integrator class 3: protocol and process-engine implementor** seam.
     pub fn is_empty(&self) -> bool {
         self.intents.is_empty()
@@ -88,14 +81,12 @@ macro_rules! define_tool_intent {
         }
 
         impl ToolIntent {
-            /// Return the literal command kind used by protocol and process-engine implementors.
             pub fn kind(&self) -> ToolIntentKind {
                 match self {
                     $(Self::$variant(_) => ToolIntentKind::$variant,)*
                 }
             }
 
-            /// Return the session binding checked by protocol and process-engine implementors.
             pub fn session_id(&self) -> &str {
                 match self {
                     $(Self::$variant(intent) => &intent.session_id,)*
@@ -196,8 +187,6 @@ pub enum ToolIntentSubmissionAdmission {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// Start declaration consumed by protocol and process-engine implementors.
-///
 /// The declaration carries no process id. Realization derives it with
 /// [`ProcessId::from_intent_identity`] from this declaration's own intent
 /// identity, so the id a leaf attempt returns before commit and the id the
@@ -211,8 +200,6 @@ pub struct StartProcessIntent {
 }
 
 impl StartProcessIntent {
-    /// Bind this declaration to the process id its identity derives.
-    ///
     /// Both realization routes call this and nothing else, so neither can
     /// substitute a freshly minted id.
     pub fn into_request(&self, identity: &ToolIntentIdentity) -> crate::ProcessStartRequest {
@@ -258,9 +245,6 @@ pub struct RegisterProcessDefinitionIntent {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// Trigger-registration declaration consumed by protocol and process-engine
-/// implementors.
-///
 /// Distinct from [`EmitTriggerIntent`], which fires an occurrence: this one
 /// installs the subscription. A leaf attempt cannot register synchronously for
 /// the same reason it cannot emit synchronously — a subscription that outlived
@@ -268,7 +252,6 @@ pub struct RegisterProcessDefinitionIntent {
 pub struct RegisterTriggerIntent {
     /// Session whose authority owns the subscription.
     pub session_id: SessionId,
-    /// Complete validated subscription draft.
     pub draft: crate::TriggerSubscriptionDraft,
 }
 
@@ -309,8 +292,6 @@ pub struct EmitProcessEventIntent {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// Trigger declaration consumed by protocol and process-engine implementors.
-///
 /// A leaf attempt cannot emit a trigger synchronously: an emission that
 /// outlives a failed attempt would advertise a cause that never committed.
 /// Declaring this intent instead moves the emission behind the attempt's own
@@ -488,17 +469,14 @@ pub fn legacy_tool_intent_v1_lookup_key(
 pub struct ToolOutcomeDone(Box<crate::ToolCallOutput>);
 
 impl ToolOutcomeDone {
-    /// Wrap a completed tool output for protocol and process-engine implementors.
     pub fn from_output(output: crate::ToolCallOutput) -> Self {
         Self(Box::new(output))
     }
 
-    /// Construct a successful completed value for protocol and process-engine implementors.
     pub fn ok(result: serde_json::Value) -> Self {
         Self::from_output(crate::ToolCallOutput::success(result))
     }
 
-    /// Construct a failed completed value for protocol and process-engine implementors.
     pub fn failure(failure: crate::ToolFailure) -> Self {
         Self::from_output(crate::ToolCallOutput::failure(failure))
     }
@@ -531,12 +509,10 @@ impl ToolAttemptOutcome {
         Self::Done { result, intents }
     }
 
-    /// Construct a completed attempt with no declarations for protocol and process-engine implementors.
     pub fn done_without_intents(result: ToolOutcomeDone) -> Self {
         Self::done(result, ToolIntents::default())
     }
 
-    /// Construct a pending attempt for protocol and process-engine implementors.
     pub fn pending(pending: crate::PendingCompletion) -> Self {
         Self::Pending(pending)
     }

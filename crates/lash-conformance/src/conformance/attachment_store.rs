@@ -3,12 +3,11 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-/// Run the full [`AttachmentStore`] conformance suite against the backend
-/// produced by `make`. `make` must return a fresh, empty store on each call.
-/// `expected_persistence` is the tier this backend declares (`Ephemeral` for
-/// in-memory, `Durable` for persistent backends). The freshness law waits on the
-/// real clock so it also works for backends whose timestamps have whole-second
-/// resolution; do not run this suite with a frozen system clock.
+/// `make` must return a fresh, empty store on each call.
+/// `expected_persistence` is the tier this backend declares (`Ephemeral` for in-memory,
+/// `Durable` for persistent backends).
+/// The freshness law waits on the real clock so it also works for backends whose timestamps
+/// have whole-second resolution; do not run this suite with a frozen system clock.
 pub async fn attachment_store<F>(make: F, expected_persistence: AttachmentStorePersistence)
 where
     F: Fn() -> Arc<dyn AttachmentStore>,

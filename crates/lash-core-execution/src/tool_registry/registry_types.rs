@@ -234,13 +234,10 @@ pub struct ToolRestoreReport {
 }
 
 impl ToolRestoreReport {
-    /// True when a persisted catalog member has no live source: the one class
-    /// that means the session lost a capability.
     pub fn has_lost_members(&self) -> bool {
         !self.lost_members.is_empty()
     }
 
-    /// True when the restore has nothing at all to report about sources.
     pub fn is_clean(&self) -> bool {
         self.lost_members.is_empty()
             && self.parked_opt_outs.is_empty()
@@ -273,7 +270,6 @@ impl ToolRestoreReport {
 /// degraded session `Require` exists to prevent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToolSourcePolicy {
-    /// Open succeeds and the [`ToolRestoreReport`] is delivered to the host.
     #[default]
     Tolerate,
     /// Open refuses when the report has lost members. Parked opt-outs and

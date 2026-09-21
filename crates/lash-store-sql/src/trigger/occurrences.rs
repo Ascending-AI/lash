@@ -95,9 +95,8 @@ crate::statements! {
                AND occurred_at_ms <= ?4
              ORDER BY occurred_at_ms ASC, occurrence_id ASC";
 
-        /// Arm occurrence `?1` for reclamation at `?2`, keeping the first
-        /// stamp. The `IS NULL` guard is what makes the grace period start
-        /// once, at the instant the firing's last delivery went away.
+        /// The `IS NULL` guard is what makes the grace period start once, at the instant the
+        /// firing's last delivery went away.
         arm_reclaimable = "UPDATE trigger_occurrences
              SET reclaimable_at_ms = ?2
              WHERE occurrence_id = ?1 AND reclaimable_at_ms IS NULL";

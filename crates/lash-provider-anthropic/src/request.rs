@@ -580,13 +580,12 @@ impl AnthropicProvider {
             };
         }
 
-        // Sampling. Anthropic Messages has no seed field, so a requested seed
-        // is not expressible on this wire. Temperature is expressible, but two
-        // separate facts can take it away, and both answer with HTTP 400 when
-        // ignored: extended thinking pins sampling for the request, and some
-        // models pin it outright (everything released after Claude Opus 4.6).
-        // The second is host-supplied capability, never inferred from the
-        // model name here.
+        // Anthropic Messages has no seed field, so a requested seed is not expressible on this
+        // wire.
+        // Temperature is expressible, but two separate facts can take it away, and both answer
+        // with HTTP 400 when ignored: extended thinking pins sampling for the request, and
+        // some models pin it outright (everything released after Claude Opus 4.6).
+        // The second is host-supplied capability, never inferred from the model name here.
         if let Some(temperature) = &policy.temperature
             && !policy
                 .thinking

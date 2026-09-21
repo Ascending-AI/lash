@@ -155,8 +155,6 @@ pub trait GroupExecutors: Send + Sync {
 /// prose.
 #[async_trait::async_trait]
 pub trait StoreEffectGroupDrain: Send + Sync {
-    /// Run one drain pass over `group_key` and report what it did.
-    ///
     /// Idempotent by construction: a second pass over a fully drained group
     /// finds no unsettled child and reports an empty pass, and a pass that races
     /// another executor replays that executor's terminal rather than writing a
@@ -214,8 +212,6 @@ impl GroupDrainReport {
             .count()
     }
 
-    /// Whether the group held nothing unsettled when the pass read it.
-    ///
     /// The retention question, in the form the group host asks it: a *closed*
     /// group with no unsettled child is complete, and completing it is what
     /// retires its process-local state.
@@ -262,11 +258,6 @@ pub struct DrainedChild {
 pub enum ChildDrainOutcome {
     /// The pass drove the child through the claim fence to a terminal, so it now
     /// holds a settlement rank like any other child.
-    ///
-    /// Whether that terminal is a success or a failure is the child's own
-    /// outcome and is read back by rank through the group surface, not reported
-    /// here: a drain that summarized outcomes would be a second, lossier copy of
-    /// the settlement record.
     Settled,
     /// Another executor owns the child, so the pass moved past it.
     ///

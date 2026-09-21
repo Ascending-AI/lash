@@ -98,8 +98,6 @@ impl DurableProcessWorker {
         Ok(())
     }
 
-    /// Open one existing session's store for a read-only membership check.
-    ///
     /// Never creates or admits a session: a factory without the
     /// open-an-existing-store seam yields nothing and the candidate is left
     /// for a worker whose factory has it.

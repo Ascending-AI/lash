@@ -6,13 +6,10 @@ use super::{HydratedCheckpointComponent, RuntimeCommit, StoreError};
 pub enum CommitBudgetLimit {
     /// Reject a commit whose measured dimension exceeds this non-zero limit.
     Bounded(std::num::NonZeroUsize),
-    /// Apply no limit to this dimension.
     Unbounded,
 }
 
 impl CommitBudgetLimit {
-    /// Construct a finite, non-zero commit limit.
-    ///
     /// # Panics
     ///
     /// Panics when `limit` is zero.
@@ -54,8 +51,6 @@ impl CommitBudget {
         Self { bytes, nodes }
     }
 
-    /// Construct a budget with finite byte and node limits.
-    ///
     /// # Panics
     ///
     /// Panics when either limit is zero.
@@ -101,7 +96,6 @@ impl RuntimeCommit {
         self.validate_measured_byte_budget(&measurement, max_bytes.get())
     }
 
-    /// Validate at the facade boundary and record its single bounded-byte observation.
     pub(super) fn validate_budget_and_record_size(&self) -> Result<(), StoreError> {
         let node_result = self.validate_node_budget();
         let CommitBudgetLimit::Bounded(max_bytes) = self.commit_budget.bytes else {

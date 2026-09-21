@@ -42,9 +42,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// call to its code block without ordering heuristics. `None` when the
     /// context is not executing a code block.
     code_block_graph_key: Option<String>,
-    /// Call id of the parent `batch` tool call when this context runs the
-    /// children of a batch dispatch, stamped onto child `TurnEvent`s. `None`
-    /// for top-level tool execution.
+    /// `None` for top-level tool execution.
     batch_parent_call_id: Option<String>,
     /// Work-driver handle for this execution's process wiring, when the
     /// deployment provides one. Threaded through so in-run process
@@ -408,8 +406,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.nested_effect_error.lock_recover().take()
     }
 
-    /// Exposes execution scope id to protocol and process-engine implementors while executing code
-    /// against the session runtime.
     pub fn execution_scope_id(&self) -> String {
         self.dispatch
             .effect_controller
@@ -458,8 +454,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         )
     }
 
-    /// Exposes session scope to protocol and process-engine implementors while executing code
-    /// against the session runtime.
     pub fn session_scope(&self) -> crate::SessionScope {
         crate::SessionScope::for_agent_frame(
             self.session_id.clone(),
@@ -467,8 +461,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         )
     }
 
-    /// Exposes trigger store to protocol and process-engine implementors while executing code
-    /// against the session runtime. Returns `None` when no trigger store is present.
     pub fn trigger_store(&self) -> Option<Arc<dyn crate::TriggerStore>> {
         self.dispatch
             .trigger_router
@@ -528,7 +520,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.batch_parent_call_id.clone()
     }
 
-    /// Emit a `ToolCallStarted` trace event for a tool run from this context.
     /// No-op when the host installed no trace sink.
     pub(super) fn emit_tool_call_started_trace(
         &self,
@@ -548,7 +539,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Emit a `ToolCallCompleted` trace event for a tool run from this context.
     /// No-op when the host installed no trace sink.
     pub(super) fn emit_tool_call_completed_trace(
         &self,
@@ -776,9 +766,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Exposes captured process execution env ref to protocol and process-engine implementors while
-    /// executing code against the session runtime.
-    ///
     /// A retired owner fails here. Every caller publishes under a durable owner and then persists
     /// the reference (trigger registration keeps it in `TriggerSubscriptionDraft::env_ref`), so a
     /// retirement must surface at publish time rather than hand back a reference to bytes the
@@ -819,8 +806,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         Ok(crate::ParentScope::from_owner(&opener))
     }
 
-    /// Starts a child process for code-executor implementors with the current execution context as
-    /// causal provenance.
     pub async fn start_child_process(
         &self,
         request: crate::ProcessStartRequest,
@@ -978,9 +963,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Exposes callable tool manifest by id to protocol and process-engine implementors while
-    /// executing code against the session runtime. Returns `None` when no callable tool manifest by
-    /// id is present.
     pub fn callable_tool_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
         crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
     }
@@ -1149,14 +1131,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Exposes chronological projection to protocol and process-engine implementors while executing
-    /// code against the session runtime.
     pub fn chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
         Arc::clone(&self.chronological_projection)
     }
 
-    /// Executes trigger effect work for protocol and process-engine implementors while executing
-    /// code against the session runtime.
     pub async fn execute_trigger_effect(
         &self,
         effect_id: String,
@@ -1248,26 +1226,18 @@ impl<'run> RuntimeExecutionContext<'run> {
             .map_err(crate::RuntimeEffectControllerError::from)
     }
 
-    /// Exposes parent invocation to protocol and process-engine implementors while executing code
-    /// against the session runtime. Returns `None` when no parent invocation is present.
     pub fn parent_invocation(&self) -> Option<&crate::RuntimeInvocation> {
         self.parent_invocation.as_ref()
     }
 
-    /// Exposes session id to protocol and process-engine implementors while executing code against
-    /// the session runtime.
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
-    /// Exposes tool catalog to protocol and process-engine implementors while executing code
-    /// against the session runtime.
     pub fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
         Arc::clone(&self.dispatch.tool_catalog)
     }
 
-    /// Exposes trigger actor to protocol and process-engine implementors while executing code
-    /// against the session runtime.
     pub fn trigger_actor(&self) -> crate::ProcessOriginator {
         self.process_execution
             .as_ref()
@@ -1275,8 +1245,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             .unwrap_or_else(|| crate::ProcessOriginator::session(self.session_scope()))
     }
 
-    /// Exposes trigger owner scope to protocol and process-engine implementors while executing code
-    /// against the session runtime.
     pub fn trigger_owner_scope(&self) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
         resolve_trigger_owner_scope(
             &self.session_id,
@@ -1284,9 +1252,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         )
     }
 
-    /// Exposes trigger registration wake target to protocol and process-engine implementors while
-    /// executing code against the session runtime. Returns `None` when no trigger registration wake
-    /// target is present.
     pub fn trigger_registration_wake_target(&self) -> Option<crate::SessionScope> {
         self.process_execution
             .as_ref()
@@ -1295,8 +1260,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             .or_else(|| Some(self.session_scope()))
     }
 
-    /// Exposes turn context to protocol and process-engine implementors while executing code
-    /// against the session runtime.
     pub fn turn_context(&self) -> &crate::TurnContext {
         &self.turn_context
     }

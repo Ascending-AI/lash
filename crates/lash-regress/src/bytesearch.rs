@@ -124,7 +124,6 @@ pub fn charset_contains(set: &[u32; MAX_CHAR_SET_LENGTH], c: u32) -> bool {
     result
 }
 
-/// A helper function for formatting bitmaps, using - ranges.
 fn format_bitmap<Func>(name: &str, f: &mut fmt::Formatter<'_>, contains: Func) -> fmt::Result
 where
     Func: Fn(u8) -> bool,
@@ -133,7 +132,6 @@ where
     let mut idx = 0;
     let mut maybe_space = "";
     while idx <= 256 {
-        // Compute the next value not contained.
         let mut end = idx;
         while end <= 256 && contains(end as u8) {
             end += 1;
@@ -158,7 +156,6 @@ where
 pub struct AsciiBitmap(pub [u8; 16]);
 
 impl AsciiBitmap {
-    /// Set a byte val in this bitmap.
     #[inline(always)]
     pub fn set(&mut self, val: u8) {
         debug_assert!(val <= 127, "Value should be ASCII");
@@ -202,7 +199,6 @@ pub struct ByteBitmap([u16; 16]);
 // TODO: the codegen here is pretty horrible; LLVM is emitting a sequence of
 // halfword instructions. Consider using a union?
 impl ByteBitmap {
-    /// Construct from a sequence of bytes.
     pub fn new(bytes: &[u8]) -> ByteBitmap {
         let mut bb = ByteBitmap::default();
         for &b in bytes {
@@ -219,7 +215,6 @@ impl ByteBitmap {
         (self.0[byte as usize] & (1 << bit)) != 0
     }
 
-    /// Set a bit in this bitmap.
     #[inline(always)]
     pub fn set(&mut self, val: u8) {
         let byte = val >> 4;
@@ -227,7 +222,6 @@ impl ByteBitmap {
         self.0[byte as usize] |= 1 << bit;
     }
 
-    /// Update ourselves from another bitmap, in place.
     pub fn bitor(&mut self, rhs: &ByteBitmap) {
         for idx in 0..self.0.len() {
             self.0[idx] |= rhs.0[idx];
@@ -242,12 +236,10 @@ impl ByteBitmap {
         self
     }
 
-    /// Count number of set bits.
     pub fn count_bits(&self) -> u32 {
         self.0.iter().map(|v| v.count_ones()).sum()
     }
 
-    /// Return ourselves as an array of a fixed length.
     /// Panics if the array is not large enough.
     #[allow(clippy::wrong_self_convention)]
     #[inline(always)]
@@ -286,7 +278,7 @@ impl ByteBitmap {
         }
 
         for &chunk in body {
-            // Use LE. Here index 0 is the earliest address.
+            // Here index 0 is the earliest address.
             let byte_idxs = ((chunk >> 4) & 0x0F0F0F0F).to_le_bytes();
             let bit_idxs = (chunk & 0x0F0F0F0F).to_le_bytes();
             if (bm[byte_idxs[0] as usize] & (1 << bit_idxs[0])) != 0 {

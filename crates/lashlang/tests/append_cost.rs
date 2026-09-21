@@ -100,8 +100,6 @@ impl ExecutionHost for Host {
     }
 }
 
-/// Runs `program` and returns `(finished value, bytes the run allocated)`.
-///
 /// Only execution is measured: the program is compiled first, so the compiler's
 /// allocations stay out of the figure. The probes are built from the IR rather
 /// than authored: what they pin is the cost of the two lowered append forms,
@@ -202,7 +200,6 @@ fn probe_program(body: Expr, iterations: usize) -> Program {
 /// append does not pay for subtracted out.
 fn bytes_per_append(body: fn() -> Expr, iterations: usize) -> f64 {
     let (built, with_append) = run_measured(&probe_program(body(), iterations));
-    // total = total + i
     let baseline = assign(
         "total",
         Expr::Binary {

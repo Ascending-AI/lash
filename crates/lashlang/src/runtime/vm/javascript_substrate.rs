@@ -630,8 +630,6 @@ fn join_json_container(
     )
 }
 
-/// Renders a `console.*` argument list as one observation line.
-///
 /// The RLM prompt tells a cell to inspect values with `console.log`, so this
 /// text is the model's only view of what it just computed. ECMAScript's own
 /// string coercion answers `"[object Object]"` for every plain object and
@@ -662,9 +660,6 @@ pub(super) fn javascript_console_observation_text(
     Ok(text)
 }
 
-/// Appends `text` to the observation, refusing the moment the byte budget is
-/// exceeded.
-///
 /// Every write in this walk goes through here, so the refusal lands while the
 /// string is still bounded rather than after it has been built. That is not a
 /// nicety: the `active` set below closes true cycles but pops on the way out,
@@ -681,8 +676,6 @@ fn push_console_text(out: &mut String, text: &str) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-/// Writes one value in observation form.
-///
 /// The shape is the compact JSON the host's print projector produces, so a
 /// TypeScript observation and a Lashlang one describe the same value the same
 /// way. Two rules differ from `JSON.stringify`, both because an inspect step

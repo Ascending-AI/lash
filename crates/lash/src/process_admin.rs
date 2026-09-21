@@ -425,7 +425,6 @@ impl Processes {
             .map_err(Into::into)
     }
 
-    /// Returns the identified process handle, if it exists.
     pub async fn get(
         &self,
         process_id: &ProcessId,
@@ -436,7 +435,6 @@ impl Processes {
             .map_err(Into::into)
     }
 
-    /// Returns the process event stream from the requested offset.
     pub async fn events(
         &self,
         process_id: &ProcessId,
@@ -448,7 +446,6 @@ impl Processes {
             .map_err(Into::into)
     }
 
-    /// Waits for the identified process to produce terminal output.
     pub async fn await_output(
         &self,
         process_id: &ProcessId,
@@ -551,7 +548,6 @@ impl Processes {
             .map_err(Into::into)
     }
 
-    /// Returns an observer for the selected process.
     pub fn observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
         self.make_observer()
     }
@@ -578,9 +574,7 @@ impl Processes {
         Ok(summaries)
     }
 
-    /// Move observer membership for `process_ids` from one session to another.
-    /// Processes are global; this re-homes only observer membership, never the
-    /// process itself.
+    /// Processes are global; this re-homes only observer membership, never the process itself.
     pub async fn transfer(
         &self,
         from_scope: &lash_core::SessionScope,
@@ -908,7 +902,6 @@ impl Processes {
             .map_err(Into::into)
     }
 
-    /// Run one bounded wake-delivery pass immediately.
     pub async fn drive_wake_deliveries(
         &self,
     ) -> Result<lash_core::facade_support::WakeDeliveryDriveReport> {

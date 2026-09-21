@@ -1505,8 +1505,6 @@ fn names_the_host_view_omits() -> Vec<(&'static str, HeapObject)> {
     ]
 }
 
-/// Installs `object` as the sole runtime root under `name`, the way an
-/// execution installs its result, and returns the state with the rooted value.
 fn state_rooting(name: &str, object: HeapObject) -> (State, Value) {
     let mut heap = Heap::default();
     let value = heap.allocate(object).expect("allocate the rooted object");

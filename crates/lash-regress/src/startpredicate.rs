@@ -10,8 +10,6 @@ use crate::util::{add_utf8_first_bytes_to_bitmap, utf8_first_byte};
 use alloc::{boxed::Box, vec::Vec};
 use memchr::memmem;
 
-/// Check if a node is anchored to the start of the line/string.
-/// Returns true if the node begins with a StartOfLine anchor.
 fn is_start_anchored(n: &Node) -> bool {
     match n {
         Node::Anchor {
@@ -28,9 +26,8 @@ fn is_start_anchored(n: &Node) -> bool {
     }
 }
 
-/// Convert the code point set to a first-byte bitmap.
-/// That is, make a list of all of the possible first bytes of every contained
-/// code point, and store that in a bitmap.
+/// That is, make a list of all of the possible first bytes of every contained code point, and
+/// store that in a bitmap.
 fn cps_to_first_byte_bitmap(input: &codepointset::CodePointSet) -> Box<ByteBitmap> {
     let mut bitmap = Box::<ByteBitmap>::default();
     for iv in input.intervals() {
@@ -41,13 +38,11 @@ fn cps_to_first_byte_bitmap(input: &codepointset::CodePointSet) -> Box<ByteBitma
 
 /// The "IR" for a start predicate.
 enum AbstractStartPredicate {
-    /// No predicate.
     Arbitrary,
 
     /// Sequence of non-empty bytes.
     Sequence(Vec<u8>),
 
-    /// Set of bytes.
     Set(Box<ByteBitmap>),
 }
 
@@ -60,7 +55,6 @@ impl AbstractStartPredicate {
             (_, Self::Arbitrary) => Self::Arbitrary,
 
             (Self::Sequence(s1), Self::Sequence(s2)) => {
-                // Compute the length of the shared prefix.
                 let shared_len = s1.iter().zip(s2.iter()).take_while(|(a, b)| a == b).count();
                 debug_assert!(s1[..shared_len] == s2[..shared_len]);
                 if shared_len > 0 {
@@ -78,7 +72,6 @@ impl AbstractStartPredicate {
             }
 
             (Self::Set(mut s1), Self::Sequence(s2)) => {
-                // Add first byte to set.
                 s1.set(s2[0]);
                 Self::Set(s1)
             }
@@ -90,7 +83,6 @@ impl AbstractStartPredicate {
         }
     }
 
-    /// Resolve ourselves to a concrete start predicate.
     fn resolve_to_insn(self) -> StartPredicate {
         match self {
             Self::Arbitrary => StartPredicate::Arbitrary,
@@ -110,9 +102,8 @@ impl AbstractStartPredicate {
     }
 }
 
-/// Compute any start-predicate for a node..
-/// If this returns None, then the instruction is conceptually zero-width (e.g.
-/// lookahead assertion) and does not contribute to the predicate.
+/// If this returns None, then the instruction is conceptually zero-width (e.g. lookahead
+/// assertion) and does not contribute to the predicate.
 /// If this returns StartPredicate::Arbitrary, then there is no predicate.
 fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
     let arbitrary = Some(AbstractStartPredicate::Arbitrary);
@@ -127,7 +118,6 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         Node::BackRef(..) => arbitrary,
 
         Node::CharSet(chars) => {
-            // Pick the first bytes out.
             let bytes = chars
                 .iter()
                 .map(|&c| utf8_first_byte(c))
@@ -187,7 +177,6 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
             ) {
                 Some(AbstractStartPredicate::disjunction(x, y))
             } else {
-                // This indicates that one of our branches could match the empty string.
                 arbitrary
             }
         }

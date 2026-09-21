@@ -628,8 +628,6 @@ struct LeafSchedule {
     fails: bool,
 }
 
-/// Runs `Promise.all([tools.x.op(), processes.await(h)])` once.
-///
 /// `tool_first` is the order the two leaves are written in, which is the order
 /// they are launched in and the order the replies come back in — never, by
 /// itself, the settlement order.

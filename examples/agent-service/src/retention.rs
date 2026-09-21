@@ -35,8 +35,6 @@ pub(crate) struct StoreRetentionReport {
     pub(crate) failures: Vec<String>,
 }
 
-/// Run the store portion of one host-owned retention pass.
-///
 /// Every lever is attempted even if an earlier one stops. The returned report
 /// makes partial progress and failures observable to the scheduler and to the
 /// deterministic example test; none of these levers is a correctness path.
@@ -111,8 +109,6 @@ pub(crate) async fn run_store_retention_pass(
     report
 }
 
-/// Run every host-owned retention lever on a real operational cadence.
-///
 /// `vacuum` is session-scoped. This example's app chat catalog is its root
 /// session catalog; process-owned sessions are not represented here and need
 /// retention owned by their process host. Store GC is a verify/repair audit;

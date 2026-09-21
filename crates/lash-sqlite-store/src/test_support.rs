@@ -1,5 +1,3 @@
-//! Test-only store probes, compiled only under `cfg(any(test, feature = "testing"))`.
-//!
 //! [`StoreTestSupport`] is the home for every `*_for_testing` hook the
 //! lash-core conformance and differential suites need from this backend; the
 //! production store traits carry none.

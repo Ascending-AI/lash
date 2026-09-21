@@ -78,9 +78,8 @@ pub async fn request_device_code() -> Result<DeviceCode, OAuthError> {
     })
 }
 
-/// Poll the device auth endpoint. Returns `Ok(Some((auth_code,
-/// code_verifier)))` when approved, `Ok(None)` when still pending,
-/// `Err` on failure.
+/// Returns `Ok(Some((auth_code, code_verifier)))` when approved, `Ok(None)` when still
+/// pending, `Err` on failure.
 pub async fn poll_device_auth(
     device_auth_id: &str,
     user_code: &str,

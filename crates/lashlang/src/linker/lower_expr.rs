@@ -51,17 +51,13 @@ impl<'module> Linker<'module> {
         result
     }
 
-    /// Dispatches one expression node to its variant's lowering.
-    ///
-    /// Every variant lowers in its own method rather than in an arm of this
-    /// match, and that split is load-bearing rather than cosmetic: this is the
-    /// recursive step, so its frame is paid once per level of source nesting,
-    /// and an unoptimized build gives a stack slot to every local of every arm
-    /// whichever arm actually runs. Collapsed into one body the arms summed to
-    /// a ~68 KiB frame, so the deepest program the parser admits
-    /// (`MAX_NESTING_DEPTH`) needed ~3 MiB to link — past the 2 MiB a host
-    /// thread gets, which turned a legal program into an abort. Split, each
-    /// level carries this dispatcher plus the one variant's frame.
+    /// Every variant lowers in its own method rather than in an arm of this match, and that
+    /// split is load-bearing rather than cosmetic: this is the recursive step, so its frame is
+    /// paid once per level of source nesting, and an unoptimized build gives a stack slot to
+    /// every local of every arm whichever arm actually runs.
+    /// Collapsed into one body the arms summed to a ~68 KiB frame, so the deepest program the
+    /// parser admits (`MAX_NESTING_DEPTH`) needed ~3 MiB to link — past the 2 MiB a host
+    /// thread gets, which turned a legal program into an abort.
     ///
     /// The same accounting is why every arm *returns* its method's `Result`
     /// instead of unwrapping it with `?` into a shared `Ok(match ..)`. Each `?`
@@ -1014,8 +1010,6 @@ impl<'module> Linker<'module> {
         ))
     }
 
-    /// Records one wait site's payload type while its process literal lifts.
-    ///
     /// A second site for the same name must agree: sites whose resolved
     /// types are mutually unassignable conflict and the link is refused; the
     /// set is structural, so an unreached branch's wait sites count.

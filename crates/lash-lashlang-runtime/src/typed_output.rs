@@ -3,8 +3,6 @@
 
 use serde_json::Value;
 
-/// Parse a tool's `output` argument into the JSON Schema it requests.
-///
 /// Two shapes are accepted:
 /// - a record of field-name → type-descriptor strings (`"str"`, `"int"`,
 ///   `"float"`, `"bool"`, `"record"`, or `"list[...]"` of those), compiled

@@ -28,8 +28,6 @@ impl ExecutionHost for Host {
     }
 }
 
-/// Runs `source` as the next cell of the session `state` carries.
-///
 /// The cell is lowered against the session's live globals and compiled on its
 /// own, which is what RLM does per cell: one fresh program, one surviving
 /// state.

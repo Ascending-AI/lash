@@ -44,7 +44,6 @@ pub struct RuntimeConfig {
     pub trace_path: Option<PathBuf>,
     /// Distinguishes this boot from the previous one for lease reclaim.
     pub incarnation: String,
-    /// Whether to mirror trace records to stderr.
     pub trace_to_stderr: bool,
     /// Optional deployment-specific lease timings.
     pub lease_timings: Option<lash::durability::LeaseTimings>,
@@ -157,8 +156,6 @@ pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque("slack-clone-bot", incarnation)
 }
 
-/// Build the standard-mode core.
-///
 /// Durability choices, all of them deliberate for an example:
 ///
 /// * **SQLite session stores** — the committed transcript, and any queued turn
@@ -357,8 +354,6 @@ fn trace_sink(config: &RuntimeConfig) -> Arc<dyn TraceSink> {
     }
 }
 
-/// Resolve the live provider and model from the environment.
-///
 /// Kept separate from [`build_core`] so tests can hand in
 /// `lash::testing::TestProvider` and never reach for a network or a key.
 pub fn provider_from_env() -> Result<(ProviderHandle, ModelSpec)> {

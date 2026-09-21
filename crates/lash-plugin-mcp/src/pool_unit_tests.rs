@@ -576,8 +576,7 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
         mcp: crate::McpToolProvider::new(Arc::clone(&pool)),
     }));
 
-    // Reap every stdio child before making assertions that can panic. With the
-    // reservation reverted, the rejected attach above becomes a second child.
+    // With the reservation reverted, the rejected attach above becomes a second child.
     pool.shutdown_all().await;
 
     let registry =

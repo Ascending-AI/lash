@@ -1,5 +1,4 @@
-//! [`PluginFactory`] for MCP integration. Holds a shared connection pool
-//! across every session built from the same `LashCore`.
+//! [`PluginFactory`] for MCP integration.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -20,8 +19,7 @@ use crate::host::{
 };
 use crate::pool::McpConnectionPool;
 
-/// Plugin factory for MCP. Add once to `LashCoreBuilder` via
-/// `.plugin(Arc::new(factory))`.
+/// Plugin factory for MCP.
 pub struct McpPluginFactory {
     pool: Arc<McpConnectionPool>,
 }
@@ -34,13 +32,11 @@ pub struct McpPluginFactoryBuilder {
 }
 
 impl McpPluginFactoryBuilder {
-    /// Route `sampling/createMessage` through the supplied host handler.
     pub fn sampling_handler(mut self, handler: Arc<dyn McpSamplingHandler>) -> Self {
         self.host_services.sampling = Some(handler);
         self
     }
 
-    /// Route `elicitation/create` through the supplied host handler.
     pub fn elicitation_handler(mut self, handler: Arc<dyn McpElicitationHandler>) -> Self {
         self.elicitation_handler = Some(handler);
         self
@@ -52,7 +48,6 @@ impl McpPluginFactoryBuilder {
         self
     }
 
-    /// Connect the configured servers and build the factory.
     pub async fn build(mut self) -> Result<McpPluginFactory, McpError> {
         if let Some(handler) = self.elicitation_handler {
             let capability = handler.capability();
@@ -74,19 +69,16 @@ impl McpPluginFactoryBuilder {
 }
 
 impl McpPluginFactory {
-    /// Connect to every configured server and return a factory whose pool is
-    /// ready to use. Servers are tried eagerly, but one being down never
-    /// fails construction — the pool keeps reconnecting in the background and
-    /// the server's tools become available once it comes up. Only
-    /// configuration errors fail. The pool is `Arc`-shared across sessions;
-    /// cloning the factory and adding it to multiple `LashCore`s shares the
-    /// same connections.
+    /// Servers are tried eagerly, but one being down never fails construction — the pool keeps
+    /// reconnecting in the background and the server's tools become available once it comes
+    /// up.
+    /// Only configuration errors fail.
+    /// The pool is `Arc`-shared across sessions; cloning the factory and adding it to multiple
+    /// `LashCore`s shares the same connections.
     pub async fn new(servers: BTreeMap<String, McpServerConfig>) -> Result<Self, McpError> {
         Self::builder(servers).build().await
     }
 
-    /// Configure servers together with optional host-owned sampling,
-    /// elicitation, and roots handlers.
     pub fn builder(servers: BTreeMap<String, McpServerConfig>) -> McpPluginFactoryBuilder {
         McpPluginFactoryBuilder {
             servers,
@@ -174,7 +166,6 @@ impl SessionPlugin for McpSessionPlugin {
 }
 
 /// The `ToolProvider` actually registered with each session's tool catalog.
-/// Delegates definitions and execution to the shared pool.
 pub struct McpToolProvider {
     pool: Arc<McpConnectionPool>,
 }

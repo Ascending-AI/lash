@@ -15,8 +15,7 @@ pub const INSERT_COLUMNS: &str = "owner_kind, owner_id";
 crate::statements! {
     /// `artifact_owner_retirements` statements both backends issue verbatim.
     pub struct OwnerRetirementStatements @ "artifact_owner_retirement" {
-        /// Whether owner `?1`/`?2` has been permanently retired. Read before
-        /// every publish, retain and transfer destination.
+        /// Read before every publish, retain and transfer destination.
         select_is_retired = "SELECT EXISTS (
                  SELECT 1 FROM artifact_owner_retirements
                  WHERE owner_kind = ?1 AND owner_id = ?2

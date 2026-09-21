@@ -28,7 +28,7 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Debug, Parser)]
 #[command(name = "lash-perf", version)]
 struct Args {
-    /// Read-only companion commands. Omitted, the binary runs the benchmark.
+    /// Omitted, the binary runs the benchmark.
     #[command(subcommand)]
     command: Option<Command>,
 
@@ -88,8 +88,6 @@ struct Args {
     #[arg(long, default_value_t = 32)]
     runtime_perf_checkpoint_components: usize,
 
-    /// Open-loop arrivals per second for high-traffic scenarios; zero starts
-    /// every session immediately
     #[arg(long, default_value_t = 0)]
     runtime_perf_load_arrival_rate: u64,
 
@@ -112,7 +110,6 @@ struct Args {
     #[arg(long, value_name = "BYTES")]
     runtime_perf_worker_stack_bytes: Option<usize>,
 
-    /// Exit non-zero when a runtime perf budget is exceeded
     #[arg(long)]
     runtime_perf_enforce_budgets: bool,
 
@@ -129,9 +126,7 @@ struct Args {
     #[arg(long)]
     runtime_perf_smoke: bool,
 
-    /// Append this run's per-scenario wall-clock and whole-window duration
-    /// medians to a history and print the trend table. Advisory in every
-    /// context: drift is warned about, never enforced (FIG-1385).
+    /// Advisory in every context: drift is warned about, never enforced (FIG-1385).
     #[arg(long, value_name = "HISTORY.jsonl")]
     runtime_perf_duration_history: Option<std::path::PathBuf>,
 
@@ -146,8 +141,6 @@ enum Command {
     /// Print the advisory duration trend table for an existing history file
     /// without running the benchmark.
     DurationTrend {
-        /// Append-only JSONL history written by
-        /// `--runtime-perf-duration-history`.
         #[arg(long, value_name = "HISTORY.jsonl")]
         history: std::path::PathBuf,
 

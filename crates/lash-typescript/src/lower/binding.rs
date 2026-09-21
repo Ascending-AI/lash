@@ -142,8 +142,6 @@ impl super::Lowerer {
         Ok(())
     }
 
-    /// Records what the binding `name` resolves to *is*.
-    ///
     /// The role is learned from the initializer, so it is always set after the
     /// declaration that a lexical scope hoists — the same resolution `binding`
     /// performs, against the same scope stack, so the fact lands on the

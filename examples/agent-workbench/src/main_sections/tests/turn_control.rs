@@ -842,8 +842,6 @@ finish(await handle);
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
-/// Hold both receipts at terminal attachment so both HTTP handlers have
-/// addressed the same gate before either can remove the active route.
 struct ConcurrentCancelTerminal {
     state: AppState,
     attached: tokio::sync::Barrier,

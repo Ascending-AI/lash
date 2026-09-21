@@ -295,8 +295,6 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
 /// the assistant-content event carrying that prose, and the protocol feedback
 /// message written after it. Dropping only the trajectory entry would leave its
 /// prose to fold into the *next* cell and its repair instruction pointing at
-/// nothing.
-///
 /// Every one of those four is identified by *provenance*, never by role or
 /// position. Only this plugin's own output is the plugin's to delete.
 fn superseded_failure_indices(
@@ -382,8 +380,7 @@ fn is_rlm_protocol_message(
     )
 }
 
-/// Emit a buffered prose as a standalone assistant message (a prose-only
-/// finish). Carries nothing for empty prose with no images.
+/// Carries nothing for empty prose with no images.
 fn flush_pending_prose(messages: &mut Vec<LlmMessage>, pending: &mut Option<PendingProse>) {
     if let Some(prose) = pending.take() {
         if prose.text.trim().is_empty()
@@ -559,10 +556,9 @@ fn message_text(
     out
 }
 
-/// The user observation message for a step: printed outputs (with re-fetch
-/// handles), images, executed calls, error, and final value. Calls intentionally
-/// render even on success: the model pays the token cost to distinguish work
-/// that ran from work that failed before dispatch. Never empty.
+/// The user observation message for a step: printed outputs (with re-fetch handles), images,
+/// executed calls, error, and final value.
+/// Never empty.
 pub(crate) fn step_output_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,

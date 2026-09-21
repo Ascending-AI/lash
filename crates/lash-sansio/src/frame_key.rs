@@ -38,8 +38,6 @@ impl std::fmt::Display for FrameKeyError {
 impl std::error::Error for FrameKeyError {}
 
 impl FrameKey {
-    /// Derives a frame key for one tool call in one frame lineage.
-    ///
     /// A redrive preserves all three inputs, while two distinct calls in the
     /// same frame have distinct `tool_call_id` values.
     pub fn from_call_site(session_id: &SessionId, frame_lineage: &str, tool_call_id: &str) -> Self {

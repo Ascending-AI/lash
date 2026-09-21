@@ -35,7 +35,6 @@ enum OperationOutputContract {
 }
 
 impl OperationContract {
-    /// Declares an operation whose input and output shapes are both fixed.
     pub fn new(input_schema: serde_json::Value, output_schema: serde_json::Value) -> Self {
         Self {
             input_schema,
@@ -43,7 +42,6 @@ impl OperationContract {
         }
     }
 
-    /// Declares an operation whose output shape is named by one of its inputs.
     pub fn from_input_field(
         input_schema: serde_json::Value,
         input_field: impl Into<String>,
@@ -520,9 +518,6 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
-    /// Records a trigger source a program referenced, keeping the whole
-    /// binding.
-    ///
     /// The provider identity and authorized route ride along deliberately: a
     /// registration executed from a durable process reads its source contract
     /// and route out of these captured requirements, long after the link
@@ -805,9 +800,6 @@ impl LashlangHostCatalog {
             .is_some_and(|module| module.operations.contains_key(operation))
     }
 
-    /// Removes one exact callable module binding from an effective link
-    /// environment.
-    ///
     /// Deferred-resolution replay uses this before applying its recorded
     /// outcome, so a later ambient definition cannot shadow the authority
     /// captured for the same call path. Resource-operation schema is removed
@@ -855,9 +847,8 @@ impl LashlangHostCatalog {
         self.value_constructors.contains_key(path)
     }
 
-    /// Remove one trigger-source constructor and its source/event schema from
-    /// an effective link catalog. Replay uses this to ensure a recorded result
-    /// wins over a later ambient definition for the same constructor path.
+    /// Replay uses this to ensure a recorded result wins over a later ambient definition for
+    /// the same constructor path.
     pub fn mask_trigger_source_constructor(&mut self, path: &str) {
         let event_name = self
             .trigger_sources

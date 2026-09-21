@@ -32,8 +32,6 @@ const DEFAULT_ATTACH_CEILING_MS: u64 = 6 * 60 * 60 * 1_000;
 pub struct RestateAuthorityId(Arc<str>);
 
 impl RestateAuthorityId {
-    /// Bind this process to a configured Restate trust domain.
-    ///
     /// The value must remain stable across handler restarts and ingress URL
     /// moves. It must change when the backing Restate state changes.
     pub fn new(value: impl AsRef<str>) -> Result<Self, lash_core::RuntimeError> {
@@ -542,7 +540,6 @@ impl RestateIngressClient {
         decode_response("Restate workflow call", &url, response).await
     }
 
-    /// Invoke a no-argument workflow handler and decode its JSON response.
     pub async fn call_workflow_empty<R>(
         &self,
         workflow: &str,
@@ -593,9 +590,9 @@ impl RestateIngressClient {
         decode_response("Restate object call", &url, response).await
     }
 
-    /// Invoke a no-argument object handler. Restate's ingress rejects calls to
-    /// zero-input handlers that carry a body or content-type, so this posts an
-    /// empty request and ignores the (empty or `null`) response payload.
+    /// Restate's ingress rejects calls to zero-input handlers that carry a body or
+    /// content-type, so this posts an empty request and ignores the (empty or `null`) response
+    /// payload.
     pub async fn call_object_empty(
         &self,
         object: &str,
@@ -804,7 +801,6 @@ impl RestateAdminClient {
         .await
     }
 
-    /// Count open Restate invocations grouped by their pinned deployment.
     pub async fn open_invocations_by_deployment(
         &self,
     ) -> Result<Vec<DeploymentOpenInvocations>, RestateHttpError> {
@@ -1017,7 +1013,6 @@ impl RestateInvocationStatus {
     }
 }
 
-/// Number of open Restate invocations associated with one deployment.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct DeploymentOpenInvocations {
     #[serde(default)]

@@ -37,9 +37,6 @@ impl AppState {
         self.core.session(session_id).session_spec(spec)
     }
 
-    /// Opens a session through [`Self::session_builder`], so every open states
-    /// the model this workbench means that session to run.
-    ///
     /// `surface` names the caller on the contention traces this open records,
     /// so a contention storm reads as which route is contending rather than as
     /// an unattributed count (FIG-3151).
@@ -232,9 +229,6 @@ impl AppState {
         );
     }
 
-    /// Delete `session_id`, reclaim the finished work it left behind, and report
-    /// what the reclamation removed.
-    ///
     /// Both halves live in one place, but only the runtime delete decides the
     /// session fence: it durably retires the id, then the retention lever
     /// reclaims globally-owned process rows the delete deliberately only
@@ -853,8 +847,6 @@ impl WorkbenchSessions {
         entry
     }
 
-    /// Register a session the roster has not seen, keeping any row it has.
-    ///
     /// This is how the boot session joins the roster: a row that already
     /// exists wins.
     pub(crate) fn ensure(&self, session_id: &SessionId) {
@@ -905,8 +897,6 @@ impl WorkbenchSessions {
         entries
     }
 
-    /// Make a rostered session the one a query-less API call resolves to.
-    ///
     /// Selection is durable for the same reason the boot id is: a reload, a
     /// restart, and the drivers that read `<data-dir>/session-id` must all
     /// agree on which session the workbench is serving.
@@ -1086,8 +1076,6 @@ pub(crate) async fn apply_model_selection_to_session(
     Ok(())
 }
 
-/// Whether the reply this turn produced is the workbench's to commit.
-///
 /// The runtime owns a turn's assistant output. A turn that finishes *as* an
 /// assistant message has already had that text committed once — by the protocol
 /// during the turn, or by the turn boundary materializing the terminal output —

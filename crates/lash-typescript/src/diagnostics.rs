@@ -491,9 +491,6 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    /// Builds a diagnostic, splitting any repair text the message carries into
-    /// [`Diagnostic::suggestions`].
-    ///
     /// The crate's rejections were authored as `"Unsupported: <refusal>.
     /// <rewrite>"` — one string, two jobs. Splitting here rather than at 34 call
     /// sites keeps the convention in one place and makes the migration total:
@@ -650,8 +647,6 @@ impl fmt::Display for Diagnostic {
 
 impl std::error::Error for Diagnostic {}
 
-/// Renders a diagnostic against the source the model actually submitted.
-///
 /// [`Diagnostic`]'s `Display` has no source to consult, so it can only name the
 /// code and the refusal — which is what the RLM executor sent, discarding the
 /// span every diagnostic already carried. A model that is told *what* is wrong
@@ -857,14 +852,13 @@ mod tests {
 
     /// The three per-site codes must never be answered by a table.
     ///
-    /// This is the check that would have caught both earlier attempts. Deriving
-    /// the answer from `accepted_idiom().is_some()` filed every arity mistake
-    /// under "refused"; excluding the codes wholesale filed the entire
-    /// determinism-refusal set — `Promise.then`, `crypto.randomUUID`,
-    /// `localeCompare`, the local-time `Date` readers — under "your program is
-    /// wrong", which sends a model debugging something the runtime will never
-    /// run. Neither a default nor an exclusion is available now: the site says,
-    /// or the crate does not compile past this test.
+    /// Deriving the answer from `accepted_idiom().is_some()` filed every arity mistake under
+    /// "refused"; excluding the codes wholesale filed the entire determinism-refusal set —
+    /// `Promise.then`, `crypto.randomUUID`, `localeCompare`, the local-time `Date` readers —
+    /// under "your program is wrong", which sends a model debugging something the runtime will
+    /// never run.
+    /// Neither a default nor an exclusion is available now: the site says, or the crate does
+    /// not compile past this test.
     ///
     /// Read from the crate's own sources rather than exercised through inputs,
     /// because the property is about *every* site, including ones no fixture

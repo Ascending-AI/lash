@@ -450,8 +450,6 @@ async fn a_reset_whose_request_goes_away_still_takes_the_roster_off_the_tombston
         }
     });
 
-    // Wait until the delete is attached, which is where the reproduction's
-    // request sat for twenty-one seconds.
     let attached = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let request = restate_requests

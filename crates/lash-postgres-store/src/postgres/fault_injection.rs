@@ -97,7 +97,6 @@ pub struct PostgresFaultInjector {
 }
 
 impl PostgresFaultInjector {
-    /// Arm one seed-selected fault point at its next reached occurrence.
     pub fn arm(&self, seed: u64, point: PostgresFaultPoint) {
         self.arm_many([PostgresFaultArm::new(seed, point, NonZeroU64::MIN)]);
     }
@@ -116,7 +115,6 @@ impl PostgresFaultInjector {
         state.point_occurrences = [0; 3];
     }
 
-    /// Return the unconsumed arms in their original plan order.
     pub fn remaining_arms(&self) -> Vec<PostgresFaultArm> {
         self.lock_state()
             .armed

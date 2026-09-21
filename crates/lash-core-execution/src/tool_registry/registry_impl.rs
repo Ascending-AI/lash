@@ -1,8 +1,6 @@
 use super::*;
 
 impl ToolRegistry {
-    /// Builds a `ToolRegistry` from tool provider data for protocol and process-engine implementors
-    /// while preparing or executing plugin and tool work.
     pub fn from_tool_provider(provider: Arc<dyn ToolProvider>) -> Result<Self, ReconfigureError> {
         let registry = Self::empty();
         registry.upsert_source(Arc::new(ToolProviderSource::new(
@@ -12,9 +10,7 @@ impl ToolRegistry {
         Ok(registry)
     }
 
-    /// Build a registry from one leaf provider plus completed first-party
-    /// orchestrating definitions. The two registration lanes must have
-    /// disjoint tool ids.
+    /// The two registration lanes must have disjoint tool ids.
     pub fn from_tool_provider_with_orchestrating_tools(
         provider: Arc<dyn ToolProvider>,
         orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
@@ -63,9 +59,6 @@ impl ToolRegistry {
         Ok(registry)
     }
 
-    /// Build a registry containing only explicit internal process tool
-    /// definitions, for hosts and tests that need an internal-only registry
-    /// without a leaf provider.
     pub fn from_internal_tools(
         definitions: Vec<crate::InternalProcessToolDef>,
     ) -> Result<Self, ReconfigureError> {

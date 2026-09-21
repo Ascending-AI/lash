@@ -237,8 +237,6 @@ impl TurnWorkDriver {
         }
     }
 
-    /// Bind control to a deployment catalog for arbitrary-session addressing.
-    ///
     /// Each request resolves its store from this same catalog. This is the
     /// remote/admin form; an already-opened session uses [`Self::for_session`].
     pub fn for_catalog(
@@ -828,9 +826,6 @@ async fn effective_cancel_evidence(
     }
 }
 
-/// Close escalation admission for a turn-ending decision and return the
-/// winner that was accepted before that closure.
-///
 /// The base gate remains the cancellation/completion authority. Its
 /// `AfterStep` winner deliberately leaves a second first-writer promise open
 /// while the turn is live so an `Immediate` request can escalate it. An
@@ -1155,10 +1150,9 @@ impl ActiveTurnControl {
 
     /// Live watch for a cancellation the turn must honour now.
     ///
-    /// Returns immediate evidence as soon as the gate resolves with it. An
-    /// after-step gate is deferred instead and the watch moves on to the
-    /// escalation promise: only an escalation makes this return, so the
-    /// caller fires the cooperative token exactly for immediate stops.
+    /// An after-step gate is deferred instead and the watch moves on to the escalation
+    /// promise: only an escalation makes this return, so the caller fires the cooperative
+    /// token exactly for immediate stops.
     pub async fn await_cancel(
         &self,
         resolver: &dyn AwaitEventResolver,
@@ -1192,11 +1186,9 @@ impl ActiveTurnControl {
 
     /// Journaled observation of the cancellation gate at one replay identity.
     ///
-    /// Returns the evidence the turn honours at this identity. An after-step
-    /// request is honoured at the start gate, the post-abort gate, and its own
-    /// step boundary; at a mid-run peek it is deferred and only an escalation
-    /// (peeked under a derived identity, so replay stays deterministic) makes
-    /// the turn stop there.
+    /// An after-step request is honoured at the start gate, the post-abort gate, and its own
+    /// step boundary; at a mid-run peek it is deferred and only an escalation (peeked under a
+    /// derived identity, so replay stays deterministic) makes the turn stop there.
     pub async fn observe_pending_cancel(
         &self,
         controller: &ScopedEffectController<'_>,
@@ -1239,9 +1231,8 @@ impl ActiveTurnControl {
         Ok(Some(honoured))
     }
 
-    /// Resolve this turn's own gate with internal after-step evidence when a
-    /// process-local stop asked for it. Runs before the step-boundary peek so
-    /// the journaled peek, not process-local state, is what replay sees.
+    /// Runs before the step-boundary peek so the journaled peek, not process-local state, is
+    /// what replay sees.
     pub async fn resolve_local_after_step(
         &self,
         resolver: &dyn AwaitEventResolver,

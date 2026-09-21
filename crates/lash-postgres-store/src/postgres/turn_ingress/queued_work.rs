@@ -30,9 +30,6 @@ lash_store_sql::statements! {
                  'enqueue_seq'
              ))";
 
-        /// Enqueue batch `?2` for session `?3` at sequence `?1`, keeping an
-        /// existing batch under the same source key and returning the id that
-        /// was written.
         insert_new = "INSERT INTO queued_work_batches (
                  enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
                  authority_json, merge_key, available_at_ms, enqueued_at_ms
@@ -279,8 +276,6 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `queued_work_items` statements only PostgreSQL issues.
     pub(crate) struct QueuedItemPostgresStatements @ "queued_work_item" {
-        /// Delete every item of session `?1`'s batches, on session deletion.
-        ///
         /// SQLite gets this from the foreign key's `ON DELETE CASCADE`; this
         /// schema's constraint is not declared cascading, so the sweep names
         /// the rows itself.

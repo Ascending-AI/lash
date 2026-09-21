@@ -92,10 +92,10 @@ impl PostgresSessionStore {
             if !retained.insert(checkpoint_hash.clone()) {
                 continue;
             }
-            // A rooted manifest is live. Decode it and retain every component
-            // blob it references. A present-yet-undecodable manifest is a
-            // hard error so GC aborts rather than dropping a live checkpoint's
-            // children; an absent one was already collected on a prior run.
+            // A rooted manifest is live.
+            // A present-yet-undecodable manifest is a hard error so GC aborts rather than
+            // dropping a live checkpoint's children; an absent one was already collected on a
+            // prior run.
             let bytes: Option<Vec<u8>> =
                 sqlx::query_scalar(crate::blobs::blob_sql().shared.select_content.sql())
                     .bind(&checkpoint_hash)

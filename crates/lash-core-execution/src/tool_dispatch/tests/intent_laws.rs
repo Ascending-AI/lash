@@ -1015,7 +1015,6 @@ async fn crashed_trigger_intent_redrive(
     (store, subscription, redriven)
 }
 
-/// Reads the single executed trigger outcome and its occurrence id.
 fn executed_trigger_outcome(
     outcome: &crate::tool_dispatch::ToolDispatchOutcome,
 ) -> (&serde_json::Value, String) {

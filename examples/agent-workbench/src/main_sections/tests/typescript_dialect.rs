@@ -365,8 +365,6 @@ impl TutorialHost {
         }
     }
 
-    /// Resolves the call the way the real runtime does, then answers it.
-    ///
     /// Resolution goes through `resolve_lashlang_module_operation`, the same
     /// function `LashlangExecutionHost` uses, so a renamed or moved binding
     /// surfaces as an unanswered operation instead of falling into a default.
@@ -432,7 +430,6 @@ impl lashlang::ExecutionHost for TutorialHost {
     }
 }
 
-/// Runs one tutorial cell through the dialect's own lower/link/compile path.
 async fn run_tutorial(source: &str) -> Result<lashlang::ExecutionOutcome, String> {
     let host = TutorialHost::new();
     let linked = lash_typescript::link(source, &host.environment)
@@ -789,9 +786,8 @@ async fn a_cell_reads_what_an_earlier_cell_bound_in_both_dialects() {
         .await;
     }
 
-    // The second turn's answer is the value the *first* turn bound, and the
-    // third turn's is the rebound one. Read from the rendered transcript,
-    // which is what a host and a judged row see.
+    // The second turn's answer is the value the *first* turn bound, and the third turn's is
+    // the rebound one.
     let Json(projected) = app_state(
         State(state.clone()),
         Query(SessionQuery {

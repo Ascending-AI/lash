@@ -236,8 +236,6 @@ pub struct SqliteFaultInjector {
 }
 
 impl SqliteFaultInjector {
-    /// Arm one seed-selected fault point at its next reached occurrence.
-    ///
     /// This preserves the original replacement behavior: any unconsumed
     /// single or multi-arm plan is discarded.
     pub fn arm(&self, seed: u64, point: SqliteFaultPoint) {
@@ -258,7 +256,6 @@ impl SqliteFaultInjector {
         state.point_occurrences = [0; 3];
     }
 
-    /// Return the unconsumed arms in their original plan order.
     pub fn remaining_arms(&self) -> Vec<SqliteFaultArm> {
         self.lock_state()
             .armed

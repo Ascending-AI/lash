@@ -52,15 +52,11 @@ pub struct RemoteTurnActivity {
 }
 
 impl RemoteTurnActivity {
-    /// Encodes one standalone activity inside the shared protocol envelope.
     /// Activities nested in reports or observations remain bare bodies.
     pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         crate::Envelope::new(self).encode_json()
     }
 
-    /// Decodes one JSON activity with the version gate ahead of the flattened
-    /// event vocabulary.
-    ///
     /// A previous peer cannot deserialize a newly added `type` variant. Probe
     /// the sibling version first so that mixed-version streams return
     /// [`RemoteProtocolError::UnsupportedProtocolVersion`] instead of an

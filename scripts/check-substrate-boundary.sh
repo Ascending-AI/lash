@@ -135,7 +135,7 @@ clock_exemption_is_allowlisted() {
     crates/lash-core/src/runtime/event_pump.rs:41)
       [[ $source == *'tokio::task::yield_now()'* ]]
       ;; # Cooperative scheduling only; no time value participates in behavior.
-    crates/lash-core/src/runtime/commit_admission.rs:239)
+    crates/lash-core/src/runtime/commit_admission.rs:237)
       [[ $source == *'tokio::time::sleep(self.inner.wait_ttl)'* ]]
       ;; # Process-local admission timeout; no durable timestamp or ordering fact.
     *)

@@ -194,11 +194,8 @@ impl McpElicitationHandler for DemoElicitationHandler {
                     };
                     content.insert(name.clone(), answer);
                 }
-                // The book is keyed by name, not by type, so its answer can
-                // still be the wrong shape for this server's schema. Validate
-                // before sending: a decline is a legitimate MCP answer, while
-                // content that fails the schema the server just published is a
-                // protocol violation the host would be committing knowingly.
+                // The book is keyed by name, not by type, so its answer can still be the wrong
+                // shape for this server's schema.
                 match request.accept(Value::Object(content)) {
                     Ok(result) => Ok(result),
                     Err(error) => {
@@ -259,8 +256,6 @@ impl DemoRootsProvider {
     }
 
     /// Publish another root, replacing any root already at the same URI.
-    ///
-    /// Returns the number of roots the host now publishes.
     pub async fn publish(&self, uri: String, name: Option<String>) -> usize {
         let mut roots = self.roots.write().await;
         roots.retain(|root| root.uri != uri);

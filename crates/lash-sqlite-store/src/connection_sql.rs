@@ -71,9 +71,6 @@ pub(crate) const SELECT_PROCESS_REGISTRY_USER_VERSION: &str =
 /// The schema generation the connection's own database carries.
 pub(crate) const SELECT_USER_VERSION: &str = "PRAGMA user_version";
 
-/// Whether an attached process registry has been provisioned far enough to
-/// carry its central table.
-///
 /// The catalog read, not a read of the table itself: a registry mid-creation
 /// has the file and the version counter but not yet the rows, and asking the
 /// catalog distinguishes "not provisioned yet" from "provisioned and empty".

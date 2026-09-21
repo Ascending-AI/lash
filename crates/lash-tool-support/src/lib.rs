@@ -10,7 +10,6 @@ pub fn invalid_tool_args(message: impl Into<String>) -> ToolOutcome {
     ToolOutcome::failure(ToolFailure::invalid_request("invalid_tool_args", message))
 }
 
-/// Parse an optional positive integer arg.
 /// Accepts `null` or `"none"` when `allow_none` is true.
 pub fn parse_optional_usize_arg(
     args: &serde_json::Value,

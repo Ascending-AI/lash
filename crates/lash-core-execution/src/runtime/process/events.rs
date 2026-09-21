@@ -131,13 +131,10 @@ pub enum ProcessCompletionAuthority {
 }
 
 impl ProcessCompletionAuthority {
-    /// Construct [`ExternalOwner`](Self::ExternalOwner) authority.
     pub fn external_owner() -> Self {
         Self::ExternalOwner
     }
 
-    /// Construct [`WorkflowKey`](Self::WorkflowKey) authority naming the
-    /// coalescing key that serves as the substrate's single-writer discipline.
     pub fn workflow_key(workflow_key: impl Into<String>) -> Self {
         Self::WorkflowKey {
             workflow_key: workflow_key.into(),
@@ -580,8 +577,6 @@ pub struct ProcessEventAppendRequest {
     pub payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay: Option<crate::RuntimeReplay>,
-    /// Whether this append withholds the wake its event type declares.
-    ///
     /// A wake is what a process *says to the session*, and the default is to
     /// say it. An append sets this when the fact it records is not news to the
     /// session: the runtime's own announcement of a call the session is already

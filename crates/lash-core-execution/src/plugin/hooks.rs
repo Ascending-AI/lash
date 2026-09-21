@@ -48,8 +48,6 @@ pub type ToolCatalogContributor =
     Arc<dyn Fn(ToolCatalogContext) -> Result<ToolCatalogContribution, PluginError> + Send + Sync>;
 pub type AssistantStreamHook =
     Arc<dyn Fn(AssistantStreamHookContext) -> PluginFuture<AssistantStreamTransform> + Send + Sync>;
-/// Derives the host-visible assistant response from the raw provider completion.
-///
 /// **This hook is at-least-once, and idempotency is your obligation.** It runs
 /// as phase 2 of a staged effect boundary: the raw completion is journaled
 /// first, so it is durable before this hook is ever called and is never

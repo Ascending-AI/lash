@@ -439,11 +439,10 @@ impl RuntimeExecutionContext<'_> {
                 .iter()
                 .map(|(index, _, _, _)| *index)
                 .collect::<Vec<_>>();
-            // Validate before translating. Dropping an out-of-range position
-            // and back-filling the gap would turn any malformed order into a
-            // clean-looking input-order permutation, which is exactly the
-            // rejection selection this field exists to prevent — the defect
-            // would be repaired into invisibility instead of failing closed.
+            // Dropping an out-of-range position and back-filling the gap would turn any
+            // malformed order into a clean-looking input-order permutation, which is exactly
+            // the rejection selection this field exists to prevent — the defect would be
+            // repaired into invisibility instead of failing closed.
             if let Err(reason) =
                 validate_batch_settlement_order(&outcome.settlement_order, batch_call_indices.len())
             {

@@ -84,8 +84,7 @@ struct RegisteredTurnCancel {
 }
 
 impl TurnCancelRegistry {
-    /// Register the token of a turn that is about to execute. The guard
-    /// removes the entry when the turn finishes, however it finishes.
+    /// The guard removes the entry when the turn finishes, however it finishes.
     fn register(
         &self,
         token: CancellationToken,
@@ -172,8 +171,6 @@ pub struct TurnBuilder {
 }
 
 impl TurnBuilder {
-    /// Install a process-local cooperative token.
-    ///
     /// This low-level hook remains for provider plumbing, shutdown, and tests.
     /// Host-facing stop controls should use `TurnWorkDriver::request_cancel`
     /// with an exact session/turn address. If this token fires, cancellation
@@ -187,8 +184,6 @@ impl TurnBuilder {
         self
     }
 
-    /// Install a process-local token with an opaque host-defined origin.
-    ///
     /// Lash records the value without interpreting it.
     pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
         self.cancel = cancel;
@@ -197,7 +192,6 @@ impl TurnBuilder {
         self
     }
 
-    /// Configures the protocol turn options and returns the updated builder.
     pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
         self.protocol_turn_options = Some(options);
         self
@@ -209,8 +203,6 @@ impl TurnBuilder {
         self
     }
 
-    /// Configures the physical turn id and returns the updated builder.
-    ///
     /// Hosts must keep this id unique within the session. Reusing it addresses
     /// the same trace, effects, and cancellation promises as the earlier turn;
     /// Lash does not mint or check uniqueness for host-supplied ids.
@@ -219,13 +211,11 @@ impl TurnBuilder {
         self
     }
 
-    /// Configures the prompt template and returns the updated builder.
     pub fn prompt_template(mut self, template: PromptTemplate) -> Self {
         self.input.turn_context.set_prompt_template(template);
         self
     }
 
-    /// Configures the prompt contribution and returns the updated builder.
     pub fn prompt_contribution(mut self, contribution: PromptContribution) -> Self {
         self.input
             .turn_context
@@ -245,13 +235,11 @@ impl TurnBuilder {
         self
     }
 
-    /// Clears prompt slot.
     pub fn clear_prompt_slot(mut self, slot: PromptSlot) -> Self {
         self.input.turn_context.clear_prompt_slot(slot);
         self
     }
 
-    /// Configures the prompt layer and returns the updated builder.
     pub fn prompt_layer(mut self, layer: PromptLayer) -> Self {
         self.input.turn_context.set_prompt_layer(layer);
         self
@@ -270,7 +258,6 @@ impl TurnBuilder {
         })
     }
 
-    /// Runs and collects activity using a borrowed effect controller.
     pub async fn run_with_effects(
         self,
         controller: &dyn RuntimeEffectController,
@@ -306,7 +293,6 @@ impl TurnBuilder {
             .await
     }
 
-    /// Starts streaming the configured operation.
     pub fn stream(self) -> Result<TurnStream> {
         let effect_host = Arc::clone(&self.effect_host);
         self.stream_with_effect_host(effect_host.as_ref())
@@ -356,7 +342,6 @@ impl TurnBuilder {
         Ok((self.runtime, self.input, self.cancel, cancel_guard))
     }
 
-    /// Runs and streams activity using a borrowed effect controller.
     pub async fn stream_to_with_effects(
         self,
         events: &dyn TurnActivitySink,
@@ -460,7 +445,6 @@ impl AdvancedTurn {
         })
     }
 
-    /// Collects the scoped turn stream into its final output.
     pub async fn collect_with_scope(
         self,
         events: &dyn TurnActivitySink,
@@ -480,7 +464,6 @@ impl AdvancedTurn {
         })
     }
 
-    /// Runs the turn in an explicit effect scope while streaming semantic activity.
     pub async fn stream_to_with_scope(
         self,
         events: &dyn TurnActivitySink,
@@ -494,7 +477,6 @@ impl AdvancedTurn {
             .await
     }
 
-    /// Starts a raw runtime event stream in an explicit effect scope.
     pub fn stream_with_scope(
         self,
         scoped_effect_controller: ScopedEffectController<'static>,
@@ -506,7 +488,6 @@ impl AdvancedTurn {
             .stream_with_scope(scoped_effect_controller, turn_id)
     }
 
-    /// Run the turn while sending raw lower-level runtime events to `events`.
     pub async fn collect_session_events_with_scope(
         self,
         events: &dyn EventSink,
@@ -534,7 +515,6 @@ pub struct TurnStream {
 }
 
 impl TurnStream {
-    /// Waits for and returns the next turn activity.
     pub async fn next_activity(&mut self) -> Option<Result<TurnActivity>> {
         self.activities.recv().await
     }
@@ -589,7 +569,6 @@ pub struct QueuedTurnBuilder {
 }
 
 impl QueuedTurnBuilder {
-    /// Install a process-local token whose origin is unknown.
     pub fn cancel(mut self, cancel: CancellationToken) -> Self {
         self.cancel = cancel;
         self.cancel_origin_hint = TurnCancelOriginHint::default();
@@ -597,8 +576,6 @@ impl QueuedTurnBuilder {
         self
     }
 
-    /// Install a process-local token with an opaque host-defined origin.
-    ///
     /// Lash records the value without interpreting it.
     pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
         self.cancel = cancel;
@@ -607,8 +584,6 @@ impl QueuedTurnBuilder {
         self
     }
 
-    /// Configures the physical turn id and returns the updated builder.
-    ///
     /// Hosts must keep this id unique within the session. Reusing it addresses
     /// the same trace, effects, and cancellation promises as the earlier turn;
     /// Lash does not mint or check uniqueness for host-supplied ids.
@@ -656,7 +631,6 @@ impl QueuedTurnBuilder {
         }))
     }
 
-    /// Runs and collects activity using a borrowed effect controller.
     pub async fn run_with_effects(
         self,
         controller: &dyn RuntimeEffectController,
@@ -681,7 +655,6 @@ impl QueuedTurnBuilder {
             .await
     }
 
-    /// Converts this builder into its advanced queued-turn facade.
     pub fn advanced(self) -> AdvancedQueuedTurn {
         AdvancedQueuedTurn { builder: self }
     }
@@ -724,7 +697,6 @@ impl QueuedTurnBuilder {
         ))
     }
 
-    /// Runs and streams activity using a borrowed effect controller.
     pub async fn stream_to_with_effects(
         self,
         events: &dyn TurnActivitySink,
@@ -834,8 +806,6 @@ impl SelectedQueuedTurnBuilder {
         self
     }
 
-    /// Configures the physical id of any selected turn.
-    ///
     /// Mutually exclusive with [`Self::drain_id`]. See
     /// [`QueuedTurnBuilder::turn_id`] for the identity contracts.
     pub fn turn_id(mut self, id: impl Into<TurnId>) -> Self {
@@ -843,8 +813,7 @@ impl SelectedQueuedTurnBuilder {
         self
     }
 
-    /// Sets the effect-scope identity for any selected turn. By default Lash
-    /// uses the first batch ID, or a fresh identity for an empty selection.
+    /// By default Lash uses the first batch ID, or a fresh identity for an empty selection.
     ///
     /// Mutually exclusive with [`Self::turn_id`]. See
     /// [`QueuedTurnBuilder::drain_id`] for the identity contracts.
@@ -868,7 +837,6 @@ impl SelectedQueuedTurnBuilder {
         })
     }
 
-    /// Runs and collects activity using a borrowed effect controller.
     pub async fn run_with_effects(
         self,
         controller: &dyn RuntimeEffectController,
@@ -909,7 +877,6 @@ impl SelectedQueuedTurnBuilder {
             .unwrap_or_else(fresh_queue_drain_id)
     }
 
-    /// Runs and streams activity using a borrowed effect controller.
     pub async fn stream_to_with_effects(
         self,
         events: &dyn TurnActivitySink,
@@ -1005,7 +972,6 @@ impl SelectedQueuedTurnBuilder {
     }
 }
 
-/// Exposes advanced execution controls for a queued turn.
 pub struct AdvancedQueuedTurn {
     builder: QueuedTurnBuilder,
 }
@@ -1291,7 +1257,6 @@ pub(crate) async fn stream_prepared_agent_frame_run(
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-/// Report produced by turn.
 pub struct TurnReport {
     /// Final runtime state for the turn.
     pub state: SessionSnapshot,
@@ -1396,7 +1361,6 @@ impl TurnReport {
         std::time::Duration::from_millis(self.execution.duration_ms)
     }
 
-    /// Returns the final assistant message when one was produced.
     pub fn assistant_message(&self) -> Option<&str> {
         match &self.outcome {
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage {
@@ -1406,7 +1370,6 @@ impl TurnReport {
         }
     }
 
-    /// Deserializes and returns the final structured value.
     pub fn final_value(&self) -> Option<&serde_json::Value> {
         match &self.outcome {
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { value }) => {
@@ -1416,7 +1379,6 @@ impl TurnReport {
         }
     }
 
-    /// Deserializes and returns a tool result by call identifier.
     pub fn tool_value(&self) -> Option<(&str, &serde_json::Value)> {
         match &self.outcome {
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::ToolValue {
@@ -1427,7 +1389,6 @@ impl TurnReport {
         }
     }
 
-    /// Returns whether the turn reached a successful terminal outcome.
     pub fn is_success(&self) -> bool {
         matches!(
             self.outcome,
@@ -1452,7 +1413,6 @@ impl TurnReport {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-/// Output produced by turn.
 pub struct TurnOutput {
     /// Final settled report for the turn.
     pub result: TurnReport,
@@ -1461,28 +1421,23 @@ pub struct TurnOutput {
 }
 
 impl TurnOutput {
-    /// Returns the final assistant message when one was produced.
     pub fn assistant_message(&self) -> Option<&str> {
         self.result.assistant_message()
     }
 
-    /// Deserializes and returns the final structured value.
     pub fn final_value(&self) -> Option<&serde_json::Value> {
         self.result.final_value()
     }
 
-    /// Deserializes and returns a tool result by call identifier.
     pub fn tool_value(&self) -> Option<(&str, &serde_json::Value)> {
         self.result.tool_value()
     }
 
-    /// Returns whether the underlying turn reached a successful terminal outcome.
     pub fn is_success(&self) -> bool {
         self.result.is_success()
     }
 
-    /// Returns whether the underlying turn stopped on a context-window
-    /// overflow. See [`TurnReport::is_context_overflow`].
+    /// See [`TurnReport::is_context_overflow`].
     pub fn is_context_overflow(&self) -> bool {
         self.result.is_context_overflow()
     }
@@ -1530,7 +1485,6 @@ pub struct TurnActivityFanout {
 }
 
 impl TurnActivityFanout {
-    /// Creates a fanout that forwards each activity to every supplied sink.
     pub fn new(sinks: impl IntoIterator<Item = Arc<dyn TurnActivitySink>>) -> Self {
         Self {
             sinks: sinks.into_iter().collect(),
@@ -1547,7 +1501,6 @@ impl TurnActivitySink for TurnActivityFanout {
     }
 }
 
-/// Returns the textual content of a message when it contains text.
 pub fn message_text(message: &Message) -> String {
     message
         .parts
@@ -1557,7 +1510,6 @@ pub fn message_text(message: &Message) -> String {
         .join("\n")
 }
 
-/// Returns the protocol role associated with a message.
 pub fn message_role(message: &Message) -> &'static str {
     match message.role {
         MessageRole::User => "user",

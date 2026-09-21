@@ -64,9 +64,8 @@ pub fn turn_commit_receipt_storage_key(
     .storage_key()
 }
 
-/// Construct queued-work claim data with the predecessor identity that an
-/// abandoning store must restore. Store implementors pass `None` for fresh
-/// work and the interrupted `claim_id` for a redrive.
+/// Construct queued-work claim data with the predecessor identity that an abandoning store
+/// must restore.
 pub fn queued_work_claim_data(
     batches: Vec<crate::runtime::QueuedWorkBatch>,
     abandon_restore_claim_id: Option<String>,
@@ -93,7 +92,6 @@ pub fn queued_work_abandon_restore_claim_id(
     claim.abandon_restore_claim_id.as_deref()
 }
 
-/// Return the interrupted predecessor token paired with its claim identity.
 pub fn queued_work_abandon_restore_claim_token(
     claim: &crate::runtime::QueuedWorkClaim,
 ) -> Option<&str> {

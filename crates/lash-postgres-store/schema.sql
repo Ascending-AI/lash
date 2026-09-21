@@ -319,8 +319,8 @@ CREATE TABLE IF NOT EXISTS lash_attachment_manifest (
     canonical_uri TEXT NOT NULL,
     intent_at_ms BIGINT NOT NULL,
     -- Identity of the write attempt that currently owns this row, minted by
-    -- begin_attachment_write. Completion and abort are matched on it. NULL on a
-    -- row created by adoption, which owns no write attempt.
+    -- begin_attachment_write.
+    -- NULL on a row created by adoption, which owns no write attempt.
     write_id TEXT,
     -- Upload evidence: set when the owning attempt reported a successful backend
     -- put. Adoption of a digest requires some row to carry it.

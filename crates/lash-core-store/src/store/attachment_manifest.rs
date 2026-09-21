@@ -18,8 +18,6 @@ pub enum AttachmentOwnerKind {
 }
 
 impl AttachmentOwnerKind {
-    /// Exposes the stable snake-case owner class that attachment-manifest implementors persist with
-    /// an intent.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Turn => "turn",
@@ -27,7 +25,6 @@ impl AttachmentOwnerKind {
         }
     }
 
-    /// Parses the stable snake-case owner class persisted by attachment-manifest stores.
     pub fn from_wire_str(value: &str) -> Option<Self> {
         match value {
             "turn" => Some(Self::Turn),
@@ -180,12 +177,10 @@ pub fn decode_attachment_owner(
 /// Identity of one attempt to write an attachment's bytes, minted by
 /// [`AttachmentManifest::begin_attachment_write`].
 ///
-/// The id is persisted on the manifest row for the duration of the attempt and
-/// is carried back in the attempt's [`AttachmentWritePermit`]. Completion and
-/// abort are matched against it, so a permit from a superseded attempt can
-/// neither certify an upload nor delete a newer attempt's row. While the
-/// attempt holds a `Condemned` digest it is also the claim token on the
-/// condemnation row, so the sweeper's arm CAS fails.
+/// The id is persisted on the manifest row for the duration of the attempt and is carried back
+/// in the attempt's [`AttachmentWritePermit`].
+/// While the attempt holds a `Condemned` digest it is also the claim token on the condemnation
+/// row, so the sweeper's arm CAS fails.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AttachmentWriteToken(u128);
 
@@ -553,9 +548,7 @@ pub trait AttachmentManifest: Send + Sync {
         attachment_ids: &[crate::AttachmentId],
     ) -> Result<(), StoreError>;
 
-    /// Return manifest entries whose intent has aged past
-    /// `older_than_epoch_ms` without ever being committed. Hosts run
-    /// this periodically to find orphans left by crashes between
+    /// Hosts run this periodically to find orphans left by crashes between
     /// `begin_attachment_write` and the next turn commit.
     async fn list_uncommitted(
         &self,
@@ -589,10 +582,8 @@ pub trait AttachmentManifest: Send + Sync {
         Ok(())
     }
 
-    /// Whether this manifest currently holds a *GC-live* ref for `attachment_id`
-    /// — a committed ref, or an uncommitted intent that is not both aged and
-    /// owner-dead. The cutoff is retention policy after terminal proof, never a
-    /// liveness oracle for turn/process owners.
+    /// The cutoff is retention policy after terminal proof, never a liveness oracle for
+    /// turn/process owners.
     ///
     /// This is the single-id counterpart to [`Self::list_all_refs`], used by the
     /// GC lever's delete-time root re-check to spare (and, post-delete, to alarm
@@ -617,11 +608,11 @@ pub trait AttachmentManifest: Send + Sync {
             .any(|ref_id| ref_id == attachment_id))
     }
 
-    /// Remove one session's manifest row. Called by the session facade when a
-    /// turn releases an attachment, and by `delete_session` when a whole
-    /// session's refs are dropped. FIG-653: committed rows needed by retained
-    /// graph history cannot be forgotten; GC removes them after the final
-    /// retained prefix disappears. Bytes die only after all roots disappear.
+    /// Called by the session facade when a turn releases an attachment, and by
+    /// `delete_session` when a whole session's refs are dropped.
+    /// FIG-653: committed rows needed by retained graph history cannot be forgotten; GC
+    /// removes them after the final retained prefix disappears.
+    /// Bytes die only after all roots disappear.
     async fn forget(
         &self,
         session_id: &SessionId,

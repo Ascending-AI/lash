@@ -101,9 +101,8 @@ impl ScriptedTransportSchedule {
         self.open_gate(&gate, exchange_index, event_index, event_name.into(), at)
     }
 
-    /// Whether the turn future is currently parked on this gate. Lets the
-    /// boundary harness couple gate release to turn liveness (poll until either
-    /// the gate blocks or the turn finishes) instead of blocking forever.
+    /// Lets the boundary harness couple gate release to turn liveness (poll until either the
+    /// gate blocks or the turn finishes) instead of blocking forever.
     pub fn is_blocked(&self, exchange_index: usize, event_index: usize) -> bool {
         self.gate(exchange_index, event_index).is_blocked()
     }

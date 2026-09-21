@@ -37,7 +37,6 @@ impl RestateSessionAdministration {
         }
     }
 
-    /// Bind this deployment's administration services to one handler context.
     pub fn for_invocation<'a, 'ctx, C>(
         &'a self,
         context: C,

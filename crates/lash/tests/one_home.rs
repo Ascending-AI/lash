@@ -57,8 +57,6 @@ fn leaves_of(body: &str) -> Vec<String> {
         .collect()
 }
 
-/// Collect `(leaf_name, module_home)` pairs for every `pub use` in `src`.
-///
 /// `forced_module` names the home for a file module whose whole body is one
 /// module (`usage`, `admin`, ...). For `lib.rs` (`forced_module == None`) the
 /// home is the full path of enclosing inline `pub mod`s joined with `::`

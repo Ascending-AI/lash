@@ -69,7 +69,6 @@ pub enum DeliveryPolicy {
     AfterCurrentTurnCommit,
 }
 impl DeliveryPolicy {
-    /// Exposes the stable snake-case delivery value for queued-work store implementors.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::EarliestSafeBoundary => "earliest_safe_boundary",
@@ -77,8 +76,6 @@ impl DeliveryPolicy {
         }
     }
 
-    /// Parses the stable delivery value for queued-work store implementors, returning `None` for an
-    /// unknown value.
     pub fn from_wire_str(value: &str) -> Option<Self> {
         match value {
             "earliest_safe_boundary" => Some(Self::EarliestSafeBoundary),
@@ -121,8 +118,6 @@ impl QueuedWorkKind {
         matches!(self, Self::Turn)
     }
 
-    /// Returns the stable snake-case value persisted by queued-work stores.
-    ///
     /// Store implementations must preserve these spellings so rows remain
     /// readable across runtime restarts and backend implementations.
     pub fn as_str(self) -> &'static str {
@@ -132,8 +127,6 @@ impl QueuedWorkKind {
         }
     }
 
-    /// Parses a persisted queued-work kind without guessing at unknown values.
-    ///
     /// The accepted values are exactly `"turn"` and `"control"`; an
     /// unrecognized value returns `None` so a store can reject incompatible
     /// durable data instead of assigning unsafe batching semantics.
@@ -182,9 +175,6 @@ impl QueuedWorkAuthority {
 }
 /// Complete claim-time bounds and drain policy passed to durable store
 /// implementations.
-///
-/// Stores apply the shared claim laws and then defer to `drain_policy` for how
-/// much of the legal FIFO prefix this wake takes.
 #[derive(Clone, Debug)]
 pub struct QueuedWorkClaimPolicy {
     pub max_context_tokens: usize,
@@ -263,7 +253,6 @@ pub struct QueuedWorkBatch {
     pub items: Vec<QueuedWorkItem>,
 }
 impl QueuedWorkBatch {
-    /// Validate persisted item families once when a backend hydrates a batch.
     pub fn validate_payload_family(&self) -> Result<(), crate::StoreError> {
         validate_payload_family(self.kind, self.items.iter().map(|item| &item.payload)).map_err(
             |message| crate::StoreError::StoredDataCorrupt {
@@ -369,8 +358,6 @@ impl QueuedWorkBatchDraft {
         self
     }
 
-    /// Reports the ingress family this draft's payloads derive.
-    ///
     /// There is deliberately no setter: the kind is a function of the payloads,
     /// so a producer cannot assert [`QueuedWorkKind::Control`] over turn work.
     pub fn kind(&self) -> QueuedWorkKind {
@@ -467,8 +454,6 @@ pub struct QueuedWorkClaimData {
 /// A shared work claim carrying queued-work batches.
 pub type QueuedWorkClaim = crate::WorkClaim<QueuedWorkClaimData>;
 impl crate::WorkClaim<QueuedWorkClaimData> {
-    /// Builds the settlement receipt a queued-work store implementor passes back after applying
-    /// every batch in this claim.
     pub fn completion(&self) -> QueuedWorkCompletion {
         QueuedWorkCompletion {
             session_id: self.session_id.clone(),
@@ -484,7 +469,6 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
         }
     }
 
-    /// Reports whether a queued-work store or conformance-suite implementor received no items.
     pub fn is_empty(&self) -> bool {
         self.batches.iter().all(|batch| batch.items.is_empty())
     }
@@ -652,7 +636,6 @@ impl From<TurnWorkPayload> for QueuedWorkBatchPayloads {
     }
 }
 impl QueuedWorkBatchPayloads {
-    /// Return the ingress family encoded by this value.
     pub fn kind(&self) -> QueuedWorkKind {
         match self {
             Self::SessionCommand(_) => QueuedWorkKind::Control,
@@ -779,7 +762,6 @@ impl TurnWorkPayload {
         Self(QueuedWorkPayload::process_wake(wake))
     }
 
-    /// Construct an internal agent-frame task item.
     pub fn agent_frame_task(
         frame_id: crate::FrameNodeId,
         task: impl Into<String>,

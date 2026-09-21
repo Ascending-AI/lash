@@ -19,8 +19,7 @@ use crate::cell_scan::{
 };
 use crate::dialect::TypescriptDialect;
 
-/// Install the stream-mask hooks on the given registrar. Called by
-/// [`crate::plugin::RlmProtocolPlugin::register`] when the session is active.
+/// Called by [`crate::plugin::RlmProtocolPlugin::register`] when the session is active.
 pub fn register_stream_mask(
     reg: &mut PluginRegistrar,
     dialect: Arc<TypescriptDialect>,
@@ -140,8 +139,6 @@ impl CellDetector {
         }
     }
 
-    /// Records how the provider stream ended.
-    ///
     /// The response hook is phase 2 of the staged LLM-call boundary (FIG-1276)
     /// and runs *after* this cleanup, so a reason that still produces a
     /// response must leave the accumulated cell intact — clearing it here would

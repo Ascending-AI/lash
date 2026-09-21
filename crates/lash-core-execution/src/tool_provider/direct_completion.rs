@@ -10,8 +10,6 @@ pub struct ToolDirectCompletionClient<'run> {
 }
 
 impl ToolDirectCompletionClient<'_> {
-    /// Run a direct completion attributed to the current tool invocation.
-    ///
     /// # Integrator class
     ///
     /// Tool implementors use this capability for provider calls that must

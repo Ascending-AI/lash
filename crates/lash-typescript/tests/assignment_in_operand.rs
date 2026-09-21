@@ -19,7 +19,6 @@ use lashlang::{
     RuntimeError, State, Value, Vm, VmContinuation, VmRunOutcome,
 };
 
-/// Finishes, prints, and answers the one tool call the park witnesses make.
 struct Host;
 
 impl ExecutionHost for Host {

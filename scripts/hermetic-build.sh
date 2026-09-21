@@ -67,7 +67,7 @@ case "$operation" in
       exit 2
     fi
     # Expunge only this workspace's hashed output base and stop its Bazel
-    # server. The shared repository and action caches are separate paths.
+    # The shared repository and action caches are separate paths.
     "$bazel" clean --expunge
     ;;
   fmt)

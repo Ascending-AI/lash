@@ -20,8 +20,6 @@ pub struct SqliteHandle {
 }
 
 impl SqliteHandle {
-    /// Open (creating parent directories) and apply `schema`.
-    ///
     /// `schema` must be idempotent — `CREATE TABLE IF NOT EXISTS` throughout —
     /// because it runs on every boot. An example that needs a migration tool to
     /// restart is an example nobody restarts.
@@ -45,7 +43,6 @@ impl SqliteHandle {
         })
     }
 
-    /// Run `work` against the connection on the blocking pool.
     pub async fn call<T, F>(&self, work: F) -> Result<T>
     where
         T: Send + 'static,

@@ -148,8 +148,6 @@ async fn register_started(
     Ok(())
 }
 
-/// Records every [`ProcessWorkerFault`] the sweep reports.
-///
 /// A drive admits rows and returns; a claim, read, terminal write, or lease
 /// release that fails afterwards has no other way back to this runbook. The
 /// judged scenarios assert the recorded list is empty, so a fault can never

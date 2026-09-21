@@ -47,9 +47,8 @@ where
     }
 }
 
-/// Number of logical messages that belong to call K's stable prefix. An
-/// explicit breakpoint wins; protocols without one treat the complete prior
-/// call as stable because the next iteration may only append to it.
+/// An explicit breakpoint wins; protocols without one treat the complete prior call as stable
+/// because the next iteration may only append to it.
 pub fn stable_message_count(request: &LlmRequest) -> usize {
     request
         .messages
@@ -70,9 +69,8 @@ pub fn stable_message_count(request: &LlmRequest) -> usize {
         .map_or(request.messages.len(), |(index, _)| index + 1)
 }
 
-/// Removes only provider cache directives. Prompt roles, ordering, content
-/// block shape, and bytes remain significant so a string/array wire-shape
-/// flip still fails the harness.
+/// Prompt roles, ordering, content block shape, and bytes remain significant so a string/array
+/// wire-shape flip still fails the harness.
 pub fn strip_cache_directives(value: &mut Value) {
     match value {
         Value::Object(object) => {

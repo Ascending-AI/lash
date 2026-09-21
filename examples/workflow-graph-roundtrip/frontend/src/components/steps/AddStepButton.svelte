@@ -22,7 +22,6 @@
     open = false;
     onPick?.(op);
   }
-  // Close the menu when focus leaves the whole affordance.
   function onBlur(event) {
     if (!event.currentTarget.contains(event.relatedTarget)) open = false;
   }
@@ -140,9 +139,7 @@
     border-radius: 12px;
     box-shadow: 0 18px 42px -16px rgba(0, 0, 0, 0.76);
   }
-  /* The first rail control sits immediately below the sticky top bar. Open its
-     menu downward so the leading actions remain visible and clickable instead
-     of occupying the top bar's pointer layer. */
+  /* The first rail control sits immediately below the sticky top bar. menu downward so the leading actions remain visible and clickable instead of occupying the top bar's pointer layer. */
   .add-menu.is-below {
     top: calc(50% + 14px);
     transform: none;

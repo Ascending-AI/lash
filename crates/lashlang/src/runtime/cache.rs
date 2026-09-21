@@ -53,9 +53,8 @@ impl<E> MruEntries<E> {
         }
     }
 
-    /// A cache hit under the shared policy: probe the back entry, else find
-    /// and promote the match to the back. Returns the matched entry in its
-    /// promoted position.
+    /// A cache hit under the shared policy: probe the back entry, else find and promote the
+    /// match to the back.
     #[expect(
         clippy::expect_used,
         reason = "the index came from position() over this same entries vec a few lines above"
@@ -79,8 +78,7 @@ impl<E> MruEntries<E> {
         self.misses += 1;
     }
 
-    /// Stores the entry a miss produced. Capacity zero bypasses residency
-    /// entirely; at capacity the front entry is evicted.
+    /// Capacity zero bypasses residency entirely; at capacity the front entry is evicted.
     fn insert(&mut self, entry: E) {
         if self.capacity == 0 {
             return;
@@ -142,8 +140,6 @@ impl CompiledProcessCacheKey {
         }
     }
 
-    /// Whether this key names the same compiled process as the borrowed parts.
-    ///
     /// A cache lookup only ever compares its key, so building an owned one to
     /// do it charges every hit for three string clones it immediately drops.
     fn matches(

@@ -19,8 +19,6 @@ pub struct ProcessPruneReport {
     pub pruned_processes: usize,
     /// Event rows deleted across those processes.
     pub pruned_events: usize,
-    /// Trigger-delivery rows reconciled after process pruning committed.
-    ///
     /// Low-level registry implementations report zero; the public Lash facade
     /// fills this field after coordinating with its configured trigger store.
     pub pruned_trigger_deliveries: usize,
@@ -50,7 +48,6 @@ pub struct ProcessWorklistCursor {
 }
 
 impl ProcessWorklistCursor {
-    /// Construct a backend-tagged cursor when implementing a [`ProcessRegistry`].
     pub fn new(
         backend: impl Into<String>,
         after_process_id: impl Into<ProcessId>,
@@ -180,8 +177,6 @@ pub enum WakeDiscardReason {
     SequenceRewound,
 }
 
-/// Complete in-memory disposition of a wake delivery.
-///
 /// State-specific evidence travels with the state that requires it, so an enqueuing delivery
 /// cannot exist without its ownership fence and a typed discard cannot exist without its reason.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -206,7 +201,6 @@ pub enum WakeDeliveryDisposition {
 }
 
 impl WakeDeliveryDisposition {
-    /// Returns the stable label-only state represented by this disposition.
     pub fn state(&self) -> WakeDeliveryState {
         match self {
             Self::Pending => WakeDeliveryState::Pending,
@@ -275,8 +269,6 @@ pub struct WakeDelivery {
 }
 
 impl WakeDelivery {
-    /// Creates a pending wake for process-store implementors with a content-derived ID, zero
-    /// attempts, immediate eligibility, and saturating expiry from creation time.
     pub fn pending(
         wake: ProcessWakeDelivery,
         config: WakeDeliveryConfig,
@@ -299,7 +291,6 @@ impl WakeDelivery {
         })
     }
 
-    /// Returns the label-only state represented by this delivery's disposition.
     pub fn state(&self) -> WakeDeliveryState {
         self.disposition.state()
     }
@@ -521,8 +512,6 @@ pub trait ProcessContinuationStore: Send + Sync {
     async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError>;
 }
 
-/// Test-only probes on a process registry.
-///
 /// Compiled only under `cfg(any(test, feature = "testing"))` and never a
 /// supertrait of [`ProcessRegistry`]: the conformance suites take
 /// [`ConformanceProcessRegistry`] (`ProcessRegistry + ProcessRegistryTestSupport`)

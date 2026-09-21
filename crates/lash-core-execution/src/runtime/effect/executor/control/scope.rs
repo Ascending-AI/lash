@@ -57,13 +57,10 @@ pub struct ScopedEffectController<'run> {
 }
 
 impl<'run> ScopedEffectController<'run> {
-    /// Returns the execution scope this controller has admitted.
     pub fn execution_scope(&self) -> &ExecutionScope {
         self.admitted.scope()
     }
 
-    /// Returns the admitted scope this controller serves: the execution scope
-    /// plus, when it is a process, the incarnation it was admitted under.
     pub fn admitted_scope(&self) -> &AdmittedScope {
         &self.admitted
     }
@@ -77,9 +74,6 @@ impl<'run> ScopedEffectController<'run> {
         self.admitted.process_ref()
     }
 
-    /// Validates the admitted scope and binds a borrowed controller for
-    /// effect-host implementors; invalid or empty scope identities are
-    /// rejected before execution.
     pub fn borrowed(
         controller: &'run dyn RuntimeEffectController,
         admitted: AdmittedScope,
@@ -156,8 +150,8 @@ impl<'run> ScopedEffectController<'run> {
         self.admitted.scope().id()
     }
 
-    /// Exposes turn id to effect-host implementors while scoping and journaling durable effects.
-    /// Returns `None` when no turn id is present.
+    /// Exposes turn id to effect-host implementors while scoping and journaling durable
+    /// effects.
     pub fn turn_id(&self) -> Option<&TurnId> {
         self.admitted.scope().turn_id()
     }
@@ -206,10 +200,8 @@ pub mod facade_ops {
     pub trait ScopedEffectControllerFacadeOps {
         fn execution_scope(&self) -> &ExecutionScope;
 
-        /// Executes one facade-owned process effect while making this controller
-        /// available to the local process command itself. Borrowed controllers
-        /// are proxied across the process task boundary; shared controllers can
-        /// be passed through directly.
+        /// Borrowed controllers are proxied across the process task boundary; shared
+        /// controllers can be passed through directly.
         async fn execute_process_effect(
             &self,
             envelope: RuntimeEffectEnvelope,

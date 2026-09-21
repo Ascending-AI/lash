@@ -114,13 +114,12 @@ impl RlmHistoryProjection {
     }
 }
 
-/// Find protocol prose and terminal mechanics superseded by a committed
-/// assistant transcript from the same turn. The relationship is derived from
-/// event provenance: protocol entries and a later assistant message before the
-/// next user/event turn boundary share one completed turn. Content is never
-/// compared. Intermediate trajectory entries remain available, while their
-/// prose is represented by the canonical transcript. A terminal step with no
-/// committed message remains unchanged.
+/// The relationship is derived from event provenance: protocol entries and a later assistant
+/// message before the next user/event turn boundary share one completed turn.
+/// Content is never compared.
+/// Intermediate trajectory entries remain available, while their prose is represented by the
+/// canonical transcript.
+/// A terminal step with no committed message remains unchanged.
 fn completed_turn_internal_indices(
     entries: &[lash_core::facade_support::ChronologicalEntry],
 ) -> HashSet<usize> {
@@ -562,8 +561,7 @@ mod tests {
         }
     }
 
-    /// Runs a TypeScript cell against the real `history` projection, the way a
-    /// model's cell reaches it. Cell source is authored in TypeScript (FIG-3015).
+    /// Cell source is authored in TypeScript (FIG-3015).
     async fn run_history_cell(
         source: &str,
         history: &lash_core::facade_support::ChronologicalProjection,

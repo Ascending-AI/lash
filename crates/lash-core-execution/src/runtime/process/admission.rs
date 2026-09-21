@@ -29,7 +29,6 @@ pub struct ProcessAdmissionReport {
     pub deferred: Vec<ProcessAdmissionDeferred>,
 }
 
-/// Whether an admission pass read the worklist itself.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ProcessAdmissionIntake {
@@ -44,8 +43,6 @@ pub enum ProcessAdmissionIntake {
 }
 
 impl ProcessAdmissionReport {
-    /// Merge a nested admission pass's report into this one.
-    ///
     /// Re-entrant drives (a work driver invoked from trigger-delivery
     /// reconcile, say) admit rows that belong to the outer call's report. Their
     /// rows are folded in ahead of the outer pass's own, and a deferred
@@ -185,7 +182,6 @@ impl ProcessRecoveryAttemptOutcome {
     }
 }
 
-/// Report from a graceful owner drain.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProcessDrainReport {
     /// Process ids this host's own started `OwnerBound` work was terminalized as

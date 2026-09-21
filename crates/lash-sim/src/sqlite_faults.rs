@@ -303,10 +303,6 @@ pub async fn run_sqlite_fault_profile(
     )
 }
 
-/// Runs the same scenario plan against one backend's real fault injector.
-///
-/// Returns `Ok(None)` when the requested backend is not configured, which only
-/// happens for Postgres without `LASH_POSTGRES_DATABASE_URL`.
 pub async fn run_backend_fault_profile(
     backend: BackendFaultKind,
     artifact_root: impl AsRef<Path>,

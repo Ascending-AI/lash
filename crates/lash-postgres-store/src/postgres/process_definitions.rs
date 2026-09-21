@@ -52,7 +52,6 @@ impl PostgresProcessDefinitionRegistry {
         }
     }
 
-    /// Bind registry timestamps to an explicit clock.
     pub fn with_clock(mut self, clock: std::sync::Arc<dyn Clock>) -> Self {
         self.clock = clock;
         self

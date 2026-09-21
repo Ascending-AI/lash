@@ -85,9 +85,6 @@ impl HandleId {
         ))
     }
 
-    /// Reads the parts back out, or `None` if this is not an id this module
-    /// minted.
-    ///
     /// A `None` here is the whole refusal: a hand-written handle, a handle from
     /// a previous execution and a handle whose text was tampered with all fail
     /// to name live work, and the caller reports that in its own terms.
@@ -148,11 +145,8 @@ impl std::fmt::Display for HandleId {
     }
 }
 
-/// Reads a handle record's two fields into a [`HandleId`].
-///
-/// `kind` is the record's [`HANDLE_FIELD`] and `id` its `id`, as the caller's
-/// own value type spells them. Returns `None` when the record is not a handle,
-/// which is how a plain value handed to `await` is told apart from a handle.
+/// `kind` is the record's [`HANDLE_FIELD`] and `id` its `id`, as the caller's own value type
+/// spells them.
 ///
 /// There is one kind and one place the parts live. A record that spells its
 /// incarnation beside the id is not a handle: the incarnation belongs inside
@@ -162,8 +156,6 @@ pub fn parse_handle(kind: &str, id: &str) -> Option<HandleId> {
     (kind == HANDLE_KIND).then(|| HandleId::from_text(id))
 }
 
-/// Whether a record carrying these field names is the handle shape.
-///
 /// This is a question about *shape*, not about live work: the linker asks it
 /// of a record literal whose values it cannot see, to decide whether awaiting
 /// that record is visibly settled. Only [`parse_handle`] can say whether a
@@ -172,14 +164,12 @@ pub fn is_handle_shape<'a>(names: impl IntoIterator<Item = &'a str>) -> bool {
     names.into_iter().any(|name| name == HANDLE_FIELD)
 }
 
-/// Reads a handle out of a JSON record, for the crates whose values are JSON.
 pub fn parse_handle_json(value: &serde_json::Value) -> Option<HandleId> {
     let kind = value.get(HANDLE_FIELD)?.as_str()?;
     let id = value.get("id")?.as_str()?;
     parse_handle(kind, id)
 }
 
-/// Builds the one handle record as JSON.
 pub fn handle_record_json(id: &HandleId) -> serde_json::Value {
     serde_json::json!({ HANDLE_FIELD: HANDLE_KIND, "id": id.as_str() })
 }

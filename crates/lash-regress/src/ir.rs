@@ -9,21 +9,16 @@ use core::fmt;
 
 #[derive(Debug, Copy, Clone)]
 pub enum AnchorType {
-    StartOfLine, // ^
-    EndOfLine,   // $
+    StartOfLine,
+    EndOfLine,
 }
 
-/// A Quantifier.
 #[derive(Debug, Copy, Clone)]
 pub struct Quantifier {
-    /// Minimum number of iterations of the loop, inclusive.
     pub min: usize,
 
-    /// Maximum number of iterations of the loop, inclusive;
-    /// or None if unbounded.
     pub max: Option<usize>,
 
-    /// Whether the loop is greedy.
     pub greedy: bool,
 }
 
@@ -38,7 +33,10 @@ pub enum Node {
 
     /// Match a literal character.
     /// If icase is true, then `c` MUST be already folded.
-    Char { c: u32, icase: bool },
+    Char {
+        c: u32,
+        icase: bool,
+    },
 
     /// Match a literal sequence of bytes.
     ByteSequence(Vec<u8>),
@@ -71,7 +69,9 @@ pub enum Node {
     },
 
     /// Word boundary (\b or \B).
-    WordBoundary { invert: bool },
+    WordBoundary {
+        invert: bool,
+    },
 
     /// A capturing group.
     /// If the name is set, it is guaranteed nonempty.
@@ -82,14 +82,12 @@ pub enum Node {
         name: Option<CaptureGroupName>,
     },
 
-    /// A backreference.
-    /// Indices are 1-based. That is, it matches JS syntax: \1 is the first capture group,
-    /// not everything.
+    /// Indices are 1-based.
+    /// That is, it matches JS syntax: \1 is the first capture group, not everything.
     /// A backreference that logically may match multiple capture groups (through shared names)
     /// are emitted through alternations of backreferences.
     BackRef(u32),
 
-    /// A bracket.
     Bracket(BracketContents),
 
     /// A lookaround assertions like (?:) or (?!).
@@ -172,8 +170,6 @@ impl Node {
 
     /// Duplicate a node, perhaps assigning new loop IDs. Note we must never
     /// copy a capture group.
-    ///
-    /// Returns None if the depth is too high.
     pub fn try_duplicate(&self, mut depth: usize) -> Option<Node> {
         if depth > 100 {
             return None;
@@ -258,7 +254,6 @@ impl Node {
     }
 }
 
-/// A helper type for walking.
 #[derive(Debug, Clone)]
 pub struct Walk {
     // It set to true, skip the children of this node.
@@ -425,9 +420,8 @@ where
     }
 }
 
-/// Call a function on every Node.
-/// If \p postorder is true, then process children before the node;
-/// otherwise process children after the node.
+/// If \p postorder is true, then process children before the node; otherwise process children
+/// after the node.
 pub fn walk<F>(postorder: bool, unicode: bool, n: &Node, func: &mut F)
 where
     F: FnMut(&Node, &mut Walk),
@@ -440,12 +434,11 @@ where
     walker.process(n);
 }
 
-/// Call a function on every Node, which may mutate the node.
-/// If \p postorder is true, then process children before the node;
-/// otherwise process children after the node.
-/// If postorder is false, the function should return true to process children,
-/// false to avoid descending into children. If postorder is true, the return
-/// value is ignored.
+/// If \p postorder is true, then process children before the node; otherwise process children
+/// after the node.
+/// If postorder is false, the function should return true to process children, false to avoid
+/// descending into children.
+/// If postorder is true, the return value is ignored.
 pub fn walk_mut<F>(postorder: bool, unicode: bool, n: &mut Node, func: &mut F)
 where
     F: FnMut(&mut Node, &mut Walk),

@@ -10,8 +10,6 @@ pub fn code_execution_context_with_trigger_store(
         .into_runtime()
 }
 
-/// Build a trigger-capable code-execution context carrying the stable parent
-/// invocation used by deferred link resolution.
 pub fn code_execution_context_with_trigger_store_and_invocation(
     trigger_store: Arc<dyn crate::TriggerStore>,
     invocation: crate::RuntimeInvocation,
@@ -23,8 +21,6 @@ pub fn code_execution_context_with_trigger_store_and_invocation(
         .into_runtime()
 }
 
-/// Build a code-execution context whose trigger operations pass through the
-/// supplied effect controller before reaching `trigger_store`.
 pub fn code_execution_context_with_trigger_store_and_effect_controller(
     trigger_store: Arc<dyn crate::TriggerStore>,
     effect_controller: Arc<dyn crate::RuntimeEffectController>,

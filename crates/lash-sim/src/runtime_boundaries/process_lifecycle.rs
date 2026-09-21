@@ -33,8 +33,6 @@ impl lash_core::ProcessEngine for LifecycleSuccessEngine {
     }
 }
 
-/// Records every worker fault the sweep reports.
-///
 /// The sweep is admission-only: a claim, read, terminal write, or lease release
 /// that fails after the drive returns has no other way into the scenario. The
 /// boundary asserts this list is empty, so a swallowed fault cannot let the

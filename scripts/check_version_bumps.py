@@ -638,6 +638,12 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-core-store/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
         "sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2"
     ),
+    # Comment-only sweep: the guarded-shape texts moved solely by deleting or
+    # slimming comments; no schema statement, struct, field, serde attribute,
+    # preimage byte expression, tag, or constant value changed, so
+    # SCHEMA_VERSION stays 108 and TURN_CHECKPOINT_SCHEMA_VERSION stays 5.
+    'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:2955b2a75bc5f7b21d5d90181e45998022dd1162ee3a0c499b8fc0bba2c47b2e',
+    'crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION': 'sha256:c47b1c80a5d170e70556653319621cc219a493ba54bea2ccdee7317fc9f850b9',
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

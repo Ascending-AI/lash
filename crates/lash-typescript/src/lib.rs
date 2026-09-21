@@ -13,10 +13,8 @@ pub mod workflow_graph;
 
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH};
 
-/// Parses with the source-nesting preflight disabled, leaving the parse-thread
-/// stack reservation as the only thing standing between a deep source and the
-/// native stack. Exists so a test can demonstrate that the no-abort guarantee
-/// does not depend on the preflight.
+/// Exists so a test can demonstrate that the no-abort guarantee does not depend on the
+/// preflight.
 #[cfg(feature = "testing")]
 pub fn parse_without_nesting_preflight(source: &str) -> Result<lashlang::Program, Diagnostic> {
     let normalized = adapter::parse_without_nesting_preflight(source)?;
@@ -49,8 +47,6 @@ pub const TYPESCRIPT_RUNTIME_NOW_OPERATION: &str = "now";
 /// The journaled operation `Math.random()` lowers to.
 pub const TYPESCRIPT_RUNTIME_RANDOM_OPERATION: &str = "random";
 
-/// Whether the lowerer accepts `method` as an instance standard-library method.
-///
 /// Exposed so the register's documented inventory can be pinned against the
 /// allowlist instead of being maintained by hand.
 pub fn accepts_instance_method(method: &str) -> bool {
@@ -75,7 +71,6 @@ pub use signatures::{
     stdlib_name_count,
 };
 
-/// Parses and lowers a TypeScript dialect program into the VM's shared AST.
 pub fn parse(source: &str) -> Result<lashlang::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
     lower::lower(&normalized)
@@ -96,9 +91,8 @@ pub fn parse_with_globals(
     lower::lower_with_ambient(&normalized, globals, &std::collections::BTreeSet::new())
 }
 
-/// Parses a cell with live session globals and the subset that currently hold
-/// process handles. The second set is semantic binding metadata: it keeps an
-/// ambient handle awaitable without making arbitrary ambient values awaitable.
+/// The second set is semantic binding metadata: it keeps an ambient handle awaitable without
+/// making arbitrary ambient values awaitable.
 pub fn parse_with_globals_and_process_handles(
     source: &str,
     globals: &std::collections::BTreeSet<String>,
@@ -124,19 +118,16 @@ pub fn parse_workflow_fragment(
     lower::lower_workflow_fragment(&normalized, globals, processes)
 }
 
-/// Validates that a source program belongs to the accepted TypeScript dialect.
 pub fn validate(source: &str) -> Result<(), Diagnostic> {
     parse(source).map(|_| ())
 }
 
-/// Parses, lowers, validates, and compiles a standalone TypeScript program.
 pub fn compile(source: &str) -> Result<lashlang::CompiledProgram, Diagnostic> {
     let program = parse(source)?;
     lashlang::compile_ast(&program)
         .map_err(|error| Diagnostic::new(DiagnosticCode::InvalidAst, error.to_string(), None))
 }
 
-/// Parses and links TypeScript against a Lash host environment.
 pub fn link(
     source: &str,
     host: &lashlang::LashlangHostEnvironment,

@@ -44,6 +44,5 @@ where
 pub(crate) struct ScheduledToolBatch<O> {
     /// One outcome per input, in input order.
     pub(crate) outcomes: Vec<O>,
-    /// Input indices in the order their futures completed.
     pub(crate) settlement_order: Vec<usize>,
 }

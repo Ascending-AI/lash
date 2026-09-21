@@ -1,7 +1,6 @@
 //! The chat platform: `slack-clone-platform`.
 //!
-//! Deliberately has no Lash dependency. Run it, open the printed URL in two
-//! browser tabs, and you have two people in a workspace.
+//! Deliberately has no Lash dependency.
 
 use anyhow::Result;
 use slack_clone::platform::{self, PlatformConfig};

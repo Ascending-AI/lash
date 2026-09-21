@@ -159,9 +159,7 @@ pub struct McpServerStatus {
     /// anomaly; the variant says which. Cleared when a connect or tool call
     /// succeeds.
     pub last_error: Option<McpServerFault>,
-    /// Number of tools imported from the server's last successful discovery.
     pub tool_count: usize,
-    /// Whether the configured reconnect-attempt budget has been exhausted.
     pub reconnect_exhausted: bool,
 }
 
@@ -171,8 +169,8 @@ struct McpEntry {
     server_name: String,
     config: McpServerConfig,
     host_services: McpHostServices,
-    /// Read-only publication cell. The actor alone owns the service and writes
-    /// this peer/generation snapshot; dispatch never routes through the actor.
+    /// The actor alone owns the service and writes this peer/generation snapshot; dispatch
+    /// never routes through the actor.
     service: tokio::sync::watch::Receiver<Option<Arc<PublishedService>>>,
     actor_tx: tokio::sync::mpsc::UnboundedSender<LifecycleCommand>,
     actor_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -184,10 +182,8 @@ struct McpEntry {
     imported_tools: RwLock<BTreeMap<String, ImportedTool>>,
     last_error: RwLock<Option<McpServerFault>>,
     shutting_down: Arc<AtomicBool>,
-    /// Applies randomized delay to the entry-owned reconnect ceiling. Kept as
-    /// a seam so pacing tests can observe ceilings without wall-clock sleeps.
+    /// Kept as a seam so pacing tests can observe ceilings without wall-clock sleeps.
     reconnect_jitter: RwLock<Arc<dyn Fn(Duration) -> Duration + Send + Sync>>,
-    /// Set when a bounded reconnect loop spends its final attempt.
     reconnect_exhausted: AtomicBool,
     /// Consecutive idle timeouts since the last successful tool call. Both
     /// increments and resets are generation-stamped messages, so accounting
@@ -263,7 +259,6 @@ struct ResolvedToolTarget {
 }
 
 impl McpConnectionPool {
-    /// Construct an empty pool.
     pub fn empty() -> Self {
         Self::empty_with_host_services(McpHostServices::default())
     }
@@ -287,12 +282,11 @@ impl McpConnectionPool {
         }
     }
 
-    /// Build a pool for the configured servers. Every server is tried eagerly
-    /// in parallel so tools are available immediately when servers are up, but a
-    /// connection failure never aborts construction: the entry stays
-    /// registered and reconnects in the background. Only configuration errors
-    /// (a misconfigured server, not an outage) fail the build. The host must
-    /// call [`McpConnectionPool::shutdown_all`] to fully reap stdio children;
+    /// Every server is tried eagerly in parallel so tools are available immediately when
+    /// servers are up, but a connection failure never aborts construction: the entry stays
+    /// registered and reconnects in the background.
+    /// Only configuration errors (a misconfigured server, not an outage) fail the build.
+    /// The host must call [`McpConnectionPool::shutdown_all`] to fully reap stdio children;
     /// dropping the returned pool kills but deliberately does not wait.
     pub async fn connect(
         servers: BTreeMap<String, McpServerConfig>,
@@ -335,10 +329,9 @@ impl McpConnectionPool {
         Ok(pool)
     }
 
-    /// Add (or replace) one server in the pool. Like initial pool construction,
-    /// attach registers the entry before an eager connection attempt and keeps
-    /// retrying startup outages in the background. Only configuration and pool
-    /// lifecycle errors fail the attach.
+    /// Like initial pool construction, attach registers the entry before an eager connection
+    /// attempt and keeps retrying startup outages in the background.
+    /// Only configuration and pool lifecycle errors fail the attach.
     pub async fn attach(
         self: &Arc<Self>,
         server_name: String,
@@ -391,7 +384,6 @@ impl McpConnectionPool {
         Ok(())
     }
 
-    /// Remove and shut down one server.
     pub async fn detach(self: &Arc<Self>, server_name: &str) -> Result<(), McpError> {
         let removed = {
             let mut entries = self.entries.write_recover();
@@ -407,7 +399,6 @@ impl McpConnectionPool {
         Ok(())
     }
 
-    /// Register an entry and return any previous entry under the same name.
     fn install(
         &self,
         server_name: String,
@@ -591,7 +582,6 @@ impl McpConnectionPool {
             .unwrap_or_default()
     }
 
-    /// Resolve a model-facing name once, then route the captured raw MCP tool.
     pub async fn call_tool(
         &self,
         prefixed_name: &str,

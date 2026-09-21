@@ -65,7 +65,6 @@ fn empty_runtime_session_state(
 }
 
 impl SessionBuilder {
-    /// Set the plugin-keyed open-time options bag wholesale.
     pub fn plugin_options(mut self, plugin_options: PluginOptions) -> Self {
         self.plugin_options = plugin_options;
         self
@@ -91,14 +90,11 @@ impl SessionBuilder {
         self
     }
 
-    /// Configures the session spec and returns the updated builder.
     pub fn session_spec(mut self, spec: SessionSpec) -> Self {
         self.spec = spec;
         self
     }
 
-    /// Configures the parent and returns the updated builder.
-    ///
     /// This is the only facade path to a related session (ADR 0089): the
     /// session that opens is an ordinary session with its own Session Binding
     /// and its own usage ledger — rolling related sessions together is host
@@ -157,13 +153,11 @@ impl SessionBuilder {
         self
     }
 
-    /// Configures the plugin and returns the updated builder.
     pub fn plugin<P: PluginBinding>(mut self, config: P::SessionConfig) -> Self {
         self.plugin_factories.push(P::factory(&config));
         self
     }
 
-    /// Opens the configured session and returns its active handle.
     pub async fn open(self) -> Result<LashSession> {
         let policy = self.session_policy();
         let resolved = self.create_store(&policy).await?;
@@ -257,8 +251,6 @@ impl SessionBuilder {
         ))
     }
 
-    /// Open with an explicitly supplied runtime state.
-    ///
     /// This is for advanced hosts that already own a complete state snapshot.
     /// Normal embedders should use [`Self::open`] to resume according to Lash's
     /// durable history.
@@ -640,7 +632,6 @@ impl PromptLayerSink for SessionBuilder {
 }
 
 #[derive(Clone)]
-/// Provides the primary app-facing handle for an active Lash session.
 pub struct LashSession {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) binding: Arc<BoundSession>,
@@ -675,8 +666,6 @@ impl ParkedSession {
 }
 
 impl LashSession {
-    /// Return administration bound to this session's owning catalog.
-    ///
     /// A root opened with an explicit store has no implied catalog authority;
     /// callers must obtain administration from the owner that selected it.
     pub fn session_administration(&self) -> Result<lash_core::SessionAdministration> {
@@ -789,13 +778,10 @@ impl LashSession {
             .map_err(|_| EmbedError::SessionStillInUse)
     }
 
-    /// Returns the session identifier.
     pub fn session_id(&self) -> SessionId {
         SessionId::from(self.runtime.observe().session_id())
     }
 
-    /// Build the execution scope for a turn in this opened session.
-    ///
     /// The scope uses the exact store-backed session identity owned by this
     /// facade handle's Session Binding.
     pub fn turn_scope(&self, turn_id: impl Into<TurnId>) -> lash_core::ExecutionScope {
@@ -834,12 +820,10 @@ impl LashSession {
         self.parent_session_id.as_deref()
     }
 
-    /// Returns the effect host used by this runtime.
     pub fn effect_host(&self) -> Arc<dyn EffectHost> {
         self.binding.effect_host()
     }
 
-    /// Creates a turn builder for the supplied input.
     pub fn turn(&self, input: TurnInput) -> TurnBuilder {
         TurnBuilder {
             runtime: self.runtime.clone(),
@@ -854,7 +838,6 @@ impl LashSession {
         }
     }
 
-    /// Creates a builder for draining queued work as a turn.
     pub fn queued_turn(&self) -> QueuedTurnBuilder {
         QueuedTurnBuilder {
             runtime: self.runtime.clone(),
@@ -1019,7 +1002,6 @@ impl LashSession {
         self.turn_cancels.cancel_all_with_mode(origin, mode)
     }
 
-    /// Returns the session administration facade.
     pub fn admin(&self) -> SessionAdmin {
         SessionAdmin {
             runtime: self.runtime.clone(),
@@ -1040,7 +1022,6 @@ impl LashSession {
         self.admin().refresh_background_graph().await
     }
 
-    /// Returns the typed plugin-operations facade.
     pub fn plugin_operations(&self) -> PluginOperations {
         PluginOperations {
             control: self.admin(),
@@ -1090,12 +1071,10 @@ impl LashSession {
             .map_err(EmbedError::Runtime)
     }
 
-    /// Returns a read-only view of the session state.
     pub fn read_view(&self) -> SessionReadView {
         self.runtime.observe().read_view.clone()
     }
 
-    /// Returns the session's current usage report.
     pub fn usage_report(&self) -> SessionUsageReport {
         self.runtime.observe().usage_report.clone()
     }
@@ -1124,7 +1103,6 @@ impl LashSession {
         Ok(report)
     }
 
-    /// Installs the probe used to observe turn-phase transitions.
     pub async fn set_turn_phase_probe(
         &self,
         probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,
@@ -1160,12 +1138,10 @@ impl ObservableSession {
         self.runtime.observe()
     }
 
-    /// Returns the session's current local observation.
     pub fn current_observation(&self) -> SessionObservation {
         self.runtime.current_session_observation()
     }
 
-    /// Returns the session's current remote observation.
     pub fn current_remote_observation(&self) -> RemoteSessionObservation {
         RemoteSessionObservation::from_core(self.current_observation())
     }
@@ -1187,7 +1163,6 @@ impl ObservableSession {
             .map_err(live_replay_error)
     }
 
-    /// Subscribes to remote DTO observations from the supplied cursor.
     pub fn subscribe_from_remote_cursor(
         &self,
         cursor: &RemoteSessionCursor,
@@ -1240,7 +1215,6 @@ impl ObservableSession {
         })
     }
 
-    /// Returns the session identifier.
     pub fn session_id(&self) -> SessionId {
         SessionId::from(self.snapshot().session_id())
     }
@@ -1250,22 +1224,18 @@ impl ObservableSession {
         self.snapshot().read_view.policy().clone()
     }
 
-    /// Returns a read-only view of the session state.
     pub fn read_view(&self) -> SessionReadView {
         self.snapshot().read_view.clone()
     }
 
-    /// Returns the session's current usage report.
     pub fn usage_report(&self) -> SessionUsageReport {
         self.snapshot().usage_report.clone()
     }
 
-    /// Returns the session's current tool state.
     pub fn tool_state(&self) -> Option<ToolState> {
         self.snapshot().tool_state.clone()
     }
 
-    /// Returns the manifests for active tools.
     pub fn active_tool_manifests(&self) -> Vec<ToolManifest> {
         self.snapshot()
             .tool_state
@@ -1284,7 +1254,6 @@ impl ObservableSession {
         self.snapshot().list_all_process_handles().await
     }
 
-    /// Returns the process scope associated with this session.
     pub fn process_scope(&self) -> SessionScope {
         self.snapshot().process_scope()
     }
@@ -1352,7 +1321,6 @@ impl RemoteSessionObservationEventStream {
         }
     }
 
-    /// Waits for and returns the next remote observation event.
     pub async fn next_event(&mut self) -> Result<RemoteSessionObservationEvent> {
         futures_util::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx))
             .await

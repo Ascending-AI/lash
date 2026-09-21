@@ -203,9 +203,8 @@ mod tests {
             "unmutated generated usage must conserve: {}",
             baseline.message
         );
-        // Drop a row that carries usage. Zero-usage rows are legitimate too
-        // (FIG-2765 unreported-attempt holes), but the conservation oracle
-        // sums counters, so only a counted contribution can go missing.
+        // Zero-usage rows are legitimate too (FIG-2765 unreported-attempt holes), but the
+        // conservation oracle sums counters, so only a counted contribution can go missing.
         let carries_usage = |row: &serde_json::Value| {
             row.get("usage")
                 .and_then(serde_json::Value::as_object)

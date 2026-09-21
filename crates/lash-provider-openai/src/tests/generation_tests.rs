@@ -234,12 +234,8 @@ fn responses_body_carries_temperature_but_never_a_seed() {
 
 #[test]
 fn codex_request_omits_both_sampling_controls() {
-    // Neither control is emitted on the Codex dialect, the same treatment it
-    // gives token caps. Whether this backend would accept `temperature` is
-    // unverified — no live probe has been run against it — so omission is the
-    // conservative side of emit-or-omit: a dropped temperature is visible in
-    // the request-body receipt, while an unsupported field would 400 every
-    // Codex call. Revisit with an authenticated request, not with docs.
+    // Neither control is emitted on the Codex dialect, the same treatment it gives token caps.
+    // Revisit with an authenticated request, not with docs.
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&sampled_request(), false)
         .unwrap();

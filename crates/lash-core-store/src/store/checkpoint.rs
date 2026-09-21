@@ -37,7 +37,7 @@ pub const EXECUTION_STATE_CHECKPOINT_COMPONENT: &str = "execution_state";
 pub struct SessionCheckpoint {
     pub schema_version: u32,
     pub turn_state: crate::PersistedTurnState,
-    /// Complete keyed component listing. A key absent here is deleted.
+    /// A key absent here is deleted.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub components: std::collections::BTreeMap<String, CheckpointComponentDescriptor>,
 }
@@ -206,8 +206,6 @@ impl HydratedCheckpointComponent {
         }
     }
 
-    /// Returns the codec version that governs this component's logical bytes.
-    ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
     /// use this value to reject incompatible components before publishing or
     /// returning a checkpoint; they must not reinterpret an unknown version as
@@ -252,8 +250,6 @@ impl HydratedCheckpointComponent {
         }
     }
 
-    /// Returns a shared handle to the carried body bytes, if any.
-    ///
     /// Integrator class (ADR 0051): same contract as [`Self::body`], but the
     /// clone is a refcount bump instead of a `to_vec` copy — callers that keep
     /// or forward the bytes should prefer it.
@@ -335,7 +331,7 @@ pub fn ensure_checkpoint_component_encoding_version(
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct HydratedSessionCheckpoint {
     pub turn_state: crate::PersistedTurnState,
-    /// Complete keyed component listing. A key absent here is deleted.
+    /// A key absent here is deleted.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub components: std::collections::BTreeMap<String, HydratedCheckpointComponent>,
 }
