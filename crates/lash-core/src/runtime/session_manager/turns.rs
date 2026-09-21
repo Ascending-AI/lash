@@ -49,7 +49,11 @@ impl ManagedSessionCapability {
     ///
     /// Cancellation is the standard turn cancellation, not a teardown path:
     ///
-    /// * Observed before the create commit, nothing is created.
+    /// * Observed before the create commit, nothing is created. A cancelled
+    ///   redelivery still reconciles first: a previous attempt may have
+    ///   committed the child and accepted this turn's input before crashing,
+    ///   so any open input scoped to this turn is durably settled before the
+    ///   cancellation is reported.
     /// * Observed after the create commit but before turn admission, the
     ///   session is retained idle — an empty durable row that is never
     ///   reclaimed by lash.
@@ -59,6 +63,12 @@ impl ManagedSessionCapability {
     ///   accepted turn-input row is settled, and nothing remains claimable.
     ///   The child session stays durable and reusable; lash never deletes a
     ///   session because a process was cancelled.
+    ///
+    /// Settlement is the fence around process terminalization: a cancelled
+    /// outcome is only ever returned once this turn's accepted child input is
+    /// terminal and unclaimed. A reconciliation or commit failure surfaces as
+    /// a retryable init error so the substrate keeps the process recoverable
+    /// instead of writing a `Cancelled` terminal over an unsettled child.
     ///
     /// Admission is the shared managed-turn registry: the process's first
     /// turn claims a `ManagedTurnLease` under `turn_concurrency_limit`, so a
@@ -79,17 +89,51 @@ impl ManagedSessionCapability {
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: CancellationToken,
     ) -> Result<InitializedSessionTurn, SessionTurnInitError> {
+        let requested_session_id = create_request.session_id.clone();
         if cancellation.is_cancelled() {
-            return Err(SessionTurnInitError::CancelledBeforeCreate);
-        }
-        let session = self
-            .create_session(current, create_request)
+            self.settle_cancelled_process_child_inputs(
+                current,
+                requested_session_id.as_ref(),
+                process_id,
+                &turn_id,
+            )
             .await
-            .map_err(|source| SessionTurnInitError::Create {
+            .map_err(|source| SessionTurnInitError::Reconcile {
+                session_id: requested_session_id.clone(),
                 source: Box::new(source),
             })?;
-        let session_id = session.session_id.clone();
+            return Err(SessionTurnInitError::CancelledBeforeCreate);
+        }
+        // A retry that finds its child still resident in this registry skips
+        // the create commit entirely: re-committing over an existing head
+        // would only ever produce a conflict, and the turn itself is
+        // idempotent on `(session_id, turn_id)`.
+        let session_id = match requested_session_id.as_ref() {
+            Some(session_id) if self.registry.lock().await.contains_key(session_id) => {
+                session_id.clone()
+            }
+            _ => {
+                self.create_session(current, create_request)
+                    .await
+                    .map_err(|source| SessionTurnInitError::Create {
+                        session_id: requested_session_id.clone(),
+                        source: Box::new(source),
+                    })?
+                    .session_id
+            }
+        };
         if cancellation.is_cancelled() {
+            self.settle_cancelled_process_child_inputs(
+                current,
+                Some(&session_id),
+                process_id,
+                &turn_id,
+            )
+            .await
+            .map_err(|source| SessionTurnInitError::Reconcile {
+                session_id: Some(session_id.clone()),
+                source: Box::new(source),
+            })?;
             return Err(SessionTurnInitError::CancelledAfterCreate { session_id });
         }
         let request = crate::SessionTurnRequest::new_process_backed(
@@ -118,7 +162,151 @@ impl ManagedSessionCapability {
                 session_id: session_id.clone(),
                 source: Box::new(source),
             })?;
-        Ok(InitializedSessionTurn { session, turn })
+        Ok(InitializedSessionTurn { session_id, turn })
+    }
+
+    /// Durably settle this turn's still-open input on the cancelled process's
+    /// retained child session(s) without running a turn.
+    ///
+    /// This is the redelivery reconcile: a previous attempt may have
+    /// committed the child session and accepted the input before crashing or
+    /// observing the durable cancellation. Opening the recorded child (plus
+    /// any session the catalog attributes to this process, covering an id a
+    /// crashed attempt minted but never recorded) and cancelling every open
+    /// row scoped to `turn_id` leaves terminal receipts behind and nothing
+    /// claimable — the precondition for the caller to write a `Cancelled`
+    /// process terminal.
+    ///
+    /// A row still held under a live session-execution-lease claim refuses
+    /// cancellation and surfaces as an error: a live holder can still settle
+    /// it, so the process stays recoverable rather than terminalizing over an
+    /// input a survivor might complete.
+    async fn settle_cancelled_process_child_inputs(
+        &self,
+        current: &CurrentSessionCapability,
+        requested_session_id: Option<&SessionId>,
+        process_id: &crate::ProcessId,
+        turn_id: &TurnId,
+    ) -> Result<(), crate::PluginError> {
+        let Some(factory) = current.host.session_store_factory.as_ref() else {
+            return Ok(());
+        };
+        let mut candidates: Vec<SessionId> = requested_session_id.cloned().into_iter().collect();
+        match factory
+            .list_sessions(&crate::SessionListFilter {
+                caused_by: Some(crate::CausalRef::Process {
+                    process_id: process_id.clone(),
+                }),
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(summaries) => {
+                for session_id in summaries.into_iter().map(|summary| summary.session_id) {
+                    if !candidates.contains(&session_id) {
+                        candidates.push(session_id);
+                    }
+                }
+            }
+            Err(crate::StoreError::UnsupportedStoreOperation { .. }) => {}
+            Err(error) => {
+                return Err(crate::PluginError::Session(format!(
+                    "failed to enumerate sessions caused by cancelled process `{process_id}`: {error}"
+                )));
+            }
+        }
+        for session_id in candidates {
+            self.settle_open_process_child_turn_input(
+                factory.as_ref(),
+                &session_id,
+                process_id,
+                turn_id,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn settle_open_process_child_turn_input(
+        &self,
+        factory: &dyn crate::SessionStoreFactory,
+        session_id: &SessionId,
+        process_id: &crate::ProcessId,
+        turn_id: &TurnId,
+    ) -> Result<(), crate::PluginError> {
+        let Some(store) = factory
+            .open_existing_store_by_id(session_id)
+            .await
+            .map_err(|error| {
+                crate::PluginError::Session(format!(
+                    "failed to inspect cancelled process `{process_id}` child session `{session_id}`: {error}"
+                ))
+            })?
+        else {
+            return Ok(());
+        };
+        // A session the catalog attributes to this process exists solely to
+        // run its turn, so every open row under it is the dead attempt's work.
+        // A session not caused by this process is foreign — only rows scoped
+        // to this exact turn may be touched.
+        let owned_by_process = store
+            .load_session_meta()
+            .await
+            .map_err(|error| {
+                crate::PluginError::Session(format!(
+                    "failed to read cancelled process `{process_id}` child session `{session_id}` metadata: {error}"
+                ))
+            })?
+            .is_some_and(|meta| {
+                matches!(
+                    &meta.relation,
+                    crate::SessionRelation::Child {
+                        caused_by: Some(crate::CausalRef::Process {
+                            process_id: owner_process_id,
+                        }),
+                        ..
+                    } if owner_process_id == process_id
+                )
+            });
+        let pending = store
+            .list_pending_turn_inputs(session_id)
+            .await
+            .map_err(|error| {
+                crate::PluginError::Session(format!(
+                    "failed to list cancelled process `{process_id}` child session `{session_id}` inputs: {error}"
+                ))
+            })?;
+        let targets: Vec<crate::PendingTurnInputCancelTarget> = pending
+            .iter()
+            .filter(|read| {
+                !read.input.state.is_terminal()
+                    && (owned_by_process || read.input.state.active_turn_id() == Some(turn_id))
+            })
+            .map(|read| {
+                crate::PendingTurnInputCancelTarget::input_id(read.input.input_id.to_string())
+            })
+            .collect();
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let receipts = store
+            .cancel_pending_turn_inputs(session_id, &targets)
+            .await
+            .map_err(|error| {
+                crate::PluginError::Session(format!(
+                    "failed to settle cancelled process `{process_id}` child session `{session_id}` inputs: {error}"
+                ))
+            })?;
+        for receipt in &receipts {
+            if let crate::PendingTurnInputCancelOutcome::AlreadyClaimed { claim, .. } =
+                &receipt.outcome
+            {
+                return Err(crate::PluginError::Session(format!(
+                    "cancelled process `{process_id}` child session `{session_id}` still holds this turn's input under a live claim: {claim:?}"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// The shared managed-turn drive: registry admission, event drain, task
@@ -221,7 +409,9 @@ impl ManagedSessionCapability {
 /// The initialized child session and its committed first turn returned by
 /// [`ManagedSessionCapability::initialize_session_and_run_turn`].
 pub(in crate::runtime::session_manager) struct InitializedSessionTurn {
-    pub session: SessionHandle,
+    /// The child the turn ran on — a newly created session or a resident one
+    /// a retry adopted.
+    pub session_id: SessionId,
     pub turn: AssembledTurn,
 }
 
@@ -230,34 +420,63 @@ pub(in crate::runtime::session_manager) struct InitializedSessionTurn {
 /// The variants partition the operation so the process runner can report the
 /// stage faithfully without inspecting error strings.
 pub(in crate::runtime::session_manager) enum SessionTurnInitError {
-    /// Cancellation was observed before the create commit; nothing exists.
+    /// Cancellation was observed before the create commit; this attempt
+    /// created nothing. Any input a previous attempt left open under this
+    /// turn was durably settled before this error was returned.
     CancelledBeforeCreate,
     /// Cancellation was observed in the window between the create commit and
-    /// turn admission. The session is committed, retained, and idle.
+    /// turn admission (or after the turn settled). The session is committed
+    /// and retained; nothing this turn accepted remains claimable.
     CancelledAfterCreate { session_id: SessionId },
-    /// Session initialization failed; no retained session was produced.
-    Create { source: Box<crate::PluginError> },
+    /// Session initialization failed.
+    ///
+    /// `session_id` is the child's recorded identity when the durable
+    /// request fixed it. Creation is multi-stage — the durable catalog row
+    /// and the runtime commit can land before a later stage fails — so a
+    /// `Some` here means a retained session *may* already exist for that id
+    /// even though no runtime was registered. `None` means only that the
+    /// request named no id, not that nothing was committed.
+    Create {
+        session_id: Option<SessionId>,
+        source: Box<crate::PluginError>,
+    },
     /// The process's execution authority did not validate for the child turn.
     Request {
         session_id: SessionId,
         source: Box<crate::PluginError>,
     },
-    /// The first turn itself failed to run to a committed outcome.
+    /// The first turn itself failed to run to a committed outcome — including
+    /// a failed final commit, which can leave the accepted input open for a
+    /// later attempt to recover.
     Turn {
         session_id: SessionId,
+        source: Box<crate::PluginError>,
+    },
+    /// Cancellation was observed but reconciling the retained child's durable
+    /// input failed, so this turn's accepted input may still be open. The
+    /// process must stay recoverable: terminalizing it now would strand a
+    /// claimable input inside the retained session.
+    Reconcile {
+        session_id: Option<SessionId>,
         source: Box<crate::PluginError>,
     },
 }
 
 impl SessionTurnInitError {
-    /// The retained child session id, when cancellation landed after the
-    /// create commit. `None` means the operation created nothing.
+    /// The child session id the operation could have left durable state for —
+    /// either a session it provably retained or, for `Create`/`Reconcile`,
+    /// the recorded identity whose catalog row may exist even though the
+    /// failure carried no runtime handle. `None` means the request named no
+    /// session, not that nothing was committed.
     pub(in crate::runtime::session_manager) fn retained_session_id(&self) -> Option<&SessionId> {
         match self {
             Self::CancelledAfterCreate { session_id }
             | Self::Request { session_id, .. }
             | Self::Turn { session_id, .. } => Some(session_id),
-            Self::CancelledBeforeCreate | Self::Create { .. } => None,
+            Self::Create { session_id, .. } | Self::Reconcile { session_id, .. } => {
+                session_id.as_ref()
+            }
+            Self::CancelledBeforeCreate => None,
         }
     }
 }

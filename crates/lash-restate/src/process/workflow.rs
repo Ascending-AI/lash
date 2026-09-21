@@ -292,34 +292,44 @@ where
                 signal?;
                 cancellation.cancel();
                 self.confirm_process_cancel_requested(&process_id).await?;
-                let _ = runner.await;
-                Ok(lash_core::ProcessRunOutcome::Terminal {
-                    output: Box::new(ProcessAwaitOutput::from_tool_output(
-                        lash_core::ToolCallOutput::cancelled(
-                            lash_core::ToolCancellation::runtime(format!(
-                                "process `{process_id}` was cancelled"
-                            )),
-                        ),
-                    )),
-                })
+                // The runner still has to settle: a `SessionTurn` runner only
+                // returns a settled outcome once the retained child's accepted
+                // input is terminal and unclaimed. An `Err` is an
+                // infrastructure failure, not a settled outcome — propagate it
+                // so the invocation retries instead of terminalizing over an
+                // unsettled child.
+                match runner.await {
+                    Err(error) => Err(error),
+                    Ok(_) => Ok(lash_core::ProcessRunOutcome::Terminal {
+                        output: Box::new(ProcessAwaitOutput::from_tool_output(
+                            lash_core::ToolCallOutput::cancelled(
+                                lash_core::ToolCancellation::runtime(format!(
+                                    "process `{process_id}` was cancelled"
+                                )),
+                            ),
+                        )),
+                    }),
+                }
             }
             outcome = &mut runner => outcome
         };
-        let runner_settled_cancelled = matches!(
-            &outcome,
-            Ok(outcome)
-                if outcome
-                    .terminal_output()
-                    .and_then(ProcessAwaitOutput::terminal_status)
-                    == Some(lash_core::ProcessStatus::Cancelled)
-        );
-        // A committed cancellation outranks a runner success (PR #897): if the
-        // runner settled before observing the cancel signal, the recorded
-        // terminal is still `Cancelled`. The child session and its committed
-        // turn stay retained either way — lash never deletes a session because
-        // a process was cancelled.
+        // A committed cancellation outranks a settled runner success
+        // (PR #897): if the runner settled before observing the cancel signal,
+        // the recorded terminal is still `Cancelled`. A runner `Err` is an
+        // infrastructure failure, not a settled outcome — it propagates so the
+        // process stays recoverable rather than masking the failure with
+        // `Cancelled` over a possibly unsettled child. The child session and
+        // its committed turn stay retained either way — lash never deletes a
+        // session because a process was cancelled.
         let outcome = if requires_cancelled_session_turn
-            && !runner_settled_cancelled
+            && matches!(
+                &outcome,
+                Ok(outcome)
+                    if outcome
+                        .terminal_output()
+                        .and_then(ProcessAwaitOutput::terminal_status)
+                        != Some(lash_core::ProcessStatus::Cancelled)
+            )
             && self
                 .process_cancel_requested(&process_id)
                 .await
