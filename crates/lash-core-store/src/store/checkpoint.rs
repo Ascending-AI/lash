@@ -491,6 +491,90 @@ mod checkpoint_tests {
         ));
     }
 
+    /// FIG-3402: the `Vec<u8>` -> `Arc<[u8]>` retype is byte-identical on the
+    /// wire. This shadow is the pre-change guarded shape verbatim; the
+    /// checkpoints below prove both serializers emit identical bytes and that
+    /// the current type still decodes what the old shape wrote.
+    #[derive(serde::Serialize, serde::Deserialize)]
+    enum LegacyHydratedCheckpointComponent {
+        Changed {
+            encoding_version: u32,
+            #[serde(with = "serde_bytes")]
+            body: Vec<u8>,
+        },
+        Unchanged {
+            descriptor: CheckpointComponentDescriptor,
+        },
+        Hydrated {
+            descriptor: CheckpointComponentDescriptor,
+            #[serde(with = "serde_bytes")]
+            body: Vec<u8>,
+        },
+    }
+
+    #[test]
+    fn arc_component_bodies_serialize_identically_to_vec_bodies() {
+        let descriptor = CheckpointComponentDescriptor {
+            blob_ref: BlobRef("arbitrary-ref".to_string()),
+            encoding_version: CHECKPOINT_COMPONENT_ENCODING_VERSION,
+        };
+        let pairs: [(
+            HydratedCheckpointComponent,
+            LegacyHydratedCheckpointComponent,
+        ); 3] = [
+            (
+                HydratedCheckpointComponent::Changed {
+                    encoding_version: CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                    body_ref: BlobRef::for_content(b"component-body"),
+                    body: Arc::from(&b"component-body"[..]),
+                },
+                LegacyHydratedCheckpointComponent::Changed {
+                    encoding_version: CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                    body: b"component-body".to_vec(),
+                },
+            ),
+            (
+                HydratedCheckpointComponent::Unchanged {
+                    descriptor: descriptor.clone(),
+                },
+                LegacyHydratedCheckpointComponent::Unchanged {
+                    descriptor: descriptor.clone(),
+                },
+            ),
+            (
+                HydratedCheckpointComponent::Hydrated {
+                    descriptor: descriptor.clone(),
+                    body: Arc::from(&b"hydrated-body"[..]),
+                },
+                LegacyHydratedCheckpointComponent::Hydrated {
+                    descriptor: descriptor.clone(),
+                    body: b"hydrated-body".to_vec(),
+                },
+            ),
+        ];
+
+        for (current, legacy) in &pairs {
+            assert_eq!(
+                serde_json::to_vec(current).expect("serialize current json"),
+                serde_json::to_vec(legacy).expect("serialize legacy json"),
+                "json bytes differ for {current:?}"
+            );
+            assert_eq!(
+                rmp_serde::to_vec_named(current).expect("serialize current msgpack"),
+                rmp_serde::to_vec_named(legacy).expect("serialize legacy msgpack"),
+                "msgpack bytes differ for {current:?}"
+            );
+            let legacy_bytes = rmp_serde::to_vec_named(legacy).expect("serialize legacy msgpack");
+            let decoded: HydratedCheckpointComponent =
+                rmp_serde::from_slice(&legacy_bytes).expect("decode legacy msgpack");
+            assert_eq!(&decoded, current, "legacy msgpack must round-trip");
+            let legacy_json = serde_json::to_vec(legacy).expect("serialize legacy json");
+            let decoded: HydratedCheckpointComponent =
+                serde_json::from_slice(&legacy_json).expect("decode legacy json");
+            assert_eq!(&decoded, current, "legacy json must round-trip");
+        }
+    }
+
     #[test]
     fn backend_component_hash_must_match_the_manifest() {
         let error = ensure_checkpoint_component_hash_agreement(

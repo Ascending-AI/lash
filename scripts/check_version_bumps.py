@@ -437,6 +437,12 @@ IDENTIFIER_RENAME_BASELINES = {
     # CHECKPOINT_COMPONENT_ENCODING_VERSION stays 2 (a bump would refuse
     # every existing v2 checkpoint).
     'crates/lash-core/src/store/checkpoint.rs:CHECKPOINT_COMPONENT_ENCODING_VERSION': 'sha256:ae8d9e989bceae4d42097ec18cb935616de4f30ccdb35507e04fb0fd90438da8',
+    # FIG-3402: checkpoint component bodies retyped Vec<u8> -> Arc<[u8]> behind
+    # a serialize_bytes shim (arc_serde_bytes), so rmp/JSON bytes are
+    # byte-identical and legacy bytes still decode; proven by
+    # arc_component_bodies_serialize_identically_to_vec_bodies in the same
+    # file. CHECKPOINT_COMPONENT_ENCODING_VERSION stays 2.
+    'crates/lash-core-store/src/store/checkpoint.rs:CHECKPOINT_COMPONENT_ENCODING_VERSION': 'sha256:5286fc29eca048a3426dc988c4250dfe488e562a7af994713a0077db012a88f2',
     # FIG-635: promise_key_preimage gained the tag-6 arm for the new
     # TurnCancelEscalation wait identity. The tag registry is append-only and
     # every previously issued key (tags 1-5 under an unchanged scope preimage)
