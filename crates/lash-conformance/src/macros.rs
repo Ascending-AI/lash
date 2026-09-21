@@ -1958,6 +1958,10 @@ macro_rules! store_effect_group_drain_tests {
     ($fixture:block) => {
         $crate::store_effect_group_drain_tests!(@catalogue $fixture; [
             (store_effect_group_drain_conformance, "store-effect-group-drain"),
+            (
+                store_effect_group_crash_matrix_conformance,
+                "store-effect-group-crash-matrix"
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

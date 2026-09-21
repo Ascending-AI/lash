@@ -7,6 +7,7 @@ pub use super::attachment_store::*;
 pub use super::await_event_cold::*;
 pub use super::direct_turn_acceptance::*;
 pub use super::durable_queued_drain_wait::*;
+pub use super::effect_group_crash_matrix::*;
 pub use super::effect_group_drain::*;
 pub use super::effect_group_host::*;
 pub use super::effect_host::*;

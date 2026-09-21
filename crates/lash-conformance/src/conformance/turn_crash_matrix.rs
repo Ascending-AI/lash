@@ -219,11 +219,22 @@ enum ProviderOperation {
 }
 
 /// Effect calls are identified from the real envelope command.
+///
+/// `GroupChild` is a scalar or batch envelope that arrived carrying group
+/// membership — the same command under a different authority, which is the
+/// state a batch/attempt-only vocabulary cannot name (FIG-3429). The group
+/// lifecycle calls are seam operations of their own: an open is where retained
+/// membership is written, a settlement is where a journaled rank is consumed,
+/// and a close is where the caller releases its losers.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 enum EffectOperation {
     ToolBatch { name: String },
     ToolAttempt { name: String },
+    GroupChild { name: String },
+    GroupOpen { children: usize },
+    GroupSettle,
+    GroupClose,
 }
 
 /// Crash placement relative to the matched semantic operation.
@@ -1231,15 +1242,27 @@ impl RuntimeEffectController for SeamEffectController {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let operation = match &envelope.command {
             crate::RuntimeEffectCommand::ToolAttempt { call, .. } => Some((
-                EffectOperation::ToolAttempt {
-                    name: call.tool_name.clone(),
+                if envelope.group.is_some() {
+                    EffectOperation::GroupChild {
+                        name: call.tool_name.clone(),
+                    }
+                } else {
+                    EffectOperation::ToolAttempt {
+                        name: call.tool_name.clone(),
+                    }
                 },
                 true,
             )),
             crate::RuntimeEffectCommand::ToolBatch { batch } => batch.calls.first().map(|call| {
                 (
-                    EffectOperation::ToolBatch {
-                        name: call.call.tool_name.clone(),
+                    if envelope.group.is_some() {
+                        EffectOperation::GroupChild {
+                            name: call.call.tool_name.clone(),
+                        }
+                    } else {
+                        EffectOperation::ToolBatch {
+                            name: call.call.tool_name.clone(),
+                        }
                     },
                     false,
                 )
@@ -1273,7 +1296,12 @@ impl RuntimeEffectController for SeamEffectController {
         &self,
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
+        let operation = TurnSeamOperation::Effect(EffectOperation::GroupOpen {
+            children: group.children().len(),
+        });
+        self.control
+            .around(operation, self.inner.open_effect_group(group))
+            .await
     }
 
     async fn await_next_settlement(
@@ -1281,7 +1309,12 @@ impl RuntimeEffectController for SeamEffectController {
         handle: &mut lash_core::EffectGroupHandle,
         cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
+        self.control
+            .around(
+                TurnSeamOperation::Effect(EffectOperation::GroupSettle),
+                self.inner.await_next_settlement(handle, cancel),
+            )
+            .await
     }
 
     async fn close_effect_group(
@@ -1289,7 +1322,12 @@ impl RuntimeEffectController for SeamEffectController {
         handle: lash_core::EffectGroupHandle,
         disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
+        self.control
+            .around(
+                TurnSeamOperation::Effect(EffectOperation::GroupClose),
+                self.inner.close_effect_group(handle, disposition),
+            )
+            .await
     }
 }
 
@@ -1981,7 +2019,9 @@ fn generated_points(trace: &[TurnSeamOperation]) -> Vec<TurnCrashPoint> {
         if matches!(operation, TurnSeamOperation::Effect(_)) {
             if matches!(
                 operation,
-                TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
+                TurnSeamOperation::Effect(
+                    EffectOperation::ToolAttempt { .. } | EffectOperation::GroupChild { .. }
+                )
             ) {
                 points.push(TurnCrashPoint {
                     operation: operation.clone(),
