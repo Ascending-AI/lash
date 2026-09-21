@@ -22,6 +22,7 @@ fn a_wire_shape_may_disagree_with_itself_and_is_refused_terminally() {
         loser_disposition: LoserPolicy::Cancel,
         replay_keys: vec!["child-0".to_owned()],
         wait_scope: ExecutionScope::runtime_operation("group-key"),
+        membership: Vec::new(),
     };
     let encoded = serde_json::to_vec(&mismatched).expect("serialize mismatched shape");
     let decoded: EffectGroupShape =
@@ -50,6 +51,7 @@ fn a_child_position_past_the_replay_keys_is_a_typed_terminal_error() {
         loser_disposition: LoserPolicy::RunToCompletion,
         replay_keys: vec!["child-0".to_owned()],
         wait_scope: ExecutionScope::runtime_operation("group-key"),
+        membership: Vec::new(),
     };
 
     assert_eq!(shape.replay_key(0).expect("the recorded child"), "child-0");

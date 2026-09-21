@@ -988,6 +988,7 @@ fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectG
             .map(|child| child.invocation.replay_key().to_owned())
             .collect(),
         wait_scope: ExecutionScope::runtime_operation(group_key),
+        membership: Vec::new(),
     }
 }
 
