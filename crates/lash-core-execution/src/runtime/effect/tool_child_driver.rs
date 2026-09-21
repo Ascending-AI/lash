@@ -268,6 +268,7 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
             &self.host,
             &self.context,
             &request,
+            self.host.child_controller(&request.scope.admitted_scope)?,
             self.context.cancellation().child_token(),
         ))
         .await

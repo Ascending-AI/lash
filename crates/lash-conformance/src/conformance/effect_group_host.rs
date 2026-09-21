@@ -1087,10 +1087,14 @@ pub async fn a_wired_host_serves_all_three_group_methods<F: Fn() -> Host>(make: 
 /// all land (FIG-3415).
 ///
 /// The driver's root effect stands in for the process-command envelope the
-/// proxy is built around in production: it stays in flight, gated on the
-/// law's release, while the group calls below arrive on the request channel —
+/// proxy is built around in production: it stays in flight until the law
+/// resolves it, while the group calls below arrive on the request channel —
 /// which is also what proves a proxied group call does not wait for the root
-/// to finish.
+/// to finish. The root is a durable wait rather than a local `ctx.run` body
+/// because a deployment-owned Restate controller runs durable waits over
+/// ingress but refuses journaled local execution outside a handler — and an
+/// unresolved wait is the one effect every group-capable controller can hold
+/// in flight.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1105,8 +1109,15 @@ pub async fn a_proxied_controller_serves_all_three_group_methods<F: Fn() -> Host
     let (proxied, requests) =
         crate::runtime::effect::EffectTaskController::scoped(scoped.controller(), admitted)
             .expect("the task proxy builds around the scoped controller");
-    let (release, released) = oneshot::channel::<()>();
     let root_scope = scoped.execution_scope().clone();
+    let root_key = scoped
+        .controller()
+        .await_event_key(
+            &root_scope,
+            AwaitEventWaitIdentity::tool_completion(format!("{prefix}-proxied-root")),
+        )
+        .await
+        .expect("the root wait key derives on the scoped controller");
     let drive = crate::runtime::effect::drive_effect_controller_task(
         scoped.controller(),
         root_scope.clone(),
@@ -1116,14 +1127,11 @@ pub async fn a_proxied_controller_serves_all_three_group_methods<F: Fn() -> Host
                 RuntimeAttribution::none(),
                 "proxied-root",
             ),
-            RuntimeEffectCommand::LanguageRuntimeValue {
-                operation: "proxied-root".to_string(),
+            RuntimeEffectCommand::AwaitEvent {
+                key: root_key.clone(),
             },
         ),
-        RuntimeEffectLocalExecutor::testing(move |_| async move {
-            let _ = released.await;
-            Ok(outcome_of(0))
-        }),
+        RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None),
         requests,
     );
     let scenario = async {
@@ -1155,7 +1163,19 @@ pub async fn a_proxied_controller_serves_all_three_group_methods<F: Fn() -> Host
         close(&proxied, handle, RUN)
             .await
             .expect("the proxied close lands");
-        let _ = release.send(());
+        let resolved = proxied
+            .controller()
+            .resolve_await_event(
+                &root_key,
+                crate::Resolution::Ok(serde_json::json!("proxied-root")),
+            )
+            .await
+            .expect("the root wait resolves through the proxy");
+        assert_eq!(
+            resolved,
+            crate::ResolveOutcome::Accepted,
+            "the root wait was still outstanding when the proxied resolve landed"
+        );
     };
     let ((), outcome) = tokio::join!(scenario, drive);
     outcome.expect("the driver completes its root effect");
