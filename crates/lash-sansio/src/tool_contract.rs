@@ -272,7 +272,7 @@ pub struct ToolManifest {
     #[serde(default = "inline_default", skip_serializing_if = "is_inline")]
     pub inline: bool,
     pub id: ToolId,
-    pub label: String,
+    pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
