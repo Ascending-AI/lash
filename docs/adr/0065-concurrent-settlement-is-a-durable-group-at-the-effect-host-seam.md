@@ -667,6 +667,18 @@ The bounded grace follows the decision and cannot reverse it.
 committed final proceeds through intent drain and durable projection to rankable
 while the opener is live or closing, so a live aggregate reaches rankability.
 
+**Within a group, intent drains are admitted in final-commit order**, the durable
+order of that linearization point, rather than in the batch's source order. This
+ADR's whole purpose is to make settlement order a durable fact, and that is what
+makes the replacement available: cross-child source order was a determinism device
+chosen when completion order was re-raced on every redrive. Carrying it into
+groups would have made `Promise.race([slow(), fast()])` unable to resolve with
+`fast` — every terminal leaf takes its source turn today, whether or not it
+declared an intent — and one hung source-first tool would stop every sibling from
+ever ranking. Rank order therefore equals commit order; only drain duration
+varies, and cancel-decided children still route through for rank like any other
+terminal.
+
 **A committed-but-undrained final remains unsettled and is ineligible for
 cancellation.** It is excluded from *cancellation*, not from lifecycle
 accounting: it still needs the rank, discharge and projection authority this ADR

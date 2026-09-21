@@ -8,8 +8,10 @@ The atomic-attempt and recorded-intent decisions remain accepted.
 Amended 2026-09-21 (FIG-3392): the phase between "final attempt recorded" and
 "declarations drained" is named as a protected lifecycle phase, with the final
 record and the cancel disposition arbitrated at **one** durable linearization
-point, and the coordination around an atomic attempt is placed at handler level
-on a child's own admitted controller. See
+point; the cross-child intent-drain order inside one batch moves from source
+order to final-commit order, while this ADR's own intra-attempt source order is
+unchanged; and the coordination around an atomic attempt is placed at handler
+level on a child's own admitted controller. See
 ["The protected phase, and where coordination runs"](#the-protected-phase-and-where-coordination-runs-fig-3392)
 at the end of this ADR; the full contract is
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
@@ -360,6 +362,31 @@ This does not weaken the at-least-once disclaimer below: an *unrecorded*
 completion still means the whole attempt runs again, and opaque in-attempt I/O
 is still at-least-once. The protection is of the recorded declaration, not of
 the external write.
+
+### Two source orders, and only one of them is this ADR's
+
+"Records the final attempt first, then admits and drains **its** declarations in
+source order" is a rule about the declarations of **one attempt**: a provider
+returns an ordered `ToolIntents`, and they are admitted in that order. **That rule
+is unchanged.**
+
+A second, different order has been enforced beside it and was never recorded in
+any ADR: the order in which the *children of one batch* take their turn to drain.
+`BatchIntentDrainGate` sequences those turns by **source index**, and
+`settle_terminal_attempt` takes its turn for every terminal attempt whether or not
+it declared an intent, so every terminal leaf of a batch settles in source order.
+That was a determinism device — before effect groups, completion order was not a
+durable fact, so source order was the only replay-stable cross-sibling order
+available for the journal commands intent realization emits.
+
+Effect groups make the final-commit order durable, so under
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) §5
+**the cross-child order becomes final-commit order**: a child's drain is admitted
+in the order its final record won the linearization point above, no child waits on
+an unfinished sibling, and a child with nothing left to admit is discharged
+immediately. The observable change is that `Promise.all`'s intent realization
+moves from argument order to completion order. The intra-attempt rule in the
+paragraph this ADR already states is not affected.
 
 ### Coordination is at handler level; only the attempt is inside the recorded body
 

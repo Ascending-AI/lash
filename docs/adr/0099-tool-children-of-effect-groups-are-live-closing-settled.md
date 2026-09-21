@@ -333,39 +333,93 @@ and its required projection.** Publishing a rank earlier would let a consumer
 observe a settlement whose declared effects have not happened, and then checkpoint
 past it.
 
+#### Intents are admitted in final-commit order, not in source order
+
+**Within a group, a child's intent drain is admitted in the order its final
+record won the §4 linearization point.** That order is durable, monotonic per
+group, assigned at the moment a final record commits, and journaled; a child never
+waits on an unfinished sibling. It is the order in which the group's children may
+emit nested semantic commands, and therefore the order a replay must reproduce.
+
+This replaces today's cross-child **source** order, which cannot be carried into
+groups. `settle_terminal_attempt` in
+`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs` calls
+`slot.begin_final_drain().await` for **every** terminal attempt, whether or not it
+declared a single intent, and `BatchIntentDrainGate::wait_for` parks until `next
+== index`. So every terminal leaf of a batch today settles in source order, and
+first-settled selection is reachable only when the source-first child *parks*
+(a deferred completion) or fails during preparation — which is exactly what the
+FIG-3395 oracle measured. Carried into groups unchanged, `Promise.race([slow(),
+fast()])` could never resolve with `fast`, and one hung source-first tool would
+stop every later sibling from ever becoming rankable. `race` and `any` would be
+accepted and useless.
+
+**Source order was a determinism device, not a product law.** Intent realization
+is journal-first and happens *after* the `ToolAttempt` is sealed, so on an
+ordinal-addressed tier those commands land in the parent's journal and their
+cross-sibling order must be replay-stable or the replay meets a mismatch. Before
+groups the only replay-stable order available was source order: completion order
+was "derived from a `FuturesUnordered` yield order in process" and journaled only
+when the whole batch record sealed (ADR 0065's Context), so a redrive re-raced and
+could produce a different permutation. ADR 0065 exists to make settlement order a
+durable fact, and once the final-commit order is itself durable it is an available
+deterministic order — so the device is no longer needed and its cost is no longer
+paid.
+
+Three consequences are stated rather than discovered:
+
+- **Rank order equals commit order.** Drains proceed in commit order and rank is
+  allocated after a child's drain, so the two agree; only the *duration* of a
+  drain varies, never the order. Cancel-decided children still route through for
+  rank like any other terminal (ADR 0065), so rank covers more children than
+  commit order does.
+- **`Promise.all`'s intent realization order changes** from source order to
+  completion order. This is observable — two children that each start a process
+  now register in completion order — and it is what ECMA-262 hosts do: side
+  effects inside `a()` and `b()` happen as each settles, not in argument order.
+- **The standalone Lashlang list-batch follows the same rule**, because it is the
+  same batch path. Its *consumer* surface is unchanged: it keeps its existing
+  all-results wait and its first-settled rejection selection (§10 L7). Only the
+  order in which its leaves' declarations are admitted moves.
+
+**ADR 0042's "drains its declarations in source order" is untouched.** That clause
+is about the declarations *of one attempt*, admitted in the order the provider
+listed them, and it stays exactly as it is. The cross-child order this section
+changes is a batch-level mechanism that no ADR ever recorded.
+
+#### Discharge is a recorded fact
+
 **A group's source slot is durably discharged only after its required intent
 outcomes are recorded, or after cancellation proves it has no remaining protected
 admission obligation. Losing a task or a lease is not discharge.** The in-process
-gate discharges from `Drop` —
-`crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs` documents
-`IntentDrainGuard` as "One child's exactly-once claim on its slot … Holding the
-guard is the claim; dropping it discharges the slot" — which is right for a
-process-local future and **wrong** if copied into durable recovery, where a crash
-would release an earlier protected slot before its intents finish.
+gate discharges from `Drop` — `IntentDrainGuard` is "One child's exactly-once
+claim on its slot … Holding the guard is the claim; dropping it discharges the
+slot" — which is right for a process-local future and **wrong** if copied into
+durable recovery, where a crash would release an earlier protected slot before its
+intents finish.
 
-**The head-of-line delay is stated, not hidden, and it is wider than "draining".**
-The guard is "Owned for the whole coordination", so a source-earlier attempt that
-is merely *running* already blocks a source-later final's intent drain — not only
-one that has begun draining. What is refused is an *undefined* barrier, in
-particular any rule of the form "drain every already-settled sibling", which is
-either circular or adds a barrier behind an unrelated sibling.
+**A child with no remaining intent admission is admitted and discharged
+immediately**, without ever blocking a sibling: an attempt that declared nothing,
+and a timer or parked wait with no remaining admission, take their place in commit
+order and release it in the same step.
 
-**Timers and parked waits with no remaining intent admission do not hold an intent
-slot until their eventual wake.**
+**What is refused is an undefined barrier**, in particular any rule of the form
+"drain every already-settled sibling", which is either circular or adds a barrier
+behind an unrelated sibling.
 
-**Source-order intent admission is preserved within a group**, with recorded
-discharge wherever separate handlers or recovery need it. The existing gate is a
-`Mutex` plus a `Notify`: two Restate handlers cannot share it and a crash past a
-checkpoint loses it, so the ordering must be representable durably — as discharge
-facts in the existing group authority, not as a new scheduler.
+The existing gate is a `Mutex` plus a `Notify`: two Restate handlers cannot share
+it and a crash past a checkpoint loses it, so commit order and discharge must be
+representable durably — as facts in the existing group authority, not as a new
+scheduler.
 
 **Across the resumed continuation and running losers there is no total order, and
 none is invented.** Existing target transaction order decides, and the
 consumer-visible observation prefix is journaled (§6). **No turn-wide intent
 scheduler.**
 
-*Status.* The per-group gate and its in-process discharge **hold today**. Durable
-discharge and the journaled observation prefix are **new** (FIG-3396, FIG-3397).
+*Status.* The per-group gate and its in-process discharge **hold today**, in
+source order. Commit order, durable discharge and the journaled observation prefix
+are **new** (FIG-3396, FIG-3397).
 
 ---
 
@@ -842,6 +896,8 @@ both.
 | W16 | session delete requested while the group is accepted or closing | Refused until settled. **This exclusion does not exist today** (§7) and is FIG-3396's. |
 | W17 | a late completion arrives after the cancel decision committed | Refused, typed, with **no journal write**; the refusal's evidence survives retirement. Already-admitted descendant commands are not undone (§4). |
 | W18 | native: OS process death | Nothing is promised. Native durability ends at the runtime's lifetime (§14). |
+| W19 | **final record committed and its commit-order position assigned, crash before the drain runs** | Recovery drains in the **recorded** commit order and never re-derives it from whatever completes first on the redrive. The position is a durable fact assigned at the §4 linearization point, not a property of the run that observed it. |
+| W20 | **two finals commit concurrently** | The linearization point serializes them, so exactly one takes the lower position, and both positions are durable before either drain begins. A tie is not resolvable by source index, by wall clock or by whichever writer returned first; if the point cannot order them it has not committed either. |
 
 ---
 
@@ -936,6 +992,15 @@ needs its rank, discharge and projection authority (§4).
 - **Three facts replace one.** Child disposition, child rankability, and the
   opener's phase are separate; an implementation that derives any of them from
   another will be wrong at a crash boundary.
+- **`race` and `any` become useful rather than merely accepted.** Carrying the
+  cross-child source-order intent gate into groups would have made
+  `Promise.race([slow(), fast()])` unable to resolve with `fast`, and one hung
+  source-first tool would have blocked every sibling from ranking. Commit order
+  removes that, at the cost of one observable change: `Promise.all`'s intent
+  realization moves from source order to completion order, which is what an
+  ECMA-262 host does anyway. FIG-3395's oracle holds the pre-cutover baseline
+  (`sqlite_terminal_leaves_settle_in_source_order`) so the move is measured, not
+  assumed.
 - **Closing is a durable fact with its own crash windows.** W9–W12 exist only
   because the transition is recorded; without it they are indistinguishable from a
   live opener.

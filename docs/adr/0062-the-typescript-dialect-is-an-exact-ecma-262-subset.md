@@ -316,11 +316,19 @@ function does not cancel a losing timer or socket, and that arm's later write ca
 land after the caller returned. Lash suppresses that write at opener close.
 
 This statement concerns **cancellation only**. It claims no general Node
-scheduling or lifetime equivalence — source-order intent head-of-line blocking
-and the registered sequential async-map deviation can already produce observable
-ordering differences while the opener is live — and opener close fences further
-unprotected Lash semantic writes without guaranteeing that external I/O already
-issued stops.
+scheduling or lifetime equivalence — the registered sequential async-map
+deviation still produces observable ordering differences while the opener is live
+— and opener close fences further unprotected Lash semantic writes without
+guaranteeing that external I/O already issued stops.
+
+One ordering divergence that exists today is **removed** rather than accepted.
+Every terminal leaf of a batch currently drains its declarations in *source*
+order, whether or not it declared any, so an aggregate resolves in source order
+and a hung source-first tool blocks every later sibling. Under ADR 0099 §5 the
+order becomes the durable **final-commit** order, which is what a host does with
+`Promise.all([a(), b()])`: each call's side effects happen as it settles, not in
+argument order. The observable consequence is that intent realization order for
+`Promise.all` moves from argument order to completion order.
 
 **An attempt whose final result already committed is exempt.** Its declared
 intents are realized before the opener settles and survive a crash in that window
