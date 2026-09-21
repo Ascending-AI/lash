@@ -1068,35 +1068,33 @@ impl SessionGraph {
             return;
         }
         // Only the mapped records are unshared and rewritten; the rest of the
-        // resident vector stays pointer-identical to every snapshot. Parents
-        // always precede their children in the resident vector (appends land
-        // at the tail), so a node whose parent is remapped sits at or after
-        // the first mapped position — scanning that tail range rewrites
-        // mapped parents, including on unmapped nodes, without touching the
-        // unmapped prefix.
+        // resident vector stays pointer-identical to every snapshot. The
+        // parent-rewrite pass scans every resident node: nothing enforces
+        // parent-before-child order in a loaded graph, so a child can sit
+        // ahead of a mapped parent anywhere in the vector. The scan reads
+        // ids only — `Arc::make_mut` still unshares just the records whose
+        // parent actually moves.
         let positions = self.resident_node_indices(mapping.iter().map(|(draft, _)| draft.as_str()));
         let derived_by_id = mapping
             .iter()
             .map(|(draft, derived)| (draft, derived))
             .collect::<HashMap<_, _>>();
         let data = self.data_mut();
-        let mut first_mapped = data.nodes.len();
         for ((_, derived), position) in mapping.iter().zip(positions) {
             let Some(index) = position else {
                 continue;
             };
-            first_mapped = first_mapped.min(index);
             Arc::make_mut(&mut data.nodes[index]).node_id = derived.clone();
         }
-        for index in first_mapped..data.nodes.len() {
-            let Some(mapped_parent) = data.nodes[index]
+        for node in &mut data.nodes {
+            let Some(mapped_parent) = node
                 .parent_node_id
                 .as_ref()
                 .and_then(|parent| derived_by_id.get(parent).map(|id| (*id).clone()))
             else {
                 continue;
             };
-            Arc::make_mut(&mut data.nodes[index]).parent_node_id = Some(mapped_parent);
+            Arc::make_mut(node).parent_node_id = Some(mapped_parent);
         }
         if let Some(leaf) = data.leaf_node_id.as_mut()
             && let Some(derived) = derived_by_id.get(leaf)

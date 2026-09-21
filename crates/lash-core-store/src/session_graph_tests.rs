@@ -1207,6 +1207,60 @@ fn remap_node_ids_rewrites_mapped_parents_on_unmapped_records() {
 }
 
 #[test]
+fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
+    // A loaded graph carries no parent-before-child guarantee: a child can
+    // sit ahead of its parent in the resident vector. Remapping the parent
+    // must still rewrite the earlier child's parent id, on both the warm
+    // cache index path and the cold fallback.
+    for warm_cache in [true, false] {
+        let record = |id: &str, parent: Option<&str>| SessionNodeRecord {
+            node_id: id.to_string().into(),
+            parent_node_id: parent.map(crate::NodeId::from),
+            timestamp: "2026-08-08T00:00:00Z".to_string(),
+            payload: SessionNodePayload::Plugin {
+                plugin_type: "remap-child-before-parent".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"id": id})),
+            },
+        };
+        let mut graph = SessionGraph::from_nodes(
+            vec![record("child", Some("root")), record("root", None)],
+            Some("child".into()),
+        )
+        .expect("child-before-parent order is structurally valid");
+        let snapshot = graph.clone();
+        if warm_cache {
+            assert!(graph.find_node("root").is_some());
+        }
+
+        let derived_root = crate::NodeId::from("derived-root".to_string());
+        graph.remap_node_ids(
+            &crate::SessionId::from("remap-test"),
+            &[("root".into(), derived_root.clone())],
+        );
+
+        assert_eq!(graph.nodes[1].node_id, derived_root);
+        assert_eq!(
+            graph.nodes[0].parent_node_id.as_ref(),
+            Some(&derived_root),
+            "warm_cache={warm_cache}: the earlier child's parent must follow the remap"
+        );
+        assert_eq!(graph.leaf_node_id.as_deref(), Some("child"));
+        // Both ancestors still resolve off the rewritten graph.
+        assert!(graph.find_node("child").is_some());
+        assert!(graph.find_node("derived-root").is_some());
+        graph
+            .validate_resident_integrity()
+            .expect("remapped child-before-parent graph stays valid");
+
+        // The snapshot keeps the original records and parent id untouched.
+        assert_eq!(snapshot.nodes[0].parent_node_id.as_deref(), Some("root"));
+        assert_eq!(snapshot.nodes[1].node_id.as_str(), "root");
+        assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
+        assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
+    }
+}
+
+#[test]
 fn apply_realized_node_timestamps_rewrites_only_realized_records() {
     let mut graph = SessionGraph::default();
     let first = graph.append_message(text_message("m1", MessageRole::User, "one"));
