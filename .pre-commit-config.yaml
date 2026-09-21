@@ -111,10 +111,12 @@ repos:
       # The recreation E2E's fixtures are projections of SCHEMA_MIGRATIONS. A
       # component bump that leaves them behind produces refusals about a
       # generation the build no longer has, so it fails here rather than one
-      # container gate later.
+      # container gate later. The same check sweeps the component-version
+      # literals in the Postgres store test suite and the committed fixtures
+      # (FIG-3413), which only a manually dispatched, database-backed job reads.
       - id: version-bump-recreation-fixtures
         name: Version-bump recreation fixtures
         language: system
         entry: python3 scripts/check_version_bump_fixtures.py
-        files: '^(crates/lash-postgres-store/src/(?:lib\.rs|postgres/schema\.rs)|runbooks/restate-postgres-workers/src/bin/version_bump\.rs|scripts/(?:check_version_bump_fixtures\.py|version-bump-recreation-e2e\.sh))$'
+        files: '^(crates/lash-postgres-store/(?:src/(?:lib\.rs|postgres/schema\.rs)|tests/.*\.rs)|fixtures/.*(?:\.sql|version\.json)|runbooks/restate-postgres-workers/src/bin/version_bump\.rs|scripts/(?:check_version_bump_fixtures\.py|version-bump-recreation-e2e\.sh))$'
         pass_filenames: false

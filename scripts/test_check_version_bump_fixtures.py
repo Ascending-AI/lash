@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 import sys
 import tempfile
 import unittest
@@ -123,6 +124,39 @@ PY
 """
 
 
+# The component-generation literals no pull-request job can reach: the
+# trunk-only Postgres suite's tripwire assertion and the two committed artifacts
+# its fixtures restore. Their line offsets are asserted, so the pin sits a few
+# lines in rather than at the top of the file.
+STORE_TEST_PATH = "crates/lash-postgres-store/tests/durable_read_fixture.rs"
+STORE_TEST_SOURCE = """\
+#[tokio::test]
+async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_configured() {
+    let Some(database_url) = support::database_url() else {
+        return;
+    };
+    restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
+    // The fixture's catalog tracks the current component by design, so this
+    // pins that the two were moved together.
+    assert_eq!(PostgresStorage::schema_version(), 52);
+    fixture::assert_prior_component_encoding_is_refused(&store).await;
+}
+"""
+
+FIXTURE_DUMP_PATH = "fixtures/checkpoint-component-v1-refusal/postgres/fixture.sql"
+FIXTURE_DUMP_SOURCE = """\
+INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture');
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 52);
+"""
+
+FIXTURE_MANIFEST_PATH = "fixtures/durable-read/v1/postgres/version.json"
+FIXTURE_MANIFEST_SOURCE = """\
+{
+  "schema": 52
+}
+"""
+
+
 class VersionBumpFixtureCheckTest(unittest.TestCase):
     def check(
         self,
@@ -131,7 +165,20 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
         migrations: str = MIGRATIONS_SOURCE,
         fixture: str = FIXTURE_SOURCE,
         gate: str = GATE_SOURCE,
+        store_test: str | None = None,
+        fixture_dump: str | None = None,
+        fixture_manifest: str | None = None,
     ) -> tuple[bool, str]:
+        # The component pins track whatever generation the case declares unless
+        # the case is about a stale pin and says so; every other case is then
+        # about its own axis alone.
+        declared = re.search(r"i32 = (\d+);", version)
+        current = declared.group(1) if declared is not None else "52"
+        store_test = store_test or STORE_TEST_SOURCE.replace("52", current)
+        fixture_dump = fixture_dump or FIXTURE_DUMP_SOURCE.replace("52", current)
+        fixture_manifest = fixture_manifest or FIXTURE_MANIFEST_SOURCE.replace(
+            "52", current
+        )
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
             for relative, text in (
@@ -142,17 +189,72 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
                 (MODULE.RENDERERS_SOURCE, migrations),
                 (MODULE.FIXTURE_SOURCE, fixture),
                 (MODULE.GATE_SOURCE, gate),
+                (STORE_TEST_PATH, store_test),
+                (FIXTURE_DUMP_PATH, fixture_dump),
+                (FIXTURE_MANIFEST_PATH, fixture_manifest),
             ):
                 path = repo / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8")
             return MODULE.check(repo)
 
+    # FIG-3413: the #1796 situation. The component moves and the literal the
+    # trunk-only Postgres suite asserts stays where it was, which every
+    # pull-request and merge-queue job is blind to.
+    def test_a_bump_that_leaves_a_stale_store_test_pin_is_refused(self) -> None:
+        valid, message = self.check(
+            version="const SCHEMA_VERSION: i32 = 53;\n",
+            store_test=STORE_TEST_SOURCE,
+            fixture_dump=FIXTURE_DUMP_SOURCE,
+            fixture_manifest=FIXTURE_MANIFEST_SOURCE,
+        )
+        self.assertFalse(valid)
+        self.assertIn("durable_read_fixture.rs:9", message)
+        self.assertIn("names component 52, but", message)
+        self.assertIn("declares 53", message)
+        # And the two committed artifacts move with it or say so by name.
+        self.assertIn("fixtures/checkpoint-component-v1-refusal/postgres/fixture.sql", message)
+        self.assertIn("fixtures/durable-read/v1/postgres/version.json", message)
+
+    def test_a_pin_deleted_rather_than_moved_is_undecidable(self) -> None:
+        with self.assertRaises(MODULE.CheckError) as raised:
+            self.check(store_test="// the refusal fixture lost its component pin\n")
+        self.assertIn("sweep matched nothing", str(raised.exception))
+        with self.assertRaises(MODULE.CheckError):
+            self.check(fixture_dump="-- a dump with no component stamp\n")
+
+    def test_a_pin_moved_to_a_sibling_test_is_still_swept(self) -> None:
+        """The sweep is over a directory, so relocating a pin does not lose it."""
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            for relative, text in (
+                (MODULE.VERSION_SOURCE, VERSION_SOURCE),
+                (MODULE.MIGRATIONS_SOURCE, MIGRATIONS_SOURCE),
+                (MODULE.RENDERERS_SOURCE, MIGRATIONS_SOURCE),
+                (MODULE.FIXTURE_SOURCE, FIXTURE_SOURCE),
+                (MODULE.GATE_SOURCE, GATE_SOURCE),
+                (STORE_TEST_PATH, STORE_TEST_SOURCE),
+                (FIXTURE_DUMP_PATH, FIXTURE_DUMP_SOURCE),
+                (FIXTURE_MANIFEST_PATH, FIXTURE_MANIFEST_SOURCE),
+                (
+                    "crates/lash-postgres-store/tests/support/component_pin.rs",
+                    "    assert_eq!(PostgresStorage::schema_version(), 51);\n",
+                ),
+            ):
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            valid, message = MODULE.check(repo)
+        self.assertFalse(valid)
+        self.assertIn("support/component_pin.rs:1", message)
+        self.assertIn("names component 51", message)
+
     def test_coherent_fixtures_pass(self) -> None:
         valid, message = self.check()
         self.assertTrue(valid, message)
         self.assertIn("component 52, floor 50", message)
         self.assertIn("1 explicitly dropped post-floor columns", message)
+        self.assertIn("3 component-version pins", message)
 
     def test_stale_floor_fails(self) -> None:
         valid, message = self.check(
