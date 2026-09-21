@@ -155,6 +155,175 @@ impl ToolDispatchContext<'_> {
     }
 }
 
+/// Version of the tool-child rebind checklist below (ADR 0099 section 3).
+///
+/// Bump this when [`REBIND_FIELDS`] or the [`RebindField`]/[`RebindDisposition`]
+/// vocabulary changes: the list is the contract every tool-child driver rebinds
+/// a lent opener context against, so an edit that slips by unnoticed is a field
+/// a child can inherit under the wrong opener's authority.
+pub const TOOL_CHILD_REBIND_VERSION: u16 = 1;
+
+/// Where a tool child's value for one [`ToolDispatchContext`] field comes from
+/// (ADR 0099 section 3).
+///
+/// The checklist is deliberately closed: a field is one of these three, and the
+/// meta-test in `tool_dispatch/tests/rebind_checklist.rs` refuses a field that
+/// arrives unclassified.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RebindDisposition {
+    /// Rebound to the child — taken from its recorded request or rebuilt under
+    /// the child's own admitted authority. The lent value is unreachable in the
+    /// child's context.
+    Rebound,
+    /// Lent from the live opener: deployment wiring and live channels a request
+    /// deliberately does not record.
+    Lent,
+    /// A fresh child-local instance: neither lent nor recorded, so nothing the
+    /// opener accumulated can leak into the child's settlement.
+    Fresh,
+}
+
+/// One field of [`ToolDispatchContext`], as the rebind checklist names it.
+///
+/// The enum exists so a fixture — or a mutant — can name one field of the
+/// context rather than a line of one driver's rebind. [`REBIND_FIELDS`] carries
+/// every variant exactly once; adding a field to `ToolDispatchContext` without
+/// adding its ruling here fails the completeness meta-test.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RebindField {
+    Plugins,
+    Tools,
+    ToolRegistry,
+    ToolCatalog,
+    Sessions,
+    SessionLifecycle,
+    SessionGraph,
+    Processes,
+    TriggerRouter,
+    ProcessDefinitions,
+    ProcessEngines,
+    EffectController,
+    DirectCompletions,
+    ParentInvocation,
+    ExecutionEnvSpec,
+    SessionId,
+    AgentFrameId,
+    EventTx,
+    CheckpointMessages,
+    TriggerOutcomes,
+    AttachmentStore,
+    AttachmentSourcePolicy,
+    TurnContext,
+    Clock,
+}
+
+impl RebindField {
+    /// The [`ToolDispatchContext`] field this ruling covers.
+    #[must_use]
+    pub const fn context_field(self) -> &'static str {
+        match self {
+            Self::Plugins => "plugins",
+            Self::Tools => "tools",
+            Self::ToolRegistry => "tool_registry",
+            Self::ToolCatalog => "tool_catalog",
+            Self::Sessions => "sessions",
+            Self::SessionLifecycle => "session_lifecycle",
+            Self::SessionGraph => "session_graph",
+            Self::Processes => "processes",
+            Self::TriggerRouter => "trigger_router",
+            Self::ProcessDefinitions => "process_definitions",
+            Self::ProcessEngines => "process_engines",
+            Self::EffectController => "effect_controller",
+            Self::DirectCompletions => "direct_completions",
+            Self::ParentInvocation => "parent_invocation",
+            Self::ExecutionEnvSpec => "execution_env_spec",
+            Self::SessionId => "session_id",
+            Self::AgentFrameId => "agent_frame_id",
+            Self::EventTx => "event_tx",
+            Self::CheckpointMessages => "checkpoint_messages",
+            Self::TriggerOutcomes => "trigger_outcomes",
+            Self::AttachmentStore => "attachment_store",
+            Self::AttachmentSourcePolicy => "attachment_source_policy",
+            Self::TurnContext => "turn_context",
+            Self::Clock => "clock",
+        }
+    }
+
+    /// The disposition a child's context assigns this field.
+    #[must_use]
+    pub const fn disposition(self) -> RebindDisposition {
+        match self {
+            // The recorded request is authoritative for what the child was
+            // admitted under: its catalog manifest, its lineage, its session
+            // and frame attribution, its environment and its own admitted
+            // controller. The completion client's transport is lent, but the
+            // ledger it reports into is the child's, so the value as a whole
+            // is rebound rather than lent.
+            Self::ToolCatalog
+            | Self::EffectController
+            | Self::DirectCompletions
+            | Self::ParentInvocation
+            | Self::ExecutionEnvSpec
+            | Self::SessionId
+            | Self::AgentFrameId => RebindDisposition::Rebound,
+            // Facts that ride the child's own outcome: a buffer the opener
+            // filled would smuggle the opener's pending facts into the child's
+            // settlement.
+            Self::CheckpointMessages | Self::TriggerOutcomes => RebindDisposition::Fresh,
+            // Everything else is deployment wiring and live channels, which
+            // section 3 puts on the lent side of the split.
+            Self::Plugins
+            | Self::Tools
+            | Self::ToolRegistry
+            | Self::Sessions
+            | Self::SessionLifecycle
+            | Self::SessionGraph
+            | Self::Processes
+            | Self::TriggerRouter
+            | Self::ProcessDefinitions
+            | Self::ProcessEngines
+            | Self::EventTx
+            | Self::AttachmentStore
+            | Self::AttachmentSourcePolicy
+            | Self::TurnContext
+            | Self::Clock => RebindDisposition::Lent,
+        }
+    }
+}
+
+/// Every [`ToolDispatchContext`] field's rebind ruling, in declaration order.
+///
+/// This is the single list a tool-child driver answers to: for each entry the
+/// child's context either carries the recorded value, borrows the live one, or
+/// holds a fresh instance — and the two-opener oracle generates its fixtures
+/// from it, so a field added here is a field the differential cannot forget.
+pub const REBIND_FIELDS: &[RebindField] = &[
+    RebindField::Plugins,
+    RebindField::Tools,
+    RebindField::ToolRegistry,
+    RebindField::ToolCatalog,
+    RebindField::Sessions,
+    RebindField::SessionLifecycle,
+    RebindField::SessionGraph,
+    RebindField::Processes,
+    RebindField::TriggerRouter,
+    RebindField::ProcessDefinitions,
+    RebindField::ProcessEngines,
+    RebindField::EffectController,
+    RebindField::DirectCompletions,
+    RebindField::ParentInvocation,
+    RebindField::ExecutionEnvSpec,
+    RebindField::SessionId,
+    RebindField::AgentFrameId,
+    RebindField::EventTx,
+    RebindField::CheckpointMessages,
+    RebindField::TriggerOutcomes,
+    RebindField::AttachmentStore,
+    RebindField::AttachmentSourcePolicy,
+    RebindField::TurnContext,
+    RebindField::Clock,
+];
+
 impl<'run> ToolDispatchContext<'run> {
     pub fn process_scope(&self) -> crate::ProcessOpScope<'_> {
         crate::ProcessOpScope::new(self.effect_controller.scoped())

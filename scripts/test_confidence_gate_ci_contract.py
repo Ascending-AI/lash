@@ -69,9 +69,9 @@ VALIDATE_QUARANTINE_MANIFEST = runpy.run_path(str(QUARANTINE_CHECK))[
 
 @functools.lru_cache(maxsize=None)
 def _store_tests_stub_bin() -> str:
-    """A PATH entry whose `bazel` and `cargo` echo their argv instead of running."""
+    """A PATH entry whose `bazel`, `cargo` and `python3` echo their argv instead of running."""
     directory = pathlib.Path(tempfile.mkdtemp(prefix="store-tests-stub-"))
-    for tool in ("bazel", "cargo"):
+    for tool in ("bazel", "cargo", "python3"):
         stub = directory / tool
         stub.write_text(
             f'#!/usr/bin/env bash\nprintf "%s\\n" "{tool} $*"\n', encoding="utf-8"
@@ -2500,6 +2500,23 @@ derive_mutation_jobs() {{
         case_body = script.split("\ncase \"${suite}\" in\n", 1)[1]
         for suite in uniform:
             self.assertNotIn(f"\n  {suite})\n", case_body, suite)
+
+    def test_store_suites_run_the_law_receipt_census_in_both_dialects(self) -> None:
+        """pg-store and s3-store census law execution on either runner.
+
+        The census is the FIG-3429 merge gate: a registered law that produced
+        no execution receipt fails the job. It must run on BOTH dialects for
+        the same reason the suite's selection does — an untrusted event takes
+        the Cargo half and would never see a Bazel-only census.
+        """
+        for suite in ("pg-store", "s3-store"):
+            with self.subTest(suite=suite):
+                bazel, cargo = store_suite_branches(suite)
+                for rendered in (bazel, cargo):
+                    self.assertIn(
+                        "python3 scripts/check_law_execution_receipts.py",
+                        rendered,
+                    )
 
     def test_minio_ci_lane_requires_storage_configuration(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

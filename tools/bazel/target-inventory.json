@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 143,
+  "cargo_target_count": 144,
   "feature_lane_units": [
     {
       "features": [],
@@ -17368,7 +17368,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 197,
+  "generated_label_count": 198,
   "packages": [
     {
       "declared_features": [
@@ -19236,6 +19236,12 @@
           "kind": "test",
           "label": "//crates/lash-sim:stack_policy__test",
           "tags": []
+        },
+        {
+          "cargo": "two_opener_differential",
+          "kind": "test",
+          "label": "//crates/lash-sim:two_opener_differential__test",
+          "tags": []
         }
       ],
       "test_batch": {
@@ -19246,7 +19252,8 @@
           "//crates/lash-sim:process_lifecycle_vocabulary__test",
           "//crates/lash-sim:retention_classification__test",
           "//crates/lash-sim:schema_congruence__test",
-          "//crates/lash-sim:signal_replay_key_constructor__test"
+          "//crates/lash-sim:signal_replay_key_constructor__test",
+          "//crates/lash-sim:two_opener_differential__test"
         ]
       }
     },

@@ -7,6 +7,7 @@ use lash_core::attachments::*;
 use lash_core::facade_support::*;
 use lash_core::runtime::*;
 use lash_core::store::*;
+pub mod law_receipt;
 mod macros;
 use lash_core::testing::conformance_support::default_queued_drain_policy;
 #[cfg(feature = "lashlang")]

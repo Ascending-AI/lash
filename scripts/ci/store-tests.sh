@@ -212,12 +212,26 @@ case "${suite}" in
   # The suites self-serialize on a per-process guard and share one database, so
   # the binaries must not overlap: Cargo runs them one at a time, and
   # `--local_test_jobs=1` makes Bazel do the same.
+  #
+  # The execution-receipt census (FIG-3429 item 8) rides both dialects: a law
+  # registered for this tier must have run in this job. Under Bazel the
+  # receipts land in each target's undeclared outputs; under Cargo they go to
+  # one file the census diffs against the whole crate's registrations.
   pg-store)
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046
       bazel_test $(labels postgres)
+      python3 scripts/check_law_execution_receipts.py \
+        --labels tools/bazel/postgres_test_labels.txt \
+        --crate-root crates/lash-postgres-store \
+        --receipts-root bazel-testlogs/crates/lash-postgres-store
     else
-      cargo test -p lash-internal-postgres-store --locked
+      receipts="$(mktemp -d)/law-receipts.txt"
+      LASH_LAW_RECEIPTS="${receipts}" \
+        cargo test -p lash-internal-postgres-store --locked
+      python3 scripts/check_law_execution_receipts.py \
+        --crate crates/lash-postgres-store \
+        --receipts "${receipts}"
     fi
     ;;
 
@@ -225,8 +239,17 @@ case "${suite}" in
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046
       bazel_test $(labels minio)
+      python3 scripts/check_law_execution_receipts.py \
+        --labels tools/bazel/minio_test_labels.txt \
+        --crate-root crates/lash-s3-store \
+        --receipts-root bazel-testlogs/crates/lash-s3-store
     else
-      cargo test -p lash-internal-s3-store --locked
+      receipts="$(mktemp -d)/law-receipts.txt"
+      LASH_LAW_RECEIPTS="${receipts}" \
+        cargo test -p lash-internal-s3-store --locked
+      python3 scripts/check_law_execution_receipts.py \
+        --crate crates/lash-s3-store \
+        --receipts "${receipts}"
     fi
     ;;
   *)
