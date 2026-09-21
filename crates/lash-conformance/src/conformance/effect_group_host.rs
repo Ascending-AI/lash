@@ -222,6 +222,10 @@ pub async fn a_reopen_reissues_each_childs_original_identity<F: Fn() -> Host>(
 /// Same key, arity, wake rule and declared disposition, so the durable reopen
 /// fence passes and the only difference left is *which children* the caller
 /// offered.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 fn impostor_group(
     execution_scope: &ExecutionScope,
     key: &str,
