@@ -1511,6 +1511,45 @@ async fn execution_grant_routes_through_ordinary_provider_contexts_without_catal
     );
 }
 
+/// `run_tool_granted` stands up the same granted route dispatch builds for a
+/// grant-admitted call, so a host can exercise its granted branch without a
+/// live turn (FIG-3436).
+#[tokio::test]
+async fn run_tool_granted_honors_the_granted_source_binding() {
+    let executed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+    registry
+        .upsert_source(Arc::new(ToolProviderSource::new(
+            "exact",
+            vec![Arc::new(GrantBindingProvider {
+                prepared_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
+                executed_bindings: Arc::clone(&executed_bindings),
+            })],
+        )))
+        .expect("source registered");
+    let registry = registry
+        .compose_session_catalog(true, Vec::new())
+        .expect("resident catalog with live grant sources");
+
+    let grant = crate::ToolExecutionGrant::from_definition(test_tool("host_only", "host-only"))
+        .with_source_id("exact")
+        .with_execution_binding(json!({ "kind": "test", "route": "grant" }));
+    let args = json!({});
+
+    // The catalog route cannot admit the tool: the grant is the authority,
+    // and `run_tool` keeps building the ungranted route.
+    let ungranted = leaf_outcome(crate::testing::run_tool(&registry, "host_only", &args).await);
+    assert!(!ungranted.is_success());
+
+    let result = leaf_outcome(crate::testing::run_tool_granted(&registry, &grant, &args).await);
+    assert!(result.is_success());
+    assert_eq!(result.value_for_projection(), json!("host_only"));
+    assert_eq!(
+        *executed_bindings.lock_recover(),
+        vec![json!({ "kind": "test", "route": "grant" })]
+    );
+}
+
 #[test]
 fn granted_deferred_source_reports_attempt_may_defer() {
     let registry = grant_deferral_registry(true);

@@ -1,0 +1,14 @@
+error[E0624]: associated function `__for_granted_source` is private
+  --> tests/ui/granted_attempt_context_is_not_constructible.rs:14:42
+   |
+14 |       let _ = lash::tools::AttemptContext::__for_granted_source(&context, "scope", &grant);
+   |                                            ^^^^^^^^^^^^^^^^^^^^ private associated function
+   |
+  ::: $WORKSPACE/crates/lash-core-execution/src/testing/mod.rs
+   |
+   | /     pub(crate) fn __for_granted_source(
+   | |         context: &crate::ToolContext<'run>,
+   | |         execution_scope_id: impl Into<String>,
+   | |         grant: &crate::ToolExecutionGrant,
+   | |     ) -> Self {
+   | |_____________- private associated function defined here
