@@ -481,7 +481,7 @@ impl TurnCommitDraft {
         // The final commit is the last boundary: appends queued since the
         // previous one extend the leaf the editor produced, never choose it.
         self.fold_pending_graph_appends();
-        self.state.persisted_node_ids = self.graph.persisted_node_ids();
+        self.state.persisted_node_ids = self.graph.take_persisted_node_ids();
         self.state.session_graph = self.graph.into_session_graph();
         self.state.refresh_current_frame_projection();
         self.state

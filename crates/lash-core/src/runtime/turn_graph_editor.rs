@@ -273,8 +273,8 @@ impl TurnGraphEditor {
         self.committed_node_ids.extend(node_ids);
     }
 
-    pub(super) fn persisted_node_ids(&self) -> HashSet<NodeId> {
-        self.committed_node_ids.clone()
+    pub(super) fn take_persisted_node_ids(&mut self) -> HashSet<NodeId> {
+        std::mem::take(&mut self.committed_node_ids)
     }
 
     pub(super) fn into_session_graph(self) -> SessionGraph {

@@ -375,7 +375,12 @@ fn nearest_ancestor_walk_is_bounded_scenario() {
     let by_id = graph_node_indices(&graph).expect("unique test ids");
 
     assert!(matches!(
-        nearest_ancestor_index(&graph, &by_id, Some("nearest-b"), |_| false),
+        nearest_ancestor_index(
+            &graph,
+            |node_id| by_id.get(node_id).copied(),
+            Some("nearest-b"),
+            |_| false
+        ),
         Err(crate::StoreError::InvalidGraphParent { .. })
     ));
 }

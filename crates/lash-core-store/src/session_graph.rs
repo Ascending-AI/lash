@@ -1,8 +1,9 @@
 use crate::{NodeId, SessionId};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
+use crate::session_graph_cache::{NodeIdIndex, SessionGraphCache};
 use crate::session_graph_integrity::{
     ancestry_indices, graph_node_indices, validate_graph_parent_topology,
 };
@@ -494,9 +495,33 @@ pub enum SessionGraphScopeError {
     },
 }
 
+/// The resident-id universe an append builder checks draft ids against.
+///
+/// A warm cache shares its `by_id` index, so uniqueness checks borrow the
+/// resident set instead of cloning every resident `NodeId` per turn. The
+/// owned variant is the cold-cache fallback and preserves the previous
+/// semantics exactly.
+#[derive(Clone, Debug)]
+enum ResidentIdSet {
+    Indexed(NodeIdIndex),
+    Owned(HashSet<NodeId>),
+}
+
+impl ResidentIdSet {
+    fn contains(&self, node_id: &NodeId) -> bool {
+        match self {
+            Self::Indexed(index) => index.get(node_id.as_str()).is_some(),
+            Self::Owned(existing) => existing.contains(node_id),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SessionGraphAppendBuilder {
-    existing_ids: HashSet<NodeId>,
+    resident_ids: ResidentIdSet,
+    /// Ids minted by this builder. Kept apart from the resident index so a
+    /// builder created off a warm cache needs no resident-set copy at all.
+    draft_ids: HashSet<NodeId>,
     leaf_node_id: Option<NodeId>,
     draft_namespace: String,
     next_draft_ordinal: u64,
@@ -516,8 +541,10 @@ impl SessionGraphAppendBuilder {
             return;
         }
         let mapping = mapping.iter().cloned().collect::<HashMap<_, _>>();
-        self.existing_ids = self
-            .existing_ids
+        // The mapping's domain is the appended tail's draft ids, so only the
+        // ids this builder minted can move; the resident index is untouched.
+        self.draft_ids = self
+            .draft_ids
             .drain()
             .map(|id| mapping.get(&id).cloned().unwrap_or(id))
             .collect();
@@ -588,7 +615,7 @@ impl SessionGraphAppendBuilder {
                     )
                 }
             };
-            self.existing_ids.insert(node_id.clone());
+            self.draft_ids.insert(node_id.clone());
             self.leaf_node_id = Some(node_id.clone());
             nodes.push(SessionNodeRecord {
                 node_id,
@@ -604,177 +631,9 @@ impl SessionGraphAppendBuilder {
         loop {
             let candidate = draft_node_id(&self.draft_namespace, self.next_draft_ordinal);
             self.next_draft_ordinal += 1;
-            if !self.existing_ids.contains(&candidate) {
+            if !self.draft_ids.contains(&candidate) && !self.resident_ids.contains(&candidate) {
                 return candidate;
             }
-        }
-    }
-}
-
-#[derive(Debug)]
-struct SessionGraphCache {
-    by_id: HashMap<NodeId, usize>,
-    active_path_indices: Vec<usize>,
-    active_events: Arc<Vec<SessionHistoryRecord>>,
-    active_messages: Arc<Vec<Message>>,
-    /// Memoized render of `active_messages`. Shared with every
-    /// `MessageSequence` built off this read model so the chat projector's
-    /// per-iteration `render_prompt` walk only happens once per turn.
-    /// Replaced (not invalidated in-place) whenever `active_messages`
-    /// changes — the `Arc` identity tracks the cache's validity.
-    prompt_render_cache: Arc<BaseRenderCache>,
-    /// Memoized scoped read-model answers, keyed by the frame each was
-    /// projected for.
-    ///
-    /// Identity is the point, not the saved work: the turn projection decides
-    /// prefix agreement by comparing the `Arc` a read model handed out
-    /// (`TurnGraphEditor::message_delta_if_current_preserved`), so a frame
-    /// projection rebuilt per call would hand the turn's two readers two
-    /// equal-but-distinct `Arc`s and force the whole-window reconciliation on
-    /// every boundary. Cleared whenever the active path moves.
-    frame_read_model: StdMutex<BTreeMap<String, SessionReadModel>>,
-}
-
-impl Clone for SessionGraphCache {
-    fn clone(&self) -> Self {
-        Self {
-            by_id: self.by_id.clone(),
-            active_path_indices: self.active_path_indices.clone(),
-            active_events: Arc::clone(&self.active_events),
-            active_messages: Arc::clone(&self.active_messages),
-            prompt_render_cache: Arc::clone(&self.prompt_render_cache),
-            frame_read_model: StdMutex::new(
-                self.frame_read_model
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .clone(),
-            ),
-        }
-    }
-}
-
-impl SessionGraphCache {
-    fn build(graph: &SessionGraph) -> Result<Self, crate::StoreError> {
-        let by_id = graph_node_indices(graph)?;
-        let mut active_path_indices =
-            ancestry_indices(graph, &by_id, graph.leaf_node_id.as_deref())?;
-        active_path_indices.reverse();
-
-        let mut cache = Self {
-            by_id,
-            active_path_indices,
-            active_events: Arc::new(Vec::new()),
-            active_messages: Arc::new(Vec::new()),
-            prompt_render_cache: Arc::new(BaseRenderCache::new()),
-            frame_read_model: StdMutex::new(BTreeMap::new()),
-        };
-        cache.rebuild_read_model(graph);
-        Ok(cache)
-    }
-
-    fn rebuild_read_model(&mut self, graph: &SessionGraph) {
-        let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
-        let mut active_events = Vec::with_capacity(self.active_path_indices.len());
-        for idx in &self.active_path_indices {
-            let node = &graph.nodes[*idx];
-            if let Some(event) = node.event() {
-                active_events.push(event.clone());
-            }
-            if let Some(message) = node.message() {
-                if !message.is_transient() {
-                    active_messages.push(message);
-                }
-                continue;
-            }
-        }
-        self.active_messages = Arc::new(active_messages);
-        self.active_events = Arc::new(active_events);
-        self.prompt_render_cache = Arc::new(BaseRenderCache::new());
-        self.frame_read_model = StdMutex::new(BTreeMap::new());
-    }
-
-    fn scoped_read_model(
-        &self,
-        graph: &SessionGraph,
-        frame_node_id: &crate::FrameNodeId,
-    ) -> SessionReadModel {
-        let mut memoized = self
-            .frame_read_model
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(read_model) = memoized.get(frame_node_id.as_str()) {
-            return read_model.clone();
-        }
-        let read_model = self.project_scoped_read_model(graph, frame_node_id);
-        memoized.insert(frame_node_id.to_string(), read_model.clone());
-        read_model
-    }
-
-    fn project_scoped_read_model(
-        &self,
-        graph: &SessionGraph,
-        frame_node_id: &crate::FrameNodeId,
-    ) -> SessionReadModel {
-        let mut active_messages = Vec::with_capacity(self.active_path_indices.len());
-        let mut active_events = Vec::with_capacity(self.active_path_indices.len());
-        let mut in_frame = false;
-        for idx in &self.active_path_indices {
-            let node = &graph.nodes[*idx];
-            if node.node_id == frame_node_id.as_str() {
-                in_frame = true;
-            } else if in_frame && matches!(node.payload, SessionNodePayload::FrameOpen { .. }) {
-                break;
-            }
-            if !in_frame {
-                continue;
-            }
-            if let Some(event) = node.event() {
-                active_events.push(event.clone());
-            }
-            if let Some(message) = node.message() {
-                if !message.is_transient() {
-                    active_messages.push(message);
-                }
-                continue;
-            }
-        }
-        SessionReadModel {
-            active_events: Arc::new(active_events),
-            messages: Arc::new(active_messages),
-            prompt_render_cache: Arc::new(BaseRenderCache::new()),
-        }
-    }
-
-    fn append_node(
-        &mut self,
-        node_index: usize,
-        node: &SessionNodeRecord,
-        previous_leaf_node_id: Option<&str>,
-    ) {
-        self.by_id.insert(node.node_id.clone(), node_index);
-        let parent_matches_leaf = node.parent_node_id.as_deref() == previous_leaf_node_id;
-        if !parent_matches_leaf {
-            return;
-        }
-        self.frame_read_model = StdMutex::new(BTreeMap::new());
-        self.active_path_indices.push(node_index);
-        if let Some(event) = node.event() {
-            Arc::make_mut(&mut self.active_events).push(event.clone());
-        }
-        if let Some(message) = node.message()
-            && !message.is_transient()
-        {
-            let messages = Arc::make_mut(&mut self.active_messages);
-            messages.push(message);
-            self.prompt_render_cache = Arc::new(BaseRenderCache::new());
-        }
-    }
-
-    fn reserve_append_capacity(&mut self, additional_nodes: usize, additional_messages: usize) {
-        self.by_id.reserve(additional_nodes);
-        self.active_path_indices.reserve(additional_nodes);
-        if additional_messages > 0 {
-            Arc::make_mut(&mut self.active_messages).reserve(additional_messages);
         }
     }
 }
@@ -1016,8 +875,15 @@ impl SessionGraph {
         &self,
         draft_namespace: impl Into<String>,
     ) -> SessionGraphAppendBuilder {
+        // A warm cache lends its `by_id` index; building the resident id set
+        // per builder is the cold-cache fallback, not the per-turn cost.
+        let resident_ids = self.cache.get().map_or_else(
+            || ResidentIdSet::Owned(self.nodes.iter().map(|node| node.node_id.clone()).collect()),
+            |cache| ResidentIdSet::Indexed(cache.by_id.clone()),
+        );
         SessionGraphAppendBuilder {
-            existing_ids: self.nodes.iter().map(|node| node.node_id.clone()).collect(),
+            resident_ids,
+            draft_ids: HashSet::new(),
             leaf_node_id: self.leaf_node_id.clone(),
             draft_namespace: draft_namespace.into(),
             next_draft_ordinal: 0,
@@ -1048,7 +914,7 @@ impl SessionGraph {
         if let Some(cache) = self.cache.get() {
             return node_ids
                 .iter()
-                .map(|node_id| cache.by_id.get(*node_id).copied())
+                .map(|node_id| cache.by_id.get(node_id))
                 .collect();
         }
         let by_id = self
@@ -1263,11 +1129,7 @@ impl SessionGraph {
     ) -> Result<SessionReadModel, SessionGraphScopeError> {
         let cache = self.cache();
         let Some(frame_node_id) = frame_node_id else {
-            return Ok(SessionReadModel {
-                active_events: Arc::clone(&cache.active_events),
-                messages: Arc::clone(&cache.active_messages),
-                prompt_render_cache: Arc::clone(&cache.prompt_render_cache),
-            });
+            return Ok(cache.active_read_model());
         };
         let frame_exists_on_active_path = cache.active_path_indices.iter().any(|index| {
             let node = &self.nodes[*index];
@@ -1412,17 +1274,33 @@ impl SessionGraph {
             crate::session_graph_integrity::validate_node_id(&node.node_id)?;
         }
 
-        let mut occupied_ids = HashSet::with_capacity(self.nodes.len() + append.nodes().len());
-        for node in &self.nodes {
-            if !occupied_ids.insert(node.node_id.as_str()) {
-                return Err(crate::StoreError::NodeIdCollision {
-                    node_id: node.node_id.clone(),
-                });
+        // The resident id set is the uniqueness and parent-residency domain
+        // for the incoming batch. A warm cache's index answers membership
+        // directly; the cold path builds the borrowed set once (not twice as
+        // the previous implementation did).
+        let cold_resident_ids = if self.cache.get().is_none() {
+            Some(
+                self.nodes
+                    .iter()
+                    .map(|node| node.node_id.as_str())
+                    .collect::<HashSet<_>>(),
+            )
+        } else {
+            None
+        };
+        let resident_occupied = |node_id: &str| {
+            if let Some(cache) = self.cache.get() {
+                cache.by_id.get(node_id).is_some()
+            } else {
+                cold_resident_ids
+                    .as_ref()
+                    .is_some_and(|ids| ids.contains(node_id))
             }
-        }
-        let resident_ids = occupied_ids.clone();
+        };
+        let mut batch_ids = HashSet::with_capacity(append.nodes().len());
         for node in append.nodes() {
-            if !occupied_ids.insert(node.node_id.as_str()) {
+            if resident_occupied(node.node_id.as_str()) || !batch_ids.insert(node.node_id.as_str())
+            {
                 return Err(crate::StoreError::NodeIdCollision {
                     node_id: node.node_id.clone(),
                 });
@@ -1432,7 +1310,7 @@ impl SessionGraph {
 
         if let Some(first) = append.nodes().first()
             && let Some(parent_node_id) = first.parent_node_id.as_deref()
-            && !resident_ids.contains(parent_node_id)
+            && !resident_occupied(parent_node_id)
         {
             return Err(crate::StoreError::InvalidGraphParent {
                 node_id: first.node_id.clone(),
@@ -1474,7 +1352,7 @@ impl SessionGraph {
         let Some(node_index) = cache.by_id.get(node_id) else {
             return Ok(false);
         };
-        Ok(cache.active_path_indices.contains(node_index))
+        Ok(cache.active_path_indices.contains(&node_index))
     }
 
     /// Return a resident graph containing only the current ancestry path.
@@ -1513,7 +1391,7 @@ impl SessionGraph {
         self.cache()
             .by_id
             .get(node_id)
-            .map(|idx| self.nodes[*idx].as_ref())
+            .map(|idx| self.nodes[idx].as_ref())
     }
 
     /// Rewrites the active readable tail and moves the resident leaf while retaining historical
@@ -1624,20 +1502,30 @@ impl SessionGraph {
         predicate: impl FnMut(&SessionNodeRecord) -> bool,
     ) -> Result<Option<usize>, crate::StoreError> {
         if let Some(cache) = self.cache.get() {
-            return nearest_ancestor_index(self, &cache.by_id, node_id, predicate);
+            return nearest_ancestor_index(
+                self,
+                |node_id| cache.by_id.get(node_id),
+                node_id,
+                predicate,
+            );
         }
         let by_id = graph_node_indices(self)?;
-        nearest_ancestor_index(self, &by_id, node_id, predicate)
+        nearest_ancestor_index(
+            self,
+            |node_id| by_id.get(node_id).copied(),
+            node_id,
+            predicate,
+        )
     }
 }
 
 fn nearest_ancestor_index(
     graph: &SessionGraph,
-    by_id: &HashMap<NodeId, usize>,
+    resolve_index: impl Fn(&str) -> Option<usize>,
     node_id: Option<&str>,
     mut predicate: impl FnMut(&SessionNodeRecord) -> bool,
 ) -> Result<Option<usize>, crate::StoreError> {
-    let mut current = node_id.and_then(|node_id| by_id.get(node_id).copied());
+    let mut current = node_id.and_then(&resolve_index);
     let mut remaining = graph.nodes.len();
     while let Some(idx) = current {
         let node = graph.nodes[idx].as_ref();
@@ -1655,7 +1543,7 @@ fn nearest_ancestor_index(
         current = node
             .parent_node_id
             .as_ref()
-            .and_then(|parent| by_id.get(parent).copied());
+            .and_then(|parent| resolve_index(parent.as_str()));
     }
     Ok(None)
 }

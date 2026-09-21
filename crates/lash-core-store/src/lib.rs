@@ -37,6 +37,7 @@ mod runtime_error_tests;
 pub mod session_catalog;
 pub mod session_execution_lease;
 pub mod session_graph;
+pub(crate) mod session_graph_cache;
 pub(crate) mod session_graph_integrity;
 pub mod session_identity;
 pub mod session_policy;

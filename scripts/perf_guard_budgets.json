@@ -909,8 +909,8 @@
       "resident_graph_append_curve": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 26000000.0,
-          "steady_state_turn_alloc_bytes_max": 1800000.0
+          "alloc_bytes_max": 14000000.0,
+          "steady_state_turn_alloc_bytes_max": 800000.0
         },
         "advisory_duration": {
           "ms_max": 40.0,

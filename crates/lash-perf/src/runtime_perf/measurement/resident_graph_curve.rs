@@ -7,12 +7,19 @@ use lash_sansio::SessionId;
 /// magnitude and include the empty graph.
 const RESIDENT_GRAPH_SIZES: [usize; 4] = [0, 32, 128, 512];
 
-/// Per-resident-node slope cap for the record-vector copy-on-write phase, in
-/// allocated bytes. A snapshot-forced copy of `Vec<Arc<SessionNodeRecord>>`
-/// is pointer-sized per node (8 bytes plus vector growth slack); the pre-Arc
-/// layout copied whole `SessionNodeRecord`s at orders of magnitude more, so
-/// this ceiling fails that regression outright.
-const MAX_COW_BYTES_PER_RESIDENT_NODE: f64 = 32.0;
+/// Per-resident-node allocation slope caps per phase, in bytes. A
+/// snapshot-forced copy of `Vec<Arc<SessionNodeRecord>>` is pointer-sized
+/// per node; construction, remap, and timestamp application touch only the
+/// appended tail, so their slopes should be near zero. Append additionally
+/// copies the node-pointer vector and the active-path index vec (two
+/// pointer-width copies plus vector growth slack), so its cap is wider.
+const MAX_SLOPE_BYTES_PER_RESIDENT_NODE: [(&str, f64); 5] = [
+    ("construct", 32.0),
+    ("cow", 32.0),
+    ("append", 96.0),
+    ("remap", 32.0),
+    ("timestamps", 32.0),
+];
 
 struct ResidentGraphFixture {
     resident_nodes: usize,
@@ -62,8 +69,8 @@ fn seed_resident_graph(resident_nodes: usize) -> anyhow::Result<ResidentGraphFix
 /// (the frozen read view and rollback holder are legitimate by design), run
 /// the four graph writes a durable one-message turn performs — editor
 /// construction, append adoption, draft-id remap, and realized-timestamp
-/// application — plus the isolated record copy-on-write — and assert the
-/// COW's allocated bytes stay flat in resident size.
+/// application — plus the isolated record copy-on-write — and assert every
+/// phase's allocated bytes stay flat in resident size.
 pub(super) async fn run_once_resident_graph_append_curve(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
@@ -202,35 +209,39 @@ pub(super) async fn run_once_resident_graph_append_curve(
             .sum(),
         ..RunTail::default()
     });
-    assert_cow_allocations_flat_in_resident_size(&result.phase_profile)?;
+    assert_allocations_flat_in_resident_size(&result.phase_profile)?;
     let _ = exported;
     Ok(result)
 }
 
-/// The record COW must not scale per resident record: a snapshot-forced copy
-/// of `Vec<Arc<SessionNodeRecord>>` is pointer-sized, so the per-node
-/// allocation slope stays under [`MAX_COW_BYTES_PER_RESIDENT_NODE`].
-fn assert_cow_allocations_flat_in_resident_size(
+/// Every phase of a one-node-append turn must stay flat in resident size:
+/// the record COW copies pointers, construction borrows the resident index,
+/// and append/remap/timestamps touch only the appended tail. A slope over
+/// the phase's cap means a whole-resident clone or scan is back.
+fn assert_allocations_flat_in_resident_size(
     phase_profile: &BTreeMap<String, RuntimePerfPhaseRunResult>,
 ) -> anyhow::Result<()> {
-    let mean_bytes = |resident_nodes: usize| -> anyhow::Result<f64> {
+    let mean_bytes = |resident_nodes: usize, operation: &str| -> anyhow::Result<f64> {
         let phase = phase_profile
-            .get(&resident_graph_phase(resident_nodes, "cow"))
+            .get(&resident_graph_phase(resident_nodes, operation))
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "resident graph append curve emitted no cow phase at size {resident_nodes}"
+                    "resident graph append curve emitted no {operation} phase at size {resident_nodes}"
                 )
             })?;
         Ok(phase.allocations.bytes_allocated as f64 / phase.samples as f64)
     };
-    let baseline = mean_bytes(RESIDENT_GRAPH_SIZES[0])?;
-    for resident_nodes in &RESIDENT_GRAPH_SIZES[1..] {
-        let slope = (mean_bytes(*resident_nodes)? - baseline) / *resident_nodes as f64;
-        if slope > MAX_COW_BYTES_PER_RESIDENT_NODE {
-            anyhow::bail!(
-                "record copy-on-write allocation grew {slope:.1} bytes per resident node at size {resident_nodes} \
-                 (cap {MAX_COW_BYTES_PER_RESIDENT_NODE}); the whole-record deep copy is back"
-            );
+    for (operation, cap) in MAX_SLOPE_BYTES_PER_RESIDENT_NODE {
+        let baseline = mean_bytes(RESIDENT_GRAPH_SIZES[0], operation)?;
+        for resident_nodes in &RESIDENT_GRAPH_SIZES[1..] {
+            let slope =
+                (mean_bytes(*resident_nodes, operation)? - baseline) / *resident_nodes as f64;
+            if slope > cap {
+                anyhow::bail!(
+                    "{operation} allocation grew {slope:.1} bytes per resident node at size {resident_nodes} \
+                     (cap {cap}); a whole-resident clone or scan is back"
+                );
+            }
         }
     }
     Ok(())
