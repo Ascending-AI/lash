@@ -308,135 +308,109 @@ pub(super) async fn run_once_trace_jsonl(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
-    let total_started = Instant::now();
-    let before_memory = process_memory_sample();
-    let total_before_alloc = allocator_stats();
+    let mut run = RunRecorder::start(scenario, chat_turns);
+    let (trace_root, trace_path, lashlang_trace_path, mut runtime) = run
+        .build(async {
+            let trace_root = make_temp_bench_dir("lash-runtime-perf-trace-jsonl")?;
+            let trace_path = trace_root.join("runtime-trace.jsonl");
+            let lashlang_trace_path = matches!(scenario, RuntimePerfScenario::TraceJsonlExtended)
+                .then(|| trace_root.join("lashlang-execution.jsonl"));
+            let trace_config = RuntimePerfTraceConfig {
+                trace_jsonl_path: Some(trace_path.clone()),
+                lashlang_execution_jsonl_path: lashlang_trace_path.clone(),
+                trace_level: if matches!(scenario, RuntimePerfScenario::TraceJsonlExtended) {
+                    lash::tracing::TraceLevel::Extended
+                } else {
+                    lash::tracing::TraceLevel::Standard
+                },
+            };
+            let runtime = build_runtime_with_store(scenario, None, Some(trace_config)).await?;
+            Ok((trace_root, trace_path, lashlang_trace_path, runtime))
+        })
+        .await?;
+    run.seed(async { seed_runtime_state(&mut runtime, scenario).await })
+        .await?;
 
-    let build_before_alloc = allocator_stats();
-    let build_started = Instant::now();
-    let trace_root = make_temp_bench_dir("lash-runtime-perf-trace-jsonl")?;
-    let trace_path = trace_root.join("runtime-trace.jsonl");
-    let lashlang_trace_path = matches!(scenario, RuntimePerfScenario::TraceJsonlExtended)
-        .then(|| trace_root.join("lashlang-execution.jsonl"));
-    let trace_config = RuntimePerfTraceConfig {
-        trace_jsonl_path: Some(trace_path.clone()),
-        lashlang_execution_jsonl_path: lashlang_trace_path.clone(),
-        trace_level: if matches!(scenario, RuntimePerfScenario::TraceJsonlExtended) {
-            lash::tracing::TraceLevel::Extended
-        } else {
-            lash::tracing::TraceLevel::Standard
-        },
-    };
-    let mut runtime = build_runtime_with_store(scenario, None, Some(trace_config)).await?;
-    let build_runtime_ms = elapsed_ms(build_started);
-    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
-    let after_build_memory = process_memory_sample();
-
-    let seed_before_alloc = allocator_stats();
-    let seed_started = Instant::now();
-    seed_runtime_state(&mut runtime, scenario).await?;
-    let seed_state_ms = elapsed_ms(seed_started);
-    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
-    let after_seed_memory = process_memory_sample();
-
-    let mut turns = Vec::with_capacity(chat_turns);
     for turn_index in 0..chat_turns {
         let phase_probe = Arc::new(RuntimePerfPhaseProbe::default());
         runtime.set_turn_phase_probe(phase_probe.clone()).await;
 
         let before_turn_usage = runtime.usage_report();
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
-        let turn_input = TurnInput::text(benchmark_prompt(scenario, turn_index));
-        let cancel = CancellationToken::new();
-        let turn = runtime_perf_timed(
-            scenario,
+        run.turn_then(
             turn_index,
-            "run_turn",
-            Some(cancel.clone()),
-            runtime.run_turn(turn_input, cancel),
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "run runtime perf scenario {} turn {}",
-                scenario.name(),
-                turn_index + 1
-            )
-        })?;
-        validate_runtime_perf_turn(scenario, turn_index, &turn)?;
-        let run_turn_ms = elapsed_ms(turn_started);
-        let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
-        let after_turn_memory = process_memory_sample();
-
-        let await_before_alloc = allocator_stats();
-        let background_started = Instant::now();
-        runtime_perf_timed(
-            scenario,
-            turn_index,
-            "await_background_work",
-            None,
-            runtime.await_background_work(),
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "await background work for {} turn {}",
-                scenario.name(),
-                turn_index + 1
-            )
-        })?;
-        let await_background_work_ms = elapsed_ms(background_started);
-        let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
-        let after_await_memory = process_memory_sample();
-        let turn_total_alloc =
-            sum_allocation_deltas([&run_turn_alloc, &await_background_work_alloc]);
-
-        let cumulative_usage = runtime.usage_report();
-        let usage_delta_entries =
-            lash_core::facade_support::diff_usage_reports(&before_turn_usage, &cumulative_usage)
+            async {
+                let turn_input = TurnInput::text(benchmark_prompt(scenario, turn_index));
+                let cancel = CancellationToken::new();
+                let turn = runtime_perf_timed(
+                    scenario,
+                    turn_index,
+                    "run_turn",
+                    Some(cancel.clone()),
+                    runtime.run_turn(turn_input, cancel),
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "run runtime perf scenario {} turn {}",
+                        scenario.name(),
+                        turn_index + 1
+                    )
+                })?;
+                validate_runtime_perf_turn(scenario, turn_index, &turn)?;
+                Ok(TurnRun {
+                    value: (),
+                    tail: TurnTail {
+                        turn_usage: turn.usage,
+                        ..TurnTail::default()
+                    },
+                })
+            },
+            async {
+                runtime_perf_timed(
+                    scenario,
+                    turn_index,
+                    "await_background_work",
+                    None,
+                    runtime.await_background_work(),
+                )
+                .await
+                .with_context(|| {
+                    format!(
+                        "await background work for {} turn {}",
+                        scenario.name(),
+                        turn_index + 1
+                    )
+                })
+            },
+            |_, _, tail| {
+                let cumulative_usage = runtime.usage_report();
+                let usage_delta_entries = lash_core::facade_support::diff_usage_reports(
+                    &before_turn_usage,
+                    &cumulative_usage,
+                )
                 .map_err(anyhow::Error::msg)?;
-        turns.push(RuntimePerfTurnResult {
-            turn_index,
-            stages: turn_stages(
-                RuntimePerfStageRunResult::measured(
-                    run_turn_ms,
-                    run_turn_alloc,
-                    after_turn_memory.rss_kb,
-                ),
-                Some(RuntimePerfStageRunResult::measured(
-                    await_background_work_ms,
-                    await_background_work_alloc,
-                    after_await_memory.rss_kb,
-                )),
-                RuntimePerfStageRunResult::measured(
-                    round3(run_turn_ms + await_background_work_ms),
-                    turn_total_alloc,
-                    after_await_memory.rss_kb,
-                ),
-            ),
-            memory: memory_span(turn_before_memory, after_await_memory),
-            phase_profile: phase_probe.take_completed(),
-            turn_usage: turn.usage,
-            usage_delta: SessionUsageReport::from_entries(&usage_delta_entries),
-            cumulative_usage,
-        });
+                tail.phase_profile = phase_probe.take_completed();
+                tail.usage_delta = SessionUsageReport::from_entries(&usage_delta_entries);
+                tail.cumulative_usage = cumulative_usage;
+                Ok(())
+            },
+        )
+        .await?;
     }
 
-    let export_before_alloc = allocator_stats();
-    let export_started = Instant::now();
-    let state = runtime.export_state().await;
-    let cumulative_usage = runtime.usage_report();
-    let export_state_ms = elapsed_ms(export_started);
-    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
-    let after_export_memory = process_memory_sample();
+    let (state, cumulative_usage) = run
+        .export(async {
+            let state = runtime.export_state().await;
+            let cumulative_usage = runtime.usage_report();
+            Ok((state, cumulative_usage))
+        })
+        .await?;
     let (trace_counters, inspect_phase) =
         measure_runtime_perf_phase("trace_jsonl.inspect_files", || {
             inspect_trace_jsonl_files(&trace_path, lashlang_trace_path.as_deref())
         })?;
-    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
-    let mut phase_profile = sum_phase_profiles(turns.iter().map(|turn| &turn.phase_profile));
+    let total_alloc = run.total_alloc_snapshot();
+    let mut phase_profile = sum_phase_profiles(run.turns().iter().map(|turn| &turn.phase_profile));
     phase_profile.insert(inspect_phase.0, inspect_phase.1);
     runtime.close().await?;
     let _ = std::fs::remove_dir_all(trace_root);
@@ -459,48 +433,7 @@ pub(super) async fn run_once_trace_jsonl(
         anyhow::bail!("extended trace_jsonl scenario produced no Lashlang execution records");
     }
 
-    Ok(RuntimePerfRunResult {
-        scenario: scenario.name().to_string(),
-        scenario_harness: scenario.scenario_harness().name().to_string(),
-        chat_turns,
-        stack_profile: None,
-        stages: run_stages(
-            [
-                (
-                    stage::BUILD_RUNTIME,
-                    RuntimePerfStageRunResult::measured(
-                        build_runtime_ms,
-                        build_runtime_alloc,
-                        after_build_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::SEED_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        seed_state_ms,
-                        seed_state_alloc,
-                        after_seed_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::EXPORT_STATE,
-                    RuntimePerfStageRunResult::measured(
-                        export_state_ms,
-                        export_state_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-                (
-                    stage::TOTAL,
-                    RuntimePerfStageRunResult::measured(
-                        elapsed_ms(total_started),
-                        total_alloc,
-                        after_export_memory.rss_kb,
-                    ),
-                ),
-            ],
-            &turns,
-        ),
+    Ok(run.finish(RunTail {
         session_nodes: state.session_graph.nodes.len(),
         active_path_messages: state
             .read_view()
@@ -508,13 +441,11 @@ pub(super) async fn run_once_trace_jsonl(
             .messages()
             .len(),
         extra_counters: trace_counters,
-        metric_samples: BTreeMap::new(),
-        metric_samples_ms: BTreeMap::new(),
-        memory: memory_span(before_memory, after_export_memory),
-        phase_profile,
-        turns,
+        phase_profile: Some(phase_profile),
+        total_alloc: Some(total_alloc),
         cumulative_usage,
-    })
+        ..RunTail::default()
+    }))
 }
 
 fn live_replay_text_payload(text: impl Into<String>) -> SessionObservationEventPayload {

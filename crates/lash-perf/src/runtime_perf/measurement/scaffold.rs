@@ -94,6 +94,9 @@ pub(crate) struct RunTail {
     pub(crate) stack_profile: Option<StackProfile>,
     pub(crate) memory: Option<RuntimePerfMemoryRunResult>,
     pub(crate) phase_profile: Option<BTreeMap<String, RuntimePerfPhaseRunResult>>,
+    /// Overrides the total span's allocation delta for sites that keep
+    /// measuring work after the last recorded stage boundary.
+    pub(crate) total_alloc: Option<RuntimePerfAllocationDelta>,
     pub(crate) total_stage: Option<RuntimePerfStageRunResult>,
     pub(crate) cumulative_usage: SessionUsageReport,
 }
@@ -254,6 +257,18 @@ impl RunRecorder {
         Ok(value)
     }
 
+    /// The turns recorded so far — for tails that aggregate over them
+    /// beyond the default phase-profile fold.
+    pub(crate) fn turns(&self) -> &[RuntimePerfTurnResult] {
+        &self.turns
+    }
+
+    /// The total allocation delta sampled now, for sites that keep
+    /// measuring past the last stage boundary.
+    pub(crate) fn total_alloc_snapshot(&self) -> RuntimePerfAllocationDelta {
+        alloc_delta(self.total.alloc_before, allocator_stats())
+    }
+
     /// Pushes a pre-measured stage entry — for sites that fabricate rather
     /// than measure their spans (the report test fixture).
     pub(crate) fn record_stage(&mut self, name: &'static str, result: RuntimePerfStageRunResult) {
@@ -283,7 +298,7 @@ impl RunRecorder {
         let total_stage = tail.total_stage.unwrap_or_else(|| {
             RuntimePerfStageRunResult::measured(
                 elapsed_ms(total.started),
-                total_alloc,
+                tail.total_alloc.clone().unwrap_or(total_alloc),
                 last_memory.rss_kb,
             )
         });
