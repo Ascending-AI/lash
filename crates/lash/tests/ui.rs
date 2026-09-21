@@ -87,6 +87,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/attempt_context_has_no_trigger_commands.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_process_event_commands.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_child_trace_emission.rs");
+    t.compile_fail("tests/ui/granted_attempt_context_is_not_constructible.rs");
     t.compile_fail("tests/ui/session_read_view_has_no_mutations.rs");
     t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/pending_announcement_requires_a_replay_key.rs");

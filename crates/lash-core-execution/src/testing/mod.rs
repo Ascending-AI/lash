@@ -552,18 +552,22 @@ impl<'run> crate::AttemptContext<'run> {
         )
     }
 
-    /// Test-only projection of a mock tool context onto the granted route:
-    /// the context a call admitted by `grant` executes under. Dispatch
-    /// applies the grant's execution binding and source id together
+    /// Crate-internal fixture constructor for the granted route: the context
+    /// a call admitted by `grant` executes under. Dispatch applies the
+    /// grant's execution binding and source id together
     /// (`AttemptAuthority::apply_execution_binding`), so this hook does the
     /// same rather than leaving the pair to drift in a hand-built fixture.
     /// Like [`__for_testing`](Self::__for_testing), no completion key is
     /// reserved: a test harness is not the attempt coordinator.
     ///
-    /// The double-underscore name is deliberate: this is a fixture hook for
-    /// tests that must stand up a granted attempt context by hand, not part
-    /// of the attempt-context API surface.
-    pub fn __for_granted_source(
+    /// Deliberately crate-private and double-underscored: a granted context
+    /// minted for one grant could otherwise be paired with a different
+    /// manifest through the public [`crate::ToolCall::new`], which the
+    /// registry would accept when the same source resolves it — the
+    /// prepared-identity refusal only exists inside dispatch.
+    /// [`run_tool_granted`] stays the sole downstream entry, so a granted
+    /// context can never outlive the grant that produced it.
+    pub(crate) fn __for_granted_source(
         context: &crate::ToolContext<'run>,
         execution_scope_id: impl Into<String>,
         grant: &crate::ToolExecutionGrant,
