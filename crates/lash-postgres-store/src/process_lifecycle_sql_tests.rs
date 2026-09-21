@@ -45,8 +45,8 @@ fn worklist_statements_keep_their_previous_bytes() {
     assert_eq!(
         process_sql().process.collect_non_terminal_records.sql(),
         "SELECT record_json FROM lash_processes
-         WHERE status IN ('running', 'waiting')
-         ORDER BY process_id ASC"
+                         WHERE status IN ('running', 'waiting')
+                         ORDER BY process_id ASC"
     );
 }
 
@@ -88,7 +88,7 @@ fn preflight_statements_keep_their_previous_predicates() {
             .handover_postgres
             .list_parked_segments
             .sql()
-            .contains("     WHERE processes.status IN ('running', 'waiting')\n")
+            .contains("     WHERE process.status IN ('running', 'waiting')\n")
     );
     assert!(
         process_sql()
@@ -104,50 +104,50 @@ fn wake_delivery_statements_keep_their_previous_bytes() {
     assert_eq!(
         process_sql().wake.reclaim_lapsed_claims.sql(),
         "UPDATE lash_process_wake_deliveries
-         SET state = 'pending', claim_token = NULL
-         WHERE state = 'enqueuing' AND next_attempt_at_ms <= $1"
+                         SET state = 'pending', claim_token = NULL
+                         WHERE state = 'enqueuing' AND next_attempt_at_ms <= $1"
     );
     assert_eq!(
         process_sql().wake.start_enqueuing.sql(),
         "UPDATE lash_process_wake_deliveries
-             SET state = 'enqueuing',
-                 claim_token = $4,
-                 attempts = attempts + 1,
-                 first_attempt_ms = COALESCE(first_attempt_ms, $2),
-                 next_attempt_at_ms = $3
-             WHERE delivery_id = $1 AND state = 'pending'"
+                             SET state = 'enqueuing',
+                                 claim_token = $4,
+                                 attempts = attempts + 1,
+                                 first_attempt_ms = COALESCE(first_attempt_ms, $2),
+                                 next_attempt_at_ms = $3
+                             WHERE delivery_id = $1 AND state = 'pending'"
     );
     assert_eq!(
         process_sql().wake.settle_claim.sql(),
         "UPDATE lash_process_wake_deliveries
-         SET state = $3, claim_token = NULL, discard_reason = $4
-         WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2"
+                     SET state = $3, claim_token = NULL, discard_reason = $4
+                     WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2"
     );
     assert_eq!(
         process_sql().wake.redrive_discarded.sql(),
         "UPDATE lash_process_wake_deliveries
-             SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
-                 claim_token = NULL, next_attempt_at_ms = $3, expires_at_ms = $2,
-                 discard_reason = NULL
-             WHERE delivery_id = $1 AND state = 'discarded'"
+                             SET state = 'pending', attempts = 0, first_attempt_ms = NULL,
+                                 claim_token = NULL, next_attempt_at_ms = $3, expires_at_ms = $2,
+                                 discard_reason = NULL
+                             WHERE delivery_id = $1 AND state = 'discarded'"
     );
     assert_eq!(
         process_sql().wake.release_claim.sql(),
         "UPDATE lash_process_wake_deliveries
-             SET state = 'pending', claim_token = NULL, next_attempt_at_ms = $3
-             WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2"
+                             SET state = 'pending', claim_token = NULL, next_attempt_at_ms = $3
+                             WHERE delivery_id = $1 AND state = 'enqueuing' AND claim_token = $2"
     );
     assert_eq!(
         process_sql().wake.discard_target_gone.sql(),
         "UPDATE lash_process_wake_deliveries
-             SET state = 'discarded', discard_reason = 'target_gone'
-             WHERE target_session_id = $1 AND state = 'pending'"
+                             SET state = 'discarded', discard_reason = 'target_gone'
+                             WHERE target_session_id = $1 AND state = 'pending'"
     );
     assert_eq!(
         process_sql().wake.discard_retargeted.sql(),
         "UPDATE lash_process_wake_deliveries
-                 SET state = 'discarded', discard_reason = 'retargeted'
-                 WHERE process_id = $1 AND target_session_id = $2 AND state = 'pending'"
+                             SET state = 'discarded', discard_reason = 'retargeted'
+                             WHERE process_id = $1 AND target_session_id = $2 AND state = 'pending'"
     );
     assert_eq!(
         process_sql().wake_postgres.insert_pending.sql(),
@@ -264,8 +264,8 @@ mod vocabulary_tokens {
         assert_eq!(
             rendered(
                 "SELECT record_json FROM processes
-         WHERE {{live_process_status(status)}}
-         ORDER BY process_id ASC"
+                         WHERE {{live_process_status(status)}}
+                         ORDER BY process_id ASC"
             ),
             process_sql().process.collect_non_terminal_records.sql()
         );

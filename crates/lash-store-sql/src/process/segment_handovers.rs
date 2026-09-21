@@ -31,9 +31,9 @@ pub const SQLITE_WALK_COLUMNS: &str =
 pub const PG_WALK_COLUMNS: &str = "handovers.process_id,
          handovers.segment_ordinal,
          handovers.handover_json,
-         processes.status,
-         processes.wake_session_id,
-         processes.record_json";
+         process.status,
+         process.wake_session_id,
+         process.record_json";
 
 crate::statements! {
     /// `process_segment_handovers` statements both backends issue verbatim.

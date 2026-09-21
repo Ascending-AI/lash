@@ -641,13 +641,13 @@ lash_store_sql::statements! {
          handovers.process_id,
          handovers.segment_ordinal,
          handovers.handover_json,
-         processes.status,
-         processes.wake_session_id,
-         processes.record_json
+         process.status,
+         process.wake_session_id,
+         process.record_json
      FROM process_segment_handovers AS handovers
-     JOIN processes AS processes
-         ON processes.process_id = handovers.process_id
-     WHERE {{live_process_status(processes.status)}}
+     JOIN processes AS process
+         ON process.process_id = handovers.process_id
+     WHERE {{live_process_status(process.status)}}
        AND (
            ?1::text IS NULL
            OR (handovers.process_id, handovers.segment_ordinal) > (?1::text, ?2::bigint)
